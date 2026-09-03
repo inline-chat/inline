@@ -29,6 +29,7 @@ final class AgentThreadToolbarModel: ObservableObject {
   @Published private(set) var catalog: AgentConfigurationCatalogSnapshot?
   @Published private(set) var context: InlineProtocol.AgentThreadContext?
   @Published private(set) var canEdit = false
+  @Published private(set) var editabilityResolved = false
   @Published private(set) var isUpdating = false
 
   let peer: InlineKit.Peer
@@ -84,62 +85,97 @@ final class AgentThreadToolbarModel: ObservableObject {
     catalog = nil
     context = nil
     canEdit = false
+    editabilityResolved = false
     isUpdating = false
   }
 
-  var projectTitle: String {
-    selectedLabel(
-      context?.configuration.projectID,
-      present: context?.configuration.hasProjectID == true,
+  var explicitProjectID: String? {
+    context?.configuration.hasProjectID == true ? context?.configuration.projectID : nil
+  }
+
+  var explicitModelID: String? {
+    context?.configuration.hasModelID == true ? context?.configuration.modelID : nil
+  }
+
+  var explicitReasoningID: String? {
+    context?.configuration.hasReasoningEffortID == true
+      ? context?.configuration.reasoningEffortID
+      : nil
+  }
+
+  var effectiveProjectID: String? {
+    explicitProjectID ?? catalog?.defaultProjectID
+  }
+
+  var effectiveModelID: String? {
+    explicitModelID ?? catalog?.defaultModelID
+  }
+
+  var effectiveReasoningID: String? {
+    explicitReasoningID ?? catalog?.defaultReasoningEffortID(forModelID: effectiveModelID)
+  }
+
+  var projectTitle: String? {
+    resolvedTitle(
+      explicitID: explicitProjectID,
+      effectiveID: effectiveProjectID,
       in: catalog?.projects
-    ) ?? "Provider default"
+    )
   }
 
-  var modelTitle: String {
-    guard context?.hasConfiguration == true, context?.configuration.hasModelID == true else {
-      return "Provider default"
-    }
-    let id = context?.configuration.modelID
-    return catalog?.models?.first(where: { $0.id == id })?.label ?? "Unavailable"
+  var modelTitle: String? {
+    guard let effectiveModelID else { return nil }
+    return catalog?.models?.first(where: { $0.id == effectiveModelID })?.label
+      ?? (explicitModelID == nil ? nil : "Unavailable")
   }
 
-  var reasoningTitle: String {
-    selectedLabel(
-      context?.configuration.reasoningEffortID,
-      present: context?.configuration.hasReasoningEffortID == true,
+  var reasoningTitle: String? {
+    resolvedTitle(
+      explicitID: explicitReasoningID,
+      effectiveID: effectiveReasoningID,
       in: availableReasoningOptions
-    ) ?? "Provider default"
+    )
+  }
+
+  var automaticProjectTitle: String? {
+    automaticTitle(catalog?.defaultProjectID, in: catalog?.projects)
+  }
+
+  var automaticModelTitle: String? {
+    guard let defaultModelID = catalog?.defaultModelID,
+          let label = catalog?.models?.first(where: { $0.id == defaultModelID })?.label
+    else { return nil }
+    return Self.automaticTitle(label)
+  }
+
+  var automaticReasoningTitle: String? {
+    automaticTitle(
+      catalog?.defaultReasoningEffortID(forModelID: effectiveModelID),
+      in: availableReasoningOptions
+    )
   }
 
   var availableReasoningOptions: [AgentConfigurationOption]? {
+    reasoningOptions(forModelID: effectiveModelID)
+  }
+
+  private func reasoningOptions(forModelID modelID: String?) -> [AgentConfigurationOption]? {
     guard let reasoning = catalog?.reasoning else { return nil }
     guard let models = catalog?.models else { return reasoning }
-    guard context?.hasConfiguration == true,
-          context?.configuration.hasModelID == true,
-          let model = models.first(where: { $0.id == context?.configuration.modelID })
-    else { return nil }
+    guard let model = models.first(where: { $0.id == modelID }) else { return nil }
     guard !model.reasoningEffortIDs.isEmpty else { return reasoning }
     let supported = Set(model.reasoningEffortIDs)
     return reasoning.filter { supported.contains($0.id) }
   }
 
-  func contextSelectingProject(_ id: String?) -> InlineProtocol.AgentThreadContext? {
-    updatedContext { configuration in
-      if let id { configuration.projectID = id } else { configuration.clearProjectID() }
-    }
-  }
-
   func contextSelectingModel(_ id: String?) -> InlineProtocol.AgentThreadContext? {
     updatedContext { configuration in
       if let id { configuration.modelID = id } else { configuration.clearModelID() }
-      if id == nil, catalog?.models != nil {
-        configuration.clearReasoningEffortID()
-      } else if configuration.hasReasoningEffortID,
-         let selectedModel = id.flatMap({ selectedModelID in
-           catalog?.models?.first(where: { $0.id == selectedModelID })
-         }),
-         !selectedModel.reasoningEffortIDs.isEmpty,
-         !selectedModel.reasoningEffortIDs.contains(configuration.reasoningEffortID)
+      let nextModelID = id ?? catalog?.defaultModelID
+      if configuration.hasReasoningEffortID,
+         reasoningOptions(forModelID: nextModelID)?.contains(where: {
+           $0.id == configuration.reasoningEffortID
+         }) != true
       {
         configuration.clearReasoningEffortID()
       }
@@ -167,7 +203,7 @@ final class AgentThreadToolbarModel: ObservableObject {
       do {
         try await update(nextContext)
       } catch {
-        ToastCenter.shared.showError("Could not update this Agent session.")
+        ToastCenter.shared.showError("Couldn’t update Agent settings.")
       }
     }
   }
@@ -205,6 +241,7 @@ final class AgentThreadToolbarModel: ObservableObject {
     loadedIdentity = identity
     catalog = nil
     canEdit = false
+    editabilityResolved = false
     generation &+= 1
     let requestGeneration = generation
     loadTask?.cancel()
@@ -222,6 +259,7 @@ final class AgentThreadToolbarModel: ObservableObject {
     catalog = nil
     context = nil
     canEdit = false
+    editabilityResolved = false
     isUpdating = false
   }
 
@@ -266,8 +304,11 @@ final class AgentThreadToolbarModel: ObservableObject {
       )
     }
 
-    if let ownedBotIDs = try? await fetchOwnedBotIDs(), isCurrent(identity, generation: generation) {
+    if let ownedBotIDs = try? await fetchOwnedBotIDs(),
+       isCurrent(identity, generation: generation)
+    {
       canEdit = ownedBotIDs.contains(identity.botUserID)
+      editabilityResolved = true
     }
 
     do {
@@ -325,13 +366,30 @@ final class AgentThreadToolbarModel: ObservableObject {
     return next
   }
 
-  private func selectedLabel(
-    _ id: String?,
-    present: Bool,
+  private func resolvedTitle(
+    explicitID: String?,
+    effectiveID: String?,
     in options: [AgentConfigurationOption]?
   ) -> String? {
-    guard present, let id else { return nil }
-    return options?.first(where: { $0.id == id })?.label ?? "Unavailable"
+    guard let effectiveID else { return nil }
+    return options?.first(where: { $0.id == effectiveID })?.label
+      ?? (explicitID == nil ? nil : "Unavailable")
+  }
+
+  private func automaticTitle(
+    _ id: String?,
+    in options: [AgentConfigurationOption]?
+  ) -> String? {
+    guard let id, let label = options?.first(where: { $0.id == id })?.label else { return nil }
+    return Self.automaticTitle(label)
+  }
+
+  private static func automaticTitle(_ label: String) -> String {
+    String(
+      localized: "Automatic — \(label)",
+      comment:
+        "Reset label for an Agent setting. The variable is the current harness-selected option name."
+    )
   }
 
   private static func nonEmpty(_ value: String?) -> String? {
@@ -342,82 +400,24 @@ final class AgentThreadToolbarModel: ObservableObject {
 
 struct AgentThreadToolbarIndicator: View {
   @ObservedObject var model: AgentThreadToolbarModel
-  let update: (InlineProtocol.AgentThreadContext) async throws -> Void
 
   var body: some View {
     if let presentation = model.presentation {
-      Menu {
-        Text("This thread has its own session with \(presentation.name).")
-
-        if model.catalog?.projects != nil || model.context?.configuration.hasProjectID == true {
-          Divider()
-          AgentThreadConfigurationSubmenu(
-            title: "Project",
-            selectionTitle: model.projectTitle,
-            options: model.catalog?.projects ?? [],
-            selectedID: model.context?.configuration.hasProjectID == true
-              ? model.context?.configuration.projectID
-              : nil,
-            // Every bound Chat created by Compose or the Agent tool already
-            // has a first message, so its provider session has started and the
-            // project is immutable. Keep the selected project visible here;
-            // choose it while creating the Chat.
-            isDisabled: true,
-            select: { id in
-              guard let context = model.contextSelectingProject(id) else { return }
-              model.performUpdate(context, using: update)
-            }
-          )
-        }
-
-        if model.catalog?.models != nil || model.context?.configuration.hasModelID == true {
-          AgentThreadModelSubmenu(
-            selectionTitle: model.modelTitle,
-            options: model.catalog?.models ?? [],
-            selectedID: model.context?.configuration.hasModelID == true
-              ? model.context?.configuration.modelID
-              : nil,
-            isDisabled: !model.canEdit || model.isUpdating,
-            select: { id in
-              guard let context = model.contextSelectingModel(id) else { return }
-              model.performUpdate(context, using: update)
-            }
-          )
-        }
-
-        if model.availableReasoningOptions != nil || model.context?.configuration.hasReasoningEffortID == true {
-          AgentThreadConfigurationSubmenu(
-            title: "Reasoning",
-            selectionTitle: model.reasoningTitle,
-            options: model.availableReasoningOptions ?? [],
-            selectedID: model.context?.configuration.hasReasoningEffortID == true
-              ? model.context?.configuration.reasoningEffortID
-              : nil,
-            isDisabled: !model.canEdit || model.isUpdating,
-            select: { id in
-              guard let context = model.contextSelectingReasoning(id) else { return }
-              model.performUpdate(context, using: update)
-            }
-          )
-        }
-      } label: {
-        HStack(spacing: 4) {
-          UserAvatar(userInfo: presentation.userInfo, size: 14)
-          Text(presentation.name)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-        }
-        .frame(maxWidth: 120, alignment: .leading)
+      HStack(spacing: 4) {
+        UserAvatar(userInfo: presentation.userInfo, size: 14)
+        Text(presentation.name)
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
       }
-      .menuStyle(.button)
-      .buttonStyle(.plain)
-      .menuIndicator(.hidden)
+      .frame(maxWidth: 120, alignment: .leading)
       // Preserve the ideal width; maxWidth remains only a truncation cap.
       .fixedSize(horizontal: true, vertical: true)
       .help(tooltip(presentation))
+      .accessibilityElement(children: .ignore)
       .accessibilityLabel("Agent session: \(presentation.name)")
+      .accessibilityHint("Open Agent Settings to change this thread’s configuration.")
     }
   }
 
@@ -429,66 +429,217 @@ struct AgentThreadToolbarIndicator: View {
   }
 }
 
-private struct AgentThreadConfigurationSubmenu: View {
-  let title: String
-  let selectionTitle: String
-  let options: [AgentConfigurationOption]
-  let selectedID: String?
-  let isDisabled: Bool
-  let select: (String?) -> Void
+struct AgentThreadSettingsSection: View {
+  @ObservedObject var model: AgentThreadToolbarModel
+  let update: (InlineProtocol.AgentThreadContext) async throws -> Void
 
   var body: some View {
-    Menu("\(title): \(selectionTitle)") {
-      selectionButton(label: "Provider default", id: nil)
-      if !options.isEmpty { Divider() }
-      ForEach(options) { option in
-        selectionButton(
-          label: option.label,
-          description: option.description,
-          id: option.id
-        )
+    if model.context != nil {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Thread")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+            if let presentation = model.presentation {
+              Text(presentation.name)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          if model.isUpdating {
+            ProgressView()
+              .controlSize(.mini)
+              .accessibilityLabel("Updating thread settings")
+          }
+        }
+
+        if let projectTitle = model.projectTitle {
+          AgentThreadSettingRow(
+            title: "Project",
+            selectionTitle: projectTitle,
+            selectionDescription: selectedProjectDescription,
+            options: projectOptions,
+            selectedID: model.explicitProjectID,
+            automaticTitle: model.automaticProjectTitle,
+            isEditable: false,
+            isUpdating: false,
+            helpText: "Project is chosen when the thread is created.",
+            select: { _ in }
+          )
+        }
+
+        if let modelTitle = model.modelTitle {
+          AgentThreadSettingRow(
+            title: "Model",
+            selectionTitle: modelTitle,
+            selectionDescription: selectedModelDescription,
+            options: modelOptions,
+            selectedID: model.explicitModelID,
+            automaticTitle: model.automaticModelTitle,
+            isEditable: model.canEdit,
+            isUpdating: model.isUpdating,
+            helpText: nil,
+            select: selectModel
+          )
+        }
+
+        if let reasoningTitle = model.reasoningTitle {
+          AgentThreadSettingRow(
+            title: "Reasoning",
+            selectionTitle: reasoningTitle,
+            selectionDescription: selectedReasoningDescription,
+            options: reasoningOptions,
+            selectedID: model.explicitReasoningID,
+            automaticTitle: model.automaticReasoningTitle,
+            isEditable: model.canEdit,
+            isUpdating: model.isUpdating,
+            helpText: nil,
+            select: selectReasoning
+          )
+        }
+
+        if model.editabilityResolved, !model.canEdit, showsModel || showsReasoning {
+          Label("Only the Agent owner can change Model and Reasoning.", systemImage: "lock")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
       }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .disabled(isDisabled)
   }
 
-  private func selectionButton(
-    label: String,
-    description: String? = nil,
-    id: String?
-  ) -> some View {
-    Button {
-      select(id)
-    } label: {
-      AgentThreadConfigurationOptionLabel(
-        title: label,
-        description: description,
-        isSelected: selectedID == id
-      )
-    }
+  private var showsModel: Bool {
+    model.modelTitle != nil
+  }
+
+  private var showsReasoning: Bool {
+    model.reasoningTitle != nil
+  }
+
+  private var projectOptions: [AgentThreadSettingOption] {
+    (model.catalog?.projects ?? []).map(AgentThreadSettingOption.init)
+  }
+
+  private var modelOptions: [AgentThreadSettingOption] {
+    (model.catalog?.models ?? []).map(AgentThreadSettingOption.init)
+  }
+
+  private var reasoningOptions: [AgentThreadSettingOption] {
+    (model.availableReasoningOptions ?? []).map(AgentThreadSettingOption.init)
+  }
+
+  private var selectedProjectDescription: String? {
+    projectOptions.first(where: { $0.id == model.effectiveProjectID })?.description
+  }
+
+  private var selectedModelDescription: String? {
+    modelOptions.first(where: { $0.id == model.effectiveModelID })?.description
+  }
+
+  private var selectedReasoningDescription: String? {
+    reasoningOptions.first(where: { $0.id == model.effectiveReasoningID })?.description
+  }
+
+  private func selectModel(_ id: String?) {
+    guard let context = model.contextSelectingModel(id) else { return }
+    model.performUpdate(context, using: update)
+  }
+
+  private func selectReasoning(_ id: String?) {
+    guard let context = model.contextSelectingReasoning(id) else { return }
+    model.performUpdate(context, using: update)
   }
 }
 
-private struct AgentThreadModelSubmenu: View {
+private struct AgentThreadSettingOption: Identifiable, Equatable {
+  let id: String
+  let label: String
+  let description: String?
+
+  init(_ option: AgentConfigurationOption) {
+    id = option.id
+    label = option.label
+    description = option.description
+  }
+
+  init(_ option: AgentModelConfigurationOption) {
+    id = option.id
+    label = option.label
+    description = option.description
+  }
+}
+
+private struct AgentThreadSettingRow: View {
+  let title: LocalizedStringResource
   let selectionTitle: String
-  let options: [AgentModelConfigurationOption]
+  let selectionDescription: String?
+  let options: [AgentThreadSettingOption]
   let selectedID: String?
-  let isDisabled: Bool
+  let automaticTitle: String?
+  let isEditable: Bool
+  let isUpdating: Bool
+  let helpText: LocalizedStringResource?
   let select: (String?) -> Void
 
   var body: some View {
-    Menu("Model: \(selectionTitle)") {
-      selectionButton(label: "Provider default", id: nil)
-      if !options.isEmpty { Divider() }
-      ForEach(options) { option in
-        selectionButton(
-          label: option.label,
-          description: option.description,
-          id: option.id
-        )
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 10) {
+        Text(title)
+          .font(.callout)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        if isEditable, automaticTitle != nil || !options.isEmpty {
+          Menu {
+            if let automaticTitle {
+              selectionButton(label: automaticTitle, id: nil)
+              if !options.isEmpty { Divider() }
+            }
+            ForEach(options) { option in
+              selectionButton(
+                label: option.label,
+                description: option.description,
+                id: option.id
+              )
+            }
+          } label: {
+            selectionValue
+          }
+          .menuStyle(.borderlessButton)
+          .disabled(isUpdating)
+          .accessibilityLabel(Text(title))
+          .accessibilityValue(selectionTitle)
+        } else {
+          selectionValue
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(selectionTitle)
+        }
+      }
+      if let selectionDescription {
+        Text(selectionDescription)
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+          .lineLimit(2)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }
+      if let helpText {
+        Text(helpText)
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+          .frame(maxWidth: .infinity, alignment: .trailing)
       }
     }
-    .disabled(isDisabled)
+  }
+
+  private var selectionValue: some View {
+    Text(selectionTitle)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .frame(maxWidth: 250, alignment: .trailing)
   }
 
   private func selectionButton(

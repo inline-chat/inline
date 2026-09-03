@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import struct InlineProtocol.AgentThreadContext
 
 enum ReplyThreadPaneMetrics {
   static let preferredWidthDefaultsKey = "replyThreadPanePreferredWidth"
@@ -44,6 +45,7 @@ struct ReplyThreadPaneView: View {
 
   @State private var toolbarState = ChatToolbarState()
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
+  @StateObject private var agentThreadToolbarModel: AgentThreadToolbarModel
   @State private var titleModel: ChatRouteToolbarTitleModel
 
   init(
@@ -57,6 +59,7 @@ struct ReplyThreadPaneView: View {
     self.onExpand = onExpand
     self.onClose = onClose
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
+    _agentThreadToolbarModel = StateObject(wrappedValue: AgentThreadToolbarModel(peer: peer))
     _titleModel = State(initialValue: ChatRouteToolbarTitleModel(
       peer: peer,
       db: dependencies.database
@@ -81,7 +84,16 @@ struct ReplyThreadPaneView: View {
           title: titleModel.title,
           status: titleModel.status,
           botChatSettingsCoordinator: botChatSettingsCoordinator,
+          agentThreadToolbarModel: agentThreadToolbarModel,
           toolbarState: toolbarState,
+          updateAgentContext: { context in
+            _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+              chatID: agentThreadToolbarModel.chatID,
+              title: nil,
+              emoji: nil,
+              agentContext: context
+            ))
+          },
           onExpand: onExpand,
           onClose: onClose
         )
@@ -100,11 +112,13 @@ struct ReplyThreadPaneView: View {
       toolbarState: toolbarState
     ))
     .task(id: peer.toString(), priority: .utility) {
+      agentThreadToolbarModel.start(database: dependencies.database)
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: dependencies.database)
       await botChatSettingsCoordinator.warmUp()
     }
     .onDisappear {
       toolbarState.dismissPresentation()
+      agentThreadToolbarModel.cancel()
       botChatSettingsCoordinator.cancel()
     }
   }
@@ -114,7 +128,9 @@ private struct ReplyThreadPaneControls: View {
   let title: String
   let status: ChatRouteToolbarTitleModel.Status
   let botChatSettingsCoordinator: BotChatSettingsCoordinator
+  @ObservedObject var agentThreadToolbarModel: AgentThreadToolbarModel
   let toolbarState: ChatToolbarState
+  let updateAgentContext: (AgentThreadContext) async throws -> Void
   let onExpand: () -> Void
   let onClose: () -> Void
 
@@ -154,10 +170,12 @@ private struct ReplyThreadPaneControls: View {
       .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
 
-      if botChatSettingsCoordinator.isToolbarVisible {
+      if botChatSettingsCoordinator.isToolbarVisible || agentThreadToolbarModel.context != nil {
         BotChatSettingsToolbarButton(
           coordinator: botChatSettingsCoordinator,
-          toolbarState: toolbarState
+          agentThreadModel: agentThreadToolbarModel,
+          toolbarState: toolbarState,
+          updateAgentContext: updateAgentContext
         )
         .buttonStyle(ReplyThreadPaneControlButtonStyle())
       }

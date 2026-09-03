@@ -1,7 +1,6 @@
 import AppKit
 import InlineKit
 import InlineMacUI
-import InlineProtocol
 import InlineUI
 import Observation
 import SwiftUI
@@ -10,7 +9,6 @@ struct ChatRouteTitleBar: View {
   let peer: InlineKit.Peer
   let contextSpaceId: Int64?
   @ObservedObject var agentThreadToolbarModel: AgentThreadToolbarModel
-  let updateAgentContext: (InlineProtocol.AgentThreadContext) async throws -> Void
   let onTitleChange: (String) -> Void
 
   @Environment(\.dependencies) private var dependencies
@@ -27,13 +25,11 @@ struct ChatRouteTitleBar: View {
     db: AppDatabase,
     contextSpaceId: Int64? = nil,
     agentThreadToolbarModel: AgentThreadToolbarModel,
-    updateAgentContext: @escaping (InlineProtocol.AgentThreadContext) async throws -> Void,
     onTitleChange: @escaping (String) -> Void = { _ in }
   ) {
     self.peer = peer
     self.contextSpaceId = contextSpaceId
     self.agentThreadToolbarModel = agentThreadToolbarModel
-    self.updateAgentContext = updateAgentContext
     self.onTitleChange = onTitleChange
     _model = State(initialValue: ChatRouteToolbarTitleModel(
       peer: peer,
@@ -93,10 +89,7 @@ struct ChatRouteTitleBar: View {
       statusView(model.status)
     } else if agentThreadToolbarModel.presentation != nil {
       HStack(spacing: 4) {
-        AgentThreadToolbarIndicator(
-          model: agentThreadToolbarModel,
-          update: updateAgentContext
-        )
+        AgentThreadToolbarIndicator(model: agentThreadToolbarModel)
 
         if model.status.text != nil || model.breadcrumb != nil {
           Text("•")

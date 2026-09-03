@@ -34,17 +34,23 @@ public func botChatSettingsControlKind(for control: BotChatSettingsModel.Control
   }
 }
 
-public struct BotChatSettingsPopover: View {
+public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
   private let coordinator: BotChatSettingsCoordinator
+  private let showsThreadConfiguration: Bool
+  private let threadConfiguration: ThreadConfiguration
   private let localFolderPicker: BotChatSettingsLocalFolderPicker?
   private let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
 
   public init(
     coordinator: BotChatSettingsCoordinator,
+    showsThreadConfiguration: Bool,
+    @ViewBuilder threadConfiguration: () -> ThreadConfiguration,
     localFolderPicker: BotChatSettingsLocalFolderPicker? = nil,
     localFolderPickerAvailable: @escaping BotChatSettingsLocalPickerAvailability = { _, _, _, _ in false }
   ) {
     self.coordinator = coordinator
+    self.showsThreadConfiguration = showsThreadConfiguration
+    self.threadConfiguration = threadConfiguration()
     self.localFolderPicker = localFolderPicker
     self.localFolderPickerAvailable = localFolderPickerAvailable
   }
@@ -56,6 +62,8 @@ public struct BotChatSettingsPopover: View {
       BotChatSettingsPopoverContent(
         coordinator: coordinator,
         botUserID: coordinator.selectedBot?.id,
+        showsThreadConfiguration: showsThreadConfiguration,
+        threadConfiguration: threadConfiguration,
         localFolderPicker: localFolderPicker,
         localFolderPickerAvailable: localFolderPickerAvailable
       )
@@ -94,7 +102,7 @@ private struct BotChatSettingsPopoverHeader: View {
             BotChatSettingsBotLabel(bot: selectedBot)
           }
           .menuStyle(.borderlessButton)
-          .fixedSize()
+          .frame(maxWidth: 180)
           .accessibilityLabel("Choose agent")
           .accessibilityValue(selectedBot.displayName)
         } else {
@@ -121,14 +129,41 @@ private struct BotChatSettingsBotLabel: View {
   }
 }
 
-private struct BotChatSettingsPopoverContent: View {
+private struct BotChatSettingsPopoverContent<ThreadConfiguration: View>: View {
   let coordinator: BotChatSettingsCoordinator
   let botUserID: Int64?
+  let showsThreadConfiguration: Bool
+  let threadConfiguration: ThreadConfiguration
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
 
-  @ViewBuilder
   var body: some View {
+    if showsThreadConfiguration {
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          threadConfiguration
+          if coordinator.isToolbarVisible {
+            Divider().padding(.horizontal, 12)
+            providerContent
+          }
+        }
+      }
+      .overlay(alignment: .bottom) {
+        if coordinator.isToolbarVisible,
+           coordinator.selectedState.document != nil,
+           let status = coordinator.selectedState.surfaceStatus
+        {
+          BotChatSettingsStatusBanner(status: status, onRetry: coordinator.refreshSelected)
+            .padding(8)
+        }
+      }
+    } else {
+      standaloneProviderContent
+    }
+  }
+
+  @ViewBuilder
+  private var standaloneProviderContent: some View {
     let state = coordinator.selectedState
     if state.phase == .loading, state.document == nil {
       BotChatSettingsCenteredState {
@@ -136,17 +171,10 @@ private struct BotChatSettingsPopoverContent: View {
         Text("Loading settings…")
           .foregroundStyle(.secondary)
       }
-    } else if let document = state.document {
+    } else if state.document != nil {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 0) {
-          BotChatSettingsDocumentView(
-            document: document,
-            pendingItemIDs: state.pendingItemIDs,
-            botUserID: botUserID,
-            localFolderPicker: localFolderPicker,
-            localFolderPickerAvailable: localFolderPickerAvailable,
-            onInvoke: coordinator.invoke(itemID:value:)
-          )
+          providerContent
         }
       }
       .overlay(alignment: .bottom) {
@@ -155,6 +183,29 @@ private struct BotChatSettingsPopoverContent: View {
             .padding(8)
         }
       }
+    } else {
+      providerContent
+    }
+  }
+
+  @ViewBuilder
+  private var providerContent: some View {
+    let state = coordinator.selectedState
+    if state.phase == .loading, state.document == nil {
+      BotChatSettingsCenteredState {
+        ProgressView()
+        Text("Loading settings…")
+          .foregroundStyle(.secondary)
+      }
+    } else if let document = state.document {
+      BotChatSettingsDocumentView(
+        document: document,
+        pendingItemIDs: state.pendingItemIDs,
+        botUserID: botUserID,
+        localFolderPicker: localFolderPicker,
+        localFolderPickerAvailable: localFolderPickerAvailable,
+        onInvoke: coordinator.invoke(itemID:value:)
+      )
     } else if let problem = state.problem {
       BotChatSettingsCenteredState {
         Image(systemName: "bolt.horizontal.circle")

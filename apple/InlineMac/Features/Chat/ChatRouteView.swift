@@ -190,14 +190,6 @@ struct ChatRouteView: View {
               db: db,
               contextSpaceId: nav.selectedSpaceId,
               agentThreadToolbarModel: agentThreadToolbarModel,
-              updateAgentContext: { context in
-                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
-                  chatID: agentThreadToolbarModel.chatID,
-                  title: nil,
-                  emoji: nil,
-                  agentContext: context
-                ))
-              },
               onTitleChange: { title in
                 navigationTitle = title
               }
@@ -250,11 +242,20 @@ struct ChatRouteView: View {
           }
         }
 
-        if botChatSettingsCoordinator.isToolbarVisible {
+        if botChatSettingsCoordinator.isToolbarVisible || agentThreadToolbarModel.context != nil {
           ToolbarItem {
             BotChatSettingsToolbarButton(
               coordinator: botChatSettingsCoordinator,
-              toolbarState: chatToolbarState
+              agentThreadModel: agentThreadToolbarModel,
+              toolbarState: chatToolbarState,
+              updateAgentContext: { context in
+                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+                  chatID: agentThreadToolbarModel.chatID,
+                  title: nil,
+                  emoji: nil,
+                  agentContext: context
+                ))
+              }
             )
             .macToolbarLayout(toolbarLayout)
             .id("bot-settings-\(peer.toString())")
