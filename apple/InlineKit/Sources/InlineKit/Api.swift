@@ -59,14 +59,26 @@ public enum Api {
       applyUpdates: InlineApplyUpdates(),
       syncStorage: GRDBSyncStorage(),
       persistenceHandler: DefaultTransactionPersistenceHandler(),
-      blockerResolver: ChatTransactionBlockerResolver()
+      blockerResolver: ChatTransactionBlockerResolver(),
+      storageIsReady: { AppDatabase.shared.isPersistent }
     )
 
     Task(priority: .utility) {
-      guard Auth.shared.handle.isLoggedIn() else { return }
+      guard Auth.shared.handle.isLoggedIn(), AppDatabase.shared.isPersistent else { return }
       await ReservedChatIDPool.shared.scheduleRefill(realtimeV2: realtime)
     }
 
     return realtime
   }()
+
+  /// Opens the shared persistent-storage boundary for every account-scoped
+  /// producer owned by InlineKit. This keeps sidecar database work from racing
+  /// ahead of the realtime admission gate after an early-launch promotion.
+  public static func admitPersistentStorage() async -> Bool {
+    guard await realtime.admitPersistentStorage() else { return false }
+    if Auth.shared.handle.isLoggedIn() {
+      await ReservedChatIDPool.shared.resume(realtimeV2: realtime)
+    }
+    return true
+  }
 }

@@ -38,7 +38,7 @@ public final class Analytics: Sendable {
   }
 
   /// Starts Sentry
-  public static func start() {
+  public static func start(identifyAuthenticatedUser: Bool = true) {
     if debugBuild, !runInDebugBuilds {
       log.trace("Analytics: debug build, skipping start")
       return
@@ -73,7 +73,7 @@ public final class Analytics: Sendable {
     log.info("Analytics: starting")
 
     // IF AUTHed
-    if Auth.shared.getIsLoggedIn() {
+    if identifyAuthenticatedUser, Auth.shared.getIsLoggedIn() {
       Task {
         log.trace("Analytics: identifying user")
         await Self.identify()
@@ -85,6 +85,13 @@ public final class Analytics: Sendable {
   public static func identify() async {
     guard SentrySDK.isEnabled else { return }
     guard let userId = Auth.shared.getCurrentUserId() else { return }
+
+    // Never treat the process-local compatibility store as account data. The user ID is already
+    // authoritative from Auth; richer profile fields can be attached after persistent admission.
+    guard AppDatabase.shared.isPersistent else {
+      identify(userId: userId, email: nil, name: nil, username: nil)
+      return
+    }
 
     // Fetch current user from database
     let currentUser = try? await AppDatabase.shared.reader.read { db in

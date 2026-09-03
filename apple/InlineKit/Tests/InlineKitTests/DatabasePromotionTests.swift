@@ -7,6 +7,77 @@ import Testing
 
 @Suite("Database Promotion")
 final class DatabasePromotionTests {
+  @Test("persistent-store admission classifies only transient authority and SQLite contention as retryable")
+  func classifiesPersistentStoreAdmissionFailures() {
+    #expect(AppDatabase.persistentOpenFailure(for: .locked)?.disposition == .retryable)
+    #expect(AppDatabase.persistentOpenFailure(for: .notFound)?.disposition == .terminal)
+    #expect(AppDatabase.persistentOpenFailure(for: .error(status: -50))?.reason == .keychainFailure)
+
+    let busy = AppDatabase.persistentOpenFailure(
+      for: DatabaseError(resultCode: .SQLITE_BUSY_SNAPSHOT)
+    )
+    #expect(busy.reason == .databaseBusy)
+    #expect(busy.disposition == .retryable)
+    #expect(busy.sqliteCode == Int32(ResultCode.SQLITE_BUSY.rawValue))
+    #expect(busy.sqliteExtendedCode == Int32(ResultCode.SQLITE_BUSY_SNAPSHOT.rawValue))
+
+    let corrupt = AppDatabase.persistentOpenFailure(
+      for: DatabaseError(resultCode: .SQLITE_CORRUPT_VTAB)
+    )
+    #expect(corrupt.reason == .databaseUnreadable)
+    #expect(corrupt.disposition == .terminal)
+
+    let full = AppDatabase.persistentOpenFailure(
+      for: DatabaseError(resultCode: .SQLITE_FULL)
+    )
+    #expect(full.reason == .databaseFull)
+    #expect(full.disposition == .terminal)
+
+    let wrongCandidate = DatabaseError(resultCode: .SQLITE_NOTADB)
+    let protectedDataDelay = AppDatabase.persistentOpenFailure(
+      afterExhaustingCandidatesWith: .locked,
+      lastError: wrongCandidate
+    )
+    #expect(protectedDataDelay.reason == .keychainLocked)
+    #expect(protectedDataDelay.disposition == .retryable)
+
+    let missingAuthority = AppDatabase.persistentOpenFailure(
+      afterExhaustingCandidatesWith: .notFound,
+      lastError: wrongCandidate
+    )
+    #expect(missingAuthority.reason == .keyUnavailable)
+    #expect(missingAuthority.disposition == .terminal)
+
+    let provenUnreadable = AppDatabase.persistentOpenFailure(
+      afterExhaustingCandidatesWith: .available(key: "available"),
+      lastError: wrongCandidate
+    )
+    #expect(provenUnreadable.reason == .databaseUnreadable)
+    #expect(provenUnreadable.disposition == .terminal)
+
+    let migrationFailure = AppDatabase.persistentOpenFailure(
+      afterExhaustingCandidatesWith: .available(key: "available"),
+      authoritativeKeyError: TestMigrationFailure(),
+      lastError: wrongCandidate
+    )
+    #expect(migrationFailure.reason == .migration)
+    #expect(migrationFailure.disposition == .terminal)
+  }
+
+  @Test("a nonpersistent database exposes its recorded open failure instead of claiming readiness")
+  func exposesPersistentStoreAdmission() throws {
+    let db = AppDatabase.empty()
+    let failure = PersistentStoreOpenFailure(
+      reason: .keychainLocked,
+      disposition: .retryable,
+      sqliteCode: nil,
+      sqliteExtendedCode: nil
+    )
+    db.recordPersistentOpenFailure(failure)
+
+    #expect(db.persistentStoreAdmission == .retryable(failure))
+  }
+
   @Test("credential preparation fails closed when durable key authority is unavailable")
   func credentialPreparationRequiresDatabaseKey() throws {
     #expect(try AppDatabase.requiredDatabaseKey(for: .available(key: "stable")) == "stable")
@@ -129,3 +200,5 @@ final class DatabasePromotionTests {
     }
   }
 }
+
+private struct TestMigrationFailure: Error {}

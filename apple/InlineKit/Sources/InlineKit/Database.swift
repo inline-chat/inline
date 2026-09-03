@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import InlineConfig
 import Logger
+import Sentry
 
 enum DatabaseCredentialPreparationError: Error, Equatable, PrivacySafeErrorCategoryProviding {
   case keychainLocked
@@ -20,12 +21,135 @@ enum DatabaseCredentialPreparationError: Error, Equatable, PrivacySafeErrorCateg
   }
 }
 
+public enum PersistentStoreOpenFailureReason: String, Sendable, Equatable {
+  case keychainLocked = "keychain_locked"
+  case keyUnavailable = "key_unavailable"
+  case keychainFailure = "keychain_failure"
+  case databaseBusy = "database_busy"
+  case databaseLocked = "database_locked"
+  case databaseFull = "database_full"
+  case databaseReadOnly = "database_read_only"
+  case databaseCannotOpen = "database_cannot_open"
+  case databaseIO = "database_io"
+  case databaseUnreadable = "database_unreadable"
+  case migration = "migration"
+  case unknown = "unknown"
+}
+
+public struct PersistentStoreOpenFailure: Error, Sendable, Equatable, PrivacySafeErrorCategoryProviding {
+  public enum Disposition: String, Sendable, Equatable {
+    case retryable
+    case terminal
+  }
+
+  public let reason: PersistentStoreOpenFailureReason
+  public let disposition: Disposition
+  public let sqliteCode: Int32?
+  public let sqliteExtendedCode: Int32?
+
+  public var privacySafeErrorCategory: String {
+    "database_open:\(reason.rawValue)"
+  }
+}
+
+public enum PersistentStoreAdmission: Sendable, Equatable {
+  case ready
+  case retryable(PersistentStoreOpenFailure)
+  case terminal(PersistentStoreOpenFailure)
+}
+
+private enum PersistentStoreStartupDiagnostics {
+  private static let slowOpenThresholdMs = 5_000
+  private static let reportLock = NSLock()
+  nonisolated(unsafe) private static var reportedEvents: Set<String> = []
+  nonisolated(unsafe) private static var startupAttemptCount = 0
+
+  static func report(
+    admission: PersistentStoreAdmission,
+    durationMs: Int,
+    fileExistedAtStart: Bool,
+    candidateAttempts: Int,
+    lastCandidateLabel: String
+  ) {
+    guard SentrySDK.isEnabled else { return }
+    let startupAttempt = reportLock.withLock {
+      startupAttemptCount += 1
+      return startupAttemptCount
+    }
+
+    let state: String
+    let failure: PersistentStoreOpenFailure?
+    switch admission {
+    case .ready:
+      state = "ready"
+      failure = nil
+    case .retryable(let value):
+      state = "retryable"
+      failure = value
+    case .terminal(let value):
+      state = "terminal"
+      failure = value
+    }
+
+    let breadcrumb = Breadcrumb(
+      level: failure == nil ? .info : .warning,
+      category: "storage.admission"
+    )
+    breadcrumb.message = "persistent_store_admission"
+    breadcrumb.data = [
+      "duration_ms": durationMs,
+      "file_existed": fileExistedAtStart,
+      "persistent": failure == nil,
+      "attempts": candidateAttempts,
+      "retry_count": max(0, startupAttempt - 1),
+    ]
+    SentrySDK.addBreadcrumb(breadcrumb)
+
+    let event: String?
+    if state == "terminal" {
+      event = "apple_persistent_store_unavailable"
+    } else if durationMs >= slowOpenThresholdMs {
+      event = "apple_persistent_store_open_slow"
+    } else {
+      event = nil
+    }
+    guard let event else { return }
+
+    let reason = failure?.reason.rawValue ?? "none"
+    let eventKey = "\(event):\(state):\(reason)"
+    let shouldReport = reportLock.withLock { reportedEvents.insert(eventKey).inserted }
+    guard shouldReport else { return }
+
+    _ = SentrySDK.capture(message: event) { scope in
+      scope.setLevel(state == "terminal" ? .error : .warning)
+      scope.setFingerprint([event, state, reason])
+      scope.clearBreadcrumbs()
+      scope.setTag(value: event, key: "event")
+      scope.setTag(value: "PersistentStoreStartup", key: "scope")
+      scope.setTag(value: state, key: "storage.admission")
+      scope.setTag(value: reason, key: "storage.failure_reason")
+      scope.setTag(value: fileExistedAtStart ? "true" : "false", key: "storage.file_existed")
+      scope.setTag(value: lastCandidateLabel, key: "storage.last_candidate")
+      scope.setExtra(value: durationMs, key: "storage.duration_ms")
+      scope.setExtra(value: candidateAttempts, key: "storage.candidate_attempts")
+      scope.setExtra(value: max(0, startupAttempt - 1), key: "storage.retry_count")
+      if let sqliteCode = failure?.sqliteCode {
+        scope.setExtra(value: sqliteCode, key: "storage.sqlite_code")
+      }
+      if let sqliteExtendedCode = failure?.sqliteExtendedCode {
+        scope.setExtra(value: sqliteExtendedCode, key: "storage.sqlite_extended_code")
+      }
+    }
+  }
+}
+
 // MARK: - DB main class
 
 public final class AppDatabase: @unchecked Sendable {
   private let writerLock = NSLock()
   private var _dbWriter: any DatabaseWriter
   private var preparedDatabaseKey: String?
+  private var persistentOpenFailure: PersistentStoreOpenFailure?
 #if DEBUG
   private static let warnLock = NSLock()
   nonisolated(unsafe) private static var warnedInMemoryObservationSites: Set<String> = []
@@ -37,6 +161,26 @@ public final class AppDatabase: @unchecked Sendable {
 
   public var isPersistent: Bool {
     dbWriter is DatabasePool
+  }
+
+  public var persistentStoreAdmission: PersistentStoreAdmission {
+    writerLock.withLock {
+      if _dbWriter is DatabasePool {
+        return .ready
+      }
+      let failure = persistentOpenFailure ?? PersistentStoreOpenFailure(
+        reason: .unknown,
+        disposition: .terminal,
+        sqliteCode: nil,
+        sqliteExtendedCode: nil
+      )
+      switch failure.disposition {
+      case .retryable:
+        return .retryable(failure)
+      case .terminal:
+        return .terminal(failure)
+      }
+    }
   }
 
 #if DEBUG
@@ -88,6 +232,7 @@ public final class AppDatabase: @unchecked Sendable {
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     _dbWriter = dbWriter
     preparedDatabaseKey = nil
+    persistentOpenFailure = nil
     let span = PerformanceTrace.begin("DatabaseMigrate", category: .launch)
     defer { span.end() }
     try migrator.migrate(dbWriter)
@@ -97,6 +242,13 @@ public final class AppDatabase: @unchecked Sendable {
     writerLock.withLock {
       _dbWriter = newWriter
       preparedDatabaseKey = nil
+      persistentOpenFailure = nil
+    }
+  }
+
+  internal func recordPersistentOpenFailure(_ failure: PersistentStoreOpenFailure) {
+    writerLock.withLock {
+      persistentOpenFailure = failure
     }
   }
 
@@ -1588,6 +1740,110 @@ public extension AppDatabase {
     }
   }
 
+  internal static func persistentOpenFailure(
+    for availability: DatabaseKeyAvailability
+  ) -> PersistentStoreOpenFailure? {
+    switch availability {
+    case .available:
+      return nil
+    case .locked:
+      return PersistentStoreOpenFailure(
+        reason: .keychainLocked,
+        disposition: .retryable,
+        sqliteCode: nil,
+        sqliteExtendedCode: nil
+      )
+    case .notFound:
+      return PersistentStoreOpenFailure(
+        reason: .keyUnavailable,
+        disposition: .terminal,
+        sqliteCode: nil,
+        sqliteExtendedCode: nil
+      )
+    case .error:
+      return PersistentStoreOpenFailure(
+        reason: .keychainFailure,
+        disposition: .terminal,
+        sqliteCode: nil,
+        sqliteExtendedCode: nil
+      )
+    }
+  }
+
+  internal static func persistentOpenFailure(
+    for error: any Error,
+    duringMigration: Bool = false
+  ) -> PersistentStoreOpenFailure {
+    guard let databaseError = error as? DatabaseError else {
+      return PersistentStoreOpenFailure(
+        reason: duringMigration ? .migration : .unknown,
+        disposition: .terminal,
+        sqliteCode: nil,
+        sqliteExtendedCode: nil
+      )
+    }
+
+    let reason: PersistentStoreOpenFailureReason
+    let disposition: PersistentStoreOpenFailure.Disposition
+    switch databaseError.resultCode {
+    case .SQLITE_BUSY:
+      reason = .databaseBusy
+      disposition = .retryable
+    case .SQLITE_LOCKED:
+      reason = .databaseLocked
+      disposition = .retryable
+    case .SQLITE_FULL:
+      reason = .databaseFull
+      disposition = .terminal
+    case .SQLITE_READONLY:
+      reason = .databaseReadOnly
+      disposition = .terminal
+    case .SQLITE_CANTOPEN:
+      reason = .databaseCannotOpen
+      disposition = .terminal
+    case .SQLITE_IOERR:
+      reason = .databaseIO
+      disposition = .terminal
+    case .SQLITE_CORRUPT, .SQLITE_NOTADB:
+      reason = .databaseUnreadable
+      disposition = .terminal
+    default:
+      reason = duringMigration ? .migration : .unknown
+      disposition = .terminal
+    }
+    return PersistentStoreOpenFailure(
+      reason: reason,
+      disposition: disposition,
+      sqliteCode: Int32(databaseError.resultCode.rawValue),
+      sqliteExtendedCode: Int32(databaseError.extendedResultCode.rawValue)
+    )
+  }
+
+  /// A failed passphrase probe cannot prove corruption while the authoritative
+  /// database key is unavailable. Preserve the key-authority classification so
+  /// a normal protected-data delay never becomes a terminal database reset.
+  internal static func persistentOpenFailure(
+    afterExhaustingCandidatesWith keyAvailability: DatabaseKeyAvailability,
+    authoritativeKeyError: (any Error)? = nil,
+    lastError: (any Error)?
+  ) -> PersistentStoreOpenFailure {
+    if let keyFailure = persistentOpenFailure(for: keyAvailability) {
+      return keyFailure
+    }
+    if let authoritativeKeyError {
+      return persistentOpenFailure(for: authoritativeKeyError, duringMigration: true)
+    }
+    if let lastError {
+      return persistentOpenFailure(for: lastError)
+    }
+    return PersistentStoreOpenFailure(
+      reason: .unknown,
+      disposition: .terminal,
+      sqliteCode: nil,
+      sqliteExtendedCode: nil
+    )
+  }
+
   private static func getDatabaseUrl() -> URL {
     do {
       let fileManager = FileManager.default
@@ -1621,6 +1877,7 @@ public extension AppDatabase {
   }
 
   private static func makeShared() -> AppDatabase {
+    let startedAt = Date()
     let sharedSpan = PerformanceTrace.begin("DatabaseMakeShared", category: .launch)
     defer { sharedSpan.end() }
 
@@ -1630,6 +1887,25 @@ public extension AppDatabase {
     let databasePath = databaseUrl.path
     let fileManager = FileManager.default
     let fileExists = fileManager.fileExists(atPath: databasePath)
+    var finalAdmission: PersistentStoreAdmission?
+    var candidateAttempts = 0
+    var lastCandidateLabel = "none"
+    defer {
+      if let finalAdmission {
+        PersistentStoreStartupDiagnostics.report(
+          admission: finalAdmission,
+          durationMs: PerformanceTrace.elapsedMilliseconds(since: startedAt),
+          fileExistedAtStart: fileExists,
+          candidateAttempts: candidateAttempts,
+          lastCandidateLabel: lastCandidateLabel
+        )
+      }
+    }
+
+    func admit(_ database: AppDatabase) -> AppDatabase {
+      finalAdmission = database.persistentStoreAdmission
+      return database
+    }
 
     var pathForLog = databasePath
     pathForLog.replace(" ", with: "\\ ")
@@ -1650,7 +1926,12 @@ public extension AppDatabase {
     }
     #endif
 
-    func openPersistent(passphrase: String) throws -> (db: AppDatabase, pool: DatabasePool) {
+    func openPersistent(
+      passphrase: String,
+      candidateLabel: String
+    ) throws -> (db: AppDatabase, pool: DatabasePool) {
+      candidateAttempts += 1
+      lastCandidateLabel = candidateLabel
       let span = PerformanceTrace.begin("DatabaseOpenPersistent", category: .launch)
       do {
         let config = AppDatabase.makeConfiguration(passphrase: passphrase)
@@ -1664,7 +1945,7 @@ public extension AppDatabase {
       }
     }
 
-    func openInMemory() -> AppDatabase {
+    func openInMemory(after failure: PersistentStoreOpenFailure) -> AppDatabase {
       do {
         // Prefer dbKey if available; fall back to legacy.
         let passphrase: String = switch DatabaseKeyStore.load() {
@@ -1674,7 +1955,9 @@ public extension AppDatabase {
           "123"
         }
         let dbQueue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: passphrase))
-        return try AppDatabase(dbQueue)
+        let database = try AppDatabase(dbQueue)
+        database.recordPersistentOpenFailure(failure)
+        return database
       } catch {
         // At this point we have no choice but to crash
         fatalError("Completely unable to initialize in-memory database: \(error)")
@@ -1693,17 +1976,29 @@ public extension AppDatabase {
       switch DatabaseKeyStore.getOrCreate() {
       case .available(let key):
         do {
-          return try openPersistent(passphrase: key).db
+          return admit(try openPersistent(passphrase: key, candidateLabel: "new_db_key").db)
         } catch {
           log.error("Failed to create persistent database with dbKey; using in-memory", error: error)
-          return openInMemory()
+          return admit(openInMemory(after: persistentOpenFailure(for: error, duringMigration: true)))
         }
       case .locked:
         log.warning("Keychain locked; using in-memory database until credentials are available")
-        return openInMemory()
-      case .notFound, .error:
+        return admit(openInMemory(after: persistentOpenFailure(
+          afterExhaustingCandidatesWith: .locked,
+          lastError: nil
+        )))
+      case .notFound:
         log.warning("No database key available; using in-memory database")
-        return openInMemory()
+        return admit(openInMemory(after: persistentOpenFailure(
+          afterExhaustingCandidatesWith: .notFound,
+          lastError: nil
+        )))
+      case .error(let status):
+        log.warning("Database key creation failed; using in-memory database")
+        return admit(openInMemory(after: persistentOpenFailure(
+          afterExhaustingCandidatesWith: .error(status: status),
+          lastError: nil
+        )))
       }
     }
 
@@ -1721,11 +2016,15 @@ public extension AppDatabase {
     if let token, token != dbKey { candidates.append((label: "token", passphrase: token)) }
     candidates.append((label: "legacy123", passphrase: "123"))
 
+    var authoritativeKeyError: (any Error)?
     var lastError: (any Error)?
 
     for candidate in candidates {
       do {
-        let opened = try openPersistent(passphrase: candidate.passphrase)
+        let opened = try openPersistent(
+          passphrase: candidate.passphrase,
+          candidateLabel: candidate.label
+        )
 
         // Migrate legacy DB encryption (token / "123") to dbKey once we can.
         if candidate.label != "dbKey" {
@@ -1734,7 +2033,10 @@ public extension AppDatabase {
             do {
               try rotatePassphrase(pool: opened.pool, to: newKey)
               // Drop the old pool (wrong config) and reopen with the new key.
-              return try openPersistent(passphrase: newKey).db
+              return admit(try openPersistent(
+                passphrase: newKey,
+                candidateLabel: "rotated_db_key"
+              ).db)
             } catch {
               log.error("Failed to rotate DB passphrase to dbKey; continuing with legacy key", error: error)
             }
@@ -1743,8 +2045,11 @@ public extension AppDatabase {
           }
         }
 
-        return opened.db
+        return admit(opened.db)
       } catch {
+        if candidate.label == "dbKey" {
+          authoritativeKeyError = error
+        }
         lastError = error
         continue
       }
@@ -1757,7 +2062,11 @@ public extension AppDatabase {
     } else {
       log.error("Failed to open persistent database; using in-memory fallback")
     }
-    return openInMemory()
+    return admit(openInMemory(after: persistentOpenFailure(
+      afterExhaustingCandidatesWith: keyAvailability,
+      authoritativeKeyError: authoritativeKeyError,
+      lastError: lastError
+    )))
   }
 
   /// If `AppDatabase.shared` was initialized while the keychain was unavailable (common on iOS before
@@ -1770,6 +2079,12 @@ public extension AppDatabase {
   private static func reopenPersistentWriterForShared() -> (any DatabaseWriter)? {
     let reopened = makeShared()
     guard reopened.dbWriter is DatabasePool else {
+      switch reopened.persistentStoreAdmission {
+      case .ready:
+        break
+      case .retryable(let failure), .terminal(let failure):
+        shared.recordPersistentOpenFailure(failure)
+      }
       return nil
     }
     return reopened.dbWriter

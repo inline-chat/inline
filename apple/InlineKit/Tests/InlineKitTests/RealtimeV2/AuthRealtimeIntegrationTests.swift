@@ -8,6 +8,32 @@ import Testing
 
 @Suite("Auth + RealtimeV2 Integration", .serialized)
 final class AuthRealtimeIntegrationTests {
+  @Test("authenticated realtime waits for persistent-store admission before starting")
+  func testPersistentStoreAdmissionGatesRealtimeStart() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let storageAdmission = LockedStorageAdmission(false)
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: RecordingApplyUpdates(),
+      syncStorage: InMemorySyncStorage(),
+      storageIsReady: { storageAdmission.value }
+    )
+
+    try? await Task.sleep(for: .milliseconds(100))
+    #expect(await transport.sentMessages.isEmpty)
+    #expect(await realtime.admitPersistentStorage() == false)
+
+    storageAdmission.value = true
+    #expect(await realtime.admitPersistentStorage())
+    #expect(await waitForCondition {
+      let messages = await transport.sentMessages
+      return containsConnectionInit(with: "1:mockToken", in: messages)
+    })
+    await realtime.prepareForTermination()
+  }
+
   @Test("login event triggers connection init with token")
   func testAuthLoginStartsHandshake() async throws {
     let auth = Auth.mocked(authenticated: false)
@@ -110,6 +136,20 @@ final class AuthRealtimeIntegrationTests {
     #expect(replacementHandshake)
 
     withExtendedLifetime(realtime) {}
+  }
+}
+
+private final class LockedStorageAdmission: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storedValue: Bool
+
+  init(_ value: Bool) {
+    storedValue = value
+  }
+
+  var value: Bool {
+    get { lock.withLock { storedValue } }
+    set { lock.withLock { storedValue = newValue } }
   }
 }
 

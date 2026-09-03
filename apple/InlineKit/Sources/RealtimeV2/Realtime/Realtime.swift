@@ -160,6 +160,8 @@ public actor RealtimeV2 {
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: PendingTransactionContinuation] = [:]
+  private let storageIsReady: @Sendable () -> Bool
+  private var didStart = false
 
   // MARK: - Initialization
 
@@ -170,9 +172,13 @@ public actor RealtimeV2 {
     syncStorage: SyncStorage,
     persistenceHandler: TransactionPersistenceHandler? = nil,
     blockerResolver: (any TransactionBlockerResolver)? = nil,
+    storageIsReady: @escaping @Sendable () -> Bool = { true },
   ) {
     self.auth = auth
-    acceptsTransactions = auth.userId() != nil && auth.hasPendingAccountTransition() == false
+    self.storageIsReady = storageIsReady
+    acceptsTransactions = auth.userId() != nil
+      && auth.hasPendingAccountTransition() == false
+      && storageIsReady()
     authDiagnosticSnapshots = auth.snapshots
     session = ProtocolSession(transport: transport, auth: auth)
     #if canImport(UIKit)
@@ -235,7 +241,9 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
-    guard !isPreparingForTermination else { return }
+    guard !didStart, !isPreparingForTermination, storageIsReady() else { return }
+    didStart = true
+    acceptsTransactions = auth.userId() != nil && auth.hasPendingAccountTransition() == false
     if auth.hasPendingAccountTransition() == false {
       _ = await ensureTransactionOwnerIfNeeded()
     }
@@ -276,6 +284,16 @@ public actor RealtimeV2 {
         await connectionManager.stop()
       }
     }
+  }
+
+  /// Starts the existing realtime owner after the app has admitted its
+  /// persistent database. Calling this repeatedly is harmless. A temporary
+  /// launch writer never receives account sync or queued transaction work.
+  @discardableResult
+  public func admitPersistentStorage() async -> Bool {
+    guard storageIsReady() else { return false }
+    await start()
+    return didStart
   }
 
   /// Called when log out happens
@@ -578,7 +596,8 @@ public actor RealtimeV2 {
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
 
-    guard auth.hasPendingAccountTransition() == false,
+    guard storageIsReady(),
+          auth.hasPendingAccountTransition() == false,
           auth.snapshot() == snapshot
     else {
       acceptsTransactions = false
