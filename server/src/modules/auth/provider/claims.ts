@@ -11,7 +11,6 @@ export type ProviderClaims = {
   authoritativeEmail: boolean
   firstName?: string
   lastName?: string
-  photoUrl?: string
 }
 
 type GooglePayload = JWTPayload & {
@@ -20,7 +19,6 @@ type GooglePayload = JWTPayload & {
   hd?: unknown
   given_name?: unknown
   family_name?: unknown
-  picture?: unknown
   nonce?: unknown
 }
 
@@ -58,7 +56,6 @@ export async function verifyGoogleIdToken(input: {
     authoritativeEmail,
     firstName: cleanName(payload["given_name"]),
     lastName: cleanName(payload["family_name"]),
-    photoUrl: safeGooglePhotoUrl(payload["picture"]),
   }
 }
 
@@ -109,18 +106,4 @@ function stringClaim(value: unknown): string | undefined {
 function cleanName(value: unknown): string | undefined {
   const name = stringClaim(value)?.trim()
   return name ? name.slice(0, 256) : undefined
-}
-
-function safeGooglePhotoUrl(value: unknown): string | undefined {
-  const raw = stringClaim(value)
-  if (!raw) return undefined
-  try {
-    const url = new URL(raw)
-    if (url.protocol !== "https:" || !["lh3.googleusercontent.com", "lh4.googleusercontent.com", "lh5.googleusercontent.com", "lh6.googleusercontent.com"].includes(url.hostname)) {
-      return undefined
-    }
-    return url.toString()
-  } catch {
-    return undefined
-  }
 }
