@@ -609,7 +609,13 @@ private struct AgentSetupProgressRow: View {
         }
       }
     case let .completed(outcome):
-      Text(item.detail ?? outcome?.label ?? "Completed")
+      if let detail = item.detail {
+        Text(detail)
+      } else if let outcome {
+        Text(outcome.label)
+      } else {
+        Text("Completed")
+      }
     case .failed:
       Text("Stopped here")
     }
