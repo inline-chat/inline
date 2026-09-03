@@ -18,6 +18,7 @@ class MentionCompletionMenu: ComposeCompletionMenuView {
   private let surfaceView: ComposeCompletionSurfaceView
   private let log = Log.scoped("MentionCompletionMenu")
   private let model = MentionCompletionViewModel()
+  private var presentationRequested = false
 
   var isVisible: Bool { isPresented }
 
@@ -177,7 +178,9 @@ class MentionCompletionMenu: ComposeCompletionMenuView {
 
     guard itemCount > 0 else {
       heightConstraint.constant = 0
-      hide(animated: false)
+      // Keep the active @ session armed while asynchronous candidates load.
+      // The compose owner calls hide() when the session actually ends.
+      dismiss(animated: false)
       return
     }
 
@@ -200,11 +203,16 @@ class MentionCompletionMenu: ComposeCompletionMenuView {
       tableView.selectRowIndexes(indexSet, byExtendingSelection: false)
       tableView.scrollRowToVisible(selectedIndex)
     }
+
+    if presentationRequested, !isPresented {
+      present()
+    }
   }
 
   func show(animated: Bool = true) {
+    presentationRequested = true
     guard hasItems else {
-      hide(animated: false)
+      dismiss(animated: false)
       return
     }
 
@@ -215,6 +223,7 @@ class MentionCompletionMenu: ComposeCompletionMenuView {
   }
 
   func hide(animated: Bool = true) {
+    presentationRequested = false
     dismiss(animated: animated)
   }
 

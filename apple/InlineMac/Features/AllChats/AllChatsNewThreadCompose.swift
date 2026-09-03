@@ -229,6 +229,14 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         updateVisibilityTooltip()
       }
       .store(in: &cancellables)
+
+    NotificationCenter.default.publisher(for: .botAgentsChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          await self?.loadAgentChoices()
+        }
+      }
+      .store(in: &cancellables)
   }
 
   var destinationTitle: String {
@@ -504,6 +512,10 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     clearAgentSelection()
     guard let choice else { return }
 
+    // The mention establishes the Chat's Agent target immediately. A catalog
+    // is optional and only controls whether configuration pickers appear.
+    selectedAgentChoiceID = choice.id
+
     agentCatalogTask = Task { [weak self] in
       guard let self else { return }
       if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: choice.bot.id),
@@ -518,7 +530,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         if let refreshed {
           applyAgentSelection(choice, catalog: refreshed)
         } else {
-          clearAgentSelection()
+          clearAgentConfiguration()
         }
       } catch {
         guard !Task.isCancelled else { return }
@@ -567,6 +579,10 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func clearAgentSelection() {
     selectedAgentChoiceID = nil
+    clearAgentConfiguration()
+  }
+
+  private func clearAgentConfiguration() {
     agentCatalog = nil
     selectedProjectID = nil
     selectedModelID = nil

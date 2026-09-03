@@ -177,6 +177,7 @@ final class NewThreadComposeAttachmentStore {
 final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource {
   private let viewModel: NewThreadMentionCandidatesViewModel
   private let updates: CurrentValueSubject<MentionCompletionCandidates, Never>
+  private var destination: NewThreadComposeDestination
   private var agents: [MentionableBotAgent] = []
   private var cancellable: AnyCancellable?
 
@@ -193,6 +194,7 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   init(db: AppDatabase, destination: NewThreadComposeDestination) {
     let viewModel = NewThreadMentionCandidatesViewModel(db: db, spaceID: destination.spaceID)
     self.viewModel = viewModel
+    self.destination = destination
     updates = CurrentValueSubject(viewModel.candidates)
     cancellable = viewModel.$candidates.sink { [weak self] candidates in
       guard let self else { return }
@@ -201,6 +203,7 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   }
 
   func setDestination(_ destination: NewThreadComposeDestination) {
+    self.destination = destination
     viewModel.setSpaceID(destination.spaceID)
   }
 
@@ -215,7 +218,14 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
 
   private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
     var candidates = candidates
-    candidates.agents = agents
+    if destination.spaceID == nil {
+      candidates.agents = agents
+    } else {
+      let spaceMemberIDs = Set(candidates.users.lazy
+        .filter { $0.source == .spaceMember }
+        .map(\.userInfo.id))
+      candidates.agents = agents.filter { spaceMemberIDs.contains($0.botUserId) }
+    }
     return candidates
   }
 }

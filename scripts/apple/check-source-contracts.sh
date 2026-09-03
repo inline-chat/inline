@@ -138,6 +138,62 @@ if [[ -n "$all_chats_source" ]]; then
   fi
 fi
 
+new_thread_compose_path="apple/InlineMac/Features/AllChats/AllChatsNewThreadCompose.swift"
+new_thread_compose_source="$(read_source "$new_thread_compose_path" 2>/dev/null || true)"
+new_thread_agent_binding_source="$(
+  printf '%s\n' "$new_thread_compose_source" |
+    sed -n '/^  private func applyFirstAgentMentionIfNeeded() {/,/^  private var firstMentionedAgentChoice:/p'
+)"
+if [[ -n "$new_thread_compose_source" ]]; then
+  for fragment in \
+    'NotificationCenter.default.publisher(for: .botAgentsChanged)' \
+    'selectedAgentChoiceID = choice.id' \
+    'clearAgentConfiguration()'; do
+    if ! printf '%s\n' "$new_thread_compose_source" | grep -F "$fragment" >/dev/null; then
+      printf 'error: %s must keep new-thread Skilled Agent refresh and binding: %s\n' \
+        "$new_thread_compose_path" "$fragment" >&2
+      failures=1
+    fi
+  done
+
+  agent_binding_line="$(
+    printf '%s\n' "$new_thread_agent_binding_source" |
+      grep -n -F 'selectedAgentChoiceID = choice.id' | head -n 1 | cut -d: -f1 || true
+  )"
+  agent_catalog_line="$(
+    printf '%s\n' "$new_thread_agent_binding_source" |
+      grep -n -F 'agentCatalogTask = Task' | head -n 1 | cut -d: -f1 || true
+  )"
+  if [[ -z "$agent_binding_line" || -z "$agent_catalog_line" ||
+        "$agent_binding_line" -ge "$agent_catalog_line" ]]; then
+    printf 'error: %s must bind the mentioned Skilled Agent before optional catalog loading\n' \
+      "$new_thread_compose_path" >&2
+    failures=1
+  fi
+fi
+
+glass_compose_path="apple/InlineMac/Views/Compose/GlassComposeAppKit.swift"
+glass_compose_source="$(read_source "$glass_compose_path" 2>/dev/null || true)"
+glass_mention_projection_source="$(
+  printf '%s\n' "$glass_compose_source" |
+    sed -n '/^  private func applyMentionCandidates() {/,/^  private func refetchMentionParticipantsIfNeeded() {/p'
+)"
+if [[ -n "$glass_mention_projection_source" ]]; then
+  if ! printf '%s\n' "$glass_mention_projection_source" |
+    grep -F 'candidates.agents = mentionAgents' >/dev/null; then
+    printf 'error: %s must project peer-filtered Skilled Agents in chat Compose\n' \
+      "$glass_compose_path" >&2
+    failures=1
+  fi
+
+  if printf '%s\n' "$glass_mention_projection_source" |
+    grep -F 'candidates.agents = []' >/dev/null; then
+    printf 'error: %s must preserve the new-thread mention source Skilled Agents\n' \
+      "$glass_compose_path" >&2
+    failures=1
+  fi
+fi
+
 if git_grep --quiet --fixed-strings 'Not Loaded Title' -- 'apple/**/*.swift'; then
   printf 'error: Apple product UI must not expose the Not Loaded Title developer placeholder\n' >&2
   failures=1

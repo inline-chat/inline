@@ -1390,8 +1390,6 @@ class GlassComposeAppKit: NSView {
     var candidates = mentionCandidates
     if case .chat = usage {
       candidates.agents = mentionAgents
-    } else {
-      candidates.agents = []
     }
     mentionCompletionMenu?.updateCandidates(candidates)
   }
