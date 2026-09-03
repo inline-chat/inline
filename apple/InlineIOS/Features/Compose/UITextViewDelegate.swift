@@ -65,6 +65,9 @@ extension ComposeView: UITextViewDelegate {
 
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
     if text.contains("￼") {
+      // Keep the fallback used by keyboard-provided stickers. Attachment processing
+      // consumes the replacement character synchronously, so the normal change
+      // notification and this queued check cannot import the same item twice.
       DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.textView.textDidChange()
       }

@@ -10,6 +10,7 @@ class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
   weak var composeView: ComposeView?
   private var trackingAccessoryView: UIView?
+  private var isProcessingInsertedAttachments = false
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
@@ -391,54 +392,54 @@ class ComposeTextView: UITextView {
   }
 
   public func checkForNewAttachments() {
-    guard let attributedText else { return }
+    guard !isProcessingInsertedAttachments, let attributedText else { return }
 
-    let string = attributedText.string
+    let snapshot = NSAttributedString(attributedString: attributedText)
+    let string = snapshot.string as NSString
     var rangesToProcess: [NSRange] = []
+    var searchRange = NSRange(location: 0, length: string.length)
 
-    for (index, char) in string.enumerated() {
-      if char == "\u{FFFC}" {
-        let nsRange = NSRange(location: index, length: 1)
-        rangesToProcess.append(nsRange)
+    while searchRange.length > 0 {
+      let range = string.range(of: "\u{FFFC}", options: [], range: searchRange)
+      guard range.location != NSNotFound else { break }
+      rangesToProcess.append(range)
+
+      let nextLocation = NSMaxRange(range)
+      searchRange = NSRange(location: nextLocation, length: string.length - nextLocation)
+    }
+
+    guard !rangesToProcess.isEmpty else { return }
+
+    isProcessingInsertedAttachments = true
+    defer { isProcessingInsertedAttachments = false }
+
+    var droppedAttachmentImages: [UIImage] = []
+    var actions: [(range: NSRange, attributes: [NSAttributedString.Key: Any], droppedImage: UIImage?)] = []
+
+    for range in rangesToProcess where range.location < snapshot.length {
+      let attributes = snapshot.attributes(at: range.location, effectiveRange: nil)
+      let droppedImage = imageFromTextAttachment(attributes: attributes)
+      if let droppedImage {
+        droppedAttachmentImages.append(droppedImage)
+      }
+      actions.append((range, attributes, droppedImage))
+    }
+
+    // Consume each transient replacement character before handing media to the composer.
+    // Descending ranges keep the UTF-16 locations valid while the text storage changes.
+    for action in actions.reversed() {
+      if action.droppedImage != nil {
+        safelyRemoveAttachment(at: action.range)
+      } else {
+        processReplacementCharacter(at: action.range, attributes: action.attributes)
       }
     }
 
-    if !rangesToProcess.isEmpty {
-      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-        guard let self else { return }
-        var droppedAttachmentImages: [UIImage] = []
-        var droppedAttachmentRanges: [NSRange] = []
-
-        for range in rangesToProcess {
-          if range.location < attributedText.length {
-            let attributes = attributedText.attributes(
-              at: range.location,
-              effectiveRange: nil
-            )
-            if let droppedImage = self.imageFromTextAttachment(attributes: attributes) {
-              droppedAttachmentImages.append(droppedImage)
-              droppedAttachmentRanges.append(range)
-              continue
-            }
-
-            self.processReplacementCharacter(at: range, attributes: attributes)
-          }
-        }
-
-        guard let composeView = self.composeView else { return }
-        guard !droppedAttachmentImages.isEmpty else { return }
-
-        // Remove replacement characters from end to start so range offsets stay valid.
-        for range in droppedAttachmentRanges.sorted(by: { $0.location > $1.location }) {
-          self.safelyRemoveAttachment(at: range)
-        }
-
-        if droppedAttachmentImages.count == 1 {
-          composeView.handleDroppedImage(droppedAttachmentImages[0])
-        } else {
-          composeView.handleMultipleDroppedImages(droppedAttachmentImages)
-        }
-      }
+    guard let composeView, !droppedAttachmentImages.isEmpty else { return }
+    if droppedAttachmentImages.count == 1 {
+      composeView.handleDroppedImage(droppedAttachmentImages[0])
+    } else {
+      composeView.handleMultipleDroppedImages(droppedAttachmentImages)
     }
   }
 
@@ -701,23 +702,54 @@ class ComposeTextView: UITextView {
   }
 
   private func safelyRemoveAttachment(at range: NSRange) {
-    guard let attributedString = attributedText?.mutableCopy() as? NSMutableAttributedString else {
-      return
-    }
-
     let validRange = NSRange(
-      location: min(range.location, attributedString.length),
-      length: min(range.length, max(0, attributedString.length - range.location))
+      location: min(range.location, textStorage.length),
+      length: min(range.length, max(0, textStorage.length - range.location))
     )
 
-    if validRange.length > 0 {
-      attributedString.replaceCharacters(in: validRange, with: "")
+    guard validRange.length > 0 else { return }
 
-      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-        self?.attributedText = attributedString
-        self?.updateTypingAttributesIfNeeded()
-      }
+    let previousSelection = selectedRange
+    textStorage.beginEditing()
+    textStorage.deleteCharacters(in: validRange)
+    textStorage.endEditing()
+
+    let removedEnd = NSMaxRange(validRange)
+    let selectionLocation: Int
+    if previousSelection.location >= removedEnd {
+      selectionLocation = previousSelection.location - validRange.length
+    } else if previousSelection.location > validRange.location {
+      selectionLocation = validRange.location
+    } else {
+      selectionLocation = previousSelection.location
     }
+    selectedRange = NSRange(location: min(selectionLocation, textStorage.length), length: 0)
+
+    normalizeTypingAttributesAfterAttachmentRemoval()
+    updateTypingAttributesIfNeeded()
+  }
+
+  private func normalizeTypingAttributesAfterAttachmentRemoval() {
+    let defaultFontSize: CGFloat = 17
+
+    if textStorage.length == 0 {
+      font = .systemFont(ofSize: defaultFontSize)
+    }
+
+    var attributes = typingAttributes
+    attributes.removeValue(forKey: .attachment)
+    attributes.removeValue(forKey: NSAttributedString.Key(rawValue: "CTAdaptiveImageProvider"))
+
+    if let typingFont = attributes[.font] as? UIFont {
+      attributes[.font] = typingFont.withSize(defaultFontSize)
+    } else {
+      attributes[.font] = UIFont.systemFont(ofSize: defaultFontSize)
+    }
+    if attributes[.foregroundColor] == nil {
+      attributes[.foregroundColor] = UIColor.label
+    }
+
+    typingAttributes = attributes
   }
 
   private func hasValidStickerAttributes() -> Bool {
