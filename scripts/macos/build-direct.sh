@@ -54,7 +54,7 @@ release_source_status() {
 }
 
 verify_frozen_source() {
-  local current_commit current_build current_snapshot current_source_status
+  local expected_commit_build current_snapshot current_source_status source_diff
   if [[ -n "${EXPECTED_SOURCE_SNAPSHOT}" ]]; then
     if [[ -z "${SOURCE_SNAPSHOT_MANIFEST}" || ! -f "${SOURCE_SNAPSHOT_MANIFEST}" ]]; then
       echo "SOURCE_SNAPSHOT_MANIFEST is required for an experimental tip build." >&2
@@ -67,14 +67,20 @@ verify_frozen_source() {
     fi
   fi
   if [[ -n "${EXPECTED_SOURCE_COMMIT}" || -n "${EXPECTED_SOURCE_BUILD}" || "${REQUIRE_CLEAN_SOURCE}" == "1" ]]; then
-    current_commit=$(git -C "${ROOT_DIR}" rev-parse HEAD)
-    current_build=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
-    if [[ -n "${EXPECTED_SOURCE_COMMIT}" && "${current_commit}" != "${EXPECTED_SOURCE_COMMIT}" ]]; then
-      echo "Source commit changed during release: expected ${EXPECTED_SOURCE_COMMIT}, found ${current_commit}" >&2
-      exit 1
-    fi
-    if [[ -n "${EXPECTED_SOURCE_BUILD}" && "${current_build}" != "${EXPECTED_SOURCE_BUILD}" ]]; then
-      echo "Source build changed during release: expected ${EXPECTED_SOURCE_BUILD}, found ${current_build}" >&2
+    if [[ -n "${EXPECTED_SOURCE_COMMIT}" ]]; then
+      source_diff=$(bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts" --root "${ROOT_DIR}" --diff-from-commit "${EXPECTED_SOURCE_COMMIT}")
+      if [[ -n "${source_diff}" ]]; then
+        echo "macOS release inputs no longer match source commit ${EXPECTED_SOURCE_COMMIT}; refusing to label or publish the artifact." >&2
+        echo "${source_diff}" >&2
+        exit 1
+      fi
+      expected_commit_build=$(git -C "${ROOT_DIR}" rev-list --count "${EXPECTED_SOURCE_COMMIT}^{commit}")
+      if [[ -n "${EXPECTED_SOURCE_BUILD}" && "${expected_commit_build}" != "${EXPECTED_SOURCE_BUILD}" ]]; then
+        echo "Source build ${EXPECTED_SOURCE_BUILD} does not match source commit ${EXPECTED_SOURCE_COMMIT} (build ${expected_commit_build})." >&2
+        exit 1
+      fi
+    elif [[ -n "${EXPECTED_SOURCE_BUILD}" ]]; then
+      echo "EXPECTED_SOURCE_COMMIT is required when EXPECTED_SOURCE_BUILD is set." >&2
       exit 1
     fi
     if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" ]]; then

@@ -86,6 +86,33 @@ export function macosReleaseSourceStatusLines(rootDir: string): string[] {
   return lines;
 }
 
+export function macosReleaseSourceDiffPaths(rootDir: string, commit: string): string[] {
+  const result = spawnSync({
+    cmd: [
+      "git",
+      "-C",
+      rootDir,
+      "diff",
+      "--name-only",
+      "-z",
+      "--no-ext-diff",
+      `${commit}^{commit}`,
+      "--",
+      ...macosReleaseSourcePathspecs,
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Unable to compare macOS release source with ${commit}: ${new TextDecoder().decode(result.stderr).trim()}`);
+  }
+  return new TextDecoder()
+    .decode(result.stdout)
+    .split("\0")
+    .filter((relativePath) => relativePath && !isEnvironmentFile(relativePath))
+    .sort();
+}
+
 function assertSafeRelativePath(relativePath: string): void {
   if (isAbsolute(relativePath) || relativePath.split("/").includes("..")) {
     throw new Error(`Unsafe macOS source snapshot path: ${relativePath}`);
@@ -213,17 +240,30 @@ export function stageMacosSourceSnapshot(
 function cli(argv: string[]): number {
   const rootIndex = argv.indexOf("--root");
   const manifestIndex = argv.indexOf("--manifest");
+  const diffFromCommitIndex = argv.indexOf("--diff-from-commit");
   const statusOnly = argv.includes("--status");
   const rootDir = rootIndex === -1 ? resolve(import.meta.dir, "../..") : resolve(argv[rootIndex + 1] ?? "");
   const manifestPath = manifestIndex === -1 ? "" : resolve(argv[manifestIndex + 1] ?? "");
-  if (!rootDir || (rootIndex !== -1 && !argv[rootIndex + 1]) || (manifestIndex !== -1 && !argv[manifestIndex + 1])) {
-    console.error("Usage: bun run macos-source-snapshot.ts [--root <repo>] [--manifest <nul-path-list>] [--status]");
+  const diffFromCommit = diffFromCommitIndex === -1 ? "" : argv[diffFromCommitIndex + 1] ?? "";
+  if (
+    !rootDir
+    || (rootIndex !== -1 && !argv[rootIndex + 1])
+    || (manifestIndex !== -1 && !argv[manifestIndex + 1])
+    || (diffFromCommitIndex !== -1 && !diffFromCommit)
+    || (statusOnly && Boolean(diffFromCommit))
+  ) {
+    console.error("Usage: bun run macos-source-snapshot.ts [--root <repo>] [--manifest <nul-path-list>] [--status | --diff-from-commit <commit>]");
     return 2;
   }
   try {
     if (statusOnly) {
       const lines = macosReleaseSourceStatusLines(rootDir);
       if (lines.length) console.log(lines.join("\n"));
+      return 0;
+    }
+    if (diffFromCommit) {
+      const paths = macosReleaseSourceDiffPaths(rootDir, diffFromCommit);
+      if (paths.length) console.log(paths.join("\n"));
       return 0;
     }
     const sha256 = manifestPath

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
-import { macosReleaseSourceStatusLines } from "./macos-source-snapshot";
+import { macosReleaseSourceDiffPaths, macosReleaseSourceStatusLines } from "./macos-source-snapshot";
 import {
   appcastXmlForBuildAllocation,
   decideAppcastFetch,
@@ -134,6 +134,8 @@ describe("release integrity helpers", () => {
     expect(buildDirectSource).toContain('"sourceSnapshotSha256": source_snapshot');
     expect(buildDirectSource).toContain('bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts"');
     expect(buildDirectSource).toContain('--root "${ROOT_DIR}" --status');
+    expect(buildDirectSource).toContain('--diff-from-commit "${EXPECTED_SOURCE_COMMIT}"');
+    expect(buildDirectSource).not.toContain("Source commit changed during release");
     expect(buildDirectSource).toContain('--manifest "${SOURCE_SNAPSHOT_MANIFEST}"');
     expect(buildDirectSource).toContain('RELEASE_CONFIG_ROOT=${RELEASE_CONFIG_ROOT:-"${ROOT_DIR}"}');
     expect(sourceSnapshotSource).toContain('["apple", "scripts/apple", "scripts/macos", "bun.lock"]');
@@ -164,13 +166,21 @@ describe("release integrity helpers", () => {
     gitFixture(rootDir, ["config", "user.email", "inline-test@example.invalid"]);
     gitFixture(rootDir, ["add", "."]);
     gitFixture(rootDir, ["commit", "--quiet", "--no-gpg-sign", "-m", "fixture"]);
+    const sourceCommit = new TextDecoder().decode(spawnSync({
+      cmd: ["git", "-C", rootDir, "rev-parse", "HEAD"],
+      stdout: "pipe",
+    }).stdout).trim();
 
     writeFileSync(resolve(rootDir, "landing/index.ts"), "export const landingFixture = 2;\n");
     expect(macosReleaseSourceStatusLines(rootDir)).toEqual([]);
+    gitFixture(rootDir, ["add", "landing/index.ts"]);
+    gitFixture(rootDir, ["commit", "--quiet", "--no-gpg-sign", "-m", "unrelated landing change"]);
+    expect(macosReleaseSourceDiffPaths(rootDir, sourceCommit)).toEqual([]);
 
     for (const path of ["apple/App.swift", "scripts/apple/helper.ts", "scripts/macos/release-app.ts", "bun.lock"] as const) {
       writeFileSync(resolve(rootDir, path), `${fixtures[path]}// changed\n`);
       expect(macosReleaseSourceStatusLines(rootDir).some((line) => line.endsWith(path))).toBe(true);
+      expect(macosReleaseSourceDiffPaths(rootDir, sourceCommit)).toContain(path);
       writeFileSync(resolve(rootDir, path), fixtures[path]);
     }
 
