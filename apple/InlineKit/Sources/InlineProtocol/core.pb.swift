@@ -18973,11 +18973,22 @@ public nonisolated struct AgentProjectCatalog: Sendable {
   /// Clears the value of `canSelectFolder`. Subsequent reads from it will return its default value.
   public mutating func clearCanSelectFolder() {self._canSelectFolder = nil}
 
+  /// Effective project when a thread omits an explicit project selection.
+  public var defaultProjectID: String {
+    get {_defaultProjectID ?? String()}
+    set {_defaultProjectID = newValue}
+  }
+  /// Returns true if `defaultProjectID` has been explicitly set.
+  public var hasDefaultProjectID: Bool {self._defaultProjectID != nil}
+  /// Clears the value of `defaultProjectID`. Subsequent reads from it will return its default value.
+  public mutating func clearDefaultProjectID() {self._defaultProjectID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _canSelectFolder: Bool? = nil
+  fileprivate var _defaultProjectID: String? = nil
 }
 
 public nonisolated struct AgentReasoningEffortOption: Sendable {
@@ -19038,11 +19049,22 @@ public nonisolated struct AgentModelOption: Sendable {
   /// Empty means that the catalog does not constrain reasoning for this model.
   public var reasoningEffortIds: [String] = []
 
+  /// Effective reasoning effort when this model has no explicit selection.
+  public var defaultReasoningEffortID: String {
+    get {_defaultReasoningEffortID ?? String()}
+    set {_defaultReasoningEffortID = newValue}
+  }
+  /// Returns true if `defaultReasoningEffortID` has been explicitly set.
+  public var hasDefaultReasoningEffortID: Bool {self._defaultReasoningEffortID != nil}
+  /// Clears the value of `defaultReasoningEffortID`. Subsequent reads from it will return its default value.
+  public mutating func clearDefaultReasoningEffortID() {self._defaultReasoningEffortID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _description_p: String? = nil
+  fileprivate var _defaultReasoningEffortID: String? = nil
 }
 
 public nonisolated struct AgentModelCatalog: Sendable {
@@ -19052,9 +19074,21 @@ public nonisolated struct AgentModelCatalog: Sendable {
 
   public var options: [AgentModelOption] = []
 
+  /// Effective model when a thread omits an explicit model selection.
+  public var defaultModelID: String {
+    get {_defaultModelID ?? String()}
+    set {_defaultModelID = newValue}
+  }
+  /// Returns true if `defaultModelID` has been explicitly set.
+  public var hasDefaultModelID: Bool {self._defaultModelID != nil}
+  /// Clears the value of `defaultModelID`. Subsequent reads from it will return its default value.
+  public mutating func clearDefaultModelID() {self._defaultModelID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _defaultModelID: String? = nil
 }
 
 /// Typed, independently optional sections published and cached by a harness.
@@ -47390,7 +47424,7 @@ nonisolated extension AgentProjectOption: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension AgentProjectCatalog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentProjectCatalog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}options\0\u{3}can_select_folder\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}options\0\u{3}can_select_folder\0\u{3}default_project_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -47400,6 +47434,7 @@ nonisolated extension AgentProjectCatalog: SwiftProtobuf.Message, SwiftProtobuf.
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.options) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._canSelectFolder) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._defaultProjectID) }()
       default: break
       }
     }
@@ -47416,12 +47451,16 @@ nonisolated extension AgentProjectCatalog: SwiftProtobuf.Message, SwiftProtobuf.
     try { if let v = self._canSelectFolder {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._defaultProjectID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: AgentProjectCatalog, rhs: AgentProjectCatalog) -> Bool {
     if lhs.options != rhs.options {return false}
     if lhs._canSelectFolder != rhs._canSelectFolder {return false}
+    if lhs._defaultProjectID != rhs._defaultProjectID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -47503,7 +47542,7 @@ nonisolated extension AgentReasoningCatalog: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension AgentModelOption: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentModelOption"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}label\0\u{1}description\0\u{3}reasoning_effort_ids\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}label\0\u{1}description\0\u{3}reasoning_effort_ids\0\u{3}default_reasoning_effort_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -47515,6 +47554,7 @@ nonisolated extension AgentModelOption: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 2: try { try decoder.decodeSingularStringField(value: &self.label) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
       case 4: try { try decoder.decodeRepeatedStringField(value: &self.reasoningEffortIds) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._defaultReasoningEffortID) }()
       default: break
       }
     }
@@ -47537,6 +47577,9 @@ nonisolated extension AgentModelOption: SwiftProtobuf.Message, SwiftProtobuf._Me
     if !self.reasoningEffortIds.isEmpty {
       try visitor.visitRepeatedStringField(value: self.reasoningEffortIds, fieldNumber: 4)
     }
+    try { if let v = self._defaultReasoningEffortID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -47545,6 +47588,7 @@ nonisolated extension AgentModelOption: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs.label != rhs.label {return false}
     if lhs._description_p != rhs._description_p {return false}
     if lhs.reasoningEffortIds != rhs.reasoningEffortIds {return false}
+    if lhs._defaultReasoningEffortID != rhs._defaultReasoningEffortID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -47552,7 +47596,7 @@ nonisolated extension AgentModelOption: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension AgentModelCatalog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentModelCatalog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}options\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}options\0\u{3}default_model_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -47561,20 +47605,29 @@ nonisolated extension AgentModelCatalog: SwiftProtobuf.Message, SwiftProtobuf._M
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.options) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._defaultModelID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.options.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.options, fieldNumber: 1)
     }
+    try { if let v = self._defaultModelID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: AgentModelCatalog, rhs: AgentModelCatalog) -> Bool {
     if lhs.options != rhs.options {return false}
+    if lhs._defaultModelID != rhs._defaultModelID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -11413,6 +11413,12 @@ export interface AgentProjectCatalog {
      * @generated from protobuf field: optional bool can_select_folder = 2;
      */
     canSelectFolder?: boolean;
+    /**
+     * Effective project when a thread omits an explicit project selection.
+     *
+     * @generated from protobuf field: optional string default_project_id = 3;
+     */
+    defaultProjectId?: string;
 }
 /**
  * @generated from protobuf message AgentReasoningEffortOption
@@ -11462,6 +11468,12 @@ export interface AgentModelOption {
      * @generated from protobuf field: repeated string reasoning_effort_ids = 4;
      */
     reasoningEffortIds: string[];
+    /**
+     * Effective reasoning effort when this model has no explicit selection.
+     *
+     * @generated from protobuf field: optional string default_reasoning_effort_id = 5;
+     */
+    defaultReasoningEffortId?: string;
 }
 /**
  * @generated from protobuf message AgentModelCatalog
@@ -11471,6 +11483,12 @@ export interface AgentModelCatalog {
      * @generated from protobuf field: repeated AgentModelOption options = 1;
      */
     options: AgentModelOption[];
+    /**
+     * Effective model when a thread omits an explicit model selection.
+     *
+     * @generated from protobuf field: optional string default_model_id = 2;
+     */
+    defaultModelId?: string;
 }
 /**
  * Typed, independently optional sections published and cached by a harness.
@@ -44810,7 +44828,8 @@ class AgentProjectCatalog$Type extends MessageType<AgentProjectCatalog> {
     constructor() {
         super("AgentProjectCatalog", [
             { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentProjectOption },
-            { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "default_project_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<AgentProjectCatalog>): AgentProjectCatalog {
@@ -44831,6 +44850,9 @@ class AgentProjectCatalog$Type extends MessageType<AgentProjectCatalog> {
                 case /* optional bool can_select_folder */ 2:
                     message.canSelectFolder = reader.bool();
                     break;
+                case /* optional string default_project_id */ 3:
+                    message.defaultProjectId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -44849,6 +44871,9 @@ class AgentProjectCatalog$Type extends MessageType<AgentProjectCatalog> {
         /* optional bool can_select_folder = 2; */
         if (message.canSelectFolder !== undefined)
             writer.tag(2, WireType.Varint).bool(message.canSelectFolder);
+        /* optional string default_project_id = 3; */
+        if (message.defaultProjectId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.defaultProjectId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -44975,7 +45000,8 @@ class AgentModelOption$Type extends MessageType<AgentModelOption> {
             { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "label", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "default_reasoning_effort_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<AgentModelOption>): AgentModelOption {
@@ -45004,6 +45030,9 @@ class AgentModelOption$Type extends MessageType<AgentModelOption> {
                 case /* repeated string reasoning_effort_ids */ 4:
                     message.reasoningEffortIds.push(reader.string());
                     break;
+                case /* optional string default_reasoning_effort_id */ 5:
+                    message.defaultReasoningEffortId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45028,6 +45057,9 @@ class AgentModelOption$Type extends MessageType<AgentModelOption> {
         /* repeated string reasoning_effort_ids = 4; */
         for (let i = 0; i < message.reasoningEffortIds.length; i++)
             writer.tag(4, WireType.LengthDelimited).string(message.reasoningEffortIds[i]);
+        /* optional string default_reasoning_effort_id = 5; */
+        if (message.defaultReasoningEffortId !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.defaultReasoningEffortId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45042,7 +45074,8 @@ export const AgentModelOption = new AgentModelOption$Type();
 class AgentModelCatalog$Type extends MessageType<AgentModelCatalog> {
     constructor() {
         super("AgentModelCatalog", [
-            { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentModelOption }
+            { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentModelOption },
+            { no: 2, name: "default_model_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<AgentModelCatalog>): AgentModelCatalog {
@@ -45060,6 +45093,9 @@ class AgentModelCatalog$Type extends MessageType<AgentModelCatalog> {
                 case /* repeated AgentModelOption options */ 1:
                     message.options.push(AgentModelOption.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional string default_model_id */ 2:
+                    message.defaultModelId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45075,6 +45111,9 @@ class AgentModelCatalog$Type extends MessageType<AgentModelCatalog> {
         /* repeated AgentModelOption options = 1; */
         for (let i = 0; i < message.options.length; i++)
             AgentModelOption.internalBinaryWrite(message.options[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string default_model_id = 2; */
+        if (message.defaultModelId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.defaultModelId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

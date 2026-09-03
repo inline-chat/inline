@@ -4189,6 +4189,8 @@ message AgentProjectCatalog {
   repeated AgentProjectOption options = 1;
   // The harness can accept a folder selected through an existing local picker.
   optional bool can_select_folder = 2;
+  // Effective project when a thread omits an explicit project selection.
+  optional string default_project_id = 3;
 }
 
 message AgentReasoningEffortOption {
@@ -4205,9 +4207,15 @@ message AgentModelOption {
   optional string description = 3;
   // Empty means that the catalog does not constrain reasoning for this model.
   repeated string reasoning_effort_ids = 4;
+  // Effective reasoning effort when this model has no explicit selection.
+  optional string default_reasoning_effort_id = 5;
 }
 
-message AgentModelCatalog { repeated AgentModelOption options = 1; }
+message AgentModelCatalog {
+  repeated AgentModelOption options = 1;
+  // Effective model when a thread omits an explicit model selection.
+  optional string default_model_id = 2;
+}
 
 // Typed, independently optional sections published and cached by a harness.
 // Omitted selections always mean "use the harness default"; defaults are not
