@@ -9,7 +9,7 @@ public final class TimeZoneSyncCoordinator {
   private let log = Log.scoped("TimeZoneSyncCoordinator")
   private var didStart = false
   private var didAttemptStartupSync = false
-  private var lastAttemptedTimeZone: String?
+  private var lastSyncedTimeZone: String?
   private var authTask: Task<Void, Never>?
   private var syncTask: Task<Void, Never>?
   private var systemTimeZoneObserver: NSObjectProtocol?
@@ -41,7 +41,7 @@ public final class TimeZoneSyncCoordinator {
           syncTask?.cancel()
           syncTask = nil
           didAttemptStartupSync = false
-          lastAttemptedTimeZone = nil
+          lastSyncedTimeZone = nil
         }
       }
     }
@@ -51,8 +51,7 @@ public final class TimeZoneSyncCoordinator {
     guard Auth.shared.getIsLoggedIn(), !Auth.shared.getHasPendingAccountTransition() else { return }
 
     let timeZone = TimeZone.autoupdatingCurrent.identifier
-    guard timeZone != lastAttemptedTimeZone else { return }
-    lastAttemptedTimeZone = timeZone
+    guard timeZone != lastSyncedTimeZone else { return }
 
     syncTask?.cancel()
     let auth = Auth.shared.handle
@@ -60,8 +59,11 @@ public final class TimeZoneSyncCoordinator {
       do {
         try Task.checkCancellation()
         try auth.requireAccountMutationAllowed()
+        try await Self.waitForRealtimeConnection()
+        try auth.requireAccountMutationAllowed()
         try await DataManager.shared.updateTimezone()
         try Task.checkCancellation()
+        self?.lastSyncedTimeZone = timeZone
         self?.log.debug("Synced time zone reason=\(reason)")
       } catch {
         if error is CancellationError { return }
@@ -69,5 +71,14 @@ public final class TimeZoneSyncCoordinator {
       }
       await MainActor.run { self?.syncTask = nil }
     }
+  }
+
+  private static func waitForRealtimeConnection() async throws {
+    for await state in await Api.realtime.connectionStates() {
+      try Task.checkCancellation()
+      if case .updating = state { return }
+      if case .connected = state { return }
+    }
+    throw CancellationError()
   }
 }

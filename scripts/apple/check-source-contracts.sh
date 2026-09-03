@@ -225,6 +225,18 @@ require_ordered_fragments() {
   done
 }
 
+time_zone_sync_path="apple/InlineKit/Sources/InlineKit/TimeZoneSyncCoordinator.swift"
+require_ordered_fragments \
+  "$time_zone_sync_path" \
+  'for await state in await Api.realtime.connectionStates()' \
+  'if case .updating = state { return }' \
+  'if case .connected = state { return }'
+require_ordered_fragments \
+  "$time_zone_sync_path" \
+  'try await Self.waitForRealtimeConnection()' \
+  'try await DataManager.shared.updateTimezone()' \
+  'self?.lastSyncedTimeZone = timeZone'
+
 voice_view_model_path="apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift"
 voice_view_model_source="$(read_source "$voice_view_model_path" 2>/dev/null || true)"
 if [[ -n "$voice_view_model_source" ]]; then
