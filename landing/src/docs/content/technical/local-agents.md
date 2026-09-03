@@ -9,9 +9,9 @@ description: "Local bridge ownership and security."
 - The bridge owns the provider process.
 - Existing chat bindings override the default workspace.
 - `--folder` selects a narrower workspace.
-- Codex is the primary local-bridge beta path.
+- Codex is the primary local-bridge alpha path.
 - Claude, OpenCode, and Amp are experimental.
-- OpenClaw and Hermes use gateways.
+- OpenClaw and Hermes are experimental gateway integrations.
 
 ## Security
 

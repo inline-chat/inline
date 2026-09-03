@@ -62,7 +62,14 @@ Agents and scripts should select the current runtime explicitly:
 inline agents setup --target codex
 ```
 
-Targets: `codex`, `claude`, `opencode`, `amp`, `hermes`, and `openclaw`.
+Support status:
+
+- Codex: alpha.
+- Claude Code: experimental.
+- OpenCode: experimental.
+- Amp: experimental.
+- Hermes Agent: experimental.
+- OpenClaw: experimental.
 
 ## Verify
 
