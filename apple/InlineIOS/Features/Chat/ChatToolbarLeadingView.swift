@@ -66,6 +66,18 @@ struct ChatToolbarLeadingView: View {
     fullChatViewModel.peer.isThread
   }
 
+  private var showsInlineTeamBadge: Bool {
+    guard let peerUserID = peerId.asUserId(),
+          let user = fullChatViewModel.peerUser,
+          user.id == peerUserID
+    else { return false }
+
+    return InlineTeamToolbarBadgeVisibility.shouldShow(
+      for: user,
+      includesDevelopmentPreview: Self.includesDevelopmentTeamBadgePreview
+    )
+  }
+
   private var activeContextSpaceId: Int64? {
     if let contextSpaceId {
       return contextSpaceId
@@ -145,6 +157,7 @@ struct ChatToolbarLeadingView: View {
 
       ChatToolbarTitleStack(
         title: title,
+        showsInlineTeamBadge: showsInlineTeamBadge,
         minimumHeight: toolbarAvatarSize,
         peerId: peerId,
         fallback: subtitleFallback,
@@ -204,6 +217,14 @@ struct ChatToolbarLeadingView: View {
       onOpenChatInfo(chatItem)
     }
   }
+
+  private static var includesDevelopmentTeamBadgePreview: Bool {
+    #if DEBUG || DEBUG_BUILD
+    true
+    #else
+    false
+    #endif
+  }
 }
 
 private struct ChatToolbarHeaderButtonStyle: ButtonStyle {
@@ -249,6 +270,7 @@ enum ChatSubtitle: Equatable {
 
 private struct ChatToolbarTitleStack: View {
   let title: String
+  let showsInlineTeamBadge: Bool
   let minimumHeight: CGFloat
   let peerId: Peer
   let fallback: ChatSubtitle
@@ -262,6 +284,7 @@ private struct ChatToolbarTitleStack: View {
 
   init(
     title: String,
+    showsInlineTeamBadge: Bool,
     minimumHeight: CGFloat,
     peerId: Peer,
     fallback: ChatSubtitle,
@@ -271,6 +294,7 @@ private struct ChatToolbarTitleStack: View {
     onOpenParentThread: @escaping (ReplyThreadToolbarContext.ParentLink) -> Void
   ) {
     self.title = title
+    self.showsInlineTeamBadge = showsInlineTeamBadge
     self.minimumHeight = minimumHeight
     self.peerId = peerId
     self.fallback = fallback
@@ -314,18 +338,24 @@ private struct ChatToolbarTitleStack: View {
     let subtitle = subtitle
 
     VStack(alignment: .leading, spacing: 0) {
-      Button(action: onOpenChatInfo) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.medium)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .allowsTightening(true)
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Button(action: onOpenChatInfo) {
+          Text(title)
+            .font(.body)
+            .fontWeight(.medium)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .allowsTightening(true)
+        }
+        .buttonStyle(ChatToolbarHeaderButtonStyle())
+        .accessibilityLabel(
+          title.isEmpty ? Text("Open chat info") : Text("Open chat info for \(title)")
+        )
+
+        if showsInlineTeamBadge {
+          InlineTeamToolbarBadge()
+        }
       }
-      .buttonStyle(ChatToolbarHeaderButtonStyle())
-      .accessibilityLabel(
-        title.isEmpty ? Text("Open chat info") : Text("Open chat info for \(title)")
-      )
 
       if subtitle != .empty {
         ChatToolbarSubtitleContent(

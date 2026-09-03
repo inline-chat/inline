@@ -159,11 +159,17 @@ struct ChatRouteTitleBar: View {
   }
 
   private var titleLabel: some View {
-    Text(model.title)
-      .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
-      .lineLimit(1)
-      .truncationMode(.tail)
-      .frame(minWidth: 0, alignment: .leading)
+    HStack(alignment: .firstTextBaseline, spacing: 4) {
+      Text(model.title)
+        .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
+        .lineLimit(1)
+        .truncationMode(.tail)
+
+      if model.showsInlineTeamBadge {
+        InlineTeamToolbarBadge()
+      }
+    }
+    .frame(minWidth: 0, alignment: .leading)
   }
 
   private var renamePopover: some View {

@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import Observation
 import RealtimeV2
@@ -80,6 +81,7 @@ final class ChatRouteToolbarTitleModel {
   var breadcrumb: Breadcrumb?
   var reference: ThreadReference?
   var status: Status = .none
+  var showsInlineTeamBadge = false
   var canRename = false
   var isEditingTitle = false
   var isSavingTitle = false
@@ -259,6 +261,7 @@ final class ChatRouteToolbarTitleModel {
       emojiDraft = resolvedEmoji() ?? ""
     }
     iconPeer = resolvedIconPeer()
+    showsInlineTeamBadge = resolvedInlineTeamBadgeVisibility()
     updateParentChatSubscription()
     updateSpaceSubscription()
     breadcrumb = resolvedBreadcrumb()
@@ -291,6 +294,18 @@ final class ChatRouteToolbarTitleModel {
     }
 
     return peer.isThread ? "Chat" : "Direct Message"
+  }
+
+  private func resolvedInlineTeamBadgeVisibility() -> Bool {
+    guard let peerUserID = peer.asUserId(),
+          let user = resolvedUserInfo()?.user,
+          user.id == peerUserID
+    else { return false }
+
+    return InlineTeamToolbarBadgeVisibility.shouldShow(
+      for: user,
+      includesDevelopmentPreview: Self.includesDevelopmentTeamBadgePreview
+    )
   }
 
   private func shouldApplyResolvedTitle(_ nextTitle: String) -> Bool {
@@ -620,5 +635,13 @@ final class ChatRouteToolbarTitleModel {
       trimmed.removeLast()
     }
     return trimmed
+  }
+
+  private static var includesDevelopmentTeamBadgePreview: Bool {
+    #if DEBUG || DEBUG_BUILD || DEVBUILD_REQUIRES_SCRIPT
+    true
+    #else
+    false
+    #endif
   }
 }
