@@ -14,6 +14,9 @@ use super::{
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
+const CHANNEL_PROBE_TIMEOUT_MS: &str = "10000";
+const CHANNEL_READINESS_ATTEMPTS: usize = 3;
+const CHANNEL_READINESS_RETRY_DELAY: Duration = Duration::from_secs(1);
 const PLUGIN_PACKAGE_NAME: &str = "@inline-openclaw/inline";
 const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.66";
 const LEGACY_SETUP_PLUGIN_VERSION: &str = "0.0.63";
@@ -105,6 +108,8 @@ pub(super) async fn preflight(
                 "--channel",
                 "inline",
                 "--probe",
+                "--timeout",
+                CHANNEL_PROBE_TIMEOUT_MS,
                 "--json",
             ],
             None,
@@ -391,22 +396,7 @@ pub(super) async fn setup(
         };
         progress.completed("service", action);
         progress.started("verification");
-        let channel_status = require_success(
-            &installed.executable,
-            &prefix,
-            &[
-                "channels",
-                "status",
-                "--channel",
-                "inline",
-                "--probe",
-                "--json",
-            ],
-            None,
-            INSTALL_TIMEOUT,
-        )
-        .await?;
-        verify_channel_status(&channel_status, bot.id)?;
+        verify_gateway_ready(installed, &prefix, bot.id).await?;
         progress.completed("verification", "ready");
         (action, true)
     };
@@ -421,6 +411,52 @@ pub(super) async fn setup(
         service_action,
         ready,
     })
+}
+
+async fn verify_gateway_ready(
+    installed: &InstalledTarget,
+    prefix: &[OsString],
+    expected_bot_id: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut last_error = None;
+    for attempt in 0..CHANNEL_READINESS_ATTEMPTS {
+        let result = match run(
+            &installed.executable,
+            prefix,
+            &[
+                "channels",
+                "status",
+                "--channel",
+                "inline",
+                "--probe",
+                "--timeout",
+                CHANNEL_PROBE_TIMEOUT_MS,
+                "--json",
+            ],
+            None,
+            COMMAND_TIMEOUT,
+        )
+        .await
+        {
+            Ok(output) => require_probe_success(&output)
+                .and_then(|()| verify_channel_status(&output.stdout, expected_bot_id)),
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < CHANNEL_READINESS_ATTEMPTS {
+            tokio::time::sleep(CHANNEL_READINESS_RETRY_DELAY).await;
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        cli_error(
+            "gateway_probe_failed",
+            "OpenClaw did not return a readiness result after restart",
+        )
+        .into()
+    }))
 }
 
 enum PluginState {
