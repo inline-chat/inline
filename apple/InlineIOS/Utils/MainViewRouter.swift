@@ -43,10 +43,32 @@ public class MainViewRouter: ObservableObject {
   }
 
   public func setRoute(route: MainRoutes) {
-    self.route = Auth.shared.getHasPendingAccountTransition()
-      || (route != .loading && AppDatabase.shared.isPersistent == false)
-      ? .loading
-      : route
+    transitionTask?.cancel()
+    transitionTask = nil
+    guard route == .main else {
+      self.route = Auth.shared.getHasPendingAccountTransition()
+        || (route != .loading && AppDatabase.shared.isPersistent == false)
+        ? .loading
+        : route
+      return
+    }
+
+    // Login may promote an early-launch temporary store while onboarding is
+    // still visible. Reopen every account-scoped producer before publishing
+    // Main so the newly authenticated account cannot mount without realtime.
+    self.route = .loading
+    guard Auth.shared.getHasPendingAccountTransition() == false else { return }
+    transitionTask = Task { @MainActor [weak self] in
+      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      let realtimeAdmitted = await Api.admitPersistentStorage()
+      guard !Task.isCancelled,
+            AppDatabase.shared.isPersistent,
+            realtimeAdmitted,
+            Auth.shared.getHasPendingAccountTransition() == false,
+            Auth.shared.getStatus().isAuthenticated
+      else { return }
+      self?.route = .main
+    }
   }
 
   @MainActor
