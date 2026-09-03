@@ -62,8 +62,8 @@ use crate::downloads::{
     download_message_media, resolve_batch_download_path, resolve_download_path,
 };
 use crate::errors::{
-    CliError, JsonCliError, JsonErrorEnvelope, human_cli_error_from_error, is_reported_cli_failure,
-    json_cli_error_from_error,
+    CliError, JsonCliError, JsonErrorEnvelope, human_cli_error, human_cli_error_from_error,
+    is_reported_cli_failure, json_cli_error_from_error,
 };
 use crate::identity::connect_realtime;
 use crate::message_export::{
@@ -2455,7 +2455,7 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
                 eprintln!("{}", error);
             }
         } else {
-            eprintln!("{}", human_cli_error_from_error(error.as_ref()));
+            eprintln!("{}", human_cli_error(&error_payload));
         }
         drop(telemetry);
         std::process::exit(1);

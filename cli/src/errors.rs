@@ -452,7 +452,11 @@ pub(crate) fn json_cli_error_from_error(error: &(dyn std::error::Error + 'static
 
 pub(crate) fn human_cli_error_from_error(error: &(dyn std::error::Error + 'static)) -> String {
     let payload = crate::diagnostics::error_payload(error);
-    format_human_cli_error(&payload, &style_error_label("Error"))
+    human_cli_error(&payload)
+}
+
+pub(crate) fn human_cli_error(payload: &JsonCliError) -> String {
+    format_human_cli_error(payload, &style_error_label("Error"))
 }
 
 fn format_human_cli_error(payload: &JsonCliError, error_label: &str) -> String {
