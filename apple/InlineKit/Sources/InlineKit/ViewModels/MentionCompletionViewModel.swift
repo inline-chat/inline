@@ -302,7 +302,7 @@ public final class MentionCompletionViewModel {
     exactlyMatches user: UserInfo,
     locale: Locale = .current
   ) -> Bool {
-    let normalizedQuery = normalized(query, locale: locale)
+    let normalizedQuery = canonicalSearchText(query, locale: locale)
     guard !normalizedQuery.isEmpty else { return false }
 
     return MentionCompletionCandidate.exactMatchValues(for: user, locale: locale)
@@ -314,34 +314,39 @@ public final class MentionCompletionViewModel {
     exactlyMatches item: MentionCompletionItem,
     locale: Locale = .current
   ) -> Bool {
-    let normalizedQuery = normalized(query, locale: locale)
+    let normalizedQuery = canonicalSearchText(query, locale: locale)
     guard !normalizedQuery.isEmpty else { return false }
     switch item {
       case let .user(user):
         return Self.query(query, exactlyMatches: user.userInfo, locale: locale)
       case let .group(group):
-        return normalized(group.name, locale: locale) == normalizedQuery
+        return canonicalSearchText(group.name, locale: locale) == normalizedQuery
       case let .agent(agent):
         let values = [agent.name, agent.handle].compactMap { $0 }
         return values
-          .map { normalized($0, locale: locale) }
+          .map { canonicalSearchText($0, locale: locale) }
           .contains(normalizedQuery)
     }
   }
 
   private func applyFilter(resetSelection: Bool, selectedId: String? = nil) {
-    let normalizedQuery = Self.normalized(query, locale: locale)
+    let normalizedQuery = Self.canonicalSearchText(query, locale: locale)
     let compactQuery = Self.compact(normalizedQuery)
+    let queryWords = normalizedQuery.split(separator: " ")
 
     let nextItems: [MentionCompletionItem]
-    if normalizedQuery.isEmpty {
+    if query.isEmpty {
       nextItems = candidates.compactMap { candidate in
         candidate.isDirectChat ? nil : candidate.item
       }
     } else {
       var tiers = Array(repeating: [MentionCompletionItem](), count: MentionMatchRank.allCases.count)
       for candidate in candidates {
-        guard let rank = candidate.matchRank(normalizedQuery, compactQuery: compactQuery) else { continue }
+        guard let rank = candidate.matchRank(
+          normalizedQuery,
+          compactQuery: compactQuery,
+          queryWords: queryWords
+        ) else { continue }
         tiers[rank.rawValue].append(candidate.item)
       }
       nextItems = tiers.flatMap(\.self)
@@ -369,6 +374,26 @@ public final class MentionCompletionViewModel {
       .lowercased()
   }
 
+  fileprivate nonisolated static func canonicalSearchText(_ text: String, locale: Locale) -> String {
+    let folded = normalized(text, locale: locale)
+    var result = ""
+    var needsSeparator = false
+
+    for scalar in folded.unicodeScalars {
+      if CharacterSet.alphanumerics.contains(scalar) {
+        if needsSeparator, !result.isEmpty {
+          result.append(" ")
+        }
+        result.unicodeScalars.append(scalar)
+        needsSeparator = false
+      } else if !result.isEmpty {
+        needsSeparator = true
+      }
+    }
+
+    return result
+  }
+
   fileprivate nonisolated static func compact(_ text: String) -> String {
     text.filter { !$0.isWhitespace }
   }
@@ -377,6 +402,7 @@ public final class MentionCompletionViewModel {
 private enum MentionMatchRank: Int, CaseIterable {
   case exactUsername
   case exactName
+  case exactToken
   case prefix
   case substring
   case detail
@@ -410,6 +436,7 @@ private struct MentionCompletionCandidate {
       Self.fields(
         [user.userInfo.user.displayName, user.userInfo.user.fullName],
         exactRank: .exactName,
+        supportsExactToken: true,
         locale: locale
       )
     sortText = MentionCompletionViewModel.normalized(user.userInfo.user.displayName, locale: locale)
@@ -420,7 +447,12 @@ private struct MentionCompletionCandidate {
     sortRank = 0
     isPinned = false
     lastMsgId = 0
-    fields = Self.fields([group.name], exactRank: .exactName, locale: locale) +
+    fields = Self.fields(
+      [group.name],
+      exactRank: .exactName,
+      supportsExactToken: true,
+      locale: locale
+    ) +
       Self.fields([group.description], exactRank: .detail, locale: locale)
     sortText = MentionCompletionViewModel.normalized(group.name, locale: locale)
   }
@@ -431,7 +463,7 @@ private struct MentionCompletionCandidate {
     isPinned = relationship?.isPinned ?? false
     lastMsgId = relationship?.lastMsgId ?? 0
     fields = Self.fields([agent.handle], exactRank: .exactUsername, locale: locale) +
-      Self.fields([agent.name], exactRank: .exactName, locale: locale) +
+      Self.fields([agent.name], exactRank: .exactName, supportsExactToken: true, locale: locale) +
       Self.fields(
         [agent.description, agent.botDisplayName, agent.botUserInfo.user.username],
         exactRank: .detail,
@@ -440,10 +472,18 @@ private struct MentionCompletionCandidate {
     sortText = MentionCompletionViewModel.normalized(agent.name, locale: locale)
   }
 
-  func matchRank(_ query: String, compactQuery: String) -> MentionMatchRank? {
+  func matchRank(
+    _ query: String,
+    compactQuery: String,
+    queryWords: [Substring]
+  ) -> MentionMatchRank? {
     var best: MentionMatchRank?
     for field in fields {
-      guard let rank = field.matchRank(query, compactQuery: compactQuery) else { continue }
+      guard let rank = field.matchRank(
+        query,
+        compactQuery: compactQuery,
+        queryWords: queryWords
+      ) else { continue }
       if rank.rawValue < (best?.rawValue ?? Int.max) {
         best = rank
       }
@@ -452,13 +492,18 @@ private struct MentionCompletionCandidate {
     return best
   }
 
-  private static func fields(_ values: [String?], exactRank: MentionMatchRank, locale: Locale) -> [MatchField] {
+  private static func fields(
+    _ values: [String?],
+    exactRank: MentionMatchRank,
+    supportsExactToken: Bool = false,
+    locale: Locale
+  ) -> [MatchField] {
     var seen = Set<String>()
     return values.compactMap { value in
       guard let value else { return nil }
-      let text = MentionCompletionViewModel.normalized(value, locale: locale)
+      let text = MentionCompletionViewModel.canonicalSearchText(value, locale: locale)
       guard !text.isEmpty, seen.insert(text).inserted else { return nil }
-      return MatchField(text: text, exactRank: exactRank)
+      return MatchField(text: text, exactRank: exactRank, supportsExactToken: supportsExactToken)
     }
   }
 
@@ -467,29 +512,50 @@ private struct MentionCompletionCandidate {
     let compactText: String
     let words: [Substring]
     let exactRank: MentionMatchRank
+    let supportsExactToken: Bool
 
-    init(text: String, exactRank: MentionMatchRank) {
+    init(text: String, exactRank: MentionMatchRank, supportsExactToken: Bool) {
       self.text = text
       compactText = MentionCompletionViewModel.compact(text)
       words = text.split(whereSeparator: \.isWhitespace)
       self.exactRank = exactRank
+      self.supportsExactToken = supportsExactToken
     }
 
-    func matchRank(_ query: String, compactQuery: String) -> MentionMatchRank? {
+    func matchRank(
+      _ query: String,
+      compactQuery: String,
+      queryWords: [Substring]
+    ) -> MentionMatchRank? {
       // Compact each field independently: "aden" + "aden" must never match "dena".
+      guard !query.isEmpty else { return nil }
       guard text.contains(query) || (!compactQuery.isEmpty && compactText.contains(compactQuery)) else { return nil }
       guard exactRank != .detail else { return .detail }
       if text == query { return exactRank }
+      if supportsExactToken,
+         compactQuery.count >= 2,
+         containsExactTokenSequence(queryWords) {
+        return .exactToken
+      }
       let isPrefix = text.hasPrefix(query) || words.contains(where: { $0.hasPrefix(query) }) ||
         (!compactQuery.isEmpty && compactText.hasPrefix(compactQuery))
       return isPrefix ? .prefix : .substring
+    }
+
+    private func containsExactTokenSequence(_ queryWords: [Substring]) -> Bool {
+      guard !queryWords.isEmpty, queryWords.count <= words.count else { return false }
+      let lastStart = words.count - queryWords.count
+      for start in 0 ... lastStart where words[start ..< start + queryWords.count].elementsEqual(queryWords) {
+        return true
+      }
+      return false
     }
   }
 
   static func exactMatchValues(for userInfo: UserInfo, locale: Locale) -> Set<String> {
     Set(
       matchValues(for: userInfo, includeFirstNames: true)
-        .map { MentionCompletionViewModel.normalized($0, locale: locale) }
+        .map { MentionCompletionViewModel.canonicalSearchText($0, locale: locale) }
         .filter { !$0.isEmpty }
     )
   }

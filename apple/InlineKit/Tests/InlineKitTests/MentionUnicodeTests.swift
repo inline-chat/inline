@@ -21,6 +21,32 @@ struct MentionUnicodeOffsetTests {
     #expect(result!.range.length == mentionRange.length)
   }
 
+  @Test("mention detection preserves straight and smart apostrophe queries")
+  func testDetectMentionWithApostrophes() throws {
+    let detector = MentionDetector()
+
+    for query in ["mo's", "mo’s"] {
+      let text = "@\(query)"
+      let result = try #require(detector.detectMentionAt(
+        cursorPosition: text.utf16.count,
+        in: NSAttributedString(string: text)
+      ))
+      #expect(result.query == query)
+      #expect(result.range == NSRange(location: 0, length: text.utf16.count))
+    }
+  }
+
+  @Test("whitespace continues to terminate mention detection")
+  func testWhitespaceTerminatesMentionDetection() {
+    let text = "@mo codex"
+    let detector = MentionDetector()
+
+    #expect(detector.detectMentionAt(
+      cursorPosition: text.utf16.count,
+      in: NSAttributedString(string: text)
+    ) == nil)
+  }
+
   @Test("extractMentionEntities uses UTF-16 length with emoji")
   func testExtractMentionEntitiesAfterEmoji() {
     let text = "🛍️ @john "

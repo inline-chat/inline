@@ -112,6 +112,55 @@ struct MentionCompletionViewModelTests {
 
     #expect(MentionCompletionViewModel.mentionText(for: bot) == "@Mo's Codex")
     #expect(MentionCompletionViewModel.mentionText(for: human) == "@Mary")
+    #expect(MentionCompletionViewModel.query("mo's", exactlyMatches: bot))
+    #expect(MentionCompletionViewModel.query("mo’s", exactlyMatches: bot))
+    #expect(!MentionCompletionViewModel.query("mos", exactlyMatches: bot))
+  }
+
+  @Test("exact name tokens beat pinned and active generic prefixes")
+  func exactNameTokensBeatGenericPrefixes() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates([
+      candidate(1, firstName: "Moein", source: .participant, lastMsgId: 1_600, isPinned: true),
+      candidate(2, firstName: "Mo's Codex", source: .directChat, lastMsgId: 20),
+      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastMsgId: 900),
+      candidate(4, firstName: "Mo's Claude", source: .directChat, lastMsgId: 10),
+    ])
+
+    model.filter(with: "mo")
+
+    #expect(userIds(model.items) == [2, 4, 1, 3])
+    #expect(model.selectedUser?.id == 2)
+  }
+
+  @Test("straight, smart, and omitted apostrophes match the same names")
+  func apostropheVariantsMatch() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates([
+      candidate(1, firstName: "Moein", source: .participant, lastMsgId: 1_600, isPinned: true),
+      candidate(2, firstName: "Mo's Codex", source: .directChat, lastMsgId: 20),
+      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastMsgId: 900),
+      candidate(4, firstName: "Mo's Claude", source: .directChat, lastMsgId: 10),
+    ])
+
+    for query in ["mo's", "mo’s", "mos"] {
+      model.filter(with: query)
+      #expect(userIds(model.items) == [2, 4])
+      #expect(model.selectedUser?.id == 2)
+    }
+  }
+
+  @Test("one-letter possessive fragments do not gain exact-token relevance")
+  func oneLetterPossessiveTokenDoesNotGainRelevance() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates([
+      candidate(1, firstName: "Sally", source: .participant, isPinned: true),
+      candidate(2, firstName: "Mo's Codex", source: .participant),
+    ])
+
+    model.filter(with: "s")
+
+    #expect(userIds(model.items) == [1, 2])
   }
 
   @Test("agents search and insert as the backing bot plus Agent identity")
