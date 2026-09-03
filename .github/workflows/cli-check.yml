@@ -41,6 +41,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Linux musl Toolchain
+        working-directory: cli
         run: |
           set -euo pipefail
           rustup target add x86_64-unknown-linux-musl

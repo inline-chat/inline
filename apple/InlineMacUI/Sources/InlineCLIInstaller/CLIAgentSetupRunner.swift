@@ -51,6 +51,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   static let maximumOutputBytes = 512 * 1_024
   private static let discoveryTimeout: TimeInterval = 20
   private static let setupTimeout: TimeInterval = 10 * 60
+  private static let outputDrainTimeout: DispatchTimeInterval = .seconds(5)
+  private static let outputDrainCloseGrace: DispatchTimeInterval = .milliseconds(250)
   private static let documentationURL = URL(string: "https://inline.chat/docs/agents")!
 
   private let configuration: CLIInstallerConfiguration
@@ -218,6 +220,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     guard result.protocolVersion == protocolVersion,
           result.ok,
           result.action == "agents.setup",
+          ["ready", "configured"].contains(result.status),
           result.bot.id > 0,
           validOpenURL(result.openURL, botID: result.bot.id) else {
       throw invalidResponse("Inline CLI returned an invalid agent setup result.")
@@ -370,11 +373,12 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     defer { timeoutTask.cancel() }
 
     nextProcess.waitUntilExit()
-    if outputGroup.wait(timeout: .now() + 5) == .timedOut {
-      try? standardOutput.fileHandleForReading.close()
-      try? standardError.fileHandleForReading.close()
-      outputGroup.wait()
-    }
+    let outputDrained = Self.finishDraining(
+      outputGroup,
+      handles: [standardOutput.fileHandleForReading, standardError.fileHandleForReading],
+      timeout: Self.outputDrainTimeout,
+      closeGrace: Self.outputDrainCloseGrace
+    )
     let stdout = stdoutCapture.value
     let stderr = stderrCapture.value
     if timeoutState.didTimeOut {
@@ -396,6 +400,14 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     }
     if isCancellationRequested(operationID) {
       throw CancellationError()
+    }
+    if !outputDrained {
+      throw AgentSetupFailure(
+        code: "cli_output_drain_timed_out",
+        message: "Inline CLI exited, but setup output did not finish closing.",
+        hint: "Retry setup. If this continues, run the provided setup command in Terminal.",
+        recoveryURL: Self.documentationURL
+      )
     }
     return CommandOutput(
       status: nextProcess.terminationStatus,
@@ -626,15 +638,29 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     }
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
+      let killDeadline = Date().addingTimeInterval(1)
+      while process.isRunning, Date() < killDeadline {
+        Thread.sleep(forTimeInterval: 0.02)
+      }
     }
   }
 
   static func stopAndWait(_ process: Process?) {
     guard let process else { return }
     stop(process)
-    if process.isRunning {
-      process.waitUntilExit()
+  }
+
+  static func finishDraining(
+    _ group: DispatchGroup,
+    handles: [FileHandle],
+    timeout: DispatchTimeInterval,
+    closeGrace: DispatchTimeInterval
+  ) -> Bool {
+    guard group.wait(timeout: .now() + timeout) == .timedOut else { return true }
+    for handle in handles {
+      try? handle.close()
     }
+    return group.wait(timeout: .now() + closeGrace) == .success
   }
 }
 

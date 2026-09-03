@@ -70,6 +70,7 @@ private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
     "cli_missing",
     "cli_network",
     "cli_operationInProgress",
+    "cli_output_drain_timed_out",
     "cli_output_too_large",
     "cli_packageManaged",
     "cli_permissionDenied",

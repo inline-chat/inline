@@ -145,6 +145,23 @@ struct CLIAgentSetupRunnerTests {
     #expect(result.readiness?.verified == false)
   }
 
+  @Test("rejects nonterminal success statuses")
+  func rejectsNonterminalSuccessStatuses() {
+    let ready = #"{"protocolVersion":1,"ok":true,"action":"agents.setup","status":"ready","documentationUrl":"https://inline.chat/docs/agents","openUrl":"in://user/42","target":"codex","family":"bridge","instance":"codex-example","bot":{"id":42,"username":"codex_bot","name":"Codex"},"service":{"kind":"inline_bridge","action":"started","ready":true,"status":"running"}}"#
+    for status in ["partial", "failed", "starting", "future"] {
+      let data = Data(
+        ready.replacingOccurrences(
+          of: #""status":"ready""#,
+          with: #""status":"\#(status)""#
+        ).utf8
+      )
+
+      #expect(throws: AgentSetupFailure.self) {
+        try CLIAgentSetupRunner.parseSetup(data)
+      }
+    }
+  }
+
   @Test("decodes readiness metadata from an older producer without verification")
   func decodesReadinessWithoutVerification() throws {
     let data = Data(
@@ -319,9 +336,30 @@ struct CLIAgentSetupRunnerTests {
     let ready = try readyPipe.fileHandleForReading.read(upToCount: 1)
     #expect(ready == Data("R".utf8))
 
+    let startedAt = ContinuousClock.now
     CLIAgentSetupRunner.stopAndWait(process)
 
     #expect(!process.isRunning)
+    #expect(ContinuousClock.now - startedAt < .seconds(3))
+  }
+
+  @Test("output drain remains bounded after closing pipe handles")
+  func outputDrainRemainsBounded() {
+    let group = DispatchGroup()
+    let pipe = Pipe()
+    group.enter()
+
+    let startedAt = ContinuousClock.now
+    let drained = CLIAgentSetupRunner.finishDraining(
+      group,
+      handles: [pipe.fileHandleForReading, pipe.fileHandleForWriting],
+      timeout: .milliseconds(20),
+      closeGrace: .milliseconds(20)
+    )
+
+    #expect(!drained)
+    #expect(ContinuousClock.now - startedAt < .seconds(1))
+    group.leave()
   }
 
   private func drain(_ payload: Data, through pipe: Pipe) async -> Data {

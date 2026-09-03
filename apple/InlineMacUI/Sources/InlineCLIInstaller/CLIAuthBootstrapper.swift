@@ -359,7 +359,6 @@ public struct CLIAuthBootstrapper: Sendable {
 
   private static func stop(_ process: Process) {
     Self.terminate(process)
-    process.waitUntilExit()
   }
 
   private static func terminate(_ process: Process) {
@@ -371,6 +370,10 @@ public struct CLIAuthBootstrapper: Sendable {
     }
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
+      let killDeadline = Date().addingTimeInterval(1)
+      while process.isRunning, Date() < killDeadline {
+        Thread.sleep(forTimeInterval: 0.02)
+      }
     }
   }
 
