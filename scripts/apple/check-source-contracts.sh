@@ -237,6 +237,24 @@ require_ordered_fragments \
   'try await DataManager.shared.updateTimezone()' \
   'self?.lastSyncedTimeZone = timeZone'
 
+api_client_path="apple/InlineKit/Sources/InlineKit/ApiClient.swift"
+api_client_source="$(read_source "$api_client_path" 2>/dev/null || true)"
+session_info_source="$(
+  printf '%s\n' "$api_client_source" |
+    sed -n '/^struct SessionInfo: Codable, Sendable {/,/^public enum ApiComposeAction:/p'
+)"
+if [[ -n "$session_info_source" ]]; then
+  if printf '%s\n' "$session_info_source" | grep -F 'Host.current().name' >/dev/null; then
+    printf 'error: %s SessionInfo must not resolve NSHost names on the main actor\n' "$api_client_path" >&2
+    failures=1
+  fi
+
+  if ! printf '%s\n' "$session_info_source" | grep -F 'ProcessInfo.processInfo.hostName' >/dev/null; then
+    printf 'error: %s SessionInfo must use the non-resolving process host name\n' "$api_client_path" >&2
+    failures=1
+  fi
+fi
+
 voice_view_model_path="apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift"
 voice_view_model_source="$(read_source "$voice_view_model_path" 2>/dev/null || true)"
 if [[ -n "$voice_view_model_source" ]]; then

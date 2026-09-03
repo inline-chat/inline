@@ -5,6 +5,15 @@ import Testing
 
 @Suite("ApiClient release safety", .serialized)
 struct ApiClientReleaseSafetyTests {
+  @Test("macOS session metadata uses the process host name")
+  @MainActor
+  func macOSSessionMetadataUsesProcessHostName() throws {
+    #if os(macOS)
+      let sessionInfo = try #require(SessionInfo.get())
+      #expect(sessionInfo.deviceName == ProcessInfo.processInfo.hostName)
+    #endif
+  }
+
   @Test("email code requests keep the address in POST JSON")
   func emailCodeRequestBoundary() async throws {
     await SuccessfulRequestProbe.shared.reset()

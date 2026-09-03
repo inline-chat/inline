@@ -2013,7 +2013,7 @@ struct SessionInfo: Codable, Sendable {
     #elseif os(macOS)
     let clientType = "macos"
     let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
-    let deviceName = Host.current().name
+    let deviceName = ProcessInfo.processInfo.hostName
     return SessionInfo(
       clientType: clientType,
       clientVersion: clientVersion,
