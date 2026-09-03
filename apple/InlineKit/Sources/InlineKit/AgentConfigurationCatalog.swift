@@ -13,37 +13,76 @@ public struct AgentModelConfigurationOption: Identifiable, Equatable, Sendable {
   public let label: String
   public let description: String?
   public let reasoningEffortIDs: [String]
+  public let defaultReasoningEffortID: String?
 }
 
 public struct AgentConfigurationCatalogSnapshot: Equatable, Sendable {
   public let projects: [AgentConfigurationOption]?
+  public let defaultProjectID: String?
   public let models: [AgentModelConfigurationOption]?
+  public let defaultModelID: String?
   public let reasoning: [AgentConfigurationOption]?
   public let canSelectFolder: Bool
 
   public init(protocolCatalog: InlineProtocol.AgentConfigurationCatalog) throws {
-    projects = try Self.projectOptions(protocolCatalog.hasProjects ? protocolCatalog.projects.options : nil)
-    reasoning = try Self.reasoningOptions(protocolCatalog.hasReasoning ? protocolCatalog.reasoning.options : nil)
-    canSelectFolder = protocolCatalog.hasProjects
+    projects = try Self.projectOptions(
+      protocolCatalog.hasProjects ? protocolCatalog.projects.options : nil)
+    reasoning = try Self.reasoningOptions(
+      protocolCatalog.hasReasoning ? protocolCatalog.reasoning.options : nil)
+    canSelectFolder =
+      protocolCatalog.hasProjects
       && protocolCatalog.projects.hasCanSelectFolder
       && protocolCatalog.projects.canSelectFolder
 
+    let reasoningIDs = Set(reasoning?.map(\.id) ?? [])
     if protocolCatalog.hasModels {
       var ids = Set<String>()
       models = try protocolCatalog.models.options.map { option in
         let id = try Self.identifier(option.id)
         guard ids.insert(id).inserted else { throw AgentConfigurationCatalogError.invalidCatalog }
         let label = try Self.label(option.label)
+        let reasoningEffortIDs = try option.reasoningEffortIds.map(Self.identifier)
+        guard Set(reasoningEffortIDs).count == reasoningEffortIDs.count,
+          reasoningEffortIDs.allSatisfy(reasoningIDs.contains)
+        else { throw AgentConfigurationCatalogError.invalidCatalog }
+        let defaultReasoningEffortID =
+          try option.hasDefaultReasoningEffortID
+          ? Self.identifier(option.defaultReasoningEffortID)
+          : nil
+        if let defaultReasoningEffortID {
+          guard reasoningIDs.contains(defaultReasoningEffortID),
+            reasoningEffortIDs.isEmpty || reasoningEffortIDs.contains(defaultReasoningEffortID)
+          else { throw AgentConfigurationCatalogError.invalidCatalog }
+        }
         return AgentModelConfigurationOption(
           id: id,
           label: label,
           description: option.hasDescription_p ? Self.description(option.description_p) : nil,
-          reasoningEffortIDs: option.reasoningEffortIds
+          reasoningEffortIDs: reasoningEffortIDs,
+          defaultReasoningEffortID: defaultReasoningEffortID
         )
       }
     } else {
       models = nil
     }
+
+    defaultProjectID = try Self.defaultID(
+      protocolCatalog.hasProjects && protocolCatalog.projects.hasDefaultProjectID
+        ? protocolCatalog.projects.defaultProjectID
+        : nil,
+      in: projects?.map(\.id)
+    )
+    defaultModelID = try Self.defaultID(
+      protocolCatalog.hasModels && protocolCatalog.models.hasDefaultModelID
+        ? protocolCatalog.models.defaultModelID
+        : nil,
+      in: models?.map(\.id)
+    )
+  }
+
+  public func defaultReasoningEffortID(forModelID modelID: String?) -> String? {
+    guard let modelID else { return nil }
+    return models?.first(where: { $0.id == modelID })?.defaultReasoningEffortID
   }
 
   private static func projectOptions(
@@ -84,6 +123,15 @@ public struct AgentConfigurationCatalogSnapshot: Equatable, Sendable {
       throw AgentConfigurationCatalogError.invalidCatalog
     }
     return value
+  }
+
+  private static func defaultID(_ value: String?, in optionIDs: [String]?) throws -> String? {
+    guard let value else { return nil }
+    let id = try identifier(value)
+    guard optionIDs?.contains(id) == true else {
+      throw AgentConfigurationCatalogError.invalidCatalog
+    }
+    return id
   }
 
   private static func label(_ value: String) throws -> String {
@@ -137,9 +185,9 @@ public final class AgentConfigurationCatalogStore {
     do {
       return try await database.dbWriter.read { db in
         guard let record = try StoredAgentConfigurationCatalog.fetchOne(db, key: botUserID),
-              let protocolCatalog = try? InlineProtocol.AgentConfigurationCatalog(
-                serializedBytes: record.payload
-              )
+          let protocolCatalog = try? InlineProtocol.AgentConfigurationCatalog(
+            serializedBytes: record.payload
+          )
         else { return nil }
         return try AgentConfigurationCatalogSnapshot(protocolCatalog: protocolCatalog)
       }
@@ -164,12 +212,13 @@ public final class AgentConfigurationCatalogStore {
     let task = Task<RefreshResult, Error> {
       let response = try await Api.realtime.callRpcDirect(
         method: .getBotConfigurationCatalog,
-        input: .getBotConfigurationCatalog(.with {
-          $0.botUserID = botUserID
-          if let peer { $0.peerID = peer.toInputPeer() }
-        })
+        input: .getBotConfigurationCatalog(
+          .with {
+            $0.botUserID = botUserID
+            if let peer { $0.peerID = peer.toInputPeer() }
+          })
       )
-      guard case let .getBotConfigurationCatalog(result)? = response else {
+      guard case .getBotConfigurationCatalog(let result)? = response else {
         throw AgentConfigurationCatalogError.invalidResponse
       }
       guard result.hasCatalog else {

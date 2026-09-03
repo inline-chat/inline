@@ -28,6 +28,12 @@ private struct AllChatsAgentMentionTarget: Equatable {
   let agentID: Int64?
 }
 
+private struct AllChatsComposeAgentConfiguration: Equatable {
+  let projectID: String?
+  let modelID: String?
+  let reasoningID: String?
+}
+
 enum AllChatsNewThreadComposePlacement {
   case top
   case bottom
@@ -45,6 +51,7 @@ private struct AllChatsComposePreferences {
   private let destinationKey: String
   private let visibilityKey: String
   private let sendSilentlyKey: String
+  private let agentConfigurationPrefix: String
 
   init(userID: Int64?, defaults: UserDefaults = .standard) {
     self.defaults = defaults
@@ -52,6 +59,7 @@ private struct AllChatsComposePreferences {
     destinationKey = "macos.allChats.newThread.destination.\(account)"
     visibilityKey = "macos.allChats.newThread.public.\(account)"
     sendSilentlyKey = "macos.allChats.newThread.sendSilently.\(account)"
+    agentConfigurationPrefix = "macos.allChats.newThread.agentConfiguration.\(account)"
   }
 
   var destinationSpaceID: Int64? {
@@ -90,6 +98,35 @@ private struct AllChatsComposePreferences {
 
   func save(sendSilently: Bool) {
     defaults.set(sendSilently, forKey: sendSilentlyKey)
+  }
+
+  func agentConfiguration(for choice: AllChatsAgentChoice) -> AllChatsComposeAgentConfiguration {
+    AllChatsComposeAgentConfiguration(
+      projectID: defaults.string(forKey: agentConfigurationKey("project", choice: choice)),
+      modelID: defaults.string(forKey: agentConfigurationKey("model", choice: choice)),
+      reasoningID: defaults.string(forKey: agentConfigurationKey("reasoning", choice: choice))
+    )
+  }
+
+  func saveAgentConfiguration(
+    _ configuration: AllChatsComposeAgentConfiguration,
+    for choice: AllChatsAgentChoice
+  ) {
+    save(configuration.projectID, forKey: agentConfigurationKey("project", choice: choice))
+    save(configuration.modelID, forKey: agentConfigurationKey("model", choice: choice))
+    save(configuration.reasoningID, forKey: agentConfigurationKey("reasoning", choice: choice))
+  }
+
+  private func agentConfigurationKey(_ field: String, choice: AllChatsAgentChoice) -> String {
+    "\(agentConfigurationPrefix).\(choice.bot.id).\(choice.agent?.id ?? 0).\(field)"
+  }
+
+  private func save(_ value: String?, forKey key: String) {
+    if let value {
+      defaults.set(value, forKey: key)
+    } else {
+      defaults.removeObject(forKey: key)
+    }
   }
 }
 
@@ -225,22 +262,53 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     agentChoices.first { $0.id == selectedAgentChoiceID }
   }
 
-  var projectTitle: String {
-    selectedLabel(selectedProjectID, in: agentCatalog?.projects) ?? "Project"
+  var effectiveProjectID: String? {
+    selectedProjectID ?? agentCatalog?.defaultProjectID
   }
 
-  var modelTitle: String {
-    agentCatalog?.models?.first(where: { $0.id == selectedModelID })?.label ?? "Model"
+  var effectiveModelID: String? {
+    selectedModelID ?? agentCatalog?.defaultModelID
   }
 
-  var reasoningTitle: String {
-    selectedLabel(selectedReasoningID, in: availableReasoningOptions) ?? "Reasoning"
+  var effectiveReasoningID: String? {
+    selectedReasoningID ?? agentCatalog?.defaultReasoningEffortID(forModelID: effectiveModelID)
+  }
+
+  var projectTitle: String? {
+    selectedLabel(effectiveProjectID, in: agentCatalog?.projects)
+  }
+
+  var modelTitle: String? {
+    guard let effectiveModelID else { return nil }
+    return agentCatalog?.models?.first(where: { $0.id == effectiveModelID })?.label
+  }
+
+  var reasoningTitle: String? {
+    selectedLabel(effectiveReasoningID, in: availableReasoningOptions)
+  }
+
+  var automaticProjectTitle: String? {
+    automaticTitle(agentCatalog?.defaultProjectID, in: agentCatalog?.projects)
+  }
+
+  var automaticModelTitle: String? {
+    guard let defaultModelID = agentCatalog?.defaultModelID,
+          let label = agentCatalog?.models?.first(where: { $0.id == defaultModelID })?.label
+    else { return nil }
+    return automaticTitle(label)
+  }
+
+  var automaticReasoningTitle: String? {
+    automaticTitle(
+      agentCatalog?.defaultReasoningEffortID(forModelID: effectiveModelID),
+      in: availableReasoningOptions
+    )
   }
 
   var availableReasoningOptions: [AgentConfigurationOption]? {
     guard let reasoning = agentCatalog?.reasoning else { return nil }
     guard let models = agentCatalog?.models else { return reasoning }
-    guard let model = models.first(where: { $0.id == selectedModelID }) else { return nil }
+    guard let model = models.first(where: { $0.id == effectiveModelID }) else { return nil }
     guard !model.reasoningEffortIDs.isEmpty else { return reasoning }
     let supported = Set(model.reasoningEffortIDs)
     return reasoning.filter { supported.contains($0.id) }
@@ -339,6 +407,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   func selectProject(_ id: String?) {
     selectedProjectID = id
+    saveCurrentAgentConfiguration()
   }
 
   func selectModel(_ id: String?) {
@@ -348,10 +417,12 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     {
       self.selectedReasoningID = nil
     }
+    saveCurrentAgentConfiguration()
   }
 
   func selectReasoning(_ id: String?) {
     selectedReasoningID = id
+    saveCurrentAgentConfiguration()
   }
 
   func makeContext(
@@ -472,13 +543,26 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     _ choice: AllChatsAgentChoice,
     catalog: AgentConfigurationCatalogSnapshot
   ) {
-    if selectedAgentChoiceID != choice.id {
-      selectedProjectID = nil
-      selectedModelID = nil
-      selectedReasoningID = nil
-    }
+    let saved = preferences.agentConfiguration(for: choice)
     selectedAgentChoiceID = choice.id
     agentCatalog = catalog
+    selectedProjectID = saved.projectID.flatMap { id in
+      catalog.projects?.contains(where: { $0.id == id }) == true ? id : nil
+    }
+    selectedModelID = saved.modelID.flatMap { id in
+      catalog.models?.contains(where: { $0.id == id }) == true ? id : nil
+    }
+    selectedReasoningID = saved.reasoningID.flatMap { id in
+      availableReasoningOptions?.contains(where: { $0.id == id }) == true ? id : nil
+    }
+    preferences.saveAgentConfiguration(
+      AllChatsComposeAgentConfiguration(
+        projectID: selectedProjectID,
+        modelID: selectedModelID,
+        reasoningID: selectedReasoningID
+      ),
+      for: choice
+    )
   }
 
   private func clearAgentSelection() {
@@ -489,12 +573,40 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     selectedReasoningID = nil
   }
 
+  private func saveCurrentAgentConfiguration() {
+    guard let choice = selectedAgentChoice else { return }
+    preferences.saveAgentConfiguration(
+      AllChatsComposeAgentConfiguration(
+        projectID: selectedProjectID,
+        modelID: selectedModelID,
+        reasoningID: selectedReasoningID
+      ),
+      for: choice
+    )
+  }
+
   private func selectedLabel(
     _ id: String?,
     in options: [AgentConfigurationOption]?
   ) -> String? {
     guard let id else { return nil }
-    return options?.first(where: { $0.id == id })?.label ?? "Unavailable"
+    return options?.first(where: { $0.id == id })?.label
+  }
+
+  private func automaticTitle(
+    _ id: String?,
+    in options: [AgentConfigurationOption]?
+  ) -> String? {
+    guard let label = selectedLabel(id, in: options) else { return nil }
+    return automaticTitle(label)
+  }
+
+  private func automaticTitle(_ label: String) -> String {
+    String(
+      localized: "Automatic — \(label)",
+      comment:
+        "Reset label for an Agent setting. The variable is the current harness-selected option name."
+    )
   }
 
   private func updateVisibilityTooltip() {
@@ -1152,8 +1264,8 @@ private struct AllChatsComposeAccessoryView: View {
   let tooltipPlacement: InlineTooltipPlacement
 
   var body: some View {
-    // This view fills the AppKit accessory slot. Keep each control at its
-    // intrinsic width so only the spacer absorbs the remaining room.
+    // This view fills the AppKit accessory slot. Destination and visibility
+    // keep their intrinsic widths; Agent choices have caps and may compress.
     HStack(spacing: 4) {
       Menu {
         Button("Home", action: model.selectHome)
@@ -1194,10 +1306,10 @@ private struct AllChatsComposeAccessoryView: View {
         .transition(.opacity)
       }
 
-      if let projects = model.agentCatalog?.projects {
+      if let projects = model.agentCatalog?.projects, let title = model.projectTitle {
         AgentConfigurationMenu(
-          title: model.projectTitle,
-          defaultTitle: "Provider default",
+          title: title,
+          automaticTitle: model.automaticProjectTitle,
           options: projects,
           selection: model.selectedProjectID,
           isDisabled: model.isSubmitting,
@@ -1210,9 +1322,10 @@ private struct AllChatsComposeAccessoryView: View {
 
       Spacer(minLength: 0)
 
-      if let models = model.agentCatalog?.models {
+      if let models = model.agentCatalog?.models, let title = model.modelTitle {
         AgentModelConfigurationMenu(
-          title: model.modelTitle,
+          title: title,
+          automaticTitle: model.automaticModelTitle,
           options: models,
           selection: model.selectedModelID,
           isDisabled: model.isSubmitting,
@@ -1221,10 +1334,10 @@ private struct AllChatsComposeAccessoryView: View {
         )
       }
 
-      if let reasoning = model.availableReasoningOptions {
+      if let reasoning = model.availableReasoningOptions, let title = model.reasoningTitle {
         AgentConfigurationMenu(
-          title: model.reasoningTitle,
-          defaultTitle: "Provider default",
+          title: title,
+          automaticTitle: model.automaticReasoningTitle,
           options: reasoning,
           selection: model.selectedReasoningID,
           isDisabled: model.isSubmitting,
@@ -1248,7 +1361,7 @@ private struct AllChatsComposeAccessoryView: View {
 @available(macOS 26.0, *)
 private struct AgentConfigurationMenu: View {
   let title: String
-  let defaultTitle: String
+  let automaticTitle: String?
   let options: [AgentConfigurationOption]
   let selection: String?
   let isDisabled: Bool
@@ -1259,8 +1372,18 @@ private struct AgentConfigurationMenu: View {
 
   var body: some View {
     Menu {
-      Button(defaultTitle) { select(nil) }
-      Divider()
+      if let automaticTitle {
+        Button {
+          select(nil)
+        } label: {
+          AgentConfigurationOptionMenuLabel(
+            title: automaticTitle,
+            description: nil,
+            isSelected: selection == nil
+          )
+        }
+        if !options.isEmpty { Divider() }
+      }
       ForEach(options) { option in
         Button {
           select(option.id)
@@ -1278,7 +1401,6 @@ private struct AgentConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
-    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: tooltipTitle,
@@ -1291,6 +1413,7 @@ private struct AgentConfigurationMenu: View {
 @available(macOS 26.0, *)
 private struct AgentModelConfigurationMenu: View {
   let title: String
+  let automaticTitle: String?
   let options: [AgentModelConfigurationOption]
   let selection: String?
   let isDisabled: Bool
@@ -1299,8 +1422,18 @@ private struct AgentModelConfigurationMenu: View {
 
   var body: some View {
     Menu {
-      Button("Provider default") { select(nil) }
-      Divider()
+      if let automaticTitle {
+        Button {
+          select(nil)
+        } label: {
+          AgentConfigurationOptionMenuLabel(
+            title: automaticTitle,
+            description: nil,
+            isSelected: selection == nil
+          )
+        }
+        if !options.isEmpty { Divider() }
+      }
       ForEach(options) { option in
         Button {
           select(option.id)
@@ -1318,7 +1451,6 @@ private struct AgentModelConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
-    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: "Model",
