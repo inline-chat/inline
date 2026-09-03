@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
 import { getRequestHeader } from "@tanstack/react-start/server"
 import { Landing } from "../landing"
+import { LANDING_METADATA } from "../landing/metadata"
 import redesignCssUrl from "../landing/styles/redesign.css?url"
 import siteChromeCssUrl from "../landing/styles/site-chrome.css?url"
 
@@ -34,26 +35,28 @@ export const Route = createFileRoute("/")({
 
     meta: [
       {
-        title: "Inline - The interface for multiplayer work",
+        title: LANDING_METADATA.title,
       },
       {
         name: "description",
-        content: "Inline is a thread-based chat app for all work, with your teammates and agents.",
+        content: LANDING_METADATA.description,
       },
-      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:card", content: LANDING_METADATA.twitter.card },
       {
         name: "twitter:title",
-        content: "Inline - The interface for multiplayer work",
+        content: LANDING_METADATA.twitter.title,
       },
       {
         name: "twitter:description",
-        content: "Inline is a thread-based chat app for all work, with your teammates and agents.",
+        content: LANDING_METADATA.twitter.description,
       },
       {
         name: "twitter:image",
-        content: "https://inline.chat/twitter-og.jpg",
+        content: LANDING_METADATA.twitter.image,
       },
-      { name: "og:image", content: "https://inline.chat/twitter-og.jpg" },
+      { property: "og:title", content: LANDING_METADATA.openGraph.title },
+      { property: "og:description", content: LANDING_METADATA.openGraph.description },
+      { property: "og:image", content: LANDING_METADATA.openGraph.image },
     ],
   }),
 })

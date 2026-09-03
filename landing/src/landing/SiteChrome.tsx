@@ -10,13 +10,12 @@ const FOOTER_GROUPS = [
   {
     title: "Connect",
     links: [
-      { label: "X / Twitter", href: "https://x.com/inline_chat", external: true, icon: "external" },
-      { label: "GitHub", href: "https://github.com/inline-chat", external: true, icon: "external" },
+      { label: "X / Twitter", href: "https://x.com/inline_chat", external: true },
+      { label: "GitHub", href: "https://github.com/inline-chat", external: true },
       {
         label: "YouTube",
         href: "https://www.youtube.com/@inlinechat",
         external: true,
-        icon: "external",
       },
       { label: emailValue(SUPPORT_EMAIL), href: `mailto:${emailValue(SUPPORT_EMAIL)}` },
     ],
@@ -38,24 +37,10 @@ const FOOTER_GROUPS = [
     ],
   },
   {
-    title: "Developers",
-    links: [
-      { label: "Connect Inline MCP", href: "/docs/mcp" },
-      { label: "Realtime API", href: "/docs/realtime-api" },
-      { label: "Rust SDK", href: "/docs/rust-sdk" },
-      { label: "Bot API", href: "/docs/bot-api" },
-    ],
-  },
-  {
     title: "Resources",
     links: [
       { label: "Documentation", href: "/docs" },
-      {
-        label: "Beta Announcement",
-        href: "https://www.youtube.com/watch?v=rjb4MVZbglg",
-        external: true,
-        icon: "play",
-      },
+      { label: "MCP", href: "/docs/mcp" },
       {
         label: "FAQ",
         href: "https://www.youtube.com/watch?v=ruJnO_ty74g",
@@ -71,42 +56,21 @@ const FOOTER_GROUPS = [
     links: [
       { label: "Privacy", href: "/legal/privacy" },
       { label: "Terms", href: "/legal/terms" },
-      { label: "Acceptable use", href: "/legal/aup" },
-      { label: "Subprocessors", href: "/legal/subprocessors" },
-      { label: "DPA", href: "/legal/dpa" },
+      { label: "Legal overview", href: "/legal" },
     ],
   },
 ] as const
 
-function FooterLinkIcon({ kind }: { kind: "external" | "play" }) {
-  if (kind === "play") {
-    return (
-      <svg
-        className="site-footer__link-icon site-footer__link-icon--play"
-        viewBox="0 0 14 14"
-        fill="none"
-        aria-hidden="true"
-      >
-        <circle cx="7" cy="7" r="5.75" stroke="currentColor" strokeWidth="1.25" />
-        <path d="M5.8 4.65 9.15 7 5.8 9.35Z" fill="currentColor" />
-      </svg>
-    )
-  }
-
+function FooterPlayIcon() {
   return (
     <svg
-      className="site-footer__link-icon"
-      viewBox="0 0 12 12"
+      className="site-footer__link-icon site-footer__link-icon--play"
+      viewBox="0 0 14 14"
       fill="none"
       aria-hidden="true"
     >
-      <path
-        d="M3 9 9 3M4 3h5v5"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <circle cx="7" cy="7" r="5.75" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M5.8 4.65 9.15 7 5.8 9.35Z" fill="currentColor" />
     </svg>
   )
 }
@@ -177,7 +141,7 @@ export function SiteFooter({ ariaLabel = "Inline footer" }: { ariaLabel?: string
                       rel={"external" in link && link.external ? "noopener noreferrer" : undefined}
                     >
                       <span>{link.label}</span>
-                      {"icon" in link ? <FooterLinkIcon kind={link.icon} /> : null}
+                      {"icon" in link ? <FooterPlayIcon /> : null}
                     </a>
                   ))}
                   {group.title === "Connect" ? <span className="site-footer__copyright">© 2026</span> : null}
