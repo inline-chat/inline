@@ -243,9 +243,16 @@ NoNewPrivileges=true\n\
 \n\
 [Install]\n\
 WantedBy=default.target\n",
-        systemd_quote(root),
+        systemd_path(root),
         systemd_directive_quote(&format!("PATH={}", account.provider_path)),
     ))
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn systemd_path(value: &str) -> String {
+    // Scalar path directives are not command lines: systemd keeps surrounding
+    // quotes as literal path bytes. Only escape unit specifiers here.
+    value.replace('%', "%%")
 }
 
 #[cfg(any(target_os = "linux", test))]

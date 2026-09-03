@@ -74,7 +74,8 @@ fn systemd_unit_uses_absolute_args_restart_bounds_and_no_secrets() {
     account.provider_path = "/opt/bin:/home/alice/A $PATH/bin".to_string();
     let unit = render_systemd_user_unit(&account, &paths).unwrap();
     assert!(unit.contains("ExecStart=\"/tmp/Inline & Bridge/bin/inline\" \"bridge\" \"run\""));
-    assert!(unit.contains("WorkingDirectory=\"/tmp/A Project/%%work\""));
+    assert!(unit.contains("WorkingDirectory=/tmp/A Project/%%work"));
+    assert!(!unit.contains("WorkingDirectory=\""));
     assert!(unit.contains("Environment=\"PATH=/opt/bin:/home/alice/A $PATH/bin\""));
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("RestartPreventExitStatus=78"));
@@ -123,10 +124,50 @@ fn account_running_is_provider_neutral() {
 
 #[test]
 fn systemd_exec_and_directive_quoting_apply_distinct_dollar_rules() {
+    assert_eq!(systemd_path("/tmp/A $agent/%i"), "/tmp/A $agent/%%i");
     assert_eq!(systemd_quote("/tmp/$agent/%i"), "\"/tmp/$$agent/%%i\"");
     assert_eq!(
         systemd_directive_quote("PATH=/tmp/$agent/%i"),
         "\"PATH=/tmp/$agent/%%i\""
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn generated_systemd_unit_passes_the_real_systemd_parser() {
+    let (mut account, _, mut paths) = fixture();
+    let root = tempfile::tempdir().unwrap();
+    let account_root = root.path().join("Inline & Bridge").join("%account");
+    fs::create_dir_all(&account_root).unwrap();
+    paths.root = account_root.clone();
+    paths.config = account_root.join("config.json");
+    fs::write(&paths.config, b"{}").unwrap();
+    paths.installed_binary = std::env::current_exe().unwrap();
+    account.service_binary = paths.installed_binary.clone();
+
+    let unit_path = root.path().join("chat.inline.agent-bridge.test.service");
+    fs::write(
+        &unit_path,
+        render_systemd_user_unit(&account, &paths).unwrap(),
+    )
+    .unwrap();
+    let output = match Command::new("systemd-analyze")
+        .arg("verify")
+        .arg(&unit_path)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            eprintln!("skipping real systemd parser check: systemd-analyze is unavailable");
+            return;
+        }
+        Err(error) => panic!("failed to run systemd-analyze: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "systemd rejected generated unit:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

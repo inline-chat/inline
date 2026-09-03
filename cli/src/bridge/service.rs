@@ -334,10 +334,7 @@ pub(super) fn install_service(
             retire_systemd_user_service(label)?;
         }
         install_stable_binary(&paths.installed_binary)?;
-        let unit_path = service_definition_path(&account.service_label)?;
-        let unit = render_systemd_user_unit(account, paths)?;
-        write_private_bytes(&unit_path, unit.as_bytes(), 0o600)?;
-        run_systemctl(["--user", "daemon-reload"])?;
+        let unit_path = refresh_systemd_user_unit(paths, account)?;
         let unit_name = systemd_unit_name(&account.service_label);
         run_systemctl(["--user", "enable", &unit_name])?;
         // `start` is a no-op for an active unit. Setup must restart here so a
@@ -400,11 +397,10 @@ pub(super) async fn start_service(
 
     #[cfg(target_os = "linux")]
     {
-        run_systemctl([
-            "--user",
-            "start",
-            &systemd_unit_name(&account.service_label),
-        ])?;
+        refresh_systemd_user_unit(paths, account)?;
+        let unit_name = systemd_unit_name(&account.service_label);
+        run_systemctl(["--user", "enable", &unit_name])?;
+        run_systemctl(["--user", "start", &unit_name])?;
         wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
     }
 }
@@ -494,11 +490,10 @@ pub(super) async fn restart_service(
     }
     #[cfg(target_os = "linux")]
     {
-        run_systemctl([
-            "--user",
-            "restart",
-            &systemd_unit_name(&account.service_label),
-        ])?;
+        refresh_systemd_user_unit(paths, account)?;
+        let unit_name = systemd_unit_name(&account.service_label);
+        run_systemctl(["--user", "enable", &unit_name])?;
+        run_systemctl(["--user", "restart", &unit_name])?;
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -739,6 +734,13 @@ pub(super) async fn doctor(
     installation: &ProviderInstallationConfig,
 ) -> BridgeDoctor {
     let definition = service_definition_path(&account.service_label).ok();
+    let service_definition = definition
+        .as_deref()
+        .map(|path| service_definition_check(path, paths, account))
+        .unwrap_or(Check {
+            ok: false,
+            detail: "service definition path is unavailable".to_string(),
+        });
     let runtime = status(paths, account, secrets, installation).await;
     let provider = match super::probe_configured_provider_async_with_runtime(
         &installation.provider_id,
@@ -778,7 +780,7 @@ pub(super) async fn doctor(
             && !secrets.control_token.is_empty(),
         account.service_binary.is_file(),
         provider.ok,
-        definition.as_ref().is_some_and(|path| path.is_file()),
+        service_definition.ok,
         runtime.healthy,
     ];
     BridgeDoctor {
@@ -801,10 +803,7 @@ pub(super) async fn doctor(
         },
         installed_binary: executable_check(&account.service_binary),
         provider,
-        service_definition: definition.as_deref().map(file_check).unwrap_or(Check {
-            ok: false,
-            detail: "service definition path is unavailable".to_string(),
-        }),
+        service_definition,
         runtime,
     }
 }
@@ -1278,6 +1277,109 @@ fn write_private_bytes(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
     set_file_mode(&temporary, mode)?;
     fs::rename(&temporary, path)?;
     set_file_mode(path, mode)
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SystemdUnitVerification {
+    Verified,
+    Unavailable,
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_systemd_user_unit(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+) -> io::Result<PathBuf> {
+    let unit_path = service_definition_path(&account.service_label)?;
+    let unit = render_systemd_user_unit(account, paths)?;
+    write_private_bytes(&unit_path, unit.as_bytes(), 0o600)?;
+    verify_systemd_unit(&unit_path)?;
+    run_systemctl(["--user", "daemon-reload"])?;
+    Ok(unit_path)
+}
+
+#[cfg(target_os = "linux")]
+fn verify_systemd_unit(path: &Path) -> io::Result<SystemdUnitVerification> {
+    let output = match Command::new("systemd-analyze")
+        .arg("verify")
+        .arg(path)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(SystemdUnitVerification::Unavailable);
+        }
+        Err(error) => return Err(error),
+    };
+    if output.status.success() {
+        return Ok(SystemdUnitVerification::Verified);
+    }
+    let stderr = safe_diagnostic(&String::from_utf8_lossy(&output.stderr));
+    let stdout = safe_diagnostic(&String::from_utf8_lossy(&output.stdout));
+    let detail = if !stderr.is_empty() { stderr } else { stdout };
+    Err(io::Error::other(format!(
+        "systemd rejected the generated bridge service: {detail}"
+    )))
+}
+
+fn service_definition_check(
+    path: &Path,
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+) -> Check {
+    if !path.is_file() {
+        return file_check(path);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let expected = match render_systemd_user_unit(account, paths) {
+            Ok(unit) => unit,
+            Err(error) => {
+                return Check {
+                    ok: false,
+                    detail: safe_diagnostic(&error.to_string()),
+                };
+            }
+        };
+        match fs::read_to_string(path) {
+            Ok(actual) if actual != expected => {
+                return Check {
+                    ok: false,
+                    detail: "service definition is stale; run `inline bridge restart` to repair it"
+                        .to_string(),
+                };
+            }
+            Err(error) => {
+                return Check {
+                    ok: false,
+                    detail: safe_diagnostic(&error.to_string()),
+                };
+            }
+            Ok(_) => {}
+        }
+        return match verify_systemd_unit(path) {
+            Ok(SystemdUnitVerification::Verified) => Check {
+                ok: true,
+                detail: "systemd accepted the service definition".to_string(),
+            },
+            Ok(SystemdUnitVerification::Unavailable) => Check {
+                ok: true,
+                detail:
+                    "service definition matches the current CLI; systemd-analyze is unavailable"
+                        .to_string(),
+            },
+            Err(error) => Check {
+                ok: false,
+                detail: safe_diagnostic(&error.to_string()),
+            },
+        };
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (paths, account);
+        file_check(path)
+    }
 }
 
 #[allow(dead_code)]

@@ -235,6 +235,11 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install systemd unit verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y systemd
+
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
@@ -253,6 +258,8 @@ jobs:
           bun run --cwd sdk build
           bun run --cwd openclaw check
           bun run --cwd hermes-agent check
+          # The CLI suite includes a real systemd parser regression test and
+          # reuses Cargo artifacts from the checks above in this same job.
           bun run --cwd cli ci
 
   build-linux:
