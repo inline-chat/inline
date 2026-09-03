@@ -41,6 +41,10 @@ export async function verifyGoogleIdToken(input: {
   })
   assertSubjectAndNonce(payload, input.nonce)
 
+  return extractGoogleProviderClaims(payload)
+}
+
+export function extractGoogleProviderClaims(payload: GooglePayload & { sub: string }): ProviderClaims {
   const email = stringClaim(payload["email"])?.trim().toLowerCase()
   const verified = payload["email_verified"] === true
   const authoritativeEmail = isGoogleAuthoritativeEmail(

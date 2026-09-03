@@ -1,5 +1,28 @@
 import { describe, expect, test } from "bun:test"
-import { isGoogleAuthoritativeEmail } from "./claims"
+import { extractGoogleProviderClaims, isGoogleAuthoritativeEmail } from "./claims"
+
+describe("Google provider claims", () => {
+  test("ignores provider profile pictures", () => {
+    const claims = extractGoogleProviderClaims({
+      sub: "google-subject",
+      email: "PERSON@GMAIL.COM",
+      email_verified: true,
+      given_name: " Hasti ",
+      family_name: " Sarkobi ",
+      picture: "https://lh3.googleusercontent.com/provider-avatar",
+    })
+
+    expect(claims).toEqual({
+      provider: "google",
+      subject: "google-subject",
+      email: "person@gmail.com",
+      authoritativeEmail: true,
+      firstName: "Hasti",
+      lastName: "Sarkobi",
+    })
+    expect(Object.hasOwn(claims, "photoUrl")).toBe(false)
+  })
+})
 
 describe("Google authoritative email", () => {
   test("trusts a verified Gmail address", () => {
