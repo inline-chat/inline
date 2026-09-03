@@ -1158,7 +1158,6 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupView() {
-    addSubview(acknowledgementView)
     acknowledgementView.onToggle = { [weak self] in
       self?.acknowledgeMessage()
     }
@@ -1233,6 +1232,7 @@ class MessageViewAppKit: NSView {
     updateReplyThreadSummaryView(for: props)
 
     addSubview(timeAndStateView)
+    addSubview(acknowledgementView, positioned: .above, relativeTo: nil)
 
     setupMessageText()
     setupContextMenu()
