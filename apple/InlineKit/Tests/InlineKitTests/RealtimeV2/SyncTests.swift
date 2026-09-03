@@ -2565,9 +2565,8 @@ final class SyncTests {
     let state = await storage.getState()
     #expect(state.lastSyncDate == storedDate)
     let requestedDates = await client.getUpdatesStateDates()
-    // Dated discovery retains the stored cursor; the repair checkpoint asks
-    // for current state by intentionally omitting a date.
-    #expect(requestedDates == [storedDate, nil])
+    // A failed dated discovery retries from the same durable cursor.
+    #expect(requestedDates == [storedDate, storedDate])
     await sync.prepareForTermination()
   }
 
