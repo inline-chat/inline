@@ -9,6 +9,7 @@ import { getPeerBots } from "../../functions/bot.getPeerBots"
 import { createBotAgent } from "../../functions/bot.agents"
 import { createBot } from "../../functions/createBot"
 import { createSubthread } from "../../functions/messages.createSubthread"
+import { encodeAgentThreadContext } from "../../modules/agentConfiguration"
 import { botChatSettingsBroker } from "../../modules/botChatSettings/broker"
 import { unreachableBotChatSettingsResponse } from "../../modules/botChatSettings/validation"
 import { RealtimeRpcError } from "../../realtime/errors"
@@ -122,6 +123,57 @@ describe("bot chat settings discovery", () => {
       BigInt(secondBotUserId),
     ].sort((left, right) => Number(left - right)))
     expect(result.suggestedBotUserId).toBe(BigInt(firstBotUserId))
+  })
+
+  test("suggests the bound Agent before the newest capable bot", async () => {
+    const first = await createBot(
+      { name: "First Bound Settings Bot", username: "firstboundsettingsbot" },
+      creatorContext,
+    )
+    const bound = await createBot(
+      { name: "Bound Settings Bot", username: "boundsettingsbot" },
+      creatorContext,
+    )
+    const firstBotUserId = Number(first.bot?.id ?? 0n)
+    const boundBotUserId = Number(bound.bot?.id ?? 0n)
+    await Promise.all([
+      BotCapabilitiesModel.replaceForBotUserId(
+        firstBotUserId,
+        [{ kind: "chat_settings", version: 1 }],
+      ),
+      BotCapabilitiesModel.replaceForBotUserId(
+        boundBotUserId,
+        [{ kind: "chat_settings", version: 1 }],
+      ),
+    ])
+
+    const chat = await testUtils.createChat(null, "Bound settings", "thread", false, creator.id)
+    if (!chat) throw new Error("Expected settings chat")
+    await testUtils.addParticipant(chat.id, creator.id)
+    await testUtils.addParticipant(chat.id, firstBotUserId)
+    await testUtils.addParticipant(chat.id, boundBotUserId)
+    await db
+      .update(schema.chats)
+      .set({
+        agentContext: encodeAgentThreadContext({
+          botUserId: BigInt(boundBotUserId),
+          agentId: undefined,
+          configuration: undefined,
+        }),
+      })
+      .where(eq(schema.chats.id, chat.id))
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: firstBotUserId,
+      text: "newest",
+    })
+
+    const result = await getPeerBots({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+    }, creatorContext)
+
+    expect(result.suggestedBotUserId).toBe(BigInt(boundBotUserId))
   })
 
   test("inherits capable bots from the parent of a reply thread", async () => {
