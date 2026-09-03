@@ -169,6 +169,26 @@ pub(super) fn persist_setup_account_files(
     Ok(())
 }
 
+fn select_bridge_bot(
+    bots: &[proto::User],
+    saved_bot_user_id: Option<i64>,
+    bot_username: &str,
+) -> (Option<proto::User>, bool) {
+    let selected = saved_bot_user_id
+        .and_then(|saved_bot_user_id| bots.iter().find(|bot| bot.id == saved_bot_user_id))
+        .or_else(|| {
+            bots.iter()
+                .find(|bot| bot.username.as_deref() == Some(bot_username))
+        })
+        .cloned();
+    let replaces_saved_bot = saved_bot_user_id.is_some_and(|saved_bot_user_id| {
+        selected
+            .as_ref()
+            .is_none_or(|bot| bot.id != saved_bot_user_id)
+    });
+    (selected, replaces_saved_bot)
+}
+
 pub(super) async fn provision_dev_bot(
     config: &Config,
     owner: &mut crate::owner_session::OwnerSession,
@@ -285,13 +305,11 @@ pub(super) async fn provision_dev_bot(
             provider_bot_username(provider.provider_id, me.id, &account.host_installation_id)
         });
     let bots = owner.call(proto::ListBotsInput {}).await?.bots;
-    let bot = if let Some(saved) = &saved {
-        bots.iter().find(|bot| bot.id == saved.bot_user_id).cloned()
-    } else {
-        bots.iter()
-            .find(|bot| bot.username.as_deref() == Some(bot_username.as_str()))
-            .cloned()
-    };
+    let (bot, replaces_saved_bot) = select_bridge_bot(
+        &bots,
+        saved.as_ref().map(|saved| saved.bot_user_id),
+        &bot_username,
+    );
 
     let requested_name = requested_name
         .map(str::trim)
@@ -317,13 +335,6 @@ pub(super) async fn provision_dev_bot(
 
     let (mut bot, created_token) = match bot {
         Some(bot) => (bot, None),
-        None if saved.is_some() => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "the saved bridge bot is no longer available; setup repair is required",
-            )
-            .into());
-        }
         None => {
             let result = owner
                 .call(proto::CreateBotInput {
@@ -338,6 +349,9 @@ pub(super) async fn provision_dev_bot(
             (bot, Some(result.token))
         }
     };
+    // Keep provider/workspace/session state under the same installation, but a
+    // replacement bot must start with a new DM and a fresh realtime cursor.
+    let retained_bot_state = saved.as_ref().filter(|_| !replaces_saved_bot);
 
     let legacy_complete_name = bot
         .last_name
@@ -487,7 +501,7 @@ pub(super) async fn provision_dev_bot(
         bot_token,
     };
 
-    let dm_chat_id = match saved.as_ref().and_then(|saved| saved.dm_chat_id) {
+    let dm_chat_id = match retained_bot_state.and_then(|saved| saved.dm_chat_id) {
         Some(chat_id) if chat_id > 0 => chat_id,
         _ => {
             let result = owner
@@ -529,15 +543,12 @@ pub(super) async fn provision_dev_bot(
             .unwrap_or_else(|| bot_username.trim_start_matches('@').to_string()),
         dm_chat_id: Some(dm_chat_id),
         workspace: workspace.to_path_buf(),
-        greeting_sent: saved.as_ref().is_some_and(|saved| saved.greeting_sent),
-        accept_messages_after: saved
-            .as_ref()
+        greeting_sent: retained_bot_state.is_some_and(|saved| saved.greeting_sent),
+        accept_messages_after: retained_bot_state
             .map(|saved| saved.accept_messages_after)
             .filter(|timestamp| *timestamp > 0)
             .unwrap_or_else(now_seconds),
-        initial_cursor_seeded: saved
-            .as_ref()
-            .is_some_and(|saved| saved.initial_cursor_seeded),
+        initial_cursor_seeded: retained_bot_state.is_some_and(|saved| saved.initial_cursor_seeded),
         display_name: bot
             .first_name
             .as_deref()
@@ -676,6 +687,42 @@ async fn sync_agent_command_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bot(id: i64, username: &str) -> proto::User {
+        proto::User {
+            id,
+            username: Some(username.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn bridge_bot_selection_reuses_the_saved_identity() {
+        let bots = vec![bot(42, "saved_bot"), bot(84, "other_bot")];
+
+        let (selected, replaces_saved_bot) = select_bridge_bot(&bots, Some(42), "saved_bot");
+
+        assert_eq!(selected.map(|bot| bot.id), Some(42));
+        assert!(!replaces_saved_bot);
+    }
+
+    #[test]
+    fn bridge_bot_selection_adopts_an_owner_recreated_bot_by_username() {
+        let bots = vec![bot(84, "saved_bot")];
+
+        let (selected, replaces_saved_bot) = select_bridge_bot(&bots, Some(42), "saved_bot");
+
+        assert_eq!(selected.map(|bot| bot.id), Some(84));
+        assert!(replaces_saved_bot);
+    }
+
+    #[test]
+    fn bridge_bot_selection_allows_setup_to_recreate_a_deleted_bot() {
+        let (selected, replaces_saved_bot) = select_bridge_bot(&[], Some(42), "saved_bot");
+
+        assert!(selected.is_none());
+        assert!(replaces_saved_bot);
+    }
 
     #[test]
     fn codex_command_catalog_exposes_session_continuity() {
