@@ -57,6 +57,7 @@ const normalizeModel = (option: AgentModelOption): AgentModelOption => ({
   label: boundedRequired(option.label, MAX_LABEL_BYTES),
   description: boundedOptional(option.description, MAX_DESCRIPTION_BYTES),
   reasoningEffortIds: option.reasoningEffortIds.map((id) => boundedRequired(id, MAX_ID_BYTES)),
+  defaultReasoningEffortId: boundedOptional(option.defaultReasoningEffortId, MAX_ID_BYTES),
 })
 
 const assertUniqueIds = (ids: string[]): void => {
@@ -78,13 +79,17 @@ export function normalizeAgentConfigurationCatalog(
     ? {
         options: catalog.projects.options.map(normalizeProject),
         canSelectFolder: catalog.projects.canSelectFolder,
+        defaultProjectId: boundedOptional(catalog.projects.defaultProjectId, MAX_ID_BYTES),
       }
     : undefined
   const reasoning = catalog.reasoning
     ? { options: catalog.reasoning.options.map(normalizeReasoning) }
     : undefined
   const models = catalog.models
-    ? { options: catalog.models.options.map(normalizeModel) }
+    ? {
+        options: catalog.models.options.map(normalizeModel),
+        defaultModelId: boundedOptional(catalog.models.defaultModelId, MAX_ID_BYTES),
+      }
     : undefined
 
   assertUniqueIds(projects?.options.map((option) => option.id) ?? [])
@@ -92,9 +97,26 @@ export function normalizeAgentConfigurationCatalog(
   assertUniqueIds(reasoning?.options.map((option) => option.id) ?? [])
 
   const reasoningIds = new Set(reasoning?.options.map((option) => option.id) ?? [])
+  const projectIds = new Set(projects?.options.map((option) => option.id) ?? [])
+  const modelIds = new Set(models?.options.map((option) => option.id) ?? [])
+  if (projects?.defaultProjectId && !projectIds.has(projects.defaultProjectId)) {
+    throw RealtimeRpcError.BadRequest()
+  }
+  if (models?.defaultModelId && !modelIds.has(models.defaultModelId)) {
+    throw RealtimeRpcError.BadRequest()
+  }
   for (const model of models?.options ?? []) {
     assertUniqueIds(model.reasoningEffortIds)
     if (model.reasoningEffortIds.some((id) => !reasoningIds.has(id))) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    if (
+      model.defaultReasoningEffortId &&
+      (
+        !reasoningIds.has(model.defaultReasoningEffortId) ||
+        (model.reasoningEffortIds.length > 0 && !model.reasoningEffortIds.includes(model.defaultReasoningEffortId))
+      )
+    ) {
       throw RealtimeRpcError.BadRequest()
     }
   }

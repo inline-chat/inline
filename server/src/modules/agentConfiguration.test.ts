@@ -12,6 +12,7 @@ describe("Agent configuration contracts", () => {
       projects: {
         options: [{ id: " local ", label: " Local ", description: " This Mac " }],
         canSelectFolder: true,
+        defaultProjectId: " local ",
       },
       models: undefined,
       reasoning: undefined,
@@ -19,6 +20,7 @@ describe("Agent configuration contracts", () => {
       projects: {
         options: [{ id: "local", label: "Local", description: "This Mac" }],
         canSelectFolder: true,
+        defaultProjectId: "local",
       },
       models: undefined,
       reasoning: undefined,
@@ -49,6 +51,60 @@ describe("Agent configuration contracts", () => {
         }],
       },
       reasoning: { options: [] },
+    })).toThrow(RealtimeRpcError)
+  })
+
+  test("keeps only defaults that resolve to compatible choices", () => {
+    expect(normalizeAgentConfigurationCatalog({
+      projects: undefined,
+      models: {
+        options: [{
+          id: " model ",
+          label: " Model ",
+          description: undefined,
+          reasoningEffortIds: [" high "],
+          defaultReasoningEffortId: " high ",
+        }],
+        defaultModelId: " model ",
+      },
+      reasoning: {
+        options: [{ id: " high ", label: " High ", description: undefined }],
+      },
+    })).toEqual({
+      projects: undefined,
+      models: {
+        options: [{
+          id: "model",
+          label: "Model",
+          description: undefined,
+          reasoningEffortIds: ["high"],
+          defaultReasoningEffortId: "high",
+        }],
+        defaultModelId: "model",
+      },
+      reasoning: {
+        options: [{ id: "high", label: "High", description: undefined }],
+      },
+    })
+
+    expect(() => normalizeAgentConfigurationCatalog({
+      projects: undefined,
+      models: {
+        options: [{
+          id: "model",
+          label: "Model",
+          description: undefined,
+          reasoningEffortIds: ["low"],
+          defaultReasoningEffortId: "high",
+        }],
+        defaultModelId: "missing",
+      },
+      reasoning: {
+        options: [
+          { id: "low", label: "Low", description: undefined },
+          { id: "high", label: "High", description: undefined },
+        ],
+      },
     })).toThrow(RealtimeRpcError)
   })
 
