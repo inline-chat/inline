@@ -119,7 +119,10 @@ struct AgentSetupWizardFooter: View {
         .buttonStyle(.borderedProminent)
       case .failed:
         if model.canRepairSelectedSetup {
-          Button("Repair Existing Setup…", action: onRepair)
+          AgentSetupReplacementButton(
+            presentation: model.failure?.presentation,
+            action: onRepair
+          )
         } else if model.canRetryFailure {
           if model.failureOperation == .targetSetup {
             Button("Retry Setup") {
@@ -150,6 +153,22 @@ struct AgentSetupWizardFooter: View {
     .frame(minHeight: 24)
     .padding(.horizontal, 20)
     .padding(.vertical, 10)
+  }
+}
+
+struct AgentSetupReplacementButton: View {
+  let presentation: AgentSetupFailurePresentation?
+  let action: () -> Void
+
+  private var label: String {
+    presentation?.replacementActionLabel ?? "Replace Existing Setup…"
+  }
+
+  var body: some View {
+    Button(action: action) {
+      Text(verbatim: label)
+    }
+    .accessibilityLabel(Text(verbatim: label))
   }
 }
 
@@ -486,7 +505,13 @@ private struct AgentSetupProgressRow: View {
         }
       }
     case let .completed(outcome):
-      Text(item.detail ?? outcome?.label ?? "Completed")
+      if let detail = item.detail {
+        Text(detail)
+      } else if let outcome {
+        Text(outcome.label)
+      } else {
+        Text("Completed")
+      }
     case .failed:
       Text("Stopped here")
     }
@@ -602,31 +627,53 @@ private struct AgentSetupRecoveryCard: View {
   }
 }
 
-private struct AgentSetupFailureScreen: View {
+struct AgentSetupFailureScreen: View {
   let failure: AgentSetupFailure?
   let items: [AgentSetupProgressItem]
   @State private var showsDetails = false
+
+  private var presentation: AgentSetupFailurePresentation? {
+    failure?.presentation
+  }
 
   var body: some View {
     ScrollView {
       VStack(spacing: 18) {
         AgentSetupScreenHeader(
           systemImage: "exclamationmark.triangle.fill",
-          title: failure?.timedOut == true ? "Setup Timed Out" : "Setup Couldn’t Finish",
-          detail: failure?.timedOut == true
-            ? "The setup deadline was reached. Inline kept completed steps and recovery details."
-            : "Inline kept completed steps and the diagnostic information needed to recover."
+          verbatimTitle: presentation?.title ?? "Setup Couldn’t Finish",
+          verbatimDetail: presentation?.detail
+            ?? "Inline kept completed steps and the diagnostic information needed to recover."
         )
 
         VStack(alignment: .leading, spacing: 16) {
-          if let message = failure?.message {
+          if let presentation {
             GroupBox {
-              Text(message)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+              VStack(alignment: .leading, spacing: 12) {
+                Text(verbatim: presentation.message)
+                  .fixedSize(horizontal: false, vertical: true)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                if let actionLabel = presentation.actionLabel, let failure {
+                  Button {
+                    _ = NSWorkspace.shared.open(presentation.actionURL ?? failure.recoveryURL)
+                  } label: {
+                    Label {
+                      Text(verbatim: actionLabel)
+                    } icon: {
+                      Image(systemName: "arrow.up.right")
+                    }
+                  }
+                  .buttonStyle(.bordered)
+                  .foregroundStyle(.primary)
+                  .accessibilityLabel(Text(verbatim: actionLabel))
+                }
+              }
             } label: {
-              Label("What Happened", systemImage: "exclamationmark.circle")
+              Label {
+                Text(verbatim: presentation.label)
+              } icon: {
+                Image(systemName: presentation.systemImage)
+              }
             }
           }
 
@@ -662,6 +709,10 @@ private struct AgentSetupFailureDetails: View {
         Text("Failed during: \(failedPhase)")
           .font(.caption)
       }
+      Text(failure.message)
+        .font(.caption.monospaced())
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
       if failure.isPartial {
         Text("Some setup work completed before the failure.")
           .font(.subheadline.weight(.medium))
@@ -726,8 +777,28 @@ private struct AgentSetupFailureDetails: View {
 
 private struct AgentSetupScreenHeader: View {
   let systemImage: String
-  let title: LocalizedStringResource
-  let detail: LocalizedStringResource
+  private let title: Text
+  private let detail: Text
+
+  init(
+    systemImage: String,
+    title: LocalizedStringResource,
+    detail: LocalizedStringResource
+  ) {
+    self.systemImage = systemImage
+    self.title = Text(title)
+    self.detail = Text(detail)
+  }
+
+  init(
+    systemImage: String,
+    verbatimTitle: String,
+    verbatimDetail: String
+  ) {
+    self.systemImage = systemImage
+    self.title = Text(verbatim: verbatimTitle)
+    self.detail = Text(verbatim: verbatimDetail)
+  }
 
   var body: some View {
     VStack(spacing: 8) {
@@ -735,9 +806,9 @@ private struct AgentSetupScreenHeader: View {
         .font(.title3.weight(.medium))
         .frame(width: 28, height: 28)
         .accessibilityHidden(true)
-      Text(title)
+      title
         .font(.title3.weight(.semibold))
-      Text(detail)
+      detail
         .font(.callout)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
