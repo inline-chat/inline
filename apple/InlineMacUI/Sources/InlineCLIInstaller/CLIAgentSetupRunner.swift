@@ -20,7 +20,10 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     let status: String?
     let documentationURL: URL?
     let failedPhase: String?
+    let timedOut: Bool?
     let changes: [String]?
+    let recoveryCommands: [String]?
+    let diagnosticReportPath: String?
     let retry: String?
     let error: Payload
 
@@ -29,7 +32,10 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       case status
       case documentationURL = "documentationUrl"
       case failedPhase
+      case timedOut
       case changes
+      case recoveryCommands
+      case diagnosticReportPath
       case retry
       case error
     }
@@ -172,6 +178,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     appProtocol: Bool = true
   ) -> [String] {
     var arguments = [
+      "--verbose",
       "--json",
       "--compact",
       "agents",
@@ -225,7 +232,21 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
        outcome.isEmpty || outcome.utf8.count > 64 || !outcome.utf8.allSatisfy(Self.isSafeCodeByte) {
       return nil
     }
-    return event
+    if let timeoutSeconds = event.timeoutSeconds,
+       !(1 ... 10 * 60).contains(timeoutSeconds) {
+      return nil
+    }
+    let message = event.message.map {
+      safeStructuredText($0, maximumScalars: 500)
+    }
+    return AgentSetupProgressEvent(
+      protocolVersion: event.protocolVersion,
+      event: event.event,
+      phase: event.phase,
+      outcome: event.outcome,
+      message: message,
+      timeoutSeconds: event.timeoutSeconds
+    )
   }
 
   private static func directSetupResult(from data: Data) -> AgentSetupResult? {
@@ -361,7 +382,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
         code: "setup_timed_out",
         message: "Inline CLI did not finish agent setup in time.",
         hint: "Rerun `inline agents setup --target <name>` in Terminal to continue debugging.",
-        recoveryURL: Self.documentationURL
+        recoveryURL: Self.documentationURL,
+        timedOut: true
       )
     }
     if outputLimitState.didExceed {
@@ -568,8 +590,9 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     let retry = envelope.retry ?? targetID.map {
       "inline agents setup --target \($0) --non-interactive"
     }
+    let code = safeCode(envelope.error.code)
     return AgentSetupFailure(
-      code: safeCode(envelope.error.code),
+      code: code,
       message: safeStructuredText(envelope.error.message, maximumScalars: 1_000),
       hint: envelope.error.hint.map { safeStructuredText($0, maximumScalars: 1_000) },
       examples: (envelope.error.examples ?? []).prefix(3).map {
@@ -580,8 +603,15 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       failedPhase: envelope.failedPhase.map {
         safeStructuredText($0, maximumScalars: 100)
       },
+      timedOut: envelope.timedOut ?? (code == "timeout"),
       completedChanges: (envelope.changes ?? []).prefix(20).map {
         safeStructuredText($0, maximumScalars: 100)
+      },
+      recoveryCommands: (envelope.recoveryCommands ?? []).prefix(5).map {
+        safeStructuredText($0, maximumScalars: 500)
+      },
+      diagnosticReportPath: envelope.diagnosticReportPath.map {
+        safeStructuredText($0, maximumScalars: 1_000)
       },
       retryCommand: retry.map { safeStructuredText($0, maximumScalars: 500) }
     )

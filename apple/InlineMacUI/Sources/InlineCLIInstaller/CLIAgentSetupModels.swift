@@ -121,17 +121,23 @@ public struct AgentSetupProgressEvent: Codable, Equatable, Sendable {
   public let event: Event
   public let phase: Phase
   public let outcome: String?
+  public let message: String?
+  public let timeoutSeconds: Int?
 
   public init(
     protocolVersion: Int,
     event: Event,
     phase: Phase,
-    outcome: String? = nil
+    outcome: String? = nil,
+    message: String? = nil,
+    timeoutSeconds: Int? = nil
   ) {
     self.protocolVersion = protocolVersion
     self.event = event
     self.phase = phase
     self.outcome = outcome
+    self.message = message
+    self.timeoutSeconds = timeoutSeconds
   }
 }
 
@@ -143,7 +149,10 @@ public struct AgentSetupFailure: LocalizedError, Equatable, Sendable {
   public let recoveryURL: URL
   public let status: String?
   public let failedPhase: String?
+  public let timedOut: Bool
   public let completedChanges: [String]
+  public let recoveryCommands: [String]
+  public let diagnosticReportPath: String?
   public let retryCommand: String?
 
   public init(
@@ -154,7 +163,10 @@ public struct AgentSetupFailure: LocalizedError, Equatable, Sendable {
     recoveryURL: URL,
     status: String? = nil,
     failedPhase: String? = nil,
+    timedOut: Bool = false,
     completedChanges: [String] = [],
+    recoveryCommands: [String] = [],
+    diagnosticReportPath: String? = nil,
     retryCommand: String? = nil
   ) {
     self.code = code
@@ -164,15 +176,20 @@ public struct AgentSetupFailure: LocalizedError, Equatable, Sendable {
     self.recoveryURL = recoveryURL
     self.status = status
     self.failedPhase = failedPhase
+    self.timedOut = timedOut
     self.completedChanges = completedChanges
+    self.recoveryCommands = recoveryCommands
+    self.diagnosticReportPath = diagnosticReportPath
     self.retryCommand = retryCommand
   }
 
   public var errorDescription: String? { message }
 
   public var recoverySuggestion: String? {
-    let parts = [hint, retryCommand, examples.first].compactMap { $0 }
-    return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    let suggestions = [hint].compactMap { $0 }
+      + recoveryCommands
+      + [retryCommand, examples.first].compactMap { $0 }
+    return suggestions.isEmpty ? nil : suggestions.joined(separator: "\n")
   }
 
   public var isPartial: Bool {

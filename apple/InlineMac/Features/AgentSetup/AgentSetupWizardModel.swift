@@ -35,6 +35,7 @@ struct AgentSetupProgressItem: Equatable, Identifiable {
 
   let id: ID
   var state: State = .pending
+  var detail: String?
 }
 
 private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
@@ -75,8 +76,10 @@ private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
     "mapped_bot_missing",
     "not_authenticated",
     "operation_in_progress",
+    "provider_integration_failed",
     "setup_conflict",
     "setup_timed_out",
+    "timeout",
     "unexpected_target",
   ]
 }
@@ -540,24 +543,33 @@ final class AgentSetupWizardModel {
     guard let id = Self.progressID(for: event.phase) else { return }
     switch event.event {
     case .phaseStarted:
-      beginProgress(id)
+      beginProgress(id, detail: event.message ?? event.timeoutSeconds.map {
+        "This step can take up to \($0) seconds."
+      })
     case .phaseCompleted:
-      completeProgress(id, outcome: event.outcome.map(AgentSetupProgressItem.Outcome.cli))
+      completeProgress(
+        id,
+        outcome: event.outcome.map(AgentSetupProgressItem.Outcome.cli),
+        detail: event.message
+      )
     }
   }
 
-  private func beginProgress(_ id: AgentSetupProgressItem.ID) {
+  private func beginProgress(_ id: AgentSetupProgressItem.ID, detail: String? = nil) {
     guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
     if case .completed = progressItems[index].state { return }
     progressItems[index].state = .active(startedAt: Date())
+    progressItems[index].detail = detail
   }
 
   private func completeProgress(
     _ id: AgentSetupProgressItem.ID,
-    outcome: AgentSetupProgressItem.Outcome? = nil
+    outcome: AgentSetupProgressItem.Outcome? = nil,
+    detail: String? = nil
   ) {
     guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
     progressItems[index].state = .completed(outcome)
+    progressItems[index].detail = detail
   }
 
   private func failActiveProgress() {

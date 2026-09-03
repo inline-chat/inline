@@ -475,13 +475,18 @@ private struct AgentSetupProgressRow: View {
     case .pending:
       Text("Waiting")
     case let .active(startedAt):
-      HStack(spacing: 4) {
-        Text("Elapsed")
-        Text(startedAt, style: .timer)
-          .monospacedDigit()
+      VStack(alignment: .leading, spacing: 2) {
+        if let detail = item.detail {
+          Text(detail)
+        }
+        HStack(spacing: 4) {
+          Text("Elapsed")
+          Text(startedAt, style: .timer)
+            .monospacedDigit()
+        }
       }
     case let .completed(outcome):
-      Text(outcome?.label ?? "Completed")
+      Text(item.detail ?? outcome?.label ?? "Completed")
     case .failed:
       Text("Stopped here")
     }
@@ -607,8 +612,10 @@ private struct AgentSetupFailureScreen: View {
       VStack(spacing: 18) {
         AgentSetupScreenHeader(
           systemImage: "exclamationmark.triangle.fill",
-          title: "Setup Couldn’t Finish",
-          detail: "Inline kept completed steps and the diagnostic information needed to recover."
+          title: failure?.timedOut == true ? "Setup Timed Out" : "Setup Couldn’t Finish",
+          detail: failure?.timedOut == true
+            ? "The setup deadline was reached. Inline kept completed steps and recovery details."
+            : "Inline kept completed steps and the diagnostic information needed to recover."
         )
 
         VStack(alignment: .leading, spacing: 16) {
@@ -667,6 +674,11 @@ private struct AgentSetupFailureDetails: View {
         Text(suggestion)
           .textSelection(.enabled)
       }
+      if let reportPath = failure.diagnosticReportPath {
+        Text("Diagnostic report: \(reportPath)")
+          .font(.caption.monospaced())
+          .textSelection(.enabled)
+      }
       Button {
         copyDiagnosticSummary()
       } label: {
@@ -704,6 +716,9 @@ private struct AgentSetupFailureDetails: View {
     }
     if let suggestion = failure.recoverySuggestion {
       lines.append("Suggested recovery: \(suggestion)")
+    }
+    if let reportPath = failure.diagnosticReportPath {
+      lines.append("Diagnostic report: \(reportPath)")
     }
     return lines.joined(separator: "\n")
   }

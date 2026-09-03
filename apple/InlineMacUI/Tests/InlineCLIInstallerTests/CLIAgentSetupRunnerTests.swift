@@ -20,13 +20,16 @@ struct CLIAgentSetupRunnerTests {
   @Test("retains structured failures surrounded by diagnostic stderr")
   func decodesFailureWithDiagnostics() throws {
     let data = Data(("warning: provider probe retrying\n"
-      + #"{"protocolVersion":1,"status":"partial","failedPhase":"integration","changes":["bot_configured"],"error":{"code":"io_error","message":"certificate expired","hint":"Check system trust"}}"#
+      + #"{"protocolVersion":1,"status":"partial","failedPhase":"service","timedOut":true,"changes":["bot_configured"],"recoveryCommands":["inline bridge doctor --json"],"diagnosticReportPath":"/tmp/inline-diagnostics-test.log","error":{"code":"timeout","message":"certificate expired","hint":"Check system trust"}}"#
       + "\ntrace: command finished\n").utf8)
     let failure = try #require(CLIAgentSetupRunner.parseFailure(data, targetID: "codex"))
     #expect(failure.message == "certificate expired")
-    #expect(failure.failedPhase == "integration")
+    #expect(failure.failedPhase == "service")
     #expect(failure.hint == "Check system trust")
     #expect(failure.completedChanges == ["bot_configured"])
+    #expect(failure.timedOut)
+    #expect(failure.recoveryCommands == ["inline bridge doctor --json"])
+    #expect(failure.diagnosticReportPath == "/tmp/inline-diagnostics-test.log")
     #expect(failure.isPartial)
   }
 
@@ -36,11 +39,11 @@ struct CLIAgentSetupRunnerTests {
       "--json", "--compact", "agents", "discover",
     ])
     #expect(CLIAgentSetupRunner.setupArguments(targetID: "codex", replaceExisting: false) == [
-      "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+      "--verbose", "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
       "--app-protocol", "1",
     ])
     #expect(CLIAgentSetupRunner.setupArguments(targetID: "hermes", replaceExisting: true) == [
-      "--json", "--compact", "agents", "setup", "--target", "hermes", "--non-interactive",
+      "--verbose", "--json", "--compact", "agents", "setup", "--target", "hermes", "--non-interactive",
       "--app-protocol", "1", "--replace",
     ])
     #expect(CLIAgentSetupRunner.setupArguments(
@@ -48,7 +51,7 @@ struct CLIAgentSetupRunnerTests {
       replaceExisting: false,
       appProtocol: false
     ) == [
-      "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+      "--verbose", "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
     ])
   }
 
@@ -98,7 +101,7 @@ struct CLIAgentSetupRunnerTests {
   @Test("decodes progress events and the final streamed result")
   func decodesStreamedSetup() throws {
     let event = Data(
-      #"{"protocolVersion":1,"event":"phase.completed","phase":"bot","outcome":"reused"}"#.utf8
+      #"{"protocolVersion":1,"event":"phase.started","phase":"service","message":"Starting the local bridge service; this can take up to 90 seconds...","timeoutSeconds":90}"#.utf8
     )
     let output = Data(
       (#"{"protocolVersion":1,"event":"phase.started","phase":"bot"}"# + "\n"
@@ -109,9 +112,11 @@ struct CLIAgentSetupRunnerTests {
     let progress = try #require(CLIAgentSetupRunner.parseProgressEvent(event))
     let result = try CLIAgentSetupRunner.parseSetup(output)
 
-    #expect(progress.event == .phaseCompleted)
-    #expect(progress.phase == .bot)
-    #expect(progress.outcome == "reused")
+    #expect(progress.event == .phaseStarted)
+    #expect(progress.phase == .service)
+    #expect(progress.outcome == nil)
+    #expect(progress.message == "Starting the local bridge service; this can take up to 90 seconds...")
+    #expect(progress.timeoutSeconds == 90)
     #expect(result.bot.id == 42)
   }
 
