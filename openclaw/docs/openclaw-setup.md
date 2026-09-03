@@ -8,7 +8,7 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 
 Choose the Inline plugin version that matches the installed OpenClaw line:
 
-- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.65` — `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities`
+- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.66` — `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities`
 - OpenClaw `2026.7.x` (`>=2026.7.1`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 - OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 

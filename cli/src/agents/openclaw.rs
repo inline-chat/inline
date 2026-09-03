@@ -15,7 +15,7 @@ use super::{
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const PLUGIN_PACKAGE_NAME: &str = "@inline-openclaw/inline";
-const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.64";
+const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.66";
 const LEGACY_SETUP_PLUGIN_VERSION: &str = "0.0.63";
 const SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline";
 const LEGACY_SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.63";
@@ -1159,16 +1159,16 @@ mod tests {
     fn plugin_inspection_distinguishes_healthy_and_foreign_sources() {
         let compatibility = current_compatibility();
         let healthy = inspect_plugin_json(
-            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.65","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.66","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
             compatibility,
         );
         assert!(matches!(
             healthy,
-            PluginState::Healthy { version } if version == "0.0.65"
+            PluginState::Healthy { version } if version == "0.0.66"
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.63","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.65","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
                 compatibility,
             ),
             PluginState::Outdated
@@ -1209,7 +1209,7 @@ mod tests {
         let inspected = r#"{
             "plugin": {
                 "packageName": "@inline-openclaw/inline",
-                "version": "0.0.65",
+                "version": "0.0.66",
                 "status": "loaded",
                 "dependencyStatus": { "requiredInstalled": true }
             },
@@ -1217,18 +1217,18 @@ mod tests {
                 "source": "npm",
                 "spec": "@inline-openclaw/inline",
                 "resolvedName": "@inline-openclaw/inline",
-                "resolvedVersion": "0.0.65",
-                "resolvedSpec": "@inline-openclaw/inline@0.0.65"
+                "resolvedVersion": "0.0.66",
+                "resolvedSpec": "@inline-openclaw/inline@0.0.66"
             }
         }"#;
         assert_eq!(
             verify_managed_plugin_install(inspected, compatibility).unwrap(),
-            "0.0.65"
+            "0.0.66"
         );
 
         let mismatched_resolution = inspected.replace(
+            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.66\"",
             "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.65\"",
-            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.63\"",
         );
         assert!(verify_managed_plugin_install(&mismatched_resolution, compatibility).is_err());
     }
@@ -1236,7 +1236,7 @@ mod tests {
     #[test]
     fn host_version_selects_a_compatible_plugin_and_capability_policy() {
         let current = setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)");
-        assert_eq!(current.minimum_plugin_version, "0.0.64");
+        assert_eq!(current.minimum_plugin_version, "0.0.66");
         assert_eq!(
             current.install_args(),
             [
