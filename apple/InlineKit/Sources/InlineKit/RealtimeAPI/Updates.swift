@@ -1084,7 +1084,7 @@ public actor UpdatesEngine: Sendable {
         )
       }
 
-      if !checkpointAlreadyReached {
+      if !checkpointAlreadyReached || repair.replacesActiveCatalog {
         guard repair.settings.hasUserSettings else {
           log.error(
             "User repair snapshot is missing required settings",

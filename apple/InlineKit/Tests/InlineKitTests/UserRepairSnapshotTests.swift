@@ -356,6 +356,50 @@ struct UserRepairSnapshotTests {
     }
   }
 
+  @Test("an interrupted fresh catalog replacement restores settings at an equal cursor")
+  @MainActor
+  func equalCursorCatalogReplacementRestoresSettings() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let settingsRecorder = UserRepairSettingsRecorder()
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in settingsRecorder.applyCount += 1 }
+    )
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user,
+        state: BucketState(date: 220, seq: 55),
+        in: db
+      )
+    }
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 42; $0.firstName = "Recovered" }
+
+    let outcome = await engine.applyUserRepair(UserRepairSnapshot(
+      chats: .init(),
+      me: me,
+      settings: userSettingsResult(),
+      checkpointState: BucketState(date: 220, seq: 55),
+      replayThroughState: BucketState(date: 220, seq: 55),
+      targetState: BucketState(date: 220, seq: 55),
+      mutationToken: accountToken(),
+      replacesActiveCatalog: true,
+      requiresProjectionAudit: true,
+      reason: "fresh_account_bootstrap"
+    ))
+
+    guard case let .applied(state, _, replayThroughState, _)? = outcome else {
+      Issue.record("Expected the interrupted fresh catalog replacement to reapply")
+      return
+    }
+    #expect(state.seq == 55)
+    #expect(replayThroughState?.seq == 55)
+    #expect(settingsRecorder.applyCount == 1)
+  }
+
   @Test("a stale repair cannot regress a newer durable cursor")
   @MainActor
   func staleRepairDoesNotRegressCursorOrApplySettings() async throws {

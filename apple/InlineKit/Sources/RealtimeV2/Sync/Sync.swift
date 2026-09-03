@@ -283,16 +283,22 @@ actor Sync {
     case latest
   }
 
+  private enum DiscoveryCheckpointPolicy {
+    case safetyGap
+    case allowingRegression
+    case exactFresh
+  }
+
   private struct ActiveDiscoveryRound {
     let generation: UInt64
     var observedTarget = false
-    var allowsCheckpointRegression = false
+    var checkpointPolicy: DiscoveryCheckpointPolicy = .safetyGap
     var pendingTargets: [BucketKey: DiscoveryTarget] = [:]
   }
 
   private struct PendingDiscoveryRound {
     let checkpoint: Int64
-    let allowsCheckpointRegression: Bool
+    let checkpointPolicy: DiscoveryCheckpointPolicy
     var pendingTargets: [BucketKey: DiscoveryTarget]
   }
 
@@ -769,7 +775,8 @@ actor Sync {
     targetState: BucketState,
     reason: String,
     replacesActiveCatalog: Bool = false,
-    requiresProjectionAudit: Bool = false
+    requiresProjectionAudit: Bool = false,
+    capturedCheckpointState: BucketState? = nil
   ) async -> UserRepairOutcome? {
     guard let client else {
       log.error("client is nil, cannot repair user bucket")
@@ -780,23 +787,34 @@ actor Sync {
       return nil
     }
     do {
-      guard let rawCheckpoint = try await callRepairRpc(
-        client: client,
-        method: .getUpdatesState,
-        input: .getUpdatesState(.init()),
-        timeout: Self.getUpdatesStateTimeout
-      ) else {
-        return nil
+      let checkpointState: BucketState
+      if let capturedCheckpointState {
+        guard capturedCheckpointState.date > 0,
+              capturedCheckpointState.seq >= targetState.seq
+        else {
+          log.error("captured user checkpoint is invalid during user repair")
+          return nil
+        }
+        checkpointState = capturedCheckpointState
+      } else {
+        guard let rawCheckpoint = try await callRepairRpc(
+          client: client,
+          method: .getUpdatesState,
+          input: .getUpdatesState(.init()),
+          timeout: Self.getUpdatesStateTimeout
+        ) else {
+          return nil
+        }
+        guard case let .getUpdatesState(checkpoint) = rawCheckpoint,
+              checkpoint.hasSeq,
+              checkpoint.date > 0,
+              Int64(checkpoint.seq) >= targetState.seq
+        else {
+          log.error("failed to capture a valid current user checkpoint during user repair")
+          return nil
+        }
+        checkpointState = BucketState(date: checkpoint.date, seq: Int64(checkpoint.seq))
       }
-      guard case let .getUpdatesState(checkpoint) = rawCheckpoint,
-            checkpoint.hasSeq,
-            checkpoint.date > 0,
-            Int64(checkpoint.seq) >= targetState.seq
-      else {
-        log.error("failed to capture a valid current user checkpoint during user repair")
-        return nil
-      }
-      let checkpointState = BucketState(date: checkpoint.date, seq: Int64(checkpoint.seq))
 
       async let chatsResult = callRepairRpc(
         client: client,
@@ -1547,7 +1565,82 @@ actor Sync {
           }
           let existingUser = try await syncStorage.getBucketState(for: .user)
           guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
-          if existingUser.seq > 0 || existingUser.date > 0 {
+          if accountMutationToken != nil {
+            let bootstrapStartedAt = Date()
+            PerformanceTrace.breadcrumb(
+              "fresh account bootstrap started",
+              category: "sync.lifecycle",
+              data: ["target_seq": payload.seq]
+            )
+            // A zero global date is a normal empty-store bootstrap, not a
+            // reason to seed only cursors. Install the authoritative account
+            // projection at the captured P0 checkpoint, capture P1 after the
+            // snapshot, and let the existing repair owner replay (P0, P1].
+            // The app remains mounted against its usable local store while the
+            // projection fills in.
+            let checkpoint = BucketState(date: payload.date, seq: Int64(payload.seq))
+            guard let outcome = await repairUserBucket(
+              targetState: existingUser,
+              reason: "fresh_account_bootstrap",
+              replacesActiveCatalog: true,
+              requiresProjectionAudit: true,
+              capturedCheckpointState: checkpoint
+            ) else {
+              PerformanceTrace.breadcrumb(
+                "fresh account bootstrap failed",
+                category: "sync.lifecycle",
+                level: .error,
+                data: [
+                  "duration_ms": PerformanceTrace.elapsedMilliseconds(since: bootstrapStartedAt),
+                  "failed": 1,
+                  "target_seq": payload.seq,
+                ]
+              )
+              throw StateFetchAttemptError.invalidResponse
+            }
+
+            nextDiscoveryRoundGeneration &+= 1
+            var round = ActiveDiscoveryRound(generation: nextDiscoveryRoundGeneration)
+            round.observedTarget = true
+            round.checkpointPolicy = .exactFresh
+            mergeDiscoveryTarget(.through(checkpoint.seq), for: .user, into: &round.pendingTargets)
+            try await stageDiscoveryCheckpoint(
+              checkpoint.date,
+              updatesFound: true,
+              round: round,
+              generation: expectedGeneration
+            )
+            guard await applyUserRepairOutcome(outcome) != nil else {
+              pendingDiscoveryRounds.removeValue(forKey: round.generation)
+              PerformanceTrace.breadcrumb(
+                "fresh account bootstrap failed",
+                category: "sync.lifecycle",
+                level: .error,
+                data: [
+                  "duration_ms": PerformanceTrace.elapsedMilliseconds(since: bootstrapStartedAt),
+                  "failed": 1,
+                  "target_seq": payload.seq,
+                ]
+              )
+              throw StateFetchAttemptError.invalidResponse
+            }
+            let bootstrapDurationMs = PerformanceTrace.elapsedMilliseconds(since: bootstrapStartedAt)
+            PerformanceTrace.breadcrumb(
+              "fresh account bootstrap completed",
+              category: "sync.lifecycle",
+              data: [
+                "duration_ms": bootstrapDurationMs,
+                "target_seq": payload.seq,
+              ]
+            )
+            PerformanceTrace.slowBreadcrumb(
+              "fresh account bootstrap was slow",
+              category: "sync.lifecycle",
+              durationMs: bootstrapDurationMs,
+              thresholdMs: 5_000,
+              data: ["target_seq": payload.seq]
+            )
+          } else if existingUser.seq > 0 || existingUser.date > 0 {
             // A user cursor may have committed before a failed global write.
             // It is no longer pristine: replay its exact gap instead of seeding
             // a newer server checkpoint and silently skipping those events.
@@ -1593,9 +1686,9 @@ actor Sync {
             stats.lastSyncDate = payload.date
             probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq))
           }
-          // A fresh bootstrap captures the account cursor first, then performs
-          // exactly one bounded post-capture user probe. It never enumerates
-          // queued chat/space buckets.
+          // Production bootstraps use the account repair snapshot above. The
+          // cursor-only branch remains solely for lightweight Sync tests that
+          // deliberately construct no authenticated account mutation owner.
         } else {
           guard payload.hasSeq else {
             throw StateFetchAttemptError.missingUserSequence
@@ -1620,7 +1713,7 @@ actor Sync {
               generation: nextDiscoveryRoundGeneration
             )
             regressionRound.observedTarget = true
-            regressionRound.allowsCheckpointRegression = true
+            regressionRound.checkpointPolicy = .allowingRegression
             activeDiscoveryRound = regressionRound
             guard let outcome = await repairUserBucket(
               targetState: BucketState(date: currentUser.date, seq: currentUser.seq),
@@ -2116,7 +2209,7 @@ actor Sync {
     }
     pendingDiscoveryRounds[round.generation] = PendingDiscoveryRound(
       checkpoint: checkpoint,
-      allowsCheckpointRegression: round.allowsCheckpointRegression,
+      checkpointPolicy: round.checkpointPolicy,
       pendingTargets: round.pendingTargets
     )
     guard await commitDiscoveryCheckpointsIfReady(generation: expectedGeneration) else {
@@ -2133,22 +2226,64 @@ actor Sync {
         break
       }
       let saved: Bool
-      if round.allowsCheckpointRegression {
+      switch round.checkpointPolicy {
+      case .safetyGap:
+        saved = await updateLastSyncDate(
+          maxAppliedDate: round.checkpoint,
+          source: "getUpdatesState:converged",
+          generation: expectedGeneration
+        )
+      case .allowingRegression:
         saved = await setLastSyncDateAllowingRegression(
           maxAppliedDate: round.checkpoint,
           source: "getUpdatesState:regression-converged",
           generation: expectedGeneration
         )
-      } else {
-        saved = await updateLastSyncDate(
-          maxAppliedDate: round.checkpoint,
-          source: "getUpdatesState:converged",
+      case .exactFresh:
+        saved = await setFreshLastSyncDate(
+          checkpoint: round.checkpoint,
+          source: "getUpdatesState:fresh-account-bootstrap",
           generation: expectedGeneration
         )
       }
       guard saved else { return false }
       pendingDiscoveryRounds.removeValue(forKey: roundGeneration)
     }
+    return true
+  }
+
+  /// A fresh account snapshot is authoritative exactly at P0. Persisting the
+  /// normal safety-gap date here would cause a subsequent launch to repeat the
+  /// catalog replacement even though the snapshot and bounded suffix already
+  /// converged. If another owner has since established a non-zero checkpoint,
+  /// preserve it instead of regressing.
+  private func setFreshLastSyncDate(
+    checkpoint: Int64,
+    source: String,
+    generation expectedGeneration: UInt64? = nil
+  ) async -> Bool {
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return false }
+    guard checkpoint > 0 else { return false }
+    let currentState: SyncState
+    do {
+      currentState = try await syncStorage.getState()
+    } catch {
+      log.error("failed to load global sync state before fresh checkpoint from \(source): \(error)")
+      return false
+    }
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return false }
+    guard currentState.lastSyncDate == 0 else {
+      stats.lastSyncDate = currentState.lastSyncDate
+      return true
+    }
+    let saved = await syncStorage.setState(SyncState(lastSyncDate: checkpoint))
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return false }
+    guard saved else {
+      log.error("failed to write fresh lastSyncDate=\(checkpoint) (source=\(source))")
+      return false
+    }
+    stats.lastSyncDate = checkpoint
+    log.debug("stored exact fresh lastSyncDate=\(checkpoint) (source=\(source))")
     return true
   }
 

@@ -1926,6 +1926,119 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
+  @Test("authenticated fresh connection installs an account snapshot before its exact checkpoint")
+  func testAuthenticatedFreshConnectionRepairsAccountSnapshot() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    let checkpoint = makeGetUpdatesStateResult(date: 100, seq: 42)
+    let replayThrough = makeGetUpdatesStateResult(date: 110, seq: 43)
+    let update43 = makeDurableUpdate(seq: 43, date: 110, payload: .updateUserSettings(.init()))
+    var user = InlineProtocol.User()
+    user.id = 1
+    var me = InlineProtocol.GetMeResult()
+    me.user = user
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [checkpoint, replayThrough],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 43,
+          date: 110,
+          updates: [update43],
+          final: true,
+          resultType: .slice
+        )],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    let mutationToken = try auth.handle.beginAccountMutation()
+    await sync.acceptedSessionOpened(sessionID: 1, mutationToken: mutationToken)
+    #expect(await waitForCondition(timeout: .seconds(3)) {
+      let state = await storage.getBucketState(for: .user)
+      let global = await storage.getState()
+      return state.seq == 43 && global.lastSyncDate == 100
+    })
+
+    let repairs = await apply.repairedUsers
+    let repair = try #require(repairs.first)
+    #expect(repairs.count == 1)
+    #expect(repair.reason == "fresh_account_bootstrap")
+    #expect(repair.targetState.date == 0)
+    #expect(repair.targetState.seq == 0)
+    #expect(repair.checkpointState.date == 100)
+    #expect(repair.checkpointState.seq == 42)
+    #expect(repair.replayThroughState?.date == 110)
+    #expect(repair.replayThroughState?.seq == 43)
+    #expect(repair.replacesActiveCatalog)
+    #expect(repair.requiresProjectionAudit)
+    let methods = await client.getCalledMethods()
+    #expect(methods.first == .getUpdatesState)
+    #expect(Set(methods[1 ... 3]) == Set([.getChats, .getMe, .getUserSettings]))
+    #expect(Array(methods.suffix(2)) == [.getUpdatesState, .getUpdates])
+    #expect(await client.getUpdatesStartSequences() == [42])
+    #expect(await client.getUpdatesEndSequences() == [43])
+    #expect(await apply.appliedUpdates == [update43])
+    await sync.prepareForTermination()
+  }
+
+  @Test("authenticated fresh connection retains zero checkpoint when its account snapshot is incomplete")
+  func testAuthenticatedFreshConnectionRetainsZeroWhenSnapshotFails() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var user = InlineProtocol.User()
+    user.id = 1
+    var me = InlineProtocol.GetMeResult()
+    me.user = user
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100, seq: 42)],
+        .getChats: [nil],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    let mutationToken = try auth.handle.beginAccountMutation()
+    await sync.acceptedSessionOpened(sessionID: 1, mutationToken: mutationToken)
+    #expect(await waitForCondition(timeout: .seconds(1)) {
+      await client.getCallCount() >= 4
+    })
+    #expect(await storage.getState().lastSyncDate == 0)
+    let userState = await storage.getBucketState(for: .user)
+    #expect(userState.date == 0)
+    #expect(userState.seq == 0)
+    #expect(await apply.repairedUsers.isEmpty)
+    await sync.prepareForTermination()
+  }
+
   @Test("fresh empty checkpoint captures the first concurrent user update")
   func testFreshEmptyCheckpointCapturesFirstConcurrentUpdate() async throws {
     let storage = InMemorySyncStorage()
