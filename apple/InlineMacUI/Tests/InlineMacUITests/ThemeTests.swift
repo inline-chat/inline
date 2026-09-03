@@ -166,7 +166,7 @@ struct ThemeTests {
     }
   }
 
-  @Test("default primary colors support white content and canvas separation")
+  @Test("default primary colors support intended content and canvas separation")
   func defaultPrimaryColorsHaveUsableContrast() {
     withUserDefaults { defaults in
       for preset in AppThemePreset.allCases where preset != .system {
@@ -176,7 +176,9 @@ struct ThemeTests {
             variant: variant,
             userDefaults: defaults
           )
-          #expect(contrastRatio(palette.primary, .init(rgb: 0xFFFFFF)) >= 4.5)
+          // Pink is an exact product color; guard a 3:1 floor without silently darkening it.
+          let minimumWhiteContrast = preset == .pink ? 3.0 : 4.5
+          #expect(contrastRatio(palette.primary, .init(rgb: 0xFFFFFF)) >= minimumWhiteContrast)
           #expect(contrastRatio(palette.primary, palette.canvas) >= 1.8)
         }
       }

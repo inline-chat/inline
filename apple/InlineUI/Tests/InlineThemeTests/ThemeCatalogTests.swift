@@ -8,6 +8,7 @@ struct ThemeCatalogTests {
     let systemCanvas = ThemeColorValue(rgb: 0xABCDEF)
     let expected: [AppThemePreset: [(ThemeAppearanceVariant, UInt32, UInt32)]] = [
       .system: [(.light, 0x00A7F8, 0xABCDEF), (.dark, 0x0A84FF, 0xABCDEF)],
+      .pink: [(.light, 0xFD4F7E, 0xFFF5F7), (.dark, 0xFD4F7E, 0x241116)],
       .sunset: [(.light, 0xC94D24, 0xFFF5F0), (.dark, 0xC94D24, 0x2A1A15)],
       .midnight: [(.light, 0x0969DA, 0xFFFFFF), (.dark, 0x0969DA, 0x0D1117)],
       .ash: [(.light, 0x44494D, 0xFFFFFF), (.dark, 0x44494D, 0x151516)],
@@ -15,6 +16,8 @@ struct ThemeCatalogTests {
       .pastel: [(.light, 0x7D57C1, 0xE2DAF1), (.dark, 0x7D57C1, 0x292D3E)],
       .neonNoir: [(.light, 0x623BE2, 0xF7F7F7), (.dark, 0x623BE2, 0x080808)],
     ]
+
+    #expect(Set(expected.keys) == Set(AppThemePreset.allCases))
 
     for (preset, variants) in expected {
       for (variant, primary, canvas) in variants {
