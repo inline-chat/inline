@@ -1152,6 +1152,8 @@ private struct AllChatsComposeAccessoryView: View {
   let tooltipPlacement: InlineTooltipPlacement
 
   var body: some View {
+    // This view fills the AppKit accessory slot. Keep each control at its
+    // intrinsic width so only the spacer absorbs the remaining room.
     HStack(spacing: 4) {
       Menu {
         Button("Home", action: model.selectHome)
@@ -1169,6 +1171,7 @@ private struct AllChatsComposeAccessoryView: View {
       .menuStyle(.button)
       .buttonStyle(.plain)
       .menuIndicator(.hidden)
+      .fixedSize(horizontal: true, vertical: true)
       .disabled(model.isSubmitting || model.isDestinationLocked)
       .inlineTooltip(
         verbatim: String(localized: "Thread destination"),
@@ -1181,6 +1184,7 @@ private struct AllChatsComposeAccessoryView: View {
           AllChatsComposePillLabel(title: model.isPublic ? "Public" : "Private")
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: true)
         .disabled(model.isSubmitting)
         .inlineTooltip(
           verbatim: model.visibilityTooltipTitle,
@@ -1274,6 +1278,7 @@ private struct AgentConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
+    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: tooltipTitle,
@@ -1313,6 +1318,7 @@ private struct AgentModelConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
+    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: "Model",

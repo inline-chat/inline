@@ -414,6 +414,8 @@ struct AgentThreadToolbarIndicator: View {
       .menuStyle(.button)
       .buttonStyle(.plain)
       .menuIndicator(.hidden)
+      // Preserve the ideal width; maxWidth remains only a truncation cap.
+      .fixedSize(horizontal: true, vertical: true)
       .help(tooltip(presentation))
       .accessibilityLabel("Agent session: \(presentation.name)")
     }
