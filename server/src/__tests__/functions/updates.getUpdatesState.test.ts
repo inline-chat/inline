@@ -15,7 +15,6 @@ import {
   users as usersTable,
 } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
-import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -228,12 +227,17 @@ describe("getUpdatesState", () => {
     expect(result.seq).toBe(17)
   })
 
-  test("rejects zero as an explicit discovery date", async () => {
-    const user = await testUtils.createUser("updates-state-invalid-zero@example.com")
+  test("accepts the released zero cursor sentinel as a fresh checkpoint", async () => {
+    const user = await testUtils.createUser("updates-state-legacy-zero@example.com")
 
-    await expect(
-      getUpdatesState({ date: 0n }, testUtils.functionContext({ userId: user.id })),
-    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    const result = await getUpdatesState(
+      { date: 0n },
+      testUtils.functionContext({ userId: user.id }),
+    )
+
+    expect(result.date).toBeGreaterThan(0n)
+    expect(result.updatesFound).toBe(false)
+    expect(result.seq).toBe(0)
   })
 
   test("fresh checkpoint reconciles a stale user counter with persisted updates", async () => {

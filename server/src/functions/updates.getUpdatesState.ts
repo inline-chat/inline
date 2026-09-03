@@ -42,7 +42,11 @@ export const getUpdatesState = async (
   context: FunctionContext,
 ): Promise<GetUpdatesStateResult> => {
   const startedAt = performance.now()
-  if (input.date !== undefined && input.date <= 0n) {
+  // CLI 0.7.8 encoded its brand-new local cursor sentinel as date=0. Keep
+  // accepting that released bootstrap shape as a fresh checkpoint while new
+  // clients use the canonical absent date.
+  const requestedDate = input.date === 0n ? undefined : input.date
+  if (requestedDate !== undefined && requestedDate < 0n) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -71,7 +75,7 @@ export const getUpdatesState = async (
   })
   const userSeq = Math.max(user.updateSeq ?? 0, latestUserUpdate?.seq ?? 0)
 
-  if (input.date !== undefined && input.date > scanStartDate) {
+  if (requestedDate !== undefined && requestedDate > scanStartDate) {
     // A future cursor cannot be clamped and scanned from "now": that would
     // silently skip history before the clamped date. Current Sync recognizes a
     // lower date as an explicit account-repair checkpoint; older clients keep
@@ -87,7 +91,7 @@ export const getUpdatesState = async (
 
   // An absent date requests a fresh checkpoint. Snapshot RPCs seed the resource
   // buckets independently, so bootstrap must not discover or replay old work.
-  if (input.date === undefined) {
+  if (requestedDate === undefined) {
     logGetUpdatesStateTiming({
       result: "checkpoint",
       totalMs: elapsedMs(startedAt),
@@ -105,7 +109,7 @@ export const getUpdatesState = async (
   // Discovery is inclusive. The cursor has already been validated not to be
   // newer than the scan-start watermark, so same-second work can be found on a
   // subsequent scan even when this scan crosses a second boundary.
-  const userLocalDate = decodeDate(input.date)
+  const userLocalDate = decodeDate(requestedDate)
 
   // check latest changes of chats from this user's dialogs for changes compared to date
   // get a list of dialogs for this user
