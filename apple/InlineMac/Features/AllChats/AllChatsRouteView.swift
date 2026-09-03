@@ -16,6 +16,7 @@ struct AllChatsRouteView: View {
   @ObservedObject private var settings = AppSettings.shared
   @State private var rowLayout: AllChatsRowLayout = .twoLine
   @State private var listFilter: AllChatsListFilter = .all
+  @State private var confirmationPresentation = AllChatsConfirmationPresentation()
   @AppStorage private var pinnedExpanded: Bool
   @AppStorage private var selectedSpaceIDValue: String
   @AppStorage private var excludedHomeSpaceIDsValue: String
@@ -139,6 +140,22 @@ struct AllChatsRouteView: View {
       guard filter == .archived else { return }
       closeArchiveFilter()
     }
+    .alert(
+      confirmationPresentation.request?.title ?? "Confirm",
+      isPresented: $confirmationPresentation.isPresented,
+      presenting: confirmationPresentation.request
+    ) { request in
+      Button("Cancel", role: .cancel) {
+        confirmationPresentation.dismiss()
+      }
+
+      Button(request.actionTitle, role: .destructive) {
+        confirmationPresentation.dismiss()
+        perform(request)
+      }
+    } message: { request in
+      Text(request.message)
+    }
   }
 
   private func chatList(presentation: AllChatsPresentation) -> some View {
@@ -171,6 +188,9 @@ struct AllChatsRouteView: View {
         layout: rowLayout,
         unreadBadgeStyle: settings.unreadBadgeStyle,
         switchToSpace: openSpace,
+        requestConfirmation: { confirmation in
+          present(confirmation, for: item)
+        },
         action: {
           open(item)
         }
@@ -310,6 +330,75 @@ struct AllChatsRouteView: View {
     } else {
       nav.replace(.allChats)
     }
+  }
+
+  private func present(_ confirmation: AllChatsRowConfirmation, for item: AllChatsItem) {
+    confirmationPresentation.present(
+      AllChatsConfirmationRequest(confirmation: confirmation, item: item)
+    )
+  }
+
+  private func perform(_ request: AllChatsConfirmationRequest) {
+    switch request.confirmation {
+    case .archive:
+      archive(request)
+    case let .destructive(action):
+      performDestructiveAction(action, peer: request.peer)
+    }
+  }
+
+  private func archive(_ request: AllChatsConfirmationRequest) {
+    Task(priority: .userInitiated) {
+      do {
+        if let dependencies {
+          try await dependencies.appUndo.archiveChat(peer: request.peer, spaceID: request.spaceID)
+        } else {
+          try await DataManager.shared.updateDialog(
+            peerId: request.peer,
+            archived: true,
+            spaceId: request.spaceID,
+            deleteEmptyThreadIfArchiving: false
+          )
+        }
+
+        navigateOutIfSelected(request.peer)
+      } catch {
+        Log.shared.error("Failed to update archive state", error: error)
+      }
+    }
+  }
+
+  @MainActor
+  private func performDestructiveAction(_ action: ChatDestructiveAction, peer: Peer) {
+    ChatDestructiveActionRunner.perform(action, peer: peer, dependencies: dependencies) {
+      navigateOutIfSelected(peer)
+    }
+  }
+
+  @MainActor
+  private func navigateOutIfSelected(_ peer: Peer) {
+    guard isSelectedInCurrentNavigation(peer) else { return }
+
+    dependencies?.nav2?.navigate(to: .empty)
+    dependencies?.nav3?.open(.empty)
+    nav.open(.empty)
+  }
+
+  @MainActor
+  private func isSelectedInCurrentNavigation(_ peer: Peer) -> Bool {
+    if nav.currentRoute.selectedPeer == peer {
+      return true
+    }
+
+    if dependencies?.nav3?.currentRoute.selectedPeer == peer {
+      return true
+    }
+
+    if case let .chat(selectedPeer)? = dependencies?.nav2?.currentRoute, selectedPeer == peer {
+      return true
+    }
+
+    return false
   }
 
   private var previousRoute: Nav3Route? {
@@ -917,7 +1006,7 @@ private struct NewThreadListRow: View {
   }
 }
 
-private enum AllChatsRowConfirmation {
+private enum AllChatsRowConfirmation: Equatable {
   case archive
   case destructive(ChatDestructiveAction)
 
@@ -949,6 +1038,53 @@ private enum AllChatsRowConfirmation {
   }
 }
 
+private struct AllChatsConfirmationRequest: Equatable {
+  let confirmation: AllChatsRowConfirmation
+  let peer: Peer
+  let chatTitle: String
+  let spaceID: Int64?
+
+  init(confirmation: AllChatsRowConfirmation, item: AllChatsItem) {
+    self.confirmation = confirmation
+    peer = item.peerId
+    chatTitle = item.title
+    spaceID = item.spaceId
+  }
+
+  var title: String {
+    confirmation.title
+  }
+
+  var actionTitle: String {
+    confirmation.actionTitle
+  }
+
+  var message: String {
+    confirmation.message(chatTitle: chatTitle)
+  }
+}
+
+private struct AllChatsConfirmationPresentation {
+  var request: AllChatsConfirmationRequest?
+
+  var isPresented: Bool {
+    get { request != nil }
+    set {
+      if newValue == false {
+        request = nil
+      }
+    }
+  }
+
+  mutating func present(_ request: AllChatsConfirmationRequest) {
+    self.request = request
+  }
+
+  mutating func dismiss() {
+    request = nil
+  }
+}
+
 private struct ChatListRow: View {
   let item: AllChatsItem
   let selected: Bool
@@ -956,13 +1092,12 @@ private struct ChatListRow: View {
   let layout: AllChatsRowLayout
   let unreadBadgeStyle: UnreadBadgeStyle
   let switchToSpace: (Int64) -> Void
+  let requestConfirmation: (AllChatsRowConfirmation) -> Void
   let action: () -> Void
 
   @Environment(\.dependencies) private var dependencies
-  @Environment(\.nav) private var nav
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered = false
-  @State private var pendingConfirmation: AllChatsRowConfirmation?
   @State private var showsRenameSheet = false
 
   private static let iconSize: CGFloat = 30
@@ -1001,16 +1136,6 @@ private struct ChatListRow: View {
       chatIsPublic: item.chatIsPublic,
       currentUserId: dependencies?.auth.getCurrentUserId()
     )
-  }
-
-  private var destructiveConfirmationPresented: Binding<Bool> {
-    Binding {
-      pendingConfirmation != nil
-    } set: { isPresented in
-      if isPresented == false {
-        pendingConfirmation = nil
-      }
-    }
   }
 
   var body: some View {
@@ -1099,13 +1224,13 @@ private struct ChatListRow: View {
 
       if item.archived {
         Button {
-          toggleArchive()
+          unarchive()
         } label: {
           Label("Unarchive", systemImage: "archivebox")
         }
       } else {
         Button(role: .destructive) {
-          pendingConfirmation = .archive
+          requestConfirmation(.archive)
         } label: {
           Label("Archive", systemImage: "archivebox")
         }
@@ -1115,26 +1240,11 @@ private struct ChatListRow: View {
         Divider()
 
         Button(role: .destructive) {
-          pendingConfirmation = .destructive(destructiveAction)
+          requestConfirmation(.destructive(destructiveAction))
         } label: {
           Label(destructiveAction.title, systemImage: destructiveAction.systemImage)
         }
       }
-    }
-    .alert(
-      pendingConfirmation?.title ?? "Confirm",
-      isPresented: destructiveConfirmationPresented,
-      presenting: pendingConfirmation
-    ) { confirmation in
-      Button("Cancel", role: .cancel) {
-        pendingConfirmation = nil
-      }
-
-      Button(confirmation.actionTitle, role: .destructive) {
-        perform(confirmation)
-      }
-    } message: { confirmation in
-      Text(confirmation.message(chatTitle: item.title))
     }
     .sheet(isPresented: $showsRenameSheet) {
       RenameChatSheet(peer: peerId, initialTitle: item.title)
@@ -1382,75 +1492,18 @@ private struct ChatListRow: View {
     }
   }
 
-  private func toggleArchive() {
+  private func unarchive() {
     Task(priority: .userInitiated) {
       do {
-        if item.archived {
-          try await DataManager.shared.updateDialog(
-            peerId: peerId,
-            archived: false,
-            spaceId: item.spaceId
-          )
-        } else if let dependencies {
-          try await dependencies.appUndo.archiveChat(peer: peerId, spaceID: item.spaceId)
-        } else {
-          try await DataManager.shared.updateDialog(
-            peerId: peerId,
-            archived: true,
-            spaceId: item.spaceId,
-            deleteEmptyThreadIfArchiving: false
-          )
-        }
-
-        if item.archived == false, isSelectedInCurrentNavigation {
-          await MainActor.run {
-            nav.open(.empty)
-            dependencies?.nav2?.navigate(to: .empty)
-            dependencies?.nav3?.open(.empty)
-          }
-        }
+        try await DataManager.shared.updateDialog(
+          peerId: peerId,
+          archived: false,
+          spaceId: item.spaceId
+        )
       } catch {
         Log.shared.error("Failed to update archive state", error: error)
       }
     }
-  }
-
-  private func perform(_ confirmation: AllChatsRowConfirmation) {
-    pendingConfirmation = nil
-
-    switch confirmation {
-    case .archive:
-      toggleArchive()
-    case let .destructive(action):
-      performDestructiveAction(action)
-    }
-  }
-
-  @MainActor
-  private func performDestructiveAction(_ action: ChatDestructiveAction) {
-    ChatDestructiveActionRunner.perform(action, peer: peerId, dependencies: dependencies) {
-      if isSelectedInCurrentNavigation {
-        dependencies?.nav2?.navigate(to: .empty)
-        dependencies?.nav3?.open(.empty)
-        nav.open(.empty)
-      }
-    }
-  }
-
-  private var isSelectedInCurrentNavigation: Bool {
-    if nav.currentRoute.selectedPeer == peerId {
-      return true
-    }
-
-    if dependencies?.nav3?.currentRoute.selectedPeer == peerId {
-      return true
-    }
-
-    if case let .chat(peer)? = dependencies?.nav2?.currentRoute, peer == peerId {
-      return true
-    }
-
-    return false
   }
 }
 

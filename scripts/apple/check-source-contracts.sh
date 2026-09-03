@@ -104,6 +104,40 @@ if [[ -n "$onboarding_preview_source" ]] &&
   failures=1
 fi
 
+all_chats_path="apple/InlineMac/Features/AllChats/AllChatsRouteView.swift"
+all_chats_source="$(read_source "$all_chats_path" 2>/dev/null || true)"
+all_chats_route_source="$(
+  printf '%s\n' "$all_chats_source" |
+    sed -n '/^struct AllChatsRouteView: View {/,/^private struct AllChatsViewOptionsMenu: View {/p'
+)"
+all_chats_row_source="$(
+  printf '%s\n' "$all_chats_source" |
+    sed -n '/^private struct ChatListRow: View {/,/^private struct AllChatsPreviewLine: View {/p'
+)"
+if [[ -n "$all_chats_source" ]]; then
+  if ! printf '%s\n' "$all_chats_source" |
+    grep -F '@State private var confirmationPresentation = AllChatsConfirmationPresentation()' >/dev/null; then
+    printf 'error: %s must keep destructive confirmation state on the stable route\n' "$all_chats_path" >&2
+    failures=1
+  fi
+
+  if ! printf '%s\n' "$all_chats_route_source" | grep -F '.alert(' >/dev/null; then
+    printf 'error: %s must present destructive confirmations from AllChatsRouteView\n' "$all_chats_path" >&2
+    failures=1
+  fi
+
+  if printf '%s\n' "$all_chats_row_source" | grep -F '.alert(' >/dev/null; then
+    printf 'error: %s ChatListRow must not own alert presentation that can remove the row\n' "$all_chats_path" >&2
+    failures=1
+  fi
+
+  if ! printf '%s\n' "$all_chats_row_source" |
+    grep -F 'let requestConfirmation: (AllChatsRowConfirmation) -> Void' >/dev/null; then
+    printf 'error: %s ChatListRow must submit confirmation requests to its stable owner\n' "$all_chats_path" >&2
+    failures=1
+  fi
+fi
+
 if git_grep --quiet --fixed-strings 'Not Loaded Title' -- 'apple/**/*.swift'; then
   printf 'error: Apple product UI must not expose the Not Loaded Title developer placeholder\n' >&2
   failures=1
