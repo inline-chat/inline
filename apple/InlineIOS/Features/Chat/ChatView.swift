@@ -327,11 +327,7 @@ struct ChatView: View {
     .onReceive(
       NotificationCenter.default.publisher(for: .botAgentMentionTapped)
     ) { notification in
-      guard !preview else { return }
-      guard let target = notification.userInfo?["target"] as? BotAgentMentionTarget,
-            target.peer == peerId
-      else { return }
-      botAgentMentionTarget = target
+      handleBotAgentMention(notification)
     }
     .sheet(item: $botAgentMentionTarget) { target in
       BotAgentProfileSheet(target: target)
@@ -349,64 +345,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardedMessage"))
     ) { notification in
-      guard canHandleGlobalNavigation else { return }
-      guard let messageId = notification.userInfo?["messageId"] as? Int64 else { return }
-
-      let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
-        .user(id: userId)
-      } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
-        .thread(id: threadId)
-      } else {
-        nil
-      }
-
-      guard let targetPeer else { return }
-
-      if targetPeer == peerId, let chatId = fullChatViewModel.chat?.id {
-        if router.tracksHistory {
-          router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
-        } else {
-          postScrollToMessage(messageId, chatId: chatId)
-        }
-        return
-      }
-
-      Task { @MainActor in
-        if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          guard canHandleGlobalNavigation else { return }
-          if router.tracksHistory {
-            router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
-          } else {
-            router.push(.chat(peer: targetPeer))
-            postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
-          }
-          return
-        }
-
-        do {
-          _ = try await realtimeV2.send(.getChat(peer: targetPeer))
-        } catch {
-          Log.shared.error("NavigateToForwardedMessage: getChat failed for peer \(targetPeer)", error: error)
-        }
-
-        if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          guard canHandleGlobalNavigation else { return }
-          if router.tracksHistory {
-            router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
-          } else {
-            router.push(.chat(peer: targetPeer))
-            postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
-          }
-          return
-        }
-
-        ToastManager.shared.showToast(
-          "You don't have access to that chat",
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
-        Log.shared.error("NavigateToForwardedMessage: missing chat for peer \(targetPeer)")
-      }
+      handleNavigateToForwardedMessage(notification)
     }
     .onReceive(
       NotificationCenter.default
@@ -508,6 +447,75 @@ struct ChatView: View {
       target.spaceId = contextSpaceId ?? fullChatViewModel.chat?.spaceId
     }
     userGroupMentionTarget = target
+  }
+
+  private func handleBotAgentMention(_ notification: Notification) {
+    guard !preview else { return }
+    guard let target = notification.userInfo?["target"] as? BotAgentMentionTarget,
+          target.peer == peerId
+    else { return }
+    botAgentMentionTarget = target
+  }
+
+  private func handleNavigateToForwardedMessage(_ notification: Notification) {
+    guard canHandleGlobalNavigation else { return }
+    guard let messageId = notification.userInfo?["messageId"] as? Int64 else { return }
+
+    let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
+      .user(id: userId)
+    } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
+      .thread(id: threadId)
+    } else {
+      nil
+    }
+
+    guard let targetPeer else { return }
+
+    if targetPeer == peerId, let chatId = fullChatViewModel.chat?.id {
+      if router.tracksHistory {
+        router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+      } else {
+        postScrollToMessage(messageId, chatId: chatId)
+      }
+      return
+    }
+
+    Task { @MainActor in
+      if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
+        guard canHandleGlobalNavigation else { return }
+        if router.tracksHistory {
+          router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+        } else {
+          router.push(.chat(peer: targetPeer))
+          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+        }
+        return
+      }
+
+      do {
+        _ = try await realtimeV2.send(.getChat(peer: targetPeer))
+      } catch {
+        Log.shared.error("NavigateToForwardedMessage: getChat failed for peer \(targetPeer)", error: error)
+      }
+
+      if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
+        guard canHandleGlobalNavigation else { return }
+        if router.tracksHistory {
+          router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+        } else {
+          router.push(.chat(peer: targetPeer))
+          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+        }
+        return
+      }
+
+      ToastManager.shared.showToast(
+        "You don't have access to that chat",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      Log.shared.error("NavigateToForwardedMessage: missing chat for peer \(targetPeer)")
+    }
   }
 
   @MainActor
