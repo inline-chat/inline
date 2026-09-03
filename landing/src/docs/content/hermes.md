@@ -22,6 +22,12 @@ Install the adapter (plugin):
 npm install -g @inline-chat/hermes-agent-adapter
 ```
 
+### Version Match
+
+| Hermes Agent                 | Inline adapter |
+| ---------------------------- | -------------- |
+| `>=0.17.0` (tested with `0.21.0`) | `0.0.15`       |
+
 Install the plugin onto Hermes:
 
 ```bash
