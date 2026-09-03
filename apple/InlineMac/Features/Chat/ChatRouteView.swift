@@ -141,10 +141,13 @@ struct ChatRouteView: View {
         chatToolbarState.dismissPresentation()
       }
       .task(id: peer.toString(), priority: .utility) {
-        BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
         agentThreadToolbarModel.start(database: dependencies.database)
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
         botChatSettingsCoordinator.startObservingDiscoveryScope(in: dependencies.database)
+      }
+      .task(id: toolbarDialog?.id, priority: .utility) {
+        guard toolbarDialog != nil else { return }
+        BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
         await botChatSettingsCoordinator.warmUp()
       }
       .onDisappear {

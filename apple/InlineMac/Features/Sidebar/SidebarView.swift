@@ -3090,9 +3090,6 @@ struct SidebarView: View {
       nav.open(.chat(peer: peer))
       return
     }
-    Task(priority: .userInitiated) {
-      await dependencies.realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
-    }
     dependencies.requestOpenChat(peer: peer)
   }
 

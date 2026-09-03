@@ -232,8 +232,8 @@ struct ChatView: View {
     .task {
       await fetchChatIfNeeded()
     }
-    .task(id: peerId.toString()) {
-      guard !preview else { return }
+    .task(id: fullChatViewModel.chatItem?.dialog.id) {
+      guard !preview, fullChatViewModel.chatItem?.dialog != nil else { return }
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
       await botChatSettingsCoordinator.warmUp()
     }

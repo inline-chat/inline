@@ -148,6 +148,60 @@ if git_grep --quiet --fixed-strings 'createPrivateChat' -- 'apple/**/*.swift'; t
   failures=1
 fi
 
+sidebar_path="apple/InlineMac/Features/Sidebar/SidebarView.swift"
+sidebar_source="$(read_source "$sidebar_path" 2>/dev/null || true)"
+dm_founder_source="$(
+  printf '%s\n' "$sidebar_source" |
+    sed -n '/^  private func dmFounder() {/,/^  private func openWhatsNew() {/p'
+)"
+if [[ -n "$dm_founder_source" ]]; then
+  if printf '%s\n' "$dm_founder_source" | grep -F 'updateDialogOpen' >/dev/null; then
+    printf 'error: %s dmFounder must let the normal V3 chat loader own first-DM materialization and placement\n' "$sidebar_path" >&2
+    failures=1
+  fi
+
+  if ! printf '%s\n' "$dm_founder_source" | grep -F 'dependencies.requestOpenChat(peer: peer)' >/dev/null; then
+    printf 'error: %s dmFounder must navigate through the normal chat-loader path\n' "$sidebar_path" >&2
+    failures=1
+  fi
+fi
+
+chat_route_path="apple/InlineMac/Features/Chat/ChatRouteView.swift"
+chat_route_source="$(read_source "$chat_route_path" 2>/dev/null || true)"
+peer_ready_toolbar_source="$(
+  printf '%s\n' "$chat_route_source" |
+    sed -n '/\.task(id: toolbarDialog?.id, priority: .utility) {/,/\.onDisappear {/p'
+)"
+if [[ -n "$chat_route_source" ]]; then
+  for fragment in \
+    'guard toolbarDialog != nil else { return }' \
+    'BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)' \
+    'await botChatSettingsCoordinator.warmUp()'; do
+    if ! printf '%s\n' "$peer_ready_toolbar_source" | grep -F "$fragment" >/dev/null; then
+      printf 'error: %s must defer peer-scoped bot toolbar loads until the canonical Dialog exists: %s\n' "$chat_route_path" "$fragment" >&2
+      failures=1
+    fi
+  done
+fi
+
+ios_chat_path="apple/InlineIOS/Features/Chat/ChatView.swift"
+ios_chat_source="$(read_source "$ios_chat_path" 2>/dev/null || true)"
+ios_peer_ready_settings_source="$(
+  printf '%s\n' "$ios_chat_source" |
+    sed -n '/\.task(id: fullChatViewModel.chatItem?.dialog.id) {/,/\.onReceive(TranslationState.shared.subject)/p'
+)"
+if [[ -n "$ios_chat_source" ]]; then
+  for fragment in \
+    'guard !preview, fullChatViewModel.chatItem?.dialog != nil else { return }' \
+    'botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)' \
+    'await botChatSettingsCoordinator.warmUp()'; do
+    if ! printf '%s\n' "$ios_peer_ready_settings_source" | grep -F "$fragment" >/dev/null; then
+      printf 'error: %s must defer bot-settings discovery until the canonical Dialog exists: %s\n' "$ios_chat_path" "$fragment" >&2
+      failures=1
+    fi
+  done
+fi
+
 require_ordered_fragments() {
   local path="$1"
   shift
