@@ -52,7 +52,9 @@ struct AgentSetupWizardContentView: View {
       AgentSetupHarnessPickerScreen(
         installedTargets: model.installedTargets,
         missingTargets: model.missingTargets,
-        selectedTargetID: $model.selectedTargetID
+        selectedTargetID: $model.selectedTargetID,
+        documentationURL: model.documentationURL,
+        agentInstructionsURL: model.agentInstructionsURL
       )
     case .noHarnesses:
       AgentSetupNoHarnessesScreen(targets: model.missingTargets)
@@ -239,6 +241,8 @@ private struct AgentSetupHarnessPickerScreen: View {
   let installedTargets: [AgentHarnessTarget]
   let missingTargets: [AgentHarnessTarget]
   @Binding var selectedTargetID: String?
+  let documentationURL: URL
+  let agentInstructionsURL: URL
 
   var body: some View {
     VStack(spacing: 0) {
@@ -249,8 +253,12 @@ private struct AgentSetupHarnessPickerScreen: View {
       )
 
       List(installedTargets, selection: $selectedTargetID) { target in
-        AgentSetupHarnessRow(target: target)
-          .tag(target.id)
+        AgentSetupHarnessRow(
+          target: target,
+          documentationURL: documentationURL,
+          agentInstructionsURL: agentInstructionsURL
+        )
+        .tag(target.id)
       }
       .listStyle(.inset)
       .scrollContentBackground(.hidden)
@@ -269,6 +277,8 @@ private struct AgentSetupHarnessPickerScreen: View {
 
 private struct AgentSetupHarnessRow: View {
   let target: AgentHarnessTarget
+  let documentationURL: URL
+  let agentInstructionsURL: URL
 
   var body: some View {
     HStack(spacing: 12) {
@@ -277,15 +287,128 @@ private struct AgentSetupHarnessRow: View {
         fallbackSystemImage: target.family == .gateway ? "network" : "terminal"
       )
       VStack(alignment: .leading, spacing: 2) {
-        Text(target.displayName)
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+          Text(target.displayName)
+          if let maturityLabel {
+            Text(maturityLabel)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
         Text(target.family == .gateway ? "Gateway integration" : "Local coding harness")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+
+      AgentSetupHarnessResourcesMenu(
+        target: target,
+        documentationURL: documentationURL,
+        agentInstructionsURL: agentInstructionsURL
+      )
     }
     .padding(.vertical, 5)
   }
+
+  private var maturityLabel: LocalizedStringResource? {
+    switch target.id {
+      case "codex":
+        "(Alpha)"
+      case "hermes", "opencode", "claude":
+        "(Beta)"
+      case "amp":
+        "(Experimental)"
+      default:
+        nil
+    }
+  }
+}
+
+private struct AgentSetupHarnessResourcesMenu: View {
+  let target: AgentHarnessTarget
+  let documentationURL: URL
+  let agentInstructionsURL: URL
+
+  var body: some View {
+    let links = resources
+
+    Menu {
+      Link(destination: links.guideURL) {
+        Label("Open Setup Guide", systemImage: "book")
+      }
+
+      Button("Copy Setup Prompt", systemImage: "doc.on.doc", action: copySetupPrompt)
+
+      if links.npmPackageURL != nil || links.sourceURL != nil {
+        Divider()
+      }
+
+      if let npmPackageURL = links.npmPackageURL {
+        Link(destination: npmPackageURL) {
+          Label("View on npm", systemImage: "shippingbox")
+        }
+      }
+
+      if let sourceURL = links.sourceURL {
+        Link(destination: sourceURL) {
+          Label("View Source Code", systemImage: "chevron.left.forwardslash.chevron.right")
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+        .foregroundStyle(.secondary)
+        .contentShape(.circle)
+        .frame(width: 18, height: 18)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .fixedSize()
+    .help("More about \(target.displayName)")
+    .accessibilityLabel("More about \(target.displayName)")
+  }
+
+  private var resources: AgentSetupHarnessResources {
+    switch target.id {
+      case "openclaw":
+        AgentSetupHarnessResources(
+          guideURL: URL(string: "https://inline.chat/docs/openclaw")!,
+          instructionsURL: URL(string: "https://inline.chat/docs/openclaw.md")!,
+          npmPackageURL: URL(string: "https://www.npmjs.com/package/@inline-openclaw/inline")!,
+          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/openclaw")!
+        )
+      case "hermes":
+        AgentSetupHarnessResources(
+          guideURL: URL(string: "https://inline.chat/docs/hermes")!,
+          instructionsURL: URL(string: "https://inline.chat/docs/hermes.md")!,
+          npmPackageURL: URL(string: "https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter")!,
+          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/hermes-agent")!
+        )
+      default:
+        AgentSetupHarnessResources(
+          guideURL: documentationURL,
+          instructionsURL: agentInstructionsURL,
+          npmPackageURL: nil,
+          sourceURL: target.family == .bridge
+            ? URL(string: "https://github.com/inline-chat/inline/tree/main/cli/src/bridge")!
+            : nil
+        )
+    }
+  }
+
+  private func copySetupPrompt() {
+    let prompt = "Set up my local \(target.displayName) as a bot in Inline:\n\(resources.instructionsURL.absoluteString)"
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(prompt, forType: .string)
+    ToastCenter.shared.showSuccess("Copied setup prompt")
+  }
+}
+
+private struct AgentSetupHarnessResources {
+  let guideURL: URL
+  let instructionsURL: URL
+  let npmPackageURL: URL?
+  let sourceURL: URL?
 }
 
 private struct AgentSetupHarnessIcon: View {

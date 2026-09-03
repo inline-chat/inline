@@ -47,8 +47,7 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
       rootView: AgentSetupWizardView(model: model)
         .environment(dependencies: dependencies.with(appBridge: appBridge))
     )
-    hostingController.sizingOptions = [.preferredContentSize]
-    hostingController.preferredContentSize = Self.contentSize
+    hostingController.sizingOptions = []
     window.contentViewController = hostingController
     window.setContentSize(Self.contentSize)
     window.center()
