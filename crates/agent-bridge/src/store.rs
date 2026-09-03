@@ -99,14 +99,47 @@ pub enum StoreError {
     UnknownInboundState(String),
     #[error("bridge state cannot stage non-terminal inbound state: {0}")]
     InvalidInboundFinalState(String),
-    #[error("bridge terminal message exceeds the durable size limit")]
+    #[error("bridge terminal message is empty")]
     InvalidInboundFinalText,
-    #[error("bridge terminal output attachments exceed the durable size limit")]
-    InvalidInboundOutputAttachments,
+    #[error(
+        "bridge terminal message uses {actual_bytes} bytes, exceeding the {limit_bytes}-byte durable limit"
+    )]
+    InboundFinalTextBytesExceeded {
+        actual_bytes: usize,
+        limit_bytes: usize,
+    },
+    #[error(
+        "bridge terminal message uses {actual_utf16} UTF-16 units, exceeding the {limit_utf16}-unit Inline limit"
+    )]
+    InboundFinalTextUtf16Exceeded {
+        actual_utf16: usize,
+        limit_utf16: usize,
+    },
+    #[error(
+        "bridge terminal output has {actual_count} attachments, exceeding the {limit_count}-attachment durable limit"
+    )]
+    InboundOutputAttachmentCountExceeded {
+        actual_count: usize,
+        limit_count: usize,
+    },
+    #[error(
+        "bridge terminal output attachment metadata uses {actual_bytes} bytes, exceeding the {limit_bytes}-byte durable limit"
+    )]
+    InboundOutputAttachmentBytesExceeded {
+        actual_bytes: usize,
+        limit_bytes: usize,
+    },
     #[error("provider turn has conflicting terminal Inline message identities")]
     AmbiguousInboundTerminalIdentity,
-    #[error("bridge progress ledger exceeds the durable size limit")]
+    #[error("bridge progress ledger is empty")]
     InvalidProgressLedger,
+    #[error(
+        "bridge progress ledger uses {actual_bytes} bytes, exceeding the {limit_bytes}-byte durable limit"
+    )]
+    ProgressLedgerBytesExceeded {
+        actual_bytes: usize,
+        limit_bytes: usize,
+    },
     #[error("bridge state contains an unknown approval state: {0}")]
     UnknownApprovalState(String),
     #[error("bridge state contains an unknown question state: {0}")]

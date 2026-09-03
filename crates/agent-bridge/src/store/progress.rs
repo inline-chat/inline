@@ -4,7 +4,11 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use super::*;
 
-const MAX_PROGRESS_LEDGER_BYTES: usize = 256 * 1024;
+// Verbose progress may span many 100k-UTF-16 Inline messages. Keep a generous
+// in-flight ceiling so the durable recovery snapshot cannot reject ordinary
+// long turns, while still bounding a single provider-controlled database row.
+// The snapshot is removed once the final Inline send commits.
+const MAX_PROGRESS_LEDGER_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DurableProgress {
@@ -20,8 +24,14 @@ impl BridgeStore {
         event_id: &str,
         ledger_json: &str,
     ) -> StoreResult<bool> {
-        if ledger_json.is_empty() || ledger_json.len() > MAX_PROGRESS_LEDGER_BYTES {
+        if ledger_json.is_empty() {
             return Err(StoreError::InvalidProgressLedger);
+        }
+        if ledger_json.len() > MAX_PROGRESS_LEDGER_BYTES {
+            return Err(StoreError::ProgressLedgerBytesExceeded {
+                actual_bytes: ledger_json.len(),
+                limit_bytes: MAX_PROGRESS_LEDGER_BYTES,
+            });
         }
         let connection = self.connection.lock().expect("bridge store poisoned");
         let changed = connection.execute(
@@ -211,5 +221,44 @@ mod tests {
                 .put_inbound_progress_ledger("event-progress", "{}")
                 .expect("completed")
         );
+    }
+
+    #[test]
+    fn progress_ledger_accepts_verbose_continuation_scale() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        store.accept_inbound(&inbound()).expect("accept");
+        store
+            .take_next_inbound(&inbound().binding, 2)
+            .expect("take")
+            .expect("record");
+        let ledger = format!(r#"{{"entries":[{{"text":"{}"}}]}}"#, "x".repeat(700_000));
+
+        assert!(
+            store
+                .put_inbound_progress_ledger("event-progress", &ledger)
+                .expect("large verbose ledger")
+        );
+        assert_eq!(
+            store
+                .inbound_progress("event-progress")
+                .expect("large verbose progress")
+                .ledger_json
+                .as_deref(),
+            Some(ledger.as_str())
+        );
+    }
+
+    #[test]
+    fn progress_ledger_keeps_a_per_turn_storage_ceiling() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        let oversized = "x".repeat(MAX_PROGRESS_LEDGER_BYTES + 1);
+
+        assert!(matches!(
+            store.put_inbound_progress_ledger("event-progress", &oversized),
+            Err(StoreError::ProgressLedgerBytesExceeded {
+                actual_bytes,
+                limit_bytes: MAX_PROGRESS_LEDGER_BYTES,
+            }) if actual_bytes == MAX_PROGRESS_LEDGER_BYTES + 1
+        ));
     }
 }

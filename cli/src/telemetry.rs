@@ -4,6 +4,7 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::errors::JsonCliError;
+use inline_agent_bridge::StoreError;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_RUNTIME_MESSAGE: &str = "Inline CLI bridge runtime failed";
@@ -12,6 +13,13 @@ const PANIC_MESSAGE: &str = "Inline CLI process panicked";
 static PANIC_HOOK: Once = Once::new();
 
 pub(crate) struct TelemetryGuard(Option<sentry::ClientInitGuard>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BridgeRuntimeLimit {
+    actual: u64,
+    maximum: u64,
+    unit: &'static str,
+}
 
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
@@ -131,12 +139,14 @@ pub(crate) fn report_bridge_runtime_error(
     if attempt.is_some_and(|attempt| !should_report_bridge_attempt(attempt)) {
         return;
     }
+    let failure = classify_bridge_runtime_failure(error);
     capture_bridge_runtime_event(
         target,
         phase,
-        classify_bridge_runtime_failure(error),
+        failure,
         attempt,
         Some(&error.to_string()),
+        bridge_runtime_limit(error),
     );
 }
 
@@ -147,11 +157,12 @@ pub(crate) fn report_bridge_provider_exit(target: &str) {
         "provider_process_exited",
         None,
         None,
+        None,
     );
 }
 
 pub(crate) fn report_bridge_configuration_fallback(target: &str, failure: &'static str) {
-    capture_bridge_runtime_event(target, "agent_configuration", failure, None, None);
+    capture_bridge_runtime_event(target, "agent_configuration", failure, None, None, None);
 }
 
 pub(crate) fn bridge_error_requires_provider_restart(
@@ -169,6 +180,7 @@ fn capture_bridge_runtime_event(
     failure: &'static str,
     attempt: Option<u32>,
     failure_text: Option<&str>,
+    limit: Option<BridgeRuntimeLimit>,
 ) {
     let mut event = sentry::protocol::Event {
         message: Some(BRIDGE_RUNTIME_MESSAGE.into()),
@@ -191,6 +203,15 @@ fn capture_bridge_runtime_event(
             crate::diagnostics::safe_text(failure_text).into(),
         );
     }
+    if let Some(limit) = limit {
+        event.tags.insert("limit_unit".into(), limit.unit.into());
+        event
+            .extra
+            .insert("limit_actual".into(), limit.actual.into());
+        event
+            .extra
+            .insert("limit_maximum".into(), limit.maximum.into());
+    }
     sentry::capture_event(event);
 }
 
@@ -204,6 +225,22 @@ fn classify_bridge_runtime_failure(error: &(dyn std::error::Error + 'static)) ->
         .is_some_and(|error| error.kind() == std::io::ErrorKind::ConnectionAborted)
     {
         return "provider_epoch_ended";
+    }
+    if let Some(error) = error.downcast_ref::<StoreError>() {
+        return match error {
+            StoreError::ProgressLedgerBytesExceeded { .. } => "progress_ledger_size_limit",
+            StoreError::InboundFinalTextBytesExceeded { .. } => "terminal_text_byte_limit",
+            StoreError::InboundFinalTextUtf16Exceeded { .. } => "terminal_text_utf16_limit",
+            StoreError::InboundOutputAttachmentCountExceeded { .. } => {
+                "terminal_attachment_count_limit"
+            }
+            StoreError::InboundOutputAttachmentBytesExceeded { .. } => {
+                "terminal_attachment_metadata_limit"
+            }
+            StoreError::InvalidProgressLedger => "progress_ledger_invalid",
+            StoreError::InvalidInboundFinalText => "terminal_text_invalid",
+            _ => "local_store",
+        };
     }
     let message = error.to_string().to_ascii_lowercase();
     if message.contains("agent configuration is unavailable") {
@@ -251,6 +288,38 @@ fn classify_bridge_runtime_failure(error: &(dyn std::error::Error + 'static)) ->
     } else {
         "unknown"
     }
+}
+
+fn bridge_runtime_limit(error: &(dyn std::error::Error + 'static)) -> Option<BridgeRuntimeLimit> {
+    let error = error.downcast_ref::<StoreError>()?;
+    let (actual, maximum, unit) = match error {
+        StoreError::ProgressLedgerBytesExceeded {
+            actual_bytes,
+            limit_bytes,
+        }
+        | StoreError::InboundFinalTextBytesExceeded {
+            actual_bytes,
+            limit_bytes,
+        }
+        | StoreError::InboundOutputAttachmentBytesExceeded {
+            actual_bytes,
+            limit_bytes,
+        } => (*actual_bytes, *limit_bytes, "bytes"),
+        StoreError::InboundFinalTextUtf16Exceeded {
+            actual_utf16,
+            limit_utf16,
+        } => (*actual_utf16, *limit_utf16, "utf16_units"),
+        StoreError::InboundOutputAttachmentCountExceeded {
+            actual_count,
+            limit_count,
+        } => (*actual_count, *limit_count, "attachments"),
+        _ => return None,
+    };
+    Some(BridgeRuntimeLimit {
+        actual: u64::try_from(actual).unwrap_or(u64::MAX),
+        maximum: u64::try_from(maximum).unwrap_or(u64::MAX),
+        unit,
+    })
 }
 
 fn install_panic_hook() {
@@ -317,6 +386,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         "failure",
         "attempt",
         "command",
+        "limit_unit",
     ] {
         if let Some(value) = event.tags.get(name) {
             safe.tags.insert(name.into(), safe_code(value));
@@ -331,6 +401,11 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         if !failure_text.is_empty() {
             safe.extra
                 .insert("failure_text".into(), failure_text.into());
+        }
+    }
+    for name in ["limit_actual", "limit_maximum"] {
+        if let Some(value) = event.extra.get(name).and_then(|value| value.as_u64()) {
+            safe.extra.insert(name.into(), value.into());
         }
     }
     safe.tags.insert("os".into(), std::env::consts::OS.into());
@@ -423,6 +498,7 @@ mod tests {
             "agent_configuration_catalog_unavailable".into(),
         );
         event.tags.insert("attempt".into(), "8".into());
+        event.tags.insert("limit_unit".into(), "bytes".into());
         event
             .tags
             .insert("session_id".into(), "private-session".into());
@@ -430,6 +506,10 @@ mod tests {
             "failure_text".into(),
             "Claude login failed at /Users/private/project\nTOKEN=private-value".into(),
         );
+        event.extra.insert("limit_actual".into(), 700_000.into());
+        event
+            .extra
+            .insert("limit_maximum".into(), 16_777_216.into());
 
         let safe = allowlisted_event(event);
         let encoded = serde_json::to_string(&safe).unwrap();
@@ -447,8 +527,68 @@ mod tests {
         );
         assert!(encoded.contains("agent_configuration_catalog_unavailable"));
         assert!(encoded.contains("Claude login failed"));
+        assert_eq!(
+            safe.tags.get("limit_unit").map(String::as_str),
+            Some("bytes")
+        );
+        assert_eq!(
+            safe.extra
+                .get("limit_actual")
+                .and_then(|value| value.as_u64()),
+            Some(700_000)
+        );
+        assert_eq!(
+            safe.extra
+                .get("limit_maximum")
+                .and_then(|value| value.as_u64()),
+            Some(16_777_216)
+        );
         assert!(!encoded.contains("private"));
         assert!(!encoded.contains("session_id"));
+    }
+
+    #[test]
+    fn bridge_store_limits_have_stable_groups_and_numeric_diagnostics() {
+        let progress = StoreError::ProgressLedgerBytesExceeded {
+            actual_bytes: 16_777_217,
+            limit_bytes: 16_777_216,
+        };
+        assert_eq!(
+            classify_bridge_runtime_failure(&progress),
+            "progress_ledger_size_limit"
+        );
+        assert_eq!(
+            bridge_runtime_limit(&progress),
+            Some(BridgeRuntimeLimit {
+                actual: 16_777_217,
+                maximum: 16_777_216,
+                unit: "bytes",
+            })
+        );
+
+        let terminal = StoreError::InboundFinalTextUtf16Exceeded {
+            actual_utf16: 100_001,
+            limit_utf16: 100_000,
+        };
+        assert_eq!(
+            classify_bridge_runtime_failure(&terminal),
+            "terminal_text_utf16_limit"
+        );
+        assert_eq!(
+            bridge_runtime_limit(&terminal),
+            Some(BridgeRuntimeLimit {
+                actual: 100_001,
+                maximum: 100_000,
+                unit: "utf16_units",
+            })
+        );
+
+        let invalid = StoreError::InvalidProgressLedger;
+        assert_eq!(
+            classify_bridge_runtime_failure(&invalid),
+            "progress_ledger_invalid"
+        );
+        assert_eq!(bridge_runtime_limit(&invalid), None);
     }
 
     #[test]

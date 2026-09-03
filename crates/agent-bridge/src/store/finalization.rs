@@ -5,7 +5,10 @@ use rusqlite::{Connection, params};
 use super::*;
 use crate::{InstallationId, OutputAttachment};
 
-const MAX_FINAL_TEXT_BYTES: usize = 128 * 1024;
+// Match the server's complete text-message envelope so durable final-send
+// recovery never rejects a payload that Inline itself accepts.
+const MAX_FINAL_TEXT_BYTES: usize = 400_000;
+const MAX_FINAL_TEXT_UTF16: usize = 100_000;
 const MAX_OUTPUT_ATTACHMENTS: usize = 8;
 const MAX_OUTPUT_ATTACHMENTS_JSON_BYTES: usize = 64 * 1024;
 
@@ -81,18 +84,37 @@ impl BridgeStore {
                 state.as_str().to_string(),
             ));
         }
-        if final_text.is_empty() || final_text.len() > MAX_FINAL_TEXT_BYTES {
+        if final_text.is_empty() {
             return Err(StoreError::InvalidInboundFinalText);
         }
+        if final_text.len() > MAX_FINAL_TEXT_BYTES {
+            return Err(StoreError::InboundFinalTextBytesExceeded {
+                actual_bytes: final_text.len(),
+                limit_bytes: MAX_FINAL_TEXT_BYTES,
+            });
+        }
+        let final_text_utf16 = final_text.encode_utf16().count();
+        if final_text_utf16 > MAX_FINAL_TEXT_UTF16 {
+            return Err(StoreError::InboundFinalTextUtf16Exceeded {
+                actual_utf16: final_text_utf16,
+                limit_utf16: MAX_FINAL_TEXT_UTF16,
+            });
+        }
         if output_attachments.len() > MAX_OUTPUT_ATTACHMENTS {
-            return Err(StoreError::InvalidInboundOutputAttachments);
+            return Err(StoreError::InboundOutputAttachmentCountExceeded {
+                actual_count: output_attachments.len(),
+                limit_count: MAX_OUTPUT_ATTACHMENTS,
+            });
         }
         if agent_output_session_id.is_some_and(|id| id <= 0) {
             return Ok(false);
         }
         let output_attachments_json = serde_json::to_string(output_attachments)?;
         if output_attachments_json.len() > MAX_OUTPUT_ATTACHMENTS_JSON_BYTES {
-            return Err(StoreError::InvalidInboundOutputAttachments);
+            return Err(StoreError::InboundOutputAttachmentBytesExceeded {
+                actual_bytes: output_attachments_json.len(),
+                limit_bytes: MAX_OUTPUT_ATTACHMENTS_JSON_BYTES,
+            });
         }
         let connection = self.connection.lock().expect("bridge store poisoned");
         let changed = connection.execute(
@@ -300,10 +322,13 @@ impl BridgeStore {
     }
 
     /// Commits a staged result only after its final Inline message was sent or
-    /// found through the existing idempotent send transaction.
+    /// found through the existing idempotent send transaction. Progress state
+    /// is no longer needed after that boundary because Inline owns the visible
+    /// messages and there is no pending final send left to reconstruct.
     pub fn commit_inbound_final_send(&self, event_id: &str) -> StoreResult<bool> {
-        let connection = self.connection.lock().expect("bridge store poisoned");
-        let changed = connection.execute(
+        let mut connection = self.connection.lock().expect("bridge store poisoned");
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
             "UPDATE inbound_directions SET
                 state = terminal_state,
                 lease_expires_at = NULL,
@@ -316,6 +341,17 @@ impl BridgeStore {
                AND terminal_state IS NOT NULL",
             params![event_id],
         )?;
+        if changed == 1 {
+            transaction.execute(
+                "DELETE FROM inbound_progress_messages WHERE event_id = ?1",
+                params![event_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM inbound_progress WHERE event_id = ?1",
+                params![event_id],
+            )?;
+        }
+        transaction.commit()?;
         Ok(changed == 1)
     }
 }
@@ -448,6 +484,17 @@ mod tests {
         started(&store, "event-1");
         assert!(
             store
+                .put_inbound_progress_ledger("event-1", r#"{"entries":[]}"#)
+                .expect("progress ledger")
+        );
+        assert_eq!(
+            store
+                .attach_inbound_progress_message("event-1", 0, 55)
+                .expect("progress message"),
+            Some(55)
+        );
+        assert!(
+            store
                 .stage_inbound_final_send("event-1", InboundState::Completed, "Done.", None,)
                 .expect("stage")
         );
@@ -479,6 +526,13 @@ mod tests {
         assert_eq!(pending[0].stream_message_id, Some(55));
         assert_eq!(pending[0].terminal_random_id, Some(123));
         assert_eq!(pending[0].state, InboundState::Completed);
+        assert_eq!(
+            store.inbound_progress("event-1").expect("progress"),
+            DurableProgress {
+                ledger_json: Some(r#"{"entries":[]}"#.to_string()),
+                message_ids: vec![55],
+            }
+        );
 
         assert!(store.commit_inbound_final_send("event-1").expect("commit"));
         assert!(
@@ -495,6 +549,62 @@ mod tests {
                 .state,
             InboundState::Completed
         );
+        assert_eq!(
+            store.inbound_progress("event-1").expect("cleaned progress"),
+            DurableProgress::default()
+        );
+    }
+
+    #[test]
+    fn terminal_text_journal_matches_inline_message_limits() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-large-final");
+        let valid = "🦀".repeat(40_000);
+        assert!(valid.len() > 128 * 1024);
+        assert!(valid.len() <= MAX_FINAL_TEXT_BYTES);
+        assert!(valid.encode_utf16().count() <= MAX_FINAL_TEXT_UTF16);
+        assert!(
+            store
+                .stage_inbound_final_send(
+                    "event-large-final",
+                    InboundState::Completed,
+                    &valid,
+                    None,
+                )
+                .expect("stage transport-valid final text")
+        );
+
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-final-utf16-limit");
+        let oversized_utf16 = "x".repeat(MAX_FINAL_TEXT_UTF16 + 1);
+        assert!(matches!(
+            store.stage_inbound_final_send(
+                "event-final-utf16-limit",
+                InboundState::Completed,
+                &oversized_utf16,
+                None,
+            ),
+            Err(StoreError::InboundFinalTextUtf16Exceeded {
+                actual_utf16,
+                limit_utf16: MAX_FINAL_TEXT_UTF16,
+            }) if actual_utf16 == MAX_FINAL_TEXT_UTF16 + 1
+        ));
+
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-final-byte-limit");
+        let oversized_bytes = "ࠀ".repeat(MAX_FINAL_TEXT_BYTES / 3 + 1);
+        assert!(matches!(
+            store.stage_inbound_final_send(
+                "event-final-byte-limit",
+                InboundState::Completed,
+                &oversized_bytes,
+                None,
+            ),
+            Err(StoreError::InboundFinalTextBytesExceeded {
+                actual_bytes,
+                limit_bytes: MAX_FINAL_TEXT_BYTES,
+            }) if actual_bytes > MAX_FINAL_TEXT_BYTES
+        ));
     }
 
     #[test]
@@ -532,6 +642,54 @@ mod tests {
                 .commit_inbound_final_send("event-output")
                 .expect("commit")
         );
+    }
+
+    #[test]
+    fn terminal_attachment_limits_report_actual_and_maximum_values() {
+        let attachment = OutputAttachment {
+            id: "image-1".to_string(),
+            kind: OutputAttachmentKind::Image,
+            path: PathBuf::from("/tmp/generated.png"),
+            mime_type: "image/png".to_string(),
+            file_name: "generated-image.png".to_string(),
+            size_bytes: 42,
+            sha256: "ab".repeat(32),
+        };
+
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-output-count-limit");
+        let too_many = vec![attachment.clone(); MAX_OUTPUT_ATTACHMENTS + 1];
+        assert!(matches!(
+            store.stage_inbound_final_send_with_attachments(
+                "event-output-count-limit",
+                InboundState::Completed,
+                "Done.",
+                &too_many,
+                None,
+            ),
+            Err(StoreError::InboundOutputAttachmentCountExceeded {
+                actual_count,
+                limit_count: MAX_OUTPUT_ATTACHMENTS,
+            }) if actual_count == MAX_OUTPUT_ATTACHMENTS + 1
+        ));
+
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-output-metadata-limit");
+        let mut oversized = attachment;
+        oversized.id = "x".repeat(MAX_OUTPUT_ATTACHMENTS_JSON_BYTES);
+        assert!(matches!(
+            store.stage_inbound_final_send_with_attachments(
+                "event-output-metadata-limit",
+                InboundState::Completed,
+                "Done.",
+                &[oversized],
+                None,
+            ),
+            Err(StoreError::InboundOutputAttachmentBytesExceeded {
+                actual_bytes,
+                limit_bytes: MAX_OUTPUT_ATTACHMENTS_JSON_BYTES,
+            }) if actual_bytes > MAX_OUTPUT_ATTACHMENTS_JSON_BYTES
+        ));
     }
 
     #[test]
