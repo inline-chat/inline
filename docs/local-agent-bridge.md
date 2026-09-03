@@ -93,10 +93,12 @@ Current beta provider paths:
   therefore starts a fresh Claude session and says so instead of failing the
   first user direction or retrying an ambiguous resume. Inline advertises ACP
   form elicitation and translates Claude `AskUserQuestion` requests into the
-  same bounded Inline question messages and buttons used by Codex. Arbitrary
-  form fields that Inline cannot safely represent are cancelled rather than
-  guessed; generic free-text forms are rejected because ACP does not identify
-  whether their answers contain secrets.
+  same bounded Inline question messages used by Codex. Single-select questions
+  use choice buttons; multi-select questions accept comma-separated labels and
+  preserve every selected value. Arbitrary form fields that Inline cannot
+  safely represent are cancelled rather than guessed; generic free-text forms
+  are rejected because ACP does not identify whether their answers contain
+  secrets.
 - **Amp experimental:** uses Inline's source-revision-pinned ACP adapter in
   direct CLI mode with the exact authenticated Amp executable accepted during
   setup. The adapter is installed from an Inline-owned complete lock and
@@ -108,12 +110,17 @@ The explicit Claude and Amp setup commands install only their required adapters
 into immutable, private, versioned bridge directories using Inline's complete
 embedded `package-lock.json` files and `npm ci`. Inline disables package scripts
 and verifies the exact manifest, complete dependency lock, adapter version,
-integrity, and executable containment before launch. Amp additionally verifies
-the embedded executable bytes and pins its exact host CLI path; it disables IDE
-detection and update checks for the managed ACP process. Amp adapter installs
-omit the SDK's optional native CLI packages, and verification repairs older
-installs that still contain one, so the separately verified host CLI is the
-only executable runtime. Providers without an Inline-owned complete lock are
+integrity, and executable containment during setup. Service launch preserves
+older configured Claude adapters for compatibility, but does not label them as
+the current verified pin, enable current-pin-only history integration, or opt
+them into new automatic permission defaults. A verification failure inside the
+current managed adapter slot still fails closed. Amp additionally verifies the
+embedded executable bytes and pins its exact host CLI path; it disables IDE
+detection and update checks for the managed ACP process.
+Amp adapter installs omit the SDK's optional native CLI packages, and
+verification repairs older installs that still contain one, so the separately
+verified host CLI is the only executable runtime. Providers without an
+Inline-owned complete lock are
 withheld from setup. The background service never downloads or updates
 adapters. Claude currently requires Node.js 22 or newer. Claude authentication
 is a host setup and service-restart preflight; Inline does not advertise an
@@ -216,10 +223,16 @@ Codex, so users can safely choose among verified recent folders without
 exposing host paths in message actions. The bridge also prewarms Claude's
 workspace-scoped settings catalog for the first Agent Settings frame, bounded
 by the normal settings deadline; model, reasoning, and permission controls then
-come from the adapter's live advertised values. No Claude-only permission mode
-is silently forced. Native Claude session continuation is
-not enabled yet. `/history` is the intentionally separate, owner-only local
-history importer: it opens a bounded six-row picker, imports the visible
+come from the adapter's live advertised values. New Claude conversations using
+the verified current adapter default to `bypassPermissions` only when the
+adapter advertises it. Codex similarly defaults an unset permission setting to
+its built-in `:danger-full-access` profile only for the workspace whose live
+catalog advertised it. An explicit bot permission setting always wins for
+either provider. Codex managed requirements remain authoritative; when they
+disallow full access, choose an allowed profile in the bot settings. Native
+Claude session continuation is not enabled yet.
+`/history` is the intentionally separate, owner-only local history importer: it
+opens a bounded six-row picker, imports the visible
 You/Claude branch into a private Inline reply thread, omits tool and attachment
 blocks, redacts sensitive-looking local details, and does not resume or mutate
 the original Claude session. `/sessions` and `/open` remain reserved for future
@@ -360,10 +373,12 @@ absolute cancellation guarantee.
 
 When an agent asks up to four non-secret questions, reply directly to the
 question message. Choices accept either their number or label; multi-question
-forms take one answer per line. Use **Skip** for one question or reply `skip all`
-to decline a form without inventing an answer. ACP form elicitation is
-deliberately limited to bounded choices plus Claude's marked per-question
-custom-answer companion.
+forms take one answer per line, and multi-select numbers or labels on one line
+are comma-separated. Use numbers when a label itself contains a comma. Listed
+choices cannot be mixed with a custom answer. Use **Skip** for one question or
+reply `skip all` to decline a form without inventing an answer. ACP form
+elicitation is deliberately limited to bounded choices plus Claude's marked
+per-question custom-answer companion.
 Generic free-text and secret entry are not supported: credential forms are
 declined locally rather than passing their values through Inline messages.
 

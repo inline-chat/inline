@@ -329,6 +329,7 @@ const MAX_UNCLAIMED_EVENTS_PER_TURN: usize = 64;
 const MAX_TERMINAL_TOMBSTONES: usize = 1_024;
 const MAX_CATALOG_PAGES: usize = 16;
 const CATALOG_PAGE_SIZE: u32 = 100;
+const DEFAULT_PERMISSION_PROFILE: &str = ":danger-full-access";
 const MAX_PENDING_INTERACTIONS: usize = 32;
 const MAX_PENDING_INTERACTIONS_PER_TURN: usize = 8;
 
@@ -401,6 +402,7 @@ pub struct CodexAppServerDriver<W> {
     questions: PendingQuestions,
     host_tools: HostTools,
     session_observers: SharedSessionObservers,
+    default_permission_profile_workspaces: Arc<StdMutex<HashSet<std::path::PathBuf>>>,
     shutdown_hook: Option<ShutdownHook>,
 }
 
@@ -414,6 +416,9 @@ impl<W> Clone for CodexAppServerDriver<W> {
             questions: self.questions.clone(),
             host_tools: self.host_tools.clone(),
             session_observers: self.session_observers.clone(),
+            default_permission_profile_workspaces: self
+                .default_permission_profile_workspaces
+                .clone(),
             shutdown_hook: self.shutdown_hook.clone(),
         }
     }
@@ -517,6 +522,7 @@ where
             questions,
             host_tools,
             session_observers,
+            default_permission_profile_workspaces: Arc::new(StdMutex::new(HashSet::new())),
             shutdown_hook,
         })
     }
@@ -779,6 +785,7 @@ where
         &self,
         cwd: &std::path::Path,
     ) -> DriverResult<DriverSettingsCatalog> {
+        let workspace = cwd.to_path_buf();
         let mut models = Vec::new();
         let mut cursor = None;
         let mut seen_cursors = HashSet::new();
@@ -871,10 +878,24 @@ where
             }
             cursor = Some(next_cursor);
         }
+        let default_permissions = permissions
+            .iter()
+            .any(|option| option.value == DEFAULT_PERMISSION_PROFILE && !option.disabled)
+            .then(|| DEFAULT_PERMISSION_PROFILE.to_string());
+        let mut default_workspaces = self
+            .default_permission_profile_workspaces
+            .lock()
+            .expect("Codex default permission workspace set poisoned");
+        if default_permissions.is_some() {
+            default_workspaces.insert(workspace);
+        } else {
+            default_workspaces.remove(&workspace);
+        }
+        drop(default_workspaces);
         Ok(DriverSettingsCatalog {
             models,
             permissions,
-            default_permissions: None,
+            default_permissions,
         })
     }
 }
@@ -1041,10 +1062,18 @@ where
             params.client_user_message_id = input
                 .client_message_id
                 .map(|id| format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{id}"));
+            let use_default_permissions = options.cwd.as_ref().is_some_and(|cwd| {
+                self.default_permission_profile_workspaces
+                    .lock()
+                    .expect("Codex default permission workspace set poisoned")
+                    .contains(cwd)
+            });
             params.cwd = options.cwd;
             params.model = options.model;
             params.effort = options.reasoning;
-            params.permissions = options.permissions;
+            params.permissions = options.permissions.or_else(|| {
+                use_default_permissions.then(|| DEFAULT_PERMISSION_PROFILE.to_string())
+            });
             let response = self
                 .mutating_request("turn/start", serialize(params)?)
                 .await?;
@@ -2592,6 +2621,11 @@ mod tests {
     #[tokio::test]
     async fn initializes_then_starts_and_streams_a_turn() {
         let (driver, mut server) = initialized_driver().await;
+        driver
+            .default_permission_profile_workspaces
+            .lock()
+            .expect("default permission workspaces")
+            .insert("/repo".into());
         let session = ProviderSessionId::new("thread-1").expect("session id");
         let server_task = tokio::spawn(async move {
             let (reader, mut writer) = tokio::io::split(&mut server);
@@ -2604,6 +2638,7 @@ mod tests {
                 request["params"]["clientUserMessageId"],
                 "inline-agent-bridge:v1:message-1"
             );
+            assert_eq!(request["params"]["permissions"], DEFAULT_PERMISSION_PROFILE);
             writer
                 .write_all(
                     b"{\"method\":\"turn/started\",\"params\":{\"turn\":{\"id\":\"turn-1\"}}}\n",
@@ -2627,7 +2662,10 @@ mod tests {
                     attachments: Vec::new(),
                     client_message_id: Some("message-1".to_string()),
                 },
-                TurnOptions::default(),
+                TurnOptions {
+                    cwd: Some("/repo".into()),
+                    ..TurnOptions::default()
+                },
             )
             .await
             .expect("start turn");
@@ -2742,6 +2780,47 @@ mod tests {
             )
             .await
             .expect("resolve question");
+        server_task.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn bypass_default_does_not_cross_from_one_workspace_to_another() {
+        let (driver, mut server) = initialized_driver().await;
+        driver
+            .default_permission_profile_workspaces
+            .lock()
+            .expect("default permission workspaces")
+            .insert("/catalogued".into());
+        let session = ProviderSessionId::new("thread-1").expect("session id");
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().expect("turn request"))
+                    .expect("turn json");
+            assert_eq!(request["method"], "turn/start");
+            assert_eq!(request["params"]["cwd"], "/other");
+            assert!(request["params"].get("permissions").is_none());
+            writer
+                .write_all(b"{\"id\":2,\"result\":{\"turn\":{\"id\":\"turn-1\"}}}\n")
+                .await
+                .expect("turn response");
+        });
+        driver
+            .start_turn(
+                &session,
+                TurnInput {
+                    text: "use provider default".to_string(),
+                    attachments: Vec::new(),
+                    client_message_id: None,
+                },
+                TurnOptions {
+                    cwd: Some("/other".into()),
+                    ..TurnOptions::default()
+                },
+            )
+            .await
+            .expect("turn");
         server_task.await.expect("server task");
     }
 
@@ -2887,7 +2966,7 @@ mod tests {
             assert_eq!(permissions_request["params"]["cwd"], "/tmp");
             writer
                 .write_all(
-                    b"{\"id\":3,\"result\":{\"data\":[{\"id\":\":workspace\",\"description\":\"Workspace access\"},{\"id\":\"admin_mode\",\"description\":null,\"allowed\":false}],\"nextCursor\":null}}\n",
+                    b"{\"id\":3,\"result\":{\"data\":[{\"id\":\":workspace\",\"description\":\"Workspace access\"},{\"id\":\":danger-full-access\",\"description\":\"Bypass permissions\"},{\"id\":\"admin_mode\",\"description\":null,\"allowed\":false}],\"nextCursor\":null}}\n",
                 )
                 .await
                 .expect("permissions response");
@@ -2906,8 +2985,20 @@ mod tests {
         assert_eq!(catalog.permissions[0].value, ":workspace");
         assert_eq!(catalog.permissions[0].label, "Workspace");
         assert!(!catalog.permissions[0].disabled);
-        assert_eq!(catalog.permissions[1].label, "Admin Mode");
-        assert!(catalog.permissions[1].disabled);
+        assert_eq!(catalog.permissions[1].label, "Danger Full Access");
+        assert_eq!(catalog.permissions[2].label, "Admin Mode");
+        assert!(catalog.permissions[2].disabled);
+        assert_eq!(
+            catalog.default_permissions.as_deref(),
+            Some(DEFAULT_PERMISSION_PROFILE)
+        );
+        assert!(
+            driver
+                .default_permission_profile_workspaces
+                .lock()
+                .expect("default permission workspaces")
+                .contains(std::path::Path::new("/tmp"))
+        );
         server_task.await.expect("server task");
     }
 
@@ -2964,6 +3055,9 @@ mod tests {
                 }
                 if method == "turn/steer" {
                     assert_eq!(request["params"]["expectedTurnId"], "turn-1");
+                }
+                if method == "turn/start" {
+                    assert_eq!(request["params"]["permissions"], ":workspace");
                 }
                 writer
                     .write_all(

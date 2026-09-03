@@ -7,12 +7,12 @@ driver rather than separate Rust packages. The driver
 uses Inline's bounded patch of the official ACP Rust SDK, explicitly negotiates
 stable protocol v1, normalizes streaming and permissions into Inline's
 provider-neutral bridge contract, supports session resume/load and negotiated
-model/reasoning configuration, maps bounded ACP form elicitation into Inline's
-existing question contract, and owns subprocess shutdown through the SDK
-connection lifecycle. Only bounded choice fields and Claude's marked optional
-custom-answer companions are accepted. Free-text fields without a secret-aware
-contract and all other unsupported forms fail closed; URL elicitation is not
-advertised.
+model/reasoning configuration, maps bounded single- and multi-select ACP form
+elicitation into Inline's existing question contract, and owns subprocess
+shutdown through the SDK connection lifecycle. Only bounded choice fields and
+Claude's marked optional custom-answer companions are accepted. Free-text
+fields without a secret-aware contract and all other unsupported forms fail
+closed; URL elicitation is not advertised.
 
 Durable resume is enabled only when the pinned provider path passes live
 cross-process evidence. OpenCode currently retains it. Claude's adapter

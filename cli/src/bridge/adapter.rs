@@ -223,6 +223,32 @@ pub(super) fn verify_pinned_adapter_executable(
     Ok(verified)
 }
 
+/// Returns whether a configured path names this CLI's current managed adapter
+/// slot. Verification failures inside that slot are integrity failures, not a
+/// compatibility signal for an older install.
+pub(super) fn targets_current_pinned_adapter(provider_id: &str, executable: &Path) -> bool {
+    let Some(support) = inline_agent_driver_acp::provider_support(provider_id) else {
+        return false;
+    };
+    let version = match support.distribution {
+        AcpDistribution::Native => return false,
+        AcpDistribution::NpmAdapter(distribution) => distribution.registry_version,
+        AcpDistribution::EmbeddedAdapter(distribution) => distribution.version,
+    };
+    executable.ancestors().any(|candidate| {
+        candidate.file_name().is_some_and(|name| name == version)
+            && candidate
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == provider_id)
+            && candidate
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "adapters")
+    })
+}
+
 fn pinned_adapter_manifest(provider_id: &str) -> Result<PinnedAdapterManifest, String> {
     match provider_id {
         "claude" => Ok(PinnedAdapterManifest {
@@ -466,6 +492,22 @@ mod tests {
                 .expect_err("tampered lock must be rejected")
                 .contains("does not match Inline's pin")
         );
+    }
+
+    #[test]
+    fn current_managed_slot_is_distinct_from_legacy_adapter_paths() {
+        assert!(targets_current_pinned_adapter(
+            "claude",
+            Path::new("/private/bridge/adapters/claude/0.73.0/node_modules/.bin/claude-agent-acp")
+        ));
+        assert!(!targets_current_pinned_adapter(
+            "claude",
+            Path::new("/private/bridge/adapters/claude/0.63.0/node_modules/.bin/claude-agent-acp")
+        ));
+        assert!(!targets_current_pinned_adapter(
+            "claude",
+            Path::new("/usr/local/bin/claude-agent-acp")
+        ));
     }
 
     #[test]

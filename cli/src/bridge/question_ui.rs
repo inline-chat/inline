@@ -71,6 +71,13 @@ fn question_actions(
     let [question] = request.questions.as_slice() else {
         return Ok(MessageActions::default());
     };
+    if question.allows_multiple {
+        return Ok(MessageActions {
+            rows: vec![MessageActionRow {
+                actions: vec![skip_button(token)?],
+            }],
+        });
+    }
     if question.options.is_empty() || question.options.len() > 5 {
         return Ok(MessageActions::default());
     }
@@ -105,7 +112,19 @@ fn question_actions(
             },
         });
     }
-    buttons.push(MessageActionButton {
+    buttons.push(skip_button(token)?);
+    Ok(MessageActions {
+        rows: buttons
+            .chunks(2)
+            .map(|actions| MessageActionRow {
+                actions: actions.to_vec(),
+            })
+            .collect(),
+    })
+}
+
+fn skip_button(token: &str) -> Result<MessageActionButton, serde_json::Error> {
+    Ok(MessageActionButton {
         action_id: "bridge_question_skip".to_string(),
         text: "Skip".to_string(),
         kind: MessageActionKind::Callback {
@@ -115,14 +134,6 @@ fn question_actions(
                 choice: QuestionCallbackChoice::Skip,
             })?,
         },
-    });
-    Ok(MessageActions {
-        rows: buttons
-            .chunks(2)
-            .map(|actions| MessageActionRow {
-                actions: actions.to_vec(),
-            })
-            .collect(),
     })
 }
 
@@ -201,6 +212,16 @@ pub(super) async fn handle_question_action<D: AgentDriver + 'static>(
             let Some(question) = pending.request.questions.first() else {
                 return Ok(QuestionActionOutcome::Handled);
             };
+            if question.allows_multiple {
+                bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                    interaction_id: *interaction_id,
+                    toast: Some(
+                        "Reply with selected numbers or labels separated by commas.".to_string(),
+                    ),
+                })
+                .await?;
+                return Ok(QuestionActionOutcome::Handled);
+            }
             let Some(option) = question.options.get(index) else {
                 bot.answer_message_action(inline_client::AnswerMessageActionRequest {
                     interaction_id: *interaction_id,
@@ -350,8 +371,11 @@ pub(super) fn render_question(provider_name: &str, request: &QuestionRequest) ->
             text.push_str(" — ");
         }
         text.push_str(&bounded_question_text(&question.prompt, 300));
-        for option in &question.options {
+        for (option_index, option) in question.options.iter().enumerate() {
             text.push_str("\n- ");
+            if question.allows_multiple {
+                text.push_str(&format!("{}. ", option_index + 1));
+            }
             text.push_str(&bounded_question_text(&option.label, 80));
             if let Some(description) = option.description.as_deref() {
                 let description = bounded_question_text(description, 160);
@@ -364,12 +388,15 @@ pub(super) fn render_question(provider_name: &str, request: &QuestionRequest) ->
         if question.allows_other && !question.options.is_empty() {
             text.push_str("\n- Another answer");
         }
+        if question.allows_multiple {
+            text.push_str("\nSelect one or more; separate choice numbers or labels with commas.");
+        }
     }
     if request.questions.len() == 1 {
         text.push_str("\n\nReply to this message with your answer, or use Skip.");
     } else {
         text.push_str(
-            "\n\nReply with one answer per line, in the same order. Reply `skip all` to skip.",
+            "\n\nReply with one answer per line, in the same order. Separate multi-select choices with commas. Reply `skip all` to skip.",
         );
     }
     if let Some(milliseconds) = request.auto_resolution_ms {
@@ -419,13 +446,54 @@ pub(super) fn parse_question_answers(
         .enumerate()
         .map(|(index, (question, answer))| {
             let answer = strip_answer_prefix(answer, index + 1);
-            let answer = normalized_answer(question, answer)?;
+            let answers = normalized_answers(question, answer)?;
             Ok(QuestionAnswer {
                 question_id: question.question_id.clone(),
-                answers: vec![answer],
+                answers,
             })
         })
         .collect()
+}
+
+fn normalized_answers(question: &Question, answer: &str) -> Result<Vec<String>, &'static str> {
+    if !question.allows_multiple {
+        return normalized_answer(question, answer).map(|answer| vec![answer]);
+    }
+    let answer = bounded_question_text(answer, 500);
+    if answer.is_empty() {
+        return Err("Every question needs an answer.");
+    }
+    if let Ok(exact) = normalized_choice(question, &answer) {
+        return Ok(vec![exact]);
+    }
+    let mut selected = Vec::new();
+    let mut has_unknown = false;
+    for value in answer.split(',').map(str::trim) {
+        match normalized_choice(question, value) {
+            Ok(value) => {
+                if !selected
+                    .iter()
+                    .any(|selected: &String| selected.eq_ignore_ascii_case(&value))
+                {
+                    selected.push(value);
+                }
+            }
+            Err(()) => has_unknown = true,
+        }
+    }
+    if has_unknown {
+        if !selected.is_empty() {
+            return Err("Do not mix listed choices with another answer.");
+        }
+        if question.allows_other {
+            return Ok(vec![format!("user_note: {answer}")]);
+        }
+        return Err("Reply with listed option numbers or labels separated by commas.");
+    }
+    if selected.is_empty() {
+        return Err("Every question needs an answer.");
+    }
+    Ok(selected)
 }
 
 fn normalized_answer(question: &Question, answer: &str) -> Result<String, &'static str> {
@@ -433,6 +501,16 @@ fn normalized_answer(question: &Question, answer: &str) -> Result<String, &'stat
     if answer.is_empty() {
         return Err("Every question needs an answer.");
     }
+    if let Ok(answer) = normalized_choice(question, &answer) {
+        return Ok(answer);
+    }
+    if question.options.is_empty() || question.allows_other {
+        return Ok(format!("user_note: {answer}"));
+    }
+    Err("Reply with one of the listed option labels.")
+}
+
+fn normalized_choice(question: &Question, answer: &str) -> Result<String, ()> {
     if let Ok(index) = answer.parse::<usize>()
         && let Some(option) = index
             .checked_sub(1)
@@ -443,14 +521,11 @@ fn normalized_answer(question: &Question, answer: &str) -> Result<String, &'stat
     if let Some(option) = question
         .options
         .iter()
-        .find(|option| option.label.eq_ignore_ascii_case(&answer))
+        .find(|option| option.label.eq_ignore_ascii_case(answer))
     {
         return Ok(option.label.clone());
     }
-    if question.options.is_empty() || question.allows_other {
-        return Ok(format!("user_note: {answer}"));
-    }
-    Err("Reply with one of the listed option labels.")
+    Err(())
 }
 
 fn strip_answer_prefix(answer: &str, expected_index: usize) -> &str {
@@ -513,6 +588,7 @@ mod tests {
                             description: Some("Inspect TUI".to_string()),
                         },
                     ],
+                    allows_multiple: false,
                     allows_other: false,
                     is_secret: false,
                 },
@@ -521,6 +597,7 @@ mod tests {
                     header: "Details".to_string(),
                     prompt: "Anything else?".to_string(),
                     options: Vec::new(),
+                    allows_multiple: false,
                     allows_other: true,
                     is_secret: false,
                 },
@@ -590,5 +667,33 @@ mod tests {
         assert_eq!(actions.rows[1].actions[0].text, "Other");
         assert_eq!(actions.rows[1].actions[1].text, "Skip");
         assert!(actions.rows.iter().all(|row| row.actions.len() <= 2));
+    }
+
+    #[test]
+    fn multi_select_questions_preserve_every_choice_without_single_choice_buttons() {
+        let mut request = question_request();
+        request.questions.truncate(1);
+        request.questions[0].allows_multiple = true;
+        request.questions[0].options[0].label = "Core, server".to_string();
+
+        let rendered = render_question("Claude", &request);
+        assert!(rendered.contains("Select one or more"));
+        assert!(rendered.contains("1. Core, server"));
+        let answers = parse_question_answers(&request, "2, 1, 1").expect("answers");
+        assert_eq!(answers[0].answers, ["TUI", "Core, server"]);
+        let exact = parse_question_answers(&request, "Core, server").expect("exact label");
+        assert_eq!(exact[0].answers, ["Core, server"]);
+        request.questions[0].allows_other = true;
+        assert_eq!(
+            parse_question_answers(&request, "1, Web"),
+            Err("Do not mix listed choices with another answer.")
+        );
+        let custom = parse_question_answers(&request, "Web, mobile").expect("custom answer");
+        assert_eq!(custom[0].answers, ["user_note: Web, mobile"]);
+
+        let actions = question_actions(&request, "token").expect("question actions");
+        assert_eq!(actions.rows.len(), 1);
+        assert_eq!(actions.rows[0].actions.len(), 1);
+        assert_eq!(actions.rows[0].actions[0].text, "Skip");
     }
 }

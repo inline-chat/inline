@@ -619,6 +619,7 @@ pub fn normalize_question_request(
                     MAX_QUESTION_PROMPT_CHARS,
                 )?,
                 options,
+                allows_multiple: false,
                 allows_other: question
                     .get("isOther")
                     .and_then(Value::as_bool)

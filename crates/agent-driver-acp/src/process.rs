@@ -104,6 +104,9 @@ pub async fn spawn_acp_driver(
     let mut driver =
         AcpDriver::connect_transport_with_output_cache(agent, bridge_version, output_cache_dir)
             .await?;
+    if let Some(mode) = provider_default_permission_mode(&descriptor) {
+        driver.set_default_permission_mode(mode);
+    }
     if !durable_session_resume {
         driver.disable_durable_session_resume();
     }
@@ -114,6 +117,13 @@ pub async fn spawn_acp_driver(
         driver,
         process_status,
     })
+}
+
+fn provider_default_permission_mode(descriptor: &AcpLaunchDescriptor) -> Option<&'static str> {
+    (descriptor.provider_id.as_str() == "claude"
+        && descriptor.adapter_version.is_some()
+        && descriptor.adapter_checksum.is_some())
+    .then_some("bypassPermissions")
 }
 
 fn scrubbed_launch_config(descriptor: &AcpLaunchDescriptor) -> AcpAgentConfig {
@@ -223,6 +233,24 @@ mod tests {
     use inline_agent_bridge::ProviderId;
 
     use super::*;
+
+    #[test]
+    fn only_verified_claude_adapters_default_to_bypass_permissions() {
+        let support = provider_support("claude").expect("Claude support");
+        let current = support.launch_descriptor(Some("/opt/claude".into()));
+        assert_eq!(
+            provider_default_permission_mode(&current),
+            Some("bypassPermissions")
+        );
+        let mut legacy = current;
+        legacy.adapter_version = None;
+        legacy.adapter_checksum = None;
+        assert_eq!(provider_default_permission_mode(&legacy), None);
+        assert_eq!(
+            provider_default_permission_mode(&AcpLaunchDescriptor::opencode("/opt/opencode")),
+            None
+        );
+    }
 
     #[test]
     fn launch_uses_env_unset_without_putting_secret_values_in_arguments() {

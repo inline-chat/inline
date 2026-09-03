@@ -133,13 +133,12 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
                     let schema = acp::ElicitationSchema::new()
                         .property(
                             "question_0",
-                            acp::StringPropertySchema::new()
-                                .title("Target")
-                                .one_of(vec![
-                                    acp::EnumOption::new("core", "Core")
-                                        .description("Inspect the core"),
-                                    acp::EnumOption::new("cli", "CLI"),
-                                ]),
+                            acp::MultiSelectPropertySchema::titled(vec![
+                                acp::EnumOption::new("core", "Core")
+                                    .description("Inspect the core"),
+                                acp::EnumOption::new("cli", "CLI"),
+                            ])
+                            .title("Targets"),
                             false,
                         )
                         .property(
@@ -155,7 +154,7 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
                                 acp::ElicitationSessionScope::new(request.session_id),
                                 schema,
                             ),
-                            "Which target?",
+                            "Which targets?",
                         ))
                         .block_task()
                         .await?;
@@ -202,9 +201,10 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
         event => panic!("expected question request, got {event:?}"),
     };
     assert_eq!(question.questions.len(), 1);
-    assert_eq!(question.questions[0].header, "Target");
-    assert_eq!(question.questions[0].prompt, "Which target?");
+    assert_eq!(question.questions[0].header, "Targets");
+    assert_eq!(question.questions[0].prompt, "Which targets?");
     assert_eq!(question.questions[0].options[0].label, "Core");
+    assert!(question.questions[0].allows_multiple);
     assert!(question.questions[0].allows_other);
 
     driver
@@ -212,7 +212,7 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
             &question.request_id,
             vec![QuestionAnswer {
                 question_id: "question_0".to_string(),
-                answers: vec!["Core".to_string()],
+                answers: vec!["Core".to_string(), "CLI".to_string()],
             }],
         )
         .await
@@ -229,7 +229,10 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
             .content
             .expect("accepted content")
             .get("question_0"),
-        Some(&acp::ElicitationContentValue::String("core".to_string()))
+        Some(&acp::ElicitationContentValue::StringArray(vec![
+            "core".to_string(),
+            "cli".to_string(),
+        ]))
     );
     assert!(matches!(
         next_event(&mut turn.events).await,

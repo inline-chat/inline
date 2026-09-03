@@ -640,6 +640,9 @@ pub struct Question {
     pub prompt: String,
     /// Predefined response choices.
     pub options: Vec<QuestionOption>,
+    /// Whether more than one predefined response may be selected.
+    #[serde(default)]
+    pub allows_multiple: bool,
     /// Whether a free-form response is accepted.
     pub allows_other: bool,
     /// Whether the answer contains secret material and must not be persisted or echoed.
@@ -1678,6 +1681,20 @@ mod tests {
             specs,
             handler: Arc::new(NeverCalledHostToolHandler),
         }
+    }
+
+    #[test]
+    fn legacy_questions_default_to_single_select_when_deserialized() {
+        let question: Question = serde_json::from_value(json!({
+            "question_id": "target",
+            "header": "Target",
+            "prompt": "Which target?",
+            "options": [],
+            "allows_other": false,
+            "is_secret": false
+        }))
+        .expect("legacy question");
+        assert!(!question.allows_multiple);
     }
 
     #[test]

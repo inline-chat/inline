@@ -47,6 +47,13 @@ pub(super) struct ProviderProbe {
     pub(super) version: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProbeCommandOutput {
+    stdout: String,
+    value: String,
+    success: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BridgeProviderSetupDescriptor {
     pub(crate) provider_id: &'static str,
@@ -288,7 +295,27 @@ fn probe_configured_provider_with_runtime(
         )?,
         VersionDiscovery::InitializeAgentInfo => match support.distribution {
             AcpDistribution::NpmAdapter(adapter) if adapter.is_verified_install_pin() => {
-                adapter.registry_version.to_string()
+                if !super::is_executable_file(executable) {
+                    return Err(format!(
+                        "the configured {} adapter is unavailable; rerun setup",
+                        support.display_name
+                    ));
+                }
+                match super::adapter::verify_pinned_adapter_executable(provider_id, executable) {
+                    Ok(_) => adapter.registry_version.to_string(),
+                    Err(error)
+                        if super::adapter::targets_current_pinned_adapter(
+                            provider_id,
+                            executable,
+                        ) =>
+                    {
+                        return Err(format!(
+                            "the configured {} adapter failed current-pin verification: {error}; rerun setup",
+                            support.display_name
+                        ));
+                    }
+                    Err(_) => "configured legacy adapter".to_string(),
+                }
             }
             AcpDistribution::EmbeddedAdapter(adapter) => adapter.version.to_string(),
             _ => {
@@ -354,16 +381,22 @@ fn probe_configured_provider_with_runtime(
                 support.display_name, auth_probe.program
             )
         })?;
-        let auth = probe_command(
-            provider_id,
-            &auth_executable,
-            auth_probe.arguments,
-            &format!("{} authentication", support.display_name),
-        )?;
-        if provider_id == "claude" && !claude_auth_is_logged_in(&auth) {
-            return Err(
-                "Claude is not authenticated; run `claude` and `/login`, then retry".to_string(),
-            );
+        let auth_label = format!("{} authentication", support.display_name);
+        if provider_id == "claude" {
+            let auth = probe_command_capture_status(
+                provider_id,
+                &auth_executable,
+                auth_probe.arguments,
+                &auth_label,
+            )?;
+            validate_claude_auth_status(&auth, &auth_label)?;
+        } else {
+            probe_command(
+                provider_id,
+                &auth_executable,
+                auth_probe.arguments,
+                &auth_label,
+            )?;
         }
     } else if provider_id == "amp" {
         let amp = if let Some(runtime) = configured_runtime {
@@ -406,11 +439,27 @@ fn probe_configured_provider_with_runtime(
     })
 }
 
-fn claude_auth_is_logged_in(output: &str) -> bool {
+fn claude_auth_is_logged_in(output: &str) -> Option<bool> {
     serde_json::from_str::<serde_json::Value>(output)
         .ok()
         .and_then(|value| value.get("loggedIn").and_then(serde_json::Value::as_bool))
-        == Some(true)
+}
+
+fn validate_claude_auth_status(output: &ProbeCommandOutput, label: &str) -> Result<(), String> {
+    let mut logged_in = claude_auth_is_logged_in(&output.stdout);
+    if logged_in.is_none() && output.stdout.is_empty() {
+        // Older Claude builds may write their status to stderr. Accept that
+        // only when stdout is empty so benign warnings cannot corrupt JSON.
+        logged_in = claude_auth_is_logged_in(&output.value);
+    }
+    match (output.success, logged_in) {
+        (true, Some(true)) => Ok(()),
+        (_, Some(false)) => {
+            Err("Claude is not authenticated; run `claude` and `/login`, then retry".to_string())
+        }
+        (false, _) => Err(format!("{label} probe failed")),
+        (true, None) => Err(format!("{label} probe returned an invalid result")),
+    }
 }
 
 fn supported_claude_node_version(output: &str) -> bool {
@@ -542,6 +591,21 @@ fn probe_command_allow_empty(
     probe_command_inner(provider_id, executable, arguments, label, true)
 }
 
+fn probe_command_capture_status(
+    provider_id: &str,
+    executable: &std::path::Path,
+    arguments: &[&str],
+    label: &str,
+) -> Result<ProbeCommandOutput, String> {
+    probe_command_output_with_timeout(
+        provider_id,
+        executable,
+        arguments,
+        label,
+        PROVIDER_PROBE_TIMEOUT,
+    )
+}
+
 fn probe_command_inner(
     provider_id: &str,
     executable: &std::path::Path,
@@ -567,6 +631,27 @@ fn probe_command_inner_with_timeout(
     allow_empty: bool,
     timeout: Duration,
 ) -> Result<String, String> {
+    let output =
+        probe_command_output_with_timeout(provider_id, executable, arguments, label, timeout)?;
+    if !output.success {
+        return Err(format!(
+            "{label} probe failed: {}",
+            super::safe_diagnostic(&output.value)
+        ));
+    }
+    if output.value.is_empty() && !allow_empty {
+        return Err(format!("{label} probe returned no result"));
+    }
+    Ok(output.value)
+}
+
+fn probe_command_output_with_timeout(
+    provider_id: &str,
+    executable: &std::path::Path,
+    arguments: &[&str],
+    label: &str,
+    timeout: Duration,
+) -> Result<ProbeCommandOutput, String> {
     let mut command = std::process::Command::new(executable);
     command
         .args(arguments)
@@ -618,17 +703,13 @@ fn probe_command_inner_with_timeout(
     };
     let stdout = receive_probe_stream(&stdout, &mut child, process_id);
     let stderr = receive_probe_stream(&stderr, &mut child, process_id);
+    let stdout_value = String::from_utf8_lossy(&stdout.0).trim().to_string();
     let value = format_probe_output(stdout, stderr);
-    if !status.success() {
-        return Err(format!(
-            "{label} probe failed: {}",
-            super::safe_diagnostic(&value)
-        ));
-    }
-    if value.is_empty() && !allow_empty {
-        return Err(format!("{label} probe returned no result"));
-    }
-    Ok(value)
+    Ok(ProbeCommandOutput {
+        stdout: stdout_value,
+        value,
+        success: status.success(),
+    })
 }
 
 fn read_probe_stream<R: Read + Send + 'static>(mut reader: R) -> mpsc::Receiver<(Vec<u8>, bool)> {
@@ -772,6 +853,30 @@ impl ProviderLaunch {
                 let executable = (!installation.executable.as_os_str().is_empty())
                     .then(|| installation.executable.clone());
                 let mut descriptor = support.launch_descriptor(executable);
+                if provider_id == "claude" {
+                    match super::adapter::verify_pinned_adapter_executable(
+                        provider_id,
+                        &descriptor.program,
+                    ) {
+                        Ok(_) => {}
+                        Err(error)
+                            if super::adapter::targets_current_pinned_adapter(
+                                provider_id,
+                                &descriptor.program,
+                            ) =>
+                        {
+                            return Err(format!(
+                                "the configured Claude adapter failed current-pin verification: {error}; rerun setup"
+                            ));
+                        }
+                        Err(_) => {
+                            // Keep older configured adapters runnable for compatibility,
+                            // but never describe their identity as the current verified pin.
+                            descriptor.adapter_version = None;
+                            descriptor.adapter_checksum = None;
+                        }
+                    }
+                }
                 if provider_id == "amp" {
                     descriptor.provider_runtime = Some(
                         if let Some(runtime) = installation
@@ -1098,6 +1203,44 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(3));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn provider_probe_can_parse_a_bounded_nonzero_status_result() {
+        let output = probe_command_output_with_timeout(
+            "claude",
+            std::path::Path::new("/bin/sh"),
+            &["-c", "printf '{\"loggedIn\":false}'; exit 1"],
+            "Claude authentication",
+            Duration::from_secs(1),
+        )
+        .expect("capture nonzero result");
+        assert!(!output.success);
+        assert_eq!(claude_auth_is_logged_in(&output.stdout), Some(false));
+        assert!(validate_claude_auth_status(&output, "Claude authentication").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_auth_probe_ignores_benign_stderr_when_stdout_is_valid_json() {
+        let output = probe_command_output_with_timeout(
+            "claude",
+            std::path::Path::new("/bin/sh"),
+            &[
+                "-c",
+                "printf '{\"loggedIn\":true}'; printf 'update warning' >&2",
+            ],
+            "Claude authentication",
+            Duration::from_secs(1),
+        )
+        .expect("capture status with warning");
+        assert!(output.success);
+        assert!(output.value.contains("update warning"));
+        assert_eq!(
+            validate_claude_auth_status(&output, "Claude authentication"),
+            Ok(())
+        );
+    }
+
     fn installation(provider_id: &str, executable: &str) -> ProviderInstallationConfig {
         ProviderInstallationConfig {
             installation_id: provider_id.to_string(),
@@ -1191,6 +1334,10 @@ mod tests {
                 expected_argument
             );
             assert!(descriptor.provider_runtime.is_none());
+            if provider_id == "claude" {
+                assert_eq!(descriptor.adapter_version, None);
+                assert_eq!(descriptor.adapter_checksum, None);
+            }
             assert_eq!(
                 descriptor.process_host.expect("process host").lock_file,
                 PathBuf::from(format!(
@@ -1222,6 +1369,17 @@ mod tests {
         let error = ProviderLaunch::from_installation(&installation("unknown", "/opt/unknown"))
             .expect_err("unknown provider must fail");
         assert_eq!(error, "unsupported agent provider: unknown");
+    }
+
+    #[test]
+    fn current_claude_adapter_integrity_failure_is_not_treated_as_legacy() {
+        let installation = installation(
+            "claude",
+            "/private/bridge/adapters/claude/0.73.0/node_modules/.bin/claude-agent-acp",
+        );
+        let error = ProviderLaunch::from_installation(&installation)
+            .expect_err("current managed adapter must verify before launch");
+        assert!(error.contains("failed current-pin verification"));
     }
 
     #[test]
@@ -1270,18 +1428,51 @@ mod tests {
 
     #[test]
     fn claude_auth_probe_requires_explicit_valid_logged_in_json() {
-        assert!(claude_auth_is_logged_in(
-            r#"{"loggedIn":true,"authMethod":"claude.ai"}"#
-        ));
+        assert_eq!(
+            claude_auth_is_logged_in(r#"{"loggedIn":true,"authMethod":"claude.ai"}"#),
+            Some(true)
+        );
         for output in [
-            r#"{"loggedIn":false}"#,
             r#"{"loggedIn":"true"}"#,
             r#"{"authenticated":true}"#,
             "not json",
             "",
         ] {
-            assert!(!claude_auth_is_logged_in(output), "accepted {output:?}");
+            assert_eq!(
+                claude_auth_is_logged_in(output),
+                None,
+                "accepted {output:?}"
+            );
         }
+        assert_eq!(
+            claude_auth_is_logged_in(r#"{"loggedIn":false}"#),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn claude_logged_out_status_is_actionable_even_when_the_cli_exits_nonzero() {
+        let logged_out = ProbeCommandOutput {
+            stdout: r#"{"loggedIn":false}"#.to_string(),
+            value: r#"{"loggedIn":false}"#.to_string(),
+            success: false,
+        };
+        let error = validate_claude_auth_status(&logged_out, "Claude authentication")
+            .expect_err("logged-out status must reject setup");
+        assert_eq!(
+            error,
+            "Claude is not authenticated; run `claude` and `/login`, then retry"
+        );
+
+        let malformed = ProbeCommandOutput {
+            stdout: "unknown failure".to_string(),
+            value: "unknown failure".to_string(),
+            success: false,
+        };
+        assert_eq!(
+            validate_claude_auth_status(&malformed, "Claude authentication"),
+            Err("Claude authentication probe failed".to_string())
+        );
     }
 
     #[test]

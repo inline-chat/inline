@@ -336,6 +336,7 @@ pub struct AcpDriver {
     capabilities: DriverCapabilities,
     prompt_capabilities: acp::PromptCapabilities,
     resume_mode: ResumeMode,
+    default_permission_mode: Option<Arc<str>>,
     active_turns: ActiveTurns,
     approvals: PendingApprovals,
     elicitations: PendingElicitations,
@@ -367,6 +368,10 @@ impl AcpDriver {
     pub(crate) fn disable_durable_session_resume(&mut self) {
         self.resume_mode = ResumeMode::Unsupported;
         self.capabilities.resume_session = false;
+    }
+
+    pub(crate) fn set_default_permission_mode(&mut self, mode: impl Into<Arc<str>>) {
+        self.default_permission_mode = Some(mode.into());
     }
 
     /// Connects the driver to an already constructed ACP client transport.
@@ -535,6 +540,7 @@ impl AcpDriver {
             capabilities,
             prompt_capabilities,
             resume_mode,
+            default_permission_mode: None,
             active_turns,
             approvals,
             elicitations,
@@ -772,10 +778,29 @@ impl AcpDriver {
 
     fn effective_permission_mode(
         &self,
-        _session_id: &str,
+        session_id: &str,
         selected: Option<&str>,
     ) -> DriverResult<Option<String>> {
-        Ok(selected.map(str::to_string))
+        if let Some(selected) = selected {
+            return Ok(Some(selected.to_string()));
+        }
+        let Some(default) = self.default_permission_mode.as_deref() else {
+            return Ok(None);
+        };
+        let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        let session = sessions.sessions.get(session_id).ok_or_else(|| {
+            DriverError::InvalidSession("ACP session metadata is unavailable".to_string())
+        })?;
+        Ok(session
+            .modes
+            .as_ref()
+            .filter(|modes| {
+                modes
+                    .available_modes
+                    .iter()
+                    .any(|mode| mode.id.to_string() == default)
+            })
+            .map(|_| default.to_string()))
     }
 }
 
@@ -815,7 +840,11 @@ impl AgentDriver for AcpDriver {
                     .values()
                     .find(|session| session.cwd == cwd)
                     .map(|session| {
-                        settings_catalog(&session.config_options, session.modes.as_ref(), None)
+                        settings_catalog(
+                            &session.config_options,
+                            session.modes.as_ref(),
+                            self.default_permission_mode.as_deref(),
+                        )
                     })
             } {
                 return Ok(catalog);
@@ -836,7 +865,7 @@ impl AgentDriver for AcpDriver {
                         .expect("new ACP session was not recorded")
                         .modes
                         .as_ref(),
-                    None,
+                    self.default_permission_mode.as_deref(),
                 )
             };
             Ok(catalog)

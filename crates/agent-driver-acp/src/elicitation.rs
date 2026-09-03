@@ -89,6 +89,7 @@ pub(crate) fn normalize_form(
             description,
             options,
         } = normalize_property(property)?;
+        let allows_multiple = kind == FieldKind::StringArray;
         let prompt = bounded_text(
             description
                 .as_deref()
@@ -138,6 +139,7 @@ pub(crate) fn normalize_form(
             header: bounded_text(title.as_deref().unwrap_or_default(), MAX_HEADER_CHARS),
             prompt,
             options,
+            allows_multiple,
             allows_other,
             is_secret: false,
         });
@@ -513,6 +515,7 @@ mod tests {
         assert_eq!(normalized.request.questions.len(), 1);
         assert_eq!(normalized.request.questions[0].header, "Target");
         assert_eq!(normalized.request.questions[0].prompt, "Which target?");
+        assert!(!normalized.request.questions[0].allows_multiple);
         assert!(normalized.request.questions[0].allows_other);
 
         let response = answer_response(
@@ -572,6 +575,50 @@ mod tests {
         )
         .expect("decline form");
         assert!(matches!(declined.action, acp::ElicitationAction::Decline));
+    }
+
+    #[test]
+    fn maps_claude_multi_select_and_preserves_every_provider_value() {
+        let mut schema = claude_form();
+        schema.properties.insert(
+            "question_0".to_string(),
+            acp::MultiSelectPropertySchema::titled(vec![
+                acp::EnumOption::new("core", "Core"),
+                acp::EnumOption::new("cli", "CLI"),
+            ])
+            .into(),
+        );
+        let normalized = normalize_form(
+            "request-multi".to_string(),
+            TurnId::new("turn-multi").expect("turn"),
+            "Which targets?",
+            schema,
+        )
+        .expect("normalize multi-select");
+        assert!(normalized.request.questions[0].allows_multiple);
+        assert!(normalized.request.questions[0].allows_other);
+
+        let response = answer_response(
+            &normalized.fields,
+            vec![QuestionAnswer {
+                question_id: "question_0".to_string(),
+                answers: vec!["Core".to_string(), "CLI".to_string()],
+            }],
+        )
+        .expect("answer multi-select");
+        let acp::ElicitationAction::Accept(accepted) = response.action else {
+            panic!("expected accepted response")
+        };
+        assert_eq!(
+            accepted
+                .content
+                .expect("accepted content")
+                .get("question_0"),
+            Some(&acp::ElicitationContentValue::StringArray(vec![
+                "core".to_string(),
+                "cli".to_string(),
+            ]))
+        );
     }
 
     #[test]
