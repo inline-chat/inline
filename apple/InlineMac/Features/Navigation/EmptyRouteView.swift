@@ -122,7 +122,6 @@ private struct EmptyRouteCenterContent: View {
       if shouldShowGettingStarted {
         GettingStartedView(
           dismiss: dismiss,
-          openCommandBar: openCommandBar,
           perform: perform
         )
         .transition(.opacity.combined(with: .scale(scale: 0.98)))

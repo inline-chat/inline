@@ -46,29 +46,18 @@ enum GettingStartedAction: String, CaseIterable, Identifiable {
 
 struct GettingStartedView: View {
   let dismiss: () -> Void
-  let openCommandBar: () -> Void
   let perform: @MainActor (GettingStartedAction) async -> Void
 
   @State private var isPerformingAction = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      GettingStartedLogoButton(action: openCommandBar)
+      GettingStartedLogo()
         .padding(.bottom, 12)
 
-      HStack(spacing: 10) {
-        Text("Welcome to Inline")
-          .font(.system(size: 13, weight: .medium))
-          .foregroundStyle(.primary)
-
-        Rectangle()
-          .fill(Color.primary.opacity(0.12))
-          .frame(width: 76, height: 1)
-
-        GettingStartedDismissButton(action: dismiss)
-      }
-      .padding(.horizontal, 6)
-      .padding(.bottom, 10)
+      GettingStartedHeader(dismiss: dismiss)
+        .padding(.horizontal, 6)
+        .padding(.bottom, 10)
 
       VStack(spacing: 2) {
         ForEach(GettingStartedAction.allCases) { action in
@@ -92,51 +81,48 @@ struct GettingStartedView: View {
   }
 }
 
-private struct GettingStartedLogoButton: View {
-  let action: () -> Void
-
-  @State private var isHovered = false
-
+private struct GettingStartedLogo: View {
   var body: some View {
-    Button(action: action) {
-      Image("InlineLogoSymbol")
-        .renderingMode(.template)
-        .resizable()
-        .scaledToFit()
-        .frame(width: 28, height: 28)
-        .foregroundStyle(.primary)
-        .frame(width: 36, height: 36)
-        .background(hoverBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .onHover { isHovered = $0 }
-    .help("Open search")
-    .accessibilityLabel("Open search")
-  }
-
-  private var hoverBackground: Color {
-    isHovered ? Color.primary.opacity(0.03) : .clear
+    Image("InlineLogoSymbol")
+      .renderingMode(.template)
+      .resizable()
+      .scaledToFit()
+      .frame(width: 26, height: 26)
+      .foregroundStyle(.primary)
+      .frame(width: 36, height: 36)
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
   }
 }
 
-private struct GettingStartedDismissButton: View {
-  let action: () -> Void
+private struct GettingStartedHeader: View {
+  let dismiss: () -> Void
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var isHovered = false
 
   var body: some View {
-    Button(action: action) {
-      Text("dismiss")
+    HStack(spacing: 10) {
+      Text("Welcome to Inline")
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(.primary)
+
+      Rectangle()
+        .fill(Color.primary.opacity(0.12))
+        .frame(width: 76, height: 1)
+
+      Button("dismiss", action: dismiss)
         .font(.system(size: 13))
-        .foregroundStyle(isHovered ? Color.primary : Color.secondary)
-        .padding(.horizontal, 5)
-        .frame(height: 24)
-        .contentShape(Rectangle())
+        .foregroundStyle(.secondary)
+        .buttonStyle(.plain)
+        .focusEffectDisabled(true)
+        .opacity(isHovered ? 1 : 0)
+        .allowsHitTesting(isHovered)
     }
-    .buttonStyle(GettingStartedButtonStyle(isHovered: isHovered))
+    .frame(height: 24)
+    .contentShape(Rectangle())
     .onHover { isHovered = $0 }
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
   }
 }
 
@@ -152,14 +138,14 @@ private struct GettingStartedActionRow: View {
     Button(action: action) {
       HStack(spacing: 8) {
         Image(systemName: systemImage)
-          .font(.system(size: 13))
+          .font(.system(size: 13, weight: .medium))
           .frame(width: 16, height: 16)
           .foregroundStyle(Color.secondary)
 
         Text(title)
           .font(.system(size: 13))
           .lineLimit(1)
-          .foregroundStyle(Color.primary)
+          .foregroundStyle(Color.secondary)
 
       }
       .padding(.horizontal, 6)
@@ -167,6 +153,7 @@ private struct GettingStartedActionRow: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(GettingStartedButtonStyle(isHovered: isHovered && !isDisabled))
+    .focusEffectDisabled(true)
     .disabled(isDisabled)
     .onHover { isHovered = $0 }
   }
