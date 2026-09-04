@@ -777,9 +777,11 @@ final class SidebarCollectionBodyController: NSViewController {
           let contentView = window.contentView
     else { return nil }
 
+    guard let contentSuperview = contentView.superview else { return nil }
     let windowPoint = collectionView.convert(point, to: nil)
-    let contentPoint = contentView.convert(windowPoint, from: nil)
-    guard let hitView = contentView.hitTest(contentPoint),
+    // AppKit hit testing expects a point in the receiver's superview coordinates.
+    let contentSuperviewPoint = contentSuperview.convert(windowPoint, from: nil)
+    guard let hitView = contentView.hitTest(contentSuperviewPoint),
           hitView === collectionView || hitView.isDescendant(of: collectionView)
     else { return nil }
 
