@@ -166,7 +166,7 @@ struct ChatRouteTitleBar: View {
         .truncationMode(.tail)
 
       if model.showsInlineTeamBadge {
-        InlineTeamToolbarBadge()
+        InlineTeamToolbarBadge(size: 14, baselineOffset: 3)
       }
     }
     .frame(minWidth: 0, alignment: .leading)

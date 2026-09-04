@@ -24,23 +24,34 @@ public enum InlineTeamToolbarBadgeVisibility {
 @MainActor
 public struct InlineTeamToolbarBadge: View {
   private let size: CGFloat
+  private let baselineOffset: CGFloat
 
-  public init(size: CGFloat = 10) {
+  public init(size: CGFloat = 12, baselineOffset: CGFloat = 1) {
     self.size = size
+    self.baselineOffset = baselineOffset
   }
 
   public var body: some View {
-    Image("InlineLogoSymbol", bundle: .main)
+    Image("InlineTeamBadgeAppIcon", bundle: .main)
       .resizable()
       .interpolation(.high)
       .scaledToFit()
       .frame(width: size, height: size)
+      .clipShape(tileShape)
+      .overlay {
+        tileShape
+          .strokeBorder(.primary.opacity(0.16), lineWidth: 0.5)
+      }
       .fixedSize()
       .alignmentGuide(.firstTextBaseline) { dimensions in
-        dimensions[.bottom] - 1
+        dimensions[.bottom] - baselineOffset
       }
       .contentShape(Rectangle())
       .help("Inline Team")
       .accessibilityLabel("Inline Team")
+  }
+
+  private var tileShape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
   }
 }
