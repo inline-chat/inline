@@ -106,6 +106,9 @@ const LEGACY_CONFIG_VERSION: u32 = 3;
 const ACCOUNT_CONFIG_VERSION: u32 = 4;
 const ACCOUNT_SECRETS_VERSION: u32 = 2;
 const MAX_ACCOUNT_CONCURRENT_TURNS: usize = 4;
+// Interactive settings should fail fast, but a cold Claude session can need
+// longer than that to publish the model catalog during service startup.
+const INITIAL_PROVIDER_CATALOG_DEADLINE: Duration = Duration::from_secs(15);
 
 mod account;
 use account::*;
@@ -293,6 +296,13 @@ pub(crate) async fn setup_provider_core(
         |_| {},
     )
     .await
+}
+
+pub(crate) fn preflight_claude_setup(
+    allow_adapter_install: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    provider::preflight_claude_setup(allow_adapter_install)
+        .map_err(|error| CliError::provider_integration_failed(error).into())
 }
 
 pub(crate) async fn setup_provider_core_with_progress<F>(
@@ -1601,89 +1611,16 @@ async fn run_provider_installation(
             .with_session_configuration_fingerprint(session_configuration_fingerprint.clone()),
     );
 
-    let catalog_projects = projects::project_choices(
+    refresh_provider_configuration_catalog(
+        &provider_id,
+        &sessions,
         &bridge_store,
-        &binding.installation_id,
-        Some(&binding.workspace_id),
-        settings_identity.codex_projects_path.as_deref(),
-    );
-    // Claude's ACP catalog is session-scoped, so loading it also prewarms the
-    // exact workspace session reused by the first turn. Bound that startup
-    // read so a slow provider cannot hold the Inline event stream indefinitely.
-    let provider_catalog = if provider_id.as_str() == PROVIDER_ID {
-        sessions.settings_catalog(&binding, now_seconds()).await
-    } else if publishes_initial_provider_catalog(provider_id.as_str()) {
-        match tokio::time::timeout(
-            SETTINGS_DEADLINE,
-            sessions.settings_catalog(&binding, now_seconds()),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_) => Err(SessionManagerError::Driver(DriverError::Transient(
-                "provider settings catalog timed out".to_string(),
-            ))),
-        }
-    } else {
-        Ok(DriverSettingsCatalog::default())
-    };
-    let candidate = match (catalog_projects, provider_catalog) {
-        (Ok(projects), Ok(provider_catalog)) => Some(agent_configuration_catalog(
-            projects,
-            &provider_catalog,
-            &settings_identity.host_label,
-        )),
-        (projects, provider_catalog) => {
-            if let Err(error) = projects {
-                eprintln!(
-                    "Agent project choices are unavailable; keeping Inline's last cached catalog: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-            }
-            if let Err(error) = provider_catalog {
-                eprintln!(
-                    "Agent model choices are unavailable; keeping Inline's last cached catalog: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-            }
-            None
-        }
-    };
-    let catalog = if let Some(candidate) = candidate {
-        match advertise_settings_with_catalog(&bot, candidate.clone()).await {
-            Ok(()) => Some(candidate),
-            Err(error) => {
-                eprintln!(
-                    "Agent configuration choices could not be cached in Inline; keeping its last cached catalog: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-                published_agent_configuration_catalog(&bot)
-                    .await
-                    .unwrap_or_else(|error| {
-                        eprintln!(
-                            "Inline's cached Agent configuration could not be read: {}",
-                            safe_diagnostic(&error.to_string())
-                        );
-                        None
-                    })
-            }
-        }
-    } else {
-        published_agent_configuration_catalog(&bot)
-            .await
-            .unwrap_or_else(|error| {
-                eprintln!(
-                    "Inline's cached Agent configuration could not be read: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-                None
-            })
-    };
-    if let Some(catalog) = catalog {
-        inbound_route
-            .bot_agent_resolver
-            .store_configuration_catalog(catalog);
-    }
+        &binding,
+        &settings_identity,
+        &bot,
+        &inbound_route,
+    )
+    .await;
 
     recover_provider_inbox(
         &bot,
@@ -1779,6 +1716,7 @@ async fn run_provider_installation(
         let (lane_promotion_tx, mut lane_promotions) =
             tokio::sync::mpsc::channel::<TurnLanePromotion>(MAX_ACCOUNT_CONCURRENT_TURNS);
         let mut turns = futures_util::stream::FuturesUnordered::new();
+        let mut catalog_refresh: Option<tokio::task::JoinHandle<()>> = None;
 
         let loop_result: Result<(), Box<dyn std::error::Error>> = 'runtime: loop {
             while active_turns.len() < MAX_ACCOUNT_CONCURRENT_TURNS {
@@ -2240,6 +2178,10 @@ async fn run_provider_installation(
                     break 'runtime Ok(());
                 }
                 description = &mut provider_exit => {
+                    if let Some(task) = catalog_refresh.take() {
+                        task.abort();
+                        let _ = task.await;
+                    }
                     health.mark_provider_unavailable();
                     crate::telemetry::report_bridge_provider_exit(provider_id.as_str());
                     sessions.seal_provider_epoch();
@@ -2427,6 +2369,25 @@ async fn run_provider_installation(
                                     readiness.mark_ready(&installation.installation_id);
                                 }
                                 eprintln!("{provider_name} restarted; queued work can resume.");
+                                let refresh_provider_id = provider_id.clone();
+                                let refresh_sessions = sessions.clone();
+                                let refresh_store = bridge_store.clone();
+                                let refresh_binding = binding.clone();
+                                let refresh_identity = settings_identity.clone();
+                                let refresh_bot = bot.clone();
+                                let refresh_route = inbound_route.clone();
+                                catalog_refresh = Some(tokio::spawn(async move {
+                                    refresh_provider_configuration_catalog(
+                                        &refresh_provider_id,
+                                        &refresh_sessions,
+                                        &refresh_store,
+                                        &refresh_binding,
+                                        &refresh_identity,
+                                        &refresh_bot,
+                                        &refresh_route,
+                                    )
+                                    .await;
+                                }));
                                 break 'restart;
                             }
                             Err(error) => {
@@ -2448,6 +2409,11 @@ async fn run_provider_installation(
                 }
             }
         };
+
+        if let Some(task) = catalog_refresh.take() {
+            task.abort();
+            let _ = task.await;
+        }
 
         active_turns.clear();
         if tokio::time::timeout(Duration::from_secs(10), async {
@@ -2502,6 +2468,104 @@ async fn run_provider_installation(
 
 fn publishes_initial_provider_catalog(provider_id: &str) -> bool {
     matches!(provider_id, "codex" | "claude")
+}
+
+async fn refresh_provider_configuration_catalog(
+    provider_id: &ProviderId,
+    sessions: &Arc<ProviderSessionManager<ProviderDriver>>,
+    bridge_store: &BridgeStore,
+    binding: &BindingKey,
+    settings_identity: &SettingsIdentity,
+    bot: &InlineClient,
+    inbound_route: &InboundRoute,
+) {
+    let catalog_projects = projects::project_choices(
+        bridge_store,
+        &binding.installation_id,
+        Some(&binding.workspace_id),
+        settings_identity.codex_projects_path.as_deref(),
+    )
+    .map_err(|error| safe_diagnostic(&error.to_string()));
+    // Claude's ACP catalog is session-scoped, so loading it also prewarms the
+    // exact workspace session reused by the first turn. Give cold startup more
+    // room than an interactive picker, while keeping a broken provider bounded.
+    let provider_catalog = if provider_id.as_str() == PROVIDER_ID {
+        sessions.settings_catalog(binding, now_seconds()).await
+    } else if publishes_initial_provider_catalog(provider_id.as_str()) {
+        match tokio::time::timeout(
+            INITIAL_PROVIDER_CATALOG_DEADLINE,
+            sessions.settings_catalog(binding, now_seconds()),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(SessionManagerError::Driver(DriverError::Transient(
+                "provider settings catalog timed out".to_string(),
+            ))),
+        }
+    } else {
+        Ok(DriverSettingsCatalog::default())
+    };
+    let candidate = match (catalog_projects, provider_catalog) {
+        (Ok(projects), Ok(provider_catalog)) => Some(agent_configuration_catalog(
+            projects,
+            &provider_catalog,
+            &settings_identity.host_label,
+        )),
+        (projects, provider_catalog) => {
+            if let Err(error) = projects {
+                eprintln!(
+                    "Agent project choices are unavailable; keeping Inline's last cached catalog: {}",
+                    error
+                );
+            }
+            if let Err(error) = provider_catalog {
+                eprintln!(
+                    "Agent model choices are unavailable; keeping Inline's last cached catalog: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+            }
+            None
+        }
+    };
+    let catalog = if let Some(candidate) = candidate {
+        match advertise_settings_with_catalog(bot, candidate.clone())
+            .await
+            .map_err(|error| safe_diagnostic(&error.to_string()))
+        {
+            Ok(()) => Some(candidate),
+            Err(diagnostic) => {
+                eprintln!(
+                    "Agent configuration choices could not be cached in Inline; keeping its last cached catalog: {}",
+                    diagnostic
+                );
+                published_agent_configuration_catalog(bot)
+                    .await
+                    .unwrap_or_else(|error| {
+                        eprintln!(
+                            "Inline's cached Agent configuration could not be read: {}",
+                            safe_diagnostic(&error.to_string())
+                        );
+                        None
+                    })
+            }
+        }
+    } else {
+        published_agent_configuration_catalog(bot)
+            .await
+            .unwrap_or_else(|error| {
+                eprintln!(
+                    "Inline's cached Agent configuration could not be read: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+                None
+            })
+    };
+    if let Some(catalog) = catalog {
+        inbound_route
+            .bot_agent_resolver
+            .store_configuration_catalog(catalog);
+    }
 }
 
 async fn shutdown_provider_driver(

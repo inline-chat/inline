@@ -296,7 +296,7 @@ pub(super) fn agent_configuration_catalog(
                 .cloned();
             AgentModelOption {
                 id: model.value.clone(),
-                label: model.label.clone(),
+                label: provider_model_display_label(model).to_string(),
                 description: model.description.clone(),
                 reasoning_effort_ids,
                 default_reasoning_effort_id,
@@ -317,6 +317,46 @@ pub(super) fn agent_configuration_catalog(
         }),
         reasoning: (!reasoning.is_empty()).then_some(AgentReasoningCatalog { options: reasoning }),
     }
+}
+
+pub(super) fn provider_model_display_label(model: &inline_agent_bridge::DriverModelOption) -> &str {
+    if model.value == "default"
+        && let Some(description) = model
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+    {
+        return description;
+    }
+    &model.label
+}
+
+fn is_synthetic_provider_default_model(model: &inline_agent_bridge::DriverModelOption) -> bool {
+    model.is_default && model.value == "default"
+}
+
+pub(super) fn model_selection_label(
+    selected: Option<&str>,
+    catalog: Option<&DriverSettingsCatalog>,
+) -> String {
+    if let Some(selected) = selected {
+        return catalog
+            .and_then(|catalog| catalog.models.iter().find(|model| model.value == selected))
+            .map(|model| {
+                let label = provider_model_display_label(model);
+                if is_synthetic_provider_default_model(model) {
+                    format!("{label} (provider default)")
+                } else {
+                    label.to_string()
+                }
+            })
+            .unwrap_or_else(|| selected.to_string());
+    }
+    catalog
+        .and_then(|catalog| catalog.models.iter().find(|model| model.is_default))
+        .map(|model| format!("{} (provider default)", provider_model_display_label(model)))
+        .unwrap_or_else(|| "provider default".to_string())
 }
 
 pub(super) async fn send_settings_command_choices(
@@ -2080,12 +2120,24 @@ async fn command_status<D: AgentDriver + 'static>(
     name: &str,
 ) -> SettingsCommandResult {
     let message = match name {
-        "model" => format_setting_status(
-            "Model",
-            settings.model.as_deref(),
-            catalog.map(|catalog| catalog.models.iter().map(|option| option.value.as_str())),
-            "/model <value|default>",
-        ),
+        "model" => {
+            let choices = catalog
+                .map(|catalog| {
+                    catalog
+                        .models
+                        .iter()
+                        .map(|option| option.value.as_str())
+                        .take(16)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|choices| !choices.is_empty())
+                .unwrap_or_else(|| "temporarily unavailable".to_string());
+            format!(
+                "Model: {}. Choices: {choices}. Use `/model <value|default>`.",
+                model_selection_label(settings.model.as_deref(), catalog)
+            )
+        }
         "reasoning" => format_setting_status(
             "Reasoning",
             settings.reasoning.as_deref(),
@@ -2273,16 +2325,19 @@ fn command_value<D: AgentDriver + 'static>(
                 argument,
                 catalog
                     .map(|catalog| {
-                        catalog
-                            .models
-                            .iter()
-                            .map(|option| (option.value.as_str(), option.label.as_str(), false))
+                        catalog.models.iter().map(|option| {
+                            (
+                                option.value.as_str(),
+                                provider_model_display_label(option),
+                                false,
+                            )
+                        })
                     })
                     .into_iter()
                     .flatten(),
                 "model",
             )?;
-            let label = display_selected(value.as_deref()).to_string();
+            let label = model_selection_label(value.as_deref(), catalog);
             Ok((
                 ITEM_MODEL,
                 Some(BotSettingsValue::String(
@@ -3243,20 +3298,39 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             }
             workspace.workspace_id
         });
-    let model = selected_model(catalog, settings.model.as_deref());
+    // ACP providers may expose their automatic choice as a synthetic model
+    // whose value is literally `default`. Inline already owns the unset row,
+    // so project that persisted spelling back to unset and avoid a duplicate
+    // choice with identical behavior.
+    let selected_model_value = settings.model.as_deref().filter(|selected| {
+        !catalog.is_some_and(|catalog| {
+            catalog.models.iter().any(|model| {
+                is_synthetic_provider_default_model(model) && model.value.as_str() == *selected
+            })
+        })
+    });
+    let model = selected_model(catalog, selected_model_value);
+    let provider_default_model_label = catalog
+        .and_then(|catalog| catalog.models.iter().find(|model| model.is_default))
+        .map(|model| format!("Automatic — {}", provider_model_display_label(model)))
+        .unwrap_or_else(|| "Provider default".to_string());
     let model_options = select_options(
         catalog.map(|catalog| {
-            catalog.models.iter().map(|model| {
-                (
-                    model.value.as_str(),
-                    model.label.as_str(),
-                    model.description.as_deref(),
-                    false,
-                )
-            })
+            catalog
+                .models
+                .iter()
+                .filter(|model| !is_synthetic_provider_default_model(model))
+                .map(|model| {
+                    (
+                        model.value.as_str(),
+                        provider_model_display_label(model),
+                        model.description.as_deref(),
+                        false,
+                    )
+                })
         }),
-        settings.model.as_deref(),
-        "Provider default",
+        selected_model_value,
+        &provider_default_model_label,
     );
     let reasoning_options = select_options(
         model.map(|model| {
@@ -3337,7 +3411,7 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                     select_item(
                         ITEM_MODEL,
                         "Model",
-                        settings.model.as_deref().unwrap_or(DEFAULT_VALUE),
+                        selected_model_value.unwrap_or(DEFAULT_VALUE),
                         model_options,
                         catalog_reason.clone(),
                     ),

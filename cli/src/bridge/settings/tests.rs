@@ -85,6 +85,96 @@ fn published_catalog_names_effective_project_model_and_reasoning_defaults() {
 }
 
 #[test]
+fn published_catalog_names_a_synthetic_provider_default_from_its_description() {
+    let model = |value: &str, label: &str, description: Option<&str>| DriverModelOption {
+        value: value.to_string(),
+        label: label.to_string(),
+        description: description.map(str::to_string),
+        reasoning: Vec::new(),
+        default_reasoning: None,
+        is_default: true,
+    };
+
+    for (model, expected) in [
+        (
+            model(
+                "default",
+                "Default (recommended)",
+                Some("Claude Sonnet 4.6"),
+            ),
+            "Claude Sonnet 4.6",
+        ),
+        (model("default", "Default", None), "Default"),
+        (
+            model("gpt-test", "GPT Test", Some("Provider description")),
+            "GPT Test",
+        ),
+    ] {
+        let catalog = agent_configuration_catalog(
+            Vec::new(),
+            &DriverSettingsCatalog {
+                models: vec![model],
+                ..DriverSettingsCatalog::default()
+            },
+            "host",
+        );
+        assert_eq!(catalog.models.expect("models").options[0].label, expected);
+    }
+}
+
+#[tokio::test]
+async fn model_picker_and_reset_copy_name_the_effective_claude_default() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, false);
+    let settings = fixture
+        .store
+        .chat_settings(&fixture.snapshot.binding, 1)
+        .expect("settings");
+    let catalog = DriverSettingsCatalog {
+        models: vec![DriverModelOption {
+            value: "default".to_string(),
+            label: "Default".to_string(),
+            description: Some("Claude Sonnet 4.6".to_string()),
+            reasoning: Vec::new(),
+            default_reasoning: None,
+            is_default: true,
+        }],
+        ..DriverSettingsCatalog::default()
+    };
+
+    let document = build_settings_document(
+        &fixture.runtime(),
+        &fixture.snapshot,
+        &settings,
+        Some(&catalog),
+    )
+    .await
+    .expect("settings document");
+    let model = document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == ITEM_MODEL)
+        .expect("model item");
+    let BotChatSettingsControl::Select { value, options } = &model.control else {
+        panic!("expected model select");
+    };
+    assert_eq!(value, DEFAULT_VALUE);
+    assert_eq!(options.len(), 1);
+    assert_eq!(options[0].label, "Automatic — Claude Sonnet 4.6");
+
+    let (_, _, confirmation) = command_value(
+        &fixture.runtime(),
+        &fixture.snapshot,
+        &settings,
+        Some(&catalog),
+        "model",
+        "default",
+    )
+    .expect("reset model");
+    assert!(confirmation.contains("Claude Sonnet 4.6 (provider default)"));
+}
+
+#[test]
 fn bound_agent_context_owns_project_model_and_reasoning_settings() {
     for item in [
         ITEM_MODEL,

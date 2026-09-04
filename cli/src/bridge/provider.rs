@@ -19,9 +19,9 @@ use inline_agent_bridge::{
     SessionInputCorrelation, SessionSpec, StartedTurn, TurnId, TurnInput, TurnOptions,
 };
 use inline_agent_driver_acp::{
-    AcpDistribution, AcpDriver, AcpLaunchDescriptor, AcpProcessStatus, VersionDiscovery,
-    provider_support, provider_support_catalog, should_scrub_acp_environment_name,
-    spawn_acp_driver,
+    AcpDistribution, AcpDriver, AcpLaunchDescriptor, AcpProcessStatus, AcpProviderSupport,
+    VersionDiscovery, provider_support, provider_support_catalog,
+    should_scrub_acp_environment_name, spawn_acp_driver,
 };
 #[cfg(test)]
 use inline_agent_driver_codex::CodexVersionPolicy;
@@ -151,6 +151,23 @@ pub(super) fn provider_display_name(provider_id: &str) -> Option<&'static str> {
         "codex" => Some("Codex"),
         provider_id => provider_support(provider_id).map(|support| support.display_name),
     }
+}
+
+/// Validates the local prerequisites that Claude setup will need without
+/// installing an adapter or changing the bridge account.
+pub(super) fn preflight_claude_setup(allow_install: bool) -> Result<(), String> {
+    let support = verified_acp_support("claude")?;
+    let AcpDistribution::NpmAdapter(adapter) = support.distribution else {
+        return Err("Claude has no verified npm adapter installation plan".to_string());
+    };
+    if !adapter.is_verified_install_pin() {
+        return Err("Claude's curated ACP adapter is missing an integrity pin".to_string());
+    }
+    if allow_install {
+        super::resolve_executable(std::path::Path::new("npm"))
+            .map_err(|_| "npm is required to install the curated Claude ACP adapter".to_string())?;
+    }
+    probe_claude_host_requirements(support)
 }
 
 /// Verifies the exact executable setup will persist, its version surface, and
@@ -357,40 +374,18 @@ fn probe_configured_provider_with_runtime(
         }
     } else if let Some(auth_probe) = support.auth_probe {
         if provider_id == "claude" {
-            let node = super::resolve_executable(std::path::Path::new("node")).map_err(|_| {
-                "Claude bridge requires Node.js 22 or newer; install or update Node.js, then retry"
-                    .to_string()
-            })?;
-            let node_version = probe_command(
-                provider_id,
-                &node,
-                &["--version"],
-                "Claude bridge Node.js version",
-            )?;
-            if !supported_claude_node_version(&node_version) {
-                return Err(format!(
-                    "Claude bridge requires Node.js 22 or newer; found {}",
-                    node_version.trim()
-                ));
-            }
-        }
-        let auth_executable = super::resolve_executable(std::path::Path::new(auth_probe.program))
-            .map_err(|_| {
-            format!(
-                "{} requires the {} CLI; install it and run its login flow first",
-                support.display_name, auth_probe.program
-            )
-        })?;
-        let auth_label = format!("{} authentication", support.display_name);
-        if provider_id == "claude" {
-            let auth = probe_command_capture_status(
-                provider_id,
-                &auth_executable,
-                auth_probe.arguments,
-                &auth_label,
-            )?;
-            validate_claude_auth_status(&auth, &auth_label)?;
+            probe_claude_host_requirements(support)?;
         } else {
+            let auth_executable = super::resolve_executable(std::path::Path::new(
+                auth_probe.program,
+            ))
+            .map_err(|_| {
+                format!(
+                    "{} requires the {} CLI; install it and run its login flow first",
+                    support.display_name, auth_probe.program
+                )
+            })?;
+            let auth_label = format!("{} authentication", support.display_name);
             probe_command(
                 provider_id,
                 &auth_executable,
@@ -437,6 +432,43 @@ fn probe_configured_provider_with_runtime(
         provider_runtime,
         version,
     })
+}
+
+fn probe_claude_host_requirements(support: &AcpProviderSupport) -> Result<(), String> {
+    let node = super::resolve_executable(std::path::Path::new("node")).map_err(|_| {
+        "Claude bridge requires Node.js 22 or newer; install or update Node.js, then retry"
+            .to_string()
+    })?;
+    let node_version = probe_command(
+        "claude",
+        &node,
+        &["--version"],
+        "Claude bridge Node.js version",
+    )?;
+    if !supported_claude_node_version(&node_version) {
+        return Err(format!(
+            "Claude bridge requires Node.js 22 or newer; found {}",
+            node_version.trim()
+        ));
+    }
+    let auth_probe = support
+        .auth_probe
+        .ok_or_else(|| "Claude has no authentication probe".to_string())?;
+    let auth_executable = super::resolve_executable(std::path::Path::new(auth_probe.program))
+        .map_err(|_| {
+            format!(
+                "{} requires the {} CLI; install it and run its login flow first",
+                support.display_name, auth_probe.program
+            )
+        })?;
+    let auth_label = format!("{} authentication", support.display_name);
+    let auth = probe_command_capture_status(
+        "claude",
+        &auth_executable,
+        auth_probe.arguments,
+        &auth_label,
+    )?;
+    validate_claude_auth_status(&auth, &auth_label)
 }
 
 fn claude_auth_is_logged_in(output: &str) -> Option<bool> {

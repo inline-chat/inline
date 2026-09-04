@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use inline_agent_bridge::{
@@ -18,7 +18,7 @@ const LIVE_TIMEOUT: Duration = Duration::from_secs(120);
 /// adapter-readiness race that used to wedge the first turn.
 #[tokio::test]
 #[ignore = "requires an installed Claude ACP adapter and authenticated Claude CLI"]
-async fn installed_claude_completes_a_direct_new_session_turn() {
+async fn installed_claude_exposes_settings_and_completes_a_direct_new_session_turn() {
     tokio::time::timeout(LIVE_TIMEOUT, async {
         let program = std::env::var_os("INLINE_ACP_CLAUDE_BIN")
             .map(PathBuf::from)
@@ -35,7 +35,35 @@ async fn installed_claude_completes_a_direct_new_session_turn() {
         let spawned = spawn_acp_driver(descriptor, "live-test")
             .await
             .expect("launch Claude ACP adapter");
-        let cwd = std::env::current_dir().expect("current directory");
+        let cwd = std::env::var_os("INLINE_ACP_CLAUDE_CWD")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().expect("current directory"));
+        let catalog_started = Instant::now();
+        let catalog = spawned
+            .driver
+            .settings_catalog(&cwd)
+            .await
+            .expect("load Claude settings catalog");
+        eprintln!(
+            "Claude settings catalog loaded in {:?}",
+            catalog_started.elapsed()
+        );
+        assert!(!catalog.models.is_empty(), "Claude returned no model choices");
+        let default_model = catalog
+            .models
+            .iter()
+            .find(|model| model.is_default)
+            .expect("Claude did not identify its default model");
+        let default_model_name = if default_model.value == "default" {
+            default_model
+                .description
+                .as_deref()
+                .filter(|description| !description.trim().is_empty())
+                .expect("Claude did not resolve the synthetic default model name")
+        } else {
+            &default_model.label
+        };
+        eprintln!("Claude default model: {default_model_name}");
         let session = spawned
             .driver
             .start_session(SessionSpec { cwd })

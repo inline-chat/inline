@@ -480,9 +480,8 @@ pub(crate) async fn setup(
             AgentTarget::Hermes => hermes::preflight(&resolved.installed, &resolved.args)
                 .await
                 .map(|_| ()),
-            AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
-                Ok(())
-            }
+            AgentTarget::Claude => bridge::preflight_claude_setup(!resolved.args.no_install),
+            AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Amp => Ok(()),
         };
         if let Err(error) = preflight {
             return report_setup_failure(error, target, &progress, false, json, json_format);

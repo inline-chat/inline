@@ -3,6 +3,11 @@
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
+fn write_executable(path: &std::path::Path, contents: &str) {
+    std::fs::write(path, contents).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
 #[test]
 fn preflight_errors_use_the_setup_envelope_without_running_a_provider() {
     let directory = tempfile::tempdir().unwrap();
@@ -84,6 +89,79 @@ fn preflight_errors_use_the_setup_envelope_without_running_a_provider() {
     assert!(!directory.path().join("provider-invoked").exists());
     assert!(!directory.path().join("missing-auth").exists());
     assert!(!directory.path().join("missing-state").exists());
+}
+
+#[test]
+fn claude_dry_run_checks_node_auth_and_adapter_install_prerequisites() {
+    let directory = tempfile::tempdir().unwrap();
+    write_executable(
+        &directory.path().join("claude"),
+        "#!/bin/sh\nprintf '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}\\n'\n",
+    );
+    write_executable(
+        &directory.path().join("node"),
+        "#!/bin/sh\nprintf 'v22.12.0\\n'\n",
+    );
+    write_executable(&directory.path().join("npm"), "#!/bin/sh\nexit 97\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_inline"))
+        .args([
+            "agents",
+            "setup",
+            "--target",
+            "claude",
+            "--dry-run",
+            "--non-interactive",
+            "--json",
+        ])
+        .env("PATH", directory.path())
+        .env("HOME", directory.path())
+        .env_remove("INLINE_TOKEN")
+        .env("INLINE_CLI_TELEMETRY", "off")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["target"], "claude");
+    assert_eq!(payload["status"], "planned");
+
+    write_executable(
+        &directory.path().join("node"),
+        "#!/bin/sh\nprintf 'v20.18.0\\n'\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_inline"))
+        .args([
+            "agents",
+            "setup",
+            "--target",
+            "claude",
+            "--dry-run",
+            "--non-interactive",
+            "--json",
+        ])
+        .env("PATH", directory.path())
+        .env("HOME", directory.path())
+        .env_remove("INLINE_TOKEN")
+        .env("INLINE_CLI_TELEMETRY", "off")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(payload["error"]["code"], "provider_integration_failed");
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Node.js 22 or newer")
+    );
 }
 
 #[test]

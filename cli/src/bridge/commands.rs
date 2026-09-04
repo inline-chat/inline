@@ -187,7 +187,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 Ok(policy) => format!("{} ({})", policy.mode.as_str(), policy.source.label()),
                 Err(_) => "unavailable".to_string(),
             };
-            let permissions_catalog = if settings.turn_active {
+            let settings_catalog = if settings.turn_active {
                 // A cancelled provider read can close its connection epoch.
                 // Status must never put a running turn at risk.
                 None
@@ -209,15 +209,16 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                     Ok(Err(_)) | Err(_) => None,
                 }
             };
+            let model = model_selection_label(current.model.as_deref(), settings_catalog.as_ref());
             let permissions = permission_selection_label(
                 current.permissions.as_deref(),
-                permissions_catalog.as_ref(),
+                settings_catalog.as_ref(),
             );
             handled(format!(
                 "Agent is {state}. Host: {}. Project: {}. Session: {session}. Model: {}. Reasoning: {}. Permissions: {}. Verbose: {}. Reply in threads: {reply_threads}. Inline tools: {inline_tools}.",
                 settings.identity.host_label,
                 workspace_label(workspace),
-                current.model.as_deref().unwrap_or("provider default"),
+                model,
                 current.reasoning.as_deref().unwrap_or("provider default"),
                 permissions,
                 if current.verbose { "on" } else { "off" },
@@ -498,6 +499,31 @@ mod tests {
         assert!(!session_error_ends_epoch(&SessionManagerError::Driver(
             DriverError::Transient("retryable".to_string())
         )));
+    }
+
+    #[test]
+    fn status_names_the_effective_provider_default_model() {
+        let catalog = DriverSettingsCatalog {
+            models: vec![DriverModelOption {
+                value: "default".to_string(),
+                label: "Default".to_string(),
+                description: Some("Claude Sonnet 4.6".to_string()),
+                reasoning: Vec::new(),
+                default_reasoning: None,
+                is_default: true,
+            }],
+            ..DriverSettingsCatalog::default()
+        };
+
+        assert_eq!(
+            model_selection_label(None, Some(&catalog)),
+            "Claude Sonnet 4.6 (provider default)"
+        );
+        assert_eq!(
+            model_selection_label(Some("default"), Some(&catalog)),
+            "Claude Sonnet 4.6 (provider default)"
+        );
+        assert_eq!(model_selection_label(None, None), "provider default");
     }
 
     #[test]
@@ -1584,7 +1610,7 @@ mod tests {
                 .iter()
                 .map(|choice| choice.label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Provider default", "GPT Test"]
+            vec!["Automatic — GPT Test", "GPT Test"]
         );
 
         for command in [
