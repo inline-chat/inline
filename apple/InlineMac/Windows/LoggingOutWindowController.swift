@@ -48,7 +48,6 @@ final class LoggingOutWindowController: NSWindowController {
     panel.isFloatingPanel = true
     panel.hidesOnDeactivate = false
     panel.level = .modalPanel
-    panel.hasShadow = true
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.isMovableByWindowBackground = true
@@ -57,15 +56,38 @@ final class LoggingOutWindowController: NSWindowController {
     quitButton.target = self
     quitButton.action = #selector(quitInline)
 
-    let contentView = NSVisualEffectView()
-    contentView.material = .popover
-    contentView.blendingMode = .behindWindow
-    contentView.state = .active
-    contentView.wantsLayer = true
-    contentView.layer?.cornerRadius = 16
-    contentView.layer?.masksToBounds = true
+    let contentView = NSView()
     contentView.addSubview(label)
     contentView.addSubview(quitButton)
+
+    if #available(macOS 26.0, *) {
+      let glassView = NSGlassEffectView()
+      glassView.style = .clear
+      glassView.cornerRadius = 16
+      glassView.contentView = contentView
+      panel.contentView = glassView
+      panel.hasShadow = false
+    } else {
+      let materialView = NSVisualEffectView()
+      materialView.material = .popover
+      materialView.blendingMode = .behindWindow
+      materialView.state = .followsWindowActiveState
+      materialView.wantsLayer = true
+      materialView.layer?.cornerRadius = 16
+      materialView.layer?.cornerCurve = .continuous
+      materialView.layer?.masksToBounds = true
+      contentView.translatesAutoresizingMaskIntoConstraints = false
+      materialView.addSubview(contentView)
+      NSLayoutConstraint.activate([
+        contentView.leadingAnchor.constraint(equalTo: materialView.leadingAnchor),
+        contentView.trailingAnchor.constraint(equalTo: materialView.trailingAnchor),
+        contentView.topAnchor.constraint(equalTo: materialView.topAnchor),
+        contentView.bottomAnchor.constraint(equalTo: materialView.bottomAnchor),
+      ])
+      panel.contentView = materialView
+      panel.hasShadow = true
+    }
+
     NSLayoutConstraint.activate([
       label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -74,7 +96,6 @@ final class LoggingOutWindowController: NSWindowController {
       quitButton.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       quitButton.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 16),
     ])
-    panel.contentView = contentView
   }
 
   @available(*, unavailable)
