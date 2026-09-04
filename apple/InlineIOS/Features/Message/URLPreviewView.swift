@@ -216,13 +216,14 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     let cornerRadius: CGFloat = mode == .large ? Metrics.largeCornerRadius : 8
 
     let theme = ThemeManager.shared.selected
-    let bgColor = outgoing ? .white.withAlphaComponent(0.1) : theme.secondaryTextColor?
-      .withAlphaComponent(0.2) ?? .systemGray5.withAlphaComponent(0.2)
-    let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
+    // Match the macOS roles, with a slightly stronger incoming fill for iOS legibility.
+    let previewBackgroundColor = outgoing ? UIColor.white.withAlphaComponent(0.08) : .label.withAlphaComponent(0.04)
+    let imagePlaceholderBackgroundColor = UIColor.label.withAlphaComponent(0.05)
+    let primaryTextColor = outgoing ? UIColor.white : .label
     let secondaryTextColor = outgoing ? UIColor.white
-      .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
+      .withAlphaComponent(0.72) : .secondaryLabel
     let tertiaryTextColor = outgoing ? UIColor.white
-      .withAlphaComponent(0.55) : (theme.primaryTextColor?.withAlphaComponent(0.55) ?? .tertiaryLabel)
+      .withAlphaComponent(0.55) : .tertiaryLabel
 
     let isVideo = preview.isVideoPreview
     let display = preview.displayContent(maxDescriptionLength: mode == .large ? 420 : 110)
@@ -286,8 +287,10 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     configureImage(
       photoInfo: photoInfo,
       isVideo: isVideo,
-      providerPlaceholderImage: !isVideo && photoInfo == nil && preview.isNotionPreview ? UIImage(named: "notion-logo") : nil,
-      backgroundColor: bgColor,
+      providerPlaceholderImage: !isVideo && photoInfo == nil && preview.isNotionPreview
+        ? UIImage(named: "notion-logo")
+        : nil,
+      placeholderBackgroundColor: imagePlaceholderBackgroundColor,
       reloadMessage: message
     )
     imageContainer.layer.cornerRadius = mode == .large ? 0 : Metrics.imageCornerRadius
@@ -326,7 +329,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     }
 
     if mode == .compact {
-      rectangleView.backgroundColor = outgoing ? UIColor.white : theme.accent
+      rectangleView.backgroundColor = outgoing ? UIColor.white.withAlphaComponent(0.8) : theme.accent
       addSubview(rectangleView)
 
       let rowStack = UIStackView()
@@ -412,7 +415,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
     NSLayoutConstraint.activate(activeConstraints)
 
-    backgroundColor = bgColor
+    backgroundColor = previewBackgroundColor
     layer.cornerRadius = cornerRadius
     layer.masksToBounds = true
   }
@@ -511,11 +514,11 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     photoInfo: PhotoInfo?,
     isVideo: Bool,
     providerPlaceholderImage: UIImage?,
-    backgroundColor: UIColor,
+    placeholderBackgroundColor: UIColor,
     reloadMessage: Message?
   ) {
     let showsProviderPlaceholder = providerPlaceholderImage != nil
-    imageContainer.backgroundColor = showsProviderPlaceholder ? .clear : backgroundColor.withAlphaComponent(0.2)
+    imageContainer.backgroundColor = showsProviderPlaceholder ? .clear : placeholderBackgroundColor
     imageContainer.isHidden = !isVideo && photoInfo == nil && !showsProviderPlaceholder
     playOverlayView.isHidden = !isVideo
     playIconView.isHidden = !isVideo
@@ -531,7 +534,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
     imageView.isHidden = false
     providerPlaceholderView.isHidden = true
-    imageContainer.backgroundColor = backgroundColor.withAlphaComponent(0.2)
+    imageContainer.backgroundColor = placeholderBackgroundColor
     imageView.showsLoadingPlaceholder = true
     imageView.setPhoto(photoInfo, reloadMessageOnFinish: reloadMessage)
   }
