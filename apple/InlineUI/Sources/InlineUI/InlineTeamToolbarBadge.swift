@@ -40,14 +40,13 @@ public struct InlineTeamToolbarBadge: View {
       .clipShape(tileShape)
       .overlay {
         tileShape
-          .strokeBorder(.primary.opacity(0.16), lineWidth: 0.5)
+          .strokeBorder(.black.opacity(0.16), lineWidth: 0.5)
       }
       .fixedSize()
       .alignmentGuide(.firstTextBaseline) { dimensions in
         dimensions[.bottom] - baselineOffset
       }
       .contentShape(Rectangle())
-      .help("Inline Team")
       .accessibilityLabel("Inline Team")
   }
 
