@@ -8,6 +8,11 @@ import Logger
 import SwiftUI
 import TextProcessing
 
+enum GlassComposeCompletionMenuPlacement {
+  case above
+  case below
+}
+
 class GlassComposeAppKit: NSView {
   private static let attachmentMarker = "\u{FFFC}"
 
@@ -20,6 +25,7 @@ class GlassComposeAppKit: NSView {
   private let usage: ComposeUsage
   private let layout: GlassComposeLayout
   private let capabilities: ComposeCapabilities
+  private let completionMenuPlacement: GlassComposeCompletionMenuPlacement
   private let chatPeerID: InlineKit.Peer?
   private var peerId: InlineKit.Peer {
     guard let chatPeerID else {
@@ -524,6 +530,7 @@ class GlassComposeAppKit: NSView {
     usage = .chat
     self.layout = layout
     self.capabilities = capabilities
+    completionMenuPlacement = .above
     chatPeerID = peerId
     self.messageList = messageList
     self.chat = chat
@@ -554,11 +561,13 @@ class GlassComposeAppKit: NSView {
     newThread context: NewThreadComposeContext,
     dependencies: AppDependencies,
     layout: GlassComposeLayout = .accessoryBar,
-    capabilities: ComposeCapabilities = .allChatsNewThread
+    capabilities: ComposeCapabilities = .allChatsNewThread,
+    completionMenuPlacement: GlassComposeCompletionMenuPlacement
   ) {
     usage = .newThread(context)
     self.layout = layout
     self.capabilities = capabilities
+    self.completionMenuPlacement = completionMenuPlacement
     chatPeerID = nil
     chat = nil
     peerUser = nil
@@ -1486,10 +1495,16 @@ class GlassComposeAppKit: NSView {
 
   private func completionMenuConstraints(for menu: NSView, spacing: CGFloat) -> [NSLayoutConstraint] {
     let anchorView = glassComposePillView ?? self
+    let verticalConstraint = switch completionMenuPlacement {
+      case .above:
+        menu.bottomAnchor.constraint(equalTo: anchorView.topAnchor, constant: -spacing)
+      case .below:
+        menu.topAnchor.constraint(equalTo: anchorView.bottomAnchor, constant: spacing)
+    }
     return [
       menu.leadingAnchor.constraint(equalTo: anchorView.leadingAnchor),
       menu.trailingAnchor.constraint(equalTo: anchorView.trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: anchorView.topAnchor, constant: -spacing),
+      verticalConstraint,
     ]
   }
 

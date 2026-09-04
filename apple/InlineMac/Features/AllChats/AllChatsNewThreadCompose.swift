@@ -44,6 +44,13 @@ enum AllChatsNewThreadComposePlacement {
       case .bottom: .above
     }
   }
+
+  var completionMenuPlacement: GlassComposeCompletionMenuPlacement {
+    switch self {
+      case .top: .below
+      case .bottom: .above
+    }
+  }
 }
 
 private struct AllChatsComposePreferences {
@@ -1122,7 +1129,8 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
       ),
       dependencies: model.dependencies,
       layout: .accessoryBar,
-      capabilities: .allChatsNewThread
+      capabilities: .allChatsNewThread,
+      completionMenuPlacement: placement.completionMenuPlacement
     )
     super.init(frame: .zero)
     weakHost.view = self
