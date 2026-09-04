@@ -242,6 +242,7 @@ public final class BotAgentsSettingsModel {
   public private(set) var savingAgentId: Int64?
   public private(set) var deletingAgentIds: Set<Int64> = []
   public private(set) var errorMessage: String?
+  public private(set) var skillErrorMessage: String?
 
   public let botUserId: Int64
   @ObservationIgnored private let directory: BotAgentDirectory
@@ -276,6 +277,7 @@ public final class BotAgentsSettingsModel {
   public func loadSkills() async {
     guard !isLoadingSkills else { return }
     isLoadingSkills = true
+    skillErrorMessage = nil
     defer { isLoadingSkills = false }
 
     do {
@@ -292,7 +294,7 @@ public final class BotAgentsSettingsModel {
         return $0.key < $1.key
       }
     } catch {
-      skills = []
+      skillErrorMessage = "Could not load skills."
     }
   }
 

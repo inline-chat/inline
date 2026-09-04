@@ -477,6 +477,11 @@ private struct IOSBotAgentsSection: View {
           .foregroundStyle(.red)
       }
 
+      if let skillErrorMessage = model.skillErrorMessage {
+        Label(skillErrorMessage, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+      }
+
       Button {
         editorItem = IOSBotAgentEditorItem(agent: nil)
       } label: {
@@ -492,6 +497,10 @@ private struct IOSBotAgentsSection: View {
       IOSBotAgentEditor(
         agent: item.agent,
         isSaving: model.savingAgentId != nil,
+        skills: model.skills,
+        isLoadingSkills: model.isLoadingSkills,
+        skillErrorMessage: model.skillErrorMessage,
+        onLoadSkills: { await model.loadSkills() },
         onSave: { draft in
           await model.save(draft, agentId: item.agent?.id)
         },
@@ -535,17 +544,29 @@ private struct IOSBotAgentEditor: View {
 
   let agent: InlineProtocol.BotAgent?
   let externallySaving: Bool
+  let skills: [InlineProtocol.BotSkill]
+  let isLoadingSkills: Bool
+  let skillErrorMessage: String?
+  let onLoadSkills: () async -> Void
   let onSave: (ManagedBotAgentDraft) async -> Bool
   let onDelete: (() async -> Bool)?
 
   init(
     agent: InlineProtocol.BotAgent?,
     isSaving: Bool,
+    skills: [InlineProtocol.BotSkill],
+    isLoadingSkills: Bool,
+    skillErrorMessage: String?,
+    onLoadSkills: @escaping () async -> Void,
     onSave: @escaping (ManagedBotAgentDraft) async -> Bool,
     onDelete: (() async -> Bool)?
   ) {
     self.agent = agent
     externallySaving = isSaving
+    self.skills = skills
+    self.isLoadingSkills = isLoadingSkills
+    self.skillErrorMessage = skillErrorMessage
+    self.onLoadSkills = onLoadSkills
     self.onSave = onSave
     self.onDelete = onDelete
     _draft = State(initialValue: agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
@@ -565,9 +586,26 @@ private struct IOSBotAgentEditor: View {
         }
 
         Section {
-          TextField("Skill key (optional)", text: $draft.skillKey)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
+          Picker("Skill", selection: $draft.skillKey) {
+            Text("None").tag("")
+            if !draft.skillKey.isEmpty, !skills.contains(where: { $0.key == draft.skillKey }) {
+              Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
+            }
+            ForEach(skills, id: \.key) { skill in
+              Text(skill.name).tag(skill.key)
+            }
+          }
+          if isLoadingSkills {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Loading skills…")
+                .foregroundStyle(.secondary)
+            }
+          }
+          if let skillErrorMessage {
+            Label(skillErrorMessage, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+          }
           TextField("Instructions (optional)", text: $draft.instructions, axis: .vertical)
             .lineLimit(5 ... 12)
         } header: {
@@ -623,6 +661,7 @@ private struct IOSBotAgentEditor: View {
         Text("Existing messages keep their text, but future mentions will no longer activate this specialization.")
       }
     }
+    .task { await onLoadSkills() }
   }
 }
 

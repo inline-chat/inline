@@ -792,6 +792,14 @@ private struct MacBotAgentsSection: View {
     models.mapValues(\.skills)
   }
 
+  private var loadingSkillBotIds: Set<Int64> {
+    Set(models.compactMap { $0.value.isLoadingSkills ? $0.key : nil })
+  }
+
+  private var skillErrors: [Int64: String] {
+    models.compactMapValues(\.skillErrorMessage)
+  }
+
   var body: some View {
     Section {
       if bots.isEmpty {
@@ -828,6 +836,10 @@ private struct MacBotAgentsSection: View {
           Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
             .foregroundStyle(.red)
         }
+        if let skillErrorMessage = models[bot.id]?.skillErrorMessage {
+          Label(skillErrorMessage, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+        }
       }
 
       HStack {
@@ -856,6 +868,11 @@ private struct MacBotAgentsSection: View {
         item: item,
         bots: bots,
         skillCatalogs: skillCatalogs,
+        loadingSkillBotIds: loadingSkillBotIds,
+        skillErrors: skillErrors,
+        onLoadSkills: { botUserId in
+          await models[botUserId]?.loadSkills()
+        },
         onSave: { botUserId, draft in
           guard let model = models[botUserId] else { return false }
           return await model.save(draft, agentId: item.agent?.id)
@@ -955,17 +972,26 @@ private struct MacBotAgentEditor: View {
   let item: MacBotAgentEditorItem
   let bots: [InlineProtocol.User]
   let skillCatalogs: [Int64: [InlineProtocol.BotSkill]]
+  let loadingSkillBotIds: Set<Int64>
+  let skillErrors: [Int64: String]
+  let onLoadSkills: (Int64) async -> Void
   let onSave: (Int64, ManagedBotAgentDraft) async -> Bool
 
   init(
     item: MacBotAgentEditorItem,
     bots: [InlineProtocol.User],
     skillCatalogs: [Int64: [InlineProtocol.BotSkill]],
+    loadingSkillBotIds: Set<Int64>,
+    skillErrors: [Int64: String],
+    onLoadSkills: @escaping (Int64) async -> Void,
     onSave: @escaping (Int64, ManagedBotAgentDraft) async -> Bool
   ) {
     self.item = item
     self.bots = bots
     self.skillCatalogs = skillCatalogs
+    self.loadingSkillBotIds = loadingSkillBotIds
+    self.skillErrors = skillErrors
+    self.onLoadSkills = onLoadSkills
     self.onSave = onSave
     _selectedBotUserId = State(initialValue: item.botUserId)
     _draft = State(initialValue: item.agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
@@ -1010,12 +1036,17 @@ private struct MacBotAgentEditor: View {
             bots: bots,
             selectedSkills: selectedSkills,
             hasUnavailableSkill: hasUnavailableSkill,
-            locksBotSelection: item.agent != nil
+            locksBotSelection: item.agent != nil,
+            isLoadingSkills: loadingSkillBotIds.contains(selectedBotUserId),
+            skillErrorMessage: skillErrors[selectedBotUserId]
           )
         }
       }
     )
     .frame(width: 560, height: 560)
+    .task(id: selectedBotUserId) {
+      await onLoadSkills(selectedBotUserId)
+    }
   }
 
   private func save() {
@@ -1083,6 +1114,8 @@ private struct MacBotAgentSpecializationSection: View {
   let selectedSkills: [InlineProtocol.BotSkill]
   let hasUnavailableSkill: Bool
   let locksBotSelection: Bool
+  let isLoadingSkills: Bool
+  let skillErrorMessage: String?
 
   var body: some View {
     Section {
@@ -1098,14 +1131,30 @@ private struct MacBotAgentSpecializationSection: View {
         }
       }
 
-      Picker("Skill", selection: $draft.skillKey) {
-        Text("None").tag("")
-        if hasUnavailableSkill {
-          Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
+      LabeledContent("Skill") {
+        HStack(spacing: 8) {
+          Picker("Skill", selection: $draft.skillKey) {
+            Text("None").tag("")
+            if hasUnavailableSkill {
+              Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
+            }
+            ForEach(selectedSkills, id: \.key) { skill in
+              Text(skill.name).tag(skill.key)
+            }
+          }
+          .labelsHidden()
+
+          if isLoadingSkills {
+            ProgressView()
+              .controlSize(.small)
+          }
         }
-        ForEach(selectedSkills, id: \.key) { skill in
-          Text(skill.name).tag(skill.key)
-        }
+      }
+
+      if let skillErrorMessage {
+        Label(skillErrorMessage, systemImage: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.red)
       }
 
       VStack(alignment: .leading, spacing: 6) {
