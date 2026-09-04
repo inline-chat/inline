@@ -322,7 +322,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let initialAgentContext: AgentThreadContext | undefined
   let encodedInitialAgentContext: Buffer | undefined
   if (input.initialAgentContext) {
-    initialAgentContext = await validateAgentThreadContext(input.initialAgentContext, currentUserId)
+    initialAgentContext = await validateAgentThreadContext(
+      input.initialAgentContext,
+      { bindingActorUserId: currentUserId, operation: "initial_message" },
+    )
     const botUserId = Number(initialAgentContext.botUserId)
     encodedInitialAgentContext = encodeAgentThreadContext(initialAgentContext)
     if (chat.agentContext !== null) {
@@ -1204,10 +1207,11 @@ async function recoverInitialAgentMessageRetry(input: {
   }
   const persistedChat = await db._query.chats.findFirst({ where: eq(chats.id, input.chatId) })
   const persistedContext = persistedChat ? chatAgentContext(persistedChat) : undefined
+  // The committed message already owns its optional Agent/configuration. Retry
+  // identity is anchored by sender, random ID, Chat, and the required bot target.
   if (
     message.chatId !== input.chatId ||
-    persistedContext?.botUserId !== input.expectedContext.botUserId ||
-    persistedContext?.agentId !== input.expectedContext.agentId
+    persistedContext?.botUserId !== input.expectedContext.botUserId
   ) {
     throw RealtimeRpcError.BadRequest()
   }

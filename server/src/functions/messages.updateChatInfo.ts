@@ -75,7 +75,7 @@ export async function updateChatInfo(
 
   const nextEmoji = emojiProvided ? (input.emoji ?? "").trim() : undefined
   const nextAgentContext = input.agentContext
-    ? await validateAgentThreadContext(input.agentContext)
+    ? await validateAgentThreadContext(input.agentContext, { operation: "update_chat_info" })
     : undefined
   if (nextAgentContext) {
     const bot = await requireManageableBot(Number(nextAgentContext.botUserId), context)

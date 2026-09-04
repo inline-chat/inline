@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
+  agentContextSanitizationMetadata,
   chatAgentContext,
   normalizeAgentConfigurationCatalog,
   normalizeAgentThreadContext,
@@ -122,6 +123,74 @@ describe("Agent configuration contracts", () => {
       agentId: undefined,
       configuration: undefined,
     })
+  })
+
+  test("discards malformed optional selections without rejecting the bot target", () => {
+    expect(normalizeAgentThreadContext({
+      botUserId: 42n,
+      agentId: 0n,
+      configuration: {
+        projectId: " ",
+        modelId: " model ",
+        reasoningEffortId: "x".repeat(257),
+      },
+    })).toEqual({
+      botUserId: 42n,
+      agentId: undefined,
+      configuration: {
+        projectId: undefined,
+        modelId: "model",
+        reasoningEffortId: undefined,
+      },
+    })
+  })
+
+  test("builds bounded Sentry metadata without Agent IDs or configuration values", () => {
+    const input = {
+      botUserId: 42n,
+      agentId: 7n,
+      configuration: {
+        projectId: "private-project",
+        modelId: "private-model",
+        reasoningEffortId: "private-reasoning",
+      },
+    }
+    const sanitized = {
+      botUserId: 42n,
+      agentId: undefined,
+      configuration: { modelId: "private-model" },
+    }
+
+    const metadata = agentContextSanitizationMetadata(
+      "create_chat",
+      input,
+      sanitized,
+      ["agent_unavailable", "project_unavailable", "reasoning_unsupported"],
+    )
+
+    expect(metadata).toEqual({
+      event: "agent_context.sanitized",
+      operation: "create_chat",
+      reasonCodes: "agent_unavailable,project_unavailable,reasoning_unsupported",
+      reasonCount: 3,
+      discardedItemCount: 3,
+      hadAgentId: true,
+      hadConfiguration: true,
+      hadProject: true,
+      hadModel: true,
+      hadReasoning: true,
+      keptAgentId: false,
+      keptConfiguration: true,
+      keptProject: false,
+      keptModel: true,
+      keptReasoning: false,
+    })
+    const serialized = JSON.stringify(metadata)
+    expect(serialized).not.toContain("private-project")
+    expect(serialized).not.toContain("private-model")
+    expect(serialized).not.toContain("private-reasoning")
+    expect(serialized).not.toContain("\"42\"")
+    expect(serialized).not.toContain("\"7\"")
   })
 
   test("fails closed when a persisted Chat context is malformed", () => {

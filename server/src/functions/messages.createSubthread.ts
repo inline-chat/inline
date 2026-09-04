@@ -87,7 +87,10 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   await ensureUsersExist(directParticipantUserIds)
 
   const agentContext = input.agentContext
-    ? await validateAgentThreadContext(input.agentContext, context.currentUserId)
+    ? await validateAgentThreadContext(input.agentContext, {
+        bindingActorUserId: context.currentUserId,
+        operation: "create_subthread",
+      })
     : undefined
   if (agentContext) {
     const botUserId = Number(agentContext.botUserId)

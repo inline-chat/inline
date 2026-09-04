@@ -6,6 +6,7 @@ import type { Transaction } from "@in/server/db/types"
 import { agentSessions } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { Log } from "@in/server/utils/log"
 import {
   AgentConfigurationCatalog,
   AgentThreadContext,
@@ -25,6 +26,32 @@ const MAX_LABEL_BYTES = 256
 const MAX_DESCRIPTION_BYTES = 2_000
 const MAX_CATALOG_BYTES = 512 * 1_024
 
+const log = new Log("modules.agentConfiguration")
+
+export type AgentContextSanitizationReason =
+  | "invalid_agent_id"
+  | "agent_unavailable"
+  | "invalid_project"
+  | "invalid_model"
+  | "invalid_reasoning"
+  | "configuration_unavailable"
+  | "project_unavailable"
+  | "model_unavailable"
+  | "model_required"
+  | "reasoning_unavailable"
+  | "reasoning_unsupported"
+
+export type AgentContextValidationOperation =
+  | "create_chat"
+  | "create_subthread"
+  | "initial_message"
+  | "update_chat_info"
+
+type AgentContextValidationOptions = {
+  operation: AgentContextValidationOperation
+  bindingActorUserId?: number
+}
+
 const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8")
 
 const boundedRequired = (value: string, maxBytes: number): string => {
@@ -37,6 +64,20 @@ const boundedOptional = (value: string | undefined, maxBytes: number): string | 
   if (value === undefined) return undefined
   const normalized = value.trim()
   if (!normalized || utf8Bytes(normalized) > maxBytes) throw RealtimeRpcError.BadRequest()
+  return normalized
+}
+
+const sanitizedAgentSelection = (
+  value: string | undefined,
+  reason: AgentContextSanitizationReason,
+  discarded: AgentContextSanitizationReason[],
+): string | undefined => {
+  if (value === undefined) return undefined
+  const normalized = value.trim()
+  if (!normalized || utf8Bytes(normalized) > MAX_ID_BYTES) {
+    discarded.push(reason)
+    return undefined
+  }
   return normalized
 }
 
@@ -140,24 +181,82 @@ export function decodeAgentConfigurationCatalog(bytes: Uint8Array | null): Agent
   }
 }
 
-export function normalizeAgentThreadContext(context: AgentThreadContext): AgentThreadContext {
+type AgentThreadContextSanitization = {
+  context: AgentThreadContext
+  discarded: AgentContextSanitizationReason[]
+}
+
+const sanitizeAgentThreadContextShape = (context: AgentThreadContext): AgentThreadContextSanitization => {
   const botUserId = Number(context.botUserId)
   const agentId = context.agentId === undefined ? undefined : Number(context.agentId)
+  const discarded: AgentContextSanitizationReason[] = []
   if (!Number.isSafeInteger(botUserId) || botUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
-  if (agentId !== undefined && (!Number.isSafeInteger(agentId) || agentId <= 0)) {
-    throw RealtimeRpcError.BadRequest()
-  }
+  const sanitizedAgentId = agentId !== undefined && (!Number.isSafeInteger(agentId) || agentId <= 0)
+    ? undefined
+    : agentId
+  if (agentId !== undefined && sanitizedAgentId === undefined) discarded.push("invalid_agent_id")
 
-  const projectId = boundedOptional(context.configuration?.projectId, MAX_ID_BYTES)
-  const modelId = boundedOptional(context.configuration?.modelId, MAX_ID_BYTES)
-  const reasoningEffortId = boundedOptional(context.configuration?.reasoningEffortId, MAX_ID_BYTES)
+  const projectId = sanitizedAgentSelection(context.configuration?.projectId, "invalid_project", discarded)
+  const modelId = sanitizedAgentSelection(context.configuration?.modelId, "invalid_model", discarded)
+  const reasoningEffortId = sanitizedAgentSelection(
+    context.configuration?.reasoningEffortId,
+    "invalid_reasoning",
+    discarded,
+  )
 
   return {
-    botUserId: BigInt(botUserId),
-    agentId: agentId === undefined ? undefined : BigInt(agentId),
-    configuration: projectId || modelId || reasoningEffortId
-      ? { projectId, modelId, reasoningEffortId }
-      : undefined,
+    context: {
+      botUserId: BigInt(botUserId),
+      agentId: sanitizedAgentId === undefined ? undefined : BigInt(sanitizedAgentId),
+      configuration: projectId || modelId || reasoningEffortId
+        ? { projectId, modelId, reasoningEffortId }
+        : undefined,
+    },
+    discarded,
+  }
+}
+
+export function normalizeAgentThreadContext(context: AgentThreadContext): AgentThreadContext {
+  return sanitizeAgentThreadContextShape(context).context
+}
+
+export const agentContextSanitizationMetadata = (
+  operation: AgentContextValidationOperation,
+  input: AgentThreadContext,
+  sanitized: AgentThreadContext,
+  discarded: readonly AgentContextSanitizationReason[],
+): Record<string, string | number | boolean> => {
+  const hadAgentId = input.agentId !== undefined
+  const hadProject = input.configuration?.projectId !== undefined
+  const hadModel = input.configuration?.modelId !== undefined
+  const hadReasoning = input.configuration?.reasoningEffortId !== undefined
+  const keptAgentId = sanitized.agentId !== undefined
+  const keptProject = sanitized.configuration?.projectId !== undefined
+  const keptModel = sanitized.configuration?.modelId !== undefined
+  const keptReasoning = sanitized.configuration?.reasoningEffortId !== undefined
+  const discardedItemCount = [
+    hadAgentId && !keptAgentId,
+    hadProject && !keptProject,
+    hadModel && !keptModel,
+    hadReasoning && !keptReasoning,
+  ].filter(Boolean).length
+
+  return {
+    event: "agent_context.sanitized",
+    operation,
+    reasonCodes: Array.from(new Set(discarded)).sort().join(","),
+    reasonCount: discarded.length,
+    discardedItemCount,
+    hadAgentId,
+    hadConfiguration: input.configuration !== undefined,
+    hadProject,
+    hadModel,
+    hadReasoning,
+    keptAgentId,
+    keptConfiguration: sanitized.configuration !== undefined,
+    keptProject,
+    keptModel,
+    keptReasoning,
   }
 }
 
@@ -175,55 +274,92 @@ export function decodeAgentThreadContext(bytes: Uint8Array | null): AgentThreadC
 
 export async function validateAgentThreadContext(
   context: AgentThreadContext,
-  bindingActorUserId?: number,
+  options: AgentContextValidationOptions,
 ): Promise<AgentThreadContext> {
-  const normalized = normalizeAgentThreadContext(context)
+  const normalizedShape = sanitizeAgentThreadContextShape(context)
+  const normalized = normalizedShape.context
+  const discarded = normalizedShape.discarded
   const botUserId = Number(normalized.botUserId)
   const bot = await UsersModel.getUserById(botUserId)
   if (!bot?.bot || UsersModel.isDeleted(bot)) throw RealtimeRpcError.UserIdInvalid()
-  if (bindingActorUserId !== undefined) {
-    const actor = bindingActorUserId === botUserId
+  if (options.bindingActorUserId !== undefined) {
+    const actor = options.bindingActorUserId === botUserId
       ? bot
-      : await UsersModel.getUserById(bindingActorUserId)
-    if (!actor || (!actor.bot && bot.botCreatorId !== bindingActorUserId)) {
+      : await UsersModel.getUserById(options.bindingActorUserId)
+    if (!actor || (!actor.bot && bot.botCreatorId !== options.bindingActorUserId)) {
       throw RealtimeRpcError.UserIdInvalid()
     }
   }
 
-  if (normalized.agentId !== undefined) {
-    const agent = await BotAgentsModel.get(Number(normalized.agentId))
-    if (!agent || Number(agent.botUserId) !== botUserId) throw RealtimeRpcError.BadRequest()
+  let agentId = normalized.agentId
+  if (agentId !== undefined) {
+    const agent = await BotAgentsModel.get(Number(agentId))
+    if (!agent || Number(agent.botUserId) !== botUserId) {
+      agentId = undefined
+      discarded.push("agent_unavailable")
+    }
   }
 
-  const configuration = normalized.configuration
-  if (!configuration) return normalized
+  let configuration = normalized.configuration
+  if (configuration) {
+    const capability = (await BotCapabilitiesModel.getForBotUserId(botUserId)).find(
+      (item) => item.kind === AGENT_CONFIGURATION_CAPABILITY_KIND && item.version === AGENT_CONFIGURATION_VERSION,
+    )
+    const catalog = decodeAgentConfigurationCatalog(capability?.payload ?? null)
+    if (!catalog) {
+      configuration = undefined
+      discarded.push("configuration_unavailable")
+    } else {
+      const projectIds = new Set(catalog.projects?.options.map((option) => option.id) ?? [])
+      const reasoningIds = new Set(catalog.reasoning?.options.map((option) => option.id) ?? [])
+      let projectId = configuration.projectId
+      let modelId = configuration.modelId
+      let reasoningEffortId = configuration.reasoningEffortId
 
-  const capability = (await BotCapabilitiesModel.getForBotUserId(botUserId)).find(
-    (item) => item.kind === AGENT_CONFIGURATION_CAPABILITY_KIND && item.version === AGENT_CONFIGURATION_VERSION,
-  )
-  const catalog = decodeAgentConfigurationCatalog(capability?.payload ?? null)
-  if (!catalog) throw RealtimeRpcError.BadRequest()
+      if (projectId && !projectIds.has(projectId)) {
+        projectId = undefined
+        discarded.push("project_unavailable")
+      }
 
-  const projectIds = new Set(catalog.projects?.options.map((option) => option.id) ?? [])
-  const model = catalog.models?.options.find((option) => option.id === configuration.modelId)
-  const reasoningIds = new Set(catalog.reasoning?.options.map((option) => option.id) ?? [])
-  if (configuration.projectId && !projectIds.has(configuration.projectId)) throw RealtimeRpcError.BadRequest()
-  if (configuration.modelId && !model) throw RealtimeRpcError.BadRequest()
-  if (configuration.reasoningEffortId && catalog.models && !model) {
-    throw RealtimeRpcError.BadRequest()
+      const selectedModel = catalog.models?.options.find((option) => option.id === modelId)
+      if (modelId && !selectedModel) {
+        modelId = undefined
+        discarded.push("model_unavailable")
+      }
+
+      const effectiveModelId = modelId ?? catalog.models?.defaultModelId
+      const effectiveModel = catalog.models?.options.find((option) => option.id === effectiveModelId)
+
+      if (reasoningEffortId && catalog.models && !effectiveModel) {
+        reasoningEffortId = undefined
+        discarded.push("model_required")
+      } else if (reasoningEffortId && !reasoningIds.has(reasoningEffortId)) {
+        reasoningEffortId = undefined
+        discarded.push("reasoning_unavailable")
+      } else if (
+        reasoningEffortId &&
+        effectiveModel &&
+        effectiveModel.reasoningEffortIds.length > 0 &&
+        !effectiveModel.reasoningEffortIds.includes(reasoningEffortId)
+      ) {
+        reasoningEffortId = undefined
+        discarded.push("reasoning_unsupported")
+      }
+
+      configuration = projectId || modelId || reasoningEffortId
+        ? { projectId, modelId, reasoningEffortId }
+        : undefined
+    }
   }
-  if (configuration.reasoningEffortId && !reasoningIds.has(configuration.reasoningEffortId)) {
-    throw RealtimeRpcError.BadRequest()
+
+  const sanitized = { botUserId: normalized.botUserId, agentId, configuration }
+  if (discarded.length > 0) {
+    log.warn(
+      "Agent context sanitized",
+      agentContextSanitizationMetadata(options.operation, context, sanitized, discarded),
+    )
   }
-  if (
-    configuration.reasoningEffortId &&
-    model &&
-    model.reasoningEffortIds.length > 0 &&
-    !model.reasoningEffortIds.includes(configuration.reasoningEffortId)
-  ) {
-    throw RealtimeRpcError.BadRequest()
-  }
-  return normalized
+  return sanitized
 }
 
 export async function hasProviderSession(

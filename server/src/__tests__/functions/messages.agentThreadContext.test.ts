@@ -50,6 +50,33 @@ describe("messages.sendMessage Agent thread context", () => {
     expect(await db.select().from(messages).where(eq(messages.chatId, chatId))).toHaveLength(1)
   })
 
+  test("recovers a retry after an unavailable Agent was cleared", async () => {
+    const otherBot = await testUtils.createUser(`agent-context-other-bot-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, otherBot.id))
+    const unavailableAgent = await BotAgentsModel.create({ botUserId: otherBot.id, name: "Other Agent" })
+    const input = {
+      peerId: { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chatId) } } },
+      message: "Run this once",
+      initialAgentContext: {
+        botUserId: BigInt(botId),
+        agentId: unavailableAgent.id,
+      },
+      randomId: 912_351n,
+    }
+    const functionContext = testUtils.functionContext({ userId: ownerId, sessionId: 1 })
+
+    await sendMessage(input, functionContext)
+    await sendMessage(input, functionContext)
+
+    const [stored] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1)
+    expect(decodeAgentThreadContext(stored?.agentContext ?? null)).toEqual({
+      botUserId: BigInt(botId),
+      agentId: undefined,
+      configuration: undefined,
+    })
+    expect(await db.select().from(messages).where(eq(messages.chatId, chatId))).toHaveLength(1)
+  })
+
   test("uses the typed initial target without injecting a text mention", async () => {
     const agent = await BotAgentsModel.create({ botUserId: botId, name: "Specialist" })
     await sendMessage({

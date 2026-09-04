@@ -136,7 +136,10 @@ export async function createChat(
   }
 
   const agentContext = input.agentContext
-    ? await validateAgentThreadContext(input.agentContext, context.currentUserId)
+    ? await validateAgentThreadContext(input.agentContext, {
+        bindingActorUserId: context.currentUserId,
+        operation: "create_chat",
+      })
     : undefined
   if (agentContext) {
     const botUserId = Number(agentContext.botUserId)

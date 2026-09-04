@@ -9,6 +9,14 @@ import * as schema from "../../db/schema"
 import { and, eq } from "drizzle-orm"
 import type { FunctionContext } from "../../functions/_types"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { BotAgentsModel } from "@in/server/db/models/botAgents"
+import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
+import {
+  AGENT_CONFIGURATION_CAPABILITY_KIND,
+  AGENT_CONFIGURATION_VERSION,
+  decodeAgentThreadContext,
+  encodeAgentConfigurationCatalog,
+} from "@in/server/modules/agentConfiguration"
 
 describe("messages.createChat", () => {
   // Setup test lifecycle
@@ -572,5 +580,165 @@ describe("messages.createChat", () => {
         },
       ),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("creates the thread and clears an Agent that belongs to another bot", async () => {
+    const owner = await testUtils.createUser("agent-context-mismatch-owner@example.com")
+    const selectedBot = await testUtils.createUser("agent-context-selected-bot@example.com")
+    const otherBot = await testUtils.createUser("agent-context-other-bot@example.com")
+    await db
+      .update(schema.users)
+      .set({ bot: true, botCreatorId: owner.id })
+      .where(eq(schema.users.id, selectedBot.id))
+    await db
+      .update(schema.users)
+      .set({ bot: true, botCreatorId: owner.id })
+      .where(eq(schema.users.id, otherBot.id))
+    const otherAgent = await BotAgentsModel.create({ botUserId: otherBot.id, name: "Other Agent" })
+
+    const result = await createChat(
+      {
+        isPublic: false,
+        participants: [{ userId: BigInt(selectedBot.id) }],
+        agentContext: { botUserId: BigInt(selectedBot.id), agentId: otherAgent.id },
+      },
+      { ...mockFunctionContext, currentUserId: owner.id },
+    )
+
+    const [saved] = await db
+      .select({ agentContext: schema.chats.agentContext })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+    expect(decodeAgentThreadContext(saved?.agentContext ?? null)).toEqual({
+      botUserId: BigInt(selectedBot.id),
+      agentId: undefined,
+      configuration: undefined,
+    })
+  })
+
+  test("creates the thread and clears configuration when its catalog is unavailable", async () => {
+    const owner = await testUtils.createUser("agent-context-catalog-owner@example.com")
+    const bot = await testUtils.createUser("agent-context-catalog-bot@example.com")
+    await db
+      .update(schema.users)
+      .set({ bot: true, botCreatorId: owner.id })
+      .where(eq(schema.users.id, bot.id))
+
+    const result = await createChat(
+      {
+        isPublic: false,
+        participants: [{ userId: BigInt(bot.id) }],
+        agentContext: {
+          botUserId: BigInt(bot.id),
+          configuration: { modelId: "provider-model" },
+        },
+      },
+      { ...mockFunctionContext, currentUserId: owner.id },
+    )
+
+    const [saved] = await db
+      .select({ agentContext: schema.chats.agentContext })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+    expect(decodeAgentThreadContext(saved?.agentContext ?? null)).toEqual({
+      botUserId: BigInt(bot.id),
+      agentId: undefined,
+      configuration: undefined,
+    })
+  })
+
+  test("keeps valid Agent configuration items while clearing invalid ones", async () => {
+    const owner = await testUtils.createUser("agent-context-items-owner@example.com")
+    const bot = await testUtils.createUser("agent-context-items-bot@example.com")
+    await db
+      .update(schema.users)
+      .set({ bot: true, botCreatorId: owner.id })
+      .where(eq(schema.users.id, bot.id))
+    await BotCapabilitiesModel.replaceForBotUserId(bot.id, [{
+      kind: AGENT_CONFIGURATION_CAPABILITY_KIND,
+      version: AGENT_CONFIGURATION_VERSION,
+      payload: encodeAgentConfigurationCatalog({
+        projects: {
+          options: [{ id: "valid-project", label: "Valid Project", description: undefined }],
+          canSelectFolder: false,
+          defaultProjectId: undefined,
+        },
+        models: {
+          options: [{
+            id: "valid-model",
+            label: "Valid Model",
+            description: undefined,
+            reasoningEffortIds: ["low"],
+            defaultReasoningEffortId: undefined,
+          }],
+          defaultModelId: "valid-model",
+        },
+        reasoning: {
+          options: [
+            { id: "low", label: "Low", description: undefined },
+            { id: "high", label: "High", description: undefined },
+          ],
+        },
+      }),
+    }])
+
+    const result = await createChat(
+      {
+        isPublic: false,
+        participants: [{ userId: BigInt(bot.id) }],
+        agentContext: {
+          botUserId: BigInt(bot.id),
+          configuration: {
+            projectId: "stale-project",
+            modelId: "valid-model",
+            reasoningEffortId: "high",
+          },
+        },
+      },
+      { ...mockFunctionContext, currentUserId: owner.id },
+    )
+
+    const [saved] = await db
+      .select({ agentContext: schema.chats.agentContext })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+    expect(decodeAgentThreadContext(saved?.agentContext ?? null)).toEqual({
+      botUserId: BigInt(bot.id),
+      agentId: undefined,
+      configuration: {
+        projectId: undefined,
+        modelId: "valid-model",
+        reasoningEffortId: undefined,
+      },
+    })
+
+    const defaultModelResult = await createChat(
+      {
+        isPublic: false,
+        participants: [{ userId: BigInt(bot.id) }],
+        agentContext: {
+          botUserId: BigInt(bot.id),
+          configuration: { reasoningEffortId: "low" },
+        },
+      },
+      { ...mockFunctionContext, currentUserId: owner.id },
+    )
+    const [defaultModelChat] = await db
+      .select({ agentContext: schema.chats.agentContext })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(defaultModelResult.chat.id)))
+      .limit(1)
+    expect(decodeAgentThreadContext(defaultModelChat?.agentContext ?? null)).toEqual({
+      botUserId: BigInt(bot.id),
+      agentId: undefined,
+      configuration: {
+        projectId: undefined,
+        modelId: undefined,
+        reasoningEffortId: "low",
+      },
+    })
   })
 })

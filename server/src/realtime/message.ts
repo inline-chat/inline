@@ -2,6 +2,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import {
   ClientMessage,
   ConnectionError_Reason,
+  type CreateChatInput,
   Method,
   RpcResult,
   ServerMessage,
@@ -41,6 +42,26 @@ const pickIdFields = (value: unknown): Record<string, unknown> | undefined => {
 const getMethodName = (method: number): string => {
   return Method[method] ?? `UNKNOWN_METHOD_${method}`
 }
+
+export const createChatRejectionMetadata = (
+  input: CreateChatInput,
+  rpcError: RealtimeRpcError,
+): Record<string, string | number | boolean> => ({
+  event: "realtime.create_chat.rejected",
+  method: getMethodName(Method.CREATE_CHAT),
+  errorCodeName: rpcError.codeName,
+  errorCodeNumber: rpcError.codeNumber,
+  hasReservedChatId: input.reservedChatId !== undefined,
+  destination: input.spaceId === undefined ? "home" : "space",
+  visibility: input.isPublic ? "public" : "private",
+  participantCount: input.participants.length,
+  hasAgentContext: input.agentContext !== undefined,
+  hasAgentId: input.agentContext?.agentId !== undefined,
+  hasConfiguration: input.agentContext?.configuration !== undefined,
+  hasProject: input.agentContext?.configuration?.projectId !== undefined,
+  hasModel: input.agentContext?.configuration?.modelId !== undefined,
+  hasReasoning: input.agentContext?.configuration?.reasoningEffortId !== undefined,
+})
 
 const AUTH_REJECTION_WARNING_WINDOW_MS = 15 * 60 * 1000
 const authRejectionLogs = new BoundedLogAggregator(AUTH_REJECTION_WARNING_WINDOW_MS, 1_024)
@@ -240,10 +261,18 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
     const rpcError = toRealtimeRpcError(e)
 
     if (message.body.oneofKind === "rpcCall" && rpcError.codeNumber < 500) {
-      log.debug("realtime RPC rejected", {
-        ...errorMeta,
-        errorMessage: rpcError.message,
-      })
+      const call = message.body.rpcCall
+      if (call.method === Method.CREATE_CHAT && call.input.oneofKind === "createChat") {
+        log.warn(
+          "realtime createChat rejected",
+          createChatRejectionMetadata(call.input.createChat, rpcError),
+        )
+      } else {
+        log.debug("realtime RPC rejected", {
+          ...errorMeta,
+          errorMessage: rpcError.message,
+        })
+      }
     } else {
       const logMessage =
         message.body.oneofKind === "connectionInit"
