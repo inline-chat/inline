@@ -2126,10 +2126,7 @@ class LegacyComposeAppKit: NSView {
     let pasteboard = NSPasteboard.general
 
     // If this is non-text content, route through attachments.
-    if textEditor.textView.handleAttachments(from: pasteboard, includeText: false) {
-      focus()
-      return
-    }
+    if handleAttachments(from: pasteboard) { return }
 
     // Otherwise, perform a native plain-text paste (ComposeNSTextView disables rich paste for reliability).
     focus()
@@ -2172,6 +2169,17 @@ class LegacyComposeAppKit: NSView {
 // MARK: External Interface for file drop
 
 extension LegacyComposeAppKit {
+  @discardableResult
+  func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
+    guard !voiceViewModel.isActive else { return false }
+    guard textEditor.textView.handleAttachments(from: pasteboard, includeText: false) else {
+      return false
+    }
+
+    focus()
+    return true
+  }
+
   func handleFileDrop(_ urls: [URL]) {
     guard !voiceViewModel.isActive else { return }
 

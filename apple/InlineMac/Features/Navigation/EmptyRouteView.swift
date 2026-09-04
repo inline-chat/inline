@@ -35,7 +35,8 @@ struct EmptyRouteView: View {
           spaces: composeSpaces,
           selectedSpaceID: nav.selectedSpaceId,
           placement: .bottom,
-          focusRequested: $nav.newThreadComposeFocusRequested
+          focusRequested: $nav.newThreadComposeFocusRequested,
+          fillsAvailableDropSurface: true
         )
         .padding(.horizontal, 12)
         .padding(.bottom, 12)

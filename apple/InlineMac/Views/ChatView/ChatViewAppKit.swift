@@ -563,63 +563,8 @@ class ChatViewAppKit: NSViewController {
   private func setupDragAndDrop() {
     guard let dropView = view as? ChatDropView else { return }
     dropView.dropHandler = { [weak self] sender in
-      self?.handleAttachments(from: sender.draggingPasteboard) ?? false
+      self?.compose?.handleAttachments(from: sender.draggingPasteboard) ?? false
     }
-  }
-
-  private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
-    Log.shared.debug("Handling attachments from pasteboard")
-
-    let result = InlinePasteboard.findAttachmentsResult(from: pasteboard)
-    let attachments = result.attachments
-
-    if let failure = result.failures.first(where: { $0.isTelegramSource }) ?? result.failures.first {
-      ToastCenter.shared.showError(failure.userFacingMessage)
-    }
-
-    for attachment in attachments {
-      switch attachment {
-        case let .image(image, url):
-          handleDroppedImage(image, sourceURL: url)
-        case let .animatedImage(url):
-          handleDroppedAnimatedImage(url)
-        case let .video(url, thumbnail):
-          handleDroppedVideo(url, thumbnail: thumbnail)
-        case let .file(url, _):
-          handleDroppedFile(url)
-        case let .text(text):
-          handleDroppedText(text)
-      }
-    }
-
-    if attachments.isEmpty {
-      Log.shared.debug("No attachments found in pasteboard")
-      return false
-    } else {
-      return true
-    }
-  }
-
-  // FILE DROPPED
-  private func handleDroppedFile(_ url: URL) {
-    compose?.handleFileDrop([url])
-  }
-
-  private func handleDroppedText(_ text: String) {
-    compose?.handleTextDropOrPaste(text)
-  }
-
-  private func handleDroppedVideo(_ url: URL, thumbnail: NSImage?) {
-    compose?.handleVideoDropOrPaste(url, thumbnail: thumbnail)
-  }
-
-  private func handleDroppedAnimatedImage(_ url: URL) {
-    compose?.handleAnimatedImageDropOrPaste(url)
-  }
-
-  // IMAGE DROPPED
-  private func handleDroppedImage(_ image: NSImage, sourceURL: URL?) {
-    compose?.handleImageDropOrPaste(image, sourceURL)
   }
 
   // MARK: - Helper Methods

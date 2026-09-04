@@ -1093,15 +1093,19 @@ private final class NewThreadComposeOverlayHostView: NSView {
 }
 
 @available(macOS 26.0, *)
-private final class NewThreadGlassComposeHostView: NSView {
+private final class NewThreadGlassComposeHostView: ChatDropView {
   let compose: GlassComposeAppKit
   private weak var completionOverlayHostView: NewThreadComposeOverlayHostView?
   private var focusRequested: Binding<Bool> = .constant(false)
+  private let fillsAvailableDropSurface: Bool
+  private var composeHeightConstraint: NSLayoutConstraint?
 
   init(
     model: AllChatsNewThreadComposeModel,
-    placement: AllChatsNewThreadComposePlacement
+    placement: AllChatsNewThreadComposePlacement,
+    fillsAvailableDropSurface: Bool
   ) {
+    self.fillsAvailableDropSurface = fillsAvailableDropSurface
     let weakHost = WeakNewThreadComposeHost()
     let supplementaryAccessoryView = NSHostingView(
       rootView: AllChatsComposeAccessoryView(
@@ -1122,17 +1126,36 @@ private final class NewThreadGlassComposeHostView: NSView {
     )
     super.init(frame: .zero)
     weakHost.view = self
+    drawsSurfaceBackground = false
+    dropHandler = { [weak self] sender in
+      self?.compose.handleAttachments(from: sender.draggingPasteboard) ?? false
+    }
     compose.configureNewThreadSendTooltip(placement: placement.tooltipPlacement)
 
     translatesAutoresizingMaskIntoConstraints = false
     compose.translatesAutoresizingMaskIntoConstraints = false
     addSubview(compose)
-    NSLayoutConstraint.activate([
+    var constraints = [
       compose.leadingAnchor.constraint(equalTo: leadingAnchor),
       compose.trailingAnchor.constraint(equalTo: trailingAnchor),
-      compose.topAnchor.constraint(equalTo: topAnchor),
-      compose.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
+    ]
+    if fillsAvailableDropSurface {
+      let heightConstraint = compose.heightAnchor.constraint(equalToConstant: model.composeHeight)
+      composeHeightConstraint = heightConstraint
+      constraints.append(heightConstraint)
+      switch placement {
+        case .top:
+          constraints.append(compose.topAnchor.constraint(equalTo: topAnchor))
+        case .bottom:
+          constraints.append(compose.bottomAnchor.constraint(equalTo: bottomAnchor))
+      }
+    } else {
+      constraints.append(contentsOf: [
+        compose.topAnchor.constraint(equalTo: topAnchor),
+        compose.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ])
+    }
+    NSLayoutConstraint.activate(constraints)
   }
 
   @available(*, unavailable)
@@ -1145,6 +1168,11 @@ private final class NewThreadGlassComposeHostView: NSView {
     compose.didLayout()
   }
 
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard fillsAvailableDropSurface else { return super.hitTest(point) }
+    return compose.hitTest(convert(point, to: compose))
+  }
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     scheduleRequestedFocus()
@@ -1153,6 +1181,13 @@ private final class NewThreadGlassComposeHostView: NSView {
   func updateFocusRequest(_ focusRequested: Binding<Bool>) {
     self.focusRequested = focusRequested
     scheduleRequestedFocus()
+  }
+
+  func updateComposeHeight(_ height: CGFloat) {
+    guard let composeHeightConstraint,
+          composeHeightConstraint.constant != height
+    else { return }
+    composeHeightConstraint.constant = height
   }
 
   private func scheduleRequestedFocus() {
@@ -1215,13 +1250,19 @@ private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   @ObservedObject var model: AllChatsNewThreadComposeModel
   @Binding var focusRequested: Bool
   let placement: AllChatsNewThreadComposePlacement
+  let fillsAvailableDropSurface: Bool
 
   func makeNSView(context: Context) -> NewThreadGlassComposeHostView {
-    NewThreadGlassComposeHostView(model: model, placement: placement)
+    NewThreadGlassComposeHostView(
+      model: model,
+      placement: placement,
+      fillsAvailableDropSurface: fillsAvailableDropSurface
+    )
   }
 
   func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {
     nsView.updateFocusRequest($focusRequested)
+    nsView.updateComposeHeight(model.composeHeight)
   }
 }
 
@@ -1233,17 +1274,20 @@ struct AllChatsNewThreadComposeHost: View {
   let spaces: [AllChatsComposeSpace]
   let selectedSpaceID: Int64?
   let placement: AllChatsNewThreadComposePlacement
+  let fillsAvailableDropSurface: Bool
 
   init(
     dependencies: AppDependencies,
     spaces: [AllChatsComposeSpace],
     selectedSpaceID: Int64?,
     placement: AllChatsNewThreadComposePlacement,
-    focusRequested: Binding<Bool> = .constant(false)
+    focusRequested: Binding<Bool> = .constant(false),
+    fillsAvailableDropSurface: Bool = false
   ) {
     self.spaces = spaces
     self.selectedSpaceID = selectedSpaceID
     self.placement = placement
+    self.fillsAvailableDropSurface = fillsAvailableDropSurface
     _focusRequested = focusRequested
     _model = StateObject(wrappedValue: AllChatsNewThreadComposeModel(
       dependencies: dependencies,
@@ -1253,13 +1297,7 @@ struct AllChatsNewThreadComposeHost: View {
   }
 
   var body: some View {
-    NewThreadGlassComposeRepresentable(
-      model: model,
-      focusRequested: $focusRequested,
-      placement: placement
-    )
-      .frame(maxWidth: .infinity)
-      .frame(height: model.composeHeight)
+    composeHost
       .padding(.horizontal, 12)
       .zIndex(10)
       .onChange(of: spaces) { _, value in
@@ -1271,6 +1309,25 @@ struct AllChatsNewThreadComposeHost: View {
       .task {
         await model.loadAgentChoices()
       }
+  }
+
+  @ViewBuilder
+  private var composeHost: some View {
+    let representable = NewThreadGlassComposeRepresentable(
+      model: model,
+      focusRequested: $focusRequested,
+      placement: placement,
+      fillsAvailableDropSurface: fillsAvailableDropSurface
+    )
+
+    if fillsAvailableDropSurface {
+      representable
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else {
+      representable
+        .frame(maxWidth: .infinity)
+        .frame(height: model.composeHeight)
+    }
   }
 }
 
