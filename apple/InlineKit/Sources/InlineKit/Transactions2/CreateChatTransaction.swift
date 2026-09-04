@@ -26,7 +26,7 @@ public struct CreateChatTransaction: Transaction2 {
     case context
   }
 
-  private var log = Log.scoped("Transactions/CreateChat")
+  private var log = Log.scoped("Transactions.CreateChat")
 
   public init(
     title: String?,
@@ -149,7 +149,10 @@ public struct CreateChatTransaction: Transaction2 {
   }
 
   public func failed(error: TransactionError2) async {
-    log.error("Failed to create chat", error: error)
+    log.error(
+      "Failed to create chat",
+      error: CreateChatFailureTelemetryError(error: error, context: context)
+    )
     await markOptimisticCreationFailed()
   }
 
@@ -194,6 +197,48 @@ public struct CreateChatTransaction: Transaction2 {
   private static func normalizedTitle(_ value: String?) -> String? {
     let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed?.isEmpty == false ? trimmed : nil
+  }
+}
+
+struct CreateChatFailureTelemetryError: Error, PrivacySafeErrorCategoryProviding {
+  let underlyingCategory: String
+  let hasReservation: Bool
+  let hasAgentContext: Bool
+  let hasAgentID: Bool
+  let hasConfiguration: Bool
+  let hasProject: Bool
+  let hasModel: Bool
+  let hasReasoning: Bool
+  let hasSpace: Bool
+  let isPublic: Bool
+
+  init(error: TransactionError2, context: CreateChatTransaction.Context) {
+    let agentContext = context.agentContext.flatMap {
+      try? InlineProtocol.AgentThreadContext(serializedBytes: $0)
+    }
+    underlyingCategory = error.privacySafeErrorCategory
+    hasReservation = context.reservedChatId != nil
+    hasAgentContext = agentContext != nil
+    hasAgentID = agentContext?.hasAgentID == true
+    hasConfiguration = agentContext?.hasConfiguration == true
+    hasProject = agentContext?.configuration.hasProjectID == true
+    hasModel = agentContext?.configuration.hasModelID == true
+    hasReasoning = agentContext?.configuration.hasReasoningEffortID == true
+    hasSpace = context.spaceId != nil
+    isPublic = context.isPublic
+  }
+
+  var privacySafeErrorCategory: String {
+    "create_chat:\(underlyingCategory)" +
+      ":r\(hasReservation ? 1 : 0)" +
+      ":a\(hasAgentContext ? 1 : 0)" +
+      ":i\(hasAgentID ? 1 : 0)" +
+      ":c\(hasConfiguration ? 1 : 0)" +
+      ":cp\(hasProject ? 1 : 0)" +
+      ":cm\(hasModel ? 1 : 0)" +
+      ":cr\(hasReasoning ? 1 : 0)" +
+      ":s\(hasSpace ? 1 : 0)" +
+      ":p\(isPublic ? 1 : 0)"
   }
 }
 

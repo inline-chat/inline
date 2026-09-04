@@ -34,6 +34,15 @@ private struct AllChatsComposeAgentConfiguration: Equatable {
   let reasoningID: String?
 }
 
+private enum AllChatsAgentConfigurationIssue: String, PrivacySafeErrorCategoryProviding {
+  case staleSelection = "agent_configuration:stale_selection"
+  case catalogUnavailable = "agent_configuration:catalog_unavailable"
+
+  var privacySafeErrorCategory: String {
+    rawValue
+  }
+}
+
 enum AllChatsNewThreadComposePlacement {
   case top
   case bottom
@@ -528,20 +537,31 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: choice.bot.id),
          !Task.isCancelled,
          isCurrentMention(choice) {
-        applyAgentSelection(choice, catalog: cached)
+        applyAgentSelection(choice, catalog: cached, persistSanitizedSelection: false)
       }
 
       do {
         let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(botUserID: choice.bot.id)
         guard !Task.isCancelled, isCurrentMention(choice) else { return }
         if let refreshed {
-          applyAgentSelection(choice, catalog: refreshed)
+          applyAgentSelection(choice, catalog: refreshed, persistSanitizedSelection: true)
         } else {
-          clearAgentConfiguration()
+          resetUnavailableAgentConfiguration(for: choice)
         }
       } catch {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, isCurrentMention(choice) else { return }
         log.error("Could not refresh Agent configuration catalog", error: error)
+        if preferences.agentConfiguration(for: choice) != AllChatsComposeAgentConfiguration(
+          projectID: nil,
+          modelID: nil,
+          reasoningID: nil
+        ) {
+          clearExplicitAgentConfiguration()
+          saveCurrentAgentConfiguration()
+          ToastCenter.shared.showInfo(String(
+            localized: "Couldn’t verify these Agent settings, so they were reset to Automatic."
+          ))
+        }
       }
     }
   }
@@ -560,7 +580,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func applyAgentSelection(
     _ choice: AllChatsAgentChoice,
-    catalog: AgentConfigurationCatalogSnapshot
+    catalog: AgentConfigurationCatalogSnapshot,
+    persistSanitizedSelection: Bool
   ) {
     let saved = preferences.agentConfiguration(for: choice)
     selectedAgentChoiceID = choice.id
@@ -574,14 +595,23 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     selectedReasoningID = saved.reasoningID.flatMap { id in
       availableReasoningOptions?.contains(where: { $0.id == id }) == true ? id : nil
     }
-    preferences.saveAgentConfiguration(
-      AllChatsComposeAgentConfiguration(
-        projectID: selectedProjectID,
-        modelID: selectedModelID,
-        reasoningID: selectedReasoningID
-      ),
-      for: choice
+    let discardedSelection = saved != AllChatsComposeAgentConfiguration(
+      projectID: selectedProjectID,
+      modelID: selectedModelID,
+      reasoningID: selectedReasoningID
     )
+    if persistSanitizedSelection {
+      saveCurrentAgentConfiguration()
+    }
+    if persistSanitizedSelection, discardedSelection {
+      log.error(
+        "Discarded stale Agent configuration",
+        error: AllChatsAgentConfigurationIssue.staleSelection
+      )
+      ToastCenter.shared.showInfo(String(
+        localized: "Some Agent settings were no longer available and were reset to Automatic."
+      ))
+    }
   }
 
   private func clearAgentSelection() {
@@ -591,9 +621,31 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func clearAgentConfiguration() {
     agentCatalog = nil
+    clearExplicitAgentConfiguration()
+  }
+
+  private func clearExplicitAgentConfiguration() {
     selectedProjectID = nil
     selectedModelID = nil
     selectedReasoningID = nil
+  }
+
+  private func resetUnavailableAgentConfiguration(for choice: AllChatsAgentChoice) {
+    let discardedSelection = preferences.agentConfiguration(for: choice) != AllChatsComposeAgentConfiguration(
+      projectID: nil,
+      modelID: nil,
+      reasoningID: nil
+    )
+    clearAgentConfiguration()
+    guard discardedSelection else { return }
+    saveCurrentAgentConfiguration()
+    log.error(
+      "Discarded Agent configuration without a current catalog",
+      error: AllChatsAgentConfigurationIssue.catalogUnavailable
+    )
+    ToastCenter.shared.showInfo(String(
+      localized: "These Agent settings are no longer available and were reset to Automatic."
+    ))
   }
 
   private func saveCurrentAgentConfiguration() {
