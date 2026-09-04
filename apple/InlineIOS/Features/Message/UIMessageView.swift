@@ -222,7 +222,7 @@ class UIMessageView: UIView {
   }
 
   private var shouldPadForwardHeader: Bool {
-    isMediaOnlyMessage && !shouldShowReactionsInsideBubble
+    hasMedia
   }
 
   private var shouldUseStandardMediaReplyPadding: Bool {

@@ -998,8 +998,8 @@ final class UIMessageView2: UIMessageView {
     }
 
     if bubbleNodeViews[NodeID.forwardHeader] != nil {
-      let insets = mediaOnlyChrome
-        ? MessageLayoutInsetsV2(top: 6, leading: 12, bottom: 0, trailing: 12)
+      let insets = hasFullBleedMedia
+        ? MessageLayoutInsetsV2(top: 6, leading: 12, bottom: 6, trailing: 12)
         : standardInsets
       append(
         NodeID.forwardHeader,
