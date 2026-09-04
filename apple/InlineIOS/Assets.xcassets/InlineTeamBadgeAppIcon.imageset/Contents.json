@@ -1,17 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "InlineTeamBadgeAppIcon-12.png",
+      "filename" : "InlineTeamBadgeAppIcon-17.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "InlineTeamBadgeAppIcon-24.png",
+      "filename" : "InlineTeamBadgeAppIcon-34.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "InlineTeamBadgeAppIcon-36.png",
+      "filename" : "InlineTeamBadgeAppIcon-51.png",
       "idiom" : "universal",
       "scale" : "3x"
     }
