@@ -1345,8 +1345,8 @@ private struct AllChatsComposeAccessoryView: View {
   let tooltipPlacement: InlineTooltipPlacement
 
   var body: some View {
-    // This view fills the AppKit accessory slot. Destination and visibility
-    // keep their intrinsic widths; Agent choices have caps and may compress.
+    // This view fills the AppKit accessory slot. Controls hug their contents;
+    // Agent choice labels cap long titles at 112 points.
     HStack(spacing: 4) {
       Menu {
         Button("Home", action: model.selectHome)
@@ -1482,6 +1482,7 @@ private struct AgentConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
+    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: tooltipTitle,
@@ -1532,6 +1533,7 @@ private struct AgentModelConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
+    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: "Model",
