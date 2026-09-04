@@ -354,6 +354,7 @@ private struct ChatToolbarTitleStack: View {
 
         if showsInlineTeamBadge {
           InlineTeamToolbarBadge(size: 12)
+            .help("Inline Team")
         }
       }
 

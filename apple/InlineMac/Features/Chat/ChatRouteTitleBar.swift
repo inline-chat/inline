@@ -132,7 +132,7 @@ struct ChatRouteTitleBar: View {
       }
     }
     .buttonStyle(.plain)
-    .help("Open Chat Info")
+    .inlineTooltip("Open Chat Info", placement: .below)
   }
 
   @ViewBuilder
@@ -167,6 +167,7 @@ struct ChatRouteTitleBar: View {
 
       if model.showsInlineTeamBadge {
         InlineTeamToolbarBadge(size: 14, baselineOffset: 3)
+          .inlineTooltip("Inline Team", placement: .below)
       }
     }
     .frame(minWidth: 0, alignment: .leading)
