@@ -107,9 +107,17 @@ describe("plugin entry", () => {
       "inline_bot_presence",
       "inline_parent_context",
     ])
-    expect(registeredCommandNames).toEqual(["threadreply", "follow", "unfollow", "inline-update"])
+    expect(registeredCommandNames).toEqual([
+      "threadreply",
+      "follow",
+      "unfollow",
+      "inline-update",
+      "inline-sync",
+      "inline-version",
+    ])
     expect(hooks.has("message_sending")).toBe(true)
     expect(hooks.has("gateway_start")).toBe(true)
+    expect(hooks.has("skill_changed")).toBe(true)
 
     const messageSending = hooks.get("message_sending")
     expect(messageSending).toBeTypeOf("function")
@@ -144,5 +152,12 @@ describe("plugin entry", () => {
     const gatewayStart = hooks.get("gateway_start")
     expect(gatewayStart).toBeTypeOf("function")
     await gatewayStart?.({ port: 24282 }, { port: 24282 })
+
+    const skillChanged = hooks.get("skill_changed")
+    expect(skillChanged).toBeTypeOf("function")
+    await skillChanged?.(
+      { action: "created", source: "source-install", occurredAt: new Date().toISOString() },
+      { workspaceDir: "/tmp/workspace", agentId: "main" },
+    )
   })
 })

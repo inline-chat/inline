@@ -190,6 +190,7 @@ import {
   summarizeInlineFollowCommandError,
   updateInlineFollowMode,
 } from "./follow-command.js"
+import { listInlineMaintenanceCommandSpecs } from "./maintenance-command-specs.js"
 import {
   OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
   buildOpenClawBotChatSettingsDocument,
@@ -1369,6 +1370,7 @@ function listInlinePluginCommandSpecs(cfg: OpenClawConfig): Array<{ name: string
     ...listHostInlinePluginCommandSpecs(cfg),
     ...listInlineFollowCommandSpecs(),
     ...listInlineBuiltinCommandSpecs(),
+    ...listInlineMaintenanceCommandSpecs(),
   ]
 }
 

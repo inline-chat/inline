@@ -385,8 +385,8 @@ describe("inline/bot-commands-sync", () => {
       commands: Array<{ command: string }>
     })
     expect(bodies.map((body) => body.commands.map((entry) => entry.command))).toEqual([
-      ["main_skill", "follow", "unfollow", "threadreply", "inline_update"],
-      ["ops_skill", "follow", "unfollow", "threadreply", "inline_update"],
+      ["main_skill", "follow", "unfollow", "threadreply", "inline_update", "inline_sync", "inline_version"],
+      ["ops_skill", "follow", "unfollow", "threadreply", "inline_update", "inline_sync", "inline_version"],
     ])
   })
 
@@ -643,17 +643,21 @@ describe("inline/bot-commands-sync", () => {
     }
     expect(firstBody.commands).toHaveLength(100)
     expect(secondBody.commands).toHaveLength(80)
-    expect(firstBody.commands.slice(0, 4).map((command) => command.command)).toEqual([
+    expect(firstBody.commands.slice(0, 6).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
       "threadreply",
       "inline_update",
+      "inline_sync",
+      "inline_version",
     ])
-    expect(secondBody.commands.slice(0, 4).map((command) => command.command)).toEqual([
+    expect(secondBody.commands.slice(0, 6).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
       "threadreply",
       "inline_update",
+      "inline_sync",
+      "inline_version",
     ])
     expect(logger.warn).toHaveBeenCalledWith(
       '[inline] bot command sync rejected 100 commands for account "default" (BOT_COMMANDS_TOO_MUCH); retrying with 80',

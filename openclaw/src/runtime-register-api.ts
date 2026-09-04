@@ -8,9 +8,9 @@ import { createInlineBotAvatarTool } from "./inline/bot-avatar-tool.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { createInlineAgentsTool } from "./inline/agents-tool.js"
-import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
-import { syncInlineAgentSkills } from "./inline/bot-skills-sync.js"
+import { syncInlineCatalogs } from "./inline/catalog-sync.js"
 import { createInlineFollowCommands } from "./inline/follow-command.js"
+import { createInlineMaintenanceCommands } from "./inline/maintenance-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
 import { createInlineUpdateCommand } from "./inline/update-command.js"
 
@@ -44,6 +44,9 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
       registerCommand(command)
     }
     registerCommand(createInlineUpdateCommand(api))
+    for (const command of createInlineMaintenanceCommands(api)) {
+      registerCommand(command)
+    }
   }
   api.on("message_sending", (event, ctx) => {
     if (ctx.channelId !== "inline") return
@@ -60,13 +63,17 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
     return { content }
   })
   api.on("gateway_start", async () => {
-    await syncInlineNativeCommands({
+    await syncInlineCatalogs({
       cfg: api.config,
       logger: api.logger,
+      reason: "gateway_start",
     })
-    await syncInlineAgentSkills({
+  })
+  api.on("skill_changed", async () => {
+    await syncInlineCatalogs({
       cfg: api.config,
       logger: api.logger,
+      reason: "skill_changed",
     })
   })
 }

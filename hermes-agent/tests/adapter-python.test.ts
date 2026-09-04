@@ -182,7 +182,11 @@ commands.telegram_menu_commands = lambda max_commands=100: ([
     ("update", "Update Hermes"),
     ("bad-name", "Hyphenated command"),
 ][:max_commands], max(0, 5 - max_commands))
-hermes_plugins.get_plugin_commands = lambda: {"inline-update": {}}
+hermes_plugins.get_plugin_commands = lambda: {
+    "inline-update": {},
+    "inline-sync": {},
+    "inline-version": {},
+}
 skills_tool._find_all_skills = lambda skip_disabled=False: [
     {"name": "research", "description": "Research with sources", "category": "knowledge"},
     {"name": "data-analysis", "description": "Analyze data", "category": "analysis"},
@@ -289,7 +293,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_skill_catalog, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_skill_catalog, _inline_update_lane, _inline_update_log_text, _inline_version_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -367,12 +371,14 @@ inline_adapter_module.strip_markdown = original_strip_markdown
 menu_commands, hidden_commands = _inline_menu_commands(100)
 assert hidden_commands == 0
 menu_names = [entry["command"] for entry in menu_commands]
-assert menu_names == ["threads", "follow", "unfollow", "inline_update", "help", "model", "update", "bad_name"]
+assert menu_names == ["threads", "follow", "unfollow", "inline_update", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
 assert menu_commands[0]["description"] == "Configure Inline reply-thread routing"
 assert menu_commands[1]["description"] == "Explicitly follow this Inline chat or thread"
 assert menu_commands[2]["description"] == "Explicitly unfollow this Inline chat or thread"
 assert menu_commands[3]["description"] == "Update the Inline Hermes plugin"
-assert menu_commands[6]["description"] == "Update Hermes"
+assert menu_commands[4]["description"] == "Resync Inline commands and skills"
+assert menu_commands[5]["description"] == "Show Inline plugin and sync information"
+assert menu_commands[8]["description"] == "Update Hermes"
 assert _inline_skill_catalog() == [
     {"key": "data-analysis", "name": "data-analysis", "description": "Analyze data", "sort_order": 0},
     {"key": "research", "name": "research", "description": "Research with sources", "sort_order": 1},
@@ -380,6 +386,8 @@ assert _inline_skill_catalog() == [
 assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
+assert _normalize_inline_plugin_command_text("/inline_sync") == "/inline-sync"
+assert _normalize_inline_plugin_command_text("/inline_version") == "/inline-version"
 assert _normalize_inline_plugin_command_text("/not_a_plugin") == "/not_a_plugin"
 assert _resolve_inline_targeted_command("/status@InlineBot now", "inlinebot") == ("/status now", True, True)
 assert _resolve_inline_targeted_command("/status@otherbot now", "inlinebot") == ("/status@otherbot now", True, False)
@@ -398,6 +406,18 @@ assert "user:pass" not in redacted_update_log
 assert "query-secret" not in redacted_update_log
 assert "env-secret-value" not in redacted_update_log
 assert "[REDACTED]" in redacted_update_log
+version_text = _inline_version_text({
+    "reason": "manual",
+    "completed_at": "2026-09-04T10:00:00Z",
+    "commands": {"state": "synced", "count": 10},
+    "skills": {"state": "synced", "count": 2},
+})
+assert "Inline Hermes plugin" in version_text
+assert "Plugin version: 0.0.15" in version_text
+assert "Hermes version: 0.18.2" in version_text
+assert "Installed or updated at:" in version_text
+assert "commands 10 published" in version_text
+assert "skills 2 published" in version_text
 
 os.environ["INLINE_CUSTOM_TOKEN"] = "custom-token"
 env_ref_token = "$" + "{INLINE_CUSTOM_TOKEN}"
@@ -474,9 +494,9 @@ assert "inline-hermes install" in ctx.platform["install_hint"]
 assert "INLINE_TOKEN/INLINE_BOT_TOKEN" in ctx.platform["install_hint"]
 assert "platforms.inline.token" in ctx.platform["install_hint"]
 assert "inline.token" in ctx.platform["install_hint"]
-assert len(ctx.commands) == 4
+assert len(ctx.commands) == 6
 registered_commands = {command["name"]: command for command in ctx.commands}
-assert list(registered_commands) == ["threads", "follow", "unfollow", "inline-update"]
+assert list(registered_commands) == ["threads", "follow", "unfollow", "inline-update", "inline-sync", "inline-version"]
 assert registered_commands["threads"]["description"] == "Configure Inline reply-thread routing"
 assert registered_commands["threads"]["args_hint"] == "[status|on|off|auto|reset]"
 thread_fallback = registered_commands["threads"]["handler"]("off")
@@ -487,6 +507,8 @@ assert "target Inline DM, group chat, or reply thread" in registered_commands["f
 assert "/unfollow" in registered_commands["unfollow"]["handler"]("unexpected")
 assert registered_commands["inline-update"]["description"] == "Update the Inline Hermes plugin"
 assert registered_commands["inline-update"]["args_hint"] == ""
+assert registered_commands["inline-sync"]["description"] == "Resync Inline commands and skills"
+assert registered_commands["inline-version"]["description"] == "Show Inline plugin and sync information"
 
 saved_platform_fields = PlatformEntry.__dataclass_fields__
 PlatformEntry.__dataclass_fields__ = {}
@@ -1705,21 +1727,55 @@ async def assert_bot_command_sync():
             return FakeBotResponse(200, {"ok": True, "result": {}})
 
     adapter._http_client = FakeBotClient()
-    await adapter._sync_bot_commands()
+    command_status = await adapter._sync_bot_commands()
+    assert command_status == {"state": "synced", "count": 10, "hidden": 0}
     assert calls[0][0] == "https://api.inline.chat/bot/setMyCommands"
     assert calls[0][2]["Authorization"] == "Bearer fake"
     assert calls[0][2]["Content-Type"] == "application/json"
     assert calls[0][3] == 10.0
     names = [entry["command"] for entry in calls[0][1]["commands"]]
-    assert names == ["threads", "follow", "unfollow", "inline_update", "help", "model", "update", "bad_name"]
+    assert names == ["threads", "follow", "unfollow", "inline_update", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
     assert calls[0][1]["commands"][0]["description"] == "Configure Inline reply-thread routing"
     assert calls[0][1]["commands"][1]["description"] == "Explicitly follow this Inline chat or thread"
     assert calls[0][1]["commands"][2]["description"] == "Explicitly unfollow this Inline chat or thread"
     assert calls[0][1]["commands"][3]["description"] == "Update the Inline Hermes plugin"
-    assert calls[0][1]["commands"][6]["description"] == "Update Hermes"
-    await adapter._sync_bot_skills()
+    assert calls[0][1]["commands"][4]["description"] == "Resync Inline commands and skills"
+    assert calls[0][1]["commands"][5]["description"] == "Show Inline plugin and sync information"
+    assert calls[0][1]["commands"][8]["description"] == "Update Hermes"
+    skill_status = await adapter._sync_bot_skills()
+    assert skill_status == {"state": "synced", "count": 2}
     assert calls[1][0] == "https://api.inline.chat/bot/setMySkills"
     assert calls[1][1] == {"skills": _inline_skill_catalog()}
+
+    refreshed = await adapter.refresh_skill_group()
+    assert refreshed == (2, 0)
+    assert calls[2][0] == "https://api.inline.chat/bot/setMyCommands"
+    assert calls[3][0] == "https://api.inline.chat/bot/setMySkills"
+    assert adapter._last_catalog_sync["reason"] == "reload_skills"
+
+    sent = []
+    async def fake_send(chat_id, text, **kwargs):
+        sent.append((chat_id, text, kwargs))
+        return SendResult(success=True)
+    adapter.send = fake_send
+    handled = await adapter._handle_inline_maintenance_command(
+        chat_id="10",
+        msg_id="20",
+        text="/inline_sync",
+        thread_id=None,
+    )
+    assert handled is True
+    assert "Inline catalogs synced" in sent[-1][1]
+    assert adapter._last_catalog_sync["reason"] == "manual"
+    handled = await adapter._handle_inline_maintenance_command(
+        chat_id="10",
+        msg_id="21",
+        text="/inline_version",
+        thread_id=None,
+    )
+    assert handled is True
+    assert "Plugin version: 0.0.15" in sent[-1][1]
+    assert "Last catalog sync:" in sent[-1][1]
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
     fallback_calls = []
@@ -4983,13 +5039,14 @@ async def assert_connect_does_not_block_on_command_sync():
     async def fake_inbound_loop():
         await asyncio.sleep(30)
 
-    async def fake_sync_bot_commands():
+    async def fake_sync_inline_catalogs(*, reason):
         sync_started.set()
         await sync_released.wait()
+        return {}
 
     adapter._start_sidecar = fake_start_sidecar
     adapter._inbound_loop = fake_inbound_loop
-    adapter._sync_bot_commands = fake_sync_bot_commands
+    adapter._sync_inline_catalogs = fake_sync_inline_catalogs
 
     connected = await adapter.connect()
     assert connected is True

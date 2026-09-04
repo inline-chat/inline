@@ -16,6 +16,7 @@ import { adaptInlineVisibleCopy } from "./message-formatting.js"
 import { listInlineFollowCommandSpecs } from "./follow-command.js"
 import { listInlineBuiltinCommandSpecs } from "./threadreply-command.js"
 import { listInlineUpdateCommandSpecs } from "./update-command.js"
+import { listInlineMaintenanceCommandSpecs } from "./maintenance-command-specs.js"
 
 type InlineCommandsSyncLogger = {
   info?: (message: string) => void
@@ -32,7 +33,14 @@ const INLINE_COMMAND_LIMIT = 100
 const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 const INLINE_COMMAND_RETRY_RATIO = 0.8
 const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
-const INLINE_REQUIRED_COMMAND_NAMES = new Set(["follow", "unfollow", "threadreply", "inline_update"])
+const INLINE_REQUIRED_COMMAND_NAMES = new Set([
+  "follow",
+  "unfollow",
+  "threadreply",
+  "inline_update",
+  "inline_sync",
+  "inline_version",
+])
 
 function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
   const inline = cfg.channels?.inline
@@ -197,6 +205,7 @@ async function buildInlineNativeCommandsForConfig(params: {
     ...listInlineFollowCommandSpecs(),
     ...listInlineBuiltinCommandSpecs(),
     ...listInlineUpdateCommandSpecs(),
+    ...listInlineMaintenanceCommandSpecs(),
   ]
   const seen = new Set<string>()
 

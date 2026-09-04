@@ -31,7 +31,7 @@ Supported:
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
-- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_update`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_update`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
 - Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged immediately and becomes a normal Hermes turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
@@ -111,6 +111,15 @@ hermes inline status --json --probe
 hermes gateway status
 inline-hermes --version
 ```
+
+Hermes publishes its installed skill catalog to Inline on gateway connect.
+Running Hermes' `/reload-skills` now republishes both the native command menu
+and skill catalog through the adapter's live refresh hook. From an authorized
+Inline chat, `/inline_sync` is the direct recovery command for the same full
+republish. After it succeeds, open or reopen Inline's Skilled Agent editor to
+load it. `/inline_version` reports the loaded plugin and Hermes versions, the
+installed/updated filesystem timestamp when available, and the last
+in-process catalog-sync result without exposing paths, tokens, or config.
 
 The Inline CLI can drive Hermes setup without putting the bot token in argv:
 

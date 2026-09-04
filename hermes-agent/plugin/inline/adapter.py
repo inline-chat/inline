@@ -107,6 +107,8 @@ _INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
 _INLINE_FOLLOW_COMMAND_DESCRIPTION = "Explicitly follow this Inline chat or thread"
 _INLINE_UNFOLLOW_COMMAND_DESCRIPTION = "Explicitly unfollow this Inline chat or thread"
 _INLINE_UPDATE_COMMAND_DESCRIPTION = "Update the Inline Hermes plugin"
+_INLINE_SYNC_COMMAND_DESCRIPTION = "Resync Inline commands and skills"
+_INLINE_VERSION_COMMAND_DESCRIPTION = "Show Inline plugin and sync information"
 _INLINE_UPDATE_PACKAGE_NAME = "@inline-chat/hermes-agent-adapter"
 _INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS = 30
 _INLINE_UPDATE_TIMEOUT_SECONDS = 5 * 60
@@ -117,6 +119,10 @@ _INLINE_THREADS_ACTION_PREFIX = "th:"
 _INLINE_THREADS_ACTION_TTL_SECONDS = 15 * 60
 _INLINE_THREAD_COMMAND_RE = re.compile(r"^/(?:thread|threads)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
 _INLINE_FOLLOW_COMMAND_RE = re.compile(r"^/(follow|unfollow)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
+_INLINE_MAINTENANCE_COMMAND_RE = re.compile(
+    r"^/(inline[_-](?:sync|version))(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$",
+    re.IGNORECASE,
+)
 _INLINE_REPLY_THREAD_NEGATION_RE = re.compile(
     r"\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+"
     r"(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|"
@@ -970,6 +976,8 @@ class InlineAdapter(BasePlatformAdapter):
         self._sidecar_proc: Optional[subprocess.Popen] = None
         self._sidecar_supervisor_task: Optional[asyncio.Task] = None
         self._command_sync_task: Optional[asyncio.Task] = None
+        self._catalog_sync_lock = asyncio.Lock()
+        self._last_catalog_sync: Optional[Dict[str, Any]] = None
         self._inbound_task: Optional[asyncio.Task] = None
         self._bot_settings_tasks: set[asyncio.Task] = set()
         self._bot_settings_locks: Dict[str, asyncio.Lock] = {}
@@ -1842,6 +1850,44 @@ class InlineAdapter(BasePlatformAdapter):
         await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
         return True
 
+    async def _handle_inline_maintenance_command(
+        self,
+        *,
+        chat_id: str,
+        msg_id: str,
+        text: str,
+        thread_id: Optional[str],
+    ) -> bool:
+        match = _INLINE_MAINTENANCE_COMMAND_RE.match(str(text or "").strip())
+        if not match:
+            return False
+        command = match.group(1).lower().replace("-", "_")
+        args = (match.group(2) or "").strip()
+        metadata = {"thread_id": thread_id} if thread_id else None
+        if args:
+            await self.send(chat_id, f"Usage: `/{command}`", reply_to=msg_id, metadata=metadata)
+            return True
+
+        if command == "inline_version":
+            body = _inline_version_text(self._last_catalog_sync)
+        else:
+            status = await self._sync_inline_catalogs(reason="manual")
+            failed = [name for name in ("commands", "skills") if status[name]["state"] == "failed"]
+            if failed:
+                body = (
+                    f"Inline catalog sync completed with failures in {', '.join(failed)}. "
+                    "Check Hermes logs for [inline] sync details."
+                )
+            else:
+                body = (
+                    "Inline catalogs synced. "
+                    f"Commands: {_inline_catalog_part_summary(status['commands'])}. "
+                    f"Skills: {_inline_catalog_part_summary(status['skills'])}. "
+                    "Open or reopen the Skilled Agent editor in Inline to load the updated catalog."
+                )
+        await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
+        return True
+
     @property
     def enforces_own_access_policy(self) -> bool:
         """Inline gates DM/group access at intake via dm_policy/group_policy."""
@@ -2021,8 +2067,7 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def _run_bot_command_sync(self) -> None:
         try:
-            await self._sync_bot_commands()
-            await self._sync_bot_skills()
+            await self._sync_inline_catalogs(reason="gateway_start")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -2032,33 +2077,55 @@ class InlineAdapter(BasePlatformAdapter):
             if asyncio.current_task() is self._command_sync_task:
                 self._command_sync_task = None
 
-    async def _sync_bot_commands(self) -> None:
+    async def _sync_inline_catalogs(self, *, reason: str) -> Dict[str, Any]:
+        async with self._catalog_sync_lock:
+            commands = await self._sync_bot_commands()
+            skills = await self._sync_bot_skills()
+            status = {
+                "reason": reason,
+                "completed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "commands": commands,
+                "skills": skills,
+            }
+            self._last_catalog_sync = status
+            return status
+
+    async def refresh_skill_group(self) -> tuple[int, int]:
+        """Republish Inline catalogs after Hermes `/reload-skills`."""
+        status = await self._sync_inline_catalogs(reason="reload_skills")
+        return (int(status["skills"].get("count") or 0), 0)
+
+    async def _sync_bot_commands(self) -> Dict[str, Any]:
         if not self._sync_commands:
-            return
+            return {"state": "disabled", "count": 0}
         if self._http_client is None:
-            return
+            return {"state": "failed", "count": 0}
         try:
             commands, hidden_count = _inline_menu_commands(max_commands=self._command_limit)
             if not commands:
                 logger.warning("[inline] bot command sync skipped: no valid Hermes commands resolved")
-                return
+                return {"state": "failed", "count": 0}
             synced = await self._set_bot_commands_with_retry(commands)
             hidden_suffix = f", {hidden_count} hidden" if hidden_count else ""
             logger.info("[inline] bot commands synced (%d command%s%s)", len(synced), "" if len(synced) == 1 else "s", hidden_suffix)
+            return {"state": "synced", "count": len(synced), "hidden": hidden_count}
         except Exception as exc:
             self._report_error("commands.sync", exc)
             logger.warning("[inline] bot command sync failed: %s", exc)
+            return {"state": "failed", "count": 0}
 
-    async def _sync_bot_skills(self) -> None:
+    async def _sync_bot_skills(self) -> Dict[str, Any]:
         if self._http_client is None:
-            return
+            return {"state": "failed", "count": 0}
         try:
             skills = _inline_skill_catalog()
             await self._call_bot_api("setMySkills", {"skills": skills})
             logger.info("[inline] bot skills synced (%d skill%s)", len(skills), "" if len(skills) == 1 else "s")
+            return {"state": "synced", "count": len(skills)}
         except Exception as exc:
             self._report_error("skills.sync", exc)
             logger.warning("[inline] bot skill sync failed: %s", exc)
+            return {"state": "failed", "count": 0}
 
     async def _set_bot_commands_with_retry(self, commands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:
@@ -2357,6 +2424,13 @@ class InlineAdapter(BasePlatformAdapter):
             from_id=from_id,
             text=text,
             chat_type=chat_type,
+            thread_id=thread_id,
+        ):
+            return
+        if not agent_action and await self._handle_inline_maintenance_command(
+            chat_id=chat_id,
+            msg_id=msg_id,
+            text=text,
             thread_id=thread_id,
         ):
             return
@@ -5314,6 +5388,57 @@ def _installed_inline_plugin_version(hermes_home: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def _inline_install_timestamp(hermes_home: Path) -> Optional[str]:
+    target = hermes_home / "plugins" / "inline"
+    try:
+        timestamp = target.lstat().st_ctime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _inline_catalog_part_summary(part: Dict[str, Any]) -> str:
+    state = str(part.get("state") or "unknown")
+    count = int(part.get("count") or 0)
+    if state == "disabled":
+        return "disabled"
+    return f"{count} published" if state == "synced" else "failed"
+
+
+def _inline_version_text(last_sync: Optional[Dict[str, Any]] = None) -> str:
+    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+    version = _installed_inline_plugin_version(hermes_home)
+    if not version:
+        try:
+            manifest = Path(__file__).with_name("plugin.yaml").read_text(encoding="utf-8")
+        except OSError:
+            manifest = ""
+        match = re.search(r"(?m)^version:\s*['\"]?([^\s'\"]+)", manifest)
+        version = match.group(1) if match else None
+    try:
+        from hermes_cli import __version__ as hermes_version
+    except Exception:
+        hermes_version = None
+
+    installed_at = _inline_install_timestamp(hermes_home)
+    if last_sync:
+        sync_text = (
+            f"{last_sync.get('completed_at') or 'unknown'} "
+            f"({last_sync.get('reason') or 'unknown'}; "
+            f"commands {_inline_catalog_part_summary(last_sync.get('commands') or {})}; "
+            f"skills {_inline_catalog_part_summary(last_sync.get('skills') or {})})"
+        )
+    else:
+        sync_text = "not run in this process"
+    return "\n".join([
+        "Inline Hermes plugin",
+        f"Plugin version: {version or 'unknown'}",
+        f"Hermes version: {hermes_version or 'unknown'}",
+        f"Installed or updated at: {installed_at or 'unavailable'} (filesystem metadata)",
+        f"Last catalog sync: {sync_text}",
+    ])
+
+
 def _inline_update_lane(version: Optional[str]) -> Optional[str]:
     if not version:
         return None
@@ -5486,6 +5611,18 @@ async def _inline_update_command_handler(raw_args: str = "") -> str:
     return await asyncio.to_thread(_run_inline_update)
 
 
+async def _inline_sync_command_handler(raw_args: str = "") -> str:
+    if str(raw_args or "").strip():
+        return "Usage: `/inline_sync`"
+    return "Run `/inline_sync` from a connected Inline chat to republish commands and skills."
+
+
+async def _inline_version_command_handler(raw_args: str = "") -> str:
+    if str(raw_args or "").strip():
+        return "Usage: `/inline_version`"
+    return _inline_version_text()
+
+
 def _inline_command_specs() -> tuple[_InlineCommandSpec, ...]:
     return (
         _InlineCommandSpec(
@@ -5508,6 +5645,16 @@ def _inline_command_specs() -> tuple[_InlineCommandSpec, ...]:
             name="inline-update",
             handler=_inline_update_command_handler,
             description=_INLINE_UPDATE_COMMAND_DESCRIPTION,
+        ),
+        _InlineCommandSpec(
+            name="inline-sync",
+            handler=_inline_sync_command_handler,
+            description=_INLINE_SYNC_COMMAND_DESCRIPTION,
+        ),
+        _InlineCommandSpec(
+            name="inline-version",
+            handler=_inline_version_command_handler,
+            description=_INLINE_VERSION_COMMAND_DESCRIPTION,
         ),
     )
 

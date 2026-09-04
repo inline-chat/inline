@@ -80,6 +80,14 @@ capability consent, strips credential variables from the updater process, and
 asks for `/restart` after OpenClaw reports a successful update. Other authorized
 chat members cannot update host plugins.
 
+Installed skills are published to Inline for Skilled Agent selection on gateway
+start and whenever OpenClaw emits `skill_changed`. Any authorized bot user can
+run `/inline_sync` to force an immediate command-and-skill catalog republish,
+then open or reopen Inline's Skilled Agent editor to load it. `/inline_version`
+shows the loaded plugin/OpenClaw versions, safe install source and timestamps
+when OpenClaw provides them, and the last in-process catalog-sync result. These
+commands never print tokens, paths, package specs, or raw configuration.
+
 After updating, verify that `openclaw plugins list` shows `inline`, `openclaw channels status --channel inline --probe --json` reports Inline configured/running, and `openclaw plugins inspect inline --json` reports the expected package version.
 
 From a local checkout (dev):
@@ -363,12 +371,12 @@ The plugin also registers `inline_bot_commands` for Inline bot command managemen
 
 Bot command sync:
 
-- On `gateway_start`, the plugin registers default bot commands for each enabled/configured Inline account.
+- On `gateway_start` and OpenClaw's `skill_changed` event, the plugin republishes bot commands and installed skills for each enabled/configured Inline account.
 - Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
-- Inline also registers `/threadreply` to manage this group's reply-thread mode, `/follow` and `/unfollow` for explicit dialog relevance, and owner-only `/inline_update` for tracked plugin updates.
+- Inline also registers `/threadreply` to manage this group's reply-thread mode, `/follow` and `/unfollow` for explicit dialog relevance, `/inline_sync` for a manual catalog refresh, `/inline_version` for safe runtime/install information, and owner-only `/inline_update` for tracked plugin updates.
 - Inline accepts `/command@botusername` when the suffix matches the active bot and ignores commands targeted at another bot, including in followed threads.
 - The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
-- Inline-owned `/follow`, `/unfollow`, `/threadreply`, and `/inline_update` entries are preserved when a larger host command set is truncated to the Bot API's 100-command limit or retried after `BOT_COMMANDS_TOO_MUCH`; startup sync logs how many entries were omitted.
+- Inline-owned `/follow`, `/unfollow`, `/threadreply`, `/inline_update`, `/inline_sync`, and `/inline_version` entries are preserved when a larger host command set is truncated to the Bot API's 100-command limit or retried after `BOT_COMMANDS_TOO_MUCH`; catalog sync logs how many entries were omitted.
 - Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
 - Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
 
