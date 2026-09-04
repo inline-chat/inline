@@ -185,6 +185,7 @@ struct SidebarNativeRowConfiguration {
     let size: SidebarItemSize
     let unreadBadgeStyle: UnreadBadgeStyle
     let showsCloseButton: Bool
+    let canCloseFromSidebar: Bool
     let isTemporary: Bool
     let isDropTargeted: Bool
     let forceHoverAppearance: Bool
@@ -2433,7 +2434,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     }
     menu.addItem(.separator())
 
-    if configuration.showsCloseButton {
+    if configuration.isTemporary, configuration.canCloseFromSidebar {
       menu.addItem(SidebarNativeMenuItem(
         title: "Close from Sidebar",
         systemImage: "xmark",
@@ -2461,6 +2462,13 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         systemImage: presentation.unread ? "checkmark.message.fill" : "envelope.badge.fill",
         action: actions.toggleReadUnread
       ))
+      if configuration.canCloseFromSidebar {
+        menu.addItem(SidebarNativeMenuItem(
+          title: "Close from Sidebar",
+          systemImage: "xmark",
+          action: actions.close
+        ))
+      }
       menu.addItem(SidebarNativeMenuItem(
         title: presentation.archived ? "Unarchive" : "Archive",
         systemImage: "archivebox",
@@ -2660,7 +2668,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     setAccessibilitySelected(interactionPresentation.selected)
 
     var actions: [NSAccessibilityCustomAction] = []
-    if configuration.showsCloseButton {
+    if configuration.canCloseFromSidebar {
       actions.append(NSAccessibilityCustomAction(name: "Close from Sidebar") {
         configuration.actions.close()
         return true

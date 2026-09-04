@@ -779,6 +779,7 @@ struct SidebarView: View {
       size: settings.sidebarItemSize,
       unreadBadgeStyle: settings.unreadBadgeStyle,
       showsCloseButton: appKitShowsCloseButton(for: item),
+      canCloseFromSidebar: settings.sidebarAsInbox,
       isTemporary: isTemporaryItem(item),
       isDropTargeted: appKitExternalDropTargetID == projectedItem.id,
       forceHoverAppearance: forceHoverAppearance,
@@ -948,6 +949,7 @@ struct SidebarView: View {
           size: settings.sidebarItemSize,
           unreadBadgeStyle: settings.unreadBadgeStyle,
           showsCloseButton: appKitShowsCloseButton(for: item),
+          canCloseFromSidebar: settings.sidebarAsInbox,
           opensOnMouseDown: false,
           allowsHoverEffects: false,
           forceHoverAppearance: true,
@@ -983,6 +985,7 @@ struct SidebarView: View {
         size: settings.sidebarItemSize,
         unreadBadgeStyle: settings.unreadBadgeStyle,
         showsCloseButton: appKitShowsCloseButton(for: item),
+        canCloseFromSidebar: settings.sidebarAsInbox,
         // Let NSCollectionView's drag recognizer win once the pointer moves;
         // a normal click still opens on mouse-up through the row tap gesture.
         opensOnMouseDown: false,
@@ -1219,6 +1222,7 @@ struct SidebarView: View {
             showsCloseButton: settings.sidebarAsInbox
               && item.pinned == false
               && isInPinnedFolder(item) == false,
+            canCloseFromSidebar: settings.sidebarAsInbox,
             opensOnMouseDown: true,
             isTemporary: isTemporary,
             isDropTargeted: isDropTargeted,
@@ -1886,7 +1890,7 @@ struct SidebarView: View {
         order: item.order,
         folderID: item.folderID,
         pinnedOrder: item.pinnedOrder,
-        restoresNestedPin: false
+        restoresPin: false
       )
     }
     if disposition == .closeDialogs {
@@ -2472,7 +2476,7 @@ struct SidebarView: View {
       var closedChats: [AppUndoHistory.ClosedChat] = []
       for itemToClose in itemsToClose {
         do {
-          if itemToClose.pinned, itemToClose.parentChatId != nil {
+          if itemToClose.pinned {
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
               peerId: itemToClose.peerId,
               pinned: false
@@ -2486,7 +2490,7 @@ struct SidebarView: View {
             order: itemToClose.order,
             folderID: itemToClose.folderID,
             pinnedOrder: itemToClose.pinnedOrder,
-            restoresNestedPin: itemToClose.pinned && itemToClose.parentChatId != nil
+            restoresPin: itemToClose.pinned
           ))
         } catch {
           failedItemIDs.insert(itemToClose.id)

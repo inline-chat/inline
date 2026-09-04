@@ -107,6 +107,7 @@ struct SidebarChatItemView: Equatable, View {
   var size: SidebarItemSize = .standard
   var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
+  var canCloseFromSidebar = false
   var opensOnMouseDown = true
   var allowsHoverEffects = true
   var forceHoverAppearance = false
@@ -212,6 +213,7 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.size == rhs.size
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
+      && lhs.canCloseFromSidebar == rhs.canCloseFromSidebar
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
       && lhs.allowsHoverEffects == rhs.allowsHoverEffects
       && lhs.forceHoverAppearance == rhs.forceHoverAppearance
@@ -347,7 +349,7 @@ struct SidebarChatItemView: Equatable, View {
       Divider()
 
       if isTemporary {
-        if showsCloseButton {
+        if canCloseFromSidebar {
           Button {
             close()
           } label: {
@@ -365,7 +367,7 @@ struct SidebarChatItemView: Equatable, View {
       }
 
       if isTemporary == false {
-        if showsCloseButton {
+        if canCloseFromSidebar {
           Button {
             close()
           } label: {
