@@ -318,6 +318,14 @@ impl BotAgentResolver {
             }
             (None, _) => None,
         };
+        let effective_model = selected_model.or_else(|| {
+            let models = catalog.models.as_ref()?;
+            let default_model_id = models.default_model_id.as_deref()?;
+            models
+                .options
+                .iter()
+                .find(|model| model.id == default_model_id)
+        });
         let reasoning = if let Some(reasoning_id) = configuration.reasoning_effort_id.as_deref() {
             let reasoning_available = catalog.reasoning.as_ref().is_some_and(|reasoning| {
                 reasoning
@@ -325,15 +333,16 @@ impl BotAgentResolver {
                     .iter()
                     .any(|option| option.id == reasoning_id)
             });
-            let model_supports_reasoning = selected_model.is_none_or(|model| {
-                model.reasoning_effort_ids.is_empty()
-                    || model
-                        .reasoning_effort_ids
-                        .iter()
-                        .any(|id| id == reasoning_id)
+            let model_supports_reasoning = catalog.models.as_ref().is_none_or(|_| {
+                effective_model.is_some_and(|model| {
+                    model.reasoning_effort_ids.is_empty()
+                        || model
+                            .reasoning_effort_ids
+                            .iter()
+                            .any(|id| id == reasoning_id)
+                })
             });
-            if configuration.model_id.is_none() || !reasoning_available || !model_supports_reasoning
-            {
+            if !reasoning_available || !model_supports_reasoning {
                 return ResolvedAgentConfiguration {
                     model,
                     fallback: Some(AgentConfigurationFallback::Reasoning),

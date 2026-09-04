@@ -51,7 +51,7 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
                 reasoning_effort_ids: vec!["high".to_string()],
                 default_reasoning_effort_id: None,
             }],
-            default_model_id: None,
+            default_model_id: Some("gpt-test".to_string()),
         }),
         reasoning: Some(AgentReasoningCatalog {
             options: vec![AgentReasoningEffortOption {
@@ -116,8 +116,36 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
         }),
         ResolvedAgentConfiguration {
             model: None,
-            reasoning: None,
-            fallback: Some(AgentConfigurationFallback::Reasoning),
+            reasoning: Some("high".to_string()),
+            fallback: None,
+        }
+    );
+
+    resolver.store_configuration_catalog(AgentConfigurationCatalog {
+        projects: None,
+        models: None,
+        reasoning: Some(AgentReasoningCatalog {
+            options: vec![AgentReasoningEffortOption {
+                id: "high".to_string(),
+                label: "High".to_string(),
+                description: None,
+            }],
+        }),
+    });
+    assert_eq!(
+        resolver.resolve_configuration(&proto::AgentThreadContext {
+            bot_user_id: 17,
+            agent_id: None,
+            configuration: Some(proto::AgentThreadConfiguration {
+                project_id: None,
+                model_id: None,
+                reasoning_effort_id: Some("high".to_string()),
+            }),
+        }),
+        ResolvedAgentConfiguration {
+            model: None,
+            reasoning: Some("high".to_string()),
+            fallback: None,
         }
     );
 }
