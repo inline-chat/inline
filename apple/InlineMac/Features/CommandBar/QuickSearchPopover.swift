@@ -182,6 +182,7 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
 #endif
   case backHome
   case newThread
+  case inviteToSpace
   case newSpace
 
   var id: String {
@@ -200,6 +201,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "Back to Home"
       case .newThread:
         "New thread"
+      case .inviteToSpace:
+        "Invite to space"
       case .newSpace:
         "New space"
     }
@@ -221,6 +224,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "house"
       case .newThread:
         "bubble.left.and.bubble.right.fill"
+      case .inviteToSpace:
+        "person.badge.plus"
       case .newSpace:
         "square.stack.3d.up.fill"
     }
@@ -238,6 +243,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         ["home", "back", "workspace", "space", "main"]
       case .newThread:
         ["new", "thread", "chat", "message", "conversation"]
+      case .inviteToSpace:
+        ["invite", "person", "people", "member", "members", "space", "team"]
       case .newSpace:
         ["new", "space", "workspace", "team"]
     }
@@ -252,6 +259,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         .always
 #endif
       case .backHome:
+        .spaceSelected
+      case .inviteToSpace:
         .spaceSelected
     }
   }
@@ -288,6 +297,9 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
           return true
         }
         return tokens.contains("start") && hasAny(["thread", "chat", "message", "conversation"])
+      case .inviteToSpace:
+        return hasAny(["invite", "inviting"]) ||
+          (hasAny(["add"]) && hasAny(["person", "people", "member", "members", "team"]))
       case .newSpace:
         return hasAny(["new", "create"])
     }
@@ -1051,6 +1063,13 @@ final class QuickSearchViewModel {
           NewThreadAction.start(dependencies: dependencies, spaceId: nav2.activeSpaceId)
         } else {
           nav3?.open(.newChat(spaceId: commandContext.selectedSpaceId))
+        }
+      case .inviteToSpace:
+        guard let spaceId = commandContext.selectedSpaceId else { return }
+        if let nav2 = dependencies.nav2 {
+          nav2.navigate(to: .inviteToSpace)
+        } else {
+          nav3?.beginInvite(spaceId: spaceId)
         }
       case .newSpace:
         if let nav2 = dependencies.nav2 {
