@@ -17,6 +17,20 @@ function collectRefs(value: unknown, path: string[] = []): string[] {
   )
 }
 
+function collectDollarPrefixedKeys(value: unknown, path: string[] = []): string[] {
+  if (!value || typeof value !== "object") {
+    return []
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => collectDollarPrefixedKeys(entry, [...path, String(index)]))
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) => {
+    const entryPath = [...path, key]
+    const own = key.startsWith("$") ? [entryPath.join(".")] : []
+    return own.concat(collectDollarPrefixedKeys(entry, entryPath))
+  })
+}
+
 describe("plugin manifest", () => {
   it("openclaw.plugin.json declares the inline plugin + channel", async () => {
     const manifestPath = path.resolve(__dirname, "..", "openclaw.plugin.json")
@@ -61,6 +75,9 @@ describe("plugin manifest", () => {
       ]),
     )
     expect(json.channelEnvVars).toBeUndefined()
+    // ClawHub transports manifest metadata through Convex, which rejects
+    // dollar-prefixed object keys before the package scanner can run.
+    expect(collectDollarPrefixedKeys(json)).toEqual([])
     const schema = json.channelConfigs?.inline?.schema
     const streaming = schema?.properties?.streaming as
       | {

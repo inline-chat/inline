@@ -39,7 +39,7 @@ the plugin version for your OpenClaw release line:
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.x` (`>=2026.8.2`) | `0.0.66` | `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities` |
+| `2026.8.x` (`>=2026.8.2`) | `0.0.67` | `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
@@ -50,12 +50,12 @@ alias for older host APIs.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.66` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Current | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+| `0.0.67` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Current | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
+| `0.0.66` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
 | `0.0.65` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
 | `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
 | `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
 | `0.0.62` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Keeps the thread-only Following control out of direct-message agent settings, where the server does not support it. |
-| `0.0.61` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Bounds model discovery through provider authentication so agent settings return a fallback instead of hanging indefinitely. |
 
 From npm:
 
