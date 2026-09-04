@@ -53,20 +53,24 @@ public class MainViewRouter: ObservableObject {
       return
     }
 
-    // Login may promote an early-launch temporary store while onboarding is
-    // still visible. Reopen every account-scoped producer before publishing
-    // Main so the newly authenticated account cannot mount without realtime.
-    self.route = .loading
-    guard Auth.shared.getHasPendingAccountTransition() == false else { return }
+    // Keep onboarding mounted while admitting persistent storage and realtime. The transition to
+    // Main is then a single visible swap; only an actual admission failure enters startup recovery.
+    guard Auth.shared.getHasPendingAccountTransition() == false else {
+      self.route = .loading
+      return
+    }
     transitionTask = Task { @MainActor [weak self] in
       _ = await AppDatabase.promoteSharedToPersistentIfPossible()
       let realtimeAdmitted = await Api.admitPersistentStorage()
-      guard !Task.isCancelled,
-            AppDatabase.shared.isPersistent,
+      guard !Task.isCancelled else { return }
+      guard AppDatabase.shared.isPersistent,
             realtimeAdmitted,
             Auth.shared.getHasPendingAccountTransition() == false,
             Auth.shared.getStatus().isAuthenticated
-      else { return }
+      else {
+        self?.route = .loading
+        return
+      }
       self?.route = .main
     }
   }
@@ -172,13 +176,18 @@ public class MainViewRouter: ObservableObject {
       }
 
     case .onboarding:
-      transitionTask?.cancel()
-      transitionTask = nil
-      if case .loggingOut = status {
+      switch status {
+      case .loggingOut:
+        transitionTask?.cancel()
+        transitionTask = nil
         route = .loading
+      case .unauthenticated, .reauthRequired:
+        transitionTask?.cancel()
+        transitionTask = nil
+      case .authenticated, .authenticatedV3, .hydrating, .locked:
+        break
       }
       // Do not auto-switch to `.main` on login: onboarding may still need to finish profile/setup.
-      break
     }
   }
 }

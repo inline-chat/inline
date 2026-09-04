@@ -235,20 +235,24 @@ class MainWindowViewModel: ObservableObject {
       return
     }
 
-    // Login may promote an early-launch temporary store while onboarding is
-    // still visible. Reopen every account-scoped producer before publishing
-    // Main so the newly authenticated account cannot mount without realtime.
-    topLevelRoute = .loading
-    guard Auth.shared.getHasPendingAccountTransition() == false else { return }
+    // Keep onboarding mounted while admitting persistent storage and realtime. The transition to
+    // Main is then a single visible swap; only an actual admission failure enters startup recovery.
+    guard Auth.shared.getHasPendingAccountTransition() == false else {
+      topLevelRoute = .loading
+      return
+    }
     transitionTask = Task { @MainActor [weak self] in
       _ = await AppDatabase.promoteSharedToPersistentIfPossible()
       let realtimeAdmitted = await Api.admitPersistentStorage()
-      guard !Task.isCancelled,
-            AppDatabase.shared.isPersistent,
+      guard !Task.isCancelled else { return }
+      guard AppDatabase.shared.isPersistent,
             realtimeAdmitted,
             Auth.shared.getHasPendingAccountTransition() == false,
             Auth.shared.getStatus().isAuthenticated
-      else { return }
+      else {
+        self?.topLevelRoute = .loading
+        return
+      }
       self?.topLevelRoute = .main
     }
   }
@@ -332,13 +336,18 @@ class MainWindowViewModel: ObservableObject {
       }
 
     case .onboarding:
-      transitionTask?.cancel()
-      transitionTask = nil
-      if case .loggingOut = status {
+      switch status {
+      case .loggingOut:
+        transitionTask?.cancel()
+        transitionTask = nil
         topLevelRoute = .loading
+      case .unauthenticated, .reauthRequired:
+        transitionTask?.cancel()
+        transitionTask = nil
+      case .authenticated, .authenticatedV3, .hydrating, .locked:
+        break
       }
       // Otherwise onboarding drives navigation to `.main` after login/profile completion.
-      break
     }
   }
 }

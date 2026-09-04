@@ -7,7 +7,7 @@ import Logger
 /// All macOS logout policy lives in this file. AppDelegate only owns the platform lifetime and
 /// forwards entry points; Auth owns durable authority, proofs, and login admission.
 private enum MacLogoutTimeouts {
-  static let serverNotification: Duration = .seconds(2)
+  static let serverNotification: Duration = .milliseconds(250)
   static let overallRecoveryUI: Duration = .seconds(15)
 }
 
@@ -116,7 +116,7 @@ extension AppDelegate {
     } catch {
       if Auth.shared.getHasPendingLogout() == false {
         if Auth.shared.getHasPendingAccountTransition() {
-          dependencies.viewModel.navigate(.loading)
+          presentLogoutPanel()
           LoggingOutWindowController.showRecoveryRequired()
           log.error("LOGOUT_TRACE event=durable_fence_ambiguous_account_transition", error: error)
           return
@@ -137,8 +137,7 @@ extension AppDelegate {
         completionPermit: AuthLogoutCompletionPermit(fence: fallbackFence)
       )
       logoutAttempt = attempt
-      dependencies.viewModel.navigate(.loading)
-      LoggingOutWindowController.show()
+      presentLogoutPanel()
       log.error("LOGOUT_TRACE event=durable_fence_failed", error: error)
       failLogout(attempt, kind: .credentials)
       return
@@ -154,9 +153,7 @@ extension AppDelegate {
     cancelPendingSpaceJoin()
     ProviderSignInCoordinator.shared.cancelPendingAttempt()
 
-    dependencies.viewModel.navigate(.loading)
-    SettingsWindowController.closeIfOpen()
-    LoggingOutWindowController.show()
+    presentLogoutPanel()
     startLogoutDeadline(for: attempt)
 
     beginLogoutPhase(.durableFence, attempt: attempt)
@@ -242,7 +239,7 @@ extension AppDelegate {
     } catch {
       finishLogoutPhase(attempt: attempt, success: false)
       log.error(
-        "Logout stopped because local database cleanup failed profile=\(ProjectConfig.userProfile ?? "default") reason=\(error.localizedDescription)",
+        "Logout stopped because local database cleanup failed profile=\(ProjectConfig.userProfile ?? "default") reason=\(type(of: error))",
         error: error
       )
       failLogout(attempt, kind: .database)
@@ -302,6 +299,13 @@ extension AppDelegate {
       else { return }
       self.failLogout(attempt, kind: .timeout)
     }
+  }
+
+  @MainActor private func presentLogoutPanel() {
+    dependencies.viewModel.navigate(.loading)
+    SettingsWindowController.closeIfOpen()
+    LoggingOutWindowController.show()
+    MainWindowController.all.forEach { $0.window?.orderOut(nil) }
   }
 
   @MainActor private func beginLogoutPhase(_ phase: MacLogoutPhase, attempt: MacLogoutAttempt) {

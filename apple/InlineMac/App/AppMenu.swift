@@ -28,6 +28,7 @@ final class AppMenu: NSObject {
   private weak var closeWindowMenuItem: NSMenuItem?
   private weak var spaceMenu: NSMenu?
   private var chatMenuItems: [ChatMenuCommand: NSMenuItem] = [:]
+  private var isPresentingLogoutConfirmation = false
 #if SPARKLE
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
@@ -949,6 +950,9 @@ final class AppMenu: NSObject {
   }
 
   @objc private func logOut(_ sender: Any?) {
+    guard !isPresentingLogoutConfirmation, let window = activeWindow() else { return }
+    isPresentingLogoutConfirmation = true
+
     let alert = NSAlert()
     alert.messageText = "Log Out"
     alert.informativeText = "Are you sure you want to log out?"
@@ -957,8 +961,11 @@ final class AppMenu: NSObject {
     let button = alert.addButton(withTitle: "Log Out")
     button.hasDestructiveAction = true
 
-    if alert.runModal() == .alertSecondButtonReturn {
-      Task { @MainActor in
+    alert.beginSheetModal(for: window) { [weak self] response in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.isPresentingLogoutConfirmation = false
+        guard response == .alertSecondButtonReturn else { return }
         await self.dependencies?.logOut()
       }
     }

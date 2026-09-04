@@ -25,7 +25,7 @@ final class LoggingOutWindowController: NSWindowController {
 
   private init() {
     let panel = LogoutPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 164, height: 54),
+      contentRect: NSRect(x: 0, y: 0, width: 180, height: 70),
       styleMask: [.borderless],
       backing: .buffered,
       defer: false
@@ -33,6 +33,7 @@ final class LoggingOutWindowController: NSWindowController {
     label = NSTextField(labelWithString: "Logging out…")
     label.font = .systemFont(ofSize: 13, weight: .medium)
     label.alignment = .center
+    label.textColor = .secondaryLabelColor
     label.translatesAutoresizingMaskIntoConstraints = false
     label.setAccessibilityLabel("Logging out")
 
@@ -48,13 +49,21 @@ final class LoggingOutWindowController: NSWindowController {
     panel.hidesOnDeactivate = false
     panel.level = .modalPanel
     panel.hasShadow = true
-    panel.backgroundColor = .windowBackgroundColor
+    panel.isOpaque = false
+    panel.backgroundColor = .clear
+    panel.isMovableByWindowBackground = true
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
     quitButton.target = self
     quitButton.action = #selector(quitInline)
 
-    let contentView = NSView()
+    let contentView = NSVisualEffectView()
+    contentView.material = .popover
+    contentView.blendingMode = .behindWindow
+    contentView.state = .active
+    contentView.wantsLayer = true
+    contentView.layer?.cornerRadius = 16
+    contentView.layer?.masksToBounds = true
     contentView.addSubview(label)
     contentView.addSubview(quitButton)
     NSLayoutConstraint.activate([

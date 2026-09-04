@@ -1,3 +1,4 @@
+import AppKit
 import Auth
 import InlineKit
 import SwiftUI
@@ -190,6 +191,20 @@ final class OnboardingViewModel: ObservableObject {
   }
 
   func goBack() {
+    guard !navigatingToMainView else { return }
+    if Auth.shared.getStatus().isAuthenticated {
+      navigatingToMainView = true
+      Task { @MainActor [weak self] in
+        guard let appDelegate = NSApp.delegate as? AppDelegate else {
+          self?.navigatingToMainView = false
+          return
+        }
+        await appDelegate.performLogOut()
+        self?.navigatingToMainView = false
+      }
+      return
+    }
+
     DispatchQueue.main.async {
       self.goingBack = true
       DispatchQueue.main.async {
