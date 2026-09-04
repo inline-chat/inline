@@ -16,7 +16,7 @@ categories = ["development-tools"]
 agent-client-protocol = { workspace = true, features = ["unstable_elicitation"] }
 base64 = "0.22.1"
 futures-util.workspace = true
-inline-agent-bridge = { version = "0.7.12", path = "../agent-bridge" }
+inline-agent-bridge = { version = "0.7.13", path = "../agent-bridge" }
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
