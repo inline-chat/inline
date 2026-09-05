@@ -4702,8 +4702,8 @@ message GetFilePartResult {
   bytes sha256 = 4;
 }
 
-// One explicit cursor state per chat and actor. max_id remains a monotonic
-// high-water mark; cleared hides its marker without rewinding that boundary.
+// One explicit target state per chat and actor. max_id is the exact message
+// carrying the marker; its legacy field name is retained for wire compatibility.
 message ChatAcknowledgement {
   int64 chat_id = 1;
   int64 user_id = 2;
@@ -4714,7 +4714,7 @@ message ChatAcknowledgement {
   optional Peer peer_id = 5;
   // Chat update sequence that orders snapshots, live updates and replay.
   int64 revision = 6;
-  // A durable tombstone. The high-water max_id remains available for fencing.
+  // A durable tombstone. max_id retains the hidden target for idempotent retry.
   bool cleared = 7;
 }
 
@@ -4723,7 +4723,7 @@ message AcknowledgeMessagesInput {
   // Set target, or expected current target when clear is true.
   int64 max_id = 2;
   bool clear = 3;
-  // State observed by the actor; fences delayed clear and same-target replay.
+  // State observed by the actor; fences delayed clear and target movement.
   int64 expected_revision = 4;
 }
 message AcknowledgeMessagesResult { repeated Update updates = 1; }
