@@ -60,6 +60,7 @@ message ServerUpdate {
     ServerUserUpdateAddedToChat user_added_to_chat = 45;
     ServerUserUpdateRemovedFromChat user_removed_from_chat = 46;
     ChatAcknowledgement acknowledgement = 47;
+    UpdateDialogTranslation user_dialog_translation = 48;
   }
 }
 

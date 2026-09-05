@@ -147,6 +147,7 @@ private enum PersistentStoreStartupDiagnostics {
 
 public final class AppDatabase: @unchecked Sendable {
   private let writerLock = NSLock()
+  public let translationPreferences = DialogTranslationPreferences()
   private var _dbWriter: any DatabaseWriter
   private var preparedDatabaseKey: String?
   private var persistentOpenFailure: PersistentStoreOpenFailure?
@@ -236,9 +237,15 @@ public final class AppDatabase: @unchecked Sendable {
     let span = PerformanceTrace.begin("DatabaseMigrate", category: .launch)
     defer { span.end() }
     try migrator.migrate(dbWriter)
+    try translationPreferences.observe(dbWriter)
   }
 
   internal func swapWriter(_ newWriter: any DatabaseWriter) {
+    do {
+      try translationPreferences.observe(newWriter)
+    } catch {
+      Self.log.error("Failed to initialize translation preferences", error: error)
+    }
     writerLock.withLock {
       _dbWriter = newWriter
       preparedDatabaseKey = nil
@@ -1279,6 +1286,41 @@ public extension AppDatabase {
         table.column("payload", .blob).notNull()
         table.column("fetchedAt", .datetime).notNull()
       }
+    }
+
+    migrator.registerMigration("dialogTranslationEnabled") { db in
+      try db.alter(table: "dialog") { table in
+        table.add(column: "translationEnabled", .boolean)
+      }
+      // Preserve the current account's old local choices without copying them to
+      // other accounts. The first explicit synced toggle replaces this value.
+      for row in try Row.fetchAll(db, sql: "SELECT id, peerUserId, peerThreadId FROM dialog") {
+        let peer: Peer
+        if let userID = row["peerUserId"] as Int64? {
+          peer = .user(id: userID)
+        } else if let threadID = row["peerThreadId"] as Int64? {
+          peer = .thread(id: threadID)
+        } else {
+          continue
+        }
+        let id: Int64 = row["id"]
+        let key = "translation_enabled_" + peer.toString()
+        if let enabled = UserDefaults.standard.object(forKey: key) as? Bool {
+          try db.execute(
+            sql: "UPDATE dialog SET translationEnabled = ? WHERE id = ?",
+            arguments: [enabled, id]
+          )
+        }
+      }
+    }
+
+    migrator.registerMigration("dialogTranslationLegacyImport") { db in
+      try db.alter(table: "dialog") { table in
+        table.add(column: "translationLegacyImportPending", .boolean).defaults(to: false)
+      }
+      // The preceding migration preserved device-local choices. Only enabled
+      // choices are uploaded; a legacy off must never disable another device.
+      try db.execute(sql: "UPDATE dialog SET translationLegacyImportPending = 1 WHERE translationEnabled = 1")
     }
 
     /// TODOs:

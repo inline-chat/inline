@@ -80,7 +80,7 @@ public class DataManager: ObservableObject {
         }
         do {
           _ = try Chat(from: result.chat).saveFull(db)
-          try Dialog(from: result.dialog).save(db, onConflict: .replace)
+          _ = try result.dialog.saveFull(db)
         } catch {
           log.error("Failed to save chat", error: error)
         }
@@ -395,7 +395,7 @@ public class DataManager: ObservableObject {
           pinnedOrder: requestOrder.pinnedOrder
         )
         try await writeAccountProjection(token: mutationToken) { db in
-          try Dialog(from: response.dialog).save(db, onConflict: .replace)
+          _ = try response.dialog.saveFull(db)
         }
       }
     } catch {

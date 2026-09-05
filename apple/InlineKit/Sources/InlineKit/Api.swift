@@ -68,6 +68,29 @@ public enum Api {
       await ReservedChatIDPool.shared.scheduleRefill(realtimeV2: realtime)
     }
 
+    Task(priority: .utility) {
+      // Keep consuming connection events while the import runs, so disconnect
+      // cancels old work and rearms one attempt. Ordinary updating/connected
+      // cycles must not rescan the database after every incoming message.
+      var importTask: Task<Void, Never>?
+      defer { importTask?.cancel() }
+      for await state in await realtime.connectionStates() {
+        guard !Task.isCancelled else { return }
+        switch state {
+        case .connecting:
+          importTask?.cancel()
+          importTask = nil
+        case .connected:
+          guard importTask == nil else { continue }
+          importTask = Task(priority: .utility) {
+            await DialogTranslationMigration.importPending(realtime: realtime)
+          }
+        case .updating:
+          break
+        }
+      }
+    }
+
     return realtime
   }()
 

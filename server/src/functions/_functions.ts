@@ -36,6 +36,7 @@ import { moveThread } from "./messages.moveThread"
 import { pinMessage } from "./messages.pinMessage"
 import { updateDialogNotificationSettings } from "./messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "./messages.updateDialogFollowMode"
+import { updateDialogTranslation } from "./messages.updateDialogTranslation"
 import { collapseHistory } from "./messages.collapseHistory"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
@@ -119,6 +120,7 @@ export const Functions = {
     pinMessage: pinMessage,
     updateDialogNotificationSettings: updateDialogNotificationSettings,
     updateDialogFollowMode: updateDialogFollowMode,
+    updateDialogTranslation,
     collapseHistory,
     forwardMessages: forwardMessages,
     createSubthread: createSubthread,

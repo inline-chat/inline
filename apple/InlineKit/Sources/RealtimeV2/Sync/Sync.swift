@@ -2789,7 +2789,7 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case .chatPermissions:
         .user
-      case .messageActionInvoked, .messageActionAnswered, .dialogFollowMode, .dialogCollapsedMaxID:
+      case .messageActionInvoked, .messageActionAnswered, .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         .user
       case let .spaceSettings(payload):
         .space(id: payload.spaceID)
@@ -3050,7 +3050,7 @@ actor BucketActor {
         true
       case .messageActionInvoked, .messageActionAnswered:
         true
-      case .dialogFollowMode, .dialogCollapsedMaxID:
+      case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         true
       case .dialogFolder:
         true

@@ -123,6 +123,7 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
       return peerLane(rpc.input.updateDialogNotificationSettings.peerId)
     }
     case "updateDialogFollowMode": return peerLane(rpc.input.updateDialogFollowMode.peerId)
+    case "updateDialogTranslation": return peerLane(rpc.input.updateDialogTranslation.peerId)
     case "showInChatList": return peerLane(rpc.input.showInChatList.peerId)
     case "updateDialogOpen": return peerLane(rpc.input.updateDialogOpen.peerId)
     case "updateDialogOrder": return peerLane(rpc.input.updateDialogOrder.peerId)

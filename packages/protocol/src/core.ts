@@ -759,6 +759,12 @@ export interface Dialog {
      * @generated from protobuf field: optional int64 folder_id = 18;
      */
     folderId?: bigint;
+    /**
+     * Personal translation preference, shared by all sessions of this account.
+     *
+     * @generated from protobuf field: optional bool translation_enabled = 19;
+     */
+    translationEnabled?: boolean;
 }
 /**
  * @generated from protobuf message DialogFolder
@@ -4508,6 +4514,12 @@ export interface RpcCall {
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogInput;
     } | {
+        oneofKind: "updateDialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslationInput updateDialogTranslation = 142;
+         */
+        updateDialogTranslation: UpdateDialogTranslationInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5356,6 +5368,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogResult;
+    } | {
+        oneofKind: "updateDialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslationResult updateDialogTranslation = 142;
+         */
+        updateDialogTranslation: UpdateDialogTranslationResult;
     } | {
         oneofKind: undefined;
     };
@@ -6555,6 +6573,50 @@ export interface UpdateDialogFollowModeResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslationInput
+ */
+export interface UpdateDialogTranslationInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Required presence distinguishes an explicit disable from malformed input.
+     *
+     * @generated from protobuf field: optional bool enabled = 2;
+     */
+    enabled?: boolean;
+    /**
+     * One-time import of a legacy device's enabled choice. Only valid with
+     * enabled=true; never overrides an explicit synced disable.
+     *
+     * @generated from protobuf field: bool import_legacy_enabled = 3;
+     */
+    importLegacyEnabled: boolean;
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslationResult
+ */
+export interface UpdateDialogTranslationResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslation
+ */
+export interface UpdateDialogTranslation {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
 }
 /**
  * @generated from protobuf message CollapseHistoryInput
@@ -10016,6 +10078,12 @@ export interface Update {
          * @generated from protobuf field: ChatAcknowledgement acknowledgement = 49;
          */
         acknowledgement: ChatAcknowledgement;
+    } | {
+        oneofKind: "dialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslation dialog_translation = 50;
+         */
+        dialogTranslation: UpdateDialogTranslation;
     } | {
         oneofKind: undefined;
     };
@@ -13793,7 +13861,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_BOT_CONFIGURATION_CATALOG = 140;
      */
-    GET_BOT_CONFIGURATION_CATALOG = 140
+    GET_BOT_CONFIGURATION_CATALOG = 140,
+    /**
+     * @generated from protobuf enum value: UPDATE_DIALOG_TRANSLATION = 141;
+     */
+    UPDATE_DIALOG_TRANSLATION = 141
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -15857,7 +15929,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] },
             { no: 17, name: "collapsed_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 19, name: "translation_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -15925,6 +15998,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional int64 folder_id */ 18:
                     message.folderId = reader.int64().toBigInt();
                     break;
+                case /* optional bool translation_enabled */ 19:
+                    message.translationEnabled = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15991,6 +16067,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional int64 folder_id = 18; */
         if (message.folderId !== undefined)
             writer.tag(18, WireType.Varint).int64(message.folderId);
+        /* optional bool translation_enabled = 19; */
+        if (message.translationEnabled !== undefined)
+            writer.tag(19, WireType.Varint).bool(message.translationEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22775,7 +22854,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
             { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
-            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput },
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -23628,6 +23708,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotConfigurationCatalog)
                     };
                     break;
+                case /* UpdateDialogTranslationInput updateDialogTranslation */ 142:
+                    message.input = {
+                        oneofKind: "updateDialogTranslation",
+                        updateDialogTranslation: UpdateDialogTranslationInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogTranslation)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24060,6 +24146,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141; */
         if (message.input.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogTranslationInput updateDialogTranslation = 142; */
+        if (message.input.oneofKind === "updateDialogTranslation")
+            UpdateDialogTranslationInput.internalBinaryWrite(message.input.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24213,7 +24302,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
             { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
-            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult },
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -25066,6 +25156,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotConfigurationCatalog)
                     };
                     break;
+                case /* UpdateDialogTranslationResult updateDialogTranslation */ 142:
+                    message.result = {
+                        oneofKind: "updateDialogTranslation",
+                        updateDialogTranslation: UpdateDialogTranslationResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogTranslation)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25498,6 +25594,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141; */
         if (message.result.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogTranslationResult updateDialogTranslation = 142; */
+        if (message.result.oneofKind === "updateDialogTranslation")
+            UpdateDialogTranslationResult.internalBinaryWrite(message.result.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29435,6 +29534,168 @@ class UpdateDialogFollowModeResult$Type extends MessageType<UpdateDialogFollowMo
  * @generated MessageType for protobuf message UpdateDialogFollowModeResult
  */
 export const UpdateDialogFollowModeResult = new UpdateDialogFollowModeResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslationInput$Type extends MessageType<UpdateDialogTranslationInput> {
+    constructor() {
+        super("UpdateDialogTranslationInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "import_legacy_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslationInput>): UpdateDialogTranslationInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.importLegacyEnabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslationInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslationInput): UpdateDialogTranslationInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                case /* bool import_legacy_enabled */ 3:
+                    message.importLegacyEnabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslationInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool enabled = 2; */
+        if (message.enabled !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        /* bool import_legacy_enabled = 3; */
+        if (message.importLegacyEnabled !== false)
+            writer.tag(3, WireType.Varint).bool(message.importLegacyEnabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslationInput
+ */
+export const UpdateDialogTranslationInput = new UpdateDialogTranslationInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslationResult$Type extends MessageType<UpdateDialogTranslationResult> {
+    constructor() {
+        super("UpdateDialogTranslationResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslationResult>): UpdateDialogTranslationResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslationResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslationResult): UpdateDialogTranslationResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslationResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslationResult
+ */
+export const UpdateDialogTranslationResult = new UpdateDialogTranslationResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslation$Type extends MessageType<UpdateDialogTranslation> {
+    constructor() {
+        super("UpdateDialogTranslation", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslation>): UpdateDialogTranslation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslation): UpdateDialogTranslation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslation
+ */
+export const UpdateDialogTranslation = new UpdateDialogTranslation$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CollapseHistoryInput$Type extends MessageType<CollapseHistoryInput> {
     constructor() {
@@ -39964,7 +40225,8 @@ class Update$Type extends MessageType<Update> {
             { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
             { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
             { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
-            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
+            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
+            { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -40261,6 +40523,12 @@ class Update$Type extends MessageType<Update> {
                         acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).acknowledgement)
                     };
                     break;
+                case /* UpdateDialogTranslation dialog_translation */ 50:
+                    message.update = {
+                        oneofKind: "dialogTranslation",
+                        dialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogTranslation)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -40417,6 +40685,9 @@ class Update$Type extends MessageType<Update> {
         /* ChatAcknowledgement acknowledgement = 49; */
         if (message.update.oneofKind === "acknowledgement")
             ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogTranslation dialog_translation = 50; */
+        if (message.update.oneofKind === "dialogTranslation")
+            UpdateDialogTranslation.internalBinaryWrite(message.update.dialogTranslation, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

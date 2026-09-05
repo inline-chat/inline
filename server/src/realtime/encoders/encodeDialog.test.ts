@@ -24,6 +24,7 @@ const baseDialog: DbDialog = {
   unreadMark: false,
   notificationSettings: null,
   followMode: null,
+  translationEnabled: null,
   collapsedMaxId: null,
   folderId: null,
 }
@@ -32,6 +33,12 @@ const encode = (overrides: Partial<DbDialog> = {}) =>
   encodeDialog({ ...baseDialog, ...overrides }, { unreadCount: 0 })
 
 describe("encodeDialog", () => {
+  test("preserves unset, enabled, and explicitly disabled translation preferences", () => {
+    expect(encode().translationEnabled).toBeUndefined()
+    expect(encode({ translationEnabled: true }).translationEnabled).toBe(true)
+    expect(encode({ translationEnabled: false }).translationEnabled).toBe(false)
+  })
+
   test("emits legacy sidebar visibility as the inverse of chatListHidden", () => {
     const visible = encode({ chatListHidden: null })
     expect(visible.sidebarVisible).toBe(true)

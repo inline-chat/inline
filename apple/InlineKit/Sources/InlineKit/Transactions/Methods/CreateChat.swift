@@ -83,8 +83,7 @@ public struct TransactionCreateChat: Transaction {
         }
 
         do {
-          let dialog = Dialog(from: result.dialog)
-          try dialog.save(db)
+          _ = try result.dialog.saveFull(db)
         } catch {
           Log.shared.error("Failed to save dialog", error: error)
         }

@@ -219,6 +219,8 @@ public actor UpdatesEngine: Sendable {
         case let .dialogNotificationSettings(dialogNotificationSettings):
           try dialogNotificationSettings.apply(db)
 
+        case let .dialogTranslation(value):
+          try value.apply(db)
         case let .dialogFollowMode(dialogFollowMode):
           try dialogFollowMode.apply(db)
 
@@ -1648,6 +1650,7 @@ enum RealtimeUpdateDiagnostics {
     case .messageActionAnswered: return "messageActionAnswered"
     case .clearChatHistory_p: return "clearChatHistory"
     case .botPresence: return "botPresence"
+    case .dialogTranslation: return "dialogTranslation"
     case .dialogFollowMode: return "dialogFollowMode"
     case .updatedUser: return "updatedUser"
     case .participantGroupAdd: return "participantGroupAdd"
@@ -1742,6 +1745,8 @@ private func userAuthorizedDialogDependencyPeers(
       case let .markAsUnread(value):
         if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
       case let .dialogNotificationSettings(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .dialogTranslation(value):
         if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
       case let .dialogFollowMode(value):
         if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
@@ -3073,6 +3078,18 @@ extension InlineProtocol.UpdateDialogNotificationSettings {
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update notification settings")
     }
+  }
+}
+
+extension InlineProtocol.UpdateDialogTranslation {
+  func apply(_ db: Database) throws {
+    guard let peer = validatedPeer(peerID),
+          var dialog = try Dialog.get(peerId: peer).fetchOne(db) else {
+      throw TransactionExecutionError.invalid
+    }
+    dialog.translationEnabled = enabled
+    dialog.translationLegacyImportPending = false
+    try dialog.update(db)
   }
 }
 

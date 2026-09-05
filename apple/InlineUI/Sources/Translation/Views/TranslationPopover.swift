@@ -44,6 +44,10 @@ public struct TranslationPopover: View {
       .padding(.top, 4)
     }
     .padding()
+    .onReceive(TranslationState.shared.subject) { changedPeer, enabled in
+      guard changedPeer == peer else { return }
+      translationEnabled = enabled
+    }
   }
 
   /// Primary button: "Translate" or "Show Original"

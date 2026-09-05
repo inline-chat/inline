@@ -780,6 +780,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatOpen":
       case "userMessageActionInvoked":
       case "userMessageActionAnswered":
+      case "userDialogTranslation":
       case "userDialogFollowMode":
       case "userDialogCollapsedMaxId":
       case "updatedUser":
@@ -1095,6 +1096,10 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
 
       case "dialogNotificationSettings":
         collectPeerSidecarRefs(update.update.dialogNotificationSettings.peerId, peerRefs)
+        break
+
+      case "dialogTranslation":
+        collectPeerSidecarRefs(update.update.dialogTranslation.peerId, peerRefs)
         break
 
       case "dialogFollowMode":
@@ -1726,6 +1731,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userMessageActionAnswered":
     case "clearChatHistory":
     case "messageAttachment":
+    case "userDialogTranslation":
     case "userDialogFollowMode":
     case "userDialogCollapsedMaxId":
     case "updatedUser":
@@ -1940,6 +1946,16 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             peerId: payload.userDialogNotificationSettings.peerId,
             notificationSettings: payload.userDialogNotificationSettings.notificationSettings,
           },
+        },
+      }
+
+    case "userDialogTranslation":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogTranslation",
+          dialogTranslation: payload.userDialogTranslation,
         },
       }
 

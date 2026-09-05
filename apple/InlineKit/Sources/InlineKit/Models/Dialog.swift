@@ -53,6 +53,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var chatListHidden: Bool? = nil
   /// Reply-thread automatic surfacing policy; nil means relevance-only default.
   public var followMode: DialogFollowMode? = nil
+  public var translationEnabled: Bool? = nil
+  public var translationLegacyImportPending: Bool? = nil
   /// Personal history-collapse boundary; messages at or below this ID stay hidden.
   public var collapsedMaxId: Int64? = nil
 
@@ -76,6 +78,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case pinnedOrder
     case folderId
     case chatListHidden
+    case translationLegacyImportPending
+    case translationEnabled
     case followMode
     case collapsedMaxId
   }
@@ -100,6 +104,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
     public static let folderId = Column(CodingKeys.folderId)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
+    public static let translationEnabled = Column(CodingKeys.translationEnabled)
     public static let followMode = Column(CodingKeys.followMode)
     public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
   }
@@ -269,6 +274,7 @@ public extension Dialog {
       chatListHidden = nil
     }
     followMode = from.hasFollowMode ? from.followMode : nil
+    translationEnabled = from.hasTranslationEnabled ? from.translationEnabled : nil
     collapsedMaxId = from.hasCollapsedMaxID ? from.collapsedMaxID : nil
   }
 
@@ -394,6 +400,8 @@ public extension ApiDialog {
         dialog.chatListHidden = existing.chatListHidden
       }
       dialog.followMode = existing.followMode
+      dialog.translationEnabled = existing.translationEnabled
+      dialog.translationLegacyImportPending = existing.translationLegacyImportPending
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -437,6 +445,14 @@ public extension InlineProtocol.Dialog {
       }
       if !hasChatListHidden, !hasSidebarVisible {
         newDialog.chatListHidden = existing.chatListHidden
+      }
+      if !hasTranslationEnabled {
+        newDialog.translationEnabled = existing.translationEnabled
+        newDialog.translationLegacyImportPending = existing.translationLegacyImportPending
+      } else {
+        // Any authoritative value satisfies the import, including an explicit
+        // disable chosen on an already-updated device.
+        newDialog.translationLegacyImportPending = false
       }
       if !hasFollowMode {
         newDialog.followMode = existing.followMode

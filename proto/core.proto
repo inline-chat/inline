@@ -251,6 +251,8 @@ message Dialog {
   optional int64 collapsed_max_id = 17;
   // Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
   optional int64 folder_id = 18;
+  // Personal translation preference, shared by all sessions of this account.
+  optional bool translation_enabled = 19;
 }
 
 message DialogFolder {
@@ -1586,6 +1588,7 @@ enum Method {
   GET_USERS = 138;
   GET_BOT_SKILLS = 139;
   GET_BOT_CONFIGURATION_CATALOG = 140;
+  UPDATE_DIALOG_TRANSLATION = 141;
 }
 
 message RpcCall {
@@ -1731,6 +1734,7 @@ message RpcCall {
     GetUsersInput getUsers = 139;
     GetBotSkillsInput getBotSkills = 140;
     GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
+    UpdateDialogTranslationInput updateDialogTranslation = 142;
   }
 }
 
@@ -1878,6 +1882,7 @@ message RpcResult {
     GetUsersResult getUsers = 139;
     GetBotSkillsResult getBotSkills = 140;
     GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
+    UpdateDialogTranslationResult updateDialogTranslation = 142;
   }
 }
 
@@ -2345,6 +2350,22 @@ message UpdateDialogFollowModeInput {
 }
 
 message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
+message UpdateDialogTranslationInput {
+  InputPeer peer_id = 1;
+  // Required presence distinguishes an explicit disable from malformed input.
+  optional bool enabled = 2;
+  // One-time import of a legacy device's enabled choice. Only valid with
+  // enabled=true; never overrides an explicit synced disable.
+  bool import_legacy_enabled = 3;
+}
+
+message UpdateDialogTranslationResult { repeated Update updates = 1; }
+
+message UpdateDialogTranslation {
+  Peer peer_id = 1;
+  bool enabled = 2;
+}
 
 message CollapseHistoryInput {
   InputPeer peer_id = 1;
@@ -3650,6 +3671,7 @@ message Update {
     UpdateUserAddedToChat user_added_to_chat = 47;
     UpdateUserRemovedFromChat user_removed_from_chat = 48;
     ChatAcknowledgement acknowledgement = 49;
+    UpdateDialogTranslation dialog_translation = 50;
   }
 }
 

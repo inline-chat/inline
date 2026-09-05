@@ -81,6 +81,9 @@ export const dialogs = pgTable(
 
     /** Optional personal folder containing this dialog. */
     folderId: integer("folder_id"),
+
+    /** Personal translation preference shared across the account's sessions. */
+    translationEnabled: boolean("translation_enabled"),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),

@@ -45,8 +45,7 @@ public struct TranslationOptions: View {
               if let peer = peer {
                 if TranslationState.shared.isTranslationEnabled(for: peer) {
                   // If already enabled, restart translation to apply new language
-                  TranslationState.shared.setTranslationEnabled(false, for: peer)
-                  TranslationState.shared.setTranslationEnabled(true, for: peer)
+                  TranslationState.shared.restartTranslation(for: peer)
                 } else {
                   // If not enabled, enable it
                   TranslationState.shared.setTranslationEnabled(true, for: peer)

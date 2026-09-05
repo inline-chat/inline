@@ -68,6 +68,7 @@ import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMess
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "@in/server/realtime/handlers/messages.updateDialogFollowMode"
+import { updateDialogTranslation } from "@in/server/realtime/handlers/messages.updateDialogTranslation"
 import { acknowledgeMessagesHandler } from "@in/server/realtime/handlers/messages.acknowledgeMessages"
 import { collapseHistoryHandler } from "@in/server/realtime/handlers/messages.collapseHistory"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
@@ -852,6 +853,13 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "updateDialogNotificationSettings", updateDialogNotificationSettings: result }
     }
 
+    case Method.UPDATE_DIALOG_TRANSLATION: {
+      if (call.input.oneofKind !== "updateDialogTranslation") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await updateDialogTranslation(call.input.updateDialogTranslation, handlerContext)
+      return { oneofKind: "updateDialogTranslation", updateDialogTranslation: result }
+    }
     case Method.UPDATE_DIALOG_FOLLOW_MODE: {
       if (call.input.oneofKind !== "updateDialogFollowMode") {
         throw RealtimeRpcError.BadRequest()

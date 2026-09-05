@@ -1,6 +1,8 @@
+import Auth
 import Combine
 import Foundation
 import InlineKit
+import Logger
 
 /// Global state for translations
 public final class TranslationState: @unchecked Sendable {
@@ -9,57 +11,66 @@ public final class TranslationState: @unchecked Sendable {
   @MainActor
   public let subject = PassthroughSubject<(Peer, Bool), Never>()
 
-  private var cache: [String: Bool] = [:]
-  private let cacheLock = NSLock()
-  private let translationEnabledKey = "translation_enabled_"
+  private var preferenceSubscription: AnyCancellable?
 
-  private init() {}
+  private init() {
+    preferenceSubscription = AppDatabase.shared.translationPreferences.changes
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] peer, _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.publish(self.isTranslationEnabled(for: peer), for: peer)
+        }
+      }
+  }
 
   public func isTranslationEnabled(for peerId: Peer) -> Bool {
-    let key = peerId.toString()
-
-    // Check cache first
-    let cached = cacheLock.withLock { cache[key] }
-    if let cached {
-      return cached
-    }
-
-    // If not in cache, get from UserDefaults and cache it
-    let value = UserDefaults.standard.bool(forKey: translationEnabledKey + key)
-
-    cacheLock.withLock {
-      cache[key] = value
-    }
-
-    return value
+    AppDatabase.shared.translationPreferences.isEnabled(for: peerId)
   }
 
+  @MainActor
   public func setTranslationEnabled(_ enabled: Bool, for peerId: Peer) {
-    let key = peerId.toString()
-
-    cacheLock.withLock {
-      cache[key] = enabled
+    let account: AuthAccountMutationToken
+    do {
+      account = try Auth.shared.handle.beginAccountMutation()
+    } catch {
+      Log.shared.error("Cannot change translation preference during account transition", error: error)
+      return
     }
-    UserDefaults.standard.set(enabled, forKey: translationEnabledKey + key)
-
-    // Notify progressive view model with a reload
-    Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId, animated: true)
-
-      // Publish the change
-      self.subject.send((peerId, enabled))
+    let preferences = AppDatabase.shared.translationPreferences
+    let intent = UUID()
+    preferences.begin(enabled, for: peerId, intent: intent)
+    Task {
+      do {
+        _ = try await Api.realtime.send(UpdateDialogTranslationTransaction(
+          peer: peerId,
+          enabled: enabled,
+          intent: intent
+        ), expectedAccount: account)
+      } catch {
+        preferences.finish(for: peerId, intent: intent)
+        Log.shared.error("Failed to save translation preference", error: error)
+      }
     }
   }
 
+  @MainActor
   public func toggleTranslation(for peerId: Peer) {
-    let current = isTranslationEnabled(for: peerId)
-    setTranslationEnabled(!current, for: peerId)
+    setTranslationEnabled(!isTranslationEnabled(for: peerId), for: peerId)
   }
 
-  public func clearCache() {
-    cacheLock.withLock {
-      cache.removeAll()
-    }
+  /// Restart local translation work after a language change without changing
+  /// the account's translation preference on other devices.
+  @MainActor
+  public func restartTranslation(for peerId: Peer) {
+    subject.send((peerId, false))
+    publish(isTranslationEnabled(for: peerId), for: peerId)
+  }
+
+  @MainActor
+  private func publish(_ enabled: Bool, for peer: Peer) {
+    MessagesPublisher.shared.messagesReload(peer: peer, animated: true)
+    subject.send((peer, enabled))
   }
 
   // MARK: - Subscriptions
