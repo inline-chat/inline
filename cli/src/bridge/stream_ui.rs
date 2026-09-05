@@ -1097,6 +1097,23 @@ impl ActivityTracker {
             .collect::<Vec<_>>();
         let incoming_title = activity.title.clone();
         let incoming_detail = activity.detail.as_deref().map(str::to_string);
+        let mut incoming_details = activity.details.clone();
+        if is_file_change_activity(activity.kind, &activity.title) {
+            for detail in &mut incoming_details {
+                // These are display labels, not local-file actions. Keep projection lexical.
+                if let Ok(relative) = Path::new(&detail.value).strip_prefix(workspace)
+                    && relative.components().all(|component| {
+                        matches!(
+                            component,
+                            std::path::Component::Normal(_) | std::path::Component::CurDir
+                        )
+                    })
+                    && let Some(path) = relative.to_str().filter(|path| !path.is_empty())
+                {
+                    detail.value = path.to_string();
+                }
+            }
+        }
         if let Some(existing) = self.entries.iter_mut().find(|entry| {
             matches!(entry, ProgressEntry::Activity { activity: existing } if existing.key == activity.activity_id)
         }) {
@@ -1121,7 +1138,7 @@ impl ActivityTracker {
                     *existing_detail = incoming_detail.clone();
                 }
                 if !activity.details.is_empty() {
-                    details.clone_from(&activity.details);
+                    details.clone_from(&incoming_details);
                 }
                 if !activity.reasoning_content.is_empty() {
                     content_parts.clone_from(&activity.reasoning_content);
@@ -1149,7 +1166,7 @@ impl ActivityTracker {
                 status: activity.status,
                 title: incoming_title,
                 detail: incoming_detail,
-                details: activity.details.clone(),
+                details: incoming_details,
                 verbose_payload: activity.verbose_payload.clone(),
                 paths,
                 exit_code: activity.exit_code,
@@ -1393,10 +1410,24 @@ impl ActivityTracker {
         let final_key = terminal
             .then(|| self.final_message().map(|(key, _)| key))
             .flatten();
+        let represented_files = self
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ProgressEntry::Activity { activity }
+                    if is_file_change_activity(activity.semantic_kind, &activity.title) =>
+                {
+                    Some(activity.details.iter().map(|detail| detail.value.as_str()))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect::<std::collections::HashSet<_>>();
         let entries = self
             .entries
             .iter()
             .filter(|entry| !matches!(entry, ProgressEntry::Message { key, phase, .. } if *phase == Some(AgentMessagePhase::FinalAnswer) || final_key == Some(key.as_str())))
+            .filter(|entry| !matches!(entry, ProgressEntry::File { path } if represented_files.contains(path.as_str())))
             .collect::<Vec<_>>();
         let blocks = render_progress_entries(&entries, mode, terminal);
         let footer = self.workspace_line.as_deref().unwrap_or("");
@@ -1671,6 +1702,49 @@ fn render_tool_sequence(
     let mut blocks = Vec::new();
     let mut index = 0;
     while index < entries.len() {
+        let work_start = index;
+        while index < entries.len() && entry_is_completed_work(entries[index]) {
+            index += 1;
+        }
+        if index > work_start {
+            let work = &entries[work_start..index];
+            let children = work
+                .iter()
+                .flat_map(|entry| render_progress_entry(entry, mode, terminal))
+                .collect::<Vec<_>>();
+            if work.len() > 1 {
+                let commands = work
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry, ProgressEntry::Activity { activity }
+                        if activity.semantic_kind == ActivitySemanticKind::Execute)
+                    })
+                    .count();
+                let command_summary = if commands == 1 {
+                    "ran a command".to_string()
+                } else {
+                    format!("ran {commands} commands")
+                };
+                let summary = match (commands > 0, work.len() > commands) {
+                    (true, true) => format!("Edited files, {command_summary}"),
+                    (true, false) => format!("Ran {commands} commands"),
+                    _ => "Edited files".to_string(),
+                };
+                blocks.extend(pack_activity_body(
+                    &activity_summary(&summary, None),
+                    &children,
+                    false,
+                    if commands == work.len() {
+                        "command"
+                    } else {
+                        "edit"
+                    },
+                ));
+            } else {
+                blocks.extend(children);
+            }
+            continue;
+        }
         let exploration_start = index;
         while index < entries.len() && entry_is_exploration(entries[index]) {
             index += 1;
@@ -1700,6 +1774,13 @@ fn render_tool_sequence(
         index += 1;
     }
     blocks
+}
+
+fn entry_is_completed_work(entry: &ProgressEntry) -> bool {
+    matches!(entry, ProgressEntry::Activity { activity }
+        if matches!(activity.semantic_kind, ActivitySemanticKind::Edit | ActivitySemanticKind::Execute)
+            && activity.status == ActivityStatus::Completed
+            && activity.exit_code.is_none_or(|code| code == 0))
 }
 
 fn entry_is_exploration(entry: &ProgressEntry) -> bool {
@@ -1882,8 +1963,26 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
     }
 
     let state = activity_state_values(status, exit_code, terminal);
-    let (effective_title, promoted_detail) = promoted_activity_title(semantic_kind, title, details);
-    let summary = activity_summary(effective_title.trim_end_matches('…'), state.as_deref());
+    let (mut effective_title, promoted_detail) =
+        promoted_activity_title(semantic_kind, title, details, status, exit_code, terminal);
+    let file_rows = is_file_change_activity(semantic_kind, title)
+        .then(|| {
+            details
+                .iter()
+                .map(|detail| file_change_row(detail, status, terminal))
+                .collect::<Option<Vec<_>>>()
+        })
+        .flatten()
+        .filter(|rows| !rows.is_empty());
+    if let Some(rows) = &file_rows {
+        effective_title = if rows.len() == 1 {
+            activity_preview(&rows[0])
+        } else {
+            let verb = file_change_verb(status, terminal);
+            format!("{verb} {} files", rows.len())
+        };
+    }
+    let summary = activity_summary(&effective_title, state.as_deref());
     let disclosure_open =
         !terminal && matches!(status, ActivityStatus::Pending | ActivityStatus::InProgress);
 
@@ -1896,14 +1995,30 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
         .map(|(_, detail)| detail)
         .flat_map(render_activity_detail)
         .collect::<Vec<_>>();
-    let detail_duplicates_promoted_title = detail.is_some_and(|detail| {
-        promoted_detail
-            .and_then(|index| details.get(index))
-            .is_some_and(|promoted| promoted.value.trim() == detail.trim())
+    if matches!(mode, VisibilityMode::Normal)
+        && let Some(rows) = &file_rows
+    {
+        body_parts = rows
+            .iter()
+            .filter(|row| rows.len() > 1 || **row != effective_title)
+            .map(|row| format!("- {}", progress_literal(row)))
+            .collect();
+    }
+    let detail_already_shown = detail.is_some_and(|detail| {
+        details.iter().any(|candidate| {
+            candidate.value.trim() == detail.trim()
+                || (semantic_kind == ActivitySemanticKind::Execute
+                    && candidate.label.eq_ignore_ascii_case("Ran")
+                    && candidate
+                        .value
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .starts_with(detail))
+        })
     });
     if let Some(detail) = detail.filter(|detail| {
-        !detail.is_empty()
-            && (matches!(mode, VisibilityMode::Verbose) || !detail_duplicates_promoted_title)
+        !detail.is_empty() && (matches!(mode, VisibilityMode::Verbose) || !detail_already_shown)
     }) {
         body_parts.extend(render_labeled_code("Detail", detail));
     }
@@ -1940,6 +2055,9 @@ fn promoted_activity_title<'a>(
     kind: ActivitySemanticKind,
     fallback: &'a str,
     details: &'a [ActivityDetail],
+    status: ActivityStatus,
+    exit_code: Option<i32>,
+    terminal: bool,
 ) -> (String, Option<usize>) {
     let expected_label = match kind {
         ActivitySemanticKind::Execute => Some("Ran"),
@@ -1948,19 +2066,93 @@ fn promoted_activity_title<'a>(
     let Some(expected_label) = expected_label else {
         return (fallback.to_string(), None);
     };
+    let verb = match status {
+        ActivityStatus::Completed if exit_code.is_none_or(|code| code == 0) => "Ran",
+        ActivityStatus::Pending | ActivityStatus::InProgress if !terminal => "Running",
+        _ => "Command",
+    };
     let Some((index, detail)) = details.iter().enumerate().find(|(_, detail)| {
-        detail.label.eq_ignore_ascii_case(expected_label)
-            && !detail.value.contains('\n')
-            && !detail.value.contains('\r')
-            && detail.value.chars().count() <= 160
-            && !detail.value.trim().is_empty()
+        detail.label.eq_ignore_ascii_case(expected_label) && !detail.value.trim().is_empty()
     }) else {
+        if matches!(fallback, "Ran command" | "Ran commands" | "Run command") {
+            return (
+                if verb == "Command" {
+                    "Command".to_string()
+                } else {
+                    format!("{verb} command")
+                },
+                None,
+            );
+        }
         return (fallback.to_string(), None);
     };
-    (
-        format!("{} {}", detail.label.trim(), detail.value.trim()),
-        Some(index),
-    )
+    let preview = activity_preview(&detail.value);
+    let fully_promoted = preview == detail.value.trim();
+    (format!("{verb} {preview}"), fully_promoted.then_some(index))
+}
+
+fn activity_preview(value: &str) -> String {
+    // Bound the projection, keeping the original value in the activity details.
+    let mut preview = String::new();
+    let mut whitespace = false;
+    for character in value.trim().chars() {
+        if character.is_whitespace() || character.is_control() {
+            whitespace = !preview.is_empty();
+            continue;
+        }
+        if whitespace {
+            preview.push(' ');
+            whitespace = false;
+        }
+        preview.push(character);
+        if preview.len() > 160 {
+            return truncate(&preview, 160);
+        }
+    }
+    preview
+}
+
+fn is_file_change_activity(kind: ActivitySemanticKind, title: &str) -> bool {
+    kind == ActivitySemanticKind::Edit
+        && matches!(
+            title,
+            "Updating files" | "Editing files" | "Edited files" | "File changes"
+        )
+}
+
+fn file_change_verb(status: ActivityStatus, terminal: bool) -> &'static str {
+    match status {
+        ActivityStatus::Completed => "Edited",
+        ActivityStatus::Pending | ActivityStatus::InProgress if !terminal => "Editing",
+        _ => "Changes to",
+    }
+}
+
+fn file_change_row(
+    detail: &ActivityDetail,
+    status: ActivityStatus,
+    terminal: bool,
+) -> Option<String> {
+    let (kind, counts) = detail.label.split_once(' ').unwrap_or((&detail.label, ""));
+    let completed_verb = match kind {
+        "Added" => "Created",
+        "Updated" => "Edited",
+        "Deleted" => "Deleted",
+        "Moved" => "Moved",
+        "File" => "Edited",
+        _ => return None,
+    };
+    let verb = if status == ActivityStatus::Completed {
+        completed_verb
+    } else {
+        file_change_verb(status, terminal)
+    };
+    let suffix = if status == ActivityStatus::Completed && !counts.is_empty() {
+        format!(" {counts}")
+    } else {
+        String::new()
+    };
+    Some(format!("{verb} {}{suffix}", detail.value))
 }
 
 fn activity_state(activity: &ProgressActivity, terminal: bool) -> Option<String> {
@@ -2479,6 +2671,241 @@ mod presentation_tests;
 #[cfg(test)]
 mod disclosure_tests {
     use super::*;
+
+    fn apply_codex_item(tracker: &mut ActivityTracker, method: &str, item: serde_json::Value) {
+        let workspace = Path::new("/workspace");
+        let events = inline_agent_driver_codex::normalize_notification(
+            inline_agent_driver_codex::CodexNotification {
+                method: method.to_string(),
+                params: serde_json::json!({"turnId":"turn-1", "item":item}),
+            },
+        )
+        .unwrap();
+        for event in events {
+            match event {
+                AgentEvent::ActivityUpsert { activity, .. } => {
+                    tracker.apply(activity, VisibilityMode::Normal, workspace);
+                }
+                AgentEvent::FilesChanged { files, .. } => {
+                    tracker.apply_files(
+                        files.into_iter().map(|file| file.path),
+                        VisibilityMode::Normal,
+                        workspace,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn activity_text(tracker: &ActivityTracker, mode: VisibilityMode) -> String {
+        tracker.render_chunks(mode, WORKING_STATUS, None).join("\n")
+    }
+
+    #[test]
+    fn codex_screenshot_work_groups_preserve_rows_and_separate_compaction() {
+        let mut tracker = ActivityTracker::default();
+        let command = serde_json::json!({"id":"command", "type":"commandExecution", "command":"cargo test", "status":"completed", "exitCode":0});
+        let edit = serde_json::json!({"id":"edit", "type":"fileChange", "status":"completed", "changes":[
+            {"path":"/workspace/a/main.rs", "kind":{"type":"update"}, "diff":"@@ -1 +1 @@\n-old\n+new\n"},
+            {"path":"/workspace/b/main.rs", "kind":{"type":"delete"}, "diff":"old\n"}
+        ]});
+        apply_codex_item(&mut tracker, "item/completed", command.clone());
+        apply_codex_item(&mut tracker, "item/completed", edit.clone());
+        // Replayed snapshots update the same activity, never the group count.
+        apply_codex_item(&mut tracker, "item/completed", command);
+        apply_codex_item(&mut tracker, "item/completed", edit);
+        apply_codex_item(
+            &mut tracker,
+            "item/started",
+            serde_json::json!({"id":"compact", "type":"contextCompaction"}),
+        );
+        let normal = activity_text(&tracker, VisibilityMode::Normal);
+        assert!(
+            normal.contains(&format!(
+                "<summary activity=\"edit\">{}</summary>",
+                progress_literal("Edited files, ran a command")
+            )),
+            "{normal}"
+        );
+        assert!(normal.contains("Edited 2 files"));
+        for row in [
+            "Ran cargo test",
+            "Edited a/main.rs +1 −1",
+            "Deleted b/main.rs +0 −1",
+        ] {
+            assert_eq!(
+                normal.matches(&progress_literal(row)).count(),
+                1,
+                "{normal}"
+            );
+        }
+        assert!(normal.find("Ran cargo test").unwrap() < normal.find("Edited 2 files").unwrap());
+        assert!(normal.contains("</details>\n\nCompacting context"));
+        assert!(!normal.contains("/workspace/a/main.rs"));
+        assert!(!normal.contains("- Updated"));
+        let verbose = activity_text(&tracker, VisibilityMode::Verbose);
+        assert!(verbose.contains("Provider data"));
+        assert!(verbose.contains("/workspace/a/main.rs"));
+        assert!(verbose.contains("-old"));
+        if let Ok(path) = std::env::var("INLINE_CODEX_ACTIVITY_FIXTURE_PATH") {
+            std::fs::write(path, serde_json::to_string(&[&normal, &verbose]).unwrap()).unwrap();
+        }
+        let restored =
+            ActivityTracker::from_durable_json(&tracker.durable_json().unwrap()).unwrap();
+        assert_eq!(activity_text(&restored, VisibilityMode::Normal), normal);
+        apply_codex_item(
+            &mut tracker,
+            "item/completed",
+            serde_json::json!({"id":"compact", "type":"contextCompaction"}),
+        );
+        assert!(activity_text(&tracker, VisibilityMode::Normal).contains("Context compacted"));
+    }
+
+    #[test]
+    fn codex_file_rows_follow_lifecycle_without_duplicate_legacy_paths() {
+        let mut tracker = ActivityTracker::default();
+        for (method, status, expected) in [
+            ("item/started", "inProgress", "Editing src/main.rs"),
+            ("item/completed", "completed", "Edited src/main.rs +1 −1"),
+        ] {
+            apply_codex_item(
+                &mut tracker,
+                method,
+                serde_json::json!({"id":"edit", "type":"fileChange", "status":status, "changes":[
+                    {"path":"/workspace/src/main.rs", "kind":"update", "diff":"@@ -1 +1 @@\n-old\n+new\n"}
+                ]}),
+            );
+            let normal = activity_text(&tracker, VisibilityMode::Normal);
+            assert!(normal.contains(&progress_literal(expected)), "{normal}");
+            assert_eq!(normal.matches(&progress_literal("src/main.rs")).count(), 1);
+            if status != "completed" {
+                assert!(!normal.contains(&progress_literal("+1 −1")));
+            }
+        }
+        for status in ["failed", "cancelled", "declined", "future"] {
+            let mut tracker = ActivityTracker::default();
+            apply_codex_item(
+                &mut tracker,
+                "item/completed",
+                serde_json::json!({"id":"edit", "type":"fileChange", "status":status, "changes":[
+                    {"path":"/workspace/src/main.rs", "kind":"update", "diff":"@@ -1 +1 @@\n-old\n+new\n"}
+                ]}),
+            );
+            tracker.set_terminal_header("Finished");
+            let normal = activity_text(&tracker, VisibilityMode::Normal);
+            assert!(!normal.contains("Edited"), "{normal}");
+            assert!(!normal.contains(&progress_literal("+1 −1")), "{normal}");
+            assert!(
+                normal.contains(if status == "future" {
+                    "completion unconfirmed"
+                } else {
+                    status
+                }),
+                "{normal}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_long_commands_keep_full_details_and_truthful_preview_states() {
+        let command = format!(
+            "printf 'αβ'\n  cargo test {}",
+            "--example-long-argument ".repeat(30)
+        );
+        for (status, exit_code, expected) in [
+            ("inProgress", None, "Running printf"),
+            ("completed", Some(0), "Ran printf"),
+            ("failed", Some(1), "Command printf"),
+            ("completed", Some(2), "Command printf"),
+            ("cancelled", None, "Command printf"),
+        ] {
+            let mut tracker = ActivityTracker::default();
+            apply_codex_item(
+                &mut tracker,
+                "item/started",
+                serde_json::json!({"id":"command", "type":"commandExecution", "command":command, "status":status, "exitCode":exit_code}),
+            );
+            let normal = activity_text(&tracker, VisibilityMode::Normal);
+            let summary = normal
+                .lines()
+                .find(|line| line.starts_with("<summary activity=\"command\">"))
+                .unwrap();
+            assert!(summary.contains(expected), "{summary}");
+            assert!(summary.contains('…'), "{summary}");
+            assert!(
+                summary.len() < 400,
+                "escaped preview must stay bounded: {summary}"
+            );
+            assert!(
+                normal.contains(command.trim_end()),
+                "full command must remain reachable"
+            );
+            assert!(
+                !normal.contains("Detail "),
+                "bounded command detail should not repeat the full command"
+            );
+            if exit_code == Some(2) {
+                assert!(summary.contains("exit 2"));
+            }
+        }
+    }
+
+    #[test]
+    fn completed_work_never_groups_across_other_activity_or_unsuccessful_work() {
+        for boundary in [
+            "commentary",
+            "reasoning",
+            "contextCompaction",
+            "webSearch",
+            "inProgress",
+            "failed",
+            "declined",
+            "cancelled",
+            "nonzero",
+        ] {
+            let mut tracker = ActivityTracker::default();
+            apply_codex_item(
+                &mut tracker,
+                "item/completed",
+                serde_json::json!({"id":"a", "type":"commandExecution", "command":"first", "status":"completed"}),
+            );
+            match boundary {
+                "commentary" => {
+                    tracker.apply_message(
+                        "comment",
+                        Some(AgentMessagePhase::Commentary),
+                        AgentMessageUpdate::Completed("Next step".into()),
+                    );
+                }
+                "reasoning" | "contextCompaction" | "webSearch" => apply_codex_item(
+                    &mut tracker,
+                    "item/started",
+                    serde_json::json!({"id":"boundary", "type":boundary}),
+                ),
+                _ => apply_codex_item(
+                    &mut tracker,
+                    "item/started",
+                    serde_json::json!({"id":"boundary", "type":"commandExecution", "command":"middle", "status":if boundary == "nonzero" {"completed"} else {boundary}, "exitCode":if boundary == "nonzero" {Some(1)} else {None}}),
+                ),
+            }
+            apply_codex_item(
+                &mut tracker,
+                "item/completed",
+                serde_json::json!({"id":"b", "type":"commandExecution", "command":"last", "status":"completed"}),
+            );
+            let normal = activity_text(&tracker, VisibilityMode::Normal);
+            assert!(
+                !normal.contains("Ran 2 commands"),
+                "boundary {boundary}: {normal}"
+            );
+            assert!(
+                !normal.contains("Ran 3 commands"),
+                "boundary {boundary}: {normal}"
+            );
+            assert!(normal.find("Ran first").unwrap() < normal.find("Ran last").unwrap());
+        }
+    }
 
     fn snapshot(tracker: &ActivityTracker) -> String {
         tracker

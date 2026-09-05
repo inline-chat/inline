@@ -279,8 +279,14 @@ Normal mode keeps the Codex presentation hierarchy: exact commentary, reasoning
 summaries and content, provider progress, action rows, searches, file reads,
 commands, tool metadata, provider plan steps, compaction notices, and other
 structured activity. Reasoning and later tools are ordered sibling phases;
-adjacent read/search work is coalesced under one `Explored` disclosure, while
-commands and mutations remain distinct. Empty provider lifecycle envelopes
+adjacent read/search work is coalesced under one `Explored` disclosure. Consecutive
+successful file edits and commands share a collapsed summary such as
+`Edited files, ran a command`, with each activity retained as a distinct child.
+Commentary, reasoning, compaction, running work, and unsuccessful work separate
+these groups. File rows show relative paths where possible and completed line
+counts from Codex's supplied content or valid diff hunks; incomplete or unsupported
+diffs have no counts. Commands show a bounded `Running`/`Ran` preview while the
+complete command remains reachable in the details. Empty provider lifecycle envelopes
 create no visible row. Assistant
 item identity and phase preserve first-seen ordering, while the final answer
 remains outside progress. Normal mode stays within one bounded progress message

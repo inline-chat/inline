@@ -810,7 +810,7 @@ fn normalize_completed_item(
                         path: PathBuf::from(path),
                         summary: change
                             .get("kind")
-                            .and_then(Value::as_str)
+                            .and_then(file_change_kind)
                             .and_then(safe_file_change_summary)
                             .map(str::to_string),
                     })
@@ -826,13 +826,15 @@ fn normalize_completed_item(
             } else {
                 None
             };
-            let mut events = vec![AgentEvent::FilesChanged {
-                turn_id: turn_id.clone(),
-                files,
-            }];
+            let mut events = Vec::new();
             if let Some(activity) = activity {
-                events.push(AgentEvent::ActivityUpsert { turn_id, activity });
+                events.push(AgentEvent::ActivityUpsert {
+                    turn_id: turn_id.clone(),
+                    activity,
+                });
             }
+            // Install the richer row before the legacy file bookkeeping event.
+            events.push(AgentEvent::FilesChanged { turn_id, files });
             Ok(events)
         }
         "imageGeneration" => normalize_image_generation(method, item, turn_id),
@@ -1147,45 +1149,18 @@ fn normalize_file_change_progress(
 ) -> Result<Vec<AgentEvent>, ProtocolError> {
     let turn_id = turn_id_at(method, params, &["turnId"])?;
     let activity_id = string_at(method, params, &["itemId"])?;
-    let changes = params
-        .get("changes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let paths = changes
-        .iter()
-        .filter_map(|change| change.get("path").and_then(Value::as_str))
-        .map(PathBuf::from);
-    let details = changes.iter().filter_map(|change| {
-        let path = change.get("path")?.as_str()?;
-        Some(ActivityDetail::code(
-            change
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("Updated"),
-            path,
-        ))
-    });
-    Ok(ActivityUpsert::new(
-        activity_id,
-        ActivitySemanticKind::Edit,
-        ActivityStatus::InProgress,
-        "Updating files",
+    Ok(
+        codex_file_change_activity_from_id(&activity_id, params, ActivityStatus::InProgress)
+            .map(|activity| {
+                activity.with_verbose_payload(
+                    serde_json::to_string_pretty(params)
+                        .expect("serializing a JSON Value is infallible"),
+                )
+            })
+            .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
+            .into_iter()
+            .collect(),
     )
-    .map(|activity| {
-        activity
-            .with_detail("Patch updated.")
-            .with_details(details)
-            .with_verbose_payload(
-                serde_json::to_string_pretty(params)
-                    .expect("serializing a JSON Value is infallible"),
-            )
-            .with_paths(paths)
-    })
-    .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
-    .into_iter()
-    .collect())
 }
 
 fn codex_item_activity(
@@ -1204,6 +1179,16 @@ fn codex_item_activity(
     let activity = match item_type.as_str() {
         "commandExecution" => {
             let (kind, title) = command_semantics(item);
+            let mut details = command_action_details(item);
+            if kind == ActivitySemanticKind::Execute
+                && let Some(command) = item.get("command").and_then(Value::as_str)
+                && !details
+                    .iter()
+                    .any(|detail| detail.label == "Ran" && detail.value == command)
+            {
+                // A shell pipeline can have several actions. Preview the whole command.
+                details.insert(0, ActivityDetail::code("Ran", command));
+            }
             ActivityUpsert::new(
                 id,
                 kind,
@@ -1226,7 +1211,7 @@ fn codex_item_activity(
                         activity.with_output_snapshot(output)
                     });
                 activity
-                    .with_details(command_action_details(item))
+                    .with_details(details)
                     .with_paths(item.get("cwd").and_then(Value::as_str).map(PathBuf::from))
                     .with_exit_code(
                         item.get("exitCode")
@@ -1554,11 +1539,24 @@ fn codex_file_change_activity_from_id(
     item: &Value,
     fallback_status: ActivityStatus,
 ) -> Option<ActivityUpsert> {
+    let status = item
+        .get("status")
+        .and_then(Value::as_str)
+        .map(codex_item_status)
+        .unwrap_or(fallback_status);
+    // Rich records use the progress ledger/message budgets, not the legacy
+    // file-action cap: retain every valid path for normal/verbose projection.
     let changes = item
         .get("changes")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|change| {
+            change
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(safe_file_change_path)
+        })
         .collect::<Vec<_>>();
     let paths = changes
         .iter()
@@ -1568,20 +1566,107 @@ fn codex_file_change_activity_from_id(
         .iter()
         .filter_map(|change| {
             let path = change.get("path")?.as_str()?;
-            let kind = change
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("Updated");
-            Some(ActivityDetail::code(kind, path))
+            let kind = change.get("kind").and_then(file_change_kind);
+            let label = match kind {
+                Some("add") => "Added",
+                Some("delete") => "Deleted",
+                Some("update") => "Updated",
+                _ => "File",
+            };
+            let counts = (status == ActivityStatus::Completed)
+                .then(|| file_change_line_counts(change))
+                .flatten();
+            let label = counts.map_or_else(
+                || label.to_string(),
+                |(added, removed)| format!("{label} +{added} −{removed}"),
+            );
+            Some(ActivityDetail::code(label, path))
         })
         .collect::<Vec<_>>();
-    let status = item
-        .get("status")
-        .and_then(Value::as_str)
-        .map(codex_item_status)
-        .unwrap_or(fallback_status);
-    ActivityUpsert::new(id, ActivitySemanticKind::Edit, status, "Updating files")
+    let title = match status {
+        ActivityStatus::Pending | ActivityStatus::InProgress => "Editing files",
+        ActivityStatus::Completed => "Edited files",
+        _ => "File changes",
+    };
+    ActivityUpsert::new(id, ActivitySemanticKind::Edit, status, title)
         .map(|activity| activity.with_details(details).with_paths(paths))
+}
+
+fn file_change_kind(kind: &Value) -> Option<&str> {
+    kind.as_str()
+        .or_else(|| kind.get("type").and_then(Value::as_str))
+}
+
+fn file_change_line_counts(change: &Value) -> Option<(usize, usize)> {
+    let diff = change.get("diff")?.as_str()?;
+    if diff.contains('\0') {
+        return None;
+    }
+    match change.get("kind").and_then(file_change_kind)? {
+        // Codex sends whole-file content for additions and deletions, not hunks.
+        "add" => Some((diff.lines().count(), 0)),
+        "delete" => Some((0, diff.lines().count())),
+        "update" => {
+            // App-server appends this annotation to the unified diff for moves.
+            let diff = change
+                .pointer("/kind/move_path")
+                .and_then(Value::as_str)
+                .and_then(|path| diff.strip_suffix(&format!("\n\nMoved to: {path}")))
+                .unwrap_or(diff);
+            unified_diff_line_counts(diff)
+        }
+        _ => None,
+    }
+}
+
+fn unified_diff_line_counts(diff: &str) -> Option<(usize, usize)> {
+    let mut remaining = (0usize, 0usize);
+    let mut counts = (0usize, 0usize);
+    let mut saw_hunk = false;
+    for line in diff.lines() {
+        if line.starts_with("@@ ") {
+            if remaining != (0, 0) {
+                return None;
+            }
+            let mut header = line.split_whitespace();
+            header.next();
+            let old = diff_hunk_length(header.next()?.strip_prefix('-')?)?;
+            let new = diff_hunk_length(header.next()?.strip_prefix('+')?)?;
+            if header.next()? != "@@" {
+                return None;
+            }
+            remaining = (old, new);
+            saw_hunk = true;
+        } else if remaining != (0, 0) {
+            match line.as_bytes().first()? {
+                b'+' => {
+                    remaining.1 = remaining.1.checked_sub(1)?;
+                    counts.0 += 1;
+                }
+                b'-' => {
+                    remaining.0 = remaining.0.checked_sub(1)?;
+                    counts.1 += 1;
+                }
+                b' ' => {
+                    remaining.0 = remaining.0.checked_sub(1)?;
+                    remaining.1 = remaining.1.checked_sub(1)?;
+                }
+                b'\\' if line == "\\ No newline at end of file" => {}
+                _ => return None,
+            }
+        } else if !(line == "\\ No newline at end of file"
+            || (!saw_hunk && (line.starts_with("--- ") || line.starts_with("+++ "))))
+        {
+            return None;
+        }
+    }
+    (saw_hunk && remaining == (0, 0)).then_some(counts)
+}
+
+fn diff_hunk_length(range: &str) -> Option<usize> {
+    let (start, length) = range.split_once(',').unwrap_or((range, "1"));
+    start.parse::<usize>().ok()?;
+    length.parse().ok()
 }
 
 fn codex_item_status(status: &str) -> ActivityStatus {
@@ -2238,6 +2323,142 @@ mod tests {
     }
 
     #[test]
+    fn file_change_counts_follow_codex_content_and_completed_diff_formats() {
+        for (change, expected) in [
+            (
+                json!({"kind":{"type":"add"},"diff":"+literal\n-last line"}),
+                Some((2, 0)),
+            ),
+            (
+                json!({"kind":"delete","diff":"first\n\nthird\n"}),
+                Some((0, 3)),
+            ),
+            (json!({"kind":{"type":"add"},"diff":""}), Some((0, 0))),
+            (
+                json!({"kind":{"type":"update"},"diff":"@@ -1,4 +1,4 @@\n foo\n-bar\n+BAR\n baz\n-qux\n+QUX\n"}),
+                Some((2, 2)),
+            ),
+            (
+                json!({"kind":"update","diff":"--- a/f\n+++ b/f\n@@ -1 +1 @@\n--- content\n+++ content\n\\ No newline at end of file\n@@ -9,0 +10,2 @@\n+one\n+two\n"}),
+                Some((3, 1)),
+            ),
+            (
+                json!({"kind":{"type":"update","move_path":"/repo/new.rs"},"diff":"@@ -1 +1 @@\n-a\n+b\n\n\nMoved to: /repo/new.rs"}),
+                Some((1, 1)),
+            ),
+            (json!({"kind":"update","diff":"@@\n-old\n+new\n"}), None),
+            (
+                json!({"kind":"update","diff":"@@ -1,2 +1,2 @@\n-old\n+new\n"}),
+                None,
+            ),
+            (
+                json!({"kind":"update","diff":"@@ -1 +1 @@\n-old\n+new\n+extra\n"}),
+                None,
+            ),
+            (json!({"kind":"update","diff":"GIT binary patch\n"}), None),
+            (json!({"kind":"add","diff":"nul\u{0000}byte"}), None),
+            (json!({"kind":"update","diff":""}), None),
+            (json!({"kind":"future","diff":"text"}), None),
+            (json!({"kind":"add"}), None),
+        ] {
+            assert_eq!(
+                super::file_change_line_counts(&change),
+                expected,
+                "{change}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_file_paths_stay_in_provider_data_without_becoming_activity_rows() {
+        let item = json!({"id":"edit", "type":"fileChange", "status":"completed", "changes":[
+            {"path":"/repo/good.rs", "kind":{"type":"add"}, "diff":"good\n"},
+            {"path":"/repo/../outside.rs", "kind":{"type":"add"}, "diff":"outside\n"},
+            {"path":"/repo/line\nbreak.rs", "kind":{"type":"add"}, "diff":"control\n"},
+            {"path":"", "kind":{"type":"add"}, "diff":"empty\n"},
+            {"path":format!("/repo/{}", "a".repeat(1024)), "kind":{"type":"add"}, "diff":"long\n"}
+        ]});
+        let events = normalize_notification(CodexNotification {
+            method: "item/completed".into(),
+            params: json!({"turnId":"turn-1", "item":item}),
+        })
+        .unwrap();
+        assert!(
+            matches!(&events[..], [AgentEvent::ActivityUpsert {activity, ..}, AgentEvent::FilesChanged {files, ..}]
+            if activity.details.len() == 1 && activity.details[0].value == "/repo/good.rs"
+                && files.len() == 1 && activity.verbose_payload.as_ref().is_some_and(|payload|
+                    serde_json::from_str::<Value>(payload).unwrap() == item))
+        );
+    }
+
+    #[test]
+    fn file_change_lifecycle_uses_rich_row_before_legacy_files_and_counts_only_success() {
+        for (method, status, expected_title, expected_label) in [
+            ("item/started", "inProgress", "Editing files", "Updated"),
+            (
+                "item/completed",
+                "completed",
+                "Edited files",
+                "Updated +1 −1",
+            ),
+            ("item/completed", "failed", "File changes", "Updated"),
+            ("item/completed", "declined", "File changes", "Updated"),
+            ("item/completed", "cancelled", "File changes", "Updated"),
+            ("item/completed", "future", "Editing files", "Updated"),
+        ] {
+            let item = json!({"id":"edit", "type":"fileChange", "status":status,
+                "changes":[{"path":"/repo/src/main.rs", "kind":{"type":"update"}, "diff":"@@ -1 +1 @@\n-old\n+new\n"}]});
+            let events = normalize_notification(CodexNotification {
+                method: method.into(),
+                params: json!({"turnId":"turn-1", "item":item}),
+            })
+            .unwrap();
+            assert!(
+                matches!(events.first(), Some(AgentEvent::ActivityUpsert { activity, .. })
+                if activity.title == expected_title && activity.details[0].label == expected_label
+                    && activity.verbose_payload.as_ref().is_some_and(|payload| payload.contains("-old")))
+            );
+            if method == "item/completed" {
+                assert!(
+                    matches!(events.last(), Some(AgentEvent::FilesChanged { files, .. })
+                    if files[0].summary.as_deref() == Some("updated"))
+                );
+            }
+        }
+        let events = normalize_notification(CodexNotification {
+            method: "item/fileChange/patchUpdated".into(),
+            params: json!({"turnId":"turn-1", "itemId":"edit", "changes":[
+                {"path":"/repo/new.rs", "kind":{"type":"add"}, "diff":"partial\n"}
+            ]}),
+        })
+        .unwrap();
+        assert!(
+            matches!(&events[..], [AgentEvent::ActivityUpsert {activity, ..}]
+            if activity.status == ActivityStatus::InProgress && activity.details[0].label == "Added")
+        );
+    }
+
+    #[test]
+    fn command_pipeline_keeps_whole_command_before_individual_actions() {
+        let command = "cat src/main.rs | custom-filter --flag";
+        let events = normalize_notification(CodexNotification {
+            method: "item/started".into(),
+            params: json!({"turnId":"turn-1", "item": {
+                "id":"command", "type":"commandExecution", "command":command,
+                "commandActions":[{"type":"read", "command":"cat src/main.rs", "name":"main.rs"},
+                    {"type":"unknown", "command":"custom-filter --flag"}]
+            }}),
+        })
+        .unwrap();
+        assert!(
+            matches!(&events[..], [AgentEvent::ActivityUpsert {activity, ..}]
+            if activity.kind == ActivitySemanticKind::Execute
+                && activity.details[0] == ActivityDetail::code("Ran", command)
+                && activity.details.len() == 3)
+        );
+    }
+
+    #[test]
     fn normalizes_file_changes_without_diff_body() {
         let events = normalize_notification(CodexNotification {
             method: "item/completed".to_string(),
@@ -2712,7 +2933,7 @@ mod tests {
         .expect("file completion");
         assert!(matches!(
             events.as_slice(),
-            [AgentEvent::FilesChanged { .. }, AgentEvent::ActivityUpsert { activity, .. }]
+            [AgentEvent::ActivityUpsert { activity, .. }, AgentEvent::FilesChanged { .. }]
                 if activity.status == ActivityStatus::Declined
                     && activity.verbose_payload.as_deref().is_some_and(|payload| {
                         payload.contains("/workspace/src/lib.rs") && payload.contains("declined")
