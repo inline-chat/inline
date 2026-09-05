@@ -1817,4 +1817,96 @@ mod tests {
             .await
             .expect("stop installed Codex app-server");
     }
+
+    #[tokio::test]
+    #[ignore = "creates an isolated authenticated Codex session and runs a short turn, compaction, and follow-up"]
+    async fn installed_codex_usage_and_compaction_round_trip() {
+        use inline_agent_bridge::{AgentEvent, SessionSpec, TurnInput, TurnOptions, TurnOutcome};
+        async fn finish(mut turn: inline_agent_bridge::StartedTurn) -> (TurnOutcome, bool) {
+            tokio::time::timeout(std::time::Duration::from_secs(90), async {
+                let mut compaction = false;
+                while let Some(event) = turn.events.next().await {
+                    match event.expect("provider event") {
+                        AgentEvent::ActivityUpsert { activity, .. } => {
+                            compaction |= activity.title.contains("context")
+                        }
+                        AgentEvent::TurnCompleted { outcome, .. } => return (outcome, compaction),
+                        _ => {}
+                    }
+                }
+                panic!("provider stream closed before terminal event");
+            })
+            .await
+            .expect("bounded provider turn")
+        }
+        let mut config = CodexLaunchConfig {
+            transport: CodexAppServerTransport::PrivateStdio,
+            ..CodexLaunchConfig::default()
+        };
+        if let Some(executable) = std::env::var_os("INLINE_CODEX_SMOKE_EXECUTABLE") {
+            config.executable = executable.into();
+        }
+        let spawned = spawn_codex_driver(config, "0.7.13-validation")
+            .await
+            .expect("initialize Codex");
+        let workspace = tempfile::tempdir().expect("isolated workspace");
+        let catalog = spawned
+            .driver
+            .settings_catalog(workspace.path())
+            .await
+            .expect("current catalog");
+        assert!(
+            catalog
+                .models
+                .iter()
+                .any(|model| model.value == "gpt-6-astra")
+        );
+        let _usage = spawned
+            .driver
+            .usage_limits()
+            .await
+            .expect("read account usage");
+        let session = spawned
+            .driver
+            .start_session(SessionSpec {
+                cwd: workspace.path().to_path_buf(),
+            })
+            .await
+            .expect("new isolated session");
+        let prompt = || TurnInput {
+            text: "Reply with exactly OK. Do not use tools or change files.".to_string(),
+            attachments: Vec::new(),
+            client_message_id: None,
+        };
+        let options = || TurnOptions {
+            model: Some("gpt-6-astra".to_string()),
+            reasoning: Some("low".to_string()),
+            ..Default::default()
+        };
+        let first = spawned
+            .driver
+            .start_turn(&session, prompt(), options())
+            .await
+            .expect("first turn");
+        assert_eq!(finish(first).await.0, TurnOutcome::Completed);
+        let compact = spawned
+            .driver
+            .compact_session(&session)
+            .await
+            .expect("start compaction");
+        let (outcome, saw_compaction) = finish(compact).await;
+        assert_eq!(outcome, TurnOutcome::Completed);
+        assert!(saw_compaction, "canonical compaction activity was missing");
+        let next = spawned
+            .driver
+            .start_turn(&session, prompt(), options())
+            .await
+            .expect("post-compaction turn");
+        assert_eq!(finish(next).await.0, TurnOutcome::Completed);
+        spawned
+            .driver
+            .shutdown()
+            .await
+            .expect("stop isolated provider");
+    }
 }

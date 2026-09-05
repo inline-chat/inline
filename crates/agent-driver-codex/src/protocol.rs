@@ -9,7 +9,7 @@ use inline_agent_bridge::{
     AgentEvent, AgentMessagePhase, AgentMessageUpdate, ApprovalOption, ApprovalRequest, FileChange,
     OutputAttachment, OutputAttachmentKind, PlanStep, PlanStepStatus, Question, QuestionAnswer,
     QuestionOption, QuestionRequest, TurnId, TurnOutcome, TurnTiming, native_tool_activity,
-    sanitize_visible_command,
+    sanitize_diagnostic_text, sanitize_visible_command,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -241,6 +241,45 @@ pub struct CodexNotification {
     pub params: Value,
 }
 
+/// Project only usage windows; never forward account, credit or billing fields.
+pub fn normalize_usage_limits(value: &Value) -> Vec<inline_agent_bridge::DriverUsageWindow> {
+    let buckets = match value.get("rateLimitsByLimitId").and_then(Value::as_object) {
+        Some(buckets) => buckets.values().take(8).collect::<Vec<_>>(),
+        None => value.get("rateLimits").into_iter().collect(),
+    };
+    let mut windows = Vec::new();
+    for bucket in buckets {
+        let label = bucket
+            .get("limitName")
+            .and_then(Value::as_str)
+            .or_else(|| bucket.get("limitId").and_then(Value::as_str))
+            .and_then(sanitize_diagnostic_text)
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| "Codex".to_string());
+        for key in ["primary", "secondary"] {
+            let Some(window) = bucket.get(key) else {
+                continue;
+            };
+            let Some(used) = window.get("usedPercent").and_then(Value::as_i64) else {
+                continue;
+            };
+            windows.push(inline_agent_bridge::DriverUsageWindow {
+                label: label.chars().take(80).collect(),
+                used_percent: used.clamp(0, 100) as u8,
+                window_minutes: window
+                    .get("windowDurationMins")
+                    .and_then(Value::as_i64)
+                    .filter(|value| *value > 0),
+                resets_at: window
+                    .get("resetsAt")
+                    .and_then(Value::as_i64)
+                    .filter(|value| *value > 0),
+            });
+        }
+    }
+    windows
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProtocolError {
     #[error("Codex notification {method} is missing {field}")]
@@ -292,6 +331,40 @@ pub fn normalize_notification(
         "turn/started" => {
             let turn_id = turn_id_at(&method, &params, &["turn", "id"])?;
             Ok(vec![AgentEvent::TurnStarted { turn_id }])
+        }
+        "error" => {
+            let turn_id = turn_id_at(&method, &params, &["turnId"])?;
+            let retrying = params
+                .get("willRetry")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let detail = params
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .and_then(sanitize_diagnostic_text)
+                .map(|text| {
+                    ActivityDetail::text(
+                        "Provider error",
+                        text.chars().take(MAX_TURN_ERROR_CHARS).collect::<String>(),
+                    )
+                });
+            let activity = ActivityUpsert::new(
+                "codex-provider-error",
+                ActivitySemanticKind::Other,
+                if retrying {
+                    ActivityStatus::InProgress
+                } else {
+                    ActivityStatus::Failed
+                },
+                if retrying {
+                    "Codex is retrying"
+                } else {
+                    "Codex reported an error"
+                },
+            )
+            .expect("fixed provider activity")
+            .with_details(detail);
+            Ok(vec![AgentEvent::ActivityUpsert { turn_id, activity }])
         }
         "item/agentMessage/delta" => {
             let turn_id = turn_id_at(&method, &params, &["turnId"])?;
@@ -354,7 +427,8 @@ pub fn normalize_notification(
 /// driver intentionally ignores. Never includes notification parameters.
 pub fn unsupported_notification_diagnostic(method: &str, params: &Value) -> Option<String> {
     match method {
-        "turn/started"
+        "error"
+        | "turn/started"
         | "turn/plan/updated"
         | "item/agentMessage/delta"
         | "item/plan/delta"
@@ -1266,7 +1340,14 @@ fn codex_item_activity(
             id,
             ActivitySemanticKind::Other,
             status,
-            "Context automatically compacted",
+            match status {
+                ActivityStatus::Pending | ActivityStatus::InProgress => "Compacting context",
+                ActivityStatus::Failed => "Context compaction failed",
+                ActivityStatus::Cancelled | ActivityStatus::Declined => {
+                    "Context compaction stopped"
+                }
+                ActivityStatus::Completed => "Context compacted",
+            },
         ),
         "reasoning" => {
             let summaries = string_array(item.get("summary"));
@@ -1538,7 +1619,10 @@ fn normalize_completed_turn(
         .get("turn")
         .and_then(|turn| turn.get("error"))
         .and_then(|error| error.get("codexErrorInfo"))
-        .and_then(Value::as_str);
+        .and_then(|info| {
+            info.as_str()
+                .or_else(|| info.as_object()?.keys().next().map(String::as_str))
+        });
     let outcome = match (status.as_str(), codex_error_info) {
         (_, Some("unauthorized")) => TurnOutcome::AuthenticationRequired,
         ("completed", _) => TurnOutcome::Completed,
@@ -1571,7 +1655,12 @@ fn normalize_completed_turn(
                 .to_string(),
         )
     } else {
-        error
+        error.filter(|message| !message.is_empty()).or_else(|| match codex_error_info {
+            Some("usageLimitExceeded") => Some("Your Codex usage limit has been reached. Run /status for usage windows and reset times.".to_string()),
+            Some("contextWindowExceeded") => Some("The Codex context window is full. Run /compact, then try again.".to_string()),
+            Some("sessionBudgetExceeded") => Some("This Codex session has reached its budget. Start a new session to continue.".to_string()),
+            _ => None,
+        })
     };
     Ok(vec![AgentEvent::TurnCompleted {
         turn_id,
@@ -1702,6 +1791,82 @@ fn value_at<'a>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn usage_windows_prefer_current_buckets_and_preserve_unknown_data() {
+        let windows = super::normalize_usage_limits(&serde_json::json!({
+            "rateLimits": {"primary": {"usedPercent": 0}},
+            "rateLimitsByLimitId": {"codex": {
+                "limitName": "Codex", "planType": "private-plan", "credits": {"balance": "private"},
+                "primary": {"usedPercent": -1, "windowDurationMins": 300, "resetsAt": null},
+                "secondary": {"usedPercent": 120, "windowDurationMins": 10080, "resetsAt": 1788600000}
+            }}
+        }));
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].used_percent, 0);
+        assert_eq!(windows[0].resets_at, None);
+        assert_eq!(windows[1].used_percent, 100);
+        assert_eq!(windows[1].window_minutes, Some(10080));
+        assert_eq!(windows[1].resets_at, Some(1788600000));
+        assert!(!serde_json::to_string(&windows).unwrap().contains("private"));
+        assert!(
+            super::normalize_usage_limits(&serde_json::json!({"rateLimits":{"primary":{}}}))
+                .is_empty()
+        );
+        assert!(super::normalize_usage_limits(&serde_json::json!({"rateLimits":null})).is_empty());
+        assert!(super::normalize_usage_limits(&serde_json::json!({"rateLimitsByLimitId":{}, "rateLimits":{"primary":{"usedPercent":0}}})).is_empty());
+    }
+
+    #[test]
+    fn current_compaction_events_report_lifecycle_truthfully() {
+        for (method, expected_status, expected_title) in [
+            (
+                "item/started",
+                super::ActivityStatus::InProgress,
+                "Compacting context",
+            ),
+            (
+                "item/completed",
+                super::ActivityStatus::Completed,
+                "Context compacted",
+            ),
+        ] {
+            let events = super::normalize_notification(super::CodexNotification {
+                method: method.to_string(),
+                params: serde_json::json!({"threadId":"session", "turnId":"compact", "item":{"id":"compact-item", "type":"contextCompaction"}}),
+            }).unwrap();
+            assert!(
+                matches!(&events[..], [super::AgentEvent::ActivityUpsert { activity, .. }]
+                if activity.status == expected_status && activity.title == expected_title)
+            );
+        }
+    }
+
+    #[test]
+    fn retry_notifications_are_progress_and_quota_failure_is_terminal() {
+        let events = super::normalize_notification(super::CodexNotification {
+            method: "error".to_string(),
+            params: serde_json::json!({"threadId":"session", "turnId":"turn", "willRetry":true,
+                "error":{"message":"Server overloaded; retrying.", "codexErrorInfo":"serverOverloaded"}}),
+        }).unwrap();
+        assert!(
+            matches!(&events[..], [super::AgentEvent::ActivityUpsert {activity, ..}]
+            if activity.status == super::ActivityStatus::InProgress && activity.title == "Codex is retrying")
+        );
+        for info in [
+            serde_json::json!("usageLimitExceeded"),
+            serde_json::json!({"usageLimitExceeded":{}}),
+        ] {
+            let events = super::normalize_notification(super::CodexNotification {
+                method: "turn/completed".to_string(),
+                params: serde_json::json!({"threadId":"session", "turn":{"id":"turn", "status":"failed", "error":{"message":"", "codexErrorInfo":info}}}),
+            }).unwrap();
+            assert!(
+                matches!(&events[..], [super::AgentEvent::TurnCompleted { outcome: super::TurnOutcome::Failed, error:Some(error), .. }]
+                if error.contains("usage limit") && error.contains("reset times"))
+            );
+        }
+    }
+
     use super::*;
     use serde_json::json;
 

@@ -113,6 +113,7 @@ pub(super) enum SettingsCommandActionOutcome {
 struct SettingsInteractionResolution {
     response: BotChatSettingsResponse,
     provider_epoch_ended: bool,
+    catalog: Option<DriverSettingsCatalog>,
 }
 
 struct SettingsInvocationFailure {
@@ -140,6 +141,7 @@ impl SettingsInteractionResolution {
         Self {
             response,
             provider_epoch_ended: false,
+            catalog: None,
         }
     }
 }
@@ -317,6 +319,29 @@ pub(super) fn agent_configuration_catalog(
         }),
         reasoning: (!reasoning.is_empty()).then_some(AgentReasoningCatalog { options: reasoning }),
     }
+}
+
+pub(super) fn refreshed_agent_configuration_catalog(
+    projects: Option<Vec<WorkspaceChoice>>,
+    provider: Option<&DriverSettingsCatalog>,
+    cached: Option<AgentConfigurationCatalog>,
+    host_label: &str,
+) -> Option<AgentConfigurationCatalog> {
+    if projects.is_none() && provider.is_none() {
+        return cached;
+    }
+    let mut catalog = cached.unwrap_or_default();
+    if let Some(projects) = projects {
+        catalog.projects =
+            agent_configuration_catalog(projects, &DriverSettingsCatalog::default(), host_label)
+                .projects;
+    }
+    if let Some(provider) = provider {
+        let fresh = agent_configuration_catalog(Vec::new(), provider, host_label);
+        catalog.models = fresh.models;
+        catalog.reasoning = fresh.reasoning;
+    }
+    Some(catalog)
 }
 
 pub(super) fn provider_model_display_label(model: &inline_agent_bridge::DriverModelOption) -> &str {
@@ -1355,6 +1380,7 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
     event: &ClientEvent,
     runtime: &SettingsRuntime<'_, D>,
     agent_context_owned: bool,
+    resolver: &BotAgentResolver,
 ) -> Result<SettingsEventOutcome, Box<dyn std::error::Error>> {
     let ClientEvent::BotInteraction(interaction) = event else {
         return Ok(SettingsEventOutcome::NotHandled);
@@ -1446,6 +1472,38 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
         return Ok(SettingsEventOutcome::Handled {
             provider_epoch_ended: resolution.provider_epoch_ended,
         });
+    }
+    if let Some(provider_catalog) = resolution.catalog.as_ref() {
+        // Reuse the catalog already loaded for this picker. Publishing after
+        // answering keeps compose/thread catalogs current without another
+        // provider read or a refresh task.
+        let projects = projects::project_choices(
+            runtime.store,
+            &snapshot.binding.installation_id,
+            Some(&next_snapshot.binding.workspace_id),
+            runtime.identity.codex_projects_path.as_deref(),
+        )
+        .ok();
+        let cached = resolver.configuration_catalog();
+        if let Some(candidate) = refreshed_agent_configuration_catalog(
+            projects,
+            Some(provider_catalog),
+            cached.clone(),
+            &runtime.identity.host_label,
+        ) && cached.as_ref() != Some(&candidate)
+        {
+            match tokio::time::timeout(
+                SETTINGS_DEADLINE,
+                advertise_settings_with_catalog(bot, candidate.clone()),
+            )
+            .await
+            {
+                Ok(Ok(())) => resolver.store_configuration_catalog(candidate),
+                _ => eprintln!(
+                    "Fresh Agent model choices could not be published; keeping the previous catalog."
+                ),
+            }
+        }
     }
     if let Some(message) = working_directory_announcement
         && let Err(error) = send_silent_text(
@@ -2594,6 +2652,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
                     None,
                 ),
                 provider_epoch_ended: session_error_ends_provider_epoch(&error),
+                catalog: None,
             };
         }
     };
@@ -2628,6 +2687,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
                     None,
                 ),
                 provider_epoch_ended: true,
+                catalog: None,
             };
         }
         Ok(Err(error)) => {
@@ -2642,6 +2702,25 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
             None
         }
     };
+    let mut resolution = resolve_loaded_settings_interaction(
+        interaction,
+        runtime,
+        snapshot,
+        projects_unavailable,
+        catalog.as_ref(),
+    )
+    .await;
+    resolution.catalog = catalog;
+    resolution
+}
+
+async fn resolve_loaded_settings_interaction<D: AgentDriver + 'static>(
+    interaction: &BotInteractionEvent,
+    runtime: &SettingsRuntime<'_, D>,
+    snapshot: ConversationSnapshot,
+    projects_unavailable: bool,
+    catalog: Option<&DriverSettingsCatalog>,
+) -> SettingsInteractionResolution {
     let current = match runtime
         .store
         .chat_settings(&snapshot.binding, now_seconds())
@@ -2660,7 +2739,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
         }
     };
     let mut current_document =
-        match build_settings_document(runtime, &snapshot, &current, catalog.as_ref()).await {
+        match build_settings_document(runtime, &snapshot, &current, catalog).await {
             Ok(document) => document,
             Err(error) => {
                 eprintln!(
@@ -2742,7 +2821,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
         runtime,
         &snapshot,
         current,
-        catalog.as_ref(),
+        catalog,
         item_id,
         value.as_ref(),
     )
@@ -2766,7 +2845,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
                     ));
                 }
             };
-            match build_settings_document(runtime, &snapshot, &settings, catalog.as_ref()).await {
+            match build_settings_document(runtime, &snapshot, &settings, catalog).await {
                 Ok(document) => SettingsInteractionResolution::normal(
                     BotChatSettingsResponse::Document(document),
                 ),
@@ -2786,6 +2865,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
         Err(failure) => SettingsInteractionResolution {
             response: failure.response,
             provider_epoch_ended: failure.provider_epoch_ended,
+            catalog: None,
         },
     }
 }
@@ -2974,7 +3054,6 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                     None,
                 )));
             }
-            let _provider_work_lease = reserve_provider_mutation(runtime)?;
             if !runtime.sessions.driver().capabilities().compact_session {
                 return Err(SettingsInvocationFailure::normal(problem(
                     BotChatSettingsProblemCode::InvalidValue,
@@ -2982,39 +3061,13 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                     None,
                 )));
             }
-            let session = runtime
-                .sessions
-                .ensure_session(&snapshot.binding, now_seconds())
-                .await
-                .map_err(|error| {
-                    let provider_epoch_ended = session_error_ends_provider_epoch(&error);
-                    operation_failed(
-                        "Couldn’t open the current session.",
-                        error,
-                        provider_epoch_ended,
-                    )
-                })?;
-            if let Some(notice) = session_open_notice(&session) {
-                return Err(SettingsInvocationFailure::normal(problem(
-                    BotChatSettingsProblemCode::Failed,
-                    notice.message(),
-                    None,
-                )));
-            }
-            runtime
-                .sessions
-                .driver()
-                .compact_session(session.session_id())
-                .await
-                .map_err(|error| {
-                    let provider_epoch_ended = error.ends_epoch();
-                    operation_failed(
-                        "Couldn’t compact the current session.",
-                        error,
-                        provider_epoch_ended,
-                    )
-                })?;
-            return Ok(snapshot.clone());
+            // Settings callbacks cannot transfer ownership of a long-running
+            // turn to the durable delivery lane. Keep compaction on /compact.
+            return Err(SettingsInvocationFailure::normal(problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Send /compact in this conversation to track progress and errors. Use /stop to interrupt it.",
+                None,
+            )));
         }
         ITEM_FOLDER | ITEM_PROJECT => {
             if runtime.turn_active {
@@ -3508,14 +3561,18 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                 items: vec![
                     button_item(ITEM_NEW, "New Session", session_rotation_reason.clone()),
                     button_item(ITEM_CLEAR, "Clear", session_rotation_reason),
-                    button_item(
-                        ITEM_COMPACT,
-                        "Compact",
-                        active_reason.clone().or_else(|| {
-                            (!compact_supported)
-                                .then(|| "This provider does not support compaction.".to_string())
-                        }),
-                    ),
+                    if compact_supported {
+                        BotChatSettingsItem {
+                            id: ITEM_COMPACT.to_string(), label: Some("Compaction".to_string()),
+                            description: None, disabled: true, disabled_reason: None,
+                            control: BotChatSettingsControl::Info {
+                                text: "Send /compact in this conversation to track progress and errors. Use /stop to interrupt it.".to_string(),
+                                tone: BotChatSettingsInfoTone::Neutral,
+                            },
+                        }
+                    } else {
+                        button_item(ITEM_COMPACT, "Compact", Some("This provider does not support compaction.".to_string()))
+                    },
                 ],
             },
             BotChatSettingsSection {

@@ -3,6 +3,46 @@
 use inline_agent_bridge::SessionOpenOutcome;
 use inline_client::{ClientErrorCategory, ClientFailure, ClientStatus};
 
+/// Present the useful provider message without dumping its response envelope,
+/// credentials, or host paths into a potentially shared conversation.
+pub(super) fn failure_message(notice: BridgeNotice, diagnostic: Option<&str>) -> String {
+    let summary = match notice {
+        BridgeNotice::AgentStartFailed => "I couldn’t start the agent.",
+        BridgeNotice::AgentTurnFailed => "The agent couldn’t finish this turn.",
+        _ => notice.message(),
+    };
+    let message = failure_with_diagnostic(summary, diagnostic);
+    if message == summary {
+        notice.message().to_string()
+    } else {
+        message
+    }
+}
+
+pub(super) fn failure_with_diagnostic(summary: &str, diagnostic: Option<&str>) -> String {
+    let detail = diagnostic.and_then(|diagnostic| {
+        let json = match diagnostic.find('{') {
+            Some(start) => {
+                Some(serde_json::from_str::<serde_json::Value>(&diagnostic[start..]).ok()?)
+            }
+            None => None,
+        };
+        let message = match json.as_ref() {
+            Some(value) => value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+                .and_then(serde_json::Value::as_str)?,
+            None => diagnostic,
+        };
+        super::safe_chat_diagnostic(message)
+    });
+    let Some(detail) = detail else {
+        return summary.to_string();
+    };
+    // Keep the provider's explanation distinct from the bridge's own copy.
+    format!("{summary}\n\n> {detail}")
+}
+
 /// A user-visible bridge state shared by messages, commands, and settings.
 // Session replacement, reconnect, and update copy are contract-first: the
 // current transport cannot emit each state to chat yet, but keeping their copy
@@ -130,6 +170,69 @@ pub(super) const fn inline_client_notice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_failure_exposes_actionable_message_without_response_envelope() {
+        let diagnostic = r#"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again."}}"#;
+        let message = failure_message(BridgeNotice::AgentTurnFailed, Some(diagnostic));
+        assert!(message.contains("gpt-6-astra"));
+        assert!(message.contains("Please upgrade"));
+        assert!(!message.contains("invalid_request_error"));
+        assert!(!message.contains("/status"));
+    }
+
+    #[test]
+    fn provider_failure_keeps_generic_copy_for_sensitive_or_missing_details() {
+        for diagnostic in [
+            None,
+            Some(""),
+            Some("Authorization: Bearer private"),
+            Some("refreshToken=private"),
+            Some("apiKey=private"),
+            Some("Invalid API key sk-private"),
+            Some("failed reading /Users/mo/private.txt"),
+            Some("failed reading /users/mo/private.txt"),
+            Some("failed reading path:/tmp/private.txt"),
+            Some("failed reading '/var/private.txt'"),
+            Some(r"failed reading D:\Users\Mo\private.txt"),
+            Some(r"failed reading \\host\private.txt"),
+            Some("failed reading ~/private.txt"),
+            Some("failed reading file:///private.txt"),
+            Some("Rejected credential: SK-private"),
+            Some("Rejected credential: ghp_private"),
+            Some("Rejected credential: github_pat_private"),
+            Some("Rejected credential: xoxb-private"),
+            Some(r#"{"request":{"prompt":"private"}}"#),
+        ] {
+            assert_eq!(
+                failure_message(BridgeNotice::AgentTurnFailed, diagnostic),
+                BridgeNotice::AgentTurnFailed.message()
+            );
+        }
+        let message = failure_message(
+            BridgeNotice::AgentStartFailed,
+            Some("Quota exceeded. Try again tomorrow."),
+        );
+        assert!(message.contains("Quota exceeded. Try again tomorrow."));
+        let message = failure_message(
+            BridgeNotice::AgentStartFailed,
+            Some("Sign in again. See https://example.com/help for instructions."),
+        );
+        assert!(message.contains("https://example.com/help"));
+        let message = failure_message(
+            BridgeNotice::AgentTurnFailed,
+            Some("Codex usage limit reached. Run /status for reset times."),
+        );
+        assert!(message.contains("Run /status for reset times."));
+        let message = failure_message(
+            BridgeNotice::AgentTurnFailed,
+            Some(
+                "Failed to fetch https://user:credential@example.com/file?signature=private-value",
+            ),
+        );
+        assert!(!message.contains("credential"));
+        assert!(!message.contains("private-value"));
+    }
 
     #[test]
     fn every_state_is_concise_and_safe_for_chat() {

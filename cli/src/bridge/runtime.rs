@@ -276,6 +276,13 @@ impl BotAgentResolver {
         agent
     }
 
+    pub(super) fn configuration_catalog(&self) -> Option<AgentConfigurationCatalog> {
+        self.configuration_catalog
+            .read()
+            .expect("Agent configuration catalog poisoned")
+            .clone()
+    }
+
     pub(super) fn store_configuration_catalog(&self, catalog: AgentConfigurationCatalog) {
         *self
             .configuration_catalog
@@ -570,7 +577,15 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
     let agent_context_owned = event_chat_uses_agent_context_settings(delivery.event(), route)
         .await
         .map_err(io::Error::other)?;
-    match handle_settings_event(bot, delivery.event(), settings, agent_context_owned).await? {
+    match handle_settings_event(
+        bot,
+        delivery.event(),
+        settings,
+        agent_context_owned,
+        &route.bot_agent_resolver,
+    )
+    .await?
+    {
         SettingsEventOutcome::NotHandled => {}
         SettingsEventOutcome::Handled {
             provider_epoch_ended,
@@ -1315,7 +1330,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     if reject_agent_context_settings_command(bot, &record, route).await? {
         return Ok(());
     }
-    let (instruction, command_acknowledgement) = match resolve_idle_command(
+    let (instruction, command_acknowledgement, is_compaction) = match resolve_idle_command(
         sessions,
         store,
         source_binding,
@@ -1333,11 +1348,14 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     )
     .await
     {
-        IdleCommandResolution::NotCommand => (record.direction.text.clone(), None),
+        IdleCommandResolution::NotCommand => (record.direction.text.clone(), None, false),
+        IdleCommandResolution::StartCompaction => {
+            (String::new(), Some("Compacting context".to_string()), true)
+        }
         IdleCommandResolution::StartDirection {
             instruction,
             acknowledgement,
-        } => (instruction, Some(acknowledgement)),
+        } => (instruction, Some(acknowledgement), false),
         IdleCommandResolution::Handled {
             message,
             failure,
@@ -1381,32 +1399,37 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             return Ok(());
         }
     };
-    let binding = match prepare_turn_delivery(
-        bot,
-        store,
-        settings_identity,
-        source_binding,
-        &record,
-        &instruction,
-    )
-    .await
-    {
-        Ok(binding) => binding,
-        Err(error) => {
-            let diagnostic = safe_diagnostic(&error.to_string());
-            publish_inbound_final_send(
-                bot,
-                store,
-                &record.event_id,
-                source_binding.chat_id,
-                None,
-                "Failed.",
-                "I couldn’t prepare the Inline reply thread for this turn. Please try again.",
-                InboundState::Failed,
-                Some(&diagnostic),
-            )
-            .await?;
-            return Ok(());
+    // Compaction operates on the current session, never a fresh reply thread.
+    let binding = if is_compaction {
+        source_binding.clone()
+    } else {
+        match prepare_turn_delivery(
+            bot,
+            store,
+            settings_identity,
+            source_binding,
+            &record,
+            &instruction,
+        )
+        .await
+        {
+            Ok(binding) => binding,
+            Err(error) => {
+                let diagnostic = safe_diagnostic(&error.to_string());
+                publish_inbound_final_send(
+                    bot,
+                    store,
+                    &record.event_id,
+                    source_binding.chat_id,
+                    None,
+                    "Failed.",
+                    "I couldn’t prepare the Inline reply thread for this turn. Please try again.",
+                    InboundState::Failed,
+                    Some(&diagnostic),
+                )
+                .await?;
+                return Ok(());
+            }
         }
     };
     record.delivery_chat_id = binding.chat_id;
@@ -1440,15 +1463,15 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     }
     let workspace = source_workspace;
     let binding = &binding;
-    let prepared_agent_input = match prepare_agent_session_input(
-        sessions, store, route, binding, &record,
-    )
-    .await
-    {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            let diagnostic = safe_diagnostic(&error.to_string());
-            publish_inbound_final_send(
+    // A control operation is not a model prompt and has no user-input echo.
+    let prepared_agent_input = if is_compaction {
+        None
+    } else {
+        match prepare_agent_session_input(sessions, store, route, binding, &record).await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let diagnostic = safe_diagnostic(&error.to_string());
+                publish_inbound_final_send(
                 bot,
                 store,
                 &record.event_id,
@@ -1460,7 +1483,8 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                 Some(&diagnostic),
             )
             .await?;
-            return Ok(());
+                return Ok(());
+            }
         }
     };
     let agent_session_id = prepared_agent_input
@@ -1514,14 +1538,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         .into());
     }
     let mut typing = TypingIndicator::start(bot, binding.chat_id).await;
-    let instruction = match build_turn_instruction(route, &record, &instruction).await {
-        Ok(instruction) => instruction,
-        Err(error) => {
-            eprintln!(
-                "Inline context resolution failed: {}",
-                safe_diagnostic(&error.to_string())
-            );
-            instruction
+    let instruction = if is_compaction {
+        instruction
+    } else {
+        match build_turn_instruction(route, &record, &instruction).await {
+            Ok(instruction) => instruction,
+            Err(error) => {
+                eprintln!(
+                    "Inline context resolution failed: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+                instruction
+            }
         }
     };
     let settings = match store.chat_settings(binding, now_seconds()) {
@@ -1550,26 +1578,32 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         VisibilityMode::Normal
     };
     let turn_started_at = Instant::now();
-    let provider_attachments =
-        materialize_inbound_attachments(&record.direction.attachments, &route.attachment_cache_dir)
-            .await;
-    let started = sessions
-        .start_turn(
-            binding,
-            now_seconds(),
-            TurnInput {
-                text: instruction,
-                attachments: provider_attachments,
-                client_message_id: Some(record.direction.id.to_string()),
-            },
-            TurnOptions {
-                cwd: None,
-                model: settings.model,
-                reasoning: settings.reasoning,
-                permissions: settings.permissions,
-            },
+    let started = if is_compaction {
+        sessions.compact_session(binding, now_seconds()).await
+    } else {
+        let provider_attachments = materialize_inbound_attachments(
+            &record.direction.attachments,
+            &route.attachment_cache_dir,
         )
         .await;
+        sessions
+            .start_turn(
+                binding,
+                now_seconds(),
+                TurnInput {
+                    text: instruction,
+                    attachments: provider_attachments,
+                    client_message_id: Some(record.direction.id.to_string()),
+                },
+                TurnOptions {
+                    cwd: None,
+                    model: settings.model,
+                    reasoning: settings.reasoning,
+                    permissions: settings.permissions,
+                },
+            )
+            .await
+    };
     let (session_open, mut turn, _provider_turn_lease) = match started {
         Ok(started) => started,
         Err(error) => {
@@ -1586,12 +1620,15 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             typing.stop().await;
             let message = match &error {
                 SessionManagerError::Driver(DriverError::AuthenticationRequired(required)) => {
-                    required.message.as_str()
+                    failure_message(
+                        BridgeNotice::AuthenticationRequired,
+                        Some(&required.message),
+                    )
                 }
                 SessionManagerError::Driver(DriverError::SessionBusy(_)) => {
-                    BridgeNotice::SessionActiveElsewhere.message()
+                    BridgeNotice::SessionActiveElsewhere.message().to_string()
                 }
-                _ => BridgeNotice::AgentStartFailed.message(),
+                _ => failure_message(BridgeNotice::AgentStartFailed, Some(&error.to_string())),
             };
             publish_inbound_final_send(
                 bot,
@@ -1600,7 +1637,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                 binding.chat_id,
                 stream_message_id,
                 "Failed.",
-                message,
+                &message,
                 InboundState::Failed,
                 Some(&diagnostic),
             )
@@ -2129,6 +2166,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                     &mut coordinator,
                     &mut typing,
                     &mut stop_confirmed,
+                    if is_compaction { SteeringSupport::Unsupported } else { sessions.driver().capabilities().steering },
                 ).await?;
                 if stop_confirmed {
                     break (TurnOutcome::Interrupted, None);
@@ -2369,14 +2407,19 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         let _ =
             presenter.replace_snapshot_with_priority(now_millis(), text, UpdatePriority::Terminal);
     }
-    let final_text = final_turn_text(
-        presenter.content(),
-        terminal.0,
-        &files,
-        workspace,
-        binding.chat_id == route.owner_dm_chat_id,
-        validation.as_ref(),
-    );
+    let final_text = if is_compaction && terminal.0 == TurnOutcome::Completed {
+        "Compacted the current agent session.".to_string()
+    } else {
+        final_turn_text(
+            presenter.content(),
+            terminal.0,
+            &files,
+            workspace,
+            binding.chat_id == route.owner_dm_chat_id,
+            validation.as_ref(),
+            terminal.1.as_deref(),
+        )
+    };
     let final_state = match terminal.0 {
         TurnOutcome::Completed | TurnOutcome::Interrupted => InboundState::Completed,
         TurnOutcome::Failed | TurnOutcome::ConnectionLost | TurnOutcome::AuthenticationRequired => {
@@ -2593,6 +2636,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
     coordinator: &mut TurnCoordinator,
     typing: &mut TypingIndicator<'_, InlineClient>,
     stop_confirmed: &mut bool,
+    steering: SteeringSupport,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if is_agent_session_projection_event(delivery.event()) {
         delivery.ack().await?;
@@ -2637,6 +2681,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
             turn_active: true,
         },
         agent_context_owned,
+        &route.bot_agent_resolver,
     )
     .await?
     {
@@ -2857,8 +2902,9 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
             delivery.ack().await?;
         }
         ClientEvent::MessageStored { message } => {
-            if steer_active_source_edit(message, sessions, session_id, turn_id, store, route)
-                .await?
+            if steering != SteeringSupport::Unsupported
+                && steer_active_source_edit(message, sessions, session_id, turn_id, store, route)
+                    .await?
             {
                 delivery.ack().await?;
                 return Ok(());
@@ -3256,7 +3302,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                         let (disposition, _) = coordinator.accept_direction(
                             record.direction.clone(),
                             true,
-                            sessions.driver().capabilities().steering,
+                            steering,
                             queue_id.clone(),
                         );
                         if store.accept_inbound(&record)? {
@@ -3302,6 +3348,19 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                     .await
                     {
                         IdleCommandResolution::NotCommand => {}
+                        IdleCommandResolution::StartCompaction => {
+                            send_text_reply(
+                                bot,
+                                binding.chat_id,
+                                record.message_id,
+                                "Wait for the current turn to finish, or stop it first.",
+                                &format!("{}-compact-busy", record.event_id),
+                                BridgeNotificationClass::RoutineStatus,
+                            )
+                            .await?;
+                            delivery.ack().await?;
+                            return Ok(());
+                        }
                         IdleCommandResolution::Handled {
                             message,
                             failure,
@@ -3357,7 +3416,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                             let (disposition, _) = coordinator.accept_direction(
                                 record.direction.clone(),
                                 true,
-                                sessions.driver().capabilities().steering,
+                                steering,
                                 queue_id.clone(),
                             );
                             if store.accept_inbound(&record)? {
@@ -3392,7 +3451,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                 let (disposition, _) = coordinator.accept_direction(
                     record.direction.clone(),
                     false,
-                    sessions.driver().capabilities().steering,
+                    steering,
                     queue_id.clone(),
                 );
                 match disposition {

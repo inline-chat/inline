@@ -195,6 +195,12 @@ where
             .ok_or(PeerError::IncomingAlreadyClaimed)
     }
 
+    pub(crate) fn abort(&self) {
+        close_peer(&self.closed, &self.pending, &self.close_tx, || {
+            PeerError::Closed
+        });
+    }
+
     pub async fn request(&self, method: &str, params: Value) -> PeerResult<Value> {
         self.request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
             .await
@@ -259,12 +265,14 @@ where
             if matches!(
                 method,
                 "account/read"
+                    | "account/rateLimits/read"
                     | "thread/list"
                     | "thread/read"
                     | "thread/turns/list"
                     | "thread/items/list"
                     | "project/list"
                     | "model/list"
+                    | "config/read"
                     | "permissionProfile/list"
             ) {
                 pending_guard.disarm();
@@ -1008,12 +1016,14 @@ mod tests {
     async fn catalog_deadlines_preserve_turn_events_and_ignore_late_replies() {
         for method in [
             "account/read",
+            "account/rateLimits/read",
             "thread/turns/list",
             "thread/items/list",
             "project/list",
             "thread/list",
             "thread/read",
             "model/list",
+            "config/read",
             "permissionProfile/list",
         ] {
             for outer_deadline in [false, true] {

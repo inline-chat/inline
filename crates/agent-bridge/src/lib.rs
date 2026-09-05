@@ -25,11 +25,11 @@ pub use driver::{
     AgentMessagePhase, AgentMessageUpdate, ApplyTiming, ApprovalDecision, ApprovalOption,
     ApprovalRequest, AuthenticationRequired, DriverCapabilities, DriverCommand,
     DriverCommandChoice, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
-    DriverResult, DriverSettingOption, DriverSettingsCatalog, FileChange, HostToolCall,
-    HostToolConfiguration, HostToolFuture, HostToolHandler, HostToolResult, HostToolSpec,
-    HostToolTransport, PlanStep, PlanStepStatus, Question, QuestionAnswer, QuestionOption,
-    QuestionRequest, ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport,
-    TurnInput, TurnOptions, TurnOutcome, TurnTiming,
+    DriverResult, DriverSettingOption, DriverSettingsCatalog, DriverUsageWindow, FileChange,
+    HostToolCall, HostToolConfiguration, HostToolFuture, HostToolHandler, HostToolResult,
+    HostToolSpec, HostToolTransport, PlanStep, PlanStepStatus, Question, QuestionAnswer,
+    QuestionOption, QuestionRequest, ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn,
+    SteeringSupport, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
 };
 pub use model::{
     BindingKey, Direction, DirectionId, InputAttachment, InputAttachmentKind, InstallationId,

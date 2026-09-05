@@ -76,7 +76,7 @@ mod stream_ui;
 mod supervisor;
 use allowlist_ui::*;
 use approval_ui::*;
-use copy::{BridgeNotice, session_open_notice};
+use copy::{BridgeNotice, failure_message, session_open_notice};
 use inline_tools::*;
 pub(crate) use provider::bridge_provider_setup_descriptors;
 use provider::*;
@@ -1266,7 +1266,7 @@ async fn settle_nonfatal_turn_error(
         record.delivery_chat_id,
         record.stream_message_id.map(InlineId::new),
         "Failed.",
-        "I couldn’t finish that turn, but the bridge is still available. Please try again.",
+        &failure_message(BridgeNotice::AgentTurnFailed, Some(&error.to_string())),
         InboundState::Failed,
         Some(&failure),
     )
@@ -2506,28 +2506,29 @@ async fn refresh_provider_configuration_catalog(
     } else {
         Ok(DriverSettingsCatalog::default())
     };
-    let candidate = match (catalog_projects, provider_catalog) {
-        (Ok(projects), Ok(provider_catalog)) => Some(agent_configuration_catalog(
-            projects,
-            &provider_catalog,
-            &settings_identity.host_label,
-        )),
-        (projects, provider_catalog) => {
-            if let Err(error) = projects {
-                eprintln!(
-                    "Agent project choices are unavailable; keeping Inline's last cached catalog: {}",
-                    error
-                );
-            }
-            if let Err(error) = provider_catalog {
-                eprintln!(
-                    "Agent model choices are unavailable; keeping Inline's last cached catalog: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-            }
-            None
-        }
+    let cached = if catalog_projects.is_err() || provider_catalog.is_err() {
+        published_agent_configuration_catalog(bot)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
     };
+    if let Err(error) = &catalog_projects {
+        eprintln!("Agent project choices are unavailable; retaining cached projects: {error}");
+    }
+    if let Err(error) = &provider_catalog {
+        eprintln!(
+            "Agent model choices are unavailable; retaining cached models: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
+    let candidate = refreshed_agent_configuration_catalog(
+        catalog_projects.ok(),
+        provider_catalog.as_ref().ok(),
+        cached,
+        &settings_identity.host_label,
+    );
     let catalog = if let Some(candidate) = candidate {
         match advertise_settings_with_catalog(bot, candidate.clone())
             .await

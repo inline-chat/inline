@@ -2319,6 +2319,7 @@ pub(super) fn final_turn_text(
     workspace: &Path,
     expose_local_file_links: bool,
     validation: Option<&ValidationSummary>,
+    diagnostic: Option<&str>,
 ) -> String {
     if outcome == TurnOutcome::Interrupted {
         return "Stopped.".to_string();
@@ -2334,10 +2335,12 @@ pub(super) fn final_turn_text(
         match outcome {
             TurnOutcome::Completed => "Done.".to_string(),
             TurnOutcome::Interrupted => unreachable!("interrupted turns return above"),
-            TurnOutcome::Failed => BridgeNotice::AgentTurnFailed.message().to_string(),
-            TurnOutcome::ConnectionLost => BridgeNotice::AgentConnectionLost.message().to_string(),
+            TurnOutcome::Failed => failure_message(BridgeNotice::AgentTurnFailed, diagnostic),
+            TurnOutcome::ConnectionLost => {
+                failure_message(BridgeNotice::AgentConnectionLost, diagnostic)
+            }
             TurnOutcome::AuthenticationRequired => {
-                BridgeNotice::AuthenticationRequired.message().to_string()
+                failure_message(BridgeNotice::AuthenticationRequired, diagnostic)
             }
         }
     };
@@ -2347,15 +2350,21 @@ pub(super) fn final_turn_text(
             TurnOutcome::Interrupted => unreachable!("interrupted turns return above"),
             TurnOutcome::Failed => {
                 text.push_str("\n\n");
-                text.push_str(BridgeNotice::AgentTurnFailed.message());
+                text.push_str(&failure_message(BridgeNotice::AgentTurnFailed, diagnostic));
             }
             TurnOutcome::ConnectionLost => {
                 text.push_str("\n\n");
-                text.push_str(BridgeNotice::AgentConnectionLost.message());
+                text.push_str(&failure_message(
+                    BridgeNotice::AgentConnectionLost,
+                    diagnostic,
+                ));
             }
             TurnOutcome::AuthenticationRequired => {
                 text.push_str("\n\n");
-                text.push_str(BridgeNotice::AuthenticationRequired.message());
+                text.push_str(&failure_message(
+                    BridgeNotice::AuthenticationRequired,
+                    diagnostic,
+                ));
             }
         }
     }

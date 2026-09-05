@@ -304,6 +304,7 @@ fn inline_thread_config() -> BTreeMap<String, Value> {
 }
 
 const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const DEFAULT_MODEL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 const SESSION_CATALOG_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MUTATING_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const CONNECTION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(7);
@@ -346,6 +347,35 @@ struct EventRouting {
     backlog: HashMap<TurnId, BackloggedTurn>,
     terminal_turns: HashSet<TurnId>,
     terminal_order: VecDeque<TurnId>,
+    compaction_starts: HashMap<String, PendingCompactionStart>,
+}
+
+#[derive(Debug)]
+struct PendingCompactionStart {
+    after_sequence: u64,
+    sender: tokio::sync::oneshot::Sender<DriverResult<TurnId>>,
+}
+
+/// Compaction has no turn ID in its RPC response. Keep the exact session
+/// claim until its start notification arrives; cancellation is ambiguous.
+struct CompactionStartGuard<W: AsyncWrite + Unpin + Send + 'static> {
+    routing: SharedEventRouting,
+    peer: CodexPeer<W>,
+    thread_id: String,
+    ambiguous: bool,
+}
+
+impl<W: AsyncWrite + Unpin + Send + 'static> Drop for CompactionStartGuard<W> {
+    fn drop(&mut self) {
+        self.routing
+            .lock()
+            .expect("Codex event routing poisoned")
+            .compaction_starts
+            .remove(&self.thread_id);
+        if self.ambiguous {
+            self.peer.abort();
+        }
+    }
 }
 
 impl EventRouting {
@@ -882,16 +912,47 @@ where
             .iter()
             .any(|option| option.value == DEFAULT_PERMISSION_PROFILE && !option.disabled)
             .then(|| DEFAULT_PERMISSION_PROFILE.to_string());
-        let mut default_workspaces = self
-            .default_permission_profile_workspaces
-            .lock()
-            .expect("Codex default permission workspace set poisoned");
-        if default_permissions.is_some() {
-            default_workspaces.insert(workspace);
-        } else {
-            default_workspaces.remove(&workspace);
+        {
+            let mut default_workspaces = self
+                .default_permission_profile_workspaces
+                .lock()
+                .expect("Codex default permission workspace set poisoned");
+            if default_permissions.is_some() {
+                default_workspaces.insert(workspace);
+            } else {
+                default_workspaces.remove(&workspace);
+            }
         }
-        drop(default_workspaces);
+        // model/list's isDefault is the catalog recommendation, which can
+        // differ from the host/project default used when turn/start omits a
+        // model. Resolve that default through Codex's existing config API.
+        let configuration = self
+            .peer
+            .request_with_timeout(
+                "config/read",
+                json!({ "includeLayers": false, "cwd": cwd }),
+                DEFAULT_MODEL_REQUEST_TIMEOUT,
+            )
+            .await;
+        match configuration {
+            Ok(configuration) => {
+                if let Some(configured_model) = configuration
+                    .pointer("/config/model")
+                    .and_then(Value::as_str)
+                {
+                    for model in &mut models {
+                        model.is_default = model.value == configured_model;
+                    }
+                }
+            }
+            Err(_) => {
+                // Default-label metadata must not hide an otherwise fresh
+                // model catalog. Use the generic provider-default label.
+                for model in &mut models {
+                    model.is_default = false;
+                }
+            }
+        }
         Ok(DriverSettingsCatalog {
             models,
             permissions,
@@ -910,6 +971,7 @@ where
             compact_session: true,
             cancel_turn: true,
             settings_catalog: true,
+            usage_limits: true,
             settings_catalog_starts_session: false,
             session_commands: false,
             steering: SteeringSupport::Native,
@@ -950,6 +1012,21 @@ where
         cwd: &'a std::path::Path,
     ) -> DriverFuture<'a, DriverSettingsCatalog> {
         Box::pin(async move { self.load_settings_catalog(cwd).await })
+    }
+
+    fn usage_limits(&self) -> DriverFuture<'_, Vec<inline_agent_bridge::DriverUsageWindow>> {
+        Box::pin(async move {
+            let response = self
+                .peer
+                .request_with_timeout(
+                    "account/rateLimits/read",
+                    json!({}),
+                    DEFAULT_MODEL_REQUEST_TIMEOUT,
+                )
+                .await
+                .map_err(driver_error)?;
+            Ok(crate::protocol::normalize_usage_limits(&response))
+        })
     }
 
     fn start_session<'a>(&'a self, spec: SessionSpec) -> DriverFuture<'a, ProviderSessionId> {
@@ -1190,16 +1267,88 @@ where
         })
     }
 
-    fn compact_session<'a>(&'a self, session_id: &'a ProviderSessionId) -> DriverFuture<'a, ()> {
+    fn compact_session<'a>(
+        &'a self,
+        session_id: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async move {
-            self.mutating_request(
-                "thread/compact/start",
-                serialize(CompactThreadParams {
-                    thread_id: session_id.to_string(),
-                })?,
+            if self
+                .session_observers
+                .claims_thread_traffic(&json!({"threadId": session_id.as_str()}))
+            {
+                return Err(DriverError::SessionBusy(
+                    "This connection only observes the session; its controller must compact it."
+                        .to_string(),
+                ));
+            }
+            // Fence notifications already queued for this session before the
+            // mutation. Actual compaction items may arrive before its RPC ACK,
+            // so the ACK itself cannot serve as the lifecycle boundary.
+            let (snapshot, after_sequence) = tokio::time::timeout(
+                CONTROL_REQUEST_TIMEOUT,
+                self.peer.request_with_wire_sequence(
+                    "thread/read",
+                    json!({
+                        "threadId": session_id.as_str(), "includeTurns": false,
+                    }),
+                ),
             )
-            .await?;
-            Ok(())
+            .await
+            .map_err(|_| {
+                DriverError::Transient(
+                    "Codex session status timed out before compaction.".to_string(),
+                )
+            })?
+            .map_err(driver_error)?;
+            match snapshot.pointer("/thread/status/type").and_then(Value::as_str) {
+                Some("idle") => {},
+                Some("active") => return Err(DriverError::Rejected("Codex is still working in this session. Stop it or wait before compacting.".to_string())),
+                _ => return Err(DriverError::Rejected("Codex could not confirm that this session is idle. Use /resume, then try /compact again.".to_string())),
+            }
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            {
+                let mut routing = self.routing.lock().expect("Codex event routing poisoned");
+                if routing.compaction_starts.contains_key(session_id.as_str())
+                    || routing.compaction_starts.len() >= MAX_UNCLAIMED_TURNS
+                {
+                    return Err(DriverError::Rejected(
+                        "A compaction is already starting. Wait for it to finish.".to_string(),
+                    ));
+                }
+                routing.compaction_starts.insert(
+                    session_id.to_string(),
+                    PendingCompactionStart {
+                        after_sequence,
+                        sender,
+                    },
+                );
+            }
+            let mut guard = CompactionStartGuard {
+                routing: self.routing.clone(),
+                peer: self.peer.clone(),
+                thread_id: session_id.to_string(),
+                ambiguous: true,
+            };
+            if let Err(error) = self
+                .mutating_request(
+                    "thread/compact/start",
+                    serialize(CompactThreadParams {
+                        thread_id: session_id.to_string(),
+                    })?,
+                )
+                .await
+            {
+                guard.ambiguous = !matches!(error, DriverError::Rejected(_));
+                return Err(error);
+            }
+            let turn_id = match tokio::time::timeout(CONTROL_REQUEST_TIMEOUT, receiver).await {
+                Ok(Ok(Ok(turn_id))) => turn_id,
+                Ok(Ok(Err(error))) => return Err(error),
+                _ => return Err(self.stop_ambiguous_epoch("thread/compact/start").await),
+            };
+            let events = self.register_turn(turn_id.clone());
+            guard.ambiguous = false;
+            Ok(StartedTurn { turn_id, events })
         })
     }
 
@@ -1319,15 +1468,64 @@ async fn dispatch_incoming<W>(
                 if session_observers.route_notification(wire_sequence, &method, &params) {
                     continue;
                 }
+                let thread_id = params
+                    .get("threadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                // The compaction item identifies the operation; an unrelated
+                // turn/started notification must never satisfy this claim.
+                let starts_compaction = method == "item/started"
+                    && params.pointer("/item/type").and_then(Value::as_str)
+                        == Some("contextCompaction");
+                let failed_before_start = (method == "error"
+                    && params.get("willRetry").and_then(Value::as_bool) == Some(false))
+                    || (method == "turn/completed"
+                        && matches!(
+                            params.pointer("/turn/status").and_then(Value::as_str),
+                            Some("failed" | "interrupted")
+                        ));
                 let unsupported = unsupported_notification_diagnostic(&method, &params);
+                let terminal_notification = method == "turn/completed";
                 match normalize_notification(CodexNotification { method, params }) {
                     Ok(events) => {
                         if let Some(diagnostic) = unsupported {
                             log::debug!("{diagnostic}");
                         }
                         for event in events {
+                            if (starts_compaction || failed_before_start)
+                                && let Some(thread_id) = thread_id.as_deref()
+                            {
+                                let turn_id = event_turn_id(&event);
+                                let sender = {
+                                    let mut routing =
+                                        routing.lock().expect("Codex event routing poisoned");
+                                    if routing.terminal_turns.contains(turn_id)
+                                        || routing.compaction_starts.get(thread_id).is_none_or(
+                                            |pending| wire_sequence <= pending.after_sequence,
+                                        )
+                                    {
+                                        None
+                                    } else {
+                                        routing.compaction_starts.remove(thread_id)
+                                    }
+                                };
+                                if let Some(pending) = sender {
+                                    let _ = pending.sender.send(Ok(turn_id.clone()));
+                                }
+                            }
                             route_event(event, &routing, &approvals, &questions);
                         }
+                    }
+                    Err(error) if terminal_notification => {
+                        // An undecodable terminal state must not leave every
+                        // consumer waiting forever for a completion we discarded.
+                        fail_all_routes(
+                            &routing,
+                            DriverError::ProcessExited(format!(
+                                "Codex sent an incompatible turn completion: {error}. Update Codex and the Inline CLI, then retry."
+                            )),
+                        );
+                        peer.abort();
                     }
                     Err(error) => log::warn!("ignoring invalid Codex notification: {error}"),
                 }
@@ -1727,9 +1925,18 @@ fn event_turn_id(event: &AgentEvent) -> &TurnId {
 }
 
 fn fail_all_routes(routing: &SharedEventRouting, error: DriverError) {
-    let routes = std::mem::take(&mut routing.lock().expect("Codex event routing poisoned").routes);
+    let (routes, compactions) = {
+        let mut routing = routing.lock().expect("Codex event routing poisoned");
+        (
+            std::mem::take(&mut routing.routes),
+            std::mem::take(&mut routing.compaction_starts),
+        )
+    };
     for (_, sender) in routes {
         let _ = sender.send(Err(error.clone()));
+    }
+    for (_, pending) in compactions {
+        let _ = pending.sender.send(Err(error.clone()));
     }
 }
 
@@ -2949,7 +3156,7 @@ mod tests {
             assert_eq!(model_request["params"]["includeHidden"], false);
             writer
                 .write_all(
-                    b"{\"id\":2,\"result\":{\"data\":[{\"model\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Coding model\",\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"xhigh\",\"description\":\"Deep reasoning\"}],\"defaultReasoningEffort\":\"xhigh\",\"isDefault\":true}],\"nextCursor\":null}}\n",
+                    b"{\"id\":2,\"result\":{\"data\":[{\"model\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Coding model\",\"hidden\":false,\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"xhigh\",\"description\":\"Deep reasoning\"}],\"defaultReasoningEffort\":\"xhigh\",\"isDefault\":true},{\"model\":\"gpt-6-astra\",\"displayName\":\"GPT-6 Astra\",\"description\":\"New model\",\"hidden\":false,\"supportedReasoningEfforts\":[],\"defaultReasoningEffort\":\"xhigh\",\"isDefault\":false}],\"nextCursor\":null}}\n",
                 )
                 .await
                 .expect("model response");
@@ -2970,6 +3177,21 @@ mod tests {
                 )
                 .await
                 .expect("permissions response");
+            let configuration_request: Value = serde_json::from_str(
+                &lines
+                    .next_line()
+                    .await
+                    .unwrap()
+                    .expect("configuration request"),
+            )
+            .expect("configuration json");
+            assert_eq!(configuration_request["method"], "config/read");
+            assert_eq!(configuration_request["params"]["cwd"], "/tmp");
+            assert_eq!(configuration_request["params"]["includeLayers"], false);
+            writer
+                .write_all(b"{\"id\":4,\"result\":{\"config\":{\"model\":\"gpt-6-astra\"}}}\n")
+                .await
+                .expect("configuration response");
         });
 
         let catalog = driver
@@ -2977,6 +3199,9 @@ mod tests {
             .await
             .expect("catalog");
         assert_eq!(catalog.models[0].value, "gpt-5.4");
+        assert!(!catalog.models[0].is_default);
+        assert_eq!(catalog.models[1].value, "gpt-6-astra");
+        assert!(catalog.models[1].is_default);
         assert_eq!(catalog.models[0].reasoning[0].value, "xhigh");
         assert_eq!(
             catalog.models[0].default_reasoning.as_deref(),
@@ -3000,6 +3225,205 @@ mod tests {
                 .contains(std::path::Path::new("/tmp"))
         );
         server_task.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn settings_catalog_keeps_fresh_models_when_default_config_is_unavailable() {
+        for stalled in [false, true] {
+            let (driver, mut server) = initialized_driver().await;
+            let (release_server, keep_open) = tokio::sync::oneshot::channel::<()>();
+            let server_task = tokio::spawn(async move {
+                let (reader, mut writer) = tokio::io::split(&mut server);
+                let mut lines = BufReader::new(reader).lines();
+                for (method, response) in [
+                    (
+                        "model/list",
+                        json!({"result":{"data":[{
+                    "model":"gpt-6-astra", "displayName":"GPT-6 Astra", "description":"New model",
+                    "hidden":false, "supportedReasoningEfforts":[], "defaultReasoningEffort":"xhigh", "isDefault":true
+                }], "nextCursor":null}}),
+                    ),
+                    (
+                        "permissionProfile/list",
+                        json!({"result":{"data":[], "nextCursor":null}}),
+                    ),
+                ] {
+                    let request: Value =
+                        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                    assert_eq!(request["method"], method);
+                    let mut response = response;
+                    response["id"] = request["id"].clone();
+                    writer
+                        .write_all(format!("{response}\n").as_bytes())
+                        .await
+                        .unwrap();
+                }
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], "config/read");
+                if stalled {
+                    // Keep the transport alive without replying to the metadata read.
+                    // The driver must return the models it has already loaded.
+                    let _ = keep_open.await;
+                } else {
+                    let response = json!({
+                        "id": request["id"],
+                        "error": {"code": -32601, "message": "Method not found"}
+                    });
+                    writer
+                        .write_all(format!("{response}\n").as_bytes())
+                        .await
+                        .unwrap();
+                }
+            });
+            let catalog = driver
+                .settings_catalog(std::path::Path::new("/tmp"))
+                .await
+                .unwrap();
+            assert_eq!(catalog.models[0].value, "gpt-6-astra");
+            assert!(
+                !catalog.models[0].is_default,
+                "an unavailable effective default must use generic copy"
+            );
+            let _ = release_server.send(());
+            server_task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn compaction_tracks_real_turn_events_across_ack_order_and_terminal_failure() {
+        for early_events in [false, true] {
+            for outcome in ["completed", "failed", "interrupted"] {
+                let (driver, mut server) = initialized_driver().await;
+                let server_task = tokio::spawn(async move {
+                    let (reader, mut writer) = tokio::io::split(&mut server);
+                    let mut lines = BufReader::new(reader).lines();
+                    let preflight: Value =
+                        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                    assert_eq!(preflight["method"], "thread/read");
+                    // An old same-session compaction queued before the read
+                    // barrier must not satisfy the new operation's claim.
+                    let stale = json!({"method":"item/started", "params":{"threadId":"thread-1", "turnId":"old-turn", "item":{"type":"contextCompaction", "id":"old-item"}}});
+                    let idle = json!({"id":preflight["id"], "result":{"thread":{"id":"thread-1", "status":{"type":"idle"}}}});
+                    writer
+                        .write_all(format!("{stale}\n{idle}\n").as_bytes())
+                        .await
+                        .unwrap();
+                    let request: Value =
+                        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                    assert_eq!(request["method"], "thread/compact/start");
+                    let ack = json!({"id":request["id"], "result":{}});
+                    let unrelated = json!({"method":"item/started", "params":{"threadId":"other-thread", "turnId":"other-turn", "item":{"type":"contextCompaction", "id":"other-item"}}});
+                    let started = json!({"method":"turn/started", "params":{"threadId":"thread-1", "turn":{"id":"compact-turn"}}});
+                    let item = json!({"method":"item/started", "params":{"threadId":"thread-1", "turnId":"compact-turn", "item":{"type":"contextCompaction", "id":"compact-item"}}});
+                    let completed = json!({"method":"turn/completed", "params":{"threadId":"thread-1", "turn":{"id":"compact-turn", "status":outcome, "error":if outcome == "failed" { json!({"message":"Weekly usage limit reached."}) } else { Value::Null }}}});
+                    let frames = if outcome == "failed" {
+                        format!("{unrelated}\n{started}\n{completed}\n")
+                    } else {
+                        format!("{unrelated}\n{started}\n{item}\n{completed}\n")
+                    };
+                    let frames = if early_events {
+                        format!("{frames}{ack}\n")
+                    } else {
+                        format!("{ack}\n{frames}")
+                    };
+                    writer.write_all(frames.as_bytes()).await.unwrap();
+                });
+                let mut turn = driver
+                    .compact_session(&ProviderSessionId::new("thread-1").unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(turn.turn_id.as_str(), "compact-turn");
+                let mut saw_start = false;
+                let mut saw_progress = false;
+                let mut terminal = None;
+                while let Some(event) = turn.events.next().await {
+                    match event.unwrap() {
+                        AgentEvent::TurnStarted { .. } => saw_start = true,
+                        AgentEvent::ActivityUpsert { activity, .. } => {
+                            saw_progress |= activity.title == "Compacting context"
+                        }
+                        AgentEvent::TurnCompleted { outcome, error, .. } => {
+                            terminal = Some((outcome, error));
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(saw_start && (saw_progress || outcome == "failed"));
+                let (actual, error) = terminal.expect("terminal event");
+                assert_eq!(
+                    actual,
+                    match outcome {
+                        "completed" => inline_agent_bridge::TurnOutcome::Completed,
+                        "failed" => inline_agent_bridge::TurnOutcome::Failed,
+                        _ => inline_agent_bridge::TurnOutcome::Interrupted,
+                    }
+                );
+                if outcome == "failed" {
+                    assert_eq!(error.as_deref(), Some("Weekly usage limit reached."));
+                }
+                assert!(driver.routing.lock().unwrap().compaction_starts.is_empty());
+                server_task.await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_compaction_start_retires_the_ambiguous_connection() {
+        let (driver, mut server) = initialized_driver().await;
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            let response =
+                json!({"id":request["id"], "result":{"thread":{"status":{"type":"idle"}}}});
+            writer
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .unwrap();
+            let request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            let response = json!({"id":request["id"], "result":{}});
+            writer
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .unwrap();
+            let _ = lines.next_line().await;
+        });
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(30),
+                driver.compact_session(&ProviderSessionId::new("thread-1").unwrap())
+            )
+            .await
+            .is_err()
+        );
+        assert!(driver.routing.lock().unwrap().compaction_starts.is_empty());
+        assert!(matches!(
+            driver.peer.request("model/list", json!({})).await,
+            Err(PeerError::Closed)
+        ));
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn incompatible_terminal_notification_fails_visible_turns_and_closes_peer() {
+        let (driver, mut server) = initialized_driver().await;
+        let mut events = driver.register_turn(TurnId::new("turn-1").unwrap());
+        server.write_all(b"{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-1\",\"turn\":{\"id\":\"turn-1\",\"status\":\"future-unknown-state\"}}}\n").await.unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.next())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(event, Err(DriverError::ProcessExited(message)) if message.contains("incompatible turn completion"))
+        );
+        assert!(matches!(
+            driver.peer.request("model/list", json!({})).await,
+            Err(PeerError::Closed)
+        ));
     }
 
     #[tokio::test]
@@ -3031,6 +3455,10 @@ mod tests {
                 (
                     "thread/backgroundTerminals/list",
                     json!({ "data": [], "nextCursor": null }),
+                ),
+                (
+                    "thread/read",
+                    json!({"thread":{"id":"thread-1", "status":{"type":"idle"}}}),
                 ),
                 ("thread/compact/start", json!({})),
             ];
@@ -3072,6 +3500,9 @@ mod tests {
                         )
                         .await
                         .expect("turn completed");
+                }
+                if method == "thread/compact/start" {
+                    writer.write_all(b"{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-1\",\"turnId\":\"compact-turn\",\"item\":{\"id\":\"compact-item\",\"type\":\"contextCompaction\"}}}\n").await.unwrap();
                 }
             }
         });

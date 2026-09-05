@@ -228,6 +228,9 @@ pub struct DriverCapabilities {
     pub cancel_turn: bool,
     /// Whether [`AgentDriver::settings_catalog`] is available.
     pub settings_catalog: bool,
+    /// Whether a cancellation-safe, read-only account usage query is available.
+    #[serde(default)]
+    pub usage_limits: bool,
     /// Whether loading a cold settings catalog starts a provider session.
     ///
     /// Session managers use this to serialize first-use settings with session
@@ -471,6 +474,19 @@ pub struct DriverSettingsCatalog {
     /// Effective permission mode when a conversation has no explicit selection.
     #[serde(default)]
     pub default_permissions: Option<String>,
+}
+
+/// One account usage window, without account identity or billing data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriverUsageWindow {
+    /// Provider-reported meter label, bounded by the adapter.
+    pub label: String,
+    /// Percentage consumed, clamped to 0 through 100.
+    pub used_percent: u8,
+    /// Window length in minutes; missing is unavailable, not zero.
+    pub window_minutes: Option<i64>,
+    /// Next reset as Unix seconds, when available.
+    pub resets_at: Option<i64>,
 }
 
 /// One provider model and its supported reasoning choices.
@@ -1524,6 +1540,13 @@ pub trait AgentDriver: Send + Sync {
         Box::pin(async { Err(DriverError::Unsupported("settings catalog")) })
     }
 
+    /// Reads current account usage without acquiring a session or consuming credits.
+    /// Cancellation must not invalidate an active turn. An empty result means
+    /// the provider did not return usable windows, not unlimited usage.
+    fn usage_limits(&self) -> DriverFuture<'_, Vec<DriverUsageWindow>> {
+        Box::pin(async { Err(DriverError::Unsupported("usage limits")) })
+    }
+
     /// Returns the current provider-native command catalog for one session.
     ///
     /// Callers invoke this only when `session_commands` is advertised. The
@@ -1577,10 +1600,14 @@ pub trait AgentDriver: Send + Sync {
         turn_id: &'a TurnId,
     ) -> DriverFuture<'a, ()>;
 
-    /// Compacts provider-owned session context.
+    /// Starts a tracked compaction turn for provider-owned session context.
     ///
     /// Callers invoke this only when `compact_session` is advertised.
-    fn compact_session<'a>(&'a self, session_id: &'a ProviderSessionId) -> DriverFuture<'a, ()>;
+    /// Acceptance is not completion; callers consume the returned event stream.
+    fn compact_session<'a>(
+        &'a self,
+        session_id: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, StartedTurn>;
 
     /// Resolves an outstanding provider approval with an advertised decision.
     fn resolve_approval<'a>(

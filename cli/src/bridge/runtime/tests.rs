@@ -1805,6 +1805,7 @@ fn typed_authentication_has_host_login_guidance() {
         Path::new("/repo"),
         false,
         None,
+        None,
     );
     assert!(output.contains("codex login"));
     assert!(!output.contains(BridgeNotice::AgentTurnFailed.message()));
@@ -1815,6 +1816,7 @@ fn typed_authentication_has_host_login_guidance() {
         &[],
         Path::new("/repo"),
         false,
+        None,
         None,
     );
     assert_eq!(empty, BridgeNotice::AuthenticationRequired.message());
@@ -1834,6 +1836,7 @@ fn final_output_does_not_duplicate_provider_completion_sections() {
         workspace,
         true,
         Some(&ValidationSummary::Passed("8 tests".to_string())),
+        None,
     );
 
     assert_eq!(output.matches("Changed files").count(), 1);
@@ -1855,6 +1858,7 @@ fn final_output_appends_only_missing_completion_sections() {
         workspace,
         false,
         Some(&ValidationSummary::Passed("8 tests".to_string())),
+        None,
     );
 
     assert!(output.contains("Changed files:\n- `src/lib.rs`"));

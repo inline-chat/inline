@@ -122,6 +122,56 @@ fn published_catalog_names_a_synthetic_provider_default_from_its_description() {
     }
 }
 
+#[test]
+fn fresh_models_publish_even_when_projects_are_unavailable() {
+    let cached = agent_configuration_catalog(
+        vec![WorkspaceChoice {
+            workspace_id: WorkspaceId::new("saved").unwrap(),
+            display_name: "Saved".into(),
+            parent_hint: None,
+            selected: true,
+        }],
+        &DriverSettingsCatalog::default(),
+        "host",
+    );
+    let provider = DriverSettingsCatalog {
+        models: vec![DriverModelOption {
+            value: "gpt-6-astra".into(),
+            label: "GPT-6 Astra".into(),
+            description: None,
+            reasoning: vec![],
+            default_reasoning: None,
+            is_default: true,
+        }],
+        ..Default::default()
+    };
+    let refreshed =
+        refreshed_agent_configuration_catalog(None, Some(&provider), Some(cached.clone()), "host")
+            .unwrap();
+    assert_eq!(refreshed.projects, cached.projects);
+    assert_eq!(
+        refreshed.models.as_ref().unwrap().options[0].id,
+        "gpt-6-astra"
+    );
+    assert_eq!(
+        refreshed
+            .models
+            .as_ref()
+            .unwrap()
+            .default_model_id
+            .as_deref(),
+        Some("gpt-6-astra")
+    );
+    let project_refresh =
+        refreshed_agent_configuration_catalog(Some(vec![]), None, Some(refreshed.clone()), "host")
+            .unwrap();
+    assert_eq!(project_refresh.models, refreshed.models);
+    assert_eq!(
+        refreshed_agent_configuration_catalog(None, None, Some(refreshed.clone()), "host"),
+        Some(refreshed)
+    );
+}
+
 #[tokio::test]
 async fn model_picker_and_reset_copy_name_the_effective_claude_default() {
     let fixture = Fixture::new(CatalogBehavior::Ready, false);
@@ -300,7 +350,10 @@ impl AgentDriver for FakeDriver {
         Box::pin(async { Ok(()) })
     }
 
-    fn compact_session<'a>(&'a self, _session_id: &'a ProviderSessionId) -> DriverFuture<'a, ()> {
+    fn compact_session<'a>(
+        &'a self,
+        _session_id: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async { Err(DriverError::Unsupported("test compact")) })
     }
 
@@ -913,6 +966,26 @@ async fn unsupported_compaction_returns_truthful_problem() {
 }
 
 #[tokio::test]
+async fn settings_compaction_directs_to_the_tracked_command_without_starting_work() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, true);
+    let response = resolve_settings_interaction(
+        &fixture.invocation(ITEM_COMPACT, None, fixture.revision()),
+        &fixture.runtime(),
+        fixture.snapshot.clone(),
+    )
+    .await;
+    let problem = expect_problem(response.response);
+    assert_eq!(problem.code, BotChatSettingsProblemCode::Unavailable);
+    assert!(problem.message.contains("Send /compact"));
+    assert!(
+        !fixture
+            .sessions
+            .session_is_active(&fixture.snapshot.binding)
+            .await
+    );
+}
+
+#[tokio::test]
 async fn catalog_timeout_keeps_safe_controls_available_and_disables_provider_options() {
     let fixture = Fixture::new(CatalogBehavior::Pending, false);
     let request = BotInteractionEvent::ChatSettingsRequested {
@@ -962,6 +1035,13 @@ async fn unset_permission_selection_names_the_effective_default() {
     };
     let response =
         resolve_settings_interaction(&request, &fixture.runtime(), fixture.snapshot.clone()).await;
+    assert!(
+        response
+            .catalog
+            .as_ref()
+            .is_some_and(|catalog| !catalog.models.is_empty()),
+        "the already-loaded model catalog must reach the publication boundary"
+    );
     let BotChatSettingsResponse::Document(document) = response.response else {
         panic!("expected settings document");
     };

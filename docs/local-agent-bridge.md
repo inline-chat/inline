@@ -238,6 +238,25 @@ blocks, redacts sensitive-looking local details, and does not resume or mutate
 the original Claude session. `/sessions` and `/open` remain reserved for future
 native continuity and return an explicit unavailable message if typed.
 
+For Codex, `/status` also reads the current account usage windows, including
+weekly limits and reset times in UTC. Missing usage or reset data is shown as
+unavailable. Status reads are bounded and do not disconnect an active turn.
+They do not consume reset credits or expose account identity and billing data.
+
+`/compact` compacts the current Codex session. It shows progress through the
+existing Working message and reports success only after Codex completes the
+operation. `/stop` can interrupt it; new instructions queue until compaction
+finishes. Automatic compaction also shows its actual in-progress/completed
+state. Providers without compaction support retain an explicit unavailable reply.
+Agent Settings directs you to `/compact` in the conversation so progress, errors,
+and interruption remain attached to that operation.
+
+Provider retries appear in progress. Terminal and command failures include a
+bounded, scrubbed provider explanation when available, such as an exhausted
+usage window or an outdated Codex installation. Unknown additive updates are
+ignored; an invalid terminal response fails visibly instead of leaving a turn
+waiting indefinitely.
+
 Each provider has a distinct bot and session namespace. A thread is a session
 for the selected project by default. After a brief ordering gate, the bot
 acknowledges every accepted provider direction with one silent, initially open

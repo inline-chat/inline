@@ -809,6 +809,7 @@ fn final_output_keeps_file_list_concise_and_relative() {
         workspace,
         true,
         None,
+        None,
     );
     assert!(
         output.contains("- [`src/file-0.rs`](file:///tmp/project/src/file-0.rs) — updated parser")
@@ -824,6 +825,7 @@ fn final_output_keeps_file_list_concise_and_relative() {
         &files,
         workspace,
         false,
+        None,
         None,
     );
     assert!(shared_output.contains("- `src/file-0.rs` — updated parser"));
@@ -951,6 +953,7 @@ fn failed_and_interrupted_partial_output_stays_honest_without_raw_errors() {
         workspace,
         false,
         None,
+        None,
     );
     assert!(failed.contains("Partial output"));
 
@@ -960,6 +963,7 @@ fn failed_and_interrupted_partial_output_stays_honest_without_raw_errors() {
         &[],
         workspace,
         false,
+        None,
         None,
     );
     assert!(authentication.contains("Partial output"));
@@ -974,6 +978,7 @@ fn failed_and_interrupted_partial_output_stays_honest_without_raw_errors() {
         workspace,
         false,
         None,
+        None,
     );
     assert!(disconnected.contains(BridgeNotice::AgentConnectionLost.message()));
 
@@ -984,8 +989,30 @@ fn failed_and_interrupted_partial_output_stays_honest_without_raw_errors() {
         workspace,
         false,
         None,
+        None,
     );
     assert_eq!(interrupted, "Stopped.");
+}
+
+#[test]
+fn failed_turn_reply_includes_provider_explanation_with_or_without_partial_output() {
+    let diagnostic = r#"{"error":{"message":"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade."}}"#;
+    for partial in ["", "Partial work"] {
+        let output = final_turn_text(
+            partial,
+            TurnOutcome::Failed,
+            &[],
+            Path::new("/tmp/project"),
+            false,
+            None,
+            Some(diagnostic),
+        );
+        assert!(output.contains("gpt-6-astra"));
+        assert!(output.contains("Please upgrade."));
+        assert!(output.contains(partial));
+        assert!(!output.contains("/status"));
+        assert!(!output.contains("{\"error\""));
+    }
 }
 
 #[test]

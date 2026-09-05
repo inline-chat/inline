@@ -731,7 +731,8 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         let mut confirmed = false;
         handle_active_delivery(&bot, delivery, &manager, session.session_id(), &turn.turn_id,
             &route.store, &binding, &route, &active, &identity,
-            &mut HashSet::new(), &mut HashMap::new(), &mut coordinator, &mut typing, &mut confirmed).await?;
+            &mut HashSet::new(), &mut HashMap::new(), &mut coordinator, &mut typing, &mut confirmed,
+            manager.driver().capabilities().steering).await?;
         assert!(confirmed, "active cancellation must be confirmed");
         assert!(!manager.shutdown_epoch_if_idle().await?, "active work lease must prevent release");
         assert_eq!(route.store.get_inbound(&queued.event_id)?.unwrap().state, InboundState::Failed);

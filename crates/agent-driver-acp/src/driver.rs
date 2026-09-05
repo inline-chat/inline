@@ -1183,7 +1183,10 @@ impl AgentDriver for AcpDriver {
         })
     }
 
-    fn compact_session<'a>(&'a self, _session_id: &'a ProviderSessionId) -> DriverFuture<'a, ()> {
+    fn compact_session<'a>(
+        &'a self,
+        _session_id: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async { Err(DriverError::Unsupported("ACP session compact")) })
     }
 
@@ -1281,6 +1284,7 @@ fn map_capabilities(capabilities: &acp::AgentCapabilities) -> DriverCapabilities
         compact_session: false,
         cancel_turn: true,
         settings_catalog: true,
+        usage_limits: false,
         settings_catalog_starts_session: true,
         session_commands: true,
         steering: SteeringSupport::Unsupported,

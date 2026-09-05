@@ -1166,10 +1166,20 @@ impl AgentDriver for ProviderDriver {
         }
     }
 
-    fn compact_session<'a>(&'a self, session_id: &'a ProviderSessionId) -> DriverFuture<'a, ()> {
+    fn compact_session<'a>(
+        &'a self,
+        session_id: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, inline_agent_bridge::StartedTurn> {
         match self {
             Self::Codex(driver) => driver.compact_session(session_id),
             Self::Acp(driver) => driver.compact_session(session_id),
+        }
+    }
+
+    fn usage_limits(&self) -> DriverFuture<'_, Vec<inline_agent_bridge::DriverUsageWindow>> {
+        match self {
+            Self::Codex(driver) => driver.usage_limits(),
+            Self::Acp(driver) => driver.usage_limits(),
         }
     }
 

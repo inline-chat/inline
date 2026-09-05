@@ -592,6 +592,24 @@ where
         }
     }
 
+    /// Runs compaction with the same epoch lease and event ownership as a turn.
+    pub async fn compact_session(
+        &self,
+        binding: &BindingKey,
+        now: i64,
+    ) -> Result<(SessionOpenOutcome, StartedTurn, ProviderWorkLease), SessionManagerError> {
+        let lease = self.begin_provider_work().await?;
+        let session = self.ensure_session(binding, now).await?;
+        let turn = match self.driver.compact_session(session.session_id()).await {
+            Ok(turn) => turn,
+            Err(error) => {
+                self.seal_epoch_if_needed(&error);
+                return Err(error.into());
+            }
+        };
+        Ok((session, turn, lease))
+    }
+
     /// Marks one Inline lane as provider work before it begins preparation,
     /// settings, session mutation, or turn execution. `/close` skips its own
     /// lease and can therefore acquire the epoch-wide write side only when no
@@ -811,8 +829,16 @@ mod tests {
         fn compact_session<'a>(
             &'a self,
             _session_id: &'a ProviderSessionId,
-        ) -> DriverFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
+        ) -> DriverFuture<'a, StartedTurn> {
+            self.start_turn(
+                _session_id,
+                TurnInput {
+                    text: String::new(),
+                    attachments: Vec::new(),
+                    client_message_id: None,
+                },
+                TurnOptions::default(),
+            )
         }
 
         fn resolve_approval<'a>(

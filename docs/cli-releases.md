@@ -6,6 +6,29 @@ path-dependency requirements, and lockfile must agree before release. Prepare
 only the intended source changes; unrelated uncommitted work is not a release
 candidate. Do not reuse an already published version.
 
+## Codex runtime freshness
+
+Before every Inline CLI release, update the Codex runtime used by the bridge to
+the newest published Codex version. Resolve both npm `latest` and `alpha` tags
+and compare versions; do not reuse the version from a previous release check.
+Install the exact resolved version through that installation's package manager.
+For a Bun-managed installation:
+
+```sh
+npm view @openai/codex dist-tags --json
+bun add --global @openai/codex@RESOLVED_VERSION
+```
+
+Verify the exact provider executable reported by `inline bridge doctor`, its
+`--version`, and the running provider separately from whichever `codex` is first
+on PATH. Restart the bridge at an idle boundary after updating. Read its live
+`model/list` catalog and verify that the current models reach Inline's Agent
+picker and published configuration catalog before signing off the release.
+
+Inline currently discovers an installed Codex executable (including the bundled
+ChatGPT runtime as a fallback); its release archive does not contain a separate
+Codex binary. This is a CLI release requirement, not a Mac-wide automatic updater.
+
 Run the CLI checks, release-script tests, Homebrew validation, and external
 agent-package contract check before committing the candidate:
 

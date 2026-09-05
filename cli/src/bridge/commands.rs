@@ -4,6 +4,7 @@ use super::*;
 
 pub(super) enum IdleCommandResolution {
     NotCommand,
+    StartCompaction,
     Handled {
         message: String,
         failure: Option<String>,
@@ -214,7 +215,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 current.permissions.as_deref(),
                 settings_catalog.as_ref(),
             );
-            handled(format!(
+            let mut message = format!(
                 "Agent is {state}. Host: {}. Project: {}. Session: {session}. Model: {}. Reasoning: {}. Permissions: {}. Verbose: {}. Reply in threads: {reply_threads}. Inline tools: {inline_tools}.",
                 settings.identity.host_label,
                 workspace_label(workspace),
@@ -222,7 +223,29 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 current.reasoning.as_deref().unwrap_or("provider default"),
                 permissions,
                 if current.verbose { "on" } else { "off" },
-            ))
+            );
+            if sessions.driver().capabilities().usage_limits {
+                // Status shares the active control lane with /stop. Give this
+                // optional read only a small slice of that lane while running.
+                let deadline = if settings.turn_active {
+                    Duration::from_millis(250)
+                } else {
+                    SETTINGS_DEADLINE
+                };
+                let usage = tokio::time::timeout(deadline, sessions.driver().usage_limits()).await;
+                message.push_str("\n\n");
+                message.push_str(&match usage {
+                    Ok(Ok(windows)) => usage_status_text(&windows),
+                    Ok(Err(error)) => super::copy::failure_with_diagnostic(
+                        "Provider usage is unavailable.",
+                        Some(&error.to_string()),
+                    ),
+                    Err(_) => {
+                        "Provider usage is unavailable; the status request timed out.".to_string()
+                    }
+                });
+            }
+            handled(message)
         }
         "new" | "clear" if settings.turn_active => {
             handled("Wait for the current turn to finish, or stop it first.")
@@ -310,21 +333,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
             if let Some(notice) = session_open_notice(&session_open) {
                 return handled(notice.message());
             }
-            match sessions
-                .driver()
-                .compact_session(session_open.session_id())
-                .await
-            {
-                Ok(()) => handled("Compacted the current agent session."),
-                Err(error) => {
-                    let fatal = error.ends_epoch();
-                    failed(
-                        "I couldn’t compact the current agent session.",
-                        error,
-                        fatal,
-                    )
-                }
-            }
+            IdleCommandResolution::StartCompaction
         }
         "queue" if arguments.is_empty() => handled("Usage: /queue <instruction>"),
         "queue" => IdleCommandResolution::StartDirection {
@@ -467,11 +476,46 @@ fn failed(
     provider_epoch_ended: bool,
 ) -> IdleCommandResolution {
     IdleCommandResolution::Handled {
-        message: message.to_string(),
+        message: super::copy::failure_with_diagnostic(message, Some(&error.to_string())),
         failure: Some(safe_diagnostic(&error.to_string())),
         provider_epoch_ended,
         choices: None,
     }
+}
+
+fn usage_status_text(windows: &[inline_agent_bridge::DriverUsageWindow]) -> String {
+    if windows.is_empty() {
+        return "Provider usage is unavailable.".to_string();
+    }
+    windows
+        .iter()
+        .take(16)
+        .map(|window| {
+            let label =
+                safe_chat_diagnostic(&window.label).unwrap_or_else(|| "Provider".to_string());
+            let duration = match window.window_minutes {
+                Some(10_080) => "weekly".to_string(),
+                Some(minutes) if minutes % 60 == 0 => format!("{}-hour", minutes / 60),
+                Some(minutes) => format!("{minutes}-minute"),
+                None => "usage".to_string(),
+            };
+            let remaining = 100_u8.saturating_sub(window.used_percent);
+            let reset = window
+                .resets_at
+                .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+                .map(|time| format!("resets {}", time.format("%b %-d at %H:%M UTC")))
+                .unwrap_or_else(|| "reset time unavailable".to_string());
+            format!(
+                "{label} {duration}: {remaining}% remaining{}; {reset}.",
+                if remaining == 0 {
+                    " (limit reached)"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn session_error_ends_epoch(error: &SessionManagerError) -> bool {
@@ -524,6 +568,28 @@ mod tests {
             "Claude Sonnet 4.6 (provider default)"
         );
         assert_eq!(model_selection_label(None, None), "provider default");
+    }
+
+    #[test]
+    fn status_reports_weekly_exhaustion_and_unknown_reset_without_assuming_capacity() {
+        let text = usage_status_text(&[inline_agent_bridge::DriverUsageWindow {
+            label: "Codex".to_string(),
+            used_percent: 100,
+            window_minutes: Some(10_080),
+            resets_at: None,
+        }]);
+        assert!(text.contains("weekly: 0% remaining (limit reached)"));
+        assert!(text.contains("reset time unavailable"));
+        assert_eq!(usage_status_text(&[]), "Provider usage is unavailable.");
+    }
+
+    #[test]
+    fn command_failure_includes_the_provider_explanation() {
+        assert!(
+            matches!(failed("Compaction failed.", "Weekly usage limit reached. Try again tomorrow.", false),
+            IdleCommandResolution::Handled { message, provider_epoch_ended:false, .. }
+                if message.contains("Weekly usage limit reached"))
+        );
     }
 
     #[test]
@@ -698,13 +764,21 @@ mod tests {
         fn compact_session<'a>(
             &'a self,
             session_id: &'a ProviderSessionId,
-        ) -> DriverFuture<'a, ()> {
+        ) -> DriverFuture<'a, StartedTurn> {
             Box::pin(async move {
                 self.compactions
                     .lock()
                     .expect("compactions")
                     .push(session_id.clone());
-                Ok(())
+                let (sender, events) = AgentEventReceiver::default_channel();
+                let turn_id = TurnId::new("compact-turn").unwrap();
+                sender.send(Ok(AgentEvent::TurnCompleted {
+                    turn_id: turn_id.clone(),
+                    outcome: TurnOutcome::Completed,
+                    error: None,
+                    timing: Default::default(),
+                }));
+                Ok(StartedTurn { turn_id, events })
             })
         }
 

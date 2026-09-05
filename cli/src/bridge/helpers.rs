@@ -9,10 +9,13 @@ pub(super) fn safe_diagnostic(error: &str) -> String {
         "authorization",
         "bearer ",
         "api_key",
+        "apikey",
         "api-key",
         "x-api-key",
         "access_token",
         "refresh_token",
+        "refreshtoken",
+        "accesstoken",
         "token=",
         "token:",
         "password",
@@ -23,10 +26,75 @@ pub(super) fn safe_diagnostic(error: &str) -> String {
     .iter()
     .any(|marker| lowered.contains(marker))
         || normalized.split_whitespace().any(looks_like_jwt)
+        || lowered
+            .split(|character: char| {
+                !character.is_ascii_alphanumeric() && !matches!(character, '-' | '_')
+            })
+            .any(|word| {
+                [
+                    "sk-",
+                    "ghp_",
+                    "github_pat_",
+                    "xoxb-",
+                    "xoxp-",
+                    "xoxa-",
+                    "xoxr-",
+                ]
+                .iter()
+                .any(|prefix| word.starts_with(prefix))
+            })
     {
         return "[redacted provider diagnostic]".to_string();
     }
     truncate(&normalized, 512)
+}
+
+/// Chat can be shared with people who do not have access to the provider host.
+/// Keep host paths in local diagnostics, not in the provider explanation we post.
+pub(super) fn safe_chat_diagnostic(error: &str) -> Option<String> {
+    // Scrub complete URLs before truncating, while preserving useful slash
+    // commands that the general transcript scrubber treats as filesystem paths.
+    let redacted_urls = error
+        .split_whitespace()
+        .map(|word| {
+            if word.contains("://") {
+                inline_agent_bridge::sanitize_diagnostic_text(word).unwrap_or_default()
+            } else {
+                word.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let message = safe_diagnostic(&redacted_urls);
+    let has_host_path = error
+        .split(|character: char| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    '"' | '\'' | '`' | '=' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+                )
+        })
+        .any(|word| {
+            // An ordinary help URL is useful; file URLs and absolute paths are not.
+            let lowered = word.to_ascii_lowercase();
+            if lowered.starts_with("https://") || lowered.starts_with("http://") {
+                return false;
+            }
+            word.split(':').any(|part| {
+                if matches!(
+                    part.trim_end_matches(['.', '!', '?']),
+                    "/status" | "/compact" | "/resume" | "/new" | "/stop" | "/help"
+                ) {
+                    return false;
+                }
+                part.starts_with('/')
+                    || part.starts_with('\\')
+                    || part.starts_with("~/")
+                    || part.starts_with("~\\")
+            })
+        });
+    (!message.is_empty() && message != "[redacted provider diagnostic]" && !has_host_path)
+        .then_some(message)
 }
 
 pub(super) fn safe_relative_path(path: &Path, workspace: &Path) -> Option<PathBuf> {

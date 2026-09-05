@@ -4080,10 +4080,10 @@ impl SdkBackend {
                 }
                 Some(other) => {
                     let kind = update_kind(&other);
-                    return Err(BackendError::new(
-                        ClientErrorCategory::Unsupported,
-                        format!("Inline update is not implemented: {kind}"),
-                    ));
+                    // Additive updates can precede later messages in the same
+                    // lossless batch. Skip projections this client does not
+                    // implement, allowing the batch and its cursor to advance.
+                    log::debug!("ignoring unprojected Inline update kind={kind} seq={seq}");
                 }
                 None => {
                     if seq > 0 {
@@ -8457,7 +8457,6 @@ mod tests {
                             date: 101,
                             ..Default::default()
                         }],
-                        ..Default::default()
                     }),
                 ),
             )
@@ -9929,23 +9928,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_updates_rejects_still_unsupported_lossless_update() {
+    async fn apply_updates_skips_unprojected_and_unknown_updates_and_continues() {
         let backend = SdkBackend::builder().build().unwrap();
-        let update = proto::Update {
-            seq: Some(1),
-            date: Some(10),
-            update: Some(proto::update::Update::ChatHasNewUpdates(
+        let kinds = [
+            Some(proto::update::Update::Acknowledgement(
+                proto::ChatAcknowledgement::default(),
+            )),
+            None,
+            Some(proto::update::Update::ChatHasNewUpdates(
                 proto::UpdateChatHasNewUpdates::default(),
             )),
-        };
-
-        let error = backend
-            .apply_updates(vec![update], None, None)
+            Some(proto::update::Update::UpdatedUser(
+                proto::UpdateUpdatedUser {
+                    user: Some(proto::User {
+                        id: 42,
+                        ..Default::default()
+                    }),
+                },
+            )),
+        ];
+        let updates = kinds
+            .into_iter()
+            .enumerate()
+            .map(|(index, update)| proto::Update {
+                seq: Some(index as i32 + 1),
+                date: Some(10),
+                update,
+            })
+            .collect();
+        let events = backend
+            .apply_updates(updates, None, None)
             .await
-            .unwrap_err();
-
-        assert_eq!(error.category, ClientErrorCategory::Unsupported);
-        assert!(error.message.contains("chat_has_new_updates"));
+            .expect("additive updates must not poison the batch");
+        assert!(
+            matches!(events.as_slice(), [ClientEvent::UserUpserted { user_id }] if user_id.get() == 42)
+        );
     }
 
     #[tokio::test]
