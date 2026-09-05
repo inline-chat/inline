@@ -309,6 +309,27 @@ describe("AdminSessionStoreLive", () => {
       },
     })
 
+    for (const path of ["/admin/metrics/app", "/admin/metrics/overview"]) {
+      const response = await handle(request(path))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        metrics: {
+          reportingTimeZone: "UTC",
+          asOf: expect.any(String),
+          dailyActivity: expect.arrayContaining([
+            expect.objectContaining({
+              date: expect.any(String),
+              activeUsers: expect.any(Number),
+              newUsers: expect.any(Number),
+              messages: expect.any(Number),
+              threads: expect.any(Number),
+            }),
+          ]),
+        },
+      })
+    }
+
     const initialConfig = await handle(
       request("/admin/server-config"),
     )

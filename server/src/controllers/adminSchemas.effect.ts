@@ -206,7 +206,18 @@ export const AdminWeeklyActivity = Schema.Struct({
   identifier: "AdminWeeklyActivity",
 })
 
+const AdminDailyActivity = Schema.Struct({
+  date: Schema.String,
+  activeUsers: WireNonNegativeInteger,
+  newUsers: WireNonNegativeInteger,
+  messages: WireNonNegativeInteger,
+  threads: WireNonNegativeInteger,
+})
+
 export const AdminAppMetrics = Schema.Struct({
+  asOf: Schema.String,
+  reportingTimeZone: Schema.Literal("UTC"),
+  dailyActivity: Schema.Array(AdminDailyActivity),
   dau: WireNonNegativeInteger,
   wau: WireNonNegativeInteger,
   messagesToday: WireNonNegativeInteger,
@@ -249,12 +260,6 @@ const AdminRecentWaitlistEntry = Schema.Struct({
   date: NullableString,
 })
 
-const AdminDailyActivity = Schema.Struct({
-  date: Schema.String,
-  activeUsers: WireNonNegativeInteger,
-  newUsers: WireNonNegativeInteger,
-})
-
 export const AdminOverviewMetricsResult = Schema.Struct({
   ok: Schema.Literal(true),
   metrics: Schema.Struct({
@@ -275,6 +280,8 @@ export const AdminOverviewMetricsResult = Schema.Struct({
     recentUsersLastDay: Schema.Array(AdminRecentUser),
     recentWaitlistLastDay: Schema.Array(AdminRecentWaitlistEntry),
     dailyActivity: Schema.Array(AdminDailyActivity),
+    asOf: Schema.String,
+    reportingTimeZone: Schema.Literal("UTC"),
   }),
 }).annotate({
   identifier: "AdminOverviewMetricsResult",
