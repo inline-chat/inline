@@ -691,7 +691,19 @@ fn probe_command_output_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(unix)]
-    command.process_group(0);
+    // A separate process group still inherits the controlling terminal. A
+    // provider/helper reading /dev/tty can then stop on SIGTTIN indefinitely.
+    // Probes are noninteractive: detach the terminal as well as the group.
+    unsafe {
+        command.pre_exec(|| {
+            // setsid is async-signal-safe; do not allocate or lock after fork.
+            if libc::setsid() == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
     for (name, _) in std::env::vars_os() {
         let should_scrub = if provider_id == "codex" {
             should_scrub_codex_environment_name(&name)
@@ -726,6 +738,12 @@ fn probe_command_output_with_timeout(
         }
         if Instant::now() >= deadline {
             terminate_probe_process(&mut child, process_id);
+            let stdout = receive_probe_stream(&stdout, &mut child, process_id);
+            let stderr = receive_probe_stream(&stderr, &mut child, process_id);
+            let detail = probe_timeout_detail(provider_id, arguments, &stdout, &stderr);
+            // Keep provider diagnostics in the local verbose report, separate
+            // from the error text copied into Sentry. Auth stdout contains PII.
+            log::debug!("{label} probe timed out: {detail}");
             return Err(format!(
                 "{label} probe timed out after {} seconds",
                 timeout.as_secs_f64()
@@ -742,6 +760,33 @@ fn probe_command_output_with_timeout(
         value,
         success: status.success(),
     })
+}
+
+fn probe_timeout_detail(
+    provider_id: &str,
+    arguments: &[&str],
+    stdout: &(Vec<u8>, bool),
+    stderr: &(Vec<u8>, bool),
+) -> String {
+    let mut detail = format!(
+        "stdout_bytes={} stderr_bytes={} output_truncated={}",
+        stdout.0.len(),
+        stderr.0.len(),
+        stdout.1 || stderr.1,
+    );
+    let claude_auth = provider_id == "claude" && arguments == ["auth", "status"];
+    let stderr_text = String::from_utf8_lossy(&stderr.0);
+    if claude_auth {
+        let logged_in = claude_auth_is_logged_in(&String::from_utf8_lossy(&stdout.0))
+            .or_else(|| claude_auth_is_logged_in(&stderr_text));
+        detail.push_str(&format!(" logged_in={logged_in:?}"));
+    }
+    // Older Claude builds can put their account JSON on stderr instead.
+    if !(stderr.0.is_empty() || claude_auth && stderr_text.contains("\"loggedIn\"")) {
+        let stderr = crate::diagnostics::safe_text(&stderr_text);
+        detail.push_str(&format!(" stderr={}", super::safe_diagnostic(&stderr)));
+    }
+    detail
 }
 
 fn read_probe_stream<R: Read + Send + 'static>(mut reader: R) -> mpsc::Receiver<(Vec<u8>, bool)> {
@@ -1233,6 +1278,70 @@ mod tests {
         .expect_err("probe must time out");
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_probe_drains_stderr_past_the_retention_limit() {
+        let output = probe_command_output_with_timeout(
+            "claude",
+            std::path::Path::new("/bin/sh"),
+            &[
+                "-c",
+                "(head -c 131072 /dev/zero >&2) & printf '{\"loggedIn\":true}'; wait",
+            ],
+            "Claude authentication",
+            Duration::from_secs(3),
+        )
+        .expect("large stderr must not block the auth probe");
+        assert_eq!(
+            validate_claude_auth_status(&output, "Claude authentication"),
+            Ok(())
+        );
+        assert!(
+            output
+                .value
+                .ends_with("[additional provider probe output omitted]")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_auth_json_does_not_bypass_a_process_timeout() {
+        let error = probe_command_output_with_timeout(
+            "claude",
+            std::path::Path::new("/bin/sh"),
+            &["-c", "printf '{\"loggedIn\":true}'; sleep 30"],
+            "Claude authentication",
+            Duration::from_millis(100),
+        )
+        .expect_err("auth JSON alone does not establish a successful exit");
+        assert!(error.contains("timed out"));
+        assert!(!error.contains("loggedIn"));
+    }
+
+    #[test]
+    fn timeout_diagnostics_keep_auth_state_without_account_output() {
+        let stdout = (
+            br#"{"loggedIn":true,"email":"private@example.com","organization":"private-org"}"#
+                .to_vec(),
+            false,
+        );
+        let stderr = (b"credential helper is waiting".to_vec(), false);
+        let detail = probe_timeout_detail("claude", &["auth", "status"], &stdout, &stderr);
+        assert!(detail.contains("logged_in=Some(true)"));
+        assert!(detail.contains("credential helper is waiting"));
+        assert!(!detail.contains("private"));
+
+        let detail =
+            probe_timeout_detail("claude", &["auth", "status"], &(Vec::new(), false), &stdout);
+        assert!(detail.contains("logged_in=Some(true)"));
+        assert!(!detail.contains("private"));
+
+        let secret_stderr = (b"Authorization: Bearer private-token".to_vec(), true);
+        let detail = probe_timeout_detail("claude", &["auth", "status"], &stdout, &secret_stderr);
+        assert!(detail.contains("output_truncated=true"));
+        assert!(!detail.contains("private"));
     }
 
     #[cfg(unix)]

@@ -109,10 +109,23 @@ pub(crate) fn report(
     if let Some(command) = command {
         event.tags.insert("command".into(), safe_code(command));
     }
+    if let Some(failure) = command_failure_kind(error) {
+        event.tags.insert("failure".into(), failure.into());
+    }
     event
         .extra
         .insert("failure_text".into(), command_failure_text(error).into());
     sentry::capture_event(event);
+}
+
+fn command_failure_kind(error: &JsonCliError) -> Option<&'static str> {
+    // Setup retains its existing public error code. Fixed metadata remains
+    // useful when Sentry's privacy rules filter the accompanying failure text.
+    (error.code == "provider_integration_failed"
+        && error
+            .message
+            .starts_with("Claude authentication probe timed out after "))
+    .then_some("provider_auth_timeout")
 }
 
 fn command_failure_text(error: &JsonCliError) -> String {
@@ -467,6 +480,29 @@ mod tests {
         // Enabling a second rustls crypto provider can make this panic, even
         // when telemetry is disabled. No network request is made here.
         assert!(reqwest::Client::builder().build().is_ok());
+    }
+
+    #[test]
+    fn auth_timeout_metadata_survives_without_failure_text() {
+        let mut error = JsonCliError::new(
+            "provider_integration_failed",
+            "Claude authentication probe timed out after 30 seconds",
+        );
+        let mut event = sentry::protocol::Event::default();
+        event.tags.insert(
+            "failure".into(),
+            command_failure_kind(&error).unwrap().into(),
+        );
+        let safe = allowlisted_event(event);
+        assert_eq!(
+            safe.tags.get("failure").map(String::as_str),
+            Some("provider_auth_timeout")
+        );
+        assert!(safe.extra.is_empty());
+        error.message = "Claude is not authenticated".into();
+        assert_eq!(command_failure_kind(&error), None);
+        error.message = "private provider details".into();
+        assert_eq!(command_failure_kind(&error), None);
     }
 
     #[test]
