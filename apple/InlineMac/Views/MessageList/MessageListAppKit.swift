@@ -35,6 +35,9 @@ class MessageListAppKit: NSViewController {
   private let messageRenderStyle: MessageRenderStyle
   private let usesAvatarOverlay: Bool
   private var messageSelection = MessageSelectionState()
+  private var forwardSelectionMonitor: Any?
+  private var forwardSelectionBar: ForwardMessageSelectionBar?
+  private var showsForwardSelection = false
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)?
 
   var isMessageSelectionActive: Bool {
@@ -344,11 +347,12 @@ class MessageListAppKit: NSViewController {
   }
 
   private var selectableMessageStableIds: [Int64] {
-    messages.map(\.id)
+    messages.filter { isForwardSelectable($0) }.map(\.id)
   }
 
   private func selectableStableId(forRow row: Int) -> Int64? {
-    guard chatRows.canSelect(row: row) else { return nil }
+    guard chatRows.canSelect(row: row), let message = message(forRow: row),
+          isForwardSelectable(message) else { return nil }
     return messageStableId(forRow: row)
   }
 
@@ -414,6 +418,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func emitMessageSelectionChange(changedStableIds: Set<Int64>) {
+    refreshForwardSelection()
     guard !changedStableIds.isEmpty else { return }
     hideMessageQuickActions()
     scheduleMessageHoverRefresh()
@@ -426,6 +431,208 @@ class MessageListAppKit: NSViewController {
         changedStableIds: changedStableIds
       )
     )
+  }
+
+  private func isForwardSelectable(_ fullMessage: FullMessage) -> Bool {
+    let message = fullMessage.message
+    return message.messageId > 0 && !message.isServiceMessage && !message.isSubthreadPlacement
+      && (message.status == nil || message.status == .sent)
+  }
+
+  static func beginForwardSelection(from source: NSView) {
+    guard ExperimentalFeatureFlags.quickForwardEnabled else { return }
+    var ancestor: NSView? = source
+    while let current = ancestor {
+      if let table = current as? NSTableView, let list = table.delegate as? MessageListAppKit {
+        let row = table.row(for: source)
+        if list.beginMessageSelection(atRow: row) {
+          table.window?.makeFirstResponder(table)
+        }
+        return
+      }
+      ancestor = current.superview
+    }
+  }
+
+  private func refreshForwardSelection() {
+    guard isViewLoaded else { return }
+    let active = messageSelection.isActive
+    let modeChanged = showsForwardSelection != active
+    // Snapshot the old geometry before exposing the new measurement width or changing cell constraints.
+    let anchor = modeChanged ? captureVisibleMessageAnchor() : nil
+    let wasAtBottom = isAtAbsoluteBottom
+    let wasPerformingUpdate = isPerformingUpdate
+    let wasSuppressingResize = suppressResizeScrollMaintenance
+    if modeChanged {
+      isPerformingUpdate = true
+      suppressResizeScrollMaintenance = true
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      NSAnimationContext.beginGrouping()
+      NSAnimationContext.current.duration = 0
+      NSAnimationContext.current.allowsImplicitAnimation = false
+    }
+    defer {
+      if modeChanged {
+        // Refresh the resize handler's baseline after restoring the viewport, before releasing the guard.
+        handleBoundsChange()
+        previousViewportHeight = scrollView.contentView.bounds.height
+        NSAnimationContext.endGrouping()
+        CATransaction.commit()
+        isPerformingUpdate = wasPerformingUpdate
+        suppressResizeScrollMaintenance = wasSuppressingResize
+      }
+    }
+    showsForwardSelection = active
+    if modeChanged, let width = measurementWidth() {
+      // This transition owns the width update; viewDidLayout must not run a second resize pass.
+      lastKnownWidth = width
+    }
+    tableView.selectionHighlightStyle = .none
+    tableView.deselectAll(nil)
+    let visible = tableView.rows(in: tableView.visibleRect)
+    if visible.location != NSNotFound {
+      for row in visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows) {
+        if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
+          configureForwardSelection(cell, row: row)
+        }
+      }
+    }
+    if active {
+      if forwardSelectionBar == nil {
+        let bar = ForwardMessageSelectionBar(
+          target: self,
+          forwardAction: #selector(forwardSelectedMessages),
+          cancelAction: #selector(cancelForwardSelection)
+        )
+        view.addSubview(bar)
+        NSLayoutConstraint.activate([
+          bar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+          bar.bottomAnchor.constraint(equalTo: scrollToBottomButton.bottomAnchor),
+        ])
+        forwardSelectionBar = bar
+      }
+      forwardSelectionBar?.isHidden = false
+      forwardSelectionBar?.update(count: messageSelection.count)
+      installForwardSelectionMonitor()
+    } else {
+      forwardSelectionBar?.isHidden = true
+      removeForwardSelectionMonitor()
+    }
+
+    if modeChanged {
+      tableView.beginUpdates()
+      if visible.location != NSNotFound {
+        updateHeightsForRows(at: IndexSet(integersIn: visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows)))
+      }
+      tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0 ..< tableView.numberOfRows))
+      tableView.endUpdates()
+      view.layoutSubtreeIfNeeded()
+      if wasAtBottom {
+        scrollToBottom(animated: false)
+      } else if let anchor {
+        restoreVisibleMessageAnchor(anchor)
+      }
+      syncAvatarOverlayAfterTableLayout()
+    }
+  }
+
+  private func configureForwardSelection(_ cell: MessageTableCell, row: Int) {
+    let stableId = selectableStableId(forRow: row)
+    cell.setForwardSelection(
+      active: messageSelection.isActive,
+      selectable: stableId != nil,
+      selected: stableId.map { messageSelection.isSelected($0) } ?? false
+    ) { [weak self] in
+      guard let self, let stableId, let currentRow = self.chatRows.rowIndex(forMessageStableId: stableId) else { return }
+      self.toggleMessageSelection(atRow: currentRow)
+    }
+  }
+
+  @objc private func cancelForwardSelection() {
+    clearMessageSelection()
+  }
+
+  @objc private func forwardSelectedMessages() {
+    guard ExperimentalFeatureFlags.quickForwardEnabled, let presenter = dependencies.forwardMessages else { return }
+    let selected = selectedMessagesInLoadedOrder
+    guard !selected.isEmpty else { return }
+    presenter.present(messages: selected, onComplete: { [weak self] in
+      self?.clearMessageSelection()
+    })
+  }
+
+  private func installForwardSelectionMonitor() {
+    guard forwardSelectionMonitor == nil else { return }
+    forwardSelectionMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .rightMouseUp, .keyDown]) { [weak self] event in
+      guard let self, !self.isDisposed, self.messageSelection.isActive,
+            let window = self.view.window, event.window === window,
+            window.attachedSheet == nil, !self.view.isHiddenOrHasHiddenAncestor
+      else { return event }
+      if !ExperimentalFeatureFlags.quickForwardEnabled {
+        self.clearMessageSelection()
+        return event
+      }
+      if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .rightMouseUp {
+        let point = self.scrollView.convert(event.locationInWindow, from: nil)
+        guard self.scrollView.bounds.contains(point),
+              let hit = self.view.hitTest(self.view.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
+              hit === self.tableView || hit.isDescendant(of: self.tableView)
+        else { return event }
+        // Telegram keeps ordinary message menus out of selection mode.
+        guard event.type == .leftMouseDown else { return nil }
+        let row = self.tableView.row(at: self.tableView.convert(event.locationInWindow, from: nil))
+        guard self.selectableStableId(forRow: row) != nil else { return nil }
+        if event.modifierFlags.contains(.shift) {
+          self.extendMessageSelection(toRow: row)
+        } else {
+          self.toggleMessageSelection(atRow: row)
+        }
+        window.makeFirstResponder(self.tableView)
+        return nil
+      }
+      guard let responder = window.firstResponder as? NSView,
+            responder === self.tableView || responder.isDescendant(of: self.tableView)
+      else { return event }
+      if event.keyCode == 125 || event.keyCode == 126 {
+        let ids = self.selectableMessageStableIds
+        let movingDown = event.keyCode == 125
+        let selected = self.selectedStableIdsInLoadedOrder()
+        let edge = movingDown ? selected.last : selected.first
+        if let edge, let index = ids.firstIndex(of: edge), !ids.isEmpty {
+          let next = min(max(index + (movingDown ? 1 : -1), 0), ids.count - 1)
+          if let row = self.chatRows.rowIndex(forMessageStableId: ids[next]) {
+            if event.modifierFlags.contains(.shift) {
+              self.extendMessageSelection(toRow: row)
+            } else {
+              self.beginMessageSelection(atRow: row)
+            }
+            self.tableView.scrollRowToVisible(row)
+          }
+        }
+        return nil
+      }
+      if event.keyCode == 53 {
+        self.clearMessageSelection()
+        return nil
+      }
+      if event.modifierFlags.intersection([.command, .control, .option]) == .command,
+         event.charactersIgnoringModifiers?.lowercased() == "a"
+      {
+        self.selectAllMessages()
+        return nil
+      }
+      if event.keyCode == 36 {
+        self.forwardSelectedMessages()
+        return nil
+      }
+      return event
+    }
+  }
+
+  private func removeForwardSelectionMonitor() {
+    if let forwardSelectionMonitor { NSEvent.removeMonitor(forwardSelectionMonitor) }
+    forwardSelectionMonitor = nil
   }
 
   private var threadAnchor: FullMessage? {
@@ -1323,7 +1530,8 @@ class MessageListAppKit: NSViewController {
       tableView.tableColumns.first?.width ?? 0.0,
       viewWidth,
     ]
-    return ceil(widths.max() ?? 0)
+    let selectionInset = showsForwardSelection ? MessageTableCell.forwardSelectionInset : 0
+    return ceil(widths.max() ?? 0) - selectionInset
   }
 
   private func isValidMeasurementWidth(_ width: CGFloat, renderStyle: MessageRenderStyle) -> Bool {
@@ -2086,6 +2294,7 @@ class MessageListAppKit: NSViewController {
     super.viewDidAppear()
     log.trace("viewDidAppear() called")
     setupLiveResizeObserver()
+    if messageSelection.isActive { installForwardSelectionMonitor() }
     observeToolbarDisplayModeIfNeeded()
     updateScrollViewInsets()
     updateToolbar()
@@ -2105,6 +2314,7 @@ class MessageListAppKit: NSViewController {
     super.viewDidDisappear()
     log.trace("viewDidDisappear() called")
     removeLiveResizeObserver()
+    removeForwardSelectionMonitor()
     clearHoveredMessage()
   }
 
@@ -2332,7 +2542,7 @@ class MessageListAppKit: NSViewController {
         guard !Task.isCancelled else { return false }
 
         let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
-        pruneMessageSelection()
+        defer { pruneMessageSelection() }
 
         switch rowUpdate {
           case let .insert(inserted) where !inserted.isEmpty:
@@ -2463,7 +2673,7 @@ class MessageListAppKit: NSViewController {
       nil
     }
     let rowUpdate = chatRows.apply(update)
-    pruneMessageSelection()
+    defer { pruneMessageSelection() }
     if rowUpdate != .none {
       clearHoveredMessage()
     }
@@ -3642,6 +3852,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     cell.setScrollState(scrollState)
     cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
+    configureForwardSelection(cell, row: row)
     let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
     cell.setMessageHoverState(shouldHover)
     if shouldHover {
@@ -4092,6 +4303,7 @@ extension MessageListAppKit {
 extension MessageListAppKit {
   func dispose() {
     isDisposed = true
+    removeForwardSelectionMonitor()
     cancellables.removeAll()
 
     // Cancel any tasks

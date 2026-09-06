@@ -181,6 +181,10 @@ actor CommandBarCatalogService {
     )
   }
 
+  func recentForwardDestinations() async -> [HomeChatListItemSnapshot] {
+    await catalog.recentForwardDestinations()
+  }
+
   func reset() async {
     generation &+= 1
     observation?.cancel()

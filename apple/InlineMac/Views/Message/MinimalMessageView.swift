@@ -3639,6 +3639,10 @@ class MinimalMessageViewAppKit: NSView {
     }
   }
 
+  @objc private func selectMessagesForForwarding() {
+    MessageListAppKit.beginForwardSelection(from: self)
+  }
+
   @objc private func forwardMessage() {
     if let forwardMessages = dependencies?.forwardMessages {
       forwardMessages.present(messages: [fullMessage])
@@ -4942,7 +4946,21 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       if !message.isSubthreadPlacement {
         let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
+        if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
+           dependencies.forwardMessages != nil {
+          forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
+        }
         menu.addItem(forwardItem)
+        if ExperimentalFeatureFlags.quickForwardEnabled, message.messageId > 0,
+           message.status == nil || message.status == .sent
+        {
+          let selectItem = NSMenuItem(
+            title: "Select Messages", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
+          )
+          selectItem.target = self
+          selectItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
+          menu.addItem(selectItem)
+        }
       }
     }
 

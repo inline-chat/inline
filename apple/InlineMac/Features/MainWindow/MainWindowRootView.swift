@@ -11,6 +11,7 @@ struct MainWindowRootView: View {
 
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
   @State private var forwardMessages = ForwardMessagesPresenter()
+  @AppStorage(ExperimentalFeatureFlags.quickForwardKey) private var quickForwardEnabled = false
   @State private var overlay = OverlayManager()
   @State private var commandBarRegistry = CommandBarRegistry()
   @State private var sidebarViewModel: SidebarViewModel
@@ -117,6 +118,10 @@ struct MainWindowRootView: View {
       } else {
         overlay.showInfo(notice.message, placement: .standard)
       }
+    }
+    .task(id: showsMain && quickForwardEnabled) {
+      guard showsMain, quickForwardEnabled, let dependencies else { return }
+      await forwardMessages.observeRecentDestinations(using: dependencies.commandBarCatalog)
     }
     .onChange(of: nav3.currentRoute) { _, _ in
       nativeTab.update(peer: currentSelectedPeer)

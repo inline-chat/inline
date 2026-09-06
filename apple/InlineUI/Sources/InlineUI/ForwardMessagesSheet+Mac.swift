@@ -160,11 +160,13 @@ struct MacForwardMessagesSheetView: View {
   }
 }
 
-private struct MacForwardDestinationRow: View, Equatable {
+struct MacForwardDestinationRow: View, Equatable {
+  enum SelectionStyle { case leadingHighlight, trailingCheckmark }
   let destination: ForwardMessagesDestination
   let isSelecting: Bool
   let isSelected: Bool
   let isHighlighted: Bool
+  var selectionStyle: SelectionStyle = .leadingHighlight
   let onActivate: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -185,12 +187,13 @@ private struct MacForwardDestinationRow: View, Equatable {
       && lhs.isSelecting == rhs.isSelecting
       && lhs.isSelected == rhs.isSelected
       && lhs.isHighlighted == rhs.isHighlighted
+      && lhs.selectionStyle == rhs.selectionStyle
   }
 
   var body: some View {
     Button(action: onActivate) {
       HStack(spacing: 0) {
-        if isSelecting {
+        if isSelecting, selectionStyle == .leadingHighlight {
           Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
             .font(.system(size: 16, weight: .medium))
             .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
@@ -219,6 +222,15 @@ private struct MacForwardDestinationRow: View, Equatable {
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        if isSelecting, selectionStyle == .trailingCheckmark {
+          Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 18, weight: .regular))
+            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.5))
+            .frame(width: 22)
+            .padding(.leading, 8)
+            .accessibilityHidden(true)
+        }
       }
       .frame(height: Self.rowHeight)
       .padding(.horizontal, 6)
@@ -272,7 +284,7 @@ private struct MacForwardDestinationRow: View, Equatable {
   }
 
   private var backgroundColor: Color {
-    if isSelected {
+    if isSelected, selectionStyle == .leadingHighlight {
       return Color.accentColor.opacity(isHighlighted ? 0.24 : 0.16)
     }
 

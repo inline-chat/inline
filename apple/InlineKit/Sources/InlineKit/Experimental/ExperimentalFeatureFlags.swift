@@ -3,6 +3,12 @@ import Foundation
 public enum ExperimentalFeatureFlags {
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
   public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
+  public static let quickForwardKey = "experimental.quickForward"
+
+  /// Opt-in macOS experiment; an unset preference intentionally defaults to false.
+  public static var quickForwardEnabled: Bool {
+    UserDefaults.standard.bool(forKey: quickForwardKey)
+  }
 
   public static var sidebarAsInboxEnabled: Bool {
     get { isSidebarAsInboxEnabled }

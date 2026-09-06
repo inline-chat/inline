@@ -5,6 +5,8 @@ struct ExperimentalSettingsDetailView: View {
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
+  @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
+  private var quickForwardEnabled = false
 
   var body: some View {
     Form {
@@ -22,6 +24,12 @@ struct ExperimentalSettingsDetailView: View {
       }
 
       Section {
+        Toggle(isOn: $quickForwardEnabled) {
+          SettingsRowLabel(
+            "Quick Forward",
+            description: "Work in progress. Forward multiple messages with an optional message without opening another chat."
+          )
+        }
         Toggle(isOn: $settings.richContentRendererEnabled) {
           SettingsRowLabel(
             "Rich Content Renderer",

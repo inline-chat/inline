@@ -31,6 +31,21 @@ public actor InlineSearchChatCatalog {
 
   public init() {}
 
+  /// Recent destinations for quick forwarding, independent of sidebar pin order.
+  public func recentForwardDestinations(limit: Int = 6) -> [HomeChatListItemSnapshot] {
+    var seen: Set<Peer> = []
+    return entries.map(\.snapshot)
+      .filter { !$0.archived && $0.chatId != nil }
+      .sorted {
+        if $0.sortDate != $1.sortDate { return $0.sortDate > $1.sortDate }
+        if $0.peerId.id != $1.peerId.id { return $0.peerId.id < $1.peerId.id }
+        return $0.peerId.isPrivate && $1.peerId.isThread
+      }
+      .filter { seen.insert($0.peerId).inserted }
+      .prefix(max(0, limit))
+      .map { $0 }
+  }
+
   public func replace(_ snapshots: [HomeChatListItemSnapshot], knownUsers: [User] = []) {
     var previousByPeer: [Peer: Entry] = [:]
     previousByPeer.reserveCapacity(entries.count)

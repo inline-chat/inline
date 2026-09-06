@@ -39,6 +39,36 @@ class MessageTableCell: NSView {
   private let log = Log.scoped("MessageTableCell", enableTracing: false)
   private var dependencies: AppDependencies?
   private var avatarSwipeProvider: MessageAvatarSwipeProvider?
+  static let forwardSelectionInset: CGFloat = 22
+  private var forwardSelectionCheckmark: ForwardMessageSelectionCheckmark?
+  private var messageTrailingConstraint: NSLayoutConstraint?
+  private var forwardSelectionActive = false
+
+  func setForwardSelection(active: Bool, selectable: Bool, selected: Bool, onToggle: @escaping () -> Void) {
+    forwardSelectionActive = active
+    messageTrailingConstraint?.constant = active ? -Self.forwardSelectionInset : 0
+    if active, selectable {
+      if forwardSelectionCheckmark == nil {
+        let checkmark = ForwardMessageSelectionCheckmark()
+        checkmark.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(checkmark)
+        NSLayoutConstraint.activate([
+          checkmark.widthAnchor.constraint(equalToConstant: 22),
+          checkmark.heightAnchor.constraint(equalToConstant: 22),
+          checkmark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+          checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        forwardSelectionCheckmark = checkmark
+      }
+      forwardSelectionCheckmark?.state = selected ? .on : .off
+      forwardSelectionCheckmark?.onToggle = onToggle
+      forwardSelectionCheckmark?.needsDisplay = true
+      forwardSelectionCheckmark?.isHidden = false
+    } else {
+      forwardSelectionCheckmark?.isHidden = true
+      forwardSelectionCheckmark?.onToggle = nil
+    }
+  }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     let hit = super.hitTest(point)
@@ -260,9 +290,13 @@ class MessageTableCell: NSView {
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
 
+    let trailing = newMessageView.trailingAnchor.constraint(
+      equalTo: trailingAnchor, constant: forwardSelectionActive ? -Self.forwardSelectionInset : 0
+    )
+    messageTrailingConstraint = trailing
     NSLayoutConstraint.activate([
       newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      newMessageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      trailing,
       newMessageView.topAnchor.constraint(equalTo: topAnchor),
       newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
@@ -339,5 +373,7 @@ class MessageTableCell: NSView {
     layer?.removeAllAnimations()
     wasTranslated = nil
     messageView?.reset()
+    forwardSelectionCheckmark?.isHidden = true
+    forwardSelectionCheckmark?.onToggle = nil
   }
 }
