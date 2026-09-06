@@ -1,3 +1,4 @@
+import { transcribeVoiceDraft } from "./voice.transcribeDraft"
 import { Method, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getMe } from "@in/server/realtime/handlers/getMe"
@@ -161,6 +162,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
   log.trace("rpc call", Method[call.method])
 
   switch (call.method) {
+    case Method.TRANSCRIBE_VOICE_DRAFT: {
+      if (call.input.oneofKind !== "transcribeVoiceDraft") throw RealtimeRpcError.BadRequest()
+      const result = await transcribeVoiceDraft(call.input.transcribeVoiceDraft, handlerContext)
+      return { oneofKind: "transcribeVoiceDraft", transcribeVoiceDraft: result }
+    }
+
     case Method.CONNECT_AGENT_SESSION: {
       if (call.input.oneofKind !== "connectAgentSession") throw RealtimeRpcError.BadRequest()
       const result = await connectAgentSessionHandler(call.input.connectAgentSession, handlerContext)

@@ -9,9 +9,9 @@ final class ComposeVoiceButton: NSView {
   private var isHovering = false
 
   var onClick: (() -> Void)?
-  var isEnabled: Bool {
-    get { glassButton?.isEnabled ?? true }
-    set { glassButton?.isEnabled = newValue }
+  var onModeChanged: (() -> Void)?
+  var isEnabled = true {
+    didSet { glassButton?.isEnabled = isEnabled }
   }
 
   override init(frame frameRect: NSRect) {
@@ -47,6 +47,9 @@ final class ComposeVoiceButton: NSView {
     translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(contentView)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(inputPreferencesDidChange), name: UserDefaults.didChangeNotification, object: nil
+    )
 
     if let glassButton {
       // GlassComposeAppKit owns glass-mode geometry so its existing width
@@ -73,6 +76,7 @@ final class ComposeVoiceButton: NSView {
         contentView.centerYAnchor.constraint(equalTo: centerYAnchor),
       ])
     }
+    refreshInputMode()
   }
 
   private static func makeContent(mode: ComposeControlMode) -> (view: NSView, button: NSButton?) {
@@ -102,13 +106,58 @@ final class ComposeVoiceButton: NSView {
   }
 
   @objc private func handleClick() {
+    guard isEnabled else { return }
     onClick?()
   }
 
   override func mouseDown(with event: NSEvent) {
     guard glassButton == nil else { return }
     super.mouseDown(with: event)
+    guard isEnabled else { return }
     onClick?()
+  }
+
+  @objc nonisolated private func inputPreferencesDidChange() {
+    Task { @MainActor [weak self] in self?.refreshInputMode() }
+  }
+
+  private func refreshInputMode() {
+    let selected = ComposeVoiceInputMode.selected
+    let image = NSImage(systemSymbolName: selected.symbol, accessibilityDescription: selected.actionTitle)?
+      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
+    glassButton?.image = image
+    (contentView as? NSImageView)?.image = image
+    toolTip = selected.actionTitle
+    glassButton?.toolTip = selected.actionTitle
+    setAccessibilityLabel(selected.actionTitle)
+    glassButton?.setAccessibilityLabel(selected.actionTitle)
+    let menu = makeInputMenu()
+    self.menu = menu
+    glassButton?.menu = menu
+    onModeChanged?()
+  }
+
+  private func makeInputMenu() -> NSMenu {
+    let menu = NSMenu()
+    for mode in [ComposeVoiceInputMode.voiceMessage, .transcribe] {
+      let item = NSMenuItem(title: mode.title, action: #selector(selectInputMode(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = mode.rawValue
+      item.state = ComposeVoiceInputMode.selected == mode ? .on : .off
+      item.image = NSImage(systemSymbolName: mode.symbol, accessibilityDescription: nil)
+      menu.addItem(item)
+    }
+    return menu
+  }
+
+  @objc private func selectInputMode(_ sender: NSMenuItem) {
+    guard let value = sender.representedObject as? String, let mode = ComposeVoiceInputMode(rawValue: value) else { return }
+    ComposeVoiceInputMode.selected = mode
+    refreshInputMode()
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   override func updateTrackingAreas() {

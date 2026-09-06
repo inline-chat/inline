@@ -1,4 +1,5 @@
 import AVFoundation
+import Auth
 import Combine
 import Foundation
 import InlineKit
@@ -12,11 +13,19 @@ enum ComposeVoiceRecordingPhase: Equatable {
   case recording
   case finishing
   case review
+  case transcribing
+  case transcriptionFailed
 }
 
 @MainActor
 final class ComposeVoiceRecordingViewModel: ObservableObject {
   @Published private(set) var phase: ComposeVoiceRecordingPhase = .idle
+  @Published private(set) var inputMode: ComposeVoiceInputMode = .voiceMessage
+  @Published private(set) var transcriptionError: String?
+  private(set) var transcriptionSendsText = false
+  private var transcriptionTask: Task<Void, Never>?
+  private var transcriptionAccount: AuthAccountMutationToken?
+
   @Published private(set) var duration: TimeInterval = 0
   @Published private(set) var samples: [UInt8] = []
   @Published private(set) var isPlaying = false
@@ -55,6 +64,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   deinit {
     let preservesFinishing = finishingLifetime.isPreserving
     startTask?.cancel()
+    transcriptionTask?.cancel()
     if !preservesFinishing {
       finishTask?.cancel()
     }
@@ -79,8 +89,18 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  func requestStart() {
+  func requestStart(mode: ComposeVoiceInputMode = .voiceMessage) {
     guard phase == .idle else { return }
+    if mode == .transcribe {
+      do {
+        transcriptionAccount = try Auth.shared.handle.beginAccountMutation()
+      } catch {
+        ToastCenter.shared.showError(error.localizedDescription)
+        return
+      }
+    }
+    inputMode = mode
+    transcriptionError = nil
 
     let operationId = UUID()
     self.operationId = operationId
@@ -122,7 +142,9 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       playbackProgress = 0
       isPlaying = false
       phase = .recording
-      stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
+      if inputMode == .voiceMessage {
+        stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
+      }
     } catch {
       log.error("Failed to start voice recording", error: error)
       ToastCenter.shared.showError(error.localizedDescription)
@@ -197,8 +219,54 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return phase == .review && recording != nil
   }
 
+  /// Keep capture, finalization and transcription under the same operation identity.
+  func transcribe(sendText: Bool, completion: @escaping @MainActor (String, Bool) -> Void) {
+    guard inputMode == .transcribe,
+          transcriptionTask == nil,
+          phase == .recording || phase == .review || phase == .transcriptionFailed,
+          let account = transcriptionAccount
+    else { return }
+    transcriptionSendsText = sendText
+    transcriptionError = nil
+    if phase == .recording { pauseRecording() }
+    let operationId = operationId
+    let finishing = finishTask
+    transcriptionTask = Task { [weak self] in
+      if let finishing { _ = await finishing.value }
+      guard !Task.isCancelled, self?.operationId == operationId else { return }
+      guard let recording = self?.recording else {
+        self?.transcriptionTask = nil
+        return
+      }
+      self?.phase = .transcribing
+      do {
+        let text = try await DraftVoiceTranscription.transcribe(
+          audio: recording.data,
+          mimeType: recording.mimeType,
+          duration: recording.duration,
+          accountToken: account
+        )
+        try Task.checkCancellation()
+        try Auth.shared.handle.validateAccountMutation(account)
+        guard let self, self.operationId == operationId, self.phase == .transcribing else { return }
+        self.transcriptionTask = nil
+        self.cancel()
+        completion(text, sendText)
+      } catch {
+        guard !Task.isCancelled, let self, self.operationId == operationId else { return }
+        self.transcriptionTask = nil
+        self.transcriptionError = error.localizedDescription
+        self.phase = .transcriptionFailed
+      }
+    }
+  }
+
   func cancel() {
     operationId = UUID()
+    transcriptionTask?.cancel()
+    transcriptionTask = nil
+    transcriptionAccount = nil
+    transcriptionError = nil
     startTask?.cancel()
     startTask = nil
     finishTask?.cancel()
@@ -277,7 +345,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func togglePlayback() {
-    guard phase == .review, let recording else { return }
+    guard inputMode == .voiceMessage, phase == .review, let recording else { return }
 
     if player?.isPlaying == true {
       player?.pause()
@@ -395,6 +463,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     stopRecordingAction?()
     stopRecordingAction = nil
 
+    inputMode = .voiceMessage
     draftVoice = voice
     recording = MacVoiceRecording(
       fileURL: url,

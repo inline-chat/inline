@@ -58,7 +58,7 @@ describe("Inline Protocol application ordering", () => {
       .toBe("authBrowserStatus")
   })
 
-  test("returns full file bytes once and a compact fresh-request replay response", async () => {
+  test.each(["getFilePart", "transcribeVoiceDraft"] as const)("returns private %s content once and a compact replay response", async (methodName) => {
     const authorization = {
       authKeyId: new Uint8Array(8).fill(1),
       permanentAuthKeyId: new Uint8Array(8).fill(2),
@@ -79,7 +79,9 @@ describe("Inline Protocol application ordering", () => {
         accountSessionId: 2,
       },
     }
-    const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async () => ({
+    const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async () => methodName === "transcribeVoiceDraft" ? {
+      oneofKind: "transcribeVoiceDraft", transcribeVoiceDraft: { text: "private dictation" },
+    } : ({
       oneofKind: "getFilePart",
       getFilePart: {
         offset: 0n,
@@ -101,7 +103,10 @@ describe("Inline Protocol application ordering", () => {
       })
       const dispatched = await dispatcher.dispatch({
         payload: RealtimeV3Request.toBinary({
-          body: { oneofKind: "rpc", rpc: RpcCall.create({
+          body: { oneofKind: "rpc", rpc: RpcCall.create(methodName === "transcribeVoiceDraft" ? {
+            method: Method.TRANSCRIBE_VOICE_DRAFT,
+            input: { oneofKind: "transcribeVoiceDraft", transcribeVoiceDraft: { audio: Uint8Array.of(1), mimeType: "audio/mp4", duration: 1 } },
+          } : {
             method: Method.GET_FILE_PART,
             input: { oneofKind: "getFilePart", getFilePart: {
               fileUniqueId: "IND_replay",
@@ -127,7 +132,8 @@ describe("Inline Protocol application ordering", () => {
         expect(replay.body.rpcError.reqMsgId).toBe(0n)
         expect(replay.body.rpcError.errorCode).toBe(RpcError_Code.RATE_LIMIT)
         expect(replay.body.rpcError.code).toBe(429)
-        expect(replay.body.rpcError.message).toBe("Retry getFilePart with a fresh request ID")
+        expect(replay.body.rpcError.message).toBe(`Retry ${methodName} with a fresh request ID`)
+        expect(new TextDecoder().decode(dispatched.replayPayload)).not.toContain("private dictation")
       }
     } finally {
       handler.mockRestore()

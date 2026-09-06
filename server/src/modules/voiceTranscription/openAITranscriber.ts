@@ -10,6 +10,7 @@ export const voiceTranscriptionModel = "gpt-transcribe"
 const fetchTimeoutMs = 30_000
 
 export type VoiceTranscriptionOptions = {
+  signal?: AbortSignal
   prompt?: string
   keywords?: string[]
   languages?: string[]
@@ -32,7 +33,7 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
   }
 
   const startMs = Date.now()
-  const { request, context } = buildGptTranscribeRequest(file, options)
+  const { context } = buildGptTranscribeRequest(file, options)
   log.info("Sending voice transcription request to OpenAI", {
     voiceId: voice.id,
     fileId: voice.fileId,
@@ -45,9 +46,7 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
     languageHintCount: context.languageHintCount,
   })
 
-  const response = await openaiClient.audio.transcriptions.create(request)
-
-  const text = cleanTranscript(response.text)
+  const text = await transcribeAudioFileWithOpenAI(file, options)
   if (!text) {
     log.warn("OpenAI voice transcription returned empty text", {
       voiceId: voice.id,
@@ -67,6 +66,17 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
   })
 
   return text
+}
+
+/** Shared GPT provider for stored voice messages and transient compose dictation. */
+export async function transcribeAudioFileWithOpenAI(file: File, options?: VoiceTranscriptionOptions) {
+  if (!openaiClient) return undefined
+  const { request } = buildGptTranscribeRequest(file, options)
+  const response = await openaiClient.audio.transcriptions.create(
+    request,
+    options?.signal ? { signal: options.signal, maxRetries: 0 } : undefined,
+  )
+  return cleanTranscript(response.text)
 }
 
 export function buildGptTranscribeRequest(file: File, options?: VoiceTranscriptionOptions) {

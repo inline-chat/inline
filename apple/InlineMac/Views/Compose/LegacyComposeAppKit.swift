@@ -77,12 +77,12 @@ class LegacyComposeAppKit: NSView {
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
     !isVoiceActive &&
       !drafts2.hasPendingAttachments(peer: peerId) &&
-      isEmptyTrimmed &&
-      attachmentItems.isEmpty &&
+      (ComposeVoiceInputMode.selected == .transcribe || (isEmptyTrimmed && attachmentItems.isEmpty)) &&
       state.editingMsgId == nil &&
       state.forwardContext == nil
   }
 
+  private var voiceButtonTrailingConstraint: NSLayoutConstraint?
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
   private var voiceEscapeKeyUnsubscribe: (() -> Void)?
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
@@ -246,6 +246,7 @@ class LegacyComposeAppKit: NSView {
     view.onClick = { [weak self] in
       self?.startVoiceRecording()
     }
+    view.onModeChanged = { [weak self] in self?.updateVoiceAvailability() }
     view.isHidden = true
     return view
   }()
@@ -359,6 +360,7 @@ class LegacyComposeAppKit: NSView {
 
   override func viewWillMove(toSuperview newSuperview: NSView?) {
     if newSuperview == nil {
+      if voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
       requestImmediateDraftPersistenceIfNeeded()
     } else {
       didRequestFinalDraftPersistence = false
@@ -479,6 +481,10 @@ class LegacyComposeAppKit: NSView {
       constant: 0
     )
 
+    let voiceButtonTrailingConstraint = voiceButton.trailingAnchor.constraint(
+      equalTo: trailingAnchor, constant: -horizontalOuterSpacing
+    )
+    self.voiceButtonTrailingConstraint = voiceButtonTrailingConstraint
     var constraints: [NSLayoutConstraint] = [
       heightConstraint,
 
@@ -535,7 +541,7 @@ class LegacyComposeAppKit: NSView {
     ]
 
     constraints.append(contentsOf: [
-      voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      voiceButtonTrailingConstraint,
       voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
       voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
       voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
@@ -569,6 +575,7 @@ class LegacyComposeAppKit: NSView {
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }
+        if editingMsgId != nil, voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         updateVoiceAvailability()
         focus()
@@ -577,6 +584,7 @@ class LegacyComposeAppKit: NSView {
     state.forwardContextPublisher
       .sink { [weak self] forwardContext in
         guard let self else { return }
+        if forwardContext != nil, voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
         let messageId = forwardContext?.messageIds.first
         let sourceChatId = forwardContext?.sourceChatId
         updateMessageView(
@@ -672,11 +680,15 @@ class LegacyComposeAppKit: NSView {
     voiceInputView.isHidden = !isVoiceActive
     textEditor.isHidden = isVoiceActive
     menuButton.isHidden = isVoiceActive
-    emojiButton.isHidden = isVoiceActive
+    let showsDictationWithSend = shouldShowVoiceButton && ComposeVoiceInputMode.selected == .transcribe && canSend
+    emojiButton.isHidden = isVoiceActive || showsDictationWithSend
+    voiceButtonTrailingConstraint?.constant = -horizontalOuterSpacing - (
+      showsDictationWithSend ? ComposeControlMode.legacy.sendButtonSize + rightButtonSpacing : 0
+    )
     attachments.isHidden = isVoiceActive
     attachments.setExternallyCollapsed(isVoiceActive)
     voiceButton.isHidden = isVoiceActive || !shouldShowVoiceButton
-    sendButton.isHidden = isVoiceActive || shouldShowVoiceButton
+    sendButton.isHidden = isVoiceActive || (shouldShowVoiceButton && !showsDictationWithSend)
 
     updateSilentModeUI(animated: false, forceLayout: false, isVoiceActive: isVoiceActive)
   }
@@ -684,10 +696,14 @@ class LegacyComposeAppKit: NSView {
   private func startVoiceRecording() {
     guard canStartVoiceRecording else { return }
     focusWindowIfNeeded()
-    voiceViewModel.requestStart()
+    voiceViewModel.requestStart(mode: ComposeVoiceInputMode.selected)
   }
 
   private func pauseVoiceRecording() {
+    if voiceViewModel.inputMode == .transcribe {
+      transcribeVoiceRecording(sendText: false)
+      return
+    }
     let drafts2 = drafts2
     let peerId = peerId
     voiceViewModel.pauseRecording { [weak self] recording in
@@ -754,18 +770,36 @@ class LegacyComposeAppKit: NSView {
         pauseVoiceRecording()
       case .review:
         voiceViewModel.togglePlayback()
-      case .idle, .starting, .finishing:
+      case .idle, .starting, .finishing, .transcribing, .transcriptionFailed:
         break
     }
   }
 
   private func sendVoiceRecording() {
+    if voiceViewModel.inputMode == .transcribe {
+      transcribeVoiceRecording(sendText: true)
+      return
+    }
     guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
     Task { @MainActor [weak self] in
       guard let self,
             await voiceViewModel.finalizeRecordingForSend()
       else { return }
       sendFinalizedVoiceRecording()
+    }
+  }
+
+  private func transcribeVoiceRecording(sendText: Bool) {
+    guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
+    voiceViewModel.transcribe(sendText: sendText) { [weak self] transcript, shouldSend in
+      guard let self, self.window != nil, self.superview != nil else { return }
+      let draft = NSMutableAttributedString(attributedString: self.textEditor.attributedString)
+      let separator = draft.string.isEmpty || draft.string.last?.isWhitespace == true ? "" : "\n"
+      draft.append(self.textEditor.createAttributedString(separator + transcript))
+      self.setAttributedString(draft)
+      self.saveDraft()
+      self.focus()
+      if shouldSend { self.send(interpretInlineCommands: false) }
     }
   }
 
@@ -1641,7 +1675,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   // Send the message
-  func send(sendMode: MessageSendMode? = nil) {
+  func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
     textEditor.textView.resetPastedLinks()
     if voiceViewModel.phase == .review {
       sendVoiceRecording()
@@ -1676,7 +1710,8 @@ class LegacyComposeAppKit: NSView {
       if case .botCommand = entity.entity { return true }
       return false
     }
-    if editingMessageId == nil,
+    if interpretInlineCommands,
+       editingMessageId == nil,
        forwardContext == nil,
        !hasAttachments,
        !hasBotCommandEntity,
@@ -3169,6 +3204,7 @@ extension LegacyComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
 
   func hostWillMove(toSuperview newSuperview: NSView?) {
     if newSuperview == nil {
+      if voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
       requestImmediateDraftPersistenceIfNeeded()
     } else {
       didRequestFinalDraftPersistence = false

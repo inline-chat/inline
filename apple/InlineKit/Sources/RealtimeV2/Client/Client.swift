@@ -107,7 +107,11 @@ actor ProtocolSession: ProtocolSessionType {
         ))
 
       case let .message(message):
-        log.trace("Protocol session received transport message: \(message)")
+        if case let .rpcResult(result) = message.body, case .transcribeVoiceDraft = result.result {
+          log.trace("Received draft transcription result (content omitted)")
+        } else {
+          log.trace("Protocol session received transport message: \(message)")
+        }
         await handleTransportMessage(message)
 
       case let .rpcCommitOutcomeUnknown(msgId):

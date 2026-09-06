@@ -4520,6 +4520,12 @@ export interface RpcCall {
          */
         updateDialogTranslation: UpdateDialogTranslationInput;
     } | {
+        oneofKind: "transcribeVoiceDraft";
+        /**
+         * @generated from protobuf field: TranscribeVoiceDraftInput transcribeVoiceDraft = 143;
+         */
+        transcribeVoiceDraft: TranscribeVoiceDraftInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5374,6 +5380,12 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogTranslationResult updateDialogTranslation = 142;
          */
         updateDialogTranslation: UpdateDialogTranslationResult;
+    } | {
+        oneofKind: "transcribeVoiceDraft";
+        /**
+         * @generated from protobuf field: TranscribeVoiceDraftResult transcribeVoiceDraft = 143;
+         */
+        transcribeVoiceDraft: TranscribeVoiceDraftResult;
     } | {
         oneofKind: undefined;
     };
@@ -13113,6 +13125,34 @@ export interface ChatAcknowledgements {
     cursors: ChatAcknowledgement[];
 }
 /**
+ * Transient dictation audio. Creates no stored file or chat message.
+ *
+ * @generated from protobuf message TranscribeVoiceDraftInput
+ */
+export interface TranscribeVoiceDraftInput {
+    /**
+     * @generated from protobuf field: bytes audio = 1;
+     */
+    audio: Uint8Array;
+    /**
+     * @generated from protobuf field: string mime_type = 2;
+     */
+    mimeType: string;
+    /**
+     * @generated from protobuf field: uint32 duration = 3;
+     */
+    duration: number;
+}
+/**
+ * @generated from protobuf message TranscribeVoiceDraftResult
+ */
+export interface TranscribeVoiceDraftResult {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+}
+/**
  * @generated from protobuf enum DialogFollowMode
  */
 export enum DialogFollowMode {
@@ -13865,7 +13905,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_DIALOG_TRANSLATION = 141;
      */
-    UPDATE_DIALOG_TRANSLATION = 141
+    UPDATE_DIALOG_TRANSLATION = 141,
+    /**
+     * @generated from protobuf enum value: TRANSCRIBE_VOICE_DRAFT = 142;
+     */
+    TRANSCRIBE_VOICE_DRAFT = 142
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -22855,7 +22899,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput },
-            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput }
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput },
+            { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "input", T: () => TranscribeVoiceDraftInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -23714,6 +23759,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogTranslation: UpdateDialogTranslationInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogTranslation)
                     };
                     break;
+                case /* TranscribeVoiceDraftInput transcribeVoiceDraft */ 143:
+                    message.input = {
+                        oneofKind: "transcribeVoiceDraft",
+                        transcribeVoiceDraft: TranscribeVoiceDraftInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).transcribeVoiceDraft)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24149,6 +24200,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogTranslationInput updateDialogTranslation = 142; */
         if (message.input.oneofKind === "updateDialogTranslation")
             UpdateDialogTranslationInput.internalBinaryWrite(message.input.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* TranscribeVoiceDraftInput transcribeVoiceDraft = 143; */
+        if (message.input.oneofKind === "transcribeVoiceDraft")
+            TranscribeVoiceDraftInput.internalBinaryWrite(message.input.transcribeVoiceDraft, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24303,7 +24357,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult },
-            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult }
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult },
+            { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "result", T: () => TranscribeVoiceDraftResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -25162,6 +25217,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogTranslation: UpdateDialogTranslationResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogTranslation)
                     };
                     break;
+                case /* TranscribeVoiceDraftResult transcribeVoiceDraft */ 143:
+                    message.result = {
+                        oneofKind: "transcribeVoiceDraft",
+                        transcribeVoiceDraft: TranscribeVoiceDraftResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).transcribeVoiceDraft)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25597,6 +25658,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogTranslationResult updateDialogTranslation = 142; */
         if (message.result.oneofKind === "updateDialogTranslation")
             UpdateDialogTranslationResult.internalBinaryWrite(message.result.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* TranscribeVoiceDraftResult transcribeVoiceDraft = 143; */
+        if (message.result.oneofKind === "transcribeVoiceDraft")
+            TranscribeVoiceDraftResult.internalBinaryWrite(message.result.transcribeVoiceDraft, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -50021,3 +50085,113 @@ class ChatAcknowledgements$Type extends MessageType<ChatAcknowledgements> {
  * @generated MessageType for protobuf message ChatAcknowledgements
  */
 export const ChatAcknowledgements = new ChatAcknowledgements$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranscribeVoiceDraftInput$Type extends MessageType<TranscribeVoiceDraftInput> {
+    constructor() {
+        super("TranscribeVoiceDraftInput", [
+            { no: 1, name: "audio", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "duration", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TranscribeVoiceDraftInput>): TranscribeVoiceDraftInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.audio = new Uint8Array(0);
+        message.mimeType = "";
+        message.duration = 0;
+        if (value !== undefined)
+            reflectionMergePartial<TranscribeVoiceDraftInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranscribeVoiceDraftInput): TranscribeVoiceDraftInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes audio */ 1:
+                    message.audio = reader.bytes();
+                    break;
+                case /* string mime_type */ 2:
+                    message.mimeType = reader.string();
+                    break;
+                case /* uint32 duration */ 3:
+                    message.duration = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranscribeVoiceDraftInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes audio = 1; */
+        if (message.audio.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.audio);
+        /* string mime_type = 2; */
+        if (message.mimeType !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.mimeType);
+        /* uint32 duration = 3; */
+        if (message.duration !== 0)
+            writer.tag(3, WireType.Varint).uint32(message.duration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranscribeVoiceDraftInput
+ */
+export const TranscribeVoiceDraftInput = new TranscribeVoiceDraftInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranscribeVoiceDraftResult$Type extends MessageType<TranscribeVoiceDraftResult> {
+    constructor() {
+        super("TranscribeVoiceDraftResult", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TranscribeVoiceDraftResult>): TranscribeVoiceDraftResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<TranscribeVoiceDraftResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranscribeVoiceDraftResult): TranscribeVoiceDraftResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranscribeVoiceDraftResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranscribeVoiceDraftResult
+ */
+export const TranscribeVoiceDraftResult = new TranscribeVoiceDraftResult$Type();

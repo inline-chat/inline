@@ -1589,6 +1589,7 @@ enum Method {
   GET_BOT_SKILLS = 139;
   GET_BOT_CONFIGURATION_CATALOG = 140;
   UPDATE_DIALOG_TRANSLATION = 141;
+  TRANSCRIBE_VOICE_DRAFT = 142;
 }
 
 message RpcCall {
@@ -1735,6 +1736,7 @@ message RpcCall {
     GetBotSkillsInput getBotSkills = 140;
     GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
     UpdateDialogTranslationInput updateDialogTranslation = 142;
+    TranscribeVoiceDraftInput transcribeVoiceDraft = 143;
   }
 }
 
@@ -1883,6 +1885,7 @@ message RpcResult {
     GetBotSkillsResult getBotSkills = 140;
     GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
     UpdateDialogTranslationResult updateDialogTranslation = 142;
+    TranscribeVoiceDraftResult transcribeVoiceDraft = 143;
   }
 }
 
@@ -4751,3 +4754,11 @@ message AcknowledgeMessagesInput {
 message AcknowledgeMessagesResult { repeated Update updates = 1; }
 
 message ChatAcknowledgements { repeated ChatAcknowledgement cursors = 1; }
+
+// Transient dictation audio. Creates no stored file or chat message.
+message TranscribeVoiceDraftInput {
+  bytes audio = 1;
+  string mime_type = 2;
+  uint32 duration = 3;
+}
+message TranscribeVoiceDraftResult { string text = 1; }

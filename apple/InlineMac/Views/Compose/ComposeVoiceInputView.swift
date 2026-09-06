@@ -29,6 +29,50 @@ struct ComposeVoiceInputView: View {
   }
 
   var body: some View {
+    Group {
+      if viewModel.inputMode == .transcribe {
+        dictationBody
+      } else {
+        voiceBody
+      }
+    }
+  }
+
+  private var dictationBody: some View {
+    ZStack {
+      if viewModel.phase == .transcribing || viewModel.phase == .finishing || viewModel.phase == .review {
+        Text("Transcribing")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .accessibilityLabel("Transcribing")
+      }
+      HStack(spacing: rowSpacing) {
+        iconButton("xmark", title: "Cancel dictation", action: onCancel)
+        if viewModel.phase == .recording {
+          waveform(progress: 0)
+          iconButton("stop.fill", title: "Stop dictation", action: onPause)
+          iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
+        } else if viewModel.phase == .transcriptionFailed {
+          Text(viewModel.transcriptionError ?? "Could not transcribe this recording.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help(viewModel.transcriptionError ?? "")
+          iconButton("arrow.clockwise", title: "Retry transcription") {
+            if viewModel.transcriptionSendsText { onSend() } else { onPause() }
+          }
+        } else {
+          Color.clear.frame(maxWidth: .infinity)
+        }
+      }
+    }
+    .padding(.horizontal, horizontalPadding)
+    .frame(maxWidth: .infinity, minHeight: mode.textMinHeight, maxHeight: mode.textMinHeight)
+  }
+
+  private var voiceBody: some View {
     HStack(alignment: rowAlignment, spacing: rowSpacing) {
       switch viewModel.phase {
       case .starting:
@@ -74,7 +118,7 @@ struct ComposeVoiceInputView: View {
         )
         iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
 
-      case .idle:
+      case .idle, .transcribing, .transcriptionFailed:
         EmptyView()
       }
     }

@@ -92,7 +92,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     guard state == .connected, let task else {
       throw TransportError.notConnected
     }
-    log.trace("sending message \(message)")
+    if case let .rpcCall(call) = message.body, call.method == .transcribeVoiceDraft {
+      log.trace("Sending draft transcription request (audio omitted)")
+    } else {
+      log.trace("sending message \(message)")
+    }
     let data = try message.serializedData()
     try await task.send(.data(data))
   }
