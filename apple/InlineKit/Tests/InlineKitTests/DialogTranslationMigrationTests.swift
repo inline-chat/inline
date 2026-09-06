@@ -1,7 +1,9 @@
+import Combine
 import Foundation
 import GRDB
 @testable import InlineKit
 import InlineProtocol
+import RealtimeV2
 import Testing
 
 @Suite("Dialog translation rollout")
@@ -103,5 +105,89 @@ struct DialogTranslationMigrationTests {
       from: JSONEncoder().encode(imported)
     )
     #expect(restored.context.importLegacyEnabled == true)
+  }
+
+  @Test("An unsupported server preserves an enabled choice without flashing off, including after relaunch")
+  func unsupportedServerKeepsLocalChoice() throws {
+    let database = try upgradedDatabase()
+    let preferences = database.translationPreferences
+    let peer = InlineKit.Peer.user(id: 8_002)
+    let transaction = UpdateDialogTranslationTransaction(peer: peer, enabled: true, intent: UUID())
+    var values: [Bool] = []
+    let observation = preferences.changes.sink { changedPeer, enabled in
+      if changedPeer == peer { values.append(enabled) }
+    }
+    defer { observation.cancel() }
+    preferences.begin(true, for: peer, intent: transaction.context.intent)
+    let saved = try database.dbWriter.write { db in
+      try UpdateDialogTranslationTransaction.preserveLocalChoice(transaction.context, preferences: preferences, in: db)
+    }
+    #expect(saved)
+    #expect(preferences.finish(for: peer, intent: transaction.context.intent))
+    #expect(!values.isEmpty && values.allSatisfy { $0 })
+    let restarted = try AppDatabase(database.dbWriter)
+    #expect(restarted.translationPreferences.isEnabled(for: peer))
+    #expect(try restarted.reader.read { db in try DialogTranslationMigration.pendingPeers(db) }.contains(peer))
+    #expect(try restarted.reader.read { db in
+      try String.fetchOne(db, sql: "SELECT translation FROM translation WHERE chatId = 9001 AND messageId = 1")
+    } == "Preserved translation")
+  }
+
+  @Test("An unsupported server's local disable is never imported as a shared disable")
+  func unsupportedServerLocalDisable() throws {
+    let database = try upgradedDatabase()
+    let preferences = database.translationPreferences
+    let peer = InlineKit.Peer.user(id: 8_001)
+    let transaction = UpdateDialogTranslationTransaction(peer: peer, enabled: false, intent: UUID())
+    preferences.begin(false, for: peer, intent: transaction.context.intent)
+    #expect(try database.dbWriter.write { db in
+      try UpdateDialogTranslationTransaction.preserveLocalChoice(transaction.context, preferences: preferences, in: db)
+    })
+    preferences.finish(for: peer, intent: transaction.context.intent)
+    #expect(!preferences.isEnabled(for: peer))
+    #expect(try database.reader.read { db in try DialogTranslationMigration.pendingPeers(db) }.isEmpty)
+  }
+
+  @Test("An old failure cannot overwrite a newer local choice or resurrect a deleted dialog")
+  func unsupportedServerStaleFailure() throws {
+    let database = try upgradedDatabase()
+    let preferences = database.translationPreferences
+    let peer = InlineKit.Peer.user(id: 8_002)
+    let first = UpdateDialogTranslationTransaction(peer: peer, enabled: true, intent: UUID())
+    preferences.begin(true, for: peer, intent: first.context.intent)
+    let next = UUID()
+    preferences.begin(false, for: peer, intent: next)
+    #expect(try database.dbWriter.write { db in
+      try !UpdateDialogTranslationTransaction.preserveLocalChoice(first.context, preferences: preferences, in: db)
+    })
+    #expect(!preferences.finish(for: peer, intent: first.context.intent))
+    #expect(!preferences.isEnabled(for: peer))
+    try database.dbWriter.write { db in
+      try db.execute(sql: "DELETE FROM dialog WHERE id = 8002")
+    }
+    #expect(try database.dbWriter.write { db in
+      try !UpdateDialogTranslationTransaction.preserveLocalChoice(first.context, preferences: preferences, in: db)
+    })
+  }
+
+  @Test("Only an explicit unsupported translation method response enables local compatibility")
+  func unsupportedServerErrorContract() {
+    let unsupported = InlineProtocol.RpcError.with {
+      $0.errorCode = .badRequest
+      $0.code = 400
+      $0.message = "Unsupported RPC method: 141"
+    }
+    #expect(UpdateDialogTranslationTransaction.isUnsupportedSync(.rpcError(unsupported)))
+    var wrongMethod = unsupported
+    wrongMethod.message = "Unsupported RPC method: 142"
+    #expect(!UpdateDialogTranslationTransaction.isUnsupportedSync(.rpcError(wrongMethod)))
+    var badRequest = unsupported
+    badRequest.message = "Bad request"
+    #expect(!UpdateDialogTranslationTransaction.isUnsupportedSync(.rpcError(badRequest)))
+    var internalError = unsupported
+    internalError.errorCode = .internalError
+    internalError.code = 500
+    #expect(!UpdateDialogTranslationTransaction.isUnsupportedSync(.rpcError(internalError)))
+    #expect(!UpdateDialogTranslationTransaction.isUnsupportedSync(.timeout))
   }
 }

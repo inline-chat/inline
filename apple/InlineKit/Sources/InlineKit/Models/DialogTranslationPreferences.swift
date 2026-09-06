@@ -7,6 +7,7 @@ import Logger
 /// rendering never open the database. Each AppDatabase owns its projection.
 public final class DialogTranslationPreferences: @unchecked Sendable {
   public let changes = PassthroughSubject<(Peer, Bool), Never>()
+  public let notices = PassthroughSubject<(peer: Peer, message: String, isError: Bool), Never>()
   private let lock = NSLock()
   private var values: [Int64: Bool] = [:]
   private var peers: [Int64: Peer] = [:]
@@ -32,7 +33,12 @@ public final class DialogTranslationPreferences: @unchecked Sendable {
     if accepted { changes.send((peer, enabled)) }
   }
 
-  public func finish(for peer: Peer, intent: UUID) {
+  func isCurrentIntent(_ intent: UUID, for peer: Peer) -> Bool {
+    lock.withLock { pending[Dialog.getDialogId(peerId: peer)]?.id == intent }
+  }
+
+  @discardableResult
+  public func finish(for peer: Peer, intent: UUID) -> Bool {
     let id = Dialog.getDialogId(peerId: peer)
     let enabled: Bool? = lock.withLock {
       guard pending[id]?.id == intent else { return nil }
@@ -40,6 +46,7 @@ public final class DialogTranslationPreferences: @unchecked Sendable {
       return values[id] ?? false
     }
     if let enabled { changes.send((peer, enabled)) }
+    return enabled != nil
   }
 
   func observe(_ writer: any DatabaseWriter) throws {

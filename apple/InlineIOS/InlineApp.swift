@@ -92,6 +92,10 @@ private struct InlineSceneRoot: View {
       .onDisappear {
         appDelegate.sceneRouterRegistry.unregister(sceneID)
       }
+      .onReceive(AppDatabase.shared.translationPreferences.notices.receive(on: DispatchQueue.main)) { notice in
+        guard scenePhase == .active else { return }
+        ToastManager.shared.showToast(notice.message, type: notice.isError ? .error : .info)
+      }
       .onChange(of: scenePhase) { _, newValue in
         if newValue == .active {
           appDelegate.sceneRouterRegistry.activate(sceneID)

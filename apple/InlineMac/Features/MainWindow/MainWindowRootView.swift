@@ -110,6 +110,14 @@ struct MainWindowRootView: View {
       syncCurrentPeer()
       syncSpaceMenuContext()
     }
+    .onReceive(AppDatabase.shared.translationPreferences.notices.receive(on: DispatchQueue.main)) { notice in
+      guard activeSelectedPeer == notice.peer else { return }
+      if notice.isError {
+        overlay.showError(notice.message, placement: .standard)
+      } else {
+        overlay.showInfo(notice.message, placement: .standard)
+      }
+    }
     .onChange(of: nav3.currentRoute) { _, _ in
       nativeTab.update(peer: currentSelectedPeer)
       syncCurrentPeer()

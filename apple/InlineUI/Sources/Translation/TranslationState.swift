@@ -49,7 +49,7 @@ public final class TranslationState: @unchecked Sendable {
         ), expectedAccount: account)
       } catch {
         preferences.finish(for: peerId, intent: intent)
-        Log.shared.error("Failed to save translation preference", error: error)
+        Log.shared.error("Translation preference sync request failed", error: error)
       }
     }
   }
