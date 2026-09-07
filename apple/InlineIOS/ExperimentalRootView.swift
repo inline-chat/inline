@@ -1187,8 +1187,10 @@ private struct ExperimentalAuthedRootView: View {
         { openHomeDestination(.spaceSettings(spaceId: space.id)) }
       }
     )
-    .frame(width: 28, height: 28)
+    // Fill the iPad toolbar target without changing the phone toolbar layout.
+    .frame(width: usesIPadSplitView ? 44 : 28, height: usesIPadSplitView ? 44 : 28)
     .accessibilityLabel(usesIPadSplitView ? "Chat List Options" : "More")
+    .accessibilityIdentifier("chatListOptions")
     .popover(isPresented: $isNotificationSettingsPresented) {
       NotificationSettingsPopoverContent(
         notificationSettings: notificationSettings,

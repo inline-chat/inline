@@ -644,12 +644,13 @@ private struct ExperimentalChatListView: View {
         // Keep spacing inside the link so its tap and context-menu source
         // cover the complete native List row rather than only its contents.
         .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
+        // Let the iPad List draw its native selection background.
+        .listRowBackground(selection == nil ? Color.clear : nil)
     }
   }
 
   private func baseRow(for item: ChatListItemSnapshot) -> some View {
-    NavigationLink(value: Destination.chat(peer: item.peer)) {
+    let link = NavigationLink(value: Destination.chat(peer: item.peer)) {
       ExperimentalChatListRow(
         item: item,
         layoutMode: chatItemRenderMode.chatListLayoutMode,
@@ -662,6 +663,14 @@ private struct ExperimentalChatListView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(rowContentInsets)
       .contentShape(.interaction, Rectangle())
+    }
+    return Group {
+      if selection != nil {
+        // ForEach identifies rows by Peer; iPad List selection is a Destination.
+        link.tag(Destination.chat(peer: item.peer))
+      } else {
+        link
+      }
     }
     .navigationLinkIndicatorVisibility(.hidden)
     .contentShape(.interaction, Rectangle())

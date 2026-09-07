@@ -41,13 +41,9 @@ struct IPadSidebarSwitcher: View {
   @Binding var selection: IPadSidebarScope
 
   var body: some View {
-    VStack(spacing: 0) {
-      Divider()
-      styledPicker
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-    .background(.bar)
+    styledPicker
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
   }
 
   @ViewBuilder
@@ -72,5 +68,6 @@ struct IPadSidebarSwitcher: View {
       }
     }
     .labelsHidden()
+    .accessibilityIdentifier("iPadChatListFilter")
   }
 }
