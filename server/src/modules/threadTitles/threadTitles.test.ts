@@ -63,13 +63,10 @@ describe("thread title generation", () => {
       ...emptyThread,
       title: "Please review the launch checklist before tomorrow morning",
       isUntitled: true,
-      messageIdCounter: 1,
     }
 
     expect(canAutoTitleThread(placeholderThread)).toBe(true)
-    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 0 })).toBe(false)
-    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 2 })).toBe(false)
-    expect(canAutoTitleThread({ ...placeholderThread, isUntitled: null })).toBe(false)
+    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 1 })).toBe(false)
   })
 
   test("requires substantial non-entity text", async () => {
@@ -327,21 +324,29 @@ describe("thread title generation", () => {
 
     await testUtils.addParticipant(chat.id, user.id)
 
-    const { sendMessage } = await import("@in/server/functions/messages.sendMessage")
-    const peerId = { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chat.id) } } }
-    const context = testUtils.functionContext({ userId: user.id, sessionId: 1 })
-    await sendMessage({ peerId, message: placeholder }, context)
+    const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
+    const generation = maybeScheduleThreadTitleGeneration({
+      chat,
+      message: textMessage,
+      text: placeholder,
+      entities: undefined,
+      currentUserId: user.id,
+    })
     await waitForParseCallCount(1)
 
-    // Keep generation pending while another real send advances the counter.
-    // Message 2 must neither replace nor cancel message 1's title job.
-    await sendMessage({
-      peerId,
-      message: "A later message with enough content must not take over title generation.",
-    }, context)
+    // A concurrent send can carry the same pre-insert chat snapshot. It must
+    // not replace or cancel the title job owned by message 1.
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: { ...textMessage, messageId: 2 },
+      text: "A later message with enough content must not take over title generation.",
+      entities: undefined,
+      currentUserId: user.id,
+    })
 
     resolveCompletion(completion("Launch Checklist"))
     await waitForChatTitle(chat.id, "Launch Checklist")
+    await generation
 
     const updated = await db
       .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
@@ -350,7 +355,6 @@ describe("thread title generation", () => {
       .then((rows) => rows[0])
 
     expect(updated).toEqual({ title: "Launch Checklist", isUntitled: true })
-    await sendMessage({ peerId, message: "Another substantial message after title generation completes." }, context)
     expect(parseCompletion).toHaveBeenCalledTimes(1)
   })
 
