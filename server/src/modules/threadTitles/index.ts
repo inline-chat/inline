@@ -133,9 +133,8 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput): P
   }
 
   // A top-level placeholder is derived from the first message, so only that
-  // message may replace it. The chat snapshot is loaded before message insert;
-  // checking the assigned message id also protects against concurrent sends
-  // that both observed the initial zero counter.
+  // message may replace it. Scheduling receives the post-insert chat snapshot;
+  // check the message id too so later sends cannot take over the first job.
   if (
     input.chat.parentMessageId == null &&
     titleGuard.kind === "untitledExact" &&
@@ -234,7 +233,7 @@ function titleGuardForScheduling(chat: ThreadTitleChat): ThreadTitleGuard | unde
     if (!isNonEmpty(chat.title)) {
       return { kind: "empty" }
     }
-    if (chat.isUntitled === true && chat.messageIdCounter === 0) {
+    if (chat.isUntitled === true && chat.messageIdCounter === 1) {
       return { kind: "untitledExact", currentTitle: chat.title }
     }
     return undefined
