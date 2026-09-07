@@ -286,10 +286,12 @@ public class ChatContainerView: UIView {
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
+    let composeLeadingAnchor = IPadNavigationLane.isEnabled ? safeAreaLayoutGuide.leadingAnchor : leadingAnchor
+    let composeTrailingAnchor = IPadNavigationLane.isEnabled ? safeAreaLayoutGuide.trailingAnchor : trailingAnchor
     NSLayoutConstraint.activate(
       commonConstraints + [
-        composeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-        composeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        composeContainerView.leadingAnchor.constraint(equalTo: composeLeadingAnchor),
+        composeContainerView.trailingAnchor.constraint(equalTo: composeTrailingAnchor),
         composeContainerView.topAnchor.constraint(
           equalTo: composeView.topAnchor,
           constant: -ComposeView.textViewVerticalMargin
@@ -298,17 +300,23 @@ public class ChatContainerView: UIView {
 
         mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
         mentionCompletionViewWrapper.leadingAnchor.constraint(
-          equalTo: leadingAnchor,
+          equalTo: composeLeadingAnchor,
           constant: ComposeView.textViewHorizantalMargin
         ),
         mentionCompletionViewWrapper.trailingAnchor.constraint(
-          equalTo: trailingAnchor,
+          equalTo: composeTrailingAnchor,
           constant: -ComposeView.textViewHorizantalMargin
         ),
         mentionCompletionHeightConstraint,
 
-        composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
-        composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
+        composeView.leadingAnchor.constraint(
+          equalTo: composeLeadingAnchor,
+          constant: ComposeView.textViewHorizantalMargin
+        ),
+        composeView.trailingAnchor.constraint(
+          equalTo: composeTrailingAnchor,
+          constant: -ComposeView.textViewHorizantalMargin
+        ),
         composeView.bottomAnchor.constraint(
           equalTo: composeContainerView.bottomAnchor,
           constant: -ComposeView.textViewVerticalMargin
@@ -320,7 +328,7 @@ public class ChatContainerView: UIView {
 
         // The hit target is 44pt while the visible glass is 34pt. Insets preserve
         // the existing 10pt visual spacing from the trailing and compose edges.
-        scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+        scrollButton.trailingAnchor.constraint(equalTo: composeTrailingAnchor, constant: -5),
         scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -5),
       ]
     )

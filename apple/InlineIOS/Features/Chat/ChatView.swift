@@ -609,7 +609,9 @@ struct ChatView: View {
         isPreview: preview,
         theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
       )
-      .edgesIgnoringSafeArea(.all)
+      // Respect the iPad detail column without changing phone or preview
+      // safe-area behavior, including the existing keyboard handling.
+      .edgesIgnoringSafeArea(IPadNavigationLane.isEnabled && !preview ? .vertical : .all)
     }
   }
 
