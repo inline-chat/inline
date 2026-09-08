@@ -3486,6 +3486,9 @@ mod tests {
                 }
                 if method == "turn/start" {
                     assert_eq!(request["params"]["permissions"], ":workspace");
+                    assert_eq!(request["params"]["model"], "gpt-6-astra");
+                    assert_eq!(request["params"]["effort"], "low");
+                    assert_eq!(request["params"]["cwd"], "/repo");
                 }
                 writer
                     .write_all(
@@ -3530,8 +3533,8 @@ mod tests {
                 },
                 TurnOptions {
                     cwd: Some("/repo".into()),
-                    model: Some("codex-model".to_string()),
-                    reasoning: Some("medium".to_string()),
+                    model: Some("gpt-6-astra".to_string()),
+                    reasoning: Some("low".to_string()),
                     permissions: Some(":workspace".to_string()),
                 },
             )

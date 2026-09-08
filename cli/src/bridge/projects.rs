@@ -150,8 +150,21 @@ pub(super) fn project_choices(
     if let Some(path) = codex_state_path {
         discover_saved_projects(store, installation_id, path)?;
     }
+    // A projectless session still needs a provider cwd. Publish the ordinary
+    // home workspace under a friendly label so clearing persists a real ID.
+    let home = resolve_setup_workspace(None)?;
+    let home_id = workspace_id(&home)?;
+    store.discover_workspace(installation_id, &home_id, &home)?;
     store.refresh_workspace_availability(installation_id, now_seconds())?;
-    Ok(store.project_workspace_choices(installation_id, selected)?)
+    let mut choices = store.project_workspace_choices(installation_id, selected)?;
+    choices.retain(|choice| choice.workspace_id != home_id);
+    choices.push(WorkspaceChoice {
+        selected: !choices.iter().any(|choice| choice.selected),
+        workspace_id: home_id,
+        display_name: "No project".to_string(),
+        parent_hint: None,
+    });
+    Ok(choices)
 }
 
 fn discover_saved_projects(
@@ -354,7 +367,12 @@ mod tests {
             let choices =
                 project_choices(&store, &installation, Some(&selected_id), Some(&state_path))
                     .unwrap();
-            assert_eq!(choices.len(), 13);
+            assert_eq!(choices.len(), 14);
+            assert!(
+                choices
+                    .iter()
+                    .any(|choice| choice.display_name == "No project")
+            );
             assert!(choices.iter().any(|choice| choice.selected));
             assert_eq!(
                 store

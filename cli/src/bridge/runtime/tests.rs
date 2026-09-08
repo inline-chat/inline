@@ -8,7 +8,7 @@ use std::sync::{
 use inline_client::{MessageMutation, RandomId, TransactionId, TransactionIdentity};
 
 #[test]
-fn bound_configuration_defaults_while_the_provider_catalog_is_unavailable() {
+fn bound_configuration_preserves_choices_while_the_provider_catalog_is_unavailable() {
     let resolver = BotAgentResolver::disabled();
     let context = proto::AgentThreadContext {
         bot_user_id: 17,
@@ -23,15 +23,14 @@ fn bound_configuration_defaults_while_the_provider_catalog_is_unavailable() {
     assert_eq!(
         resolver.resolve_configuration(&context),
         ResolvedAgentConfiguration {
-            model: None,
-            reasoning: None,
-            fallback: Some(AgentConfigurationFallback::Catalog),
+            model: Some("gpt-test".to_string()),
+            reasoning: Some("high".to_string()),
         }
     );
 }
 
 #[test]
-fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
+fn bound_configuration_preserves_native_ids_despite_stale_catalog() {
     let resolver = BotAgentResolver::disabled();
     resolver.store_configuration_catalog(AgentConfigurationCatalog {
         projects: Some(AgentProjectCatalog {
@@ -77,7 +76,6 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
         ResolvedAgentConfiguration {
             model: Some("gpt-test".to_string()),
             reasoning: Some("high".to_string()),
-            fallback: None,
         }
     );
     assert_eq!(
@@ -85,23 +83,20 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
         ResolvedAgentConfiguration {
             model: Some("gpt-test".to_string()),
             reasoning: Some("high".to_string()),
-            fallback: None,
         }
     );
     assert_eq!(
         resolver.resolve_configuration(&context("inline", "missing", "high")),
         ResolvedAgentConfiguration {
-            model: None,
-            reasoning: None,
-            fallback: Some(AgentConfigurationFallback::Model),
+            model: Some("missing".to_string()),
+            reasoning: Some("high".to_string()),
         }
     );
     assert_eq!(
         resolver.resolve_configuration(&context("inline", "gpt-test", "low")),
         ResolvedAgentConfiguration {
             model: Some("gpt-test".to_string()),
-            reasoning: None,
-            fallback: Some(AgentConfigurationFallback::Reasoning),
+            reasoning: Some("low".to_string()),
         }
     );
     assert_eq!(
@@ -117,7 +112,6 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
         ResolvedAgentConfiguration {
             model: None,
             reasoning: Some("high".to_string()),
-            fallback: None,
         }
     );
 
@@ -145,7 +139,6 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
         ResolvedAgentConfiguration {
             model: None,
             reasoning: Some("high".to_string()),
-            fallback: None,
         }
     );
 }
@@ -461,7 +454,7 @@ fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
 }
 
 #[test]
-fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
+fn unbound_chat_keeps_a_replaced_default_workspace() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     store
@@ -506,10 +499,13 @@ fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
     };
 
     let conversation = conversation_for_chat(&route, 707).expect("home fallback");
-    let home = resolve_setup_workspace(None).expect("test home");
+
     let snapshot = conversation.snapshot();
-    assert_eq!(snapshot.workspace, home);
-    assert_ne!(snapshot.binding.workspace_id, workspace_id);
+    assert_eq!(
+        snapshot.workspace,
+        std::fs::canonicalize(&workspace).unwrap()
+    );
+    assert_eq!(snapshot.binding.workspace_id, workspace_id);
 }
 
 #[tokio::test]
@@ -837,7 +833,6 @@ async fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
             .expect("mark unavailable")
     );
     std::fs::rename(&workspace_path, &moved_workspace_path).expect("move original workspace");
-    std::fs::create_dir(&workspace_path).expect("replace workspace path");
     let route = InboundRoute {
         store: store.clone(),
         installation_id: installation_id.clone(),

@@ -269,10 +269,8 @@ impl BridgeStore {
         Ok(self.recent_workspaces(installation_id, 1)?.pop())
     }
 
-    /// Revalidates the registered canonical path and filesystem object before
-    /// the provider receives it. A missing, redirected, or replaced root is
-    /// failed closed and marked unavailable instead of silently changing the
-    /// project in which an existing conversation executes.
+    /// Resolves the selected path at execution time. Folder replacements and
+    /// symlink changes are allowed; only a missing/non-directory root blocks work.
     pub fn verified_workspace(
         &self,
         installation_id: &InstallationId,
@@ -286,7 +284,7 @@ impl BridgeStore {
             })?;
         let verified_canonical_path = fs::canonicalize(&record.path)
             .ok()
-            .filter(|canonical| canonical == &record.path && canonical.is_dir());
+            .filter(|canonical| canonical.is_dir());
         let Some(verified_canonical_path) = verified_canonical_path else {
             self.mark_workspace_unavailable(installation_id, workspace_id, checked_at)?;
             return Err(StoreError::WorkspaceUnavailable {
@@ -299,17 +297,6 @@ impl BridgeStore {
         let stored_persistent_identity =
             self.workspace_persistent_identity(installation_id, workspace_id)?;
         let current_persistent_identity = workspace_persistent_identity(&verified_canonical_path);
-        if !workspace_filesystem_identity_matches(
-            record.filesystem_identity.as_ref(),
-            current_identity.as_ref(),
-            stored_persistent_identity.as_ref(),
-            current_persistent_identity.as_ref(),
-        ) {
-            self.mark_workspace_unavailable(installation_id, workspace_id, checked_at)?;
-            return Err(StoreError::WorkspaceUnavailable {
-                workspace_id: workspace_id.to_string(),
-            });
-        }
 
         if record.missing_since.is_some()
             || record.filesystem_identity != current_identity
@@ -341,6 +328,7 @@ impl BridgeStore {
             record.missing_since = None;
             record.filesystem_identity = current_identity;
         }
+        record.path = verified_canonical_path;
         Ok(record)
     }
 
@@ -914,20 +902,6 @@ fn workspace_filesystem_identity(path: &Path) -> StoreResult<Option<WorkspaceFil
     }))
 }
 
-fn workspace_filesystem_identity_matches(
-    stored: Option<&WorkspaceFilesystemIdentity>,
-    current: Option<&WorkspaceFilesystemIdentity>,
-    stored_persistent: Option<&WorkspacePersistentIdentity>,
-    current_persistent: Option<&WorkspacePersistentIdentity>,
-) -> bool {
-    match (stored_persistent, current_persistent) {
-        (Some(stored), Some(current)) => return stored == current,
-        (Some(_), None) => return false,
-        (None, Some(_)) | (None, None) => {}
-    }
-    stored == current
-}
-
 fn parse_persistent_identity(
     volume_uuid: Option<Vec<u8>>,
     object_id: Option<Vec<u8>>,
@@ -1342,7 +1316,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn replaced_workspace_root_is_rejected_even_at_the_same_path() {
+    fn replaced_workspace_root_remains_available_at_the_selected_path() {
         let store = BridgeStore::open_in_memory().expect("store");
         put_installation(&store);
         let parent = tempfile::tempdir().expect("parent");
@@ -1371,14 +1345,51 @@ mod tests {
         let missing = store
             .refresh_workspace_availability(&installation(), 2)
             .expect("refresh workspaces");
-        assert_eq!(missing.len(), 1);
+        assert!(missing.is_empty());
         assert_eq!(
             store
                 .workspace(&installation(), &workspace_id)
                 .expect("stored workspace")
                 .expect("workspace")
                 .missing_since,
-            Some(2)
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_path_follows_a_new_symlink_target() {
+        let store = BridgeStore::open_in_memory().unwrap();
+        put_installation(&store);
+        let root = tempfile::tempdir().unwrap();
+        let selected = root.path().join("inline");
+        let target = root.path().join("inline-core");
+        fs::create_dir(&selected).unwrap();
+        let selected = fs::canonicalize(selected).unwrap();
+        let id = WorkspaceId::new("inline").unwrap();
+        store
+            .select_workspace(&installation(), &id, &selected, 1)
+            .unwrap();
+        fs::rename(&selected, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &selected).unwrap();
+        let resolved = store.verified_workspace(&installation(), &id, 2).unwrap();
+        assert_eq!(resolved.path, fs::canonicalize(&target).unwrap());
+        assert_eq!(
+            store.workspace(&installation(), &id).unwrap().unwrap().path,
+            selected
+        );
+        let second = root.path().join("another-inline");
+        fs::create_dir(&second).unwrap();
+        // Replace the link atomically, keeping the registered selection unchanged.
+        let next_link = root.path().join("next-link");
+        std::os::unix::fs::symlink(&second, &next_link).unwrap();
+        fs::rename(next_link, &selected).unwrap();
+        assert_eq!(
+            store
+                .verified_workspace(&installation(), &id, 3)
+                .unwrap()
+                .path,
+            fs::canonicalize(second).unwrap()
         );
     }
 
@@ -1456,7 +1467,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn persistent_volume_identity_rejects_cross_volume_inode_collision() {
+    fn verified_workspace_refreshes_changed_volume_identity() {
         let store = BridgeStore::open_in_memory().expect("store");
         put_installation(&store);
         let workspace_id = WorkspaceId::new("workspace-volume-replaced").expect("id");
@@ -1480,10 +1491,11 @@ mod tests {
             .expect("simulate another volume with a colliding inode");
         assert_eq!(changed, 1);
 
-        assert!(matches!(
-            store.verified_workspace(&installation(), &workspace_id, 2),
-            Err(StoreError::WorkspaceUnavailable { .. })
-        ));
+        assert!(
+            store
+                .verified_workspace(&installation(), &workspace_id, 2)
+                .is_ok()
+        );
     }
 
     #[test]

@@ -53,6 +53,8 @@ mod conversation;
 pub(in crate::bridge) use conversation::*;
 mod content;
 use content::*;
+mod settings_recovery;
+use settings_recovery::*;
 mod queue_ui;
 pub(in crate::bridge) use queue_ui::*;
 #[cfg(test)]
@@ -186,34 +188,10 @@ pub(super) struct BotAgentResolver {
 
 type BotAgentCache = HashMap<i64, (Instant, Option<proto::BotAgent>)>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AgentConfigurationFallback {
-    Catalog,
-    Project,
-    Model,
-    Reasoning,
-}
-
-impl AgentConfigurationFallback {
-    pub const fn code(self) -> &'static str {
-        match self {
-            Self::Catalog => "agent_configuration_catalog_defaulted",
-            Self::Project => "agent_project_defaulted",
-            Self::Model => "agent_model_defaulted",
-            Self::Reasoning => "agent_reasoning_defaulted",
-        }
-    }
-
-    pub const fn message(self) -> &'static str {
-        "Some selected Agent settings are unavailable, so I’m using this provider’s defaults. Your request is still continuing."
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct ResolvedAgentConfiguration {
     pub model: Option<String>,
     pub reasoning: Option<String>,
-    pub fallback: Option<AgentConfigurationFallback>,
 }
 
 fn agent_thread_context_to_proto(
@@ -297,73 +275,11 @@ impl BotAgentResolver {
         let Some(configuration) = context.configuration.as_ref() else {
             return ResolvedAgentConfiguration::default();
         };
-        let catalog = self
-            .configuration_catalog
-            .read()
-            .expect("Agent configuration catalog poisoned");
-        let Some(catalog) = catalog.as_ref() else {
-            return ResolvedAgentConfiguration {
-                fallback: (configuration.model_id.is_some()
-                    || configuration.reasoning_effort_id.is_some())
-                .then_some(AgentConfigurationFallback::Catalog),
-                ..ResolvedAgentConfiguration::default()
-            };
-        };
-        let selected_model = configuration.model_id.as_deref().and_then(|model_id| {
-            catalog
-                .models
-                .as_ref()
-                .and_then(|models| models.options.iter().find(|model| model.id == model_id))
-        });
-        let model = match (&configuration.model_id, selected_model) {
-            (Some(model), Some(_)) => Some(model.clone()),
-            (Some(_), None) => {
-                return ResolvedAgentConfiguration {
-                    fallback: Some(AgentConfigurationFallback::Model),
-                    ..ResolvedAgentConfiguration::default()
-                };
-            }
-            (None, _) => None,
-        };
-        let effective_model = selected_model.or_else(|| {
-            let models = catalog.models.as_ref()?;
-            let default_model_id = models.default_model_id.as_deref()?;
-            models
-                .options
-                .iter()
-                .find(|model| model.id == default_model_id)
-        });
-        let reasoning = if let Some(reasoning_id) = configuration.reasoning_effort_id.as_deref() {
-            let reasoning_available = catalog.reasoning.as_ref().is_some_and(|reasoning| {
-                reasoning
-                    .options
-                    .iter()
-                    .any(|option| option.id == reasoning_id)
-            });
-            let model_supports_reasoning = catalog.models.as_ref().is_none_or(|_| {
-                effective_model.is_some_and(|model| {
-                    model.reasoning_effort_ids.is_empty()
-                        || model
-                            .reasoning_effort_ids
-                            .iter()
-                            .any(|id| id == reasoning_id)
-                })
-            });
-            if !reasoning_available || !model_supports_reasoning {
-                return ResolvedAgentConfiguration {
-                    model,
-                    fallback: Some(AgentConfigurationFallback::Reasoning),
-                    ..ResolvedAgentConfiguration::default()
-                };
-            }
-            Some(reasoning_id.to_string())
-        } else {
-            None
-        };
+        // The catalog may be stale or unavailable. Preserve explicit native IDs
+        // and let the provider validate them instead of silently using defaults.
         ResolvedAgentConfiguration {
-            model,
-            reasoning,
-            fallback: None,
+            model: configuration.model_id.clone(),
+            reasoning: configuration.reasoning_effort_id.clone(),
         }
     }
 
@@ -570,6 +486,10 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
         delivery.ack().await?;
         return Ok(());
     }
+    if handle_settings_retry(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_allowlist_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -693,11 +613,20 @@ pub(super) async fn inbound_from_delivery(
     let ClientEvent::MessageStored { message } = delivery.event() else {
         return Ok(None);
     };
+    inbound_from_message(bot, message, route, false).await
+}
+
+async fn inbound_from_message(
+    bot: &InlineClient,
+    message: &MessageRecord,
+    route: &InboundRoute,
+    retry: bool,
+) -> Result<Option<InboundRecord>, Box<dyn std::error::Error>> {
     if is_agent_session_projection(message) {
         return Ok(None);
     }
     let response_not_before = tokio::time::Instant::now() + INITIAL_RESPONSE_DELAY;
-    if message.timestamp < route.accept_messages_after {
+    if !retry && message.timestamp < route.accept_messages_after {
         return Ok(None);
     }
     // Human access is provider-wide and owner-controlled. Bot deliveries have
@@ -920,9 +849,7 @@ pub(super) async fn inbound_from_delivery(
         && (is_workspace_recovery_command(&direction.text, &route.bot_username)
             || is_provider_epoch_release_command(&direction.text, &route.bot_username))
     {
-        conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get())
-            .await
-            .map(|conversation| (conversation, None))
+        conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get()).await
     } else {
         conversation_for_chat_with_agent_context(
             route,
@@ -932,41 +859,9 @@ pub(super) async fn inbound_from_delivery(
         )
     };
     let conversation = match resolved {
-        Ok((conversation, fallback)) => {
-            if let Some(fallback) = fallback {
-                crate::telemetry::report_bridge_configuration_fallback(
-                    route.provider_id.as_str(),
-                    fallback.code(),
-                );
-                if let Err(error) = send_text_reply(
-                    bot,
-                    message.chat_id.get(),
-                    message.message_id.get(),
-                    fallback.message(),
-                    &format!("{event_id}-agent-configuration-defaulted"),
-                    BridgeNotificationClass::RoutineStatus,
-                )
-                .await
-                {
-                    eprintln!(
-                        "Agent configuration fallback notice failed; continuing the request: {}",
-                        safe_diagnostic(&error.to_string())
-                    );
-                }
-            }
-            conversation.snapshot()
-        }
+        Ok(conversation) => conversation.snapshot(),
         Err(ConversationResolutionError::MissingWorkspace) => {
-            let notice = BridgeNotice::MissingWorkspace.message().to_string();
-            send_text_reply(
-                bot,
-                message.chat_id.get(),
-                message.message_id.get(),
-                &notice,
-                &format!("{event_id}-missing-workspace"),
-                BridgeNotificationClass::ImportantFailure,
-            )
-            .await?;
+            send_workspace_recovery(bot, message, &event_id).await?;
             return Ok(None);
         }
         Err(ConversationResolutionError::InvalidAgentContext(notice)) => {
@@ -2660,6 +2555,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
         return Ok(());
     }
     if handle_active_claude_history_action(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
+    if handle_settings_retry(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
     }

@@ -65,7 +65,7 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
     chat_id: i64,
     context: Option<&proto::AgentThreadContext>,
     apply_provider_configuration: bool,
-) -> Result<(ActiveConversation, Option<AgentConfigurationFallback>), ConversationResolutionError> {
+) -> Result<ActiveConversation, ConversationResolutionError> {
     let context = match context {
         Some(context) if context.bot_user_id != route.bot_user_id => {
             return Err(ConversationResolutionError::InvalidAgentContext(
@@ -78,40 +78,47 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
         .and_then(|context| context.configuration.as_ref())
         .and_then(|configuration| configuration.project_id.as_deref());
 
-    let (conversation, workspace_fallback) = match requested_project_id {
+    let conversation = match requested_project_id {
         Some(project_id) => {
-            let workspace = match WorkspaceId::new(project_id.to_string()) {
-                Ok(workspace_id) => route
-                    .store
-                    .workspace(&route.installation_id, &workspace_id)?,
-                Err(_) => None,
-            };
-            match workspace
-                .map(|workspace| bind_chat_workspace(route, chat_id, workspace))
-                .transpose()
-            {
-                Ok(Some(workspace)) => (
-                    ActiveConversation::new(
-                        BindingKey {
-                            installation_id: route.installation_id.clone(),
-                            chat_id,
-                            workspace_id: workspace.workspace_id,
-                        },
-                        workspace.path,
-                    ),
-                    None,
-                ),
-                Ok(None) | Err(ConversationResolutionError::MissingWorkspace) => (
-                    bind_default_conversation(route, chat_id)?,
-                    Some(AgentConfigurationFallback::Project),
-                ),
-                Err(error) => return Err(error),
-            }
+            let workspace_id = WorkspaceId::new(project_id.to_string())
+                .map_err(|_| ConversationResolutionError::MissingWorkspace)?;
+            let workspace = route
+                .store
+                .workspace(&route.installation_id, &workspace_id)?
+                .ok_or(ConversationResolutionError::MissingWorkspace)?;
+            let workspace = bind_chat_workspace(route, chat_id, workspace)?;
+            ActiveConversation::new(
+                BindingKey {
+                    installation_id: route.installation_id.clone(),
+                    chat_id,
+                    workspace_id: workspace.workspace_id,
+                },
+                workspace.path,
+            )
         }
-        None => (conversation_for_chat(route, chat_id)?, None),
+        None if context.is_some() => {
+            // No project was shown/selected yet. Preserve an existing binding;
+            // a new chat uses the advertised default or home, never recents.
+            let default_id = route
+                .bot_agent_resolver
+                .configuration_catalog()
+                .and_then(|catalog| catalog.projects)
+                .and_then(|projects| projects.default_project_id)
+                .and_then(|id| WorkspaceId::new(id).ok());
+            let default = default_id
+                .map(|id| route.store.workspace(&route.installation_id, &id))
+                .transpose()?
+                .flatten();
+            let fallback = match default {
+                Some(workspace) => workspace,
+                None => home_workspace(route)?,
+            };
+            conversation_for_chat_with_fallback(route, chat_id, Some(fallback))?
+        }
+        None => conversation_for_chat(route, chat_id)?,
     };
     let binding = conversation.snapshot().binding;
-    let fallback = if let Some(context) = context.filter(|_| apply_provider_configuration) {
+    if let Some(context) = context.filter(|_| apply_provider_configuration) {
         let configuration = route.bot_agent_resolver.resolve_configuration(context);
         route.store.apply_agent_thread_configuration(
             &binding,
@@ -119,27 +126,8 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
             configuration.reasoning.as_deref(),
             now_seconds(),
         )?;
-        workspace_fallback.or(configuration.fallback)
-    } else {
-        workspace_fallback
-    };
-    Ok((conversation, fallback))
-}
-
-fn bind_default_conversation(
-    route: &InboundRoute,
-    chat_id: i64,
-) -> Result<ActiveConversation, ConversationResolutionError> {
-    let workspace = default_workspace_or_home(route)?;
-    let workspace = bind_chat_workspace(route, chat_id, workspace)?;
-    Ok(ActiveConversation::new(
-        BindingKey {
-            installation_id: route.installation_id.clone(),
-            chat_id,
-            workspace_id: workspace.workspace_id,
-        },
-        workspace.path,
-    ))
+    }
+    Ok(conversation)
 }
 
 #[cfg(test)]

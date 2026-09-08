@@ -644,7 +644,11 @@ async fn project_browser_pages_all_projects_and_selects_beyond_quick_choices() {
         assert!(options.iter().any(|option| option.value == *value));
         values.extend(options.iter().map(|option| option.value.clone()));
     }
-    assert_eq!(values.len(), 121, "no clipping at eight or 100 projects");
+    assert_eq!(
+        values.len(),
+        122,
+        "all projects plus No project, without clipping"
+    );
     assert!(
         project_settings_document(&fixture.runtime(), &fixture.snapshot, &base, usize::MAX)
             .is_err()

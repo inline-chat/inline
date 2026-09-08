@@ -1111,7 +1111,7 @@ fn version_twenty_eight_database_adds_agent_output_link_repair() {
 }
 
 #[test]
-fn version_twenty_five_workspace_backfill_fails_closed_on_device_drift() {
+fn version_twenty_five_workspace_identity_is_revalidated_after_device_drift() {
     let directory = tempfile::tempdir().expect("directory");
     let workspace = tempfile::tempdir().expect("workspace");
     let database = directory.path().join("bridge.sqlite");
@@ -1157,10 +1157,11 @@ fn version_twenty_five_workspace_backfill_fails_closed_on_device_drift() {
     drop(connection);
 
     let store = BridgeStore::open(&database).expect("reopen");
-    assert!(matches!(
-        store.verified_workspace(&installation_id, &workspace_id, 2),
-        Err(StoreError::WorkspaceUnavailable { .. })
-    ));
+    assert!(
+        store
+            .verified_workspace(&installation_id, &workspace_id, 2)
+            .is_ok()
+    );
 }
 
 #[test]

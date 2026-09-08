@@ -193,7 +193,7 @@ async fn provider_unavailable_bound_context_without_catalog_handles_status_and_q
 }
 
 #[tokio::test]
-async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
+async fn stale_catalog_preserves_configuration_and_queues_the_delivery() {
     let route = route("codex");
     route
         .bot_agent_resolver
@@ -238,7 +238,24 @@ async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
         })
         .await
         .expect("failure history");
-    assert!(history_contains(&history, "using this provider’s defaults"));
+    assert!(!history_contains(
+        &history,
+        "using this provider’s defaults"
+    ));
+    let record = route
+        .store
+        .get_inbound("inline-message-706-9")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        route
+            .store
+            .chat_settings(&record.binding, 2)
+            .unwrap()
+            .model
+            .as_deref(),
+        Some("missing-model")
+    );
     assert_eq!(
         route
             .store
@@ -251,7 +268,7 @@ async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
 }
 
 #[tokio::test]
-async fn unavailable_bound_project_defaults_and_queues_the_delivery() {
+async fn unavailable_bound_project_offers_retry_without_queueing() {
     let route = route("codex");
     record_bound_dialog_with_project(&route, "missing-project", "gpt-test").await;
     let (bot, backend, mut events) = client().await;
@@ -272,14 +289,16 @@ async fn unavailable_bound_project_defaults_and_queues_the_delivery() {
         })
         .await
         .expect("fallback history");
-    assert!(history_contains(&history, "using this provider’s defaults"));
+    assert!(history_contains(&history, "project folder isn’t available"));
+    // InMemoryBackend omits action metadata; callback access and deduplication
+    // are covered by settings_retry_rechecks_access_and_admits_the_original_request_once.
     assert_eq!(
         route
             .store
             .pending_inbound_bindings(&route.installation_id, 10)
             .expect("queued work")
             .len(),
-        1
+        0
     );
     bot.shutdown().await.expect("shutdown");
 }
@@ -635,4 +654,160 @@ async fn unavailable_workspace_allows_only_owner_project_recovery_commands() {
         delivery.ack().await.unwrap();
         bot.shutdown().await.unwrap();
     }
+}
+
+#[test]
+fn explicit_project_and_projectless_chats_never_follow_recent_workspaces() {
+    let route = route("codex");
+    let recent = tempfile::tempdir().expect("recent project");
+    route
+        .store
+        .select_workspace(
+            &route.installation_id,
+            &WorkspaceId::new("experiment").unwrap(),
+            recent.path(),
+            2,
+        )
+        .unwrap();
+    let context = |project: &str| proto::AgentThreadContext {
+        bot_user_id: route.bot_user_id,
+        agent_id: None,
+        configuration: Some(proto::AgentThreadConfiguration {
+            project_id: Some(project.to_string()),
+            model_id: Some("gpt-6-astra".to_string()),
+            reasoning_effort_id: Some("low".to_string()),
+        }),
+    };
+    let inline =
+        conversation_for_chat_with_agent_context(&route, 6336, Some(&context("project")), true)
+            .unwrap()
+            .snapshot();
+    assert_eq!(inline.binding.workspace_id.as_str(), "project");
+    let settings = route.store.chat_settings(&inline.binding, 3).unwrap();
+    assert_eq!(settings.model.as_deref(), Some("gpt-6-astra"));
+    assert_eq!(settings.reasoning.as_deref(), Some("low"));
+    let choices =
+        projects::project_choices(&route.store, &route.installation_id, None, None).unwrap();
+    let no_project = choices
+        .iter()
+        .find(|choice| choice.display_name == "No project")
+        .unwrap();
+    let projectless = conversation_for_chat_with_agent_context(
+        &route,
+        6336,
+        Some(&context(no_project.workspace_id.as_str())),
+        true,
+    )
+    .unwrap()
+    .snapshot();
+    assert_eq!(
+        projectless.workspace,
+        resolve_setup_workspace(None).unwrap()
+    );
+    assert_ne!(projectless.binding.workspace_id.as_str(), "experiment");
+    // Resolution is repeatable across repeated route resolution; recents cannot undo clearing.
+    route
+        .store
+        .select_workspace(
+            &route.installation_id,
+            &WorkspaceId::new("experiment").unwrap(),
+            recent.path(),
+            4,
+        )
+        .unwrap();
+    let resumed = conversation_for_chat_with_agent_context(
+        &route,
+        6336,
+        Some(&context(no_project.workspace_id.as_str())),
+        true,
+    )
+    .unwrap()
+    .snapshot();
+    assert_eq!(resumed.binding, projectless.binding);
+    assert!(matches!(
+        conversation_for_chat_with_agent_context(&route, 7000, Some(&context("missing")), true),
+        Err(ConversationResolutionError::MissingWorkspace)
+    ));
+    assert!(
+        route
+            .store
+            .bound_chat_workspace(&route.installation_id, 7000)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn settings_retry_rechecks_access_and_admits_the_original_request_once() {
+    let mut route = route("codex");
+    record_bound_dialog_with_project(&route, "project", "gpt-6-astra").await;
+    let (bot, _, _) = client().await;
+    let source = message(7, Some(false), "continue working");
+    route.bot_store.insert_message(source.clone()).unwrap();
+    let mut card = message(
+        route.bot_user_id,
+        Some(true),
+        "Choose a project, then retry.",
+    );
+    card.message_id = InlineId::new(20);
+    card.reply_to_message_id = Some(source.message_id);
+    card.metadata.actions = vec![inline_client::MessageActionRecord {
+        action_id: "bridge_settings_retry".to_string(),
+        label: "Retry".to_string(),
+        kind: "callback".to_string(),
+    }];
+    route.bot_store.insert_message(card.clone()).unwrap();
+    let action = |actor| ClientEvent::MessageActionInvoked {
+        interaction_id: InlineId::new(90),
+        chat_id: source.chat_id,
+        message_id: card.message_id,
+        actor_user_id: InlineId::new(actor),
+        action_id: "bridge_settings_retry".to_string(),
+        data: b"bridge-settings-retry-v1".to_vec(),
+    };
+    // Restart cutoffs must not prevent an explicitly retried old request.
+    route.accept_messages_after = 100;
+    assert!(
+        handle_settings_retry(&bot, &action(8), &route)
+            .await
+            .unwrap()
+    );
+    assert!(
+        route
+            .store
+            .get_inbound("inline-message-706-9")
+            .unwrap()
+            .is_none()
+    );
+    for _ in 0..2 {
+        assert!(
+            handle_settings_retry(&bot, &action(7), &route)
+                .await
+                .unwrap()
+        );
+    }
+    let record = route
+        .store
+        .get_inbound("inline-message-706-9")
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.binding.workspace_id.as_str(), "project");
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        route
+            .store
+            .chat_settings(&record.binding, 3)
+            .unwrap()
+            .model
+            .as_deref(),
+        Some("gpt-6-astra")
+    );
+    bot.shutdown().await.unwrap();
 }
