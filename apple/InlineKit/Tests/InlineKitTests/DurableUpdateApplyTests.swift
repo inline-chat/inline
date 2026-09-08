@@ -82,6 +82,14 @@ struct DurableUpdateApplyTests {
 
     #expect(!result.succeeded)
     #expect(result.committedBucketState == nil)
+    guard case let .cursorChanged(bucket, expected, actual)? = result.failure else {
+      Issue.record("Expected typed durable cursor conflict")
+      return
+    }
+    #expect(bucket == key)
+    #expect(expected.seq == 0)
+    #expect(actual.seq == 2)
+
     try await queue.read { (db: Database) throws in
       #expect(try User.fetchOne(db, id: 55) == nil)
       let state = try #require(try DbBucketState.fetchOne(db))
@@ -211,13 +219,10 @@ struct DurableUpdateApplyTests {
       }
     )
 
-    var invalidGroup = InlineProtocol.UserGroup()
-    invalidGroup.id = 88
-    invalidGroup.spaceID = 999
-    invalidGroup.name = "Missing space"
-    invalidGroup.date = 10
+    // Orphan UserGroup enrichment is intentionally ignored by projection
+    // ownership. Use an invalid required Dialog peer to exercise a real failure.
     var sidecars = InlineProtocol.UpdateSidecars()
-    sidecars.userGroups = [invalidGroup]
+    sidecars.dialogs = [InlineProtocol.Dialog()]
 
     var settings = InlineProtocol.UpdateUserSettings()
     settings.settings = .with {
@@ -242,7 +247,7 @@ struct DurableUpdateApplyTests {
     #expect(!result.succeeded)
     #expect(recorder.userIDs == [42])
     try await queue.read { (db: Database) throws in
-      #expect(try UserGroup.fetchCount(db) == 0)
+      #expect(try Dialog.fetchCount(db) == 0)
       #expect(try DbBucketState.fetchCount(db) == 0)
     }
   }

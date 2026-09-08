@@ -133,6 +133,7 @@ public class DataManager: ObservableObject {
     let mutationToken = try beginAccountMutation()
     do {
       try await writeAccountProjection(token: mutationToken) { db in
+        try SyncRemovalRevision.advance(db)
         try Space.deleteOne(db, id: spaceId)
 
         try Member
@@ -160,6 +161,7 @@ public class DataManager: ObservableObject {
     let mutationToken = try beginAccountMutation()
     do {
       try await writeAccountProjection(token: mutationToken) { db in
+        try SyncRemovalRevision.advance(db)
         try Space.deleteOne(db, id: spaceId)
 
         try Member
@@ -501,6 +503,7 @@ public class DataManager: ObservableObject {
     do {
       _ = try await Api.realtime.send(.deleteChat(peerId: peerId))
       try await writeAccountProjection(token: mutationToken) { db in
+        try SyncRemovalRevision.advance(db)
         do {
           try Message.filter(Column("chatId") == threadId).deleteAll(db)
         } catch {

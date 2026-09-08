@@ -70,6 +70,7 @@ public enum BucketKey: Sendable, Hashable {
 }
 
 public protocol SyncStorage: Sendable {
+  func getRemovalRevision() async throws -> Int64
   func getState() async throws -> SyncState
   @discardableResult
   func setState(_ state: SyncState) async -> Bool
@@ -92,4 +93,11 @@ public protocol SyncStorage: Sendable {
   /// Clears global sync state and all bucket states.
   @discardableResult
   func clearSyncState() async -> Bool
+}
+
+public extension SyncStorage {
+  /// Stores without destructive projection writers have no invalidations.
+  func getRemovalRevision() async throws -> Int64 {
+    0
+  }
 }

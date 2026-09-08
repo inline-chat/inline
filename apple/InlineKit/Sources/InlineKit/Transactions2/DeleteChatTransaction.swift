@@ -44,6 +44,7 @@ public struct DeleteChatTransaction: Transaction2 {
       // Optimistically hide the chat from UI by marking as deleted
       // or removing from dialogs list
       try await AppDatabase.shared.dbWriter.write { db in
+        try SyncRemovalRevision.advance(db)
         // Find and remove the dialog for this peer
         let dialogId = Dialog.getDialogId(peerId: context.peerId)
         try Dialog.deleteOne(db, key: dialogId)

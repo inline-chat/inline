@@ -708,6 +708,7 @@ public extension Dialog {
   /// - Throws: Any database error.
   func deleteFromLocalDatabase() async throws {
     try await AppDatabase.shared.dbWriter.write { db in
+      try SyncRemovalRevision.advance(db)
       // Use peerId to fetch the associated chat
       if var chat = try Chat.getByPeerId(db: db, peerId: self.peerId) {
         chat.lastMsgId = nil

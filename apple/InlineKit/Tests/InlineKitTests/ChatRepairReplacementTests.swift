@@ -165,7 +165,7 @@ struct ChatRepairReplacementTests {
       targetState: BucketState(date: 20, seq: 5),
       mutationToken: accountToken(),
       reason: "recent-window",
-      expectedUserStateForMissingChild: expectedUserState
+      expectedRemovalRevision: 0
     ))
 
     #expect(committed?.seq == 5)
@@ -189,7 +189,6 @@ struct ChatRepairReplacementTests {
   @Test("does not let a chat repair overwrite a newer user-bucket read projection")
   func newerUserCursorPreservesReadProjection() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
-    let requestedUserState = BucketState(date: 50, seq: 7)
     try await queue.write { (db: Database) throws in
       try User(id: 42, email: "viewer-newer@example.com", firstName: "Viewer").insert(db)
       var dialog = Dialog(from: .with {
@@ -217,7 +216,7 @@ struct ChatRepairReplacementTests {
       targetState: BucketState(date: 20, seq: 5),
       mutationToken: accountToken(),
       reason: "stale-user-projection",
-      expectedUserStateForMissingChild: requestedUserState
+      expectedRemovalRevision: 0
     ))
 
     #expect(committed?.seq == 5)

@@ -31,6 +31,24 @@ struct DbGlobalSyncState: Codable, FetchableRecord, PersistableRecord {
   var lastSyncDate: Int64
 }
 
+/// Survives deletion of individual roots and cursors. Account token admission
+/// separately fences database/account replacement.
+enum SyncRemovalRevision {
+  static func read(_ db: Database) throws -> Int64 {
+    guard let revision = try Int64.fetchOne(db, sql: "SELECT revision FROM sync_removal_revision WHERE id = 1") else {
+      throw DatabaseError(resultCode: .SQLITE_CORRUPT, message: "Missing sync removal revision")
+    }
+    return revision
+  }
+
+  static func advance(_ db: Database) throws {
+    try db.execute(sql: "UPDATE sync_removal_revision SET revision = revision + 1 WHERE id = 1")
+    guard db.changesCount == 1 else {
+      throw DatabaseError(resultCode: .SQLITE_CORRUPT, message: "Missing sync removal revision")
+    }
+  }
+}
+
 // MARK: - Storage Implementation
 
 public struct GRDBSyncStorage: SyncStorage {
@@ -38,6 +56,10 @@ public struct GRDBSyncStorage: SyncStorage {
 
   public init(db: AppDatabase = .shared) {
     self.db = db
+  }
+
+  public func getRemovalRevision() async throws -> Int64 {
+    try await db.reader.read { try SyncRemovalRevision.read($0) }
   }
 
   public func getState() async throws -> SyncState {

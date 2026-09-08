@@ -11,6 +11,154 @@ import Testing
 
 @Suite("SyncTests", .serialized)
 final class SyncTests {
+  @Test("cursor conflict already covered durably completes without another request")
+  func conflictReconcilesCoveredDemand() async throws {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let apply = RecordingApplyUpdates()
+    await apply.gateNextApply()
+    await apply.setResult(.init(
+      appliedCount: 0,
+      failedCount: 1,
+      failure: .cursorChanged(
+        bucket: key,
+        expected: .init(date: 100, seq: 5),
+        actual: .init(date: 120, seq: 6)
+      )
+    ))
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 6, date: 120, updates: [makeChatInfoUpdate(seq: 6, date: 120)], final: true, resultType: .slice
+    )])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 6)])
+    await apply.waitUntilApplyGated()
+    await storage.setBucketState(for: key, state: .init(date: 120, seq: 6))
+    await apply.releaseApply()
+    #expect(await waitForCondition {
+      let stats = await sync.getStats()
+      return stats.bucketApplyConflicts == 1 && stats.activeBucketFetches == 0
+    })
+    #expect(await client.getUpdatesStartSequences() == [5])
+    #expect(await sync.getStats().bucketApplyFailures == 0)
+    #expect(await sync.getStats().bucketUpdatesSkipped == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("a warm actor reloads a deleted cursor before dismissing an equal hint")
+  func deletedCursorDoesNotSuppressHint() async throws {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    let apply = RecordingApplyUpdates()
+    let response = makeGetUpdatesResult(
+      seq: 1, date: 100, updates: [], final: true, resultType: .slice,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)
+    )
+    let client = FakeProtocolClient(responses: [response, response])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    #expect(await waitForCondition {
+      let stats = await sync.getStats()
+      return stats.bucketFetchCount == 1 && stats.activeBucketFetches == 0
+    })
+    await storage.removeBucketState(for: key)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    #expect(await waitForCondition { await client.getUpdatesStartSequences().count == 2 })
+    #expect(await client.getUpdatesStartSequences() == [0, 0])
+    #expect(await waitForCondition { await storage.getBucketState(for: key).seq == 1 })
+    await sync.prepareForTermination()
+  }
+
+  @Test("partially superseded catch-up retries from durable progress")
+  func conflictRebuildsRemainingDemand() async throws {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let apply = RecordingApplyUpdates()
+    await apply.gateNextApply()
+    await apply.setResultSequence([
+      .init(appliedCount: 0, failedCount: 1, failure: .cursorChanged(
+        bucket: key, expected: .init(date: 100, seq: 5), actual: .init(date: 120, seq: 6)
+      )),
+      .success(count: 1),
+    ])
+    let client = FakeProtocolClient(responses: [
+      makeGetUpdatesResult(
+        seq: 6,
+        date: 120,
+        updates: [makeChatInfoUpdate(seq: 6, date: 120)],
+        final: false,
+        resultType: .slice
+      ),
+      makeGetUpdatesResult(
+        seq: 7,
+        date: 130,
+        updates: [makeChatInfoUpdate(seq: 7, date: 130)],
+        final: true,
+        resultType: .slice
+      ),
+    ])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 7)])
+    await apply.waitUntilApplyGated()
+    await storage.setBucketState(for: key, state: .init(date: 120, seq: 6))
+    await apply.releaseApply()
+    #expect(await waitForCondition(timeout: .seconds(4)) { await storage.getBucketState(for: key).seq == 7 })
+    #expect(await client.getUpdatesStartSequences() == [5, 6])
+    await sync.prepareForTermination()
+  }
+
+  @Test("queued child captures removal evidence only after acquiring a fetch slot")
+  func queuedChildCapturesCurrentRemovalEvidence() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .slice,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)
+    )
+    let client = FakeProtocolClient(responses: [response, response], gateFirstCall: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15, maxConcurrentBucketFetches: 1)
+    )
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    await client.waitForFirstCallStarted()
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 2, updateSeq: 1)])
+    #expect(await waitForCondition { await sync.getStats().activeBucketFetches == 2 })
+    await storage.setRemovalRevision(1)
+    await client.releaseFirstCall()
+    #expect(await waitForCondition { await apply.bucketCommits.count == 2 })
+    let commits = await apply.bucketCommits
+    #expect(commits.first { $0.key == .chat(peer: makeChatPeer(chatId: 1)) }?.expectedRemovalRevision == 0)
+    #expect(commits.first { $0.key == .chat(peer: makeChatPeer(chatId: 2)) }?.expectedRemovalRevision == 1)
+    await sync.prepareForTermination()
+  }
+
+  @Test("durable progress past a frozen target completes without an invalid RPC")
+  func durableOvershootRetiresFrozenTarget() async throws {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 130, seq: 7))
+    let client = FakeProtocolClient(responses: [])
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    let actor = BucketActor(
+      key: key, seq: 5, date: 100, client: client, sync: sync,
+      fetchLimiter: FetchLimiter(limit: 1), accountMutationToken: nil
+    )
+    await actor.setFetchTarget(upToSeq: 6)
+    await actor.fetchNewUpdates()
+    #expect(await actor.snapshot().seq == 7)
+    #expect(await client.getUpdatesStartSequences().isEmpty)
+    #expect(await sync.getStats().activeBucketFetches == 0)
+    await sync.prepareForTermination()
+  }
+
   @Test("sync config defaults")
   func testSyncConfigDefaults() {
     #expect(SyncConfig.default.lastSyncSafetyGapSeconds == 15)
@@ -146,7 +294,7 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
-  @Test("initial child page carries the request-time user cursor across its RPC")
+  @Test("initial child page carries removal evidence independently of User traffic")
   func testInitialChildPageCarriesUserAdmissionFence() async throws {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 4))
@@ -158,14 +306,13 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
     await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 7, updateSeq: 1)])
     await client.waitForFirstCallStarted()
-    // The real writer regression covers rejecting this changed user cursor;
-    // this adapter test ensures we retain the coordinate captured before RPC.
+    // Ordinary User progress must not change the destructive revision captured
+    // before this RPC. The real writer tests also verify admission.
     await storage.setBucketState(for: .user, state: BucketState(date: 120, seq: 5))
     await client.releaseFirstCall()
     #expect(await waitForCondition { await apply.bucketCommits.count == 1 })
     let commit = try #require(await apply.bucketCommits.first)
-    #expect(commit.expectedUserStateForMissingChild?.seq == 4)
-    #expect(commit.expectedUserStateForMissingChild?.date == 100)
+    #expect(commit.expectedRemovalRevision == 0)
     await sync.prepareForTermination()
   }
 
@@ -1390,7 +1537,7 @@ final class SyncTests {
     #expect(await client.getUpdatesStartSequences() == [0, 0])
   }
 
-  @Test("failed user finalization releases the pending gate into delayed retry")
+  @Test("failed user finalization retries retained evidence without another User fetch")
   func testFailedUserRepairFinalizationSchedulesRetry() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
@@ -1461,13 +1608,15 @@ final class SyncTests {
     await sync.activateGeneration()
 
     await sync.process(updates: [makeDurableUpdate(seq: 10, date: 200, payload: .updatedUser(.init()))])
+    #expect(await waitForCondition { await apply.finalizationAttempts > 0 })
+    await apply.setFinalizeUserRepairResult(true)
     let recovered = await waitForCondition(timeout: .seconds(4)) {
       await storage.getBucketState(for: .user).seq == 12
     }
 
     #expect(recovered)
     #expect(await storage.getBucketState(for: childKey).seq == 5)
-    #expect(await client.getUpdatesStartSequences() == [0, 0, 0])
+    #expect(await client.getUpdatesStartSequences() == [0, 0])
     #expect(await waitForCondition {
       let stats = await sync.getStats()
       return stats.queuedDiscoveryTargets == 0 && stats.discoveryTargetsPending == 0 && stats.activeBucketFetches == 0
@@ -3010,7 +3159,7 @@ final class SyncTests {
 
     await sync.acceptedSessionOpened(sessionID: 1, mutationToken: try auth.handle.beginAccountMutation())
     let repaired = await waitForCondition {
-      await apply.repairedUsers.count == 1
+      await storage.getState().lastSyncDate == 185
     }
 
     #expect(repaired)
@@ -3026,6 +3175,7 @@ final class SyncTests {
     #expect(await storage.getState().lastSyncDate == 185)
     #expect(await client.getCalledMethods().filter { $0 == .getChats }.count == 1)
     #expect(await client.getCalledMethods().contains(.getUpdates) == false)
+    await sync.prepareForTermination()
   }
 
   @Test("regression audits an equal user cursor and catches only the returned child")
@@ -3241,8 +3391,10 @@ final class SyncTests {
     #expect(result.succeeded)
 
     let didCallState = await waitForCondition(timeout: .seconds(3)) {
-      let methods = await client.getCalledMethods()
-      return methods.contains(.getUpdatesState)
+      let dates = await client.getUpdatesStateDates()
+      let state = await storage.getState()
+      let user = await storage.getBucketState(for: .user)
+      return dates.count == 2 && state.lastSyncDate == 777 && user.seq == 12
     }
     #expect(didCallState)
 
@@ -3763,6 +3915,9 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 100)
+    #expect(await waitForCondition { await sync.getStats().bucketApplyFailures == 1 })
+    #expect(await sync.getStats().bucketUpdatesSkipped == 0)
+    #expect(await sync.getStats().bucketApplyConflicts == 0)
     await sync.prepareForTermination()
   }
 
@@ -4873,6 +5028,7 @@ private func waitForCondition(
 
 final actor FakeProtocolClient: ProtocolClientType {
   nonisolated let events = AsyncChannel<ProtocolSessionEventEnvelope>()
+  private let responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult.OneOf_Result?)?
 
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
   private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
@@ -4902,8 +5058,10 @@ final actor FakeProtocolClient: ProtocolClientType {
     gateCallNumbers: Set<Int> = [],
     gateMethods: Set<InlineProtocol.Method> = [],
     methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil,
-    methodErrors: [InlineProtocol.Method: [Error]] = [:]
+    methodErrors: [InlineProtocol.Method: [Error]] = [:],
+    responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult.OneOf_Result?)? = nil
   ) {
+    self.responseProvider = responseProvider
     self.responses = responses
     var gates = gateCallNumbers
     if gateFirstCall {
@@ -4967,6 +5125,7 @@ final actor FakeProtocolClient: ProtocolClientType {
       throw error
     }
 
+    if let responseProvider { return try await responseProvider(method, input) }
     if let responsesForMethod = methodResponses?[method], !responsesForMethod.isEmpty {
       var updated = responsesForMethod
       let value = updated.removeFirst()
@@ -5054,6 +5213,7 @@ actor RecordingApplyUpdates: ApplyUpdates {
   var result = UpdateApplyResult.success(count: 0)
   var resultSequence: [UpdateApplyResult] = []
   var repairResult = true
+  var finalizationAttempts = 0
   var finalizeUserRepairResult = true
   var repairStorage: (any SyncStorage)?
   var userRepairOutcome: UserRepairOutcome?
@@ -5215,6 +5375,7 @@ actor RecordingApplyUpdates: ApplyUpdates {
     _ finalization: UserRepairFinalization,
     resolvedTargets: [BucketKey: UserRepairTargetResolution]
   ) async -> BucketState? {
+    finalizationAttempts += 1
     guard repairResult,
           finalizeUserRepairResult,
           Set(resolvedTargets.keys) == Set(finalization.catchUpTargets.keys),
@@ -5330,6 +5491,14 @@ actor SyncActivityRecorder {
 }
 
 actor InMemorySyncStorage: SyncStorage {
+  private var removalRevision: Int64 = 0
+  func getRemovalRevision() -> Int64 {
+    removalRevision
+  }
+
+  func setRemovalRevision(_ value: Int64) {
+    removalRevision = value
+  }
   private var state = SyncState(lastSyncDate: 0)
   private var bucketStates: [BucketKey: BucketState] = [:]
   private var stateWriteFailuresRemaining = 0

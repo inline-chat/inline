@@ -10,6 +10,36 @@ struct DatabaseMigrationOrderTests {
   private let repairMigration = "repair invalid cached user presence"
   private let previousTailMigration = "dialog folder pinned order"
 
+  @Test("existing databases acquire persistent removal evidence without changing cursors")
+  func upgradesRemovalRevision() throws {
+    let migrator = makeMigrator()
+    let writer = try DatabaseQueue()
+    try migrator.migrate(writer, upTo: "agent thread context and catalog")
+    try writer.write { db in
+      try DbBucketState(bucketType: 2, entityId: 0, date: 100, seq: 7).insert(db)
+    }
+    try migrator.migrate(writer)
+    try writer.write { (db: Database) throws in
+      #expect(try SyncRemovalRevision.read(db) == 0)
+      try SyncRemovalRevision.advance(db)
+      #expect(try SyncRemovalRevision.read(db) == 1)
+      #expect(try DbBucketState.fetchOne(db)?.seq == 7)
+    }
+    try migrator.migrate(writer)
+    #expect(try writer.read { try SyncRemovalRevision.read($0) } == 1)
+  }
+
+  @Test("missing removal evidence fails instead of admitting revision zero")
+  func missingRemovalEvidenceFails() throws {
+    let writer = try DatabaseQueue()
+    try makeMigrator().migrate(writer)
+    try writer.write { db in
+      try db.execute(sql: "DELETE FROM sync_removal_revision")
+      #expect(throws: DatabaseError.self) { try SyncRemovalRevision.read(db) }
+      #expect(throws: DatabaseError.self) { try SyncRemovalRevision.advance(db) }
+    }
+  }
+
   @Test("message payload follows the earlier dialog folders migration")
   func messagePayloadFollowsDialogFolders() {
     let migrations = makeMigrator().migrations

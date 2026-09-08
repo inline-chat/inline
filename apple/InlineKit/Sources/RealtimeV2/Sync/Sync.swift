@@ -82,6 +82,9 @@ public struct SyncStats: Sendable {
   public var bucketUpdatesDuplicateSkipped: Int64
   public var bucketFetchCount: Int64
   public var bucketFetchFailures: Int64
+  public var bucketApplyFailures: Int64 = 0
+  public var bucketApplyConflicts: Int64 = 0
+  public var bucketApplySuperseded: Int64 = 0
   public var bucketFetchTooLong: Int64
   public var bucketFetchFollowups: Int64
   public var realtimeBufferRecoveries: Int64
@@ -628,10 +631,18 @@ actor Sync {
     }
   }
 
-  /// Apply updates from bucket actor
-  func userStateForMissingChildAdmission() async throws -> BucketState {
+  func durableBucketState(for key: BucketKey) async throws -> BucketState {
     guard acceptsWork, !isResetting else { throw CancellationError() }
-    return try await syncStorage.getBucketState(for: .user)
+    let expectedGeneration = generation
+    let state = try await syncStorage.getBucketState(for: key)
+    guard isCurrent(expectedGeneration) else { throw CancellationError() }
+    return state
+  }
+
+  /// Apply updates from bucket actor
+  func removalRevisionForChildAdmission() async throws -> Int64 {
+    guard acceptsWork, !isResetting else { throw CancellationError() }
+    return try await syncStorage.getRemovalRevision()
   }
 
   /// Apply updates from bucket actor
@@ -693,7 +704,7 @@ actor Sync {
     }
 
     do {
-      let expectedUserStateForMissingChild = try await syncStorage.getBucketState(for: .user)
+      let expectedRemovalRevision = try await syncStorage.getRemovalRevision()
       guard let rawChat = try await callRepairRpc(
         client: client,
         method: .getChat,
@@ -735,7 +746,7 @@ actor Sync {
         targetState: targetState,
         mutationToken: accountMutationToken,
         reason: reason,
-        expectedUserStateForMissingChild: expectedUserStateForMissingChild
+        expectedRemovalRevision: expectedRemovalRevision
       ))
       if repaired == nil {
         log.error("failed to apply chat repair snapshot")
@@ -780,7 +791,7 @@ actor Sync {
       return nil
     }
     do {
-      let expectedUserStateForMissingChild = try await syncStorage.getBucketState(for: .user)
+      let expectedRemovalRevision = try await syncStorage.getRemovalRevision()
       guard let rawSpace = try await callRepairRpc(
         client: client,
         method: .getSpace,
@@ -803,7 +814,7 @@ actor Sync {
         targetState: targetState,
         mutationToken: accountMutationToken,
         reason: reason,
-        expectedUserStateForMissingChild: expectedUserStateForMissingChild
+        expectedRemovalRevision: expectedRemovalRevision
       ))
     } catch {
       log.error("failed to repair space bucket", error: error)
@@ -1629,7 +1640,14 @@ actor Sync {
     guard isCurrent(expectedGeneration) else { return nil }
     if let bucketActor = buckets[key] {
       if case let .through(targetSeq)? = queuedDiscoveryTargets[key] {
-        let snapshot = await bucketActor.snapshot()
+        var snapshot = await bucketActor.snapshot()
+        if snapshot.seq >= targetSeq {
+          guard await bucketActor.reconcileDurableState(), isCurrent(expectedGeneration) else {
+            if retriesLoadFailure { scheduleBucketLoadRetry(key: key) }
+            return nil
+          }
+          snapshot = await bucketActor.snapshot()
+        }
         if snapshot.seq >= targetSeq {
           await bucketDidAdvance(
             key: key,
@@ -1668,7 +1686,14 @@ actor Sync {
     // exact queued dependency; `.latest` still requires an authoritative fetch.
     if case let .through(targetSeq)? = queuedDiscoveryTargets[key],
        bucketState.seq >= targetSeq {
-      await bucketDidAdvance(key: key, state: bucketState)
+      guard await bucketActor.reconcileDurableState(), isCurrent(expectedGeneration) else {
+        if retriesLoadFailure { scheduleBucketLoadRetry(key: key) }
+        return nil
+      }
+      let snapshot = await bucketActor.snapshot()
+      if snapshot.seq >= targetSeq {
+        await bucketDidAdvance(key: key, state: BucketState(date: snapshot.date, seq: snapshot.seq))
+      }
     }
     return bucketActor
   }
@@ -2287,6 +2312,17 @@ actor Sync {
   func recordBucketFetchFailure() {
     stats.bucketFetchFailures += 1
     stats.lastBucketFetchFailureAt = nowSeconds()
+  }
+
+  func recordBucketApplySuperseded() {
+    stats.bucketApplySuperseded += 1
+  }
+
+  func recordBucketApplyFailure(_ failure: UpdateApplyFailure?) {
+    switch failure {
+      case .cursorChanged?, .removalRevisionChanged?: stats.bucketApplyConflicts += 1
+      default: stats.bucketApplyFailures += 1
+    }
   }
 
   func recordBucketFetchTooLong() {
@@ -2942,6 +2978,7 @@ actor BucketActor {
   private var activeOperations = 0
   private var idleWaiters: [CheckedContinuation<Void, Never>] = []
   private struct PendingUserRepair {
+    let id = UUID()
     let finalization: UserRepairFinalization
     var resolvedTargets: [BucketKey: UserRepairTargetResolution] = [:]
     var isFinalizing = false
@@ -2975,6 +3012,27 @@ actor BucketActor {
     self.sync = sync
     self.fetchLimiter = fetchLimiter
     self.accountMutationToken = accountMutationToken
+  }
+
+  /// Actors cache durable coordinates. Refresh at demand admission and after a
+  /// rejected page, including backwards movement when a durable row was removed.
+  /// Never overwrite a coordinate installed while this read was suspended.
+  func reconcileDurableState() async -> Bool {
+    guard !isInvalidated, let sync else { return false }
+    let priorSeq = seq
+    let priorDate = date
+    do {
+      let state = try await sync.durableBucketState(for: key)
+      guard !isInvalidated, !Task.isCancelled else { return false }
+      guard seq == priorSeq, date == priorDate else { return false }
+      seq = state.seq
+      date = state.date
+      retainBufferedRealtimeUpdates(after: state.seq)
+      return true
+    } catch {
+      log.warning("could not reconcile durable bucket state; retaining demand")
+      return false
+    }
   }
 
   /// Advances an already-created actor when an authoritative account snapshot
@@ -3190,7 +3248,7 @@ actor BucketActor {
   ///
   /// We use this as an upper bound so catch-up fetches don't chase a moving target while the
   /// connection is live and new realtime updates keep arriving.
-  func noteHasNewUpdates(upToSeq: Int64) -> Bool {
+  func noteHasNewUpdates(upToSeq: Int64) async -> Bool {
     guard !isInvalidated else { return false }
 
     // If the server didn't provide a meaningful seq, fetch anyway to be safe.
@@ -3199,8 +3257,13 @@ actor BucketActor {
       needsFetch = true
       return true
     }
-    // Ignore stale hints.
-    guard upToSeq > seq else { return false }
+    // Only the no-fetch decision needs a fresh read; ordinary live updates
+    // retain their existing fast path. A failed read preserves the demand.
+    if upToSeq <= seq {
+      let refreshed = await reconcileDurableState()
+      guard !isInvalidated else { return false }
+      if refreshed, upToSeq <= seq { return false }
+    }
     fetchSeqEnd = max(fetchSeqEnd ?? 0, upToSeq)
     return true
   }
@@ -3215,7 +3278,7 @@ actor BucketActor {
   }
 
   func noteHasNewUpdatesAndMaybeFetch(upToSeq: Int64) async {
-    if noteHasNewUpdates(upToSeq: upToSeq) {
+    if await noteHasNewUpdates(upToSeq: upToSeq) {
       await fetchNewUpdates()
     }
   }
@@ -3368,8 +3431,17 @@ actor BucketActor {
     }
     // A pending account repair owns the user cursor until its exact child
     // targets finalize. Do not start a competing user catch-up pass meanwhile.
-    if pendingUserRepair != nil {
+    if let pending = pendingUserRepair {
       needsFetch = true
+      if !pending.isFinalizing,
+         pending.resolvedTargets.count == pending.finalization.catchUpTargets.count
+      {
+        retryTask?.cancel()
+        retryTask = nil
+        beginOperation()
+        defer { endOperation() }
+        await attemptPendingUserRepairFinalization()
+      }
       return
     }
 
@@ -3555,15 +3627,13 @@ actor BucketActor {
       )
     }
 
+    guard await reconcileDurableState() else {
+      resultLabel = "state_reload_failed"
+      return false
+    }
     var currentSeq = seq
 
     do {
-      let expectedUserStateForMissingChild: BucketState?
-      if key != .user, currentSeq == 0 {
-        expectedUserStateForMissingChild = try await sync.userStateForMissingChildAdmission()
-      } else {
-        expectedUserStateForMissingChild = nil
-      }
       if needsUserProjectionRepair {
         guard let outcome = await sync.repairUserBucket(
           targetState: BucketState(date: date, seq: seq),
@@ -3602,14 +3672,18 @@ actor BucketActor {
         resultLabel = "missing_fixed_target"
         return false
       }
-      if passLatestGeneration != nil, currentSeq >= hardEndSeq {
+      // A newer durable writer can move past this frozen target before a
+      // retry. Do not issue startSeq > seqEnd. Equal finite targets still run
+      // the deliberate bounded probe used by bootstrap.
+      if currentSeq > hardEndSeq || (passLatestGeneration != nil && currentSeq >= hardEndSeq) {
         completeLatestDemand(passLatestGeneration)
+        if let fetchSeqEnd, seq >= fetchSeqEnd { self.fetchSeqEnd = nil }
         await sync.bucketDidAdvance(
           key: key,
           state: BucketState(date: date, seq: seq),
-          authoritative: !hasLatestDemand
+          authoritative: passLatestGeneration != nil && !hasLatestDemand
         )
-        resultLabel = "latest_already_durable"
+        resultLabel = "target_already_durable"
         return true
       }
       while true {
@@ -3635,7 +3709,10 @@ actor BucketActor {
           "bucket=\(key.traceKind) start_seq=\(currentSeq) seq_end=\(hardEndSeq)"
         )
         let result: InlineProtocol.RpcResult.OneOf_Result?
+        let expectedRemovalRevision: Int64?
         do {
+          expectedRemovalRevision = key != .user && currentSeq == 0
+            ? try await sync.removalRevisionForChildAdmission() : nil
           result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
             $0.bucket = key.toProtocolBucket()
             $0.startSeq = currentSeq
@@ -3801,7 +3878,7 @@ actor BucketActor {
           key: key,
           state: pageEndState,
           expectedStartState: pageStartState,
-          expectedUserStateForMissingChild: expectedUserStateForMissingChild
+          expectedRemovalRevision: expectedRemovalRevision
         )
         let applyStartedAt = Date()
         let applySpan = PerformanceTrace.begin(
@@ -3821,10 +3898,26 @@ actor BucketActor {
         guard applyResult.succeeded else {
           await sync.recordBucketUpdatesApplied(
             applied: applyResult.appliedCount,
-            skipped: max(0, payload.updates.count - filteredUpdates.count) + applyResult.failedCount,
+            skipped: max(0, payload.updates.count - filteredUpdates.count - duplicateSkipped),
             duplicates: duplicateSkipped
           )
-          resultLabel = "apply_failed"
+          await sync.recordBucketApplyFailure(applyResult.failure)
+          resultLabel = applyResult.failure?.category ?? "apply_failed"
+          if case let .cursorChanged(bucket, _, _)? = applyResult.failure, bucket == key {
+            guard await reconcileDurableState() else { return false }
+            if seq >= hardEndSeq {
+              completeLatestDemand(passLatestGeneration)
+              await sync.bucketDidAdvance(
+                key: key, state: BucketState(date: date, seq: seq),
+                authoritative: passLatestGeneration != nil && !hasLatestDemand
+              )
+              await sync.recordBucketApplySuperseded()
+              resultLabel = "superseded"
+              return true
+            }
+            // Keep backoff for ongoing contention, but the next request uses
+            // this accepted coordinate rather than retrying an obsolete page.
+          }
           return false
         }
 
@@ -4104,36 +4197,70 @@ actor BucketActor {
       state: state,
       authoritative: authoritative
     )
-    guard pending.resolvedTargets.count == pending.finalization.catchUpTargets.count,
-          let sync
-    else {
-      pendingUserRepair = pending
-      return
-    }
+    pendingUserRepair = pending
+    await attemptPendingUserRepairFinalization()
+  }
+
+  private func attemptPendingUserRepairFinalization() async {
+    guard !isInvalidated, var pending = pendingUserRepair, !pending.isFinalizing,
+          pending.resolvedTargets.count == pending.finalization.catchUpTargets.count,
+          let sync else { return }
     pending.isFinalizing = true
     pendingUserRepair = pending
-    guard let saved = await sync.finalizeUserRepair(
-      pending.finalization,
-      resolvedTargets: pending.resolvedTargets
-    ) else {
-      // The finalization CAS may lose to another account writer. Do not leave
-      // the actor permanently blocked behind a pending outcome: preserve the
-      // exact child dependencies, retain the old cursor, and enter the normal
-      // delayed retry path while the activity lease stays held.
+    let saved = await sync.finalizeUserRepair(
+      pending.finalization, resolvedTargets: pending.resolvedTargets
+    )
+    guard !isInvalidated, pendingUserRepair?.id == pending.id else { return }
+    if let saved {
       pendingUserRepair = nil
-      needsFetch = true
-      setFetchTarget(upToSeq: pending.finalization.proposedUserState.seq)
-      scheduleRetry()
-      log.warning("user repair finalization was not accepted; retaining old cursor")
+      needsFetch = hasLatestDemand
+      resetRetryState()
+      _ = await commitUserRepairState(
+        saved, replayThroughState: pending.finalization.replayThroughState, sync: sync
+      )
       return
     }
-    guard !isInvalidated else { return }
-    pendingUserRepair = nil
-    _ = await commitUserRepairState(
-      saved,
-      replayThroughState: pending.finalization.replayThroughState,
-      sync: sync
-    )
+
+    do {
+      let current = try await sync.durableBucketState(for: .user)
+      guard !isInvalidated, pendingUserRepair?.id == pending.id else { return }
+      let expected = pending.finalization.expectedUserState
+      if current.seq < pending.finalization.proposedUserState.seq,
+         current.seq != expected.seq || current.date != expected.date
+      {
+        // A changed User projection invalidates this candidate. Re-admit it;
+        // an unchanged storage failure does not justify repeating the catalog.
+        pendingUserRepair = nil
+        needsUserProjectionRepair = true
+        setFetchTarget(upToSeq: pending.finalization.proposedUserState.seq)
+        scheduleRetry()
+        return
+      }
+      var unresolved: [BucketKey: Int64] = [:]
+      for (key, resolution) in pending.resolvedTargets {
+        let durable = try await sync.durableBucketState(for: key)
+        guard !isInvalidated, pendingUserRepair?.id == pending.id else { return }
+        if durable.seq < resolution.state.seq || durable.date < resolution.state.date {
+          pending.resolvedTargets.removeValue(forKey: key)
+          unresolved[key] = pending.finalization.catchUpTargets[key]
+        }
+      }
+      pending.isFinalizing = false
+      pendingUserRepair = pending
+      if !unresolved.isEmpty {
+        await sync.registerUserRepairTargets(unresolved)
+        await sync.launchUserRepairTargets(unresolved)
+        return
+      }
+    } catch {
+      guard !isInvalidated, pendingUserRepair?.id == pending.id else { return }
+      pending.isFinalizing = false
+      pendingUserRepair = pending
+    }
+    // Retain exact evidence and the old cursor. The normal bounded retry now
+    // retries finalization instead of fetching the same successful User work.
+    scheduleRetry()
+    log.warning("user repair finalization pending; retrying retained evidence")
   }
 
   func pendingUserRepairTargetBecameInaccessible(key: BucketKey) async {

@@ -319,7 +319,11 @@ public actor UpdatesEngine: Sendable {
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
-      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+      return UpdateApplyResult(
+        appliedCount: 0,
+        failedCount: failedCount,
+        failure: .rejected(category: "invalid_bucket")
+      )
     }
 
     let bucketSettingsUpdates: [InlineProtocol.UpdateUserSettings] = updates.compactMap { update in
@@ -339,7 +343,11 @@ public actor UpdatesEngine: Sendable {
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
-      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+      return UpdateApplyResult(
+        appliedCount: 0,
+        failedCount: failedCount,
+        failure: .rejected(category: "invalid_settings")
+      )
     }
     let bucketSettings = bucketCommit == nil ? [] : bucketSettingsUpdates.map(\.settings)
     let isUserBucket = bucketCommit?.key == .user
@@ -353,7 +361,11 @@ public actor UpdatesEngine: Sendable {
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
-      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+      return UpdateApplyResult(
+        appliedCount: 0,
+        failedCount: failedCount,
+        failure: .rejected(category: "user_projection_busy")
+      )
     }
     let ownsUserBucketCriticalSection = !bucketSettings.isEmpty
     if ownsUserBucketCriticalSection {
@@ -374,7 +386,11 @@ public actor UpdatesEngine: Sendable {
         batchSpan.end(
           "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
         )
-        return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+        return UpdateApplyResult(
+          appliedCount: 0,
+          failedCount: failedCount,
+          failure: .rejected(category: "missing_account_token")
+        )
       }
       do {
         try validateAccountMutation(mutationToken)
@@ -390,7 +406,11 @@ public actor UpdatesEngine: Sendable {
         batchSpan.end(
           "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
         )
-        return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+        return UpdateApplyResult(
+          appliedCount: 0,
+          failedCount: failedCount,
+          failure: .rejected(category: "account_or_settings_failure")
+        )
       }
     }
 
@@ -419,6 +439,7 @@ public actor UpdatesEngine: Sendable {
     var reloadPeers = Set<Peer>()
     var appliedCount = 0
     var failedCount = 0
+    var applyFailure: UpdateApplyFailure?
     var committedBucketState: BucketState?
     var didApplySidecars = false
     var chunkIndex = 0
@@ -458,8 +479,8 @@ public actor UpdatesEngine: Sendable {
                 in: db
               )
             }
-            try requireUserAdmissionForMissingChild(
-              bucketCommit.key, expectedUserState: bucketCommit.expectedUserStateForMissingChild, in: db
+            try requireRemovalAdmission(
+              bucketCommit.key, expectedRevision: bucketCommit.expectedRemovalRevision, in: db
             )
           }
           var chunkReloadPeers = Set<Peer>()
@@ -579,6 +600,7 @@ public actor UpdatesEngine: Sendable {
           "Failed to apply updates chunk",
           error: privacySafeDurableApplyError(error, phase: "batch")
         )
+        applyFailure = applyFailure ?? classifiedApplyFailure(error)
         chunkFailed = chunk.count
         failedCount += chunkFailed
       }
@@ -622,8 +644,8 @@ public actor UpdatesEngine: Sendable {
               in: db
             )
           }
-          try requireUserAdmissionForMissingChild(
-            bucketCommit.key, expectedUserState: bucketCommit.expectedUserStateForMissingChild, in: db
+          try requireRemovalAdmission(
+            bucketCommit.key, expectedRevision: bucketCommit.expectedRemovalRevision, in: db
           )
           var emptyReloadPeers = Set<Peer>()
           if let sidecars, hasSidecars(sidecars) {
@@ -654,6 +676,7 @@ public actor UpdatesEngine: Sendable {
           "Failed to atomically apply empty update batch sidecars and cursor",
           error: privacySafeDurableApplyError(error, phase: "empty_batch")
         )
+        applyFailure = applyFailure ?? classifiedApplyFailure(error)
         failedCount += 1
       }
     }
@@ -708,7 +731,8 @@ public actor UpdatesEngine: Sendable {
     return UpdateApplyResult(
       appliedCount: appliedCount,
       failedCount: failedCount,
-      committedBucketState: committedBucketState
+      committedBucketState: committedBucketState,
+      failure: applyFailure
     )
   }
 
@@ -795,8 +819,8 @@ public actor UpdatesEngine: Sendable {
       try validateAccountMutation(snapshot.mutationToken)
       let committedState = try await database.dbWriter.write { db in
         try validateAccountMutation(snapshot.mutationToken)
-        try requireUserAdmissionForMissingChild(
-          bucketKey, expectedUserState: snapshot.expectedUserStateForMissingChild, in: db
+        try requireRemovalAdmission(
+          bucketKey, expectedRevision: snapshot.expectedRemovalRevision, in: db
         )
         if let existing = try DbBucketState
           .filter(
@@ -981,8 +1005,8 @@ public actor UpdatesEngine: Sendable {
       try validateAccountMutation(repair.mutationToken)
       return try await database.dbWriter.write { db in
         try validateAccountMutation(repair.mutationToken)
-        try requireUserAdmissionForMissingChild(
-          bucketKey, expectedUserState: repair.expectedUserStateForMissingChild, in: db
+        try requireRemovalAdmission(
+          bucketKey, expectedRevision: repair.expectedRemovalRevision, in: db
         )
         if let existing = try DbBucketState
           .filter(
@@ -1883,7 +1907,25 @@ private func durableUpdateFailureCause(_ error: Error) -> DurableUpdateFailureCa
   }
 }
 
+private func classifiedApplyFailure(_ error: Error) -> UpdateApplyFailure {
+  if let error = error as? DurableUpdateApplyError {
+    if case let .removalRevisionChanged(expected, actual) = error {
+      return .removalRevisionChanged(expected: expected, actual: actual)
+    }
+    if case let .cursorChanged(bucket, expected, actual) = error {
+      return .cursorChanged(bucket: bucket, expected: expected, actual: actual)
+    }
+    return .rejected(category: error.privacySafeErrorCategory)
+  }
+  if let failure = error as? DurableUpdateFailure {
+    return .rejected(category: failure.privacySafeErrorCategory)
+  }
+  // Do not pass arbitrary error descriptions (which may contain row data) to sync.
+  return .rejected(category: "storage_or_account")
+}
+
 enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
+  case removalRevisionChanged(expected: Int64, actual: Int64)
   case reducerFailed(kind: String, batchIndex: Int)
   case invalidBucket(BucketKey)
   case cursorChanged(bucket: BucketKey, expected: BucketState, actual: BucketState)
@@ -1898,6 +1940,8 @@ enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
 
   var privacySafeErrorCategory: String {
     switch self {
+      case .removalRevisionChanged:
+        "sync_apply:removal_revision_changed"
       case let .reducerFailed(kind, _):
         "sync_apply:reducer_failed:\(kind)"
       case .invalidBucket:
@@ -1973,27 +2017,16 @@ private func requireExpectedBucketState(
   }
 }
 
-private func requireUserAdmissionForMissingChild(
+private func requireRemovalAdmission(
   _ key: BucketKey,
-  expectedUserState: BucketState?,
+  expectedRevision: Int64?,
   in db: Database
 ) throws {
-  guard let expectedUserState else { return }
-  let isMissing: Bool
-  switch key {
-    case let .chat(peer):
-      guard let peer = validatedPeer(peer) else { throw DurableUpdateApplyError.invalidBucket(key) }
-      isMissing = try Chat.getByPeerId(db: db, peerId: peer) == nil
-    case let .space(id):
-      isMissing = try Space.fetchOne(db, id: id) == nil
-    case .user:
-      return
+  guard key != .user, let expected = expectedRevision else { return }
+  let actual = try SyncRemovalRevision.read(db)
+  guard actual == expected else {
+    throw DurableUpdateApplyError.removalRevisionChanged(expected: expected, actual: actual)
   }
-  guard isMissing else { return }
-  // Absence at seq=0 is ambiguous: it can be pristine or a User removal that
-  // committed while the first child page was in flight. The request-time User
-  // cursor disambiguates without a durable tombstone or an account-wide sweep.
-  try requireExpectedBucketState(expectedUserState, advancingTo: expectedUserState, for: .user, in: db)
 }
 
 private func validatedPeer(_ protoPeer: InlineProtocol.Peer) -> Peer? {
@@ -2215,6 +2248,7 @@ enum RealtimeUpdateApplyError: Error {
 }
 
 func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
+  try SyncRemovalRevision.advance(db)
   try DbBucketState
     .filter(DbBucketState.Columns.bucketType == 1 && DbBucketState.Columns.entityId == -chatId)
     .deleteAll(db)
@@ -2770,7 +2804,7 @@ extension InlineProtocol.UpdateSpaceMemberAdd {
 }
 
 extension InlineProtocol.UpdateSpaceMemberDelete {
-  func apply(_ db: Database) throws {
+  func apply(_ db: Database, currentUserID: Int64? = Auth.shared.getCurrentUserId()) throws {
     Log.shared.debug("update space member delete user \(userID) from space \(spaceID)")
 
     try Member
@@ -2778,8 +2812,9 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
       .filter(Column("spaceId") == spaceID)
       .deleteAll(db)
 
-    guard userID == Auth.shared.getCurrentUserId() else { return }
+    guard userID == currentUserID else { return }
 
+    try SyncRemovalRevision.advance(db)
     Log.shared.info("Current user was removed from space, cleaning up local data")
     let chatsInSpace = try Chat.filter(Column("spaceId") == spaceID).fetchAll(db)
     let chatIds = chatsInSpace.map(\.id)
@@ -2835,6 +2870,7 @@ extension InlineProtocol.UpdateSpaceMemberUpdate {
   }
 
   private func removePublicThreadsForSpace(spaceId: Int64, db: Database) throws {
+    try SyncRemovalRevision.advance(db)
     let publicThreads = try Chat
       .filter(Chat.Columns.spaceId == spaceId)
       .filter(Chat.Columns.type == ChatType.thread.rawValue)

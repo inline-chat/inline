@@ -413,6 +413,7 @@ public extension Chat {
   /// - Throws: Any database error.
   func deleteFromLocalDatabase() async throws {
     try await AppDatabase.shared.dbWriter.write { db in
+      try SyncRemovalRevision.advance(db)
 
       var chat = self
       chat.lastMsgId = nil

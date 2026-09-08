@@ -620,10 +620,10 @@ struct SidecarProjectionOwnershipTests {
     }
   }
 
-  @Test("a User change rejects delayed zero-bootstrap pages for missing children", arguments: [true, false])
-  func missingChildRequiresRequestTimeUserAdmission(isChat: Bool) async throws {
+  @Test("ordinary User progress permits a delayed missing-child page", arguments: [true, false])
+  func userProgressDoesNotInvalidateMissingChild(isChat: Bool) async throws {
     let (queue, engine) = try makeEngine()
-    try await queue.write { (db: Database) throws in
+    try await queue.write { db in
       _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: .init(date: 11, seq: 11), in: db)
     }
     let key: BucketKey = isChat ? .chat(peer: chatPeer()) : .space(id: spaceID)
@@ -631,29 +631,83 @@ struct SidecarProjectionOwnershipTests {
       updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
       bucketCommit: UpdateBucketCommit(
         key: key, state: .init(date: 8, seq: 8), expectedStartState: .init(date: 0, seq: 0),
-        expectedUserStateForMissingChild: .init(date: 10, seq: 10)
+        expectedRemovalRevision: 0
       )
     )
+    #expect(result.succeeded)
+    #expect(result.committedBucketState?.seq == 8)
+    #expect(result.failure == nil)
+  }
 
+  @Test("Space removal fences an absent child without a User cursor change")
+  func spaceRemovalRejectsDelayedChild() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { db in
+      // No Chat row existed when the request started. The Space deletion must
+      // still invalidate its delayed zero-cursor sidecars.
+      try InlineProtocol.UpdateSpaceMemberDelete.with {
+        $0.spaceID = spaceID
+        $0.userID = 42
+      }.apply(db, currentUserID: 42)
+    }
+    let result = await engine.applyBatch(
+      updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: .init(
+        key: .chat(peer: chatPeer()),
+        state: .init(date: 8, seq: 8),
+        expectedStartState: .init(date: 0, seq: 0),
+        expectedRemovalRevision: 0
+      )
+    )
     #expect(!result.succeeded)
-    #expect(result.committedBucketState == nil)
+    guard case .removalRevisionChanged? = result.failure else {
+      Issue.record("Space removal must invalidate delayed child admission")
+      return
+    }
     try await queue.read { (db: Database) throws in
-      #expect(try Space.fetchOne(db, id: spaceID) == nil)
+      #expect(try cursor(.user, db: db) == nil)
       #expect(try Chat.fetchOne(db, id: chatID) == nil)
-      #expect(try Dialog.fetchCount(db) == 0)
-      #expect(try cursor(key, db: db) == nil)
-      #expect(try cursor(.user, db: db)?.seq == 11)
     }
   }
 
-  @Test("unchanged User admission still permits a pristine child bootstrap")
+  @Test("removal revision rolls back with its transaction and survives regrant")
+  func removalRevisionRollbackAndRegrant() async throws {
+    let (queue, engine) = try makeEngine()
+    try queue.inTransaction { db in
+      try deleteChatSyncBucket(db, chatId: chatID)
+      return .rollback
+    }
+    #expect(try await queue.read { try SyncRemovalRevision.read($0) } == 0)
+    try await queue.write { db in
+      try deleteLocalChatData(db, chatId: chatID)
+      try Space(from: makeSpace()).save(db)
+      try Chat(from: makeChat()).save(db)
+    }
+    let result = await engine.applyBatch(
+      updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: .init(
+        key: .chat(peer: chatPeer()),
+        state: .init(date: 8, seq: 8),
+        expectedStartState: .init(date: 0, seq: 0),
+        expectedRemovalRevision: 0
+      )
+    )
+    #expect(!result.succeeded)
+    guard case .removalRevisionChanged? = result.failure else {
+      Issue.record("Regrant must not erase removal evidence")
+      return
+    }
+    #expect(try await queue.read { try cursor(.chat(peer: chatPeer()), db: $0) } == nil)
+  }
+
+  @Test("unchanged removal revision still permits a pristine child bootstrap")
   func unchangedUserAdmissionPermitsBootstrap() async throws {
     let (queue, engine) = try makeEngine()
     let result = await engine.applyBatch(
       updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
       bucketCommit: UpdateBucketCommit(
         key: .chat(peer: chatPeer()), state: .init(date: 8, seq: 8), expectedStartState: .init(date: 0, seq: 0),
-        expectedUserStateForMissingChild: .init(date: 0, seq: 0)
+        expectedRemovalRevision: 0
       )
     )
 
@@ -691,10 +745,16 @@ struct SidecarProjectionOwnershipTests {
       updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
       bucketCommit: UpdateBucketCommit(
         key: .chat(peer: chatPeer()), state: .init(date: 8, seq: 8), expectedStartState: .init(date: 0, seq: 0),
-        expectedUserStateForMissingChild: .init(date: 10, seq: 10)
+        expectedRemovalRevision: 0
       )
     )
     #expect(!delayed.succeeded)
+    guard case let .removalRevisionChanged(expected, actual)? = delayed.failure else {
+      Issue.record("Expected destructive-change conflict")
+      return
+    }
+    #expect(expected == 0)
+    #expect(actual > expected)
     try await queue.read { (db: Database) throws in
       #expect(try Chat.fetchOne(db, id: chatID) == nil)
       #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db) == nil)
@@ -714,7 +774,7 @@ struct SidecarProjectionOwnershipTests {
       updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
       bucketCommit: UpdateBucketCommit(
         key: .chat(peer: chatPeer()), state: .init(date: 8, seq: 8), expectedStartState: .init(date: 7, seq: 7),
-        expectedUserStateForMissingChild: .init(date: 10, seq: 10)
+        expectedRemovalRevision: 0
       )
     )
 
@@ -743,8 +803,8 @@ struct SidecarProjectionOwnershipTests {
     }
   }
 
-  @Test("missing child repair checks request-time User admission", arguments: [true, false], [true, false])
-  func missingChildRepairRequiresUserAdmission(isChat: Bool, userAdvanced: Bool) async throws {
+  @Test("missing child repair checks destructive changes", arguments: [true, false], [true, false])
+  func missingChildRepairRequiresRemovalAdmission(isChat: Bool, userAdvanced: Bool) async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let engine = UpdatesEngine(
       database: try AppDatabase(queue), authenticatedUserID: { 42 }, validateAccountMutation: { _ in }
@@ -754,7 +814,9 @@ struct SidecarProjectionOwnershipTests {
       if isChat { try Space(from: makeSpace()).save(db) }
       _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: .init(date: 11, seq: 11), in: db)
     }
-    let expectedUserState = BucketState(date: userAdvanced ? 10 : 11, seq: userAdvanced ? 10 : 11)
+    if userAdvanced {
+      try await queue.write { try SyncRemovalRevision.advance($0) }
+    }
     let token = AuthAccountMutationToken(generation: 1, userID: 42)
     let committed: BucketState?
     if isChat {
@@ -764,7 +826,7 @@ struct SidecarProjectionOwnershipTests {
       committed = await engine.applyChatRepair(ChatRepairSnapshot(
         peer: chatPeer(), chat: snapshot, pinnedMessages: [], targetState: .init(date: 8, seq: 8),
         mutationToken: token, reason: "missing-child-admission",
-        expectedUserStateForMissingChild: expectedUserState
+        expectedRemovalRevision: 0
       ))
     } else {
       var snapshot = InlineProtocol.GetSpaceResult()
@@ -779,7 +841,7 @@ struct SidecarProjectionOwnershipTests {
       committed = await engine.applySpaceRepair(SpaceRepairSnapshot(
         spaceID: spaceID, snapshot: snapshot, targetState: .init(date: 8, seq: 8),
         mutationToken: token, reason: "missing-child-admission",
-        expectedUserStateForMissingChild: expectedUserState
+        expectedRemovalRevision: 0
       ))
     }
     #expect(committed?.seq == (userAdvanced ? nil : 8))
@@ -836,7 +898,7 @@ struct SidecarProjectionOwnershipTests {
       committed = await engine.applyChatRepair(ChatRepairSnapshot(
         peer: chatPeer(), chat: snapshot, pinnedMessages: [], targetState: .init(date: 8, seq: 8),
         mutationToken: token, reason: "cursor-only-projection",
-        expectedUserStateForMissingChild: .init(date: 0, seq: 0)
+        expectedRemovalRevision: 0
       ))
     } else {
       var snapshot = InlineProtocol.GetSpaceResult()
@@ -850,7 +912,7 @@ struct SidecarProjectionOwnershipTests {
       committed = await engine.applySpaceRepair(SpaceRepairSnapshot(
         spaceID: spaceID, snapshot: snapshot, targetState: .init(date: 8, seq: 8),
         mutationToken: token, reason: "cursor-only-projection",
-        expectedUserStateForMissingChild: .init(date: 0, seq: 0)
+        expectedRemovalRevision: 0
       ))
     }
     #expect(committed?.seq == (cursorSequence == 8 ? 8 : nil))

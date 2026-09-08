@@ -6,22 +6,40 @@ public enum UpdateApplySource: Sendable, Equatable {
   case syncCatchup
 }
 
+/// Durable admission conflicts are recoverable state changes, not reducer failures.
+public enum UpdateApplyFailure: Sendable {
+  case removalRevisionChanged(expected: Int64, actual: Int64)
+  case cursorChanged(bucket: BucketKey, expected: BucketState, actual: BucketState)
+  case rejected(category: String)
+
+  public var category: String {
+    switch self {
+      case .cursorChanged: "cursor_changed"
+      case .removalRevisionChanged: "removal_revision_changed"
+      case let .rejected(category): category
+    }
+  }
+}
+
 public struct UpdateApplyResult: Sendable {
   public let appliedCount: Int
   public let failedCount: Int
+  public let failure: UpdateApplyFailure?
   public let committedBucketState: BucketState?
 
   public var succeeded: Bool {
-    failedCount == 0
+    failedCount == 0 && failure == nil
   }
 
   public init(
     appliedCount: Int,
     failedCount: Int,
-    committedBucketState: BucketState? = nil
+    committedBucketState: BucketState? = nil,
+    failure: UpdateApplyFailure? = nil
   ) {
     self.appliedCount = appliedCount
     self.failedCount = failedCount
+    self.failure = failure
     self.committedBucketState = committedBucketState
   }
 
@@ -34,21 +52,20 @@ public struct UpdateBucketCommit: Sendable {
   public let key: BucketKey
   public let state: BucketState
   public let expectedStartState: BucketState?
-  /// Request-time account projection fence for materializing an absent child.
-  /// A user removal may erase both the child model and its zero cursor while
-  /// its first page is in flight; the child CAS alone cannot detect that ABA.
-  public let expectedUserStateForMissingChild: BucketState?
+  /// Destructive-change revision captured before requesting a zero-cursor child.
+  /// Survives removal/regrant without coupling admission to ordinary User traffic.
+  public let expectedRemovalRevision: Int64?
 
   public init(
     key: BucketKey,
     state: BucketState,
     expectedStartState: BucketState? = nil,
-    expectedUserStateForMissingChild: BucketState? = nil
+    expectedRemovalRevision: Int64? = nil
   ) {
     self.key = key
     self.state = state
     self.expectedStartState = expectedStartState
-    self.expectedUserStateForMissingChild = expectedUserStateForMissingChild
+    self.expectedRemovalRevision = expectedRemovalRevision
   }
 }
 
@@ -60,7 +77,7 @@ public struct ChatRepairSnapshot: Sendable {
   public let pinnedMessages: [InlineProtocol.Message]
   public let targetState: BucketState
   public let mutationToken: AuthAccountMutationToken
-  public let expectedUserStateForMissingChild: BucketState?
+  public let expectedRemovalRevision: Int64?
   public let reason: String
 
   public init(
@@ -70,14 +87,14 @@ public struct ChatRepairSnapshot: Sendable {
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
     reason: String,
-    expectedUserStateForMissingChild: BucketState? = nil
+    expectedRemovalRevision: Int64? = nil
   ) {
     self.peer = peer
     self.chat = chat
     self.pinnedMessages = pinnedMessages
     self.targetState = targetState
     self.mutationToken = mutationToken
-    self.expectedUserStateForMissingChild = expectedUserStateForMissingChild
+    self.expectedRemovalRevision = expectedRemovalRevision
     self.reason = reason
   }
 }
@@ -87,7 +104,7 @@ public struct SpaceRepairSnapshot: Sendable {
   public let snapshot: InlineProtocol.GetSpaceResult
   public let targetState: BucketState
   public let mutationToken: AuthAccountMutationToken
-  public let expectedUserStateForMissingChild: BucketState?
+  public let expectedRemovalRevision: Int64?
   public let reason: String
 
   public init(
@@ -96,13 +113,13 @@ public struct SpaceRepairSnapshot: Sendable {
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
     reason: String,
-    expectedUserStateForMissingChild: BucketState? = nil
+    expectedRemovalRevision: Int64? = nil
   ) {
     self.spaceID = spaceID
     self.snapshot = snapshot
     self.targetState = targetState
     self.mutationToken = mutationToken
-    self.expectedUserStateForMissingChild = expectedUserStateForMissingChild
+    self.expectedRemovalRevision = expectedRemovalRevision
     self.reason = reason
   }
 }

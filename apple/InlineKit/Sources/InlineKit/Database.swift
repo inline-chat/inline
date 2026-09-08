@@ -1323,6 +1323,14 @@ public extension AppDatabase {
       try db.execute(sql: "UPDATE dialog SET translationLegacyImportPending = 1 WHERE translationEnabled = 1")
     }
 
+    migrator.registerMigration("sync destructive removal revision") { db in
+      try db.create(table: "sync_removal_revision") { table in
+        table.column("id", .integer).primaryKey().check { $0 == 1 }
+        table.column("revision", .integer).notNull().defaults(to: 0)
+      }
+      try db.execute(sql: "INSERT INTO sync_removal_revision (id, revision) VALUES (1, 0)")
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
