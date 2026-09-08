@@ -25,6 +25,21 @@ private func frame(
 
 @Suite("Sidebar collection frozen drag layout")
 struct SidebarCollectionDragLayoutTests {
+  @Test func discontiguousSelectionReservesOneCompactSpan() {
+    let rows = [
+      DragRow(id: .parent, height: 44),
+      DragRow(id: .reply, height: 44),
+      DragRow(id: .next, height: 44),
+    ]
+    let result = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: DragState(sourceIDs: [.parent, .next], destinationIndex: 0, slotHeight: 88)
+    )
+    #expect(result.slotFrame?.height == 88)
+    #expect(frame(result, .reply)?.minY == 88)
+    #expect(result.contentHeight == 132)
+  }
+
   @Test("vertical hit resolution never assigns the gap between rows")
   func verticalHitResolutionRequiresContainment() {
     let guides = [

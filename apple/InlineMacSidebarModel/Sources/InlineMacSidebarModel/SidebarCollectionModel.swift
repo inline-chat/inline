@@ -132,15 +132,18 @@ extension SidebarCollectionProjectedNode: Sendable where NodeID: Sendable, Secti
 /// `visibleNodeIDs` respects collapse and therefore defines preview/slot height.
 public struct SidebarCollectionDragGroup<NodeID: Hashable>: Hashable {
   public let sourceID: NodeID
+  public let sourceIDs: [NodeID]
   public let attachedNodeIDs: [NodeID]
   public let visibleNodeIDs: [NodeID]
 
   public init(
     sourceID: NodeID,
     attachedNodeIDs: [NodeID],
-    visibleNodeIDs: [NodeID]
+    visibleNodeIDs: [NodeID],
+    sourceIDs: [NodeID]? = nil
   ) {
     self.sourceID = sourceID
+    self.sourceIDs = sourceIDs ?? [sourceID]
     self.attachedNodeIDs = attachedNodeIDs
     self.visibleNodeIDs = visibleNodeIDs
   }
@@ -341,6 +344,87 @@ public struct SidebarCollectionSnapshot<
       attachedNodeIDs: attached,
       visibleNodeIDs: visible
     )
+  }
+
+  /// Combine discontiguous selections in caller-provided sidebar order. A
+  /// selected descendant is already carried by its selected ancestor.
+  public func dragGroup(for sourceIDs: [NodeID]) throws -> SidebarCollectionDragGroup<NodeID> {
+    let selected = Set(sourceIDs)
+    var seen = Set<NodeID>()
+    let roots = sourceIDs.filter { id in
+      guard seen.insert(id).inserted else { return false }
+      var parent = parentByNodeID[id]
+      while let ancestor = parent {
+        if selected.contains(ancestor) { return false }
+        parent = parentByNodeID[ancestor]
+      }
+      return true
+    }
+    guard let first = roots.first else { throw SidebarCollectionModelError.sourceMissing }
+    let groups = try roots.map { try dragGroup(for: $0) }
+    return SidebarCollectionDragGroup(
+      sourceID: first,
+      attachedNodeIDs: groups.flatMap(\.attachedNodeIDs),
+      visibleNodeIDs: groups.flatMap(\.visibleNodeIDs),
+      sourceIDs: roots
+    )
+  }
+
+  public func legalSlots(for sourceIDs: [NodeID]) throws -> [SidebarCollectionSlot<NodeID, SectionID>] {
+    let group = try dragGroup(for: sourceIDs)
+    let excluded = Set(group.attachedNodeIDs)
+    var slots = try legalSlots(for: group.sourceID)
+    for id in group.sourceIDs.dropFirst() {
+      let allowed = try Set(legalSlots(for: id))
+      slots.removeAll { !allowed.contains($0) }
+    }
+    return slots.filter {
+      !($0.parentID.map(excluded.contains) ?? false)
+        && !($0.beforeSiblingID.map(excluded.contains) ?? false)
+    }
+  }
+
+  /// Reuse the single-source validation and move semantics; callers publish
+  /// only the final value, so intermediate arrangements are never rendered.
+  public func moving(
+    _ sourceIDs: [NodeID],
+    to destination: SidebarCollectionSlot<NodeID, SectionID>,
+    scope: SidebarCollectionMoveScope = .attachedSubtree
+  ) throws -> Self {
+    let group = try dragGroup(for: sourceIDs)
+    let excluded = Set(group.attachedNodeIDs)
+    if destination.parentID.map(excluded.contains) == true
+      || destination.beforeSiblingID.map(excluded.contains) == true
+    {
+      throw SidebarCollectionModelError.destinationInsideDraggedGroup
+    }
+    var result = self
+    for sourceID in group.sourceIDs {
+      result = try result.moving(sourceID, to: destination, scope: scope)
+    }
+    return result
+  }
+
+  public func isGroup(_ sourceIDs: [NodeID], at slot: SidebarCollectionSlot<NodeID, SectionID>) -> Bool {
+    guard !sourceIDs.isEmpty else { return false }
+    let siblings: [NodeID]
+    if let parentID = slot.parentID {
+      guard sectionByNodeID[parentID] == slot.sectionID,
+            let parent = nodes[parentID] else { return false }
+      siblings = parent.childIDs
+    } else {
+      guard let section = sections.first(where: { $0.id == slot.sectionID }) else { return false }
+      siblings = section.rootIDs
+    }
+    let end: Int
+    if let before = slot.beforeSiblingID {
+      guard let index = siblings.firstIndex(of: before) else { return false }
+      end = index
+    } else {
+      end = siblings.count
+    }
+    guard end >= sourceIDs.count else { return false }
+    return siblings[(end - sourceIDs.count) ..< end].elementsEqual(sourceIDs)
   }
 
   /// Returns every currently reachable structural destination for `sourceID`.
@@ -681,6 +765,7 @@ public struct SidebarCollectionPendingMove<
 >: Equatable {
   public let id: UUID
   public let sourceID: NodeID
+  public let sourceIDs: [NodeID]
   public let destination: SidebarCollectionSlot<NodeID, SectionID>
   public let scope: SidebarCollectionMoveScope
   public let rpcAcknowledged: Bool
@@ -690,10 +775,12 @@ public struct SidebarCollectionPendingMove<
     sourceID: NodeID,
     destination: SidebarCollectionSlot<NodeID, SectionID>,
     scope: SidebarCollectionMoveScope = .attachedSubtree,
-    rpcAcknowledged: Bool = false
+    rpcAcknowledged: Bool = false,
+    sourceIDs: [NodeID]? = nil
   ) {
     self.id = id
     self.sourceID = sourceID
+    self.sourceIDs = sourceIDs ?? [sourceID]
     self.destination = destination
     self.scope = scope
     self.rpcAcknowledged = rpcAcknowledged
@@ -705,7 +792,8 @@ public struct SidebarCollectionPendingMove<
       sourceID: sourceID,
       destination: destination,
       scope: scope,
-      rpcAcknowledged: true
+      rpcAcknowledged: true,
+      sourceIDs: sourceIDs
     )
   }
 }
@@ -744,23 +832,27 @@ public struct SidebarCollectionOptimisticState<
     id: UUID,
     sourceID: NodeID,
     destination: SidebarCollectionSlot<NodeID, SectionID>,
-    scope: SidebarCollectionMoveScope = .attachedSubtree
+    scope: SidebarCollectionMoveScope = .attachedSubtree,
+    sourceIDs: [NodeID]? = nil
   ) throws -> Bool {
     let previousPresentation = presented
-    let replacesPendingSource = pendingMoves.contains { $0.sourceID == sourceID }
-    let retained = pendingMoves.filter { $0.sourceID != sourceID }
+    let sources = sourceIDs ?? [sourceID]
+    let selected = Set(sources)
+    let replacesPendingSource = pendingMoves.contains { !selected.isDisjoint(with: $0.sourceIDs) }
+    let retained = pendingMoves.filter { selected.isDisjoint(with: $0.sourceIDs) }
     let replayed = replay(retained, on: confirmed)
     guard replayed.moves.count == retained.count else {
       throw SidebarCollectionModelError.pendingMoveDependency
     }
     var nextPending = replayed.moves
-    let moved = try replayed.snapshot.moving(sourceID, to: destination, scope: scope)
+    let moved = try replayed.snapshot.moving(sources, to: destination, scope: scope)
     if moved != replayed.snapshot || replacesPendingSource {
       nextPending.append(SidebarCollectionPendingMove(
         id: id,
         sourceID: sourceID,
         destination: destination,
-        scope: scope
+        scope: scope,
+        sourceIDs: sources
       ))
     }
     pendingMoves = nextPending
@@ -810,13 +902,14 @@ public struct SidebarCollectionOptimisticState<
 
     for move in pendingMoves {
       if move.rpcAcknowledged,
-         cursor.isNode(move.sourceID, at: move.destination) {
+         cursor.isGroup(move.sourceIDs, at: move.destination)
+      {
         acknowledged.append(move.id)
         continue
       }
       do {
         cursor = try cursor.moving(
-          move.sourceID,
+          move.sourceIDs,
           to: move.destination,
           scope: move.scope
         )
@@ -848,11 +941,12 @@ public struct SidebarCollectionOptimisticState<
     for move in moves {
       if removesAcknowledgedMatches,
          move.rpcAcknowledged,
-         cursor.isNode(move.sourceID, at: move.destination) {
+         cursor.isGroup(move.sourceIDs, at: move.destination)
+      {
         continue
       }
       guard let moved = try? cursor.moving(
-        move.sourceID,
+        move.sourceIDs,
         to: move.destination,
         scope: move.scope
       ) else {

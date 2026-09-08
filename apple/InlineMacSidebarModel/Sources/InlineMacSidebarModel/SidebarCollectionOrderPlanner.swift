@@ -3,9 +3,9 @@ import Foundation
 /// Validates the two persisted neighbors around a moved sidebar item before
 /// asking the caller's fractional-index implementation for a new key.
 ///
-/// Interactive reorder is deliberately a single-item mutation. Missing,
-/// duplicate, or reversed neighbor keys are rejected instead of triggering a
-/// client-side multi-RPC lane renumber.
+/// Each moved dialog receives one new key. Batch moves allocate consecutive
+/// keys in the same outside gap. Missing, duplicate, or reversed neighbor keys
+/// are rejected instead of triggering a client-side lane renumber.
 public enum SidebarCollectionOrderPlanner {
   public static func insertionOrder(
     hasPrevious: Bool,

@@ -113,6 +113,7 @@ struct SidebarNativeRowConfiguration {
     let rename: () -> Void
     let togglePin: () -> Void
     let toggleReadUnread: () -> Void
+    var markAllRead: (() -> Void)? = nil
     let toggleArchive: () -> Void
     let folderMenu: () -> SidebarChatFolderMenu?
   }
@@ -180,7 +181,7 @@ struct SidebarNativeRowConfiguration {
 
   struct Chat {
     let presentation: ChatPresentation
-    let selected: Bool
+    var selected: Bool
     let titleDimmed: Bool
     let size: SidebarItemSize
     let unreadBadgeStyle: UnreadBadgeStyle
@@ -192,6 +193,8 @@ struct SidebarNativeRowConfiguration {
     let indentationLevel: Int
     let showsIcon: Bool
     let disclosureExpanded: Bool?
+    var descendantUnreadCount: Int = 0
+    var descendantProminentUnreadCount: Int = 0
     let actions: ChatActions
   }
 
@@ -220,6 +223,7 @@ struct SidebarNativeRowConfiguration {
     let rename: () -> Void
     let close: () -> Void
     let ungroup: () -> Void
+    let markAllRead: () -> Void
   }
 
   struct Folder {
@@ -255,8 +259,16 @@ struct SidebarNativeRowConfiguration {
   }
 
   let rowID: SidebarCollectionRow.ID
-  let content: Content
+  var content: Content
   let animatesChanges: Bool
+
+  func selectingChat(_ selected: Bool?) -> Self {
+    guard let selected, case var .chat(chat) = content else { return self }
+    chat.selected = selected
+    var configuration = self
+    configuration.content = .chat(chat)
+    return configuration
+  }
 
   var interactionPresentation: InteractionPresentation {
     switch content {
@@ -465,6 +477,14 @@ final class SidebarNativeRowView: NSView {
     return contentView.blocksReorder(at: contentView.convert(point, from: self))
   }
 
+  func setSelectionHandlers(
+    click: ((NSEvent.ModifierFlags) -> Bool)?,
+    contextMenu: (() -> NSMenu?)?
+  ) {
+    (contentView as? SidebarNativeInteractiveContentView)?.primaryClickHandler = click
+    (contentView as? SidebarNativeInteractiveContentView)?.selectionContextMenu = contextMenu
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
     representedRowID = nil
@@ -578,8 +598,11 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
   }
 
   var primaryAction: (() -> Void)?
+  var primaryClickHandler: ((NSEvent.ModifierFlags) -> Bool)?
+  var selectionContextMenu: (() -> NSMenu?)?
   var doubleClickAction: (() -> Void)?
   private var mouseDownPoint: NSPoint?
+  private var mouseDownModifiers: NSEvent.ModifierFlags = []
   private var capturedInteractionTarget: InteractionTarget?
   private(set) var isHovered = false
   private(set) var pressedInteractionTarget: InteractionTarget?
@@ -621,6 +644,7 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     window?.makeFirstResponder(self)
     let point = convert(event.locationInWindow, from: nil)
     mouseDownPoint = point
+    mouseDownModifiers = event.modifierFlags
     capturedInteractionTarget = interactionTarget(at: point)
     setPressedInteractionTarget(capturedInteractionTarget)
   }
@@ -650,6 +674,7 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
 
     switch capturedInteractionTarget {
     case .primary:
+        if primaryClickHandler?(mouseDownModifiers) == true { return }
       primaryAction?()
       if event.clickCount >= 2 {
         doubleClickAction?()
@@ -1476,7 +1501,7 @@ private final class SidebarNativeImageView: NSImageView {
 }
 
 @MainActor
-private final class SidebarNativeMenuItem: NSMenuItem {
+final class SidebarNativeMenuItem: NSMenuItem {
   private let actionHandler: () -> Void
 
   init(
@@ -1679,6 +1704,12 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       }
     })
     menu.addItem(.separator())
+    menu.addItem(SidebarNativeMenuItem(
+      title: "Mark All Read",
+      systemImage: "checkmark.message.fill",
+      action: configuration.actions.markAllRead
+    ))
+    menu.addItem(.separator())
     if configuration.presentation.childCount == 0 {
       menu.addItem(SidebarNativeMenuItem(
         title: "Delete Folder",
@@ -1820,6 +1851,10 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       name: configuration.presentation.isPinned ? "Unpin" : "Pin"
     ) {
       configuration.actions.togglePin()
+      return true
+    })
+    actions.append(NSAccessibilityCustomAction(name: "Mark All Read") {
+      configuration.actions.markAllRead()
       return true
     })
     actions.append(NSAccessibilityCustomAction(name: "Rename folder") {
@@ -2069,35 +2104,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       animatesChanges: allowsAnimations
     )
 
-    let showsPreview = configuration.size != .compact
-    let titleHasNumberedUnread = configuration.unreadBadgeStyle == .numbered
-      && presentation.unread
-      && !showsPreview
-    let previewHasNumberedUnread = configuration.unreadBadgeStyle == .numbered
-      && presentation.unread
-      && showsPreview
-    trailingUnreadBadge.configure(
-      unreadCount: presentation.unread ? presentation.unreadCount : 0,
-      hasUnreadMark: presentation.unread && presentation.unreadMark,
-      prominent: presentation.prominentUnreadDot,
-      style: configuration.unreadBadgeStyle,
-      animatesChanges: allowsAnimations
-    )
-    trailingUnreadBadge.setPlacementVisible(
-      titleHasNumberedUnread || previewHasNumberedUnread,
-      animated: allowsAnimations
-    )
-    leadingUnreadBadge.configure(
-      unreadCount: presentation.unread ? presentation.unreadCount : 0,
-      hasUnreadMark: presentation.unread && presentation.unreadMark,
-      prominent: presentation.prominentUnreadDot,
-      style: .dot,
-      animatesChanges: allowsAnimations
-    )
-    leadingUnreadBadge.setPlacementVisible(
-      configuration.unreadBadgeStyle == .dot,
-      animated: allowsAnimations
-    )
+    configureUnreadBadges()
 
     configureDisclosureVisual()
     updateControlPresentation(animated: false)
@@ -2162,7 +2169,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     }
     let showsPreview = configuration.size != .compact
     let badgeBelongsToPreview = configuration.unreadBadgeStyle == .numbered
-      && presentation.unread
+      && (displayedUnread.count > 0 || displayedUnread.mark)
       && showsPreview
     let keepsNumberedUnreadNearContent = configuration.indentationLevel > 0
       && trailingUnreadBadge.occupiesLayout
@@ -2406,6 +2413,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
   override func menu(for _: NSEvent) -> NSMenu? {
     guard let configuration else { return nil }
+    if let menu = selectionContextMenu?() { return menu }
     let presentation = configuration.presentation
     let actions = configuration.actions
     let menu = NSMenu()
@@ -2449,6 +2457,13 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         systemImage: "sidebar.left",
         action: actions.persist
       ))
+      if let markAllRead = actions.markAllRead {
+        menu.addItem(SidebarNativeMenuItem(
+          title: "Mark All Read",
+          systemImage: "checkmark.message.fill",
+          action: markAllRead
+        ))
+      }
     } else {
       if presentation.pinned || presentation.folderID == nil {
         menu.addItem(SidebarNativeMenuItem(
@@ -2462,6 +2477,13 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         systemImage: presentation.unread ? "checkmark.message.fill" : "envelope.badge.fill",
         action: actions.toggleReadUnread
       ))
+      if let markAllRead = actions.markAllRead {
+        menu.addItem(SidebarNativeMenuItem(
+          title: "Mark All Read",
+          systemImage: "checkmark.message.fill",
+          action: markAllRead
+        ))
+      }
       if configuration.canCloseFromSidebar {
         menu.addItem(SidebarNativeMenuItem(
           title: "Close from Sidebar",
@@ -2653,7 +2675,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     guard let configuration else { return }
     let presentation = configuration.presentation
     setAccessibilityLabel(presentation.title)
-    let unreadValue: String? = if presentation.unreadCount == 1 {
+    let unreadValue: String? = if displayedDisclosureExpanded == false, displayedUnread.count > 0 {
+      "\(displayedUnread.count) unread chats including sub-threads"
+    } else if presentation.unreadCount == 1 {
       "1 unread message"
     } else if presentation.unreadCount > 1 {
       "\(presentation.unreadCount) unread messages"
@@ -2700,12 +2724,61 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         return true
       })
     }
+    if let markAllRead = configuration.actions.markAllRead {
+      actions.append(NSAccessibilityCustomAction(name: "Mark All Read") {
+        markAllRead()
+        return true
+      })
+    }
     setAccessibilityCustomActions(actions)
+  }
+
+  private var displayedUnread: (count: Int, mark: Bool, prominent: Bool) {
+    guard let configuration else { return (0, false, false) }
+    let own = configuration.presentation
+    let includesChildren = displayedDisclosureExpanded == false
+    return (
+      includesChildren
+        ? configuration.descendantUnreadCount + (own.unread ? 1 : 0)
+        : (own.unread ? own.unreadCount : 0),
+      own.unread && own.unreadMark,
+      (own.unread && own.prominentUnreadDot)
+        || (includesChildren && configuration.descendantProminentUnreadCount > 0)
+    )
+  }
+
+  private func configureUnreadBadges() {
+    guard let configuration else { return }
+    let unread = displayedUnread
+    trailingUnreadBadge.configure(
+      unreadCount: unread.count,
+      hasUnreadMark: unread.mark,
+      prominent: unread.prominent,
+      style: configuration.unreadBadgeStyle,
+      animatesChanges: allowsAnimations
+    )
+    trailingUnreadBadge.setPlacementVisible(
+      configuration.unreadBadgeStyle == .numbered,
+      animated: allowsAnimations
+    )
+    leadingUnreadBadge.configure(
+      unreadCount: unread.count,
+      hasUnreadMark: unread.mark,
+      prominent: unread.prominent,
+      style: .dot,
+      animatesChanges: allowsAnimations
+    )
+    leadingUnreadBadge.setPlacementVisible(
+      configuration.unreadBadgeStyle == .dot,
+      animated: allowsAnimations
+    )
   }
 
   private func performDisclosureToggle() {
     guard let configuration, let displayedDisclosureExpanded else { return }
     self.displayedDisclosureExpanded = !displayedDisclosureExpanded
+    configureUnreadBadges()
+    needsLayout = true
     configureDisclosureVisual()
     updateControlPresentation(animated: false)
     updateAccessibility()

@@ -20,6 +20,7 @@ struct SidebarFolderItemView: View, Equatable {
   let onRename: () -> Void
   let onClose: () -> Void
   let onUngroup: () -> Void
+  let onMarkAllRead: () -> Void
 
   @State private var isHovering = false
   @State private var isEmojiPickerPresented = false
@@ -122,6 +123,10 @@ struct SidebarFolderItemView: View, Equatable {
       Button("Change Emoji…", systemImage: "face.smiling") {
         isEmojiPickerPresented = true
       }
+
+      Divider()
+
+      Button("Mark All Read", systemImage: "checkmark.message.fill", action: onMarkAllRead)
 
       Divider()
 

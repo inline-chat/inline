@@ -318,6 +318,10 @@ final class DeveloperSidebarPlaygroundModel {
   }
 
   func apply(_ intent: SidebarCollectionMoveIntent) {
+    if case let .chats(moves) = intent {
+      moves.forEach { apply(.chat($0)) }
+      return
+    }
     guard case let .chat(move) = intent else {
       record("Reordered a folder fixture.")
       return
@@ -451,7 +455,8 @@ final class DeveloperSidebarPlaygroundModel {
           togglePin: { [weak self] in self?.record("Pinned or unpinned a folder fixture.") },
           rename: { [weak self] in self?.record("Renamed a folder fixture.") },
           close: { [weak self] in self?.record("Closed a folder fixture.") },
-          ungroup: { [weak self] in self?.record("Ungrouped a folder fixture.") }
+          ungroup: { [weak self] in self?.record("Ungrouped a folder fixture.") },
+          markAllRead: { [weak self] in self?.markAllRead(in: folder.nodeID) }
         )
       ))
     case .folderEmpty:
@@ -699,6 +704,14 @@ final class DeveloperSidebarPlaygroundModel {
     ]
   }
 
+  private func markAllRead(in nodeID: SidebarCollectionNodeID) {
+    let ids = Set(tree.items(includingDescendantsOf: nodeID).map(\.id))
+    for index in chats.indices where ids.contains(chats[index].sidebarItem.id) {
+      chats[index].unreadCount = 0
+      chats[index].unreadMark = false
+    }
+  }
+
   private func chatConfiguration(
     _ projected: SidebarProjectedItem,
     context: SidebarCollectionRowRenderContext
@@ -721,6 +734,8 @@ final class DeveloperSidebarPlaygroundModel {
       disclosureExpanded: projected.isExpandable
         ? (context.disclosureExpandedOverride ?? projected.isExpanded)
         : nil,
+      descendantUnreadCount: projected.descendantUnreadCount,
+      descendantProminentUnreadCount: projected.descendantProminentUnreadCount,
       actions: .init(
         open: { [weak self] in self?.select(item.chatId) },
         close: { [weak self] in self?.close(item.chatId) },
@@ -731,6 +746,7 @@ final class DeveloperSidebarPlaygroundModel {
         rename: { [weak self] in self?.record("Selected Rename for \(item.title).") },
         togglePin: { [weak self] in self?.togglePin(item.chatId) },
         toggleReadUnread: { [weak self] in self?.toggleRead(item.chatId) },
+        markAllRead: projected.isExpandable ? { [weak self] in self?.markAllRead(in: projected.nodeID) } : nil,
         toggleArchive: { [weak self] in self?.record("Selected Archive/Unarchive for \(item.title).") },
         folderMenu: { nil }
       )
@@ -1015,6 +1031,17 @@ private struct DeveloperSidebarCollectionHost: View {
         AnyView(Text(verbatim: String(describing: row.id)))
       },
       actions: SidebarCollectionActions(
+        batchMenu: { items in
+          let menu = NSMenu()
+          menu.addItem(SidebarNativeMenuItem(title: "Mark as Read", systemImage: "checkmark.message") {
+            let ids = Set(items.map(\.id))
+            for index in model.chats.indices where ids.contains(model.chats[index].sidebarItem.id) {
+              model.chats[index].unreadCount = 0
+              model.chats[index].unreadMark = false
+            }
+          })
+          return menu
+        },
         move: { move, completion in
           model.apply(move)
           completion(true)

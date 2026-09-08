@@ -341,6 +341,7 @@ struct SidebarCollectionFolderMove {
 
 enum SidebarCollectionMoveIntent {
   case chat(SidebarCollectionMove)
+  case chats([SidebarCollectionMove])
   case folder(SidebarCollectionFolderMove)
 }
 
@@ -356,6 +357,7 @@ struct SidebarCollectionExternalDropTarget: Hashable {
 }
 
 struct SidebarCollectionActions {
+  let batchMenu: ([SidebarViewModel.Item]) -> NSMenu?
   let move: (
     SidebarCollectionMoveIntent,
     @escaping @MainActor @Sendable (Bool) -> Void

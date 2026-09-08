@@ -28,6 +28,8 @@ struct SidebarProjectedItem: Equatable, Identifiable {
   let orderLane: SidebarOrderLane?
   let lane: SidebarOrderLane?
   let childCount: Int
+  let descendantUnreadCount: Int
+  let descendantProminentUnreadCount: Int
   let isExpanded: Bool
 
   var id: ChatListItem.Identifier { item.id }
@@ -121,7 +123,26 @@ struct SidebarCollectionTree {
   func projectedNodes(
     orderLaneOverrides: [ChatListItem.Identifier: SidebarOrderLane] = [:]
   ) -> [SidebarProjectedNode] {
-    snapshot.visibleProjection().compactMap { projected in
+    // Reduce the full tree once, including descendants hidden by collapse.
+    var unreadByID: [NodeID: (count: Int, prominent: Int)] = [:]
+    func aggregate(_ id: NodeID) -> (count: Int, prominent: Int) {
+      let item = id.chatID.flatMap { itemByID[$0] }
+      var total = (
+        count: item?.unread == true ? 1 : 0,
+        prominent: item?.unread == true && item?.prominentUnreadDot == true ? 1 : 0
+      )
+      for childID in snapshot.nodes[id]?.childIDs ?? [] {
+        let child = aggregate(childID)
+        total.count += child.count
+        total.prominent += child.prominent
+      }
+      unreadByID[id] = total
+      return total
+    }
+    for section in snapshot.sections {
+      for id in section.rootIDs { _ = aggregate(id) }
+    }
+    return snapshot.visibleProjection().compactMap { projected in
       guard let node = snapshot.nodes[projected.id] else { return nil }
       switch projected.id {
       case let .chat(id):
@@ -135,24 +156,20 @@ struct SidebarCollectionTree {
           orderLane: orderLaneOverrides[id] ?? orderLaneByID[projected.id],
           lane: projected.sectionID,
           childCount: node.childIDs.count,
+          descendantUnreadCount: (unreadByID[projected.id]?.count ?? 0) - (item.unread ? 1 : 0),
+          descendantProminentUnreadCount: (unreadByID[projected.id]?.prominent ?? 0)
+            - (item.unread && item.prominentUnreadDot ? 1 : 0),
           isExpanded: isExpanded
         ))
       case let .folder(id):
         guard let folder = folderByID[id], let lane = projected.sectionID else { return nil }
-        let unreadCount = node.childIDs.lazy.compactMap(\.chatID).reduce(into: 0) { count, id in
-          if itemByID[id]?.unread == true { count += 1 }
-        }
-        let prominentUnreadCount = node.childIDs.lazy.compactMap(\.chatID).reduce(into: 0) {
-          count, id in
-          if let item = itemByID[id], item.unread, item.prominentUnreadDot { count += 1 }
-        }
         return .folder(SidebarProjectedFolder(
           folder: folder,
           depth: projected.depth,
           lane: lane,
           childCount: node.childIDs.count,
-          unreadCount: unreadCount,
-          prominentUnreadCount: prominentUnreadCount,
+          unreadCount: unreadByID[projected.id]?.count ?? 0,
+          prominentUnreadCount: unreadByID[projected.id]?.prominent ?? 0,
           isExpanded: node.isExpanded
         ))
       }
@@ -166,6 +183,12 @@ struct SidebarCollectionTree {
       guard case let .chat(item) = node else { return nil }
       return item
     }
+  }
+
+  /// Resolve membership from the complete tree, independent of disclosure state.
+  func items(includingDescendantsOf id: NodeID) -> [SidebarViewModel.Item] {
+    guard let group = try? snapshot.dragGroup(for: id) else { return [] }
+    return group.attachedNodeIDs.compactMap { $0.chatID.flatMap { itemByID[$0] } }
   }
 
   func persistedOrder(

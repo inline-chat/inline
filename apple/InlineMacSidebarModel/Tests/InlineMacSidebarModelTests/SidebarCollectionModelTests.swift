@@ -87,6 +87,80 @@ private func rootIDs(
 
 @Suite("Sidebar collection hierarchy")
 struct SidebarCollectionHierarchyTests {
+  @Test func movingSecondarySelectionSupersedesPendingBatch() throws {
+    let base = try standardSnapshot()
+    var state = SidebarCollectionOptimisticState(confirmed: base)
+    let first = UUID()
+    try state.beginMove(
+      id: first, sourceID: .parentA, destination: slot(.pinned), sourceIDs: [.parentA, .rootC]
+    )
+    let firstResult = state.presented
+    let second = UUID()
+    try state.beginMove(id: second, sourceID: .rootC, destination: slot(.normal, before: .rootB))
+    #expect(state.pendingMoves.map(\.id) == [second])
+    let acknowledgedSupersededMove = state.acknowledgeRPC(id: first)
+    #expect(!acknowledgedSupersededMove)
+    state.receiveExternal(firstResult)
+    #expect(rootIDs(state.presented, sectionID: .pinned) == [.parentA])
+    #expect(rootIDs(state.presented, sectionID: .normal) == [.rootC, .rootB])
+  }
+
+  @Test func selectionDeduplicatesAttachedRepliesIncludingCollapsedGroups() throws {
+    let snapshot = try standardSnapshot(parentExpanded: false)
+    let group = try snapshot.dragGroup(for: [.parentA, .replyA1, .rootC, .rootC])
+    #expect(group.sourceIDs == [.parentA, .rootC])
+    #expect(group.visibleNodeIDs == [.parentA, .rootC])
+    #expect(group.attachedNodeIDs == [.parentA, .replyA1, .replyA2, .rootC])
+    let moved = try snapshot.moving(group.sourceIDs, to: slot(.pinned))
+    #expect(rootIDs(moved, sectionID: .pinned) == [.parentA, .rootC])
+    #expect(rootIDs(moved, sectionID: .normal) == [.rootB])
+    #expect(moved.parentID(of: .replyA1) == .parentA)
+  }
+
+  @Test func batchSlotsExcludeEverySourceAndRequireCommonContainers() throws {
+    let snapshot = try standardSnapshot()
+    let slots = try snapshot.legalSlots(for: [.replyA1, .rootC])
+    #expect(!slots.contains { $0.parentID == .parentA })
+    #expect(!slots.contains { $0.beforeSiblingID == .replyA1 || $0.beforeSiblingID == .rootC })
+    let moved = try snapshot.moving([.replyA1, .rootC], to: slot(.normal, before: .rootB))
+    #expect(rootIDs(moved, sectionID: .normal) == [.parentA, .replyA1, .rootC, .rootB])
+    #expect(moved.nodes[.parentA]?.childIDs == [.replyA2])
+    #expect(moved.isGroup([.replyA1, .rootC], at: slot(.normal, before: .rootB)))
+  }
+
+  @Test func batchCanEnterFolderInSelectionOrder() throws {
+    let snapshot = try TestSnapshot(
+      sections: [section(.normal, [.folder, .rootB, .rootC])],
+      nodes: [node(.folder, childPolicy: .any), node(.rootB), node(.rootC)]
+    )
+    let destination = slot(.normal, parentID: .folder)
+    #expect(try snapshot.legalSlots(for: [.rootB, .rootC]).contains(destination))
+    let moved = try snapshot.moving([.rootB, .rootC], to: destination)
+    #expect(moved.nodes[.folder]?.childIDs == [.rootB, .rootC])
+  }
+
+  @Test func optimisticBatchSurvivesPartialObservationAndFailureUsesLatestBase() throws {
+    let base = try standardSnapshot()
+    var state = SidebarCollectionOptimisticState(confirmed: base)
+    let id = UUID()
+    let sources: [TestSidebarNodeID] = [.parentA, .rootC]
+    let destination = slot(.pinned)
+    try state.beginMove(id: id, sourceID: .parentA, destination: destination, sourceIDs: sources)
+    let complete = state.presented
+    let partial = try base.moving(.parentA, to: destination)
+    let result = state.receiveExternal(partial)
+    #expect(result.acknowledgedMoveIDs.isEmpty)
+    #expect(state.presented == complete)
+    state.failMove(id: id)
+    #expect(state.presented == partial)
+
+    try state.beginMove(id: id, sourceID: .parentA, destination: destination, sourceIDs: sources)
+    state.acknowledgeRPC(id: id)
+    #expect(state.pendingMoves.count == 1)
+    #expect(state.receiveExternal(complete).acknowledgedMoveIDs == [id])
+    #expect(state.pendingMoves.isEmpty)
+  }
+
   @Test("projects parent and replies as stable preorder with inherited section")
   func projectsExpandedHierarchy() throws {
     let snapshot = try standardSnapshot()

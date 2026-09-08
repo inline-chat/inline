@@ -175,6 +175,9 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     nativeConfiguration: SidebarNativeRowConfiguration?,
     isLayoutVisible: Bool,
     preservesCollectionTransition: Bool,
+    selected: Bool? = nil,
+    click: ((NSEvent.ModifierFlags) -> Bool)? = nil,
+    contextMenu: (() -> NSMenu?)? = nil,
     panHandler: @escaping PanHandler
   ) {
     #if DEBUG
@@ -232,7 +235,8 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
       removeHostedRenderer()
       let nativeView = ensureNativeView()
       nativeView.isHidden = false
-      nativeView.configure(nativeConfiguration)
+      nativeView.configure(nativeConfiguration.selectingChat(selected))
+      nativeView.setSelectionHandlers(click: click, contextMenu: contextMenu)
       synchronizeHostedAccessibility()
       return
     }

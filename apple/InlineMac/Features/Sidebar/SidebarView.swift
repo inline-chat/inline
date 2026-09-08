@@ -339,6 +339,7 @@ struct SidebarView: View {
       nativeContent: nativeAppKitContent,
       dragPreviewContent: appKitDragPreviewContent,
       actions: SidebarCollectionActions(
+        batchMenu: sidebarBatchMenu,
         move: applyAppKitSidebarMove,
         toggleDisclosure: toggleAppKitNode,
         externalDropTarget: makeAppKitExternalDropTarget,
@@ -727,7 +728,8 @@ struct SidebarView: View {
             )
           },
           close: { removeFolder(folder, disposition: .closeDialogs) },
-          ungroup: { removeFolder(folder, disposition: .keepDialogs) }
+          ungroup: { removeFolder(folder, disposition: .keepDialogs) },
+          markAllRead: { markAllRead(in: folder.nodeID) }
         )
       ))
     case .folderEmpty:
@@ -788,6 +790,8 @@ struct SidebarView: View {
       disclosureExpanded: projectedItem.isExpandable
         ? (disclosureExpandedOverride ?? projectedItem.isExpanded)
         : nil,
+      descendantUnreadCount: projectedItem.descendantUnreadCount,
+      descendantProminentUnreadCount: projectedItem.descendantProminentUnreadCount,
       actions: SidebarNativeRowConfiguration.ChatActions(
         open: { openChat(item) },
         close: { closeChat(item) },
@@ -807,6 +811,7 @@ struct SidebarView: View {
             dependencies: dependencies
           )
         },
+        markAllRead: projectedItem.isExpandable ? { markAllRead(in: projectedItem.nodeID) } : nil,
         toggleArchive: {
           guard let dependencies else { return }
           ChatMenuActions.toggleArchive(
@@ -849,7 +854,8 @@ struct SidebarView: View {
         )
       },
       onClose: { removeFolder(folder, disposition: .closeDialogs) },
-      onUngroup: { removeFolder(folder, disposition: .keepDialogs) }
+      onUngroup: { removeFolder(folder, disposition: .keepDialogs) },
+      onMarkAllRead: { markAllRead(in: folder.nodeID) }
     )
     .equatable()
   }
@@ -1706,6 +1712,41 @@ struct SidebarView: View {
       "collapse folder expanded=\(expanded) visibleRowsBefore=\(visibleRowsBefore) "
         + "visibleRowsAfter=\(appKitRows.count)"
     )
+  }
+
+  private func markAllRead(in nodeID: SidebarCollectionNodeID) {
+    for item in appKitSidebarTree.items(includingDescendantsOf: nodeID) where item.unread {
+      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    }
+  }
+
+  private func sidebarBatchMenu(for items: [SidebarViewModel.Item]) -> NSMenu? {
+    guard items.count > 1 else { return nil }
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    let read = SidebarNativeMenuItem(title: "Mark as Read", systemImage: "checkmark.message") {
+      for item in items where item.unread {
+        SidebarChatRowActionRunner.toggleReadUnread(item, dependencies: dependencies)
+      }
+    }
+    read.isEnabled = dependencies != nil && items.contains(where: \.unread)
+    menu.addItem(read)
+    menu.addItem(.separator())
+    let folder = SidebarNativeMenuItem(
+      title: "New Folder with Selection",
+      systemImage: "folder.badge.plus"
+    ) {
+      createFolder(peers: items.map(\.peerId))
+    }
+    folder.isEnabled = dependencies != nil && canCreateFolder && items.count <= 100
+      && items.allSatisfy { !isTemporaryItem($0) }
+    if !canCreateFolder {
+      folder.subtitle = "Available from Home"
+    } else if items.count > 100 {
+      folder.subtitle = "Select up to 100 chats"
+    }
+    menu.addItem(folder)
+    return menu
   }
 
   private func sidebarFolderMenu(
@@ -2689,6 +2730,8 @@ struct SidebarView: View {
     switch intent {
     case let .chat(move):
       applyAppKitChatMove(move, completion: completion)
+    case let .chats(moves):
+      applyAppKitChatMoves(moves, completion: completion)
     case let .folder(move):
       applyAppKitFolderMove(move, completion: completion)
     }
@@ -2742,8 +2785,46 @@ struct SidebarView: View {
     }
   }
 
+  private func applyAppKitChatMoves(
+    _ moves: [SidebarCollectionMove],
+    completion: @escaping @MainActor @Sendable (Bool) -> Void
+  ) {
+    // Allocate one consecutive gap before writing anything. Every selected
+    // root shares the same outside neighbors; unrelated rows keep their keys.
+    var orders: [String] = []
+    for move in moves {
+      guard let order = safeSidebarInsertionOrder(
+        hasPrevious: !orders.isEmpty || move.hasPreviousOrder,
+        previousOrder: orders.last ?? move.previousOrder,
+        hasNext: move.hasNextOrder,
+        nextOrder: move.nextOrder
+      ) else {
+        ToastCenter.shared.showError("Couldn’t move the selected chats. Please try again.")
+        completion(false)
+        return
+      }
+      orders.append(order)
+    }
+    Task { @MainActor in
+      for (move, order) in zip(moves, orders) {
+        let success = await withCheckedContinuation { continuation in
+          applyAppKitChatMove(move, targetOrder: order) { success in
+            continuation.resume(returning: success)
+          }
+        }
+        guard success else {
+          ToastCenter.shared.showError("Some chats couldn’t be moved. Please try again.")
+          completion(false)
+          return
+        }
+      }
+      completion(true)
+    }
+  }
+
   private func applyAppKitChatMove(
     _ move: SidebarCollectionMove,
+    targetOrder: String? = nil,
     completion: @escaping @MainActor @Sendable (Bool) -> Void
   ) {
     if effectiveSidebarSort == .recentActivity {
@@ -2791,7 +2872,7 @@ struct SidebarView: View {
       )
     }
 
-    guard let targetOrder = safeSidebarInsertionOrder(
+    guard let targetOrder = targetOrder ?? safeSidebarInsertionOrder(
       hasPrevious: move.hasPreviousOrder,
       previousOrder: move.previousOrder,
       hasNext: move.hasNextOrder,
