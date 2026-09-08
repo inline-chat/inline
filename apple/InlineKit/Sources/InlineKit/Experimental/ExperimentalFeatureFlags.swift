@@ -10,6 +10,12 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.bool(forKey: quickForwardKey)
   }
 
+  public static let fileBrowserKey = "experimental.fileBrowser"
+
+  public static var fileBrowserEnabled: Bool {
+    UserDefaults.standard.bool(forKey: fileBrowserKey)
+  }
+
   public static var sidebarAsInboxEnabled: Bool {
     get { isSidebarAsInboxEnabled }
     set { setSidebarAsInboxEnabled(newValue) }

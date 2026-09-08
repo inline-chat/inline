@@ -304,6 +304,7 @@ extension AppDelegate {
   @MainActor private func presentLogoutPanel() {
     dependencies.viewModel.navigate(.loading)
     SettingsWindowController.closeIfOpen()
+    FilesWindowController.closeIfOpen()
     LoggingOutWindowController.show()
     MainWindowController.all.forEach { $0.window?.orderOut(nil) }
   }

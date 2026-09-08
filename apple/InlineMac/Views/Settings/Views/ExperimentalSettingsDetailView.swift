@@ -1,7 +1,11 @@
+import Auth
 import InlineKit
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
+  @Environment(\.dependencies) private var dependencies
+  @ObservedObject private var auth = Auth.shared
+  @AppStorage(ExperimentalFeatureFlags.fileBrowserKey) private var fileBrowserEnabled = false
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
@@ -11,6 +15,16 @@ struct ExperimentalSettingsDetailView: View {
   var body: some View {
     Form {
       Section {
+        Toggle(isOn: $fileBrowserEnabled) {
+          SettingsRowLabel("File Browser", description: "Browse files, images, and videos by chat in a separate Files window.")
+        }
+        .onChange(of: fileBrowserEnabled) { _, enabled in
+          if !enabled { FilesWindowController.closeIfOpen() }
+        }
+        if fileBrowserEnabled, let dependencies {
+          Button("Open Files") { FilesWindowController.show(dependencies: dependencies) }
+            .disabled(auth.currentUserId == nil)
+        }
         Toggle(isOn: $nativeFileDownloadsEnabled) {
           SettingsRowLabel(
             "Native File Downloads",

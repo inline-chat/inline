@@ -27,6 +27,7 @@ final class AppMenu: NSObject {
   private weak var tabBarMenuItem: NSMenuItem?
   private weak var closeWindowMenuItem: NSMenuItem?
   private weak var spaceMenu: NSMenu?
+  private weak var filesMenuItem: NSMenuItem?
   private var chatMenuItems: [ChatMenuCommand: NSMenuItem] = [:]
   private var isPresentingLogoutConfirmation = false
 #if SPARKLE
@@ -778,6 +779,7 @@ final class AppMenu: NSObject {
 
   private func setupWindowMenu() {
     let windowMenu = NSMenu(title: "Window")
+    windowMenu.delegate = self
     let windowMenuItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
     windowMenuItem.submenu = windowMenu
     mainMenu.addItem(windowMenuItem)
@@ -804,6 +806,13 @@ final class AppMenu: NSObject {
     windowMenu.addItem(alwaysOnTopItem)
 
     windowMenu.addItem(NSMenuItem.separator())
+
+    let filesItem = NSMenuItem(title: "Files", action: #selector(openFiles(_:)), keyEquivalent: "")
+    filesItem.target = self
+    filesItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+    filesItem.isHidden = !ExperimentalFeatureFlags.fileBrowserEnabled
+    windowMenu.addItem(filesItem)
+    filesMenuItem = filesItem
 
     let macDevtoolsItem = NSMenuItem(
       title: "Open Devtools",
@@ -939,6 +948,11 @@ final class AppMenu: NSObject {
 
   @MainActor @objc private func newWindow(_ sender: Any?) {
     (NSApp.delegate as? AppDelegate)?.openNewMainWindow(sender)
+  }
+
+  @objc private func openFiles(_ sender: Any?) {
+    guard let dependencies else { return }
+    FilesWindowController.show(dependencies: dependencies)
   }
 
   @MainActor @objc private func newThread(_ sender: Any?) {
@@ -1341,6 +1355,9 @@ final class AppMenu: NSObject {
 
 extension AppMenu: NSMenuDelegate {
   func menuNeedsUpdate(_ menu: NSMenu) {
+    if menu === filesMenuItem?.menu {
+      filesMenuItem?.isHidden = !ExperimentalFeatureFlags.fileBrowserEnabled
+    }
     guard menu === spaceMenu else { return }
     menu.removeAllItems()
 
@@ -1423,6 +1440,10 @@ extension AppMenu: NSMenuDelegate {
 extension AppMenu: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let dependencies else { return false }
+
+    if menuItem === filesMenuItem {
+      return ExperimentalFeatureFlags.fileBrowserEnabled && dependencies.auth.getCurrentUserId() != nil
+    }
 
 #if SPARKLE
     if menuItem == updateMenuItem {
