@@ -213,6 +213,7 @@ public final class LinkDetector: Sendable {
 
   // Detects explicit-scheme URLs using custom regex (covers app deep links and long query strings)
   private func detectExplicitSchemeLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
+    guard text.contains("://") else { return [] }
     let nsText = text as NSString
     let searchRange = NSRange(location: 0, length: nsText.length)
     let matches = Self.explicitSchemeURLRegex.matches(in: text, options: [], range: searchRange)
@@ -258,6 +259,15 @@ public final class LinkDetector: Sendable {
 
   /// Detects bare domains with whitelisted TLDs (without protocol)
   private func detectBareDomainLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
+    // Every whitelisted TLD starts with a letter after a literal period. Avoid
+    // an ICU scan for prose with only sentence-ending dots. Non-ASCII bytes
+    // remain candidates so ICU's Unicode case folding keeps its exact behavior.
+    var followsPeriod = false
+    let hasCandidate = text.utf8.contains { byte in
+      defer { followsPeriod = byte == 46 }
+      return followsPeriod && ((65 ... 90).contains(byte) || (97 ... 122).contains(byte) || byte >= 128)
+    }
+    guard hasCandidate else { return [] }
     let range = NSRange(location: 0, length: text.utf16.count)
     let matches = Self.bareDomainRegex.matches(in: text, options: [], range: range)
 

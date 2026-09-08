@@ -1,10 +1,22 @@
 
+import Foundation
 import Testing
 @testable import TextProcessing
 
 @Suite("LinkDetector")
 struct LinkDetectorTests {
   let detector = LinkDetector.shared
+
+  @Test("Sentence punctuation fast paths retain link ranges", arguments: [
+    "inline://chat", "https://localhost:8080/a", "EXAMPLE.COM", "سلام.example.com",
+  ])
+  func punctuationPrefix(candidate: String) {
+    let prefix = String(repeating: "Text arrives in small pieces. ", count: 200) + "🧪 "
+    #expect(detector.detectLinks(in: prefix).isEmpty)
+    let matches = detector.detectLinks(in: prefix + candidate)
+    #expect(matches.count == 1)
+    #expect(matches.first?.range == NSRange(location: prefix.utf16.count, length: candidate.utf16.count))
+  }
 
   @Test("Does not detect domains inside email addresses")
   func doesNotDetectEmailDomain() async throws {
