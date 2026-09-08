@@ -23,7 +23,11 @@ export const Route = createFileRoute("/")({
   loader: () => getIsIOSRequest(),
 
   head: () => ({
+    scripts: [
+      { type: "application/ld+json", children: JSON.stringify(LANDING_METADATA.website) },
+    ],
     links: [
+      { rel: "canonical", href: LANDING_METADATA.url },
       {
         rel: "preload",
         href: "/inline-macos-message-style.webp",
@@ -54,6 +58,9 @@ export const Route = createFileRoute("/")({
         name: "twitter:image",
         content: LANDING_METADATA.twitter.image,
       },
+      { property: "og:site_name", content: LANDING_METADATA.siteName },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: LANDING_METADATA.url },
       { property: "og:title", content: LANDING_METADATA.openGraph.title },
       { property: "og:description", content: LANDING_METADATA.openGraph.description },
       { property: "og:image", content: LANDING_METADATA.openGraph.image },
