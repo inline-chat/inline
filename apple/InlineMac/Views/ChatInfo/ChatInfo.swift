@@ -1667,7 +1667,25 @@ private struct ChatInfoDocumentRow: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: DocumentView, context: Context) {
-    nsView.update(with: documentMessage.document)
+    nsView.update(
+      with: documentMessage.document,
+      fullMessage: makeFullMessage(from: documentMessage)
+    )
+  }
+
+  func sizeThatFits(
+    _ proposal: ProposedViewSize,
+    nsView _: DocumentView,
+    context _: Context
+  ) -> CGSize? {
+    // DocumentView uses manual frames, so SwiftUI cannot infer its height from constraints.
+    let preferredWidth = DocumentPresentationPlan.preferredWidth(for: documentMessage.document)
+    let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? preferredWidth
+
+    CGSize(
+      width: width,
+      height: DocumentPresentationPlan.preferredHeight(for: documentMessage.document)
+    )
   }
 
   private func makeFullMessage(from documentMessage: DocumentMessage) -> FullMessage {
