@@ -90,6 +90,8 @@ public enum DatabaseWork<Payload: Equatable & Sendable>: Equatable, Sendable {
 public enum DatabaseResult: Equatable, Sendable {
   case done
   case bucketState(SyncPosition)
+  /// Transactional evidence, not a cursor-only read. For repair finalization,
+  /// the writer must revalidate every child even if the parent is already newer.
   case committed(SyncPosition)
   case conflict
   case failed

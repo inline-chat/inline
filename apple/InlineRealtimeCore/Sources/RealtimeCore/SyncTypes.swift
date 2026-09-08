@@ -48,7 +48,8 @@ extension Page {
     var accounted: Set<Int64> = []
     var endDate = max(start.date, date)
     for update in updates {
-      guard update.hasSequence, update.supported, update.sequence > start.sequence,
+      guard update.hasSequence, update.supported, update.date >= 0,
+        update.sequence > start.sequence,
         update.sequence <= through, accounted.insert(update.sequence).inserted
       else { return .reject }
       endDate = max(endDate, update.date)

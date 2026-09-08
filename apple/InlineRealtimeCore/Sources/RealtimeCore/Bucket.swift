@@ -5,6 +5,7 @@ struct Bucket<Payload: Equatable & Sendable>: Sendable {
   var repair: BucketRepair<Payload>?
   var position: SyncPosition? { cursor.map { SyncPosition(sequence: $0, date: date) } }
   var target: Int64 = 0
+  var requiresAuthoritativeThrough: Int64 = 0
   var latest: UInt64 = 0
   var completedLatest: UInt64 = 0
   var pending: OperationID?

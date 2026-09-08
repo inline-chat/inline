@@ -16,6 +16,8 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
   var database: [OperationID: PendingDatabase<Payload>] = [:]
   var buckets: [BucketID: Bucket<Payload>] = [:]
   var discovery: Discovery?
+  var lastSyncBucket: BucketID?
+  var lastSyncWasDiscovery = true
   var directQueue: [Payload] = []
   var lastAdmission: AdmissionClass = .direct
   var closing: Set<OperationID> = []
@@ -73,6 +75,8 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       finished = [:]
       buckets = [:]
       discovery = nil
+      lastSyncBucket = nil
+      lastSyncWasDiscovery = true
       directQueue = []
       active = true
       reportedDrained = false
@@ -113,10 +117,29 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
     case .call(let payload):
       if active { directQueue.append(payload) }
     case .catchUp(let key, let target):
-      if active { demand(key, through: target) }
+      if active {
+        demand(key, through: target)
+        observeDiscoveryDemand(key, through: target)
+      }
     case .live(let key, let update):
       if active {
+        guard update.hasSequence, update.sequence > 0 else { break }
         demand(key, through: update.sequence)
+        observeDiscoveryDemand(key, through: update.sequence)
+        // Uninterpretable live payloads retain the gap but cannot certify it.
+        guard update.supported, update.date >= 0 else {
+          let fence = max(buckets[key]?.requiresAuthoritativeThrough ?? 0, update.sequence)
+          buckets[key]?.requiresAuthoritativeThrough = fence
+          buckets[key]?.buffer.removeValue(forKey: update.sequence)
+          break
+        }
+        if let buffered = buckets[key]?.buffer[update.sequence], buffered != update {
+          // Contradictory payloads are not resolved by arrival order. Fetch authority.
+          let fence = max(buckets[key]?.requiresAuthoritativeThrough ?? 0, update.sequence)
+          buckets[key]?.requiresAuthoritativeThrough = fence
+          buckets[key]?.buffer.removeValue(forKey: update.sequence)
+          break
+        }
         if update.sequence > (buckets[key]?.cursor ?? 0) {
           buckets[key]?.buffer[update.sequence] = update
           if (buckets[key]?.buffer.count ?? 0) > configuration.maxBufferedUpdates {
@@ -141,6 +164,12 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       if active, after >= 0 {
         if discovery == nil {
           discovery = Discovery(after: after)
+          for key in buckets.keys.sorted() {
+            guard let bucket = buckets[key], bucket.hasDemand else { continue }
+            observeDiscoveryDemand(
+              key,
+              through: bucket.latest > bucket.completedLatest ? nil : bucket.target)
+          }
         } else {
           discovery?.requested = true
         }
@@ -243,12 +272,13 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
     case (.transaction(let key), .rejected): settle(key, .failed)
     case (.bucket(let key, let from, let target), .page(let page)):
       receivedPage(page, bucket: key, from: from, target: target)
-    case (.captureLatest(let key, let latest, let minimum), .head(let position)):
+    case (.captureLatest(let key, let start, let latest, let minimum), .head(let position)):
       buckets[key]?.pending = nil
       if let current = buckets[key]?.position,
-        position.sequence >= current.sequence, position.date >= current.date
+        position.sequence >= start.sequence, position.date >= start.date
       {
-        buckets[key]?.pass = CatchUpPass(target: max(minimum, position.sequence), latest: latest)
+        buckets[key]?.pass = CatchUpPass(
+          target: max(current.sequence, max(minimum, position.sequence)), latest: latest)
       } else {
         buckets[key]?.blocked = true
         output.append(.event(.blocked("invalid latest coordinate")))
@@ -265,13 +295,25 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       }
       discovery?.pending = nil
       discovery?.checkpoint = checkpoint
-      discovery?.targets = targets
-      for key in targets.keys.sorted() { demand(key, through: targets[key]) }
+      var combined = current.targets
+      for (key, target) in targets {
+        if let existing = combined[key] {
+          combined[key] = existing == 0 || target == 0 ? 0 : max(existing, target)
+        } else {
+          combined[key] = target
+        }
+      }
+      discovery?.targets = combined
+      for key in combined.keys.sorted() {
+        let target = combined[key]!
+        demand(key, through: target > 0 ? target : nil)
+        if target == 0 { discovery?.requiredLatest[key] = buckets[key]?.latest }
+      }
     case (.direct, .result(let payload)): output.append(.event(.directFinished(attempt, payload)))
     default:
       switch request.owner {
       case .transaction(let key): settle(key, .executionUnknown)
-      case .bucket(let key, _, _), .captureLatest(let key, _, _), .repair(let key):
+      case .bucket(let key, _, _), .captureLatest(let key, _, _, _), .repair(let key):
         buckets[key]?.pending = nil
         buckets[key]?.blocked = true
       case .discovery: discovery = nil
@@ -320,26 +362,9 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       lastAdmission = .transaction
       _ = write(.markDispatching(key))
     }
+    if !lastSyncWasDiscovery { pumpDiscovery() }
     pumpBuckets()
-    if var recovery = discovery, recovery.pending == nil {
-      if recovery.retryAt == nil || recovery.retryAt! <= now {
-        recovery.retryAt = nil
-        discovery = recovery
-        if let checkpoint = recovery.checkpoint {
-          if recovery.targets.allSatisfy({ (buckets[$0.key]?.cursor ?? -1) >= $0.value }) {
-            let operation = write(.storeCheckpoint(checkpoint))
-            discovery?.pending = operation
-          }
-        } else if session.openConnection != nil, reservedRequests < configuration.capacity,
-          nextAdmission == .sync
-        {
-          discovery?.requested = false
-          lastAdmission = .sync
-          let attempt = transmit(.discover(after: recovery.after), owner: .discovery)
-          discovery?.pending = attempt
-        }
-      }
-    }
+    pumpDiscovery()
     while !directQueue.isEmpty, session.openConnection != nil,
       reservedRequests < configuration.capacity, nextAdmission == .direct
     {
@@ -370,7 +395,8 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
         return false
       }
       let canApplyLive =
-        bucket.latest == bucket.completedLatest && cursor < Int64.max
+        bucket.latest == bucket.completedLatest && cursor >= bucket.requiresAuthoritativeThrough
+        && cursor < Int64.max
         && bucket.buffer[cursor + 1] != nil
       return !canApplyLive
     }

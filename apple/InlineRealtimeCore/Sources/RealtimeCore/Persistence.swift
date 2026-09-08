@@ -82,7 +82,7 @@ extension RealtimeCore {
         }
       }
     case (.finalizeRepair(let key, _, let snapshot, _), .committed(let position))
-    where position == snapshot.position:
+    where position.sequence >= snapshot.position.sequence && position.date >= snapshot.position.date:
       buckets[key]?.pending = nil
       buckets[key]?.repair = nil
       if position.sequence >= (buckets[key]?.cursor ?? 0) {

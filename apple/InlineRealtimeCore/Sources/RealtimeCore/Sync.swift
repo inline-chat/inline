@@ -24,7 +24,12 @@ extension RealtimeCore {
   }
 
   mutating func pumpBuckets() {
-    for key in buckets.keys.sorted() {
+    let keys = buckets.keys.sorted()
+    let ordered =
+      lastSyncBucket.map { last in
+        keys.filter { $0 > last } + keys.filter { $0 <= last }
+      } ?? keys
+    for key in ordered {
       guard var bucket = buckets[key], bucket.pending == nil, !bucket.blocked else { continue }
       if let retry = bucket.retryAt, retry > now { continue }
       bucket.retryAt = nil
@@ -41,6 +46,8 @@ extension RealtimeCore {
             nextAdmission == .sync
           {
             lastAdmission = .sync
+            lastSyncBucket = key
+            lastSyncWasDiscovery = false
             let operation = transmit(
               .repairSnapshot(key, repair.boundary, repair.reason), owner: .repair(key))
             buckets[key]?.pending = operation
@@ -72,7 +79,9 @@ extension RealtimeCore {
         }
         continue
       }
-      if bucket.latest == bucket.completedLatest, position.sequence < Int64.max,
+      if bucket.latest == bucket.completedLatest,
+        position.sequence >= bucket.requiresAuthoritativeThrough,
+        position.sequence < Int64.max,
         bucket.buffer[position.sequence + 1] != nil
       {
         var updates: [Update<Payload>] = []
@@ -90,10 +99,13 @@ extension RealtimeCore {
         nextAdmission == .sync
       {
         lastAdmission = .sync
+        lastSyncBucket = key
+        lastSyncWasDiscovery = false
         if bucket.pass == nil && bucket.latest > bucket.completedLatest {
           let operation = transmit(
             .captureLatest(key),
-            owner: .captureLatest(key, latest: bucket.latest, minimum: bucket.target))
+            owner: .captureLatest(
+              key, from: position, latest: bucket.latest, minimum: bucket.target))
           buckets[key]?.pending = operation
         } else {
           let pass =

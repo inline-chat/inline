@@ -1,7 +1,7 @@
 enum RequestOwner: Equatable, Sendable {
   case transaction(TransactionID)
   case bucket(BucketID, from: SyncPosition, target: Int64)
-  case captureLatest(BucketID, latest: UInt64, minimum: Int64)
+  case captureLatest(BucketID, from: SyncPosition, latest: UInt64, minimum: Int64)
   case repair(BucketID)
   case discovery
   case direct
@@ -44,7 +44,7 @@ extension RealtimeCore {
         transactions[key]?.phase = .ready
         transactions[key]?.retryAt = now + configuration.retryDelay
       }
-    case .bucket(let key, _, _), .captureLatest(let key, _, _), .repair(let key):
+    case .bucket(let key, _, _), .captureLatest(let key, _, _, _), .repair(let key):
       buckets[key]?.pending = nil
       buckets[key]?.retryAt = now + configuration.retryDelay
     case .discovery:
