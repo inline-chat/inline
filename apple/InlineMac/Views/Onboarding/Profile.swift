@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import InlineKit
 import InlineProtocol
 import InlineUI
@@ -83,13 +84,12 @@ final class OnboardingProfileSetupModel {
 
     do {
       let components = Self.nameComponents(trimmed)
-      let result = try await realtimeV2.updateProfile(
-        firstName: components.firstName,
-        lastName: components.lastName ?? "",
-        bio: nil
-      )
-      await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user)
+      let account = try Auth.shared.handle.beginAccountMutation()
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: account) { realtime in
+        try await realtime.updateProfile(firstName: components.firstName, lastName: components.lastName ?? "", bio: nil)
+      }
+      try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: account)
+      try await save(result.user, account: account)
       return true
     } catch {
       errorMessage = error.localizedDescription
@@ -118,7 +118,9 @@ final class OnboardingProfileSetupModel {
     errorMessage = nil
     usernameState = .checking
     do {
-      let result = try await realtimeV2.checkUsername(candidate)
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2) { realtime in
+        try await realtime.checkUsername(candidate)
+      }
       guard cleanUsername(username) == candidate, !Task.isCancelled else { return }
       usernameState = switch result.availability {
       case .usernameAvailable: .available
@@ -143,9 +145,12 @@ final class OnboardingProfileSetupModel {
     defer { isSavingUsername = false }
 
     do {
-      let result = try await realtimeV2.changeUsername(candidate)
-      await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user)
+      let account = try Auth.shared.handle.beginAccountMutation()
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: account) { realtime in
+        try await realtime.changeUsername(candidate)
+      }
+      try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: account)
+      try await save(result.user, account: account)
       return true
     } catch {
       errorMessage = error.localizedDescription
@@ -161,6 +166,7 @@ final class OnboardingProfileSetupModel {
     defer { isUploadingPhoto = false }
 
     do {
+      let account = try Auth.shared.handle.beginAccountMutation()
       let prepared = try await Task.detached(priority: .userInitiated) {
         try ProfilePhotoProcessor.prepare(data)
       }.value
@@ -171,9 +177,11 @@ final class OnboardingProfileSetupModel {
         mimeType: .imagePng,
         progress: { _ in }
       )
-      let result = try await realtimeV2.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
-      await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user, preservesProfilePhoto: false)
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: account) { realtime in
+        try await realtime.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
+      }
+      try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: account)
+      try await save(result.user, account: account, preservesProfilePhoto: false)
       await cacheSelectedPhoto(prepared, userID: result.user.id)
       previewImage = NSImage(data: prepared)
       hasPhoto = true
@@ -192,9 +200,12 @@ final class OnboardingProfileSetupModel {
     defer { isUploadingPhoto = false }
 
     do {
-      let result = try await realtimeV2.setProfilePhoto(fileUniqueID: nil)
-      await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user, preservesProfilePhoto: false)
+      let account = try Auth.shared.handle.beginAccountMutation()
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: account) { realtime in
+        try await realtime.setProfilePhoto(fileUniqueID: nil)
+      }
+      try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: account)
+      try await save(result.user, account: account, preservesProfilePhoto: false)
       previewImage = nil
       hasPhoto = false
     } catch {
@@ -204,12 +215,15 @@ final class OnboardingProfileSetupModel {
 
   private func save(
     _ user: InlineProtocol.User,
+    account: AuthAccountMutationToken,
     preservesProfilePhoto: Bool = true
   ) async throws {
     let previousUserInfo = savedUserInfo
     let savedUser = try await AppDatabase.shared.dbWriter.write { db in
-      try User.save(db, user: user)
+      try Auth.shared.handle.validateAccountMutation(account)
+      return try User.save(db, user: user)
     }
+    try Auth.shared.handle.validateAccountMutation(account)
 
     var previewUser = savedUser
     if preservesProfilePhoto, hasPhoto, let previousUser = previousUserInfo?.user {

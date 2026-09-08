@@ -53,7 +53,7 @@ private enum HomeBootstrapOutcome: Sendable {
 }
 
 struct ExperimentalRootView: View {
-  @StateObject private var onboardingNavigation = OnboardingNavigation()
+  private var onboardingNavigation: OnboardingNavigation { mainViewRouter.onboardingNavigation }
   @StateObject private var api = ApiClient()
   @StateObject private var userData = UserData()
   @StateObject private var mainViewRouter = MainViewRouter()

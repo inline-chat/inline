@@ -135,14 +135,12 @@ extension Profile {
         guard mutationToken.userID == userId else { throw CancellationError() }
 
         let (firstName, lastName) = parseNameComponents(from: trimmedName)
-        let result = try await realtimeV2.updateProfile(
-          firstName: firstName,
-          lastName: lastName ?? "",
-          bio: nil
-        )
+        let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: mutationToken) { realtime in
+          try await realtime.updateProfile(firstName: firstName, lastName: lastName ?? "", bio: nil)
+        }
         try Auth.shared.handle.validateAccountMutation(mutationToken)
         try Task.checkCancellation()
-        await realtimeV2.applyUpdatesAndWait(result.updates)
+        try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: mutationToken)
         persistedUser = try await database.dbWriter.write { db in
           try Auth.shared.handle.validateAccountMutation(mutationToken)
           return try User.save(db, user: result.user)
@@ -203,10 +201,12 @@ extension Profile {
     )
     try Auth.shared.handle.validateAccountMutation(mutationToken)
     try Task.checkCancellation()
-    let result = try await realtimeV2.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
+    let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: mutationToken) { realtime in
+      try await realtime.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
+    }
     try Auth.shared.handle.validateAccountMutation(mutationToken)
     try Task.checkCancellation()
-    await realtimeV2.applyUpdatesAndWait(result.updates)
+    try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: mutationToken)
     let savedUser = try await database.dbWriter.write { db in
       try Auth.shared.handle.validateAccountMutation(mutationToken)
       return try User.save(db, user: result.user)
@@ -427,7 +427,9 @@ extension OnboardingUsername {
     do {
       try await Task.sleep(for: .milliseconds(400))
       guard !Task.isCancelled, cleanUsername(nav.profileUsername) == candidate else { return }
-      let result = try await realtimeV2.checkUsername(candidate)
+      let result = try await OnboardingSession.withConnection(realtime: realtimeV2) { realtime in
+        try await realtime.checkUsername(candidate)
+      }
       guard !Task.isCancelled, cleanUsername(nav.profileUsername) == candidate else { return }
 
       withAnimation(.smooth(duration: 0.15)) {
@@ -458,11 +460,17 @@ extension OnboardingUsername {
     Task {
       do {
         formState.startLoading()
-        let result = try await realtimeV2.changeUsername(candidate)
-        await realtimeV2.applyUpdatesAndWait(result.updates)
-        _ = try await database.dbWriter.write { db in
-          try User.save(db, user: result.user)
+        let mutationToken = try Auth.shared.handle.beginAccountMutation()
+        guard mutationToken.userID == userId else { throw CancellationError() }
+        let result = try await OnboardingSession.withConnection(realtime: realtimeV2, accountToken: mutationToken) { realtime in
+          try await realtime.changeUsername(candidate)
         }
+        try await realtimeV2.applyUpdatesAndWait(result.updates, accountToken: mutationToken)
+        _ = try await database.dbWriter.write { db in
+          try Auth.shared.handle.validateAccountMutation(mutationToken)
+          return try User.save(db, user: result.user)
+        }
+        try Auth.shared.handle.validateAccountMutation(mutationToken)
         appNavigation.reset()
         nav.reset()
         mainViewRouter.setRoute(route: .main)

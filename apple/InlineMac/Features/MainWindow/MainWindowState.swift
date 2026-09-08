@@ -14,7 +14,7 @@ enum TopLevelRoute: Equatable {
     guard persistentStorage else { return .loading }
     switch status {
     case .authenticated, .authenticatedV3:
-      return .main
+      return .loading
     case .unauthenticated, .reauthRequired:
       return .onboarding
     case .hydrating, .locked, .loggingOut:
@@ -196,7 +196,7 @@ class MainWindowViewModel: ObservableObject {
       switch Auth.shared.getStatus() {
       case .authenticated, .authenticatedV3:
         guard await Api.admitPersistentStorage() else { return }
-        self?.topLevelRoute = .main
+        await self?.resolveAuthenticatedRoute()
       case .unauthenticated, .reauthRequired:
         self?.topLevelRoute = .onboarding
       case .hydrating, .locked, .loggingOut:
@@ -253,7 +253,7 @@ class MainWindowViewModel: ObservableObject {
         self?.topLevelRoute = .loading
         return
       }
-      self?.topLevelRoute = .main
+      await self?.resolveAuthenticatedRoute()
     }
   }
 
@@ -274,6 +274,26 @@ class MainWindowViewModel: ObservableObject {
   }
 #endif
 
+  @MainActor
+  private func resolveAuthenticatedRoute() async {
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+    do {
+      let userID = try await OnboardingSession.pendingProfileUserID()
+      guard !Task.isCancelled,
+            Auth.shared.getStatus().isAuthenticated,
+            !Auth.shared.getHasPendingAccountTransition()
+      else { return }
+      guard (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
+      onboardingInitialRoute = userID == nil ? .welcome : .profile
+      topLevelRoute = userID == nil ? .main : .onboarding
+    } catch {
+      guard !Task.isCancelled,
+            (try? Auth.shared.handle.validateAccountMutation(account)) != nil
+      else { return }
+      topLevelRoute = .loading
+    }
+  }
+
   private func handle(status: AuthStatus) {
     startupLoadingReason = Self.currentStartupLoadingReason()
     if Auth.shared.getHasPendingAccountTransition() {
@@ -286,7 +306,8 @@ class MainWindowViewModel: ObservableObject {
     case .loading:
       switch status {
       case .hydrating, .locked, .loggingOut:
-        break
+        transitionTask?.cancel()
+        transitionTask = nil
 
       case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
@@ -299,7 +320,7 @@ class MainWindowViewModel: ObservableObject {
                 Auth.shared.getHasPendingAccountTransition() == false,
                 Auth.shared.getStatus().isAuthenticated
           else { return }
-          self?.topLevelRoute = .main
+          await self?.resolveAuthenticatedRoute()
         }
 
       case .unauthenticated, .reauthRequired:

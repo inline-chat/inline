@@ -13,6 +13,7 @@ public enum MainRoutes: Equatable {
 }
 
 public class MainViewRouter: ObservableObject {
+  let onboardingNavigation = OnboardingNavigation()
   @Published var route: MainRoutes
   @Published private(set) var isRetryingStartup = false
   private var cancellables: Set<AnyCancellable> = []
@@ -71,7 +72,7 @@ public class MainViewRouter: ObservableObject {
         self?.route = .loading
         return
       }
-      self?.route = .main
+      await self?.resolveAuthenticatedRoute()
     }
   }
 
@@ -95,7 +96,7 @@ public class MainViewRouter: ObservableObject {
       switch Auth.shared.getStatus() {
       case .authenticated, .authenticatedV3:
         guard await Api.admitPersistentStorage() else { return }
-        self?.route = .main
+        await self?.resolveAuthenticatedRoute()
       case .unauthenticated, .reauthRequired:
         self?.route = .onboarding
       case .hydrating, .locked, .loggingOut:
@@ -104,11 +105,36 @@ public class MainViewRouter: ObservableObject {
     }
   }
 
+  @MainActor
+  private func resolveAuthenticatedRoute() async {
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+    do {
+      let userID = try await OnboardingSession.pendingProfileUserID()
+      guard !Task.isCancelled,
+            Auth.shared.getStatus().isAuthenticated,
+            !Auth.shared.getHasPendingAccountTransition()
+      else { return }
+      guard (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
+      if let userID {
+        onboardingNavigation.prepareProfileDraft(for: userID)
+        onboardingNavigation.path = [.profile(userId: userID)]
+        route = .onboarding
+      } else {
+        route = .main
+      }
+    } catch {
+      guard !Task.isCancelled,
+            (try? Auth.shared.handle.validateAccountMutation(account)) != nil
+      else { return }
+      route = .loading
+    }
+  }
+
   private static func initialRoute(for status: AuthStatus, persistentStorage: Bool) -> MainRoutes {
     guard persistentStorage else { return .loading }
     switch status {
     case .authenticated, .authenticatedV3:
-      return .main
+      return .loading
     case .hydrating, .locked, .loggingOut:
       return .loading
     case .unauthenticated, .reauthRequired:
@@ -139,7 +165,7 @@ public class MainViewRouter: ObservableObject {
                 Auth.shared.getHasPendingAccountTransition() == false,
                 Auth.shared.getStatus().isAuthenticated
           else { return }
-          self?.route = .main
+          await self?.resolveAuthenticatedRoute()
         }
       case .unauthenticated, .reauthRequired:
         transitionTask?.cancel()
@@ -158,7 +184,8 @@ public class MainViewRouter: ObservableObject {
           self?.route = .onboarding
         }
       case .hydrating, .locked, .loggingOut:
-        break
+        transitionTask?.cancel()
+        transitionTask = nil
       }
 
     case .main:

@@ -10,6 +10,27 @@ import Testing
 // send; settled connection presentation is covered separately by the sync presentation suites.
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
+  @Test("onboarding profile submission waits for the authenticated V3 connection")
+  func testOnboardingWaitsForConnection() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let account = try auth.handle.beginAccountMutation()
+    let transport = DelayedOnboardingTransport()
+    let realtime = RealtimeV2(transport: transport, auth: auth.handle,
+                              applyUpdates: SendTestApplyUpdates(), syncStorage: SendTestSyncStorage())
+    let save = Task {
+      try await realtime.withUserInitiatedConnection(accountToken: account, timeout: .seconds(3)) { realtime in
+        try await realtime.updateProfile(firstName: "Test", lastName: "Person", bio: nil)
+      }
+    }
+    #expect(await waitForCondition(timeout: .seconds(1)) { await transport.started })
+    #expect(await transport.profileCalls == 0)
+    await transport.allowConnection()
+    let result = try await save.value
+    #expect(result.user.firstName == "Test")
+    #expect(await transport.profileCalls == 1)
+    await realtime.loggedOut()
+  }
+
   @Test("external command RPCs and response updates reject stale account generations")
   func testExternalCommandRejectsStaleAccount() async throws {
     let auth = Auth.mocked(authenticated: true)
@@ -3795,4 +3816,37 @@ private func waitForCondition(
   }
 
   return true
+}
+
+private actor DelayedOnboardingTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+  private(set) var started = false
+  private(set) var profileCalls = 0
+  private var connected = false
+
+  func isApplicationAuthenticatedOnConnect() async -> Bool { true }
+  func start() async {
+    guard !started else { return }
+    started = true
+    await events.send(.connecting)
+  }
+  func allowConnection() async {
+    connected = true
+    await events.send(.connected)
+  }
+  func stop() async {
+    connected = false
+    await events.send(.disconnected(errorDescription: "stopped"))
+  }
+  func send(_ message: ClientMessage) async throws {
+    guard connected else { throw TransportError.notConnected }
+    guard case let .rpcCall(call) = message.body, call.method == .updateProfile else { return }
+    profileCalls += 1
+    var result = InlineProtocol.RpcResult()
+    result.reqMsgID = message.id
+    result.result = .updateProfile(.with { $0.user = .with { $0.id = 1; $0.firstName = "Test" } })
+    var response = ServerProtocolMessage()
+    response.body = .rpcResult(result)
+    await events.send(.message(response))
+  }
 }

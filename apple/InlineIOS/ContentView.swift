@@ -9,7 +9,7 @@ struct ContentView2: View {
   @Environment(\.scenePhase) private var scene
   @Environment(\.realtime) var realtime
 
-  @StateObject private var onboardingNav = OnboardingNavigation()
+  private var onboardingNav: OnboardingNavigation { mainViewRouter.onboardingNavigation }
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
   @StateObject var mainViewRouter = MainViewRouter()
