@@ -1613,6 +1613,20 @@ rpc_requests!(
         InvokeBotChatSettingsItem
     ),
     (
+        RequestBotFilesystemInput,
+        RequestBotFilesystem,
+        RequestBotFilesystem,
+        RequestBotFilesystemResult,
+        RequestBotFilesystem
+    ),
+    (
+        AnswerBotFilesystemInput,
+        AnswerBotFilesystem,
+        AnswerBotFilesystem,
+        AnswerBotFilesystemResult,
+        AnswerBotFilesystem
+    ),
+    (
         AnswerBotChatSettingsInput,
         AnswerBotChatSettings,
         AnswerBotChatSettings,

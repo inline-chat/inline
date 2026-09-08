@@ -350,6 +350,7 @@ fn info_tone_from_proto(value: i32) -> BackendResult<BotChatSettingsInfoTone> {
 
 fn folder_to_proto(folder: BotChatSettingsFolder) -> proto::BotChatSettingsFolder {
     proto::BotChatSettingsFolder {
+        remote_browser_version: folder.remote_browser_version,
         value: folder.value,
         recent_folders: folder
             .recent_folders
@@ -371,6 +372,7 @@ fn folder_from_proto(folder: proto::BotChatSettingsFolder) -> BackendResult<BotC
         ));
     }
     Ok(BotChatSettingsFolder {
+        remote_browser_version: folder.remote_browser_version,
         value: folder.value,
         recent_folders: folder
             .recent_folders
@@ -537,6 +539,7 @@ mod tests {
                     disabled: false,
                     disabled_reason: None,
                     control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
+                        remote_browser_version: None,
                         value: "workspace-1".to_owned(),
                         recent_folders: vec![BotChatSettingsFolderOption {
                             value: "workspace-1".to_owned(),

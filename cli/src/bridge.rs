@@ -118,6 +118,7 @@ mod claude_history;
 use claude_history::*;
 mod session_browser;
 use session_browser::*;
+mod filesystem;
 mod settings;
 use settings::*;
 mod owner_control;

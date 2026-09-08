@@ -216,6 +216,12 @@ export interface BotEvent {
          */
         chatSettingsItemInvoked: BotChatSettingsItemInvoked;
     } | {
+        oneofKind: "filesystemRequested";
+        /**
+         * @generated from protobuf field: BotFilesystemRequested filesystem_requested = 3;
+         */
+        filesystemRequested: BotFilesystemRequested;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4508,6 +4514,18 @@ export interface RpcCall {
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogInput;
     } | {
+        oneofKind: "requestBotFilesystem";
+        /**
+         * @generated from protobuf field: RequestBotFilesystemInput requestBotFilesystem = 142;
+         */
+        requestBotFilesystem: RequestBotFilesystemInput;
+    } | {
+        oneofKind: "answerBotFilesystem";
+        /**
+         * @generated from protobuf field: AnswerBotFilesystemInput answerBotFilesystem = 143;
+         */
+        answerBotFilesystem: AnswerBotFilesystemInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5356,6 +5374,18 @@ export interface RpcResult {
          * @generated from protobuf field: GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogResult;
+    } | {
+        oneofKind: "requestBotFilesystem";
+        /**
+         * @generated from protobuf field: RequestBotFilesystemResult requestBotFilesystem = 142;
+         */
+        requestBotFilesystem: RequestBotFilesystemResult;
+    } | {
+        oneofKind: "answerBotFilesystem";
+        /**
+         * @generated from protobuf field: AnswerBotFilesystemResult answerBotFilesystem = 143;
+         */
+        answerBotFilesystem: AnswerBotFilesystemResult;
     } | {
         oneofKind: undefined;
     };
@@ -11845,6 +11875,12 @@ export interface BotChatSettingsFolder {
      * @generated from protobuf field: optional string local_picker_capability = 7;
      */
     localPickerCapability?: string;
+    /**
+     * Owner-only remote directory browsing; absent/zero means unsupported.
+     *
+     * @generated from protobuf field: optional uint32 remote_browser_version = 8;
+     */
+    remoteBrowserVersion?: number;
 }
 /**
  * @generated from protobuf message BotChatSettingsFolderOption
@@ -13045,6 +13081,201 @@ export interface ChatAcknowledgements {
     cursors: ChatAcknowledgement[];
 }
 /**
+ * Owner-only, ephemeral remote filesystem control plane. These paths and
+ * entries must never enter chat history, sync buckets, or diagnostic payloads.
+ *
+ * @generated from protobuf message RequestBotFilesystemInput
+ */
+export interface RequestBotFilesystemInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 2;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: string host_installation_id = 3;
+     */
+    hostInstallationId: string;
+    /**
+     * @generated from protobuf field: RequestBotFilesystemInput.Operation operation = 4;
+     */
+    operation: RequestBotFilesystemInput_Operation;
+    /**
+     * Empty starts at the host home directory; otherwise an absolute path.
+     *
+     * @generated from protobuf field: string path = 5;
+     */
+    path: string;
+    /**
+     * Exclusive filename cursor for bounded, lexically ordered listing pages.
+     *
+     * @generated from protobuf field: string after = 6;
+     */
+    after: string;
+}
+/**
+ * @generated from protobuf enum RequestBotFilesystemInput.Operation
+ */
+export enum RequestBotFilesystemInput_Operation {
+    /**
+     * @generated from protobuf enum value: OPERATION_UNSPECIFIED = 0;
+     */
+    OPERATION_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: LIST = 1;
+     */
+    LIST = 1,
+    /**
+     * @generated from protobuf enum value: REGISTER_FOLDER = 2;
+     */
+    REGISTER_FOLDER = 2
+}
+/**
+ * @generated from protobuf message BotFilesystemEntry
+ */
+export interface BotFilesystemEntry {
+    /**
+     * @generated from protobuf field: string name = 1;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: BotFilesystemEntry.Kind kind = 2;
+     */
+    kind: BotFilesystemEntry_Kind;
+    /**
+     * @generated from protobuf field: uint64 size = 3;
+     */
+    size: bigint;
+}
+/**
+ * @generated from protobuf enum BotFilesystemEntry.Kind
+ */
+export enum BotFilesystemEntry_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_UNSPECIFIED = 0;
+     */
+    KIND_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: FILE = 1;
+     */
+    FILE = 1,
+    /**
+     * @generated from protobuf enum value: DIRECTORY = 2;
+     */
+    DIRECTORY = 2,
+    /**
+     * @generated from protobuf enum value: SYMLINK = 3;
+     */
+    SYMLINK = 3,
+    /**
+     * @generated from protobuf enum value: OTHER = 4;
+     */
+    OTHER = 4
+}
+/**
+ * @generated from protobuf message BotFilesystemListing
+ */
+export interface BotFilesystemListing {
+    /**
+     * @generated from protobuf field: string path = 1;
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: optional string parent_path = 2;
+     */
+    parentPath?: string;
+    /**
+     * @generated from protobuf field: repeated BotFilesystemEntry entries = 3;
+     */
+    entries: BotFilesystemEntry[];
+    /**
+     * @generated from protobuf field: optional string next_after = 4;
+     */
+    nextAfter?: string;
+}
+/**
+ * @generated from protobuf message BotFilesystemResponse
+ */
+export interface BotFilesystemResponse {
+    /**
+     * @generated from protobuf oneof: result
+     */
+    result: {
+        oneofKind: "listing";
+        /**
+         * @generated from protobuf field: BotFilesystemListing listing = 1;
+         */
+        listing: BotFilesystemListing;
+    } | {
+        oneofKind: "workspaceId";
+        /**
+         * @generated from protobuf field: string workspace_id = 2;
+         */
+        workspaceId: string;
+    } | {
+        oneofKind: "problem";
+        /**
+         * Short, safe user-facing error; never OS error strings or credentials.
+         *
+         * @generated from protobuf field: string problem = 3;
+         */
+        problem: string;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message RequestBotFilesystemResult
+ */
+export interface RequestBotFilesystemResult {
+    /**
+     * @generated from protobuf field: BotFilesystemResponse response = 1;
+     */
+    response?: BotFilesystemResponse;
+}
+/**
+ * @generated from protobuf message BotFilesystemRequested
+ */
+export interface BotFilesystemRequested {
+    /**
+     * @generated from protobuf field: uint64 request_id = 1;
+     */
+    requestId: bigint;
+    /**
+     * @generated from protobuf field: int64 actor_user_id = 2;
+     */
+    actorUserId: bigint;
+    /**
+     * @generated from protobuf field: int64 chat_id = 3;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: RequestBotFilesystemInput input = 4;
+     */
+    input?: RequestBotFilesystemInput;
+}
+/**
+ * @generated from protobuf message AnswerBotFilesystemInput
+ */
+export interface AnswerBotFilesystemInput {
+    /**
+     * @generated from protobuf field: uint64 request_id = 1;
+     */
+    requestId: bigint;
+    /**
+     * @generated from protobuf field: BotFilesystemResponse response = 2;
+     */
+    response?: BotFilesystemResponse;
+}
+/**
+ * @generated from protobuf message AnswerBotFilesystemResult
+ */
+export interface AnswerBotFilesystemResult {
+}
+/**
  * @generated from protobuf enum DialogFollowMode
  */
 export enum DialogFollowMode {
@@ -13793,7 +14024,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_BOT_CONFIGURATION_CATALOG = 140;
      */
-    GET_BOT_CONFIGURATION_CATALOG = 140
+    GET_BOT_CONFIGURATION_CATALOG = 140,
+    /**
+     * @generated from protobuf enum value: REQUEST_BOT_FILESYSTEM = 141;
+     */
+    REQUEST_BOT_FILESYSTEM = 141,
+    /**
+     * @generated from protobuf enum value: ANSWER_BOT_FILESYSTEM = 142;
+     */
+    ANSWER_BOT_FILESYSTEM = 142
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -14537,7 +14776,8 @@ class BotEvent$Type extends MessageType<BotEvent> {
     constructor() {
         super("BotEvent", [
             { no: 1, name: "chat_settings_requested", kind: "message", oneof: "event", T: () => BotChatSettingsRequested },
-            { no: 2, name: "chat_settings_item_invoked", kind: "message", oneof: "event", T: () => BotChatSettingsItemInvoked }
+            { no: 2, name: "chat_settings_item_invoked", kind: "message", oneof: "event", T: () => BotChatSettingsItemInvoked },
+            { no: 3, name: "filesystem_requested", kind: "message", oneof: "event", T: () => BotFilesystemRequested }
         ]);
     }
     create(value?: PartialMessage<BotEvent>): BotEvent {
@@ -14564,6 +14804,12 @@ class BotEvent$Type extends MessageType<BotEvent> {
                         chatSettingsItemInvoked: BotChatSettingsItemInvoked.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).chatSettingsItemInvoked)
                     };
                     break;
+                case /* BotFilesystemRequested filesystem_requested */ 3:
+                    message.event = {
+                        oneofKind: "filesystemRequested",
+                        filesystemRequested: BotFilesystemRequested.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).filesystemRequested)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14582,6 +14828,9 @@ class BotEvent$Type extends MessageType<BotEvent> {
         /* BotChatSettingsItemInvoked chat_settings_item_invoked = 2; */
         if (message.event.oneofKind === "chatSettingsItemInvoked")
             BotChatSettingsItemInvoked.internalBinaryWrite(message.event.chatSettingsItemInvoked, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BotFilesystemRequested filesystem_requested = 3; */
+        if (message.event.oneofKind === "filesystemRequested")
+            BotFilesystemRequested.internalBinaryWrite(message.event.filesystemRequested, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22775,7 +23024,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
             { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
-            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput },
+            { no: 142, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
+            { no: 143, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -23628,6 +23879,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotConfigurationCatalog)
                     };
                     break;
+                case /* RequestBotFilesystemInput requestBotFilesystem */ 142:
+                    message.input = {
+                        oneofKind: "requestBotFilesystem",
+                        requestBotFilesystem: RequestBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).requestBotFilesystem)
+                    };
+                    break;
+                case /* AnswerBotFilesystemInput answerBotFilesystem */ 143:
+                    message.input = {
+                        oneofKind: "answerBotFilesystem",
+                        answerBotFilesystem: AnswerBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).answerBotFilesystem)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24060,6 +24323,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141; */
         if (message.input.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
+        /* RequestBotFilesystemInput requestBotFilesystem = 142; */
+        if (message.input.oneofKind === "requestBotFilesystem")
+            RequestBotFilesystemInput.internalBinaryWrite(message.input.requestBotFilesystem, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* AnswerBotFilesystemInput answerBotFilesystem = 143; */
+        if (message.input.oneofKind === "answerBotFilesystem")
+            AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24213,7 +24482,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
             { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
-            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult },
+            { no: 142, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
+            { no: 143, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -25066,6 +25337,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotConfigurationCatalog)
                     };
                     break;
+                case /* RequestBotFilesystemResult requestBotFilesystem */ 142:
+                    message.result = {
+                        oneofKind: "requestBotFilesystem",
+                        requestBotFilesystem: RequestBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).requestBotFilesystem)
+                    };
+                    break;
+                case /* AnswerBotFilesystemResult answerBotFilesystem */ 143:
+                    message.result = {
+                        oneofKind: "answerBotFilesystem",
+                        answerBotFilesystem: AnswerBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).answerBotFilesystem)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25498,6 +25781,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141; */
         if (message.result.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
+        /* RequestBotFilesystemResult requestBotFilesystem = 142; */
+        if (message.result.oneofKind === "requestBotFilesystem")
+            RequestBotFilesystemResult.internalBinaryWrite(message.result.requestBotFilesystem, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* AnswerBotFilesystemResult answerBotFilesystem = 143; */
+        if (message.result.oneofKind === "answerBotFilesystem")
+            AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -46095,7 +46384,8 @@ class BotChatSettingsFolder$Type extends MessageType<BotChatSettingsFolder> {
             { no: 4, name: "host_label", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "allows_local_picker", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "local_picker_port", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
-            { no: 7, name: "local_picker_capability", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 7, name: "local_picker_capability", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "remote_browser_version", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<BotChatSettingsFolder>): BotChatSettingsFolder {
@@ -46135,6 +46425,9 @@ class BotChatSettingsFolder$Type extends MessageType<BotChatSettingsFolder> {
                 case /* optional string local_picker_capability */ 7:
                     message.localPickerCapability = reader.string();
                     break;
+                case /* optional uint32 remote_browser_version */ 8:
+                    message.remoteBrowserVersion = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -46168,6 +46461,9 @@ class BotChatSettingsFolder$Type extends MessageType<BotChatSettingsFolder> {
         /* optional string local_picker_capability = 7; */
         if (message.localPickerCapability !== undefined)
             writer.tag(7, WireType.LengthDelimited).string(message.localPickerCapability);
+        /* optional uint32 remote_browser_version = 8; */
+        if (message.remoteBrowserVersion !== undefined)
+            writer.tag(8, WireType.Varint).uint32(message.remoteBrowserVersion);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -49750,3 +50046,486 @@ class ChatAcknowledgements$Type extends MessageType<ChatAcknowledgements> {
  * @generated MessageType for protobuf message ChatAcknowledgements
  */
 export const ChatAcknowledgements = new ChatAcknowledgements$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RequestBotFilesystemInput$Type extends MessageType<RequestBotFilesystemInput> {
+    constructor() {
+        super("RequestBotFilesystemInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "host_installation_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "operation", kind: "enum", T: () => ["RequestBotFilesystemInput.Operation", RequestBotFilesystemInput_Operation] },
+            { no: 5, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "after", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RequestBotFilesystemInput>): RequestBotFilesystemInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.hostInstallationId = "";
+        message.operation = 0;
+        message.path = "";
+        message.after = "";
+        if (value !== undefined)
+            reflectionMergePartial<RequestBotFilesystemInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RequestBotFilesystemInput): RequestBotFilesystemInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* string host_installation_id */ 3:
+                    message.hostInstallationId = reader.string();
+                    break;
+                case /* RequestBotFilesystemInput.Operation operation */ 4:
+                    message.operation = reader.int32();
+                    break;
+                case /* string path */ 5:
+                    message.path = reader.string();
+                    break;
+                case /* string after */ 6:
+                    message.after = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RequestBotFilesystemInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 bot_user_id = 2; */
+        if (message.botUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.botUserId);
+        /* string host_installation_id = 3; */
+        if (message.hostInstallationId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.hostInstallationId);
+        /* RequestBotFilesystemInput.Operation operation = 4; */
+        if (message.operation !== 0)
+            writer.tag(4, WireType.Varint).int32(message.operation);
+        /* string path = 5; */
+        if (message.path !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.path);
+        /* string after = 6; */
+        if (message.after !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.after);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RequestBotFilesystemInput
+ */
+export const RequestBotFilesystemInput = new RequestBotFilesystemInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotFilesystemEntry$Type extends MessageType<BotFilesystemEntry> {
+    constructor() {
+        super("BotFilesystemEntry", [
+            { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "kind", kind: "enum", T: () => ["BotFilesystemEntry.Kind", BotFilesystemEntry_Kind] },
+            { no: 3, name: "size", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotFilesystemEntry>): BotFilesystemEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.name = "";
+        message.kind = 0;
+        message.size = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<BotFilesystemEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotFilesystemEntry): BotFilesystemEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string name */ 1:
+                    message.name = reader.string();
+                    break;
+                case /* BotFilesystemEntry.Kind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* uint64 size */ 3:
+                    message.size = reader.uint64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotFilesystemEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string name = 1; */
+        if (message.name !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.name);
+        /* BotFilesystemEntry.Kind kind = 2; */
+        if (message.kind !== 0)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* uint64 size = 3; */
+        if (message.size !== 0n)
+            writer.tag(3, WireType.Varint).uint64(message.size);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotFilesystemEntry
+ */
+export const BotFilesystemEntry = new BotFilesystemEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotFilesystemListing$Type extends MessageType<BotFilesystemListing> {
+    constructor() {
+        super("BotFilesystemListing", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "parent_path", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "entries", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BotFilesystemEntry },
+            { no: 4, name: "next_after", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotFilesystemListing>): BotFilesystemListing {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.entries = [];
+        if (value !== undefined)
+            reflectionMergePartial<BotFilesystemListing>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotFilesystemListing): BotFilesystemListing {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* optional string parent_path */ 2:
+                    message.parentPath = reader.string();
+                    break;
+                case /* repeated BotFilesystemEntry entries */ 3:
+                    message.entries.push(BotFilesystemEntry.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional string next_after */ 4:
+                    message.nextAfter = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotFilesystemListing, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* optional string parent_path = 2; */
+        if (message.parentPath !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.parentPath);
+        /* repeated BotFilesystemEntry entries = 3; */
+        for (let i = 0; i < message.entries.length; i++)
+            BotFilesystemEntry.internalBinaryWrite(message.entries[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional string next_after = 4; */
+        if (message.nextAfter !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.nextAfter);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotFilesystemListing
+ */
+export const BotFilesystemListing = new BotFilesystemListing$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotFilesystemResponse$Type extends MessageType<BotFilesystemResponse> {
+    constructor() {
+        super("BotFilesystemResponse", [
+            { no: 1, name: "listing", kind: "message", oneof: "result", T: () => BotFilesystemListing },
+            { no: 2, name: "workspace_id", kind: "scalar", oneof: "result", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "problem", kind: "scalar", oneof: "result", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotFilesystemResponse>): BotFilesystemResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.result = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<BotFilesystemResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotFilesystemResponse): BotFilesystemResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BotFilesystemListing listing */ 1:
+                    message.result = {
+                        oneofKind: "listing",
+                        listing: BotFilesystemListing.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).listing)
+                    };
+                    break;
+                case /* string workspace_id */ 2:
+                    message.result = {
+                        oneofKind: "workspaceId",
+                        workspaceId: reader.string()
+                    };
+                    break;
+                case /* string problem */ 3:
+                    message.result = {
+                        oneofKind: "problem",
+                        problem: reader.string()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotFilesystemResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BotFilesystemListing listing = 1; */
+        if (message.result.oneofKind === "listing")
+            BotFilesystemListing.internalBinaryWrite(message.result.listing, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string workspace_id = 2; */
+        if (message.result.oneofKind === "workspaceId")
+            writer.tag(2, WireType.LengthDelimited).string(message.result.workspaceId);
+        /* string problem = 3; */
+        if (message.result.oneofKind === "problem")
+            writer.tag(3, WireType.LengthDelimited).string(message.result.problem);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotFilesystemResponse
+ */
+export const BotFilesystemResponse = new BotFilesystemResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RequestBotFilesystemResult$Type extends MessageType<RequestBotFilesystemResult> {
+    constructor() {
+        super("RequestBotFilesystemResult", [
+            { no: 1, name: "response", kind: "message", T: () => BotFilesystemResponse }
+        ]);
+    }
+    create(value?: PartialMessage<RequestBotFilesystemResult>): RequestBotFilesystemResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<RequestBotFilesystemResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RequestBotFilesystemResult): RequestBotFilesystemResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BotFilesystemResponse response */ 1:
+                    message.response = BotFilesystemResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RequestBotFilesystemResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BotFilesystemResponse response = 1; */
+        if (message.response)
+            BotFilesystemResponse.internalBinaryWrite(message.response, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RequestBotFilesystemResult
+ */
+export const RequestBotFilesystemResult = new RequestBotFilesystemResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotFilesystemRequested$Type extends MessageType<BotFilesystemRequested> {
+    constructor() {
+        super("BotFilesystemRequested", [
+            { no: 1, name: "request_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "input", kind: "message", T: () => RequestBotFilesystemInput }
+        ]);
+    }
+    create(value?: PartialMessage<BotFilesystemRequested>): BotFilesystemRequested {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.requestId = 0n;
+        message.actorUserId = 0n;
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<BotFilesystemRequested>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotFilesystemRequested): BotFilesystemRequested {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint64 request_id */ 1:
+                    message.requestId = reader.uint64().toBigInt();
+                    break;
+                case /* int64 actor_user_id */ 2:
+                    message.actorUserId = reader.int64().toBigInt();
+                    break;
+                case /* int64 chat_id */ 3:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* RequestBotFilesystemInput input */ 4:
+                    message.input = RequestBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, message.input);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotFilesystemRequested, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint64 request_id = 1; */
+        if (message.requestId !== 0n)
+            writer.tag(1, WireType.Varint).uint64(message.requestId);
+        /* int64 actor_user_id = 2; */
+        if (message.actorUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.actorUserId);
+        /* int64 chat_id = 3; */
+        if (message.chatId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.chatId);
+        /* RequestBotFilesystemInput input = 4; */
+        if (message.input)
+            RequestBotFilesystemInput.internalBinaryWrite(message.input, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotFilesystemRequested
+ */
+export const BotFilesystemRequested = new BotFilesystemRequested$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AnswerBotFilesystemInput$Type extends MessageType<AnswerBotFilesystemInput> {
+    constructor() {
+        super("AnswerBotFilesystemInput", [
+            { no: 1, name: "request_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "response", kind: "message", T: () => BotFilesystemResponse }
+        ]);
+    }
+    create(value?: PartialMessage<AnswerBotFilesystemInput>): AnswerBotFilesystemInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.requestId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AnswerBotFilesystemInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AnswerBotFilesystemInput): AnswerBotFilesystemInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint64 request_id */ 1:
+                    message.requestId = reader.uint64().toBigInt();
+                    break;
+                case /* BotFilesystemResponse response */ 2:
+                    message.response = BotFilesystemResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AnswerBotFilesystemInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint64 request_id = 1; */
+        if (message.requestId !== 0n)
+            writer.tag(1, WireType.Varint).uint64(message.requestId);
+        /* BotFilesystemResponse response = 2; */
+        if (message.response)
+            BotFilesystemResponse.internalBinaryWrite(message.response, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AnswerBotFilesystemInput
+ */
+export const AnswerBotFilesystemInput = new AnswerBotFilesystemInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AnswerBotFilesystemResult$Type extends MessageType<AnswerBotFilesystemResult> {
+    constructor() {
+        super("AnswerBotFilesystemResult", []);
+    }
+    create(value?: PartialMessage<AnswerBotFilesystemResult>): AnswerBotFilesystemResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AnswerBotFilesystemResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AnswerBotFilesystemResult): AnswerBotFilesystemResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: AnswerBotFilesystemResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AnswerBotFilesystemResult
+ */
+export const AnswerBotFilesystemResult = new AnswerBotFilesystemResult$Type();

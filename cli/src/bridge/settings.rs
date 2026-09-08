@@ -1382,6 +1382,11 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
     agent_context_owned: bool,
     resolver: &BotAgentResolver,
 ) -> Result<SettingsEventOutcome, Box<dyn std::error::Error>> {
+    if super::filesystem::handle_filesystem_event(bot, event, runtime).await? {
+        return Ok(SettingsEventOutcome::Handled {
+            provider_epoch_ended: false,
+        });
+    }
     let ClientEvent::BotInteraction(interaction) = event else {
         return Ok(SettingsEventOutcome::NotHandled);
     };
@@ -1788,6 +1793,7 @@ fn provider_unavailable_project_document(
                     disabled_reason: pinned
                         .then(|| "This session thread is pinned to its Codex project.".to_string()),
                     control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
+                        remote_browser_version: None,
                         value: current.workspace_id.to_string(),
                         recent_folders: folder_options(choices, unavailable_workspace_id.as_ref()),
                         host_installation_id: route.installation_id.to_string(),
@@ -3586,6 +3592,7 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                     disabled: project_reason.is_some(),
                     disabled_reason: project_reason,
                     control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
+                        remote_browser_version: Some(1),
                         value: snapshot.binding.workspace_id.to_string(),
                         recent_folders: folder_options(
                             choices,

@@ -2476,6 +2476,18 @@ impl ClientBackend for SdkBackend {
         })
     }
 
+    fn answer_bot_filesystem(
+        &self,
+        request: proto::AnswerBotFilesystemInput,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.call_realtime(&session, request).await?;
+            Ok(OperationOutcome::empty())
+        })
+    }
+
     fn connect_agent_session(
         &self,
         request: proto::ConnectAgentSessionInput,
@@ -4171,6 +4183,29 @@ fn bot_event_delivery(event: proto::BotEvent) -> BackendResult<ClientEventDelive
             "bot event did not include an interaction",
         )
     })? {
+        Event::FilesystemRequested(request) => {
+            validate_bot_interaction_ids(
+                request.request_id,
+                request.chat_id,
+                request.actor_user_id,
+            )?;
+            let input = request.input.ok_or_else(|| {
+                BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "missing filesystem input",
+                )
+            })?;
+            BotInteractionEvent::FilesystemRequested {
+                request_id: request.request_id,
+                chat_id: InlineId::new(request.chat_id),
+                actor_user_id: InlineId::new(request.actor_user_id),
+                bot_user_id: InlineId::new(input.bot_user_id),
+                host_installation_id: input.host_installation_id,
+                operation: input.operation,
+                path: input.path,
+                after: input.after,
+            }
+        }
         Event::ChatSettingsRequested(request) => {
             validate_bot_interaction_ids(
                 request.request_id,

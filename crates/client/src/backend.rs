@@ -377,6 +377,19 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         request: AnswerBotChatSettingsRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
+    /// Answers an owner-only remote filesystem interaction.
+    fn answer_bot_filesystem(
+        &self,
+        _request: proto::AnswerBotFilesystemInput,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::InvalidInput,
+                "remote filesystem is unsupported",
+            ))
+        })
+    }
+
     /// Connects one provider session to an Inline thread.
     fn connect_agent_session(
         &self,

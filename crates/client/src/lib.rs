@@ -456,6 +456,25 @@ pub enum BotSettingsValue {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum BotInteractionEvent {
+    /// An owner requested private remote filesystem metadata or registration.
+    FilesystemRequested {
+        /// Server-owned reply correlation ID.
+        request_id: u64,
+        /// Authorized conversation routing context.
+        chat_id: InlineId,
+        /// Authenticated requesting owner.
+        actor_user_id: InlineId,
+        /// Target bot identity.
+        bot_user_id: InlineId,
+        /// Exact host selected by the owner.
+        host_installation_id: String,
+        /// Version-one filesystem operation number.
+        operation: i32,
+        /// Remote directory path; never log this value.
+        path: String,
+        /// Exclusive filename cursor; never log this value.
+        after: String,
+    },
     /// A client opened the bot settings surface for a chat.
     ChatSettingsRequested {
         /// Broker request ID used by the bot's answer RPC.

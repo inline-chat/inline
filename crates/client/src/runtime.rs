@@ -811,6 +811,20 @@ impl InlineClient {
         }
     }
 
+    /// Answers one private remote filesystem request.
+    pub async fn answer_bot_filesystem(
+        &self,
+        request: proto::AnswerBotFilesystemInput,
+    ) -> Result<(), ClientRequestError> {
+        match self
+            .request(ClientRequest::AnswerBotFilesystem(request))
+            .await?
+        {
+            ClientResponse::Empty => Ok(()),
+            _ => unreachable!("unexpected filesystem response"),
+        }
+    }
+
     /// Connects one provider session to an Inline thread.
     pub async fn connect_agent_session(
         &self,
@@ -1317,6 +1331,11 @@ impl ClientRunner {
                 .invoke_bot_chat_settings_item(request)
                 .await
                 .map(ClientResponse::BotChatSettings),
+            ClientRequest::AnswerBotFilesystem(request) => {
+                let outcome = self.backend.answer_bot_filesystem(request).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
             ClientRequest::AnswerBotChatSettings(request) => {
                 let outcome = self.backend.answer_bot_chat_settings(request).await?;
                 self.event_emitter.emit_operation_events(outcome).await?;
@@ -1603,6 +1622,12 @@ async fn handle_concurrent_request(
             .invoke_bot_chat_settings_item(request)
             .await
             .map(ClientResponse::BotChatSettings),
+        ClientRequest::AnswerBotFilesystem(request) => {
+            events
+                .emit_operation_events(backend.answer_bot_filesystem(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
         ClientRequest::AnswerBotChatSettings(request) => {
             events
                 .emit_operation_events(backend.answer_bot_chat_settings(request).await?)
@@ -1751,6 +1776,7 @@ enum ClientRequest {
     RequestBotChatSettings(RequestBotChatSettingsRequest),
     InvokeBotChatSettingsItem(InvokeBotChatSettingsItemRequest),
     AnswerBotChatSettings(AnswerBotChatSettingsRequest),
+    AnswerBotFilesystem(proto::AnswerBotFilesystemInput),
     ConnectAgentSession(proto::ConnectAgentSessionInput),
     GetAgentSession(proto::GetAgentSessionInput),
     SyncAgentSessionMessages(proto::SyncAgentSessionMessagesInput),
@@ -1808,6 +1834,7 @@ impl ClientRequest {
             Self::RequestBotChatSettings(_) => "request_bot_chat_settings",
             Self::InvokeBotChatSettingsItem(_) => "invoke_bot_chat_settings_item",
             Self::AnswerBotChatSettings(_) => "answer_bot_chat_settings",
+            Self::AnswerBotFilesystem(_) => "answer_bot_filesystem",
             Self::ConnectAgentSession(_) => "connect_agent_session",
             Self::GetAgentSession(_) => "get_agent_session",
             Self::SyncAgentSessionMessages(_) => "sync_agent_session_messages",

@@ -251,6 +251,9 @@ pub enum BotChatSettingsInfoTone {
 /// Host-local folder selector metadata.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotChatSettingsFolder {
+    /// Remote metadata browser contract, absent for older hosts.
+    #[serde(default)]
+    pub remote_browser_version: Option<u32>,
     /// Current opaque host-owned workspace identifier.
     pub value: String,
     /// Recently used opaque workspaces.

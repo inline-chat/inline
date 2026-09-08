@@ -391,7 +391,8 @@ pub(super) fn actionable_event_chat_id(event: &ClientEvent) -> Option<i64> {
         ClientEvent::MessageStored { message } => Some(message.chat_id.get()),
         ClientEvent::MessageActionInvoked { chat_id, .. } => Some(chat_id.get()),
         ClientEvent::BotInteraction(
-            BotInteractionEvent::ChatSettingsRequested { chat_id, .. }
+            BotInteractionEvent::FilesystemRequested { chat_id, .. }
+            | BotInteractionEvent::ChatSettingsRequested { chat_id, .. }
             | BotInteractionEvent::ChatSettingsItemInvoked { chat_id, .. },
         ) => Some(chat_id.get()),
         _ => None,
@@ -419,7 +420,8 @@ async fn event_chat_uses_agent_context_settings(
 ) -> Result<bool, String> {
     let chat_id = match event {
         ClientEvent::BotInteraction(
-            BotInteractionEvent::ChatSettingsRequested { chat_id, .. }
+            BotInteractionEvent::FilesystemRequested { chat_id, .. }
+            | BotInteractionEvent::ChatSettingsRequested { chat_id, .. }
             | BotInteractionEvent::ChatSettingsItemInvoked { chat_id, .. },
         )
         | ClientEvent::MessageActionInvoked { chat_id, .. } => chat_id.get(),

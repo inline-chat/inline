@@ -733,8 +733,33 @@ async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
             .is_none()
     );
 
+    let unauthorized_filesystem_event =
+        ClientEvent::BotInteraction(BotInteractionEvent::FilesystemRequested {
+            request_id: 2,
+            chat_id: InlineId::new(999),
+            actor_user_id: InlineId::new(8),
+            bot_user_id: InlineId::new(route.bot_user_id),
+            host_installation_id: "host-test".to_string(),
+            operation: 1,
+            path: String::new(),
+            after: String::new(),
+        });
+    let resolution = conversation_for_settings_event(&route, &unauthorized_filesystem_event, None)
+        .await
+    .expect("filesystem authorization should be resolved without storage mutation");
+    assert!(matches!(
+        resolution,
+        SettingsConversationResolution::Unauthorized
+    ));
+    assert!(
+        store
+            .bound_chat_workspace(&installation_id, 999)
+            .expect("read filesystem binding")
+            .is_none()
+    );
+
     let owner_dm_event = ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
-        request_id: 2,
+        request_id: 3,
         chat_id: InlineId::new(route.owner_dm_chat_id),
         actor_user_id: InlineId::new(route.owner_user_id),
         version: 1,
@@ -753,6 +778,27 @@ async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
             .bound_chat_workspace(&installation_id, route.owner_dm_chat_id)
             .expect("read binding")
             .is_some()
+    );
+
+    let filesystem_event = ClientEvent::BotInteraction(BotInteractionEvent::FilesystemRequested {
+        request_id: 4,
+        chat_id: InlineId::new(route.owner_dm_chat_id),
+        actor_user_id: InlineId::new(route.owner_user_id),
+        bot_user_id: InlineId::new(route.bot_user_id),
+        host_installation_id: "host-test".to_string(),
+        operation: 1,
+        path: String::new(),
+        after: String::new(),
+    });
+    let resolution = conversation_for_settings_event(&route, &filesystem_event, None)
+        .await
+        .expect("owner filesystem requests should resolve their conversation");
+    let SettingsConversationResolution::Ready(filesystem_conversation) = resolution else {
+        panic!("owner filesystem requests must not be treated as unauthorized settings events");
+    };
+    assert_eq!(
+        filesystem_conversation.snapshot().binding.chat_id,
+        route.owner_dm_chat_id
     );
 
     let reply_thread_binding = BindingKey {

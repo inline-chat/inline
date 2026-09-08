@@ -71,6 +71,7 @@ message BotEvent {
   oneof event {
     BotChatSettingsRequested chat_settings_requested = 1;
     BotChatSettingsItemInvoked chat_settings_item_invoked = 2;
+    BotFilesystemRequested filesystem_requested = 3;
   }
 }
 
@@ -1586,6 +1587,8 @@ enum Method {
   GET_USERS = 138;
   GET_BOT_SKILLS = 139;
   GET_BOT_CONFIGURATION_CATALOG = 140;
+  REQUEST_BOT_FILESYSTEM = 141;
+  ANSWER_BOT_FILESYSTEM = 142;
 }
 
 message RpcCall {
@@ -1731,6 +1734,8 @@ message RpcCall {
     GetUsersInput getUsers = 139;
     GetBotSkillsInput getBotSkills = 140;
     GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
+    RequestBotFilesystemInput requestBotFilesystem = 142;
+    AnswerBotFilesystemInput answerBotFilesystem = 143;
   }
 }
 
@@ -1878,6 +1883,8 @@ message RpcResult {
     GetUsersResult getUsers = 139;
     GetBotSkillsResult getBotSkills = 140;
     GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
+    RequestBotFilesystemResult requestBotFilesystem = 142;
+    AnswerBotFilesystemResult answerBotFilesystem = 143;
   }
 }
 
@@ -4333,6 +4340,8 @@ message BotChatSettingsFolder {
   // path. Clients must probe this exact endpoint before opening a picker.
   optional uint32 local_picker_port = 6;
   optional string local_picker_capability = 7;
+  // Owner-only remote directory browsing; absent/zero means unsupported.
+  optional uint32 remote_browser_version = 8;
 }
 
 message BotChatSettingsFolderOption {
@@ -4729,3 +4738,59 @@ message AcknowledgeMessagesInput {
 message AcknowledgeMessagesResult { repeated Update updates = 1; }
 
 message ChatAcknowledgements { repeated ChatAcknowledgement cursors = 1; }
+
+// Owner-only, ephemeral remote filesystem control plane. These paths and
+// entries must never enter chat history, sync buckets, or diagnostic payloads.
+message RequestBotFilesystemInput {
+  InputPeer peer_id = 1;
+  int64 bot_user_id = 2;
+  string host_installation_id = 3;
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    LIST = 1;
+    REGISTER_FOLDER = 2;
+  }
+  Operation operation = 4;
+  // Empty starts at the host home directory; otherwise an absolute path.
+  string path = 5;
+  // Exclusive filename cursor for bounded, lexically ordered listing pages.
+  string after = 6;
+}
+message BotFilesystemEntry {
+  string name = 1;
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    FILE = 1;
+    DIRECTORY = 2;
+    SYMLINK = 3;
+    OTHER = 4;
+  }
+  Kind kind = 2;
+  uint64 size = 3;
+}
+message BotFilesystemListing {
+  string path = 1;
+  optional string parent_path = 2;
+  repeated BotFilesystemEntry entries = 3;
+  optional string next_after = 4;
+}
+message BotFilesystemResponse {
+  oneof result {
+    BotFilesystemListing listing = 1;
+    string workspace_id = 2;
+    // Short, safe user-facing error; never OS error strings or credentials.
+    string problem = 3;
+  }
+}
+message RequestBotFilesystemResult { BotFilesystemResponse response = 1; }
+message BotFilesystemRequested {
+  uint64 request_id = 1;
+  int64 actor_user_id = 2;
+  int64 chat_id = 3;
+  RequestBotFilesystemInput input = 4;
+}
+message AnswerBotFilesystemInput {
+  uint64 request_id = 1;
+  BotFilesystemResponse response = 2;
+}
+message AnswerBotFilesystemResult {}

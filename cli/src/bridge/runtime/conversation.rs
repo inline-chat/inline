@@ -275,7 +275,8 @@ pub(in crate::bridge) async fn conversation_for_settings_event(
 ) -> Result<SettingsConversationResolution, ConversationResolutionError> {
     let actor_user_id = match event {
         ClientEvent::BotInteraction(
-            BotInteractionEvent::ChatSettingsRequested { actor_user_id, .. }
+            BotInteractionEvent::FilesystemRequested { actor_user_id, .. }
+            | BotInteractionEvent::ChatSettingsRequested { actor_user_id, .. }
             | BotInteractionEvent::ChatSettingsItemInvoked { actor_user_id, .. },
         ) => actor_user_id.get(),
         _ => return Ok(SettingsConversationResolution::Unauthorized),
