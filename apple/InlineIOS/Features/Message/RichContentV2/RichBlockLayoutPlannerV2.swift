@@ -1,8 +1,11 @@
+import InlineIOSUI
 import InlineKit
 import InlineProtocol
+import InlineSyntaxHighlighting
 import TextProcessing
 import UIKit
 
+@MainActor
 final class RichBlockLayoutPlannerV2 {
   static let shared = RichBlockLayoutPlannerV2()
   private static let maximumContentByteCount = 512 * 1_024
@@ -124,6 +127,7 @@ final class RichBlockLayoutPlannerV2 {
     let resolvedWidth = builder.claimsMaximumWidth
       ? availableWidth
       : min(availableWidth, max(1, ceil(builder.measuredMaxX)))
+    builder.normalizeFlexibleFrames(from: availableWidth, to: resolvedWidth)
     let plan = RichBlockLayoutPlanV2(
       size: CGSize(width: resolvedWidth, height: ceil(builder.height)),
       mathSignature: math.signature,
@@ -245,7 +249,7 @@ final class RichBlockLayoutPlannerV2 {
     let lastLineHeight: CGFloat
   }
 
-  private struct Builder {
+  @MainActor private struct Builder {
     static let blockSpacing: CGFloat = 8
     static let codeHorizontalInset: CGFloat = 8
     static let codeHeaderHeight: CGFloat = 21
@@ -275,6 +279,33 @@ final class RichBlockLayoutPlannerV2 {
     var trailingTextLine: RichBlockLayoutPlanV2.TrailingTextLine?
     var tableCellCount = 0
     var imageCount = 0
+    var trailingTextEdges: [(nodeIndex: Int, containerMaxX: CGFloat)] = []
+
+    // Wrap text once at the permitted width, then fit decorations to its actual extent.
+    // This is geometry-only: changing the wrapping width here would reshape streamed text.
+    mutating func normalizeFlexibleFrames(from maximumWidth: CGFloat, to resolvedWidth: CGFloat) {
+      let widthReduction = max(0, maximumWidth - resolvedWidth)
+      for index in nodes.indices where widthReduction > 0 {
+        switch nodes[index].kind {
+          case .separator, .quote:
+            let trailingMargin = max(0, maximumWidth - nodes[index].frame.maxX)
+            nodes[index].frame.size.width = max(
+              1,
+              resolvedWidth - trailingMargin - nodes[index].frame.minX
+            )
+          default:
+            break
+        }
+      }
+      // RTL paragraphs retain their logical trailing edge even when a wider sibling
+      // determines the bubble width. Only positions change; text never reflows here.
+      for (index, containerMaxX) in trailingTextEdges {
+        nodes[index].frame.origin.x = max(
+          nodes[index].frame.minX,
+          containerMaxX - widthReduction - nodes[index].frame.width
+        )
+      }
+    }
 
     mutating func layout(
       blocks: [InlineProtocol.Block],
@@ -358,6 +389,7 @@ final class RichBlockLayoutPlannerV2 {
           let imageNode = RichBlockLayoutPlanV2.ImageNode(
             path: path,
             frame: frame,
+            alt: imageAlt(image),
             state: imageState(image)
           )
           nodes.append(.init(path: path, frame: frame, kind: .image(imageNode)))
@@ -373,7 +405,10 @@ final class RichBlockLayoutPlannerV2 {
             ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen)
           guard appendText(
             disclosure.summary,
-            role: .disclosure(progress: disclosure.kind == .progress, expanded: expanded),
+            role: .disclosure(
+              progress: disclosure.kind == .progress, expanded: expanded,
+              activity: RichBlockActivityKindV2(disclosure.activityKind)
+            ),
             path: path,
             x: x,
             width: width,
@@ -429,7 +464,15 @@ final class RichBlockLayoutPlannerV2 {
     ) -> Bool {
       let range = NSRange(location: Int(text.offset), length: Int(text.length))
       let rtl = text.hasIsRtl ? text.isRtl : (inheritedRTL ?? false)
-      let disclosureChrome: CGFloat = if case .disclosure = role { 24 } else { 0 }
+      let textWidth: CGFloat
+      let disclosureChrome: CGFloat
+      if case let .disclosure(_, _, activity) = role {
+        textWidth = RichBlockDisclosureMetricsV2.titleViewportWidth(containerWidth: width, hasActivity: activity != nil)
+        disclosureChrome = RichBlockDisclosureMetricsV2.accessoryWidth(hasActivity: activity != nil)
+      } else {
+        textWidth = width
+        disclosureChrome = 0
+      }
       guard let styled = Self.styled(
         attributedText,
         range: range,
@@ -437,11 +480,12 @@ final class RichBlockLayoutPlannerV2 {
         baseFontSize: baseFontSize,
         rtl: rtl,
         math: math,
-        maximumWidth: max(1, width - disclosureChrome)
+        maximumWidth: max(1, textWidth)
       ) else { return false }
-      let measurement = measureText(styled, width: max(1, width - disclosureChrome))
+      let measurement = measureText(styled, width: max(1, textWidth))
       let nodeWidth = min(width, max(1, measurement.maxLineWidth + disclosureChrome))
-      let frame = CGRect(x: rtl ? x + width - nodeWidth : x, y: height, width: nodeWidth, height: measurement.height)
+      let frame = CGRect(x: x, y: height, width: nodeWidth, height: measurement.height)
+      if rtl { trailingTextEdges.append((nodeIndex: nodes.count, containerMaxX: x + width)) }
       nodes.append(.init(
         path: path,
         frame: frame,
@@ -456,7 +500,6 @@ final class RichBlockLayoutPlannerV2 {
           isRTL: rtl
         )
       }
-      if rtl { claimsMaximumWidth = true }
       return true
     }
 
@@ -475,16 +518,12 @@ final class RichBlockLayoutPlannerV2 {
       let language = code.hasLanguage && !code.language.isEmpty ? code.language : nil
       let codeFont = UIFont.monospacedSystemFont(ofSize: baseFontSize * 0.9, weight: .regular)
       let gutterFont = UIFont.monospacedDigitSystemFont(ofSize: baseFontSize * 0.9, weight: .regular)
-      let gutterWidth: CGFloat = syntaxHighlightingSupported(language)
+      let gutterWidth: CGFloat = CodeSyntaxHighlighter.supports(language: language)
         ? ceil((String(lineCount) as NSString).size(withAttributes: [.font: gutterFont]).width)
         + Self.codeGutterTextTrailingInset
         : 0
       let gutterGap = gutterWidth > 0 ? Self.codeGutterContentGap : 0
       let viewportWidth = max(1, width - Self.codeHorizontalInset * 2 - gutterWidth - gutterGap)
-      let codeText = NSAttributedString(
-        string: plain,
-        attributes: [.font: codeFont]
-      )
       let longestLineWidth = plain.components(separatedBy: .newlines).reduce(CGFloat.zero) { result, line in
         max(result, ceil((line as NSString).size(withAttributes: [.font: codeFont]).width))
       }
@@ -565,6 +604,7 @@ final class RichBlockLayoutPlannerV2 {
             isRTL: rtl
           ))
         ))
+        measuredMaxX = max(measuredMaxX, markerFrame.maxX)
         let itemStart = height
         let childX = rtl ? listX : listX + markerWidth
         guard layout(
@@ -600,6 +640,8 @@ final class RichBlockLayoutPlannerV2 {
       ))
       height += Self.quoteVerticalInset
       let contentX = x + (rtl ? Self.quoteTrailingInset : Self.quoteLeadingInset)
+      let precedingMaxX = measuredMaxX
+      measuredMaxX = 0
       guard layout(
         blocks: quote.children,
         parent: path,
@@ -609,10 +651,10 @@ final class RichBlockLayoutPlannerV2 {
         inheritedRTL: rtl,
         isRoot: false
       ) else { return false }
+      let endingInset = rtl ? Self.quoteLeadingInset : Self.quoteTrailingInset
+      measuredMaxX = max(precedingMaxX, measuredMaxX + endingInset)
       height += Self.quoteVerticalInset
       nodes[decorationIndex].frame.size.height = max(1, height - startY)
-      measuredMaxX = max(measuredMaxX, x + width)
-      claimsMaximumWidth = true
       return true
     }
 
@@ -635,6 +677,7 @@ final class RichBlockLayoutPlannerV2 {
         return RichBlockLayoutPlanV2.ImageNode(
           path: itemPath,
           frame: CGRect(x: itemX, y: 0, width: itemWidth, height: Self.albumHeight),
+          alt: imageAlt(image),
           state: imageState(image)
         )
       }
@@ -834,29 +877,14 @@ final class RichBlockLayoutPlannerV2 {
       {
         return cached.measurement
       }
-      let storage = NSTextStorage(attributedString: text)
-      let manager = NSLayoutManager()
-      let container = NSTextContainer(size: CGSize(width: containerWidth, height: .greatestFiniteMagnitude))
-      container.lineFragmentPadding = 0
-      container.lineBreakMode = .byWordWrapping
-      manager.addTextContainer(container)
-      storage.addLayoutManager(manager)
-      manager.ensureLayout(for: container)
-      var maxLineWidth: CGFloat = 0
-      var lastLineWidth: CGFloat = 0
-      var lastLineHeight: CGFloat = ceil(baseFontSize * 1.25)
-      let glyphRange = manager.glyphRange(for: container)
-      manager.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, _, _ in
-        maxLineWidth = max(maxLineWidth, usedRect.width)
-        lastLineWidth = usedRect.width
-        lastLineHeight = usedRect.height
-      }
-      let used = manager.usedRect(for: container)
+      let textMeasurement = MessageTextMeasurementV2.measure(
+        text, maximumWidth: containerWidth, minimumLineHeight: baseFontSize * 1.25
+      )
       let measurement = TextMeasurement(
-        height: max(ceil(used.height), ceil(baseFontSize * 1.25)),
-        maxLineWidth: max(1, ceil(maxLineWidth)),
-        lastLineWidth: ceil(lastLineWidth),
-        lastLineHeight: ceil(lastLineHeight)
+        height: textMeasurement.size.height,
+        maxLineWidth: textMeasurement.size.width,
+        lastLineWidth: textMeasurement.lastLineWidth,
+        lastLineHeight: textMeasurement.lastLineHeight
       )
       if cacheable {
         RichBlockLayoutPlannerV2.textMeasurementCache.setObject(
@@ -916,6 +944,17 @@ final class RichBlockLayoutPlannerV2 {
       return CGSize(width: CGFloat(dimensions.0), height: CGFloat(dimensions.1))
     }
 
+    func imageAlt(_ image: InlineProtocol.BlockImage) -> String? {
+      let text = image.alt
+      guard text.offset >= 0, text.length > 0,
+            text.offset <= attributedText.length,
+            text.length <= Int64(attributedText.length) - text.offset,
+            let range = Range(NSRange(location: Int(text.offset), length: Int(text.length)), in: attributedText.string)
+      else { return nil }
+      let alt = String(attributedText.string[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+      return alt.isEmpty ? nil : alt
+    }
+
     func imageState(_ image: InlineProtocol.BlockImage) -> RichBlockLayoutPlanV2.ImageNode.State {
       switch image.state {
         case .pending?:
@@ -940,21 +979,6 @@ final class RichBlockLayoutPlannerV2 {
         case .right: .trailing
         case .unspecified, .UNRECOGNIZED: rtl ? .trailing : .leading
       }
-    }
-
-    func syntaxHighlightingSupported(_ language: String?) -> Bool {
-      guard let language = language?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-      else { return false }
-      return [
-        "swift", "swift5", "swift6",
-        "typescript", "ts", "javascript", "js", "tsx", "jsx",
-        "python", "py", "python3",
-        "bash", "sh", "shell", "zsh",
-        "html", "htm", "css", "scss", "json", "jsonc", "yaml", "yml",
-        "go", "golang", "rust", "rs",
-      ].contains(language)
     }
   }
 }

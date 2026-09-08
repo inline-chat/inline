@@ -266,6 +266,38 @@ enum MessageView2PlaygroundFixtures {
       outgoing: false,
       allowsInteraction: true
     ),
+    .init(
+      id: 10_009,
+      title: "Disclosures + activity icons",
+      detail: "Expand each activity; the first title shows progress and respects Reduce Motion.",
+      message: richFixture(id: 10_009, rich: richDisclosures()),
+      outgoing: false,
+      allowsInteraction: true
+    ),
+    .init(
+      id: 10_010,
+      title: "Quotes + checklists",
+      detail: "Compact nested decorations, checked states, and a separator within the measured bubble.",
+      message: richFixture(id: 10_010, rich: richQuotesAndChecklist(rtl: false)),
+      outgoing: false,
+      allowsInteraction: true
+    ),
+    .init(
+      id: 10_011,
+      title: "RTL hierarchy",
+      detail: "Persian paragraphs, nested quotes, and trailing checklist markers.",
+      message: richFixture(id: 10_011, rich: richQuotesAndChecklist(rtl: true)),
+      outgoing: false,
+      allowsInteraction: true
+    ),
+    .init(
+      id: 10_012,
+      title: "Image placeholders + album",
+      detail: "Pending and unavailable media keep their dimensions. The album scrolls horizontally without network requests.",
+      message: richFixture(id: 10_012, rich: richImagePlaceholders()),
+      outgoing: false,
+      allowsInteraction: true
+    ),
   ]
 
   private static func fixture(
@@ -449,6 +481,87 @@ enum MessageView2PlaygroundFixtures {
 
   private static func paragraphBlock(_ text: BlockText) -> InlineProtocol.Block {
     .with { $0.paragraph = text }
+  }
+
+  private static func richDisclosures() -> RichFixture {
+    var builder = RichTextBuilder()
+    let activities: [(BlockDisclosure.ActivityKind, String)] = [
+      (.reasoning, "Thinking through the next step"),
+      (.explore, "Exploring the workspace"),
+      (.read, "Reading files"),
+      (.search, "Searching the source"),
+      (.edit, "Editing a file"),
+      (.delete, "Removing obsolete content"),
+      (.move, "Moving a file"),
+      (.command, "Running a command"),
+      (.web, "Reading a web page"),
+      (.tool, "Using a tool"),
+    ]
+    let blocks = activities.enumerated().map { index, activity in
+      let summary = builder.segment(activity.1)
+      let detail = builder.segment("Expanded detail for this activity. Toggle the row to inspect its title and content layout.")
+      return InlineProtocol.Block.with {
+        $0.disclosure.summary = summary
+        $0.disclosure.activityKind = activity.0
+        if index == 0 { $0.disclosure.kind = .progress }
+        $0.disclosure.children = [paragraphBlock(detail)]
+      }
+    }
+    return builder.finish(blocks: blocks)
+  }
+
+  private static func richQuotesAndChecklist(rtl: Bool) -> RichFixture {
+    var builder = RichTextBuilder()
+    var paragraph = builder.segment(rtl ? "سلام دنیا" : "A compact message")
+    paragraph.isRtl = rtl
+    let quote = builder.segment(rtl ? "یک نقل قول کوتاه" : "A short quote")
+    let nested = builder.segment(rtl ? "نقل قول تو در تو" : "Nested quote")
+    let unchecked = builder.segment(rtl ? "بررسی چیدمان" : "Review layout")
+    let checked = builder.segment(rtl ? "حفظ متن اصلی" : "Preserve source text")
+    return builder.finish(blocks: [
+      paragraphBlock(paragraph),
+      .with {
+        $0.quote.isRtl = rtl
+        $0.quote.children = [
+          paragraphBlock(quote),
+          .with { $0.quote.children = [paragraphBlock(nested)] },
+        ]
+      },
+      .with { $0.separator = .init() },
+      .with {
+        $0.list.kind = .unordered
+        $0.list.isRtl = rtl
+        $0.list.items = [
+          .with { $0.checked = false; $0.children = [paragraphBlock(unchecked)] },
+          .with { $0.checked = true; $0.children = [paragraphBlock(checked)] },
+        ]
+      },
+    ])
+  }
+
+  private static func richImagePlaceholders() -> RichFixture {
+    var builder = RichTextBuilder()
+    let imageAlt = builder.segment("Pending image")
+    let albumAlts = (1 ... 5).map { builder.segment("Album image \($0)") }
+    return builder.finish(blocks: [
+      .with {
+        $0.image.alt = imageAlt
+        $0.image.pending.dimensions = .with { $0.width = 320; $0.height = 180 }
+      },
+      .with {
+        $0.album.images = albumAlts.enumerated().map { index, alt in
+          .with {
+            $0.alt = alt
+            let dimensions = BlockImageDimensions.with {
+              $0.width = index.isMultiple(of: 2) ? 240 : 120
+              $0.height = 180
+            }
+            if index.isMultiple(of: 2) { $0.pending.dimensions = dimensions }
+            else { $0.unavailable.dimensions = dimensions }
+          }
+        }
+      },
+    ])
   }
 
   private static func headingBlock(_ text: BlockText, level: UInt32) -> InlineProtocol.Block {

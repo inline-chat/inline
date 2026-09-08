@@ -85,8 +85,14 @@ final class UIMessageView2: UIMessageView {
     return cache
   }()
 
+  #if DEBUG || DEBUG_BUILD
+  private static let animationDiagnosticsEnabled = ProcessInfo.processInfo.arguments
+    .contains("--message-v2-animation-diagnostics")
+  #endif
+
   private static func animationEvent(_ value: @autoclosure () -> String) {
     #if DEBUG || DEBUG_BUILD
+    guard animationDiagnosticsEnabled else { return }
     NSLog("%@", "MV2_ANIM \(value())")
     #endif
   }
@@ -102,6 +108,7 @@ final class UIMessageView2: UIMessageView {
   private var leafMeasurementGenerations: [MessageLayoutNodeIDV2: Int] = [:]
   private var actionButtonRows: [[MessageActionButton]] = []
   private let richContentView = RichBlockContentViewV2()
+  private var flatTextBinding = MessageTextBindingV2()
   private var currentRichPlan: RichBlockLayoutPlanV2?
   private var transitionOldRichPlan: RichBlockLayoutPlanV2?
   private var transitionAppearingViews: [UIView] = []
@@ -110,7 +117,7 @@ final class UIMessageView2: UIMessageView {
   private var activeGeometryTransitionGeneration: UInt?
   private var renderedRichContentSignature: Int?
   private var renderedRichContentByteCount: Int?
-  private var renderedRichSource: String?
+  private var renderedRichText: NSAttributedString?
   private weak var richLinkLongPress: UILongPressGestureRecognizer?
   private var didInstallReplyTap = false
   private var didInstallRichInteractions = false
@@ -143,6 +150,11 @@ final class UIMessageView2: UIMessageView {
       buildHierarchy: false
     )
 
+    // Flat and structural V2 text use the same engine as their measured plans.
+    if !fullMessage.message.isServiceMessage {
+      messageLabel = createMessageLabel(usingTextLayoutManager: false)
+      messageLabel.useManualMessageLayout()
+    }
     layoutContentSignature = fullMessage.hashValue
     buildManualHierarchy()
     layoutTraitRegistration = registerForTraitChanges([
@@ -202,11 +214,11 @@ final class UIMessageView2: UIMessageView {
     if message.isServiceMessage {
       serviceLabel.attributedText = serviceAttributedText()
     } else {
-      messageLabel.attributedText = attributedMessageText()
+      updateMessageLabelText()
     }
     renderedRichContentSignature = nil
     renderedRichContentByteCount = nil
-    renderedRichSource = nil
+    renderedRichText = nil
     leafMeasurements.removeAll(keepingCapacity: true)
     invalidateMeasuredContent()
   }
@@ -216,9 +228,16 @@ final class UIMessageView2: UIMessageView {
     super.applyTheme(theme)
     renderedRichContentSignature = nil
     renderedRichContentByteCount = nil
-    renderedRichSource = nil
+    renderedRichText = nil
     leafMeasurements.removeAll(keepingCapacity: true)
     invalidateMeasuredContent()
+  }
+
+  override func updateMessageLabelText() {
+    // Rich candidates bind only after planning: valid blocks need no hidden
+    // TextKit copy, while rejected blocks must show their canonical fallback.
+    guard !shouldRenderRichContentV2 else { return }
+    flatTextBinding.apply(attributedMessageText(), to: messageLabel)
   }
 
   override func attributedMessageText() -> NSAttributedString? {
@@ -345,6 +364,9 @@ final class UIMessageView2: UIMessageView {
     Self.animationEvent("cancel message=\(message.stableId) generation=\(geometryTransitionGeneration)")
     layer.removeAllAnimations()
     bubbleView.layer.removeAllAnimations()
+    for view in bubbleView.geometryTransitionViews {
+      view.layer.removeAllAnimations()
+    }
     for view in bubbleNodeViews.values {
       view.layer.removeAllAnimations()
       view.alpha = 1
@@ -384,7 +406,7 @@ final class UIMessageView2: UIMessageView {
       return
     }
 
-    bubbleView.frame = layout.bubbleFrame
+    if bubbleView.frame != layout.bubbleFrame { bubbleView.frame = layout.bubbleFrame }
     bubbleView.layoutIfNeeded()
 
     for (id, view) in bubbleNodeViews {
@@ -393,19 +415,20 @@ final class UIMessageView2: UIMessageView {
         continue
       }
       view.isHidden = false
-      view.frame = convertToBubbleContent(frame)
+      let contentFrame = convertToBubbleContent(frame)
+      if view.frame != contentFrame { view.frame = contentFrame }
       if view === reactionsFlowView {
         reactionsFlowView.setV2LayoutWidth(frame.width)
       }
       if view === richContentView, let richPlan {
         richContentView.isHidden = false
         richContentView.applyLayout(richPlan)
-        messageLabel.frame = view.frame
+        if messageLabel.frame != view.frame { messageLabel.frame = view.frame }
         messageLabel.alpha = 0
         messageLabel.isUserInteractionEnabled = false
       } else if view === richContentView {
         richContentView.isHidden = true
-        messageLabel.frame = view.frame
+        if messageLabel.frame != view.frame { messageLabel.frame = view.frame }
         messageLabel.alpha = 1
         messageLabel.isUserInteractionEnabled = true
       }
@@ -417,7 +440,7 @@ final class UIMessageView2: UIMessageView {
         continue
       }
       view.isHidden = false
-      view.frame = frame
+      if view.frame != frame { view.frame = frame }
       if view === reactionsFlowView {
         reactionsFlowView.setV2LayoutWidth(frame.width)
       }
@@ -437,6 +460,7 @@ final class UIMessageView2: UIMessageView {
 
   private func capturePresentationGeometry() -> [PresentationGeometry] {
     let views = [bubbleView, serviceContainerView, serviceLabel, messageLabel, richContentView]
+      + bubbleView.geometryTransitionViews
       + Array(bubbleNodeViews.values)
       + Array(rootNodeViews.values)
       + transitionDisappearingSnapshots.map(\.view)
@@ -513,6 +537,7 @@ final class UIMessageView2: UIMessageView {
       if let hit = richContentView.entityHit(at: point) {
         return hasInteractiveRichTextTarget(at: hit.characterIndex, in: hit.text)
       }
+      return false
     }
     return super.hasInteractiveTextTarget(atPointInMessageView: pointInMessageView)
   }
@@ -545,12 +570,18 @@ final class UIMessageView2: UIMessageView {
       if let hit = richContentView.entityHit(at: point) {
         return linkURL(at: hit.characterIndex, in: hit.text)
       }
+      return nil
     }
     return super.linkURL(atPointInMessageView: pointInMessageView)
   }
 
   override func sendAnimationTextView() -> UITextView {
     currentRichPlan == nil ? messageLabel : (richContentView.primaryTextSurface ?? messageLabel)
+  }
+
+  func mathSource(atPointInMessageView point: CGPoint) -> String? {
+    guard currentRichPlan != nil else { return nil }
+    return richContentView.mathSource(at: convert(point, to: richContentView))
   }
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -574,6 +605,8 @@ final class UIMessageView2: UIMessageView {
     var candidate = hitTest(pointInMessageView, with: nil)
     while let view = candidate, view !== self {
       if let scrollView = view as? UIScrollView,
+         scrollView.isScrollEnabled,
+         scrollView.panGestureRecognizer.isEnabled,
          scrollView.contentSize.width > scrollView.bounds.width + 1
       {
         return true
@@ -621,7 +654,6 @@ final class UIMessageView2: UIMessageView {
     if message.isServiceMessage {
       serviceLabel.attributedText = serviceAttributedText()
     } else {
-      messageLabel.attributedText = attributedMessageText()
       metadataView.updateMessage(updatedMessage, animated: false)
       floatingMetadataView.updateMessage(updatedMessage, animated: false)
       invalidateLeafMeasurement(NodeID.floatingMetadata)
@@ -654,7 +686,11 @@ final class UIMessageView2: UIMessageView {
 
     currentLayout = nil
     currentLayoutKey = nil
-    currentRichPlan = nil
+    // A reaction or metadata update changes bubble geometry, but does not require
+    // restyling every rich node. ensureRichPlan compares the new source and plan.
+    if previousMessage.message.messageId != message.messageId {
+      currentRichPlan = nil
+    }
     invalidateIntrinsicContentSize()
     setNeedsLayout()
     // Content binding above is shared. The lab supplies geometry prepared on a separate renderer.
@@ -678,6 +714,7 @@ final class UIMessageView2: UIMessageView {
     }
 
     bubbleView.translatesAutoresizingMaskIntoConstraints = true
+    bubbleView.useAnimatedGeometry()
     addSubview(bubbleView)
     registerRootNode(acknowledgementView, id: NodeID.acknowledgement)
     acknowledgementView.configure(fullMessage)
@@ -905,7 +942,7 @@ final class UIMessageView2: UIMessageView {
       geometryTransitionGeneration &+= 1
     }
     // A newly attached fixture inherits traits after initialization, before its first display.
-    messageLabel.attributedText = attributedMessageText()
+    flatTextBinding.apply(prepared.rich == nil ? attributedMessageText() : nil, to: messageLabel)
     transitionOldRichPlan = oldRichPlan
     activeGeometryTransitionGeneration = geometryTransitionGeneration
     if let rich = prepared.rich, let payload = message.blockContentPayload {
@@ -1404,6 +1441,7 @@ final class UIMessageView2: UIMessageView {
           let payload = message.blockContentPayload
     else {
       currentRichPlan = nil
+      updateMessageLabelText()
       return true
     }
     let tailWidth = MessageBubbleView.tailWidth(for: resolvedTailSide)
@@ -1422,13 +1460,17 @@ final class UIMessageView2: UIMessageView {
       disclosureOverrides: RichBlockDisclosureStateStoreV2.shared.overrides(for: message)
     ) else {
       currentRichPlan = nil
+      flatTextBinding.apply(attributedText, to: messageLabel)
       return true
     }
+
+    flatTextBinding.apply(nil, to: messageLabel)
 
     if renderingMode != .fixtureMeasurement, currentRichPlan != plan
       || renderedRichContentSignature != payload.cacheSignature
       || renderedRichContentByteCount != payload.byteCount
-      || renderedRichSource?.utf8.elementsEqual(attributedText.string.utf8) != true
+      || renderedRichText?.string.utf8.elementsEqual(attributedText.string.utf8) != true
+      || renderedRichText?.isEqual(to: attributedText) != true
     {
       richContentView.update(
         plan: plan,
@@ -1438,12 +1480,12 @@ final class UIMessageView2: UIMessageView {
         palette: richPalette,
         message: message,
         mathPreparationEnabled: renderingMode == .automatic,
-        deferLayout: transitionOldRichPlan != nil && !UIAccessibility.isReduceMotionEnabled,
+        deferLayout: transitionOldRichPlan != nil && canAnimateContentTransition,
         transitionGeneration: geometryTransitionGeneration
       )
       renderedRichContentSignature = payload.cacheSignature
       renderedRichContentByteCount = payload.byteCount
-      renderedRichSource = attributedText.string
+      renderedRichText = attributedText.copy() as? NSAttributedString
     }
     currentRichPlan = plan
     return true
@@ -1933,6 +1975,7 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func markAppearing(_ view: UIView, scale: CGFloat = 0.98) {
+    guard canAnimateContentTransition else { return }
     view.alpha = 0
     view.transform = CGAffineTransform(scaleX: scale, y: scale)
     transitionAppearingViews.append(view)
@@ -1944,6 +1987,7 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func retainTransitionSnapshot(of view: UIView) {
+    guard canAnimateContentTransition else { return }
     let frame: CGRect = if let presentation = view.layer.presentation(),
                            let parent = view.superview
     {
@@ -1960,6 +2004,11 @@ final class UIMessageView2: UIMessageView {
         view: snapshot
       ))
     }
+  }
+
+  private var canAnimateContentTransition: Bool {
+    !UIAccessibility.isReduceMotionEnabled && window != nil
+      && (renderingMode == .fixtureDisplay || onGeometryChange != nil)
   }
 
   private func setupMessageActionsV2() {
@@ -2239,20 +2288,10 @@ final class UIMessageView2: UIMessageView {
     maximumWidth: CGFloat
   ) -> (size: CGSize, isSingleLine: Bool) {
     guard attributedText.length > 0 else { return (.zero, false) }
-    let width = max(1, maximumWidth)
-    let unbounded = attributedText.boundingRect(
-      with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin, .usesFontLeading],
-      context: nil
-    ).integral.size
-    let measured = attributedText.boundingRect(
-      with: CGSize(width: min(width, max(1, ceil(unbounded.width))), height: CGFloat.greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin, .usesFontLeading],
-      context: nil
-    ).integral.size
+    let measurement = MessageTextMeasurementV2.measure(attributedText, maximumWidth: maximumWidth)
     return (
-      CGSize(width: max(1, ceil(measured.width)), height: max(1, ceil(measured.height))),
-      !attributedText.string.contains("\n") && unbounded.width <= width + 0.5
+      measurement.size,
+      measurement.lineCount == 1 && measurement.size.width <= maximumWidth + 0.5
     )
   }
 

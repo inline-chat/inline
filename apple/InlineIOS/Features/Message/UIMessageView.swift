@@ -2536,9 +2536,13 @@ class UIMessageView: UIView {
       )
     }
 
-    messageLabel.attributedText = attributedMessageText()
+    updateMessageLabelText()
     acknowledgementView.refreshAppearance(activeColor: theme.primary.uiColor)
     updateReactionBackgroundOverridesForCurrentMessage()
+  }
+
+  func updateMessageLabelText() {
+    messageLabel.attributedText = attributedMessageText()
   }
 
   func updateReactionBackgroundOverridesForCurrentMessage() {

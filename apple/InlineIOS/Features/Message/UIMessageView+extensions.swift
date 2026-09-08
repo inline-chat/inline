@@ -19,6 +19,7 @@ final class MessageBubbleView: UIView {
 
   private let fillLayer = CAShapeLayer()
   private let lightingLayer = CAGradientLayer()
+  private var animatedFillView: MessageBubbleFillView?
   private var lightingAlphas: (top: CGFloat, bottom: CGFloat)?
   private var lightingVector: (startY: CGFloat, endY: CGFloat)?
   private var colorTraitRegistration: UITraitChangeRegistration?
@@ -81,6 +82,27 @@ final class MessageBubbleView: UIView {
     updateShape()
   }
 
+  /// V2's visible fill follows the same UIView animator as its content. Updating a
+  /// CAShapeLayer path with actions disabled would jump straight to the final size.
+  func useAnimatedGeometry() {
+    guard animatedFillView == nil else { return }
+    let fill = MessageBubbleFillView()
+    fill.isUserInteractionEnabled = false
+    insertSubview(fill, belowSubview: contentView)
+    animatedFillView = fill
+    lightingLayer.isHidden = true
+    updateShape()
+  }
+
+  var geometryTransitionViews: [UIView] {
+    var views = [contentView]
+    if let animatedFillView {
+      views.append(animatedFillView)
+      if let mask = animatedFillView.mask { views.append(mask) }
+    }
+    return views
+  }
+
   func configure(side: MessageBubbleTailSide, animated: Bool = false) {
     guard self.side != side else { return }
     let removedTailPath = animated && side == .none
@@ -128,7 +150,9 @@ final class MessageBubbleView: UIView {
     CATransaction.setDisableActions(true)
     lightingLayer.startPoint = CGPoint(x: 0.5, y: startY)
     lightingLayer.endPoint = CGPoint(x: 0.5, y: endY)
-    lightingLayer.isHidden = resolvedFillColor.cgColor.alpha <= 0.01
+    animatedFillView?.gradient.startPoint = lightingLayer.startPoint
+    animatedFillView?.gradient.endPoint = lightingLayer.endPoint
+    lightingLayer.isHidden = animatedFillView != nil || resolvedFillColor.cgColor.alpha <= 0.01
     CATransaction.commit()
   }
 
@@ -140,6 +164,8 @@ final class MessageBubbleView: UIView {
     CATransaction.setDisableActions(true)
     lightingLayer.startPoint = CGPoint(x: 0.5, y: 0)
     lightingLayer.endPoint = CGPoint(x: 0.5, y: 1)
+    animatedFillView?.gradient.startPoint = lightingLayer.startPoint
+    animatedFillView?.gradient.endPoint = lightingLayer.endPoint
     CATransaction.commit()
     updateGradientColors()
   }
@@ -162,6 +188,13 @@ final class MessageBubbleView: UIView {
   }
 
   private func updateShape() {
+    if let animatedFillView {
+      animatedFillView.configure(side: side, scale: traitCollection.displayScale)
+      animatedFillView.frame = bounds
+      animatedFillView.layoutIfNeeded()
+      updateGradientColors()
+      return
+    }
     let color = resolvedFillColor
     let path = visiblePath().cgPath
 
@@ -183,7 +216,9 @@ final class MessageBubbleView: UIView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     lightingLayer.colors = [top.cgColor, bottom.cgColor]
-    lightingLayer.isHidden = color.cgColor.alpha <= 0.01
+    animatedFillView?.gradient.colors = lightingLayer.colors
+    animatedFillView?.isHidden = color.cgColor.alpha <= 0.01
+    lightingLayer.isHidden = animatedFillView != nil || color.cgColor.alpha <= 0.01
     CATransaction.commit()
   }
 
@@ -240,6 +275,64 @@ final class MessageBubbleView: UIView {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak fadeLayer] in
       fadeLayer?.removeFromSuperlayer()
     }
+  }
+}
+
+/// A nine-slice alpha mask keeps corners and the tail fixed while UIKit interpolates
+/// the fill's bounds. No path construction or bitmap rendering occurs during a resize.
+private final class MessageBubbleFillView: UIView {
+  override class var layerClass: AnyClass { CAGradientLayer.self }
+
+  var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+  private static let masks: NSCache<NSString, UIImage> = {
+    let cache = NSCache<NSString, UIImage>()
+    cache.countLimit = 12
+    return cache
+  }()
+
+  private let imageMask = UIImageView()
+  private var maskKey: NSString?
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    gradient.locations = [0, 1]
+    mask = imageMask
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    imageMask.frame = bounds
+  }
+
+  func configure(side: MessageBubbleTailSide, scale: CGFloat) {
+    let scale = max(1, scale)
+    let key = "\(side)-\(scale)" as NSString
+    guard maskKey != key else { return }
+    maskKey = key
+    if let image = Self.masks.object(forKey: key) {
+      imageMask.image = image
+      return
+    }
+    let radius = MessageBubbleGeometry.cornerRadius
+    let tail = MessageBubbleGeometry.tailWidth(for: side)
+    let size = CGSize(width: radius * 2 + tail + 1, height: radius * 2 + 1)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = scale
+    let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+      UIColor.white.setFill()
+      MessageBubbleGeometry.path(in: CGRect(origin: .zero, size: size), side: side).fill()
+    }.resizableImage(withCapInsets: UIEdgeInsets(
+      top: radius,
+      left: radius + (side == .leading ? tail : 0),
+      bottom: radius,
+      right: radius + (side == .trailing ? tail : 0)
+    ), resizingMode: .stretch)
+    Self.masks.setObject(image, forKey: key)
+    imageMask.image = image
   }
 }
 
@@ -302,8 +395,8 @@ extension UIMessageView {
     return stack
   }
 
-  func createMessageLabel() -> UITextView {
-    let textView = CodeBlockTextView()
+  func createMessageLabel(usingTextLayoutManager: Bool = true) -> UITextView {
+    let textView = CodeBlockTextView(usingTextLayoutManager: usingTextLayoutManager)
     textView.backgroundColor = .clear
     textView.textAlignment = .natural
     textView.font = .systemFont(ofSize: 17)

@@ -1,6 +1,7 @@
 import InlineIOSUI
 import InlineKit
 import InlineProtocol
+import InlineSyntaxHighlighting
 import InlineUI
 import UIKit
 import TextProcessing
@@ -22,9 +23,12 @@ private func richTextCharacterIndex(
 
   let textContainer = textView.textContainer
   let layoutManager = textView.layoutManager
+  // UIView conversion already returns coordinates in the scroll view's bounds,
+  // whose origin is its content offset. Adding the offset again breaks hits in
+  // horizontally scrolled code and in RTL text with a nonzero bounds origin.
   let containerPoint = CGPoint(
-    x: point.x - textView.textContainerInset.left + textView.contentOffset.x,
-    y: point.y - textView.textContainerInset.top + textView.contentOffset.y
+    x: point.x - textView.textContainerInset.left,
+    y: point.y - textView.textContainerInset.top
   )
   layoutManager.ensureLayout(for: textContainer)
   guard layoutManager.usedRect(for: textContainer)
@@ -297,7 +301,7 @@ private struct RichBlockRenderContextV2 {
   let onEntityTap: (NSAttributedString, Int) -> Bool
   let onImageTap: (RichBlockImageGallerySelectionV2) -> Void
 
-  func text(for node: RichBlockLayoutPlanV2.TextNode, maximumWidth: CGFloat? = nil) -> NSAttributedString {
+  @MainActor func text(for node: RichBlockLayoutPlanV2.TextNode, maximumWidth: CGFloat? = nil) -> NSAttributedString {
     if let literal = node.literal {
       return NSAttributedString(
         string: literal,
@@ -349,7 +353,8 @@ private protocol RichBlockTextSurfaceProvidingV2: AnyObject {
 }
 
 private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
-  private let sourceView = CodeBlockTextView()
+  private var sourceBinding = MessageTextBindingV2()
+  private let sourceView = CodeBlockTextView(usingTextLayoutManager: false)
   private let scrollView = UIScrollView()
   private let imageView = UIImageView()
   private let progress = UIActivityIndicatorView(style: .medium)
@@ -403,7 +408,9 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
     scrollView.isHidden = !rendered
     if rendered, imageView.image == nil { progress.startAnimating() } else { progress.stopAnimating() }
     if !rendered {
-      sourceView.attributedText = context.text(for: .init(range: math.range, role: .paragraph, literal: nil, isRTL: false))
+      sourceBinding.apply(context.text(for: .init(range: math.range, role: .paragraph, literal: nil, isRTL: false)), to: sourceView)
+    } else {
+      sourceBinding.apply(nil, to: sourceView)
     }
     isAccessibilityElement = rendered
     if rendered {
@@ -443,7 +450,7 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
     super.prepareForReuse()
     progress.stopAnimating()
     imageView.image = nil
-    sourceView.attributedText = nil
+    sourceBinding.apply(nil, to: sourceView)
     request = nil
     imageSize = nil
     source = ""
@@ -458,7 +465,10 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
   RichBlockTextSurfaceProvidingV2,
   UIGestureRecognizerDelegate
 {
-  private let textView = CodeBlockTextView()
+  // Measurement, entity hit testing, and code decorations all use TextKit 1.
+  // Select that engine before the first layout instead of switching after drawing.
+  private let textView = CodeBlockTextView(usingTextLayoutManager: false)
+  private var textBinding = MessageTextBindingV2()
   private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
   var textSurface: UITextView {
     textView
@@ -471,7 +481,7 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
     textView.backgroundColor = .clear
     textView.isEditable = false
     textView.isSelectable = false
-    textView.isScrollEnabled = false
+    textView.useManualMessageLayout()
     textView.textContainerInset = .zero
     textView.textContainer.lineFragmentPadding = 0
     textView.dataDetectorTypes = []
@@ -484,13 +494,16 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    textView.frame = bounds
+    if textView.frame != bounds { textView.frame = bounds }
   }
 
   override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
     guard case let .text(text) = node.kind else { return }
+    // New nodes already have their planned frame. Bind at that width instead
+    // of making UIKit lay out the whole source in an initial zero-width view.
+    if textView.bounds.width == 0, bounds.width > 0 { textView.frame = bounds }
     let attributed = context.text(for: text, maximumWidth: node.frame.width)
-    if textView.attributedText?.isEqual(to: attributed) != true { textView.attributedText = attributed }
+    textBinding.apply(attributed, to: textView)
     onEntityTap = context.onEntityTap
     isAccessibilityElement = true
     if case .heading = text.role { accessibilityTraits = [.staticText, .header] }
@@ -504,7 +517,7 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
 
   override func prepareForReuse() {
     super.prepareForReuse()
-    textView.attributedText = nil
+    textBinding.apply(nil, to: textView)
     onEntityTap = nil
     accessibilityLabel = nil
     accessibilityCustomActions = nil
@@ -703,9 +716,11 @@ private final class RichBlockTextShimmerViewV2: UIView {
 private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
   RichBlockEntityHittableV2
 {
-  private let title = CodeBlockTextView()
+  private let title = CodeBlockTextView(usingTextLayoutManager: false)
+  private var titleBinding = MessageTextBindingV2()
   private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
   private let chevron = UIImageView()
+  private let activityIcon = UIImageView()
   private let shimmer = RichBlockTextShimmerViewV2()
   private var path = BlockContentPath()
   private var expanded = false
@@ -719,13 +734,16 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     title.backgroundColor = .clear
     title.isEditable = false
     title.isSelectable = false
-    title.isScrollEnabled = false
+    title.useManualMessageLayout()
     title.textContainerInset = .zero
     title.textContainer.lineFragmentPadding = 0
     title.isUserInteractionEnabled = false
     chevron.contentMode = .scaleAspectFit
+    activityIcon.contentMode = .scaleAspectFit
+    activityIcon.isAccessibilityElement = false
     addSubview(title)
     addSubview(chevron)
+    addSubview(activityIcon)
     addSubview(shimmer)
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap(_:))))
     isAccessibilityElement = true
@@ -744,7 +762,7 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
 
   override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
     guard case let .text(text) = node.kind,
-          case let .disclosure(progress, isExpanded) = text.role
+          case let .disclosure(progress, isExpanded, activity) = text.role
     else { return }
     path = node.path
     expanded = isExpanded
@@ -752,14 +770,21 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     isRTL = text.isRTL
     onToggle = context.onDisclosureToggle
     onEntityTap = context.onEntityTap
-    let attributed = NSMutableAttributedString(attributedString: context.text(for: text, maximumWidth: max(1, node.frame.width - 24)))
+    activityIcon.image = activity.flatMap { UIImage(systemName: $0.symbolName) }
+    activityIcon.isHidden = activity == nil
+    activityIcon.tintColor = context.palette.secondary
+    let attributed = NSMutableAttributedString(attributedString: context.text(
+      for: text,
+      maximumWidth: RichBlockDisclosureMetricsV2.titleViewportWidth(
+        containerWidth: node.frame.width, hasActivity: activity != nil
+      )
+    ))
     attributed.addAttribute(
       .foregroundColor,
       value: context.palette.secondary,
       range: NSRange(location: 0, length: attributed.length)
     )
-    if title.attributedText?.isEqual(to: attributed) != true {
-      title.attributedText = attributed
+    if titleBinding.apply(attributed, to: title) {
       shimmer.invalidateMask()
     }
     updateChevron()
@@ -779,33 +804,14 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    let chevronSide = min(CGFloat(14), bounds.height)
-    let gap: CGFloat = 4
-    let titleViewport = max(1, bounds.width - chevronSide - gap)
-    title.frame = CGRect(x: 0, y: 0, width: titleViewport, height: bounds.height)
-    title.layoutIfNeeded()
-    let usedWidth = min(
-      titleViewport,
-      max(1, ceil(title.layoutManager.usedRect(for: title.textContainer).width))
+    let geometry = RichBlockDisclosureMetricsV2.layout(
+      bounds: bounds, isRTL: isRTL, hasActivity: !activityIcon.isHidden
     )
-    if isRTL {
-      title.frame = CGRect(x: bounds.width - usedWidth, y: 0, width: usedWidth, height: bounds.height)
-      chevron.frame = CGRect(
-        x: max(0, title.frame.minX - gap - chevronSide),
-        y: floor((bounds.height - chevronSide) / 2),
-        width: chevronSide,
-        height: chevronSide
-      )
-    } else {
-      title.frame = CGRect(x: 0, y: 0, width: usedWidth, height: bounds.height)
-      chevron.frame = CGRect(
-        x: min(bounds.width - chevronSide, title.frame.maxX + gap),
-        y: floor((bounds.height - chevronSide) / 2),
-        width: chevronSide,
-        height: chevronSide
-      )
-    }
+    title.frame = geometry.title
+    chevron.frame = geometry.chevron
+    activityIcon.frame = geometry.activity ?? .zero
     shimmer.frame = title.frame
+    title.layoutIfNeeded()
     shimmer.updateMask(from: title)
   }
 
@@ -818,9 +824,12 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     super.prepareForReuse()
     onToggle = nil
     onEntityTap = nil
-    title.attributedText = nil
+    titleBinding.apply(nil, to: title)
+    activityIcon.image = nil
+    activityIcon.isHidden = true
     shimmer.invalidateMask()
     accessibilityLabel = nil
+    accessibilityValue = nil
     accessibilityCustomActions = nil
     entityAccessibility.clear()
     shimmer.setAnimating(false)
@@ -889,321 +898,6 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
   }
 }
 
-private enum RichCodeTokenKindV2 {
-  case keyword
-  case type
-  case function
-  case string
-  case number
-  case comment
-  case punctuation
-}
-
-private struct RichCodeTokenV2 {
-  let range: NSRange
-  let kind: RichCodeTokenKindV2
-}
-
-/// Bounded lexical coloring keeps code readable without pulling every Tree-sitter grammar into
-/// the default-off iOS binary. The macOS semantic highlighter remains the richer reference.
-private enum RichCodeSyntaxHighlighterV2 {
-  private static let maximumUTF16Length = 100_000
-  private static let maximumLines = 5_000
-
-  static func supports(language: String?) -> Bool {
-    normalized(language) != nil
-  }
-
-  static func tokens(for text: String, language: String?) -> [RichCodeTokenV2] {
-    guard !Task.isCancelled, let language = normalized(language),
-          text.utf16.count <= maximumUTF16Length,
-          text.lazy.filter({ $0 == "\n" }).prefix(maximumLines).count < maximumLines
-    else { return [] }
-
-    let fullRange = NSRange(location: 0, length: (text as NSString).length)
-    // Advisory wall-time bound in addition to source limits. ICU progress
-    // callbacks let cancellation stop searches that have not found a match.
-    let deadline = ContinuousClock.now + .milliseconds(25)
-    var candidates: [(priority: Int, token: RichCodeTokenV2)] = []
-    func append(pattern: String, kind: RichCodeTokenKindV2, priority: Int, options: NSRegularExpression.Options = []) {
-      guard !Task.isCancelled, ContinuousClock.now < deadline,
-            let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-      expression.enumerateMatches(in: text, options: .reportProgress, range: fullRange) { match, _, stop in
-        guard !Task.isCancelled, ContinuousClock.now < deadline else { stop.pointee = true; return }
-        guard let match, match.range.length > 0 else { return }
-        candidates.append((priority, .init(range: match.range, kind: kind)))
-      }
-    }
-
-    if ["python", "bash", "yaml"].contains(language) {
-      append(pattern: "#[^\\n]*", kind: .comment, priority: 0)
-    } else if language == "html" {
-      append(pattern: "<!--[\\s\\S]*?-->", kind: .comment, priority: 0)
-    } else {
-      append(pattern: "//[^\\n]*|/\\*[\\s\\S]*?\\*/", kind: .comment, priority: 0)
-    }
-    append(
-      pattern: #"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"#,
-      kind: .string,
-      priority: 1
-    )
-    append(pattern: #"\b(?:0x[0-9A-Fa-f]+|\d+(?:\.\d+)?)\b"#, kind: .number, priority: 2)
-
-    let keywords = keywordSet(for: language)
-    if !keywords.isEmpty {
-      let body = keywords.map(NSRegularExpression.escapedPattern).joined(separator: "|")
-      append(pattern: "\\b(?:\(body))\\b", kind: .keyword, priority: 3)
-    }
-    append(pattern: #"\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()"#, kind: .function, priority: 4)
-    if ["swift", "typescript", "tsx", "go", "rust"].contains(language) {
-      append(pattern: #"\b[A-Z][A-Za-z0-9_]*\b"#, kind: .type, priority: 5)
-    }
-    append(pattern: #"[{}\[\](),.;:]"#, kind: .punctuation, priority: 6)
-
-    var occupied = IndexSet()
-    var accepted: [RichCodeTokenV2] = []
-    guard !Task.isCancelled, ContinuousClock.now < deadline else { return [] }
-    for candidate in candidates.sorted(by: {
-      $0.priority == $1.priority ? $0.token.range.location < $1.token.range.location : $0.priority < $1.priority
-    }) {
-      guard !Task.isCancelled else { return [] }
-      let range = candidate.token.range.location ..< NSMaxRange(candidate.token.range)
-      guard !occupied.intersects(integersIn: range) else { continue }
-      occupied.insert(integersIn: range)
-      accepted.append(candidate.token)
-    }
-    return accepted.sorted { $0.range.location < $1.range.location }
-  }
-
-  private static func normalized(_ language: String?) -> String? {
-    guard let value = language?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
-      return nil
-    }
-    return switch value {
-      case "swift", "swift5", "swift6": "swift"
-      case "typescript", "ts", "javascript", "js": "typescript"
-      case "tsx", "jsx": "tsx"
-      case "python", "py", "python3": "python"
-      case "bash", "sh", "shell", "zsh": "bash"
-      case "html", "htm": "html"
-      case "css", "scss": "css"
-      case "json", "jsonc": "json"
-      case "yaml", "yml": "yaml"
-      case "go", "golang": "go"
-      case "rust", "rs": "rust"
-      default: nil
-    }
-  }
-
-  private static func keywordSet(for language: String) -> [String] {
-    switch language {
-      case "swift": [
-          "actor",
-          "as",
-          "async",
-          "await",
-          "break",
-          "case",
-          "catch",
-          "class",
-          "continue",
-          "default",
-          "defer",
-          "do",
-          "else",
-          "enum",
-          "extension",
-          "false",
-          "for",
-          "func",
-          "guard",
-          "if",
-          "import",
-          "in",
-          "init",
-          "let",
-          "nil",
-          "protocol",
-          "return",
-          "self",
-          "some",
-          "struct",
-          "switch",
-          "throw",
-          "throws",
-          "true",
-          "try",
-          "var",
-          "where",
-          "while",
-        ]
-      case "typescript", "tsx": [
-          "async",
-          "await",
-          "break",
-          "case",
-          "catch",
-          "class",
-          "const",
-          "continue",
-          "default",
-          "delete",
-          "do",
-          "else",
-          "export",
-          "extends",
-          "false",
-          "finally",
-          "for",
-          "from",
-          "function",
-          "if",
-          "import",
-          "in",
-          "instanceof",
-          "interface",
-          "let",
-          "new",
-          "null",
-          "of",
-          "return",
-          "static",
-          "switch",
-          "throw",
-          "true",
-          "try",
-          "type",
-          "typeof",
-          "undefined",
-          "var",
-          "while",
-        ]
-      case "python": [
-          "and",
-          "as",
-          "assert",
-          "async",
-          "await",
-          "break",
-          "class",
-          "continue",
-          "def",
-          "del",
-          "elif",
-          "else",
-          "except",
-          "False",
-          "finally",
-          "for",
-          "from",
-          "global",
-          "if",
-          "import",
-          "in",
-          "is",
-          "lambda",
-          "None",
-          "not",
-          "or",
-          "pass",
-          "raise",
-          "return",
-          "True",
-          "try",
-          "while",
-          "with",
-          "yield",
-        ]
-      case "bash": [
-          "case",
-          "do",
-          "done",
-          "elif",
-          "else",
-          "esac",
-          "fi",
-          "for",
-          "function",
-          "if",
-          "in",
-          "select",
-          "then",
-          "time",
-          "until",
-          "while",
-        ]
-      case "go": [
-          "break",
-          "case",
-          "chan",
-          "const",
-          "continue",
-          "default",
-          "defer",
-          "else",
-          "fallthrough",
-          "for",
-          "func",
-          "go",
-          "goto",
-          "if",
-          "import",
-          "interface",
-          "map",
-          "package",
-          "range",
-          "return",
-          "select",
-          "struct",
-          "switch",
-          "type",
-          "var",
-        ]
-      case "rust": [
-          "as",
-          "async",
-          "await",
-          "break",
-          "const",
-          "continue",
-          "crate",
-          "dyn",
-          "else",
-          "enum",
-          "extern",
-          "false",
-          "fn",
-          "for",
-          "if",
-          "impl",
-          "in",
-          "let",
-          "loop",
-          "match",
-          "mod",
-          "move",
-          "mut",
-          "pub",
-          "ref",
-          "return",
-          "self",
-          "static",
-          "struct",
-          "super",
-          "trait",
-          "true",
-          "type",
-          "unsafe",
-          "use",
-          "where",
-          "while",
-        ]
-      case "json": ["false", "null", "true"]
-      default: []
-    }
-  }
-}
-
 private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBlockTextSurfaceProvidingV2 {
   private struct HighlightSignature: Equatable {
     let code: String
@@ -1223,11 +917,13 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     }
   }
 
+  private static let highlighter = CodeSyntaxHighlighter()
+
   private let languageLabel = UILabel()
   private let copyButton = UIButton(type: .system)
   private let gutterLabel = UILabel()
   private let scrollView = UIScrollView()
-  private let textView = UITextView()
+  private let textView = UITextView(usingTextLayoutManager: false)
   var textSurface: UITextView {
     textView
   }
@@ -1307,10 +1003,10 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     if highlightSignature != signature {
       highlightSignature = signature
       completedHighlightSignature = nil
-      textView.attributedText = NSAttributedString(
+      setCodeText(NSAttributedString(
         string: code,
         attributes: [.font: font, .foregroundColor: context.palette.primary]
-      )
+      ))
       startHighlight(for: signature)
     } else if highlightTask == nil, completedHighlightSignature != signature {
       startHighlight(for: signature)
@@ -1440,7 +1136,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     highlightGeneration &+= 1
     let generation = highlightGeneration
     highlightTask?.cancel()
-    guard RichCodeSyntaxHighlighterV2.supports(language: signature.language),
+    guard CodeSyntaxHighlighter.supports(language: signature.language),
           !signature.code.isEmpty
     else {
       highlightTask = nil
@@ -1455,14 +1151,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     let code = signature.code
     let language = signature.language
     highlightTask = Task { @MainActor [weak self] in
-      let worker = Task.detached(priority: .utility) {
-        RichCodeSyntaxHighlighterV2.tokens(for: code, language: language)
-      }
-      let tokens = await withTaskCancellationHandler {
-        await worker.value
-      } onCancel: {
-        worker.cancel()
-      }
+      let tokens = (try? await Self.highlighter.tokens(for: code, language: language)) ?? []
       guard !Task.isCancelled,
             let self,
             highlightGeneration == generation,
@@ -1489,24 +1178,36 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
           range: token.range
         )
       }
-      textView.attributedText = highlighted
+      setCodeText(highlighted)
       completedHighlightSignature = signature
       highlightTask = nil
     }
   }
 
+  private func setCodeText(_ text: NSAttributedString) {
+    let preservesSelection = textView.attributedText?.string.utf8.elementsEqual(text.string.utf8) == true
+    let selection = preservesSelection ? textView.selectedRange : nil
+    textView.attributedText = text
+    if let selection,
+       selection.location >= 0, selection.length >= 0,
+       selection.location <= text.length,
+       selection.length <= text.length - selection.location {
+      textView.selectedRange = selection
+    }
+  }
+
   private static func tokenColor(
-    _ kind: RichCodeTokenKindV2,
+    _ kind: CodeTokenKind,
     primary: UIColor,
     secondary: UIColor,
     accent: UIColor
   ) -> UIColor {
     switch kind {
-      case .keyword, .number:
+      case .keyword, .number, .constant:
         accent
       case .type:
         accent
-      case .function:
+      case .function, .property, .operatorSymbol:
         primary
       case .string:
         secondary
@@ -1518,6 +1219,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
   }
 }
 
+@MainActor
 private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
   private let photoView = PlatformPhotoView()
   private let unavailable = UIImageView(image: UIImage(systemName: "photo"))
@@ -1546,13 +1248,15 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
   ) {
     backgroundColor = palette.placeholder
     unavailable.tintColor = palette.secondary
+    accessibilityValue = nil
     switch image.state {
       case .pending:
         currentImage = nil
         self.onImageTap = nil
         photoView.setPhoto(nil)
         unavailable.isHidden = true
-        accessibilityLabel = "Image loading"
+        accessibilityLabel = image.alt ?? "Image"
+        accessibilityValue = NSLocalizedString("Loading", comment: "Image accessibility loading state")
         accessibilityTraits = [.image]
       case let .ready(photo):
         guard photo.hasDisplayablePreview else {
@@ -1560,7 +1264,8 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
           self.onImageTap = nil
           photoView.setPhoto(nil)
           unavailable.isHidden = false
-          accessibilityLabel = "Image unavailable"
+          accessibilityLabel = image.alt ?? "Image"
+          accessibilityValue = NSLocalizedString("Unavailable", comment: "Image accessibility unavailable state")
           accessibilityTraits = [.image]
           return
         }
@@ -1568,14 +1273,15 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
         self.onImageTap = onImageTap
         photoView.setPhoto(photo, reloadMessageOnFinish: message)
         unavailable.isHidden = true
-        accessibilityLabel = "Image"
+        accessibilityLabel = image.alt ?? "Image"
         accessibilityTraits = [.image, .button]
       case .unavailable:
         currentImage = nil
         self.onImageTap = nil
         photoView.setPhoto(nil)
         unavailable.isHidden = false
-        accessibilityLabel = "Image unavailable"
+        accessibilityLabel = image.alt ?? "Image"
+        accessibilityValue = NSLocalizedString("Unavailable", comment: "Image accessibility unavailable state")
         accessibilityTraits = [.image]
     }
   }
@@ -1598,6 +1304,8 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
     // this node is pooled. That visibility must not leak into the next image.
     photoView.alpha = 1
     photoView.setPhoto(nil)
+    accessibilityLabel = nil
+    accessibilityValue = nil
   }
 
   override func layoutSubviews() {
@@ -1733,7 +1441,8 @@ private final class RichBlockSeparatorNodeViewV2: RichBlockRenderableViewV2 {
 }
 
 private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2, UIGestureRecognizerDelegate {
-  private let textView = CodeBlockTextView()
+  private let textView = CodeBlockTextView(usingTextLayoutManager: false)
+  private var textBinding = MessageTextBindingV2()
   private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
   private var onEntityTap: ((NSAttributedString, Int) -> Bool)?
 
@@ -1742,7 +1451,7 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2,
     textView.backgroundColor = .clear
     textView.isEditable = false
     textView.isSelectable = false
-    textView.isScrollEnabled = false
+    textView.useManualMessageLayout()
     textView.textContainerInset = .zero
     textView.textContainer.lineFragmentPadding = 0
     textView.isUserInteractionEnabled = true
@@ -1764,9 +1473,10 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2,
     palette: RichBlockPaletteV2,
     onEntityTap: @escaping (NSAttributedString, Int) -> Bool
   ) {
-    if let text {
-      if textView.attributedText?.isEqual(to: text) != true { textView.attributedText = text }
-    } else if textView.attributedText != nil { textView.attributedText = nil }
+    if textView.bounds.width == 0, bounds.width > 20 {
+      textView.frame = bounds.insetBy(dx: 10, dy: 7)
+    }
+    textBinding.apply(text, to: textView)
     if textView.textAlignment != alignment { textView.textAlignment = alignment }
     self.onEntityTap = onEntityTap
     backgroundColor = .clear
@@ -1781,7 +1491,7 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2,
   }
 
   func prepareForReuse() {
-    textView.attributedText = nil
+    textBinding.apply(nil, to: textView)
     onEntityTap = nil
     accessibilityLabel = nil
     accessibilityValue = nil
@@ -1791,7 +1501,8 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2,
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    textView.frame = bounds.insetBy(dx: 10, dy: 7)
+    let frame = bounds.insetBy(dx: 10, dy: 7)
+    if textView.frame != frame { textView.frame = frame }
   }
 
   func entityHit(at point: CGPoint) -> (text: NSAttributedString, characterIndex: Int)? {
@@ -1873,16 +1584,18 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
       canvas.addSubview(cellView)
       cellViews.append(cellView)
     }
+    // A shrinking table must release its old text stacks. Retaining the peak
+    // size at every block path defeats the planner's total cell budget.
+    while cellViews.count > table.cells.count {
+      let cellView = cellViews.removeLast()
+      cellView.prepareForReuse()
+      cellView.removeFromSuperview()
+    }
     let firstRowY = table.cells.first?.frame.minY
     let columnCount = max(1, table.cells.prefix { $0.frame.minY == firstRowY }.count)
     for (index, cellView) in cellViews.enumerated() {
-      guard index < table.cells.count else {
-        cellView.isHidden = true
-        continue
-      }
       let cell = table.cells[index]
-      cellView.isHidden = false
-      cellView.frame = cell.frame
+      if cellView.frame != cell.frame { cellView.frame = cell.frame }
       let text = RichBlockLayoutPlannerV2.styledTableText(
         from: context.attributedText,
         range: cell.range,
@@ -1944,7 +1657,11 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
   override func prepareForReuse() {
     super.prepareForReuse()
     table = nil
-    for cell in cellViews { cell.prepareForReuse() }
+    for cell in cellViews {
+      cell.prepareForReuse()
+      cell.removeFromSuperview()
+    }
+    cellViews.removeAll(keepingCapacity: true)
     didSetInitialOffset = false
     lastIsRTL = false
     scrollView.contentOffset = .zero
@@ -1962,6 +1679,20 @@ final class RichBlockContentViewV2: UIView {
   var onEntityTap: ((NSAttributedString, Int) -> Bool)?
   var onImageTap: ((RichBlockImageGallerySelectionV2) -> Void)?
   var onMathPrepared: (() -> Void)?
+
+  func mathSource(at point: CGPoint) -> String? {
+    guard bounds.contains(point), let currentPlan, let source = previousSource else { return nil }
+    for node in currentPlan.nodes {
+      guard case let .math(math) = node.kind,
+            let view = nodeViews[node.path], !view.isHidden, view.alpha > 0.01,
+            view.bounds.contains(convert(point, to: view)),
+            let range = Range(math.range, in: source)
+      else { continue }
+      let value = String(source[range])
+      if !value.isEmpty { return value }
+    }
+    return nil
+  }
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableViewV2] = [:]
   private var reusePool: [RichBlockRenderKindV2: [RichBlockRenderableViewV2]] = [:]
@@ -2070,7 +1801,7 @@ final class RichBlockContentViewV2: UIView {
       }
       view.apply(node: node, context: context)
       if !deferLayout {
-        view.frame = node.frame
+        if view.frame != node.frame { view.frame = node.frame }
         view.alpha = 1
         view.transform = .identity
       }
@@ -2085,7 +1816,7 @@ final class RichBlockContentViewV2: UIView {
     for node in plan.nodes {
       guard let view = nodeViews[node.path], view.reuseKind == node.reuseKind else { continue }
       view.updateLayout(node: node)
-      view.frame = node.frame
+      if view.frame != node.frame { view.frame = node.frame }
       view.alpha = 1
       view.transform = .identity
     }

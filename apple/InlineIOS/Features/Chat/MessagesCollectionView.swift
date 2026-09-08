@@ -57,14 +57,16 @@ final class MessagesCollectionView: UICollectionView {
     collapsedMaxId: Int64? = nil,
     isPreview: Bool = false,
     sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
-    theme: IOSThemeSnapshot
+    theme: IOSThemeSnapshot,
+    viewModel: MessagesSectionedViewModel? = nil,
+    messageViewImplementation: MessageViewImplementation? = nil
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
     self.isPreview = isPreview
     self.theme = theme
-    let messageViewImplementation = MessageView2Feature.selectedImplementation(
+    let implementation = messageViewImplementation ?? MessageView2Feature.selectedImplementation(
       isExperimentAvailable: SettingsBuildAudience.showsDebugTools
     )
     let coordinator = Coordinator(
@@ -75,7 +77,8 @@ final class MessagesCollectionView: UICollectionView {
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator,
       theme: theme,
-      messageViewImplementation: messageViewImplementation
+      messageViewImplementation: implementation,
+      viewModel: viewModel
     )
     self.coordinator = coordinator
     let layout = MessagesCollectionView.createLayout { [weak coordinator] sectionIndex in
@@ -1117,6 +1120,29 @@ private extension MessagesCollectionView {
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
     private var v2GeometryAnimator: UIViewPropertyAnimator?
+    private var v2GeometryTransitions: [V2GeometryTransition] = []
+
+    @MainActor private struct V2GeometryTransition {
+      weak var cell: MessageCollectionViewCell?
+      weak var view: UIMessageView2?
+      let layout: MessageBubbleLayoutV2
+      let generation: UInt
+
+      var isCurrent: Bool {
+        guard let cell, let view else { return false }
+        return cell.messageView === view && view.geometryTransitionGeneration == generation
+      }
+
+      func apply() {
+        guard isCurrent else { return }
+        view?.applyGeometryTransition(to: layout, generation: generation)
+      }
+
+      func finish() {
+        guard isCurrent else { return }
+        view?.finishGeometryTransition(generation: generation)
+      }
+    }
     private var deferredContextMenuUpdatedMessageIDs = Set<Int64>()
     private var deferredContextMenuUpdateAnimated = false
     private var lastVisibleReadCandidateID: Int64?
@@ -2185,7 +2211,8 @@ private extension MessagesCollectionView {
       isPreview: Bool = false,
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
       theme: IOSThemeSnapshot,
-      messageViewImplementation: MessageViewImplementation
+      messageViewImplementation: MessageViewImplementation,
+      viewModel: MessagesSectionedViewModel? = nil
     ) {
       self.peerId = peerId
       self.chatId = chatId
@@ -2194,7 +2221,7 @@ private extension MessagesCollectionView {
       self.theme = theme
       self.messageViewImplementation = messageViewImplementation
       self.sendAnimationCoordinator = sendAnimationCoordinator
-      viewModel = MessagesSectionedViewModel(
+      self.viewModel = viewModel ?? MessagesSectionedViewModel(
         peer: peerId,
         reversed: true,
         collapsedMaxId: collapsedMaxId
@@ -2204,7 +2231,7 @@ private extension MessagesCollectionView {
       super.init()
       rebuildListSections()
 
-      viewModel.observe { [weak self] update in
+      self.viewModel.observe { [weak self] update in
         guard let self else { return }
         applyUpdate(update)
         if !isPreview {
@@ -2245,6 +2272,15 @@ private extension MessagesCollectionView {
     }
 
     func dispose() {
+      if let animator = v2GeometryAnimator {
+        v2GeometryAnimator = nil
+        if animator.state == .active {
+          animator.stopAnimation(false)
+          animator.finishAnimation(at: .end)
+        }
+      }
+      for transition in v2GeometryTransitions { transition.finish() }
+      v2GeometryTransitions.removeAll()
       olderLoadTask?.cancel()
       olderLoadTask = nil
       remoteOlderTask?.cancel()
@@ -2630,24 +2666,32 @@ private extension MessagesCollectionView {
         return
       }
 
+      // Capture the model's destination before finishing at .current changes it
+      // to an intermediate transform. Otherwise rapid updates retain a row offset.
+      let geometry = MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window)
       if let activeAnimator = v2GeometryAnimator {
         v2GeometryAnimator = nil
-        activeAnimator.stopAnimation(false)
-        activeAnimator.finishAnimation(at: .current)
+        if activeAnimator.state == .active {
+          activeAnimator.stopAnimation(false)
+          activeAnimator.finishAnimation(at: .current)
+        }
       }
 
-      let visibleCells = collectionView.visibleCells
-      let previousTransforms = Dictionary(uniqueKeysWithValues: visibleCells.map {
-        (ObjectIdentifier($0), $0.transform)
-      })
-      let oldFramesInWindow = Dictionary(uniqueKeysWithValues: visibleCells.map { cell in
-        let frame: CGRect = if let presentation = cell.layer.presentation(), let parent = cell.superview {
-          parent.convert(presentation.frame, to: window)
-        } else {
-          cell.convert(cell.bounds, to: window)
+      // Finishing a superseded animator at .current preserves every participating
+      // bubble. Carry its remaining destinations into the replacement animator;
+      // finishing just the previous changed row here would snap it to the end.
+      v2GeometryTransitions = v2GeometryTransitions.filter { transition in
+        guard transition.isCurrent, let cell = transition.cell else { return false }
+        guard collectionView.indexPath(for: cell) != nil else {
+          transition.finish()
+          return false
         }
-        return (ObjectIdentifier(cell), frame)
-      })
+        return transition.view !== nextView
+      }
+      v2GeometryTransitions.append(.init(
+        cell: changedCell, view: nextView, layout: newLayout, generation: transitionGeneration
+      ))
+      let transitions = v2GeometryTransitions
 
       let anchor = makeV2GeometryContentAnchor(
         around: changedCell,
@@ -2656,6 +2700,7 @@ private extension MessagesCollectionView {
       )
 
       UIView.performWithoutAnimation {
+        geometry.applyTargetTransforms()
         collectionView.collectionViewLayout.invalidateLayout()
         collectionView.layoutIfNeeded()
         restoreSendAnimationContentAnchor(anchor, in: collectionView)
@@ -2663,50 +2708,33 @@ private extension MessagesCollectionView {
         nextView.layoutIfNeeded()
       }
 
-      for cell in visibleCells {
-        let id = ObjectIdentifier(cell)
-        guard let oldFrame = oldFramesInWindow[id] else { continue }
-        let newFrame = cell.convert(cell.bounds, to: window)
-        let visualDeltaY = oldFrame.minY - newFrame.minY
-        guard abs(visualDeltaY) > 0.25,
-              let parent = cell.superview
-        else { continue }
-
-        let parentOrigin = parent.convert(CGPoint.zero, to: window)
-        let parentUnitY = parent.convert(CGPoint(x: 0, y: 1), to: window)
-        let windowScaleY = parentUnitY.y - parentOrigin.y
-        guard abs(windowScaleY) > 0.001 else { continue }
-        let localDeltaY = visualDeltaY / windowScaleY
-        let previousTransform = previousTransforms[id] ?? .identity
-        cell.transform = CGAffineTransform(translationX: 0, y: localDeltaY)
-          .concatenating(previousTransform)
-      }
+      geometry.restorePresentedPositions(window: window)
 
       let animations = {
-        for cell in visibleCells {
-          cell.transform = previousTransforms[ObjectIdentifier(cell)] ?? .identity
-        }
-        nextView.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
+        geometry.applyTargetTransforms()
+        for transition in transitions { transition.apply() }
         collectionView.layoutIfNeeded()
         changedCell.layoutIfNeeded()
       }
 
       guard !UIAccessibility.isReduceMotionEnabled else {
         UIView.performWithoutAnimation(animations)
-        nextView.finishGeometryTransition(generation: transitionGeneration)
+        for transition in transitions { transition.finish() }
+        v2GeometryTransitions.removeAll()
         return
       }
 
       let animator = UIViewPropertyAnimator(duration: 0.28, curve: .easeInOut)
       animator.addAnimations(animations)
-      animator.addCompletion { [weak self, weak animator, weak collectionView, weak changedCell, weak nextView] _ in
-        guard let nextView else { return }
-        nextView.finishGeometryTransition(generation: transitionGeneration)
-        if let changedCell {
-          collectionView?.syncBubbleGradient(for: changedCell)
-        }
-        if let animator, self?.v2GeometryAnimator === animator {
-          self?.v2GeometryAnimator = nil
+      animator.addCompletion { [weak self, weak animator, weak collectionView] _ in
+        guard let self, let animator, self.v2GeometryAnimator === animator else { return }
+        self.v2GeometryAnimator = nil
+        self.v2GeometryTransitions.removeAll()
+        for transition in transitions {
+          transition.finish()
+          if transition.isCurrent, let cell = transition.cell {
+            collectionView?.syncBubbleGradient(for: cell)
+          }
         }
       }
       v2GeometryAnimator = animator
@@ -4001,6 +4029,10 @@ private extension MessagesCollectionView {
         return nil
       }
 
+      let mathSource = (cell.messageView as? UIMessageView2).flatMap { view in
+        view.mathSource(atPointInMessageView: collectionView.convert(point, to: view))
+      }
+
       // Check if the touch point is within a view that has its own context menu interaction
       if let messageView = cell.messageView {
         let pointInMessageView = collectionView.convert(point, to: messageView)
@@ -4080,6 +4112,12 @@ private extension MessagesCollectionView {
             UIPasteboard.general.string = message.text
           }
           actions.append(copyAction)
+        }
+
+        if let mathSource {
+          actions.append(UIAction(title: "Copy LaTeX", image: UIImage(systemName: "function")) { _ in
+            UIPasteboard.general.string = mathSource
+          })
         }
 
         if isMessageSending {

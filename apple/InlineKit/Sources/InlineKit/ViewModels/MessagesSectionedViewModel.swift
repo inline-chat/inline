@@ -68,13 +68,17 @@ public class MessagesSectionedViewModel {
     peer: Peer,
     reversed: Bool = false,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
-    collapsedMaxId: Int64? = nil
+    collapsedMaxId: Int64? = nil,
+    database: AppDatabase = .shared,
+    publisher: MessagesPublisher = .shared
   ) {
     self.collapsedMaxId = collapsedMaxId
     progressiveViewModel = MessagesProgressiveViewModel(
       peer: peer,
       reversed: reversed,
-      initialState: initialState
+      initialState: initialState,
+      database: database,
+      publisher: publisher
     )
 
     // Setup observer for progressive view model changes

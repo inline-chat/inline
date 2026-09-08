@@ -336,7 +336,12 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func revealSendAnimationTarget() {
-    setSendAnimationTargetPrepared(false)
+    // Ordinary diffable reconfiguration also calls this method. Only a prepared
+    // send target needs recursive cleanup; clearing an already-visible cell
+    // cancels unrelated bubble and neighboring-row geometry animations.
+    if messageViewImplementation == .legacy || isPreparedForSendAnimationTarget {
+      setSendAnimationTargetPrepared(false)
+    }
     messageView?.animateInitialDeliveryAcknowledgementIfNeeded()
   }
 
@@ -778,7 +783,12 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     guard let messageView else { return }
     guard !isServiceMessage else { return }
     let bubble = messageView.bubbleView
-    bubble.layer.removeAllAnimations()
+    // V2 highlight cleanup owns color only; preserve its resize animation.
+    if messageViewImplementation == .v2 {
+      bubble.layer.removeAnimation(forKey: "backgroundColor")
+    } else {
+      bubble.layer.removeAllAnimations()
+    }
     bubble.backgroundColor = messageView.bubbleColor
     messageView.clearMediaHighlight()
   }
