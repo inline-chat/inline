@@ -1,3 +1,4 @@
+import { adminOAuthConnections } from "@in/server/modules/oauth/adminConnections"
 import {
   Effect,
 } from "effect"
@@ -1046,11 +1047,13 @@ const usersOperation: AdminOperationsShape["users"] =
             .orderBy(desc(users.id))
             .limit(50)
       const origin = userOrigin(request.publicOrigin)
+      const oauthConnections = await adminOAuthConnections(rows.map((user) => user.id))
 
       return jsonResult({
         ok: true as const,
         users: rows.map((user) => ({
           ...user,
+          oauthConnections: oauthConnections.get(user.id) ?? [],
           lastOnline:
             user.lastOnline?.toISOString() ?? null,
           createdAt:
@@ -1162,6 +1165,7 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
         return yield* reject(404, "not_found")
       }
 
+      const oauthConnections = yield* attempt("admin.users.detail.oauth", () => adminOAuthConnections([userId]))
       const detail = yield* attempt(
         "admin.users.detail.related",
         async () => {
@@ -1334,6 +1338,7 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
           bot: user.bot,
           botCreatorId: user.botCreatorId,
           pendingSetup: user.pendingSetup,
+          oauthConnections: oauthConnections.get(user.id) ?? [],
           timeZone: user.timeZone,
           lastUpdateDate:
             user.lastUpdateDate?.toISOString() ?? null,

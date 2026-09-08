@@ -1,3 +1,4 @@
+import { adminOAuthConnections } from "@in/server/modules/oauth/adminConnections"
 import { Effect } from "effect"
 import os from "node:os"
 import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm"
@@ -263,6 +264,7 @@ export const getRecentOverviewActivity = async (publicOrigin: string, now: Date)
       .limit(8),
   ])
   const origin = ADMIN_PUBLIC_API_ORIGIN ?? publicOrigin
+  const oauthConnections = await adminOAuthConnections(recentUsers.map((user) => user.id))
 
   return {
     newUsersLastDay: newUsersRow?.count ?? 0,
@@ -275,6 +277,7 @@ export const getRecentOverviewActivity = async (publicOrigin: string, now: Date)
       username: user.username,
       createdAt: user.createdAt?.toISOString() ?? null,
       pendingSetup: user.pendingSetup,
+      oauthConnections: oauthConnections.get(user.id) ?? [],
       avatarUrl: user.photoFileId ? `${origin}/admin/users/${user.id}/avatar` : null,
     })),
     recentWaitlist: recentWaitlist.map((entry) => ({

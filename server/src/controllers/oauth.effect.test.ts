@@ -166,6 +166,37 @@ const makeKernel = ({
 }
 
 describe("Effect OAuth routes", () => {
+  it("preserves profile form fields and accepts an HTML consent intermediate step", async () => {
+    let received: URLSearchParams | undefined
+    const kernel = makeKernel({
+      oauth: {
+        execute: (operation, { request }) => Effect.tryPromise({
+          try: async () => {
+            expect(operation).toBe("consent")
+            received = new URLSearchParams(await request.text())
+            return new Response("<html>Profile saved; choose what to share</html>", {
+              status: 200,
+              headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+            })
+          },
+          catch: (cause) => new OAuthHttpFailure({ operation, cause }),
+        }),
+      },
+    })
+    try {
+      const response = await kernel.handler(new Request("http://inline.test/oauth/authorize/consent", {
+        method: "POST", body: new URLSearchParams({ csrf: "test-csrf", step: "profile", name: "Test Person", username: "testperson" }),
+      }))
+      expect(response.status).toBe(200)
+      expect(received?.get("name")).toBe("Test Person")
+      expect(received?.get("username")).toBe("testperson")
+      expect(received?.get("step")).toBe("profile")
+      expect(response.headers.get("cache-control")).toBe("no-store")
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
   it("preserves multiple hosted-login cookies through the Web response boundary", async () => {
     const kernel = makeKernel({
       oauth: {

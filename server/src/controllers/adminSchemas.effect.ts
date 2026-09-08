@@ -249,6 +249,7 @@ const AdminRecentUser = Schema.Struct({
   username: NullableString,
   createdAt: NullableString,
   pendingSetup: NullableBoolean,
+  oauthConnections: Schema.optionalKey(Schema.Array(Schema.Literals(["chatgpt", "mcp"]))),
   avatarUrl: NullableString,
 })
 
@@ -677,6 +678,7 @@ const AdminUserSummary = Schema.Struct({
   deleted: NullableBoolean,
   bot: NullableBoolean,
   pendingSetup: NullableBoolean,
+  oauthConnections: Schema.optionalKey(Schema.Array(Schema.Literals(["chatgpt", "mcp"]))),
   timeZone: NullableString,
   photoFileId: NullableInlineId,
   avatarUrl: NullableString,
@@ -763,6 +765,7 @@ export const AdminUserDetailResult = Schema.Struct({
     bot: NullableBoolean,
     botCreatorId: NullableUserId,
     pendingSetup: NullableBoolean,
+    oauthConnections: Schema.optionalKey(Schema.Array(Schema.Literals(["chatgpt", "mcp"]))),
     timeZone: NullableString,
     lastUpdateDate: NullableString,
     updateSeq: NullableInteger,

@@ -184,6 +184,9 @@ const nativeAppleErrors = [
 ] as const
 
 const OAuthConsentPayload = Schema.Struct({
+  step: OptionalString,
+  name: OptionalString,
+  username: OptionalString,
   csrf: OptionalString,
   space_id: Schema.optionalKey(
     Schema.Union([
@@ -1001,6 +1004,7 @@ const oauthResponseContracts: Readonly<
     ...oauthHtmlErrorVariants,
   ],
   consent: [
+    htmlVariant(200, ["cache-control"]),
     {
       status: 302,
       mediaType: "none",

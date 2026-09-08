@@ -5,7 +5,7 @@ import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
 import { db } from "@in/server/db"
-import { oauthAuthRequests, oauthAuthCodes, oauthGrants } from "@in/server/db/schema"
+import { oauthAuthRequests, oauthAuthCodes, oauthGrants, users } from "@in/server/db/schema"
 import { eq, inArray } from "drizzle-orm"
 import { authRequestCookieName } from "@in/server/modules/oauth/authRequestCookie"
 import { oauthConfig } from "@in/server/modules/oauth/config"
@@ -32,6 +32,7 @@ describe("OAuth controller", () => {
   async function consentFixture() {
     const nowMs = Date.now()
     const user = await testUtils.createUser(`consent-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ firstName: "Test", username: `test-${crypto.randomUUID()}` }).where(eq(users.id, user.id))
     const client = await OauthModel.createClient({
       clientId: crypto.randomUUID(), redirectUris: ["https://example.com/callback"], clientName: "consent-test", nowMs,
     })

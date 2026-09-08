@@ -41,8 +41,8 @@ import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
 import parsePhoneNumber from "libphonenumber-js"
 import { db } from "@in/server/db"
-import { members, spaces, users, type DbProviderAuthAttempt } from "@in/server/db/schema"
-import { and, eq, isNull } from "drizzle-orm"
+import { members, sessions, spaces, users, userNotDeleted, type DbProviderAuthAttempt } from "@in/server/db/schema"
+import { and, eq, isNull, ne, or } from "drizzle-orm"
 import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
 import {
   attachProviderAfterEmailProof,
@@ -76,6 +76,9 @@ import {
 } from "./authRequestCookie"
 import { normalizeMcpResourceIndicator } from "./resourceIndicator"
 import { isGrantSessionActive } from "./grantSession"
+import { needsOAuthProfile, parseOAuthProfile, type OAuthProfile } from "./profile"
+import { oauthClientKind } from "./clientKind"
+import { handler as updateProfile } from "@in/server/methods/updateProfile"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -142,8 +145,8 @@ function renderPage(title: string, body: string): string {
     h1 { margin: 0; font-size: 25px; line-height: 1.2; letter-spacing: -0.035em; }
     .intro { margin: 9px 0 24px; color: #666661; font-size: 14px; line-height: 1.5; }
     label { display: block; margin-top: 16px; font-size: 13px; font-weight: 650; }
-    input[type="email"], input[type="tel"], input[name="code"] { width: 100%; min-height: 46px; padding: 11px 13px; margin-top: 7px; border-radius: 10px; border: 1px solid #cececa; background: #fff; color: #171717; font: inherit; font-size: 15px; outline: none; transition: border-color 120ms ease, box-shadow 120ms ease; }
-    input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #343431; box-shadow: 0 0 0 3px rgba(30, 30, 28, 0.1); }
+    input[type="text"], input[type="email"], input[type="tel"], input[name="code"] { width: 100%; min-height: 46px; padding: 11px 13px; margin-top: 7px; border-radius: 10px; border: 1px solid #cececa; background: #fff; color: #171717; font: inherit; font-size: 15px; outline: none; transition: border-color 120ms ease, box-shadow 120ms ease; }
+    input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #343431; box-shadow: 0 0 0 3px rgba(30, 30, 28, 0.1); }
     input[name="code"] { letter-spacing: 0.16em; font-variant-numeric: tabular-nums; }
     button { width: 100%; min-height: 46px; margin-top: 20px; padding: 11px 16px; border-radius: 11px; border: 1px solid #171717; background: #171717; color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
     button:hover { background: #30302d; }
@@ -178,14 +181,18 @@ function renderPage(title: string, body: string): string {
     .actions { display: grid; width: 100%; gap: 9px; margin-top: 8px; }
     .action { display: grid; width: 100%; min-height: 46px; place-items: center; padding: 11px 16px; border: 1px solid #171717; border-radius: 11px; background: #171717; color: #fff; font-size: 14px; font-weight: 650; text-decoration: none; cursor: pointer; }
     .action.secondary { border-color: #cececa; background: transparent; color: #171717; }
+    .app-downloads { margin: 20px 0; }
+    .app-downloads h2 { margin: 0; font-size: 15px; }
+    .app-downloads p { margin: 10px 0 0; font-size: 13px; line-height: 1.5; }
+    .app-downloads a { color: inherit; text-underline-offset: 3px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 520px) { body { align-items: start; padding: 22px 14px; } .brand { margin-bottom: 18px; } .card { padding: 24px 20px; border-radius: 16px; } }
     @media (prefers-color-scheme: dark) {
       body { color: #f3f3f0; background: #111210; }
       .card { border-color: #343532; background: #1b1c19; box-shadow: none; }
       .intro, .muted { color: #a7a8a1; }
-      input[type="email"], input[type="tel"], input[name="code"] { border-color: #464742; background: #22231f; color: #f3f3f0; }
-      input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #d0d0ca; box-shadow: 0 0 0 3px rgba(240, 240, 235, 0.1); }
+      input[type="text"], input[type="email"], input[type="tel"], input[name="code"] { border-color: #464742; background: #22231f; color: #f3f3f0; }
+      input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #d0d0ca; box-shadow: 0 0 0 3px rgba(240, 240, 235, 0.1); }
       button { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
       button:hover { background: #dcdcd7; }
       .provider-button { border-color: #464742; background: #22231f; color: #f3f3f0; }
@@ -517,6 +524,35 @@ async function getSpacesForUser(userId: number): Promise<Array<{ id: number; nam
   return rows
 }
 
+function oauthProfilePage(
+  authRequest: OauthAuthRequest,
+  user: OAuthProfile,
+  error?: string,
+  values?: { name: string; username: string },
+): Response {
+  const name = values?.name ?? [user.firstName, user.lastName].filter(Boolean).join(" ")
+  const username = values?.username ?? user.username ?? ""
+  return html(error ? 400 : 200, renderPage("Set up your profile", `
+<p class="intro">Choose how you appear in Inline. Then continue connecting your app.</p>
+${error ? `<div class="error" role="alert">${escapeHtml(error)}</div>` : ""}
+<form method="post" action="/oauth/authorize/consent">
+  <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
+  <input type="hidden" name="step" value="profile" />
+  <label for="profile-name">Name</label>
+  <input type="text" id="profile-name" name="name" autocomplete="name" value="${escapeHtml(name)}" maxlength="513" required autofocus />
+  <label for="profile-username">Username</label>
+  <input type="text" id="profile-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" value="${escapeHtml(username)}" minlength="2" maxlength="256" required />
+  <button type="submit">Continue</button>
+</form>`), { "cache-control": "no-store" })
+}
+
+async function loadOAuthProfile(userId: number) {
+  return (await db.select({
+    firstName: users.firstName, lastName: users.lastName, username: users.username,
+    pendingSetup: users.pendingSetup,
+  }).from(users).where(and(eq(users.id, userId), userNotDeleted())).limit(1))[0]
+}
+
 export async function completeAuthorizeSignIn(
   authRequest: OauthAuthRequest,
   verifyResult: unknown,
@@ -554,6 +590,10 @@ export async function completeAuthorizeSignIn(
     authMethod: method,
   })
 
+  const profile = await loadOAuthProfile(userId)
+  if (!profile) return html(401, renderPage("Sign-in expired", `<div class="error">Sign in again to continue.</div>`))
+  if (needsOAuthProfile(profile)) return oauthProfilePage(authRequest, profile)
+
   let spaces: Array<{ id: number; name: string }> = []
   try {
     spaces = await getSpacesForUser(userId)
@@ -575,12 +615,26 @@ export async function completeAuthorizeSignIn(
     .join("")
   const client = await OauthModel.getClient(authRequest.clientId)
   const clientName = client?.clientName?.trim() || "the connected app"
+  const priorSession = oauthClientKind(client?.clientName) === "chatgpt"
+    ? (await db.select({ id: sessions.id }).from(sessions).where(and(
+      eq(sessions.userId, userId),
+      or(isNull(sessions.deviceId), ne(sessions.deviceId, authRequest.deviceId)),
+    )).limit(1))[0]
+    : true
+  const downloadPrompt = !priorSession ? `
+<section class="scope app-downloads" aria-label="Get Inline">
+  <h2>Get Inline on your devices</h2>
+  <p>Download Inline for macOS or iOS to start conversations and connect with your team. Sign in with the same account.</p>
+  <p><a href="https://inline.chat/download/mac/beta" target="_blank" rel="noopener noreferrer">Download for macOS</a> · <a href="https://testflight.apple.com/join/FkC3f7fz" target="_blank" rel="noopener noreferrer">Get Inline for iOS</a></p>
+  <p class="muted">You can download the apps later. Continue below to connect ChatGPT.</p>
+</section>` : ""
 
   return html(
     200,
     renderPage(
       "Choose what to share",
       `
+${downloadPrompt}
 <p class="intro">Select where ${escapeHtml(clientName)} can act on your behalf. You can revoke access later.</p>
 <form method="post" action="/oauth/authorize/consent">
   <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
@@ -1137,6 +1191,32 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
   const csrf = readParam(body, "csrf")
   if (!constantTimeEqual(csrf, authRequest.csrfToken)) {
     return html(400, renderPage("Error", `<div class="error">Invalid CSRF token.</div>`))
+  }
+
+  const profile = await loadOAuthProfile(authRequest.inlineUserId)
+  if (!profile) return html(401, renderPage("Sign-in expired", `<div class="error">Sign in again to continue.</div>`))
+  if (needsOAuthProfile(profile)) {
+    if (readParam(body, "step") !== "profile") return oauthProfilePage(authRequest, profile)
+    const values = { name: readParam(body, "name"), username: readParam(body, "username") }
+    const parsed = parseOAuthProfile(values.name, values.username)
+    if (parsed.error) return oauthProfilePage(authRequest, profile, parsed.error, values)
+    const session = (await db.select({ id: sessions.id }).from(sessions).where(and(
+      eq(sessions.userId, authRequest.inlineUserId), eq(sessions.deviceId, authRequest.deviceId), isNull(sessions.revoked),
+    )).limit(1))[0]
+    if (!session) return html(401, renderPage("Sign-in expired", `<div class="error">Sign in again to continue.</div>`))
+    try {
+      await updateProfile(parsed.profile, { currentUserId: authRequest.inlineUserId, currentSessionId: session.id, ip: undefined })
+    } catch (cause) {
+      if (cause instanceof InlineError && cause.code === 400) {
+        return oauthProfilePage(authRequest, profile, cause.description ?? "Check your name and username.", values)
+      }
+      throw cause
+    }
+    return completeAuthorizeSignIn(authRequest, { userId: authRequest.inlineUserId }, authRequest.authMethod ?? "email")
+  }
+  // A retried profile POST must never double as consent.
+  if (readParam(body, "step") === "profile") {
+    return completeAuthorizeSignIn(authRequest, { userId: authRequest.inlineUserId }, authRequest.authMethod ?? "email")
   }
 
   const selectedSpaceIds = readAllParams(body, "space_id")
