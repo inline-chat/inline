@@ -39,7 +39,7 @@ describe("desktopPushSuppression", () => {
 
     await tracker.recordChatActivity({ userId: 1, sessionId: 1, chatId: 100 })
 
-    now += 29_999
+    now += 14_999
 
     expect(
       tracker.shouldSuppressIOSSendMessagePush({
