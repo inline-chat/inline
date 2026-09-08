@@ -182,10 +182,11 @@ struct MacNotificationsTests {
 
   @Test("freshness, insertion, and unread gates reject replay")
   func replaySafetyGates() {
-    let fresh = makeMessage(date: 970)
-    let stale = makeMessage(date: 969)
+    let fresh = makeMessage(date: 880)
+    let stale = makeMessage(date: 879)
     let invalidDate = makeMessage(date: 0)
 
+    #expect(MacNotifications.maximumMessageAge == 120)
     #expect(shouldSchedule(fresh, mode: .all))
     #expect(!shouldSchedule(stale, mode: .all))
     #expect(!shouldSchedule(invalidDate, mode: .all))
@@ -197,6 +198,25 @@ struct MacNotificationsTests {
   func futureTimestampTolerance() {
     let future = makeMessage(date: 1_300)
     #expect(shouldSchedule(future, mode: .all))
+  }
+
+  @Test("notification attachments are best effort within a bounded delivery budget")
+  func notificationAttachmentsAreBestEffort() async {
+    let immediateURL = URL(fileURLWithPath: "/tmp/notification-avatar.png")
+    let immediate = await MacNotifications.bestEffortAttachment(timeout: .seconds(1)) {
+      immediateURL
+    }
+    #expect(immediate == immediateURL)
+
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let timedOut = await MacNotifications.bestEffortAttachment(timeout: .milliseconds(10)) {
+      try? await Task.sleep(for: .seconds(5))
+      return immediateURL
+    }
+
+    #expect(timedOut == nil)
+    #expect(startedAt.duration(to: clock.now) < .seconds(1))
   }
 
   @Test("silent send mode suppresses even urgent local routing")

@@ -105,7 +105,8 @@ public actor MacNotifications {
   public static let shared = MacNotifications()
 
   private static let urgentNudgeText = "\u{1F6A8}"
-  static let maximumMessageAge: TimeInterval = 30
+  static let maximumMessageAge: TimeInterval = 2 * 60
+  static let attachmentPreparationTimeout: Duration = .milliseconds(500)
 
   enum MessageUpdateSource: Equatable, Sendable {
     case newMessage
@@ -235,6 +236,25 @@ public actor MacNotifications {
     guard message.date > 0 else { return false }
     let messageDate = Date(timeIntervalSince1970: TimeInterval(message.date))
     return now.timeIntervalSince(messageDate) <= maximumMessageAge
+  }
+
+  nonisolated static func bestEffortAttachment(
+    timeout: Duration = attachmentPreparationTimeout,
+    operation: @escaping @Sendable () async -> URL?
+  ) async -> URL? {
+    await withTaskGroup(of: URL?.self, returning: URL?.self) { group in
+      group.addTask {
+        await operation()
+      }
+      group.addTask {
+        try? await Task.sleep(for: timeout)
+        return nil
+      }
+
+      let attachment = await group.next() ?? nil
+      group.cancelAll()
+      return attachment
+    }
   }
 
   nonisolated static func messageNotificationIdentifier(
@@ -481,7 +501,9 @@ extension MacNotifications {
     let imageURL = if isThread {
       ThreadIconNotificationAttachmentRenderer.attachmentURL(for: chat)
     } else {
-      await avatarBuilder.attachmentURL(for: user, fallbackUserID: protocolMsg.fromID)
+      await Self.bestEffortAttachment {
+        await self.avatarBuilder.attachmentURL(for: user, fallbackUserID: protocolMsg.fromID)
+      }
     }
     let isUrgentNudge = Self.isUrgentNudge(protocolMsg)
     var notificationUserInfo: [AnyHashable: Any] = [
@@ -744,6 +766,7 @@ private actor AvatarAttachmentBuilder {
   }
 
   func attachmentURL(for userInfo: UserInfo?, fallbackUserID: Int64) async -> URL? {
+    guard !Task.isCancelled else { return nil }
     guard let userInfo else { return nil }
 
     let source: AvatarSource
@@ -759,6 +782,7 @@ private actor AvatarAttachmentBuilder {
       return nil
     }
 
+    guard !Task.isCancelled else { return nil }
     return attachmentURL(for: source)
   }
 
@@ -833,12 +857,15 @@ private actor AvatarAttachmentBuilder {
 #endif
 
   private func loadAvatarSource(for userInfo: UserInfo) async -> AvatarSource? {
+    guard !Task.isCancelled else { return nil }
+
     if let localURL = userInfo.user.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
        let image = await retrieveImage(from: .local(localURL)) {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
+    guard !Task.isCancelled else { return nil }
     if let remoteURL = userInfo.user.getRemoteURL() {
       if let image = await retrieveImage(from: .remote(remoteURL)) {
         return AvatarSource(cacheKey: remoteURL.absoluteString, image: image)
@@ -906,7 +933,12 @@ private actor AvatarAttachmentBuilder {
           return nil
         }
 
+        guard !Task.isCancelled else { return nil }
         return downsampleImage(from: data)
+      } catch is CancellationError {
+        return nil
+      } catch let error as URLError where error.code == .cancelled {
+        return nil
       } catch {
         log.error("Failed to download avatar image", error: error)
         return nil

@@ -63,7 +63,7 @@ public actor UpdatesEngine: Sendable {
             try newMessageUpdate.apply(
               db,
               publishChanges: false,
-              suppressNotifications: true,
+              suppressNotifications: false,
               materializeMissingReferences: true,
               incrementUnreadCount: false
             )
@@ -2397,8 +2397,9 @@ extension InlineProtocol.UpdateNewMessage {
     }
 
     #if os(macOS)
-    // Keep sync catch-up suppressed until its durable payload preserves every
-    // notification-affecting input. The age gate also rejects delayed realtime delivery.
+    // Realtime and catch-up share this post-commit admission path. Insertion,
+    // freshness, final unread state, sender-silent intent, and notification mode
+    // prevent old or ineligible catch-up messages from notifying.
     if !suppressNotifications,
        !hadMessage,
        msg.out == false,
