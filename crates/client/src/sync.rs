@@ -399,9 +399,11 @@ impl SyncManager {
             .await?;
         let mut events = drained.deliveries;
         let force_fetch = force_fetch || drained.probe_after_commit;
+        // A hint can lag a live update in the same batch. Cover both before
+        // releasing the buffer owned by this operation.
         let target_seq = target_seq
             .filter(|target| *target > state.seq)
-            .or_else(|| buffered.last_key_value().map(|(seq, _)| *seq));
+            .max(buffered.last_key_value().map(|(seq, _)| *seq));
         if !force_fetch && target_seq.is_none() && buffered.is_empty() && state.seq > 0 {
             return Ok(events);
         }
@@ -2133,6 +2135,40 @@ mod tests {
             .await
             .unwrap();
 
+        let applied = host.applied.lock().await;
+        assert_eq!(applied.len(), 2);
+        assert_eq!(
+            applied
+                .iter()
+                .flat_map(|batch| batch.iter().map(update_seq))
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState { seq: 3, date: 30 }
+        );
+    }
+
+    #[tokio::test]
+    async fn older_hint_does_not_drop_newer_buffered_realtime_update() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![
+            updates_result(vec![message_update(2, 20, 7, 102)], 2, 20, false),
+            updates_result(vec![message_update(3, 30, 7, 103)], 3, 30, true),
+        ]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![chat_hint(7, 2), message_update(3, 30, 7, 103)])
+            .await
+            .unwrap();
+
+        assert_eq!(host.requests.lock().await[0].seq_end, 3);
         let applied = host.applied.lock().await;
         assert_eq!(applied.len(), 2);
         assert_eq!(
