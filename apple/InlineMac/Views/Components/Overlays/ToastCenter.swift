@@ -44,18 +44,33 @@ extension ToastPresenting {
 final class ToastCenter {
   static let shared = ToastCenter()
   private init() {}
+  private var loadingID: UUID?
+  private weak var loadingPresenter: (any ToastPresenting)?
 
   private var targetPresenter: (any ToastPresenting)? {
     MainWindowOpenCoordinator.shared.activeToastPresenter
   }
 
+  @discardableResult
   func showLoading(
     _ message: String,
     actionTitle: String? = nil,
     action: (@MainActor () -> Void)? = nil,
     placement: ToastPlacement = .standard
-  ) {
-    targetPresenter?.showLoading(message, actionTitle: actionTitle, action: action, placement: placement)
+  ) -> UUID {
+    let id = UUID()
+    loadingID = id
+    loadingPresenter = targetPresenter
+    loadingPresenter?.showLoading(message, actionTitle: actionTitle, action: action, placement: placement)
+    return id
+  }
+
+  /// A canceled navigation may only dismiss the loading toast it presented.
+  func dismiss(loading id: UUID) {
+    guard loadingID == id else { return }
+    loadingPresenter?.dismissToast()
+    loadingID = nil
+    loadingPresenter = nil
   }
 
   func showUndoCountdown(
@@ -65,6 +80,8 @@ final class ToastCenter {
     placement: ToastPlacement = .standard,
     action: @escaping @MainActor () -> Void
   ) {
+    loadingID = nil
+    loadingPresenter = nil
     targetPresenter?.showUndoCountdown(
       message,
       duration: duration,
@@ -75,6 +92,8 @@ final class ToastCenter {
   }
 
   func showInfo(_ message: String, placement: ToastPlacement = .standard) {
+    loadingID = nil
+    loadingPresenter = nil
     targetPresenter?.showInfo(message, placement: placement)
   }
 
@@ -84,14 +103,20 @@ final class ToastCenter {
     action: (@MainActor () -> Void)? = nil,
     placement: ToastPlacement = .standard
   ) {
+    loadingID = nil
+    loadingPresenter = nil
     targetPresenter?.showSuccess(message, actionTitle: actionTitle, action: action, placement: placement)
   }
 
   func showError(_ message: String, placement: ToastPlacement = .standard) {
+    loadingID = nil
+    loadingPresenter = nil
     targetPresenter?.showError(message, placement: placement)
   }
 
   func dismiss() {
+    loadingID = nil
+    loadingPresenter = nil
     targetPresenter?.dismissToast()
   }
 }

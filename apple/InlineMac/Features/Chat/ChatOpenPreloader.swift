@@ -1,6 +1,8 @@
 import Foundation
+import Auth
 import GRDB
 import InlineKit
+import InlineMacUI
 import InlineUI
 import os.signpost
 
@@ -10,9 +12,11 @@ struct PreparedChatPayload: Sendable {
   let chatItem: SpaceChatItem?
   let messagesInitialState: MessagesProgressiveViewModel.InitialState
   let pinnedMessage: PreparedPinnedMessage?
+  var experimentalPosition: MessageListInitialPosition? = nil
+  var experimentalRequestedMessageID: Int64? = nil
 }
 
-struct PreparedPinnedMessage: Sendable {
+struct PreparedPinnedMessage: Sendable, Equatable {
   let messageId: Int64
   let message: FullMessage?
 }
@@ -28,7 +32,8 @@ actor ChatOpenPreloader {
   func prepare(
     peer: Peer,
     targetMessageId: Int64? = nil,
-    database: AppDatabase
+    database: AppDatabase,
+    experimentalMessageList: Bool? = nil
   ) async throws -> PreparedChatPayload {
     let prepareSignpostID = OSSignpostID(log: Self.signpostLog)
     var preparedMessageCount = 0
@@ -51,19 +56,67 @@ actor ChatOpenPreloader {
       )
     }
 
-    let initialLimit = await MainActor.run {
-      MessagesProgressiveViewModel.defaultInitialLimit()
+    let (initialLimit, usesExperimentalList, accountID) = await MainActor.run {
+      (MessagesProgressiveViewModel.defaultInitialLimit(),
+       ExperimentalMessageListFeature.isAvailable && (experimentalMessageList ?? ExperimentalMessageListFeature.isEnabled),
+       Auth.shared.getCurrentUserId())
     }
     try Task.checkCancellation()
 
-    if let targetMessageId {
-      let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
-        peer: peer,
-        anchorID: targetMessageId,
-        limit: initialLimit,
-        database: database
-      )
-      guard outcome != .empty else { throw TargetError.unavailable }
+    var initialPosition: MessageListInitialPosition?
+    var requestedMessageID: Int64?
+    if usesExperimentalList {
+      let openingChat = try await database.reader.read { db in
+        try Self.fetchChatItem(peer: peer, db: db)
+      }
+      let saved: MessageListInitialPosition?
+      if let accountID, let chatID = openingChat?.chat?.id ?? openingChat?.dialog.chatId {
+        saved = await ExperimentalChatPositionStore.shared.load(accountID: accountID, chatID: chatID)
+      } else {
+        saved = nil
+      }
+      if let targetMessageId, let anchor = MessageListViewportAnchor(messageID: targetMessageId, offsetY: 0) {
+        initialPosition = .anchor(anchor)
+        requestedMessageID = targetMessageId
+      } else if case .anchor = saved {
+        initialPosition = saved
+        requestedMessageID = saved?.messageID
+      } else if let dialog = openingChat?.dialog, (dialog.unreadCount ?? 0) > 0,
+                (dialog.readInboxMaxId ?? 0) < MessageHistoryHole.positiveMessageIDMax,
+                let anchor = MessageListViewportAnchor(messageID: max(1, (dialog.readInboxMaxId ?? 0) + 1), offsetY: 0) {
+        initialPosition = .anchor(anchor)
+      } else {
+        initialPosition = .latest
+      }
+      if let collapsedMaxID = openingChat?.dialog.collapsedMaxId,
+         let target = initialPosition?.messageID, target <= collapsedMaxID,
+         collapsedMaxID < MessageHistoryHole.positiveMessageIDMax,
+         let anchor = MessageListViewportAnchor(messageID: collapsedMaxID + 1, offsetY: 0) {
+        initialPosition = .anchor(anchor)
+      }
+    }
+    let preparedPosition = initialPosition
+    let preparedRequestedMessageID = requestedMessageID
+    let windowTargetID = initialPosition?.messageID ?? targetMessageId
+
+    if let windowTargetID {
+      let hasCachedTarget = usesExperimentalList ? try await database.reader.read { db in
+        var query = Message.filter(Message.Columns.messageId == windowTargetID)
+        switch peer {
+          case let .thread(id): query = query.filter(Message.Columns.peerThreadId == id)
+          case let .user(id): query = query.filter(Message.Columns.peerUserId == id)
+        }
+        return try query.fetchCount(db) > 0
+      } : false
+      if !hasCachedTarget {
+        let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+          peer: peer,
+          anchorID: windowTargetID,
+          limit: initialLimit,
+          database: database
+        )
+        guard outcome != .empty else { throw TargetError.unavailable }
+      }
       try Task.checkCancellation()
     }
 
@@ -130,7 +183,7 @@ actor ChatOpenPreloader {
         messages = try Self.fetchInitialMessages(
           peer: peer,
           limit: initialLimit,
-          targetMessageId: targetMessageId,
+          targetMessageId: windowTargetID,
           db: db
         )
         messageCount = messages.count
@@ -183,7 +236,9 @@ actor ChatOpenPreloader {
         targetMessageId: targetMessageId,
         chatItem: chatItem,
         messagesInitialState: messagesInitialState,
-        pinnedMessage: pinnedMessage
+        pinnedMessage: pinnedMessage,
+        experimentalPosition: preparedPosition,
+        experimentalRequestedMessageID: preparedRequestedMessageID
       )
     }
     try Task.checkCancellation()
@@ -191,7 +246,7 @@ actor ChatOpenPreloader {
     preparedMessageCount = payload.messagesInitialState.messages.count
     let likelyVisibleMessages = Self.likelyVisibleMessages(
       in: payload.messagesInitialState.messages,
-      targetMessageId: targetMessageId,
+      targetMessageId: windowTargetID,
       limit: InlineTinyThumbnailWarmupPolicy.firstPresentationMessageLimit
     )
     let thumbnailWarmup = await InlineTinyThumbnailPrewarmer.beginWarmup(
@@ -199,10 +254,12 @@ actor ChatOpenPreloader {
       includeSupportingMedia: false,
       priority: .visible
     )
-    _ = await InlineTinyThumbnailPrewarmer.waitUntilReady(
-      thumbnailWarmup,
-      timeout: InlineTinyThumbnailWarmupPolicy.firstPresentationTimeout
-    )
+    if !usesExperimentalList {
+      _ = await InlineTinyThumbnailPrewarmer.waitUntilReady(
+        thumbnailWarmup,
+        timeout: InlineTinyThumbnailWarmupPolicy.firstPresentationTimeout
+      )
+    }
     if Task.isCancelled {
       await InlineTinyThumbnailPrewarmer.cancel(thumbnailWarmup)
       throw CancellationError()

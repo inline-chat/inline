@@ -59,7 +59,9 @@ class ChatViewAppKit: NSViewController {
   private let onDialogChange: (@MainActor (Dialog?) -> Void)?
   private let appearance: ChatViewAppearance
   private var viewModel: FullChatViewModel
-  private let preparedPayload: PreparedChatPayload?
+  private var preparedPayload: PreparedChatPayload?
+  private let usesExperimentalMessageList: Bool
+  private var experimentalPreparationTask: Task<Void, Never>?
 
   private var dialog: Dialog? {
     viewModel.chatItem?.dialog
@@ -77,7 +79,7 @@ class ChatViewAppKit: NSViewController {
   }
 
   // Child controllers
-  private var messageListVC: MessageListAppKit?
+  private var messageListVC: (any ChatMessageListController)?
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ChatLoadErrorView>?
@@ -108,6 +110,9 @@ class ChatViewAppKit: NSViewController {
     self.toolbarState = toolbarState
     self.onDialogChange = onDialogChange
     self.preparedPayload = preparedPayload
+    usesExperimentalMessageList = ExperimentalMessageListFeature.isAvailable && (
+      preparedPayload.map { $0.experimentalPosition != nil } ?? ExperimentalMessageListFeature.isEnabled
+    )
     viewModel = FullChatViewModel(
       db: dependencies.database,
       peer: peerId,
@@ -331,6 +336,31 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func setupChatComponents(chat: Chat) {
+    if usesExperimentalMessageList, preparedPayload == nil {
+      guard experimentalPreparationTask == nil else { return }
+      if spinnerVC == nil { showSpinner() }
+      experimentalPreparationTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+        defer { experimentalPreparationTask = nil }
+        do {
+          let payload = try await ChatOpenPreloader.shared.prepare(
+            peer: peerId, database: dependencies.database, experimentalMessageList: true
+          )
+          guard !Task.isCancelled, !isDisposed else { return }
+          preparedPayload = payload
+          spinnerVC?.view.removeFromSuperview()
+          spinnerVC?.removeFromParent()
+          spinnerVC = nil
+          setupChatComponents(chat: chat)
+        } catch is CancellationError {
+          return
+        } catch {
+          guard !isDisposed else { return }
+          state = .error(error)
+        }
+      }
+      return
+    }
     let componentsSignpostID = OSSignpostID(log: signpostLog)
     os_signpost(
       .begin,
@@ -345,7 +375,7 @@ class ChatViewAppKit: NSViewController {
     }
 
     // Message List
-    let messageListVC_: MessageListAppKit
+    let messageListVC_: any ChatMessageListController
     do {
       let signpostID = OSSignpostID(log: signpostLog)
       os_signpost(
@@ -360,17 +390,33 @@ class ChatViewAppKit: NSViewController {
         os_signpost(.end, log: signpostLog, name: "MessageListSetup", signpostID: signpostID)
       }
 
-      messageListVC_ = MessageListAppKit(
-        dependencies: dependencies,
-        peerId: peerId,
-        chat: chat,
-        showUnreadAfter: unreadBoundaryAtOpen(),
-        initialState: preparedPayload?.messagesInitialState,
-        collapsedMaxId: dialog?.collapsedMaxId,
-        initialPinnedMessage: preparedPayload?.pinnedMessage,
-        surfaceStyle: appearance.surfaceStyle,
-        additionalTopContentInset: appearance.additionalTopContentInset
-      )
+      if usesExperimentalMessageList {
+        messageListVC_ = ExperimentalMessageListAppKit(
+          dependencies: dependencies,
+          peerId: peerId,
+          chat: chat,
+          showUnreadAfter: unreadBoundaryAtOpen(),
+          initialState: preparedPayload?.messagesInitialState,
+          initialPosition: preparedPayload?.experimentalPosition ?? .latest,
+          requestedMessageID: preparedPayload?.experimentalRequestedMessageID,
+          collapsedMaxId: dialog?.collapsedMaxId,
+          initialPinnedMessage: preparedPayload?.pinnedMessage,
+          surfaceStyle: appearance.surfaceStyle,
+          additionalTopContentInset: appearance.additionalTopContentInset
+        )
+      } else {
+        messageListVC_ = MessageListAppKit(
+          dependencies: dependencies,
+          peerId: peerId,
+          chat: chat,
+          showUnreadAfter: unreadBoundaryAtOpen(),
+          initialState: preparedPayload?.messagesInitialState,
+          collapsedMaxId: dialog?.collapsedMaxId,
+          initialPinnedMessage: preparedPayload?.pinnedMessage,
+          surfaceStyle: appearance.surfaceStyle,
+          additionalTopContentInset: appearance.additionalTopContentInset
+        )
+      }
     }
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
@@ -425,6 +471,7 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func scheduleInitialTargetScrollIfNeeded(chat: Chat) {
+    guard !usesExperimentalMessageList else { return }
     guard !didScrollToInitialTarget else { return }
     guard let targetMessageId = preparedPayload?.targetMessageId else { return }
     didScrollToInitialTarget = true
@@ -532,6 +579,8 @@ class ChatViewAppKit: NSViewController {
   }
 
   func dispose() {
+    experimentalPreparationTask?.cancel()
+    experimentalPreparationTask = nil
     guard !isDisposed else { return }
     isDisposed = true
     fetchChatTask?.cancel()

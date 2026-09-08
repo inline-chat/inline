@@ -11,6 +11,8 @@ struct ExperimentalSettingsDetailView: View {
   private var nativeFileDownloadsEnabled = false
   @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
   private var quickForwardEnabled = false
+  @AppStorage(ExperimentalMessageListFeature.key)
+  private var messageListV2Enabled = false
 
   var body: some View {
     Form {
@@ -38,6 +40,14 @@ struct ExperimentalSettingsDetailView: View {
       }
 
       Section {
+        if ExperimentalMessageListFeature.isAvailable {
+          Toggle(isOn: $messageListV2Enabled) {
+            SettingsRowLabel(
+              "Message List V2 (WIP)",
+              description: "Unfinished Debug experiment with known scrolling and performance issues. Applies to newly opened chats."
+            )
+          }
+        }
         Toggle(isOn: $quickForwardEnabled) {
           SettingsRowLabel(
             "Quick Forward",

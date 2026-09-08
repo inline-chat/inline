@@ -3,7 +3,7 @@ import InlineKit
 
 protocol ComposeImplementation: AnyObject {
   var view: NSView { get }
-  var messageList: MessageListAppKit? { get set }
+  var messageList: (any ChatMessageListController)? { get set }
 
   func hostWillMove(toSuperview newSuperview: NSView?)
   func didLayout()
@@ -30,14 +30,14 @@ final class ComposeAppKit: NSView {
   private let usesGlassCompose: Bool
   private let surfaceStyle: ChatViewAppearance.SurfaceStyle
 
-  weak var messageList: MessageListAppKit? {
+  weak var messageList: (any ChatMessageListController)? {
     get { implementation.messageList }
     set { implementation.messageList = newValue }
   }
 
   init(
     peerId: InlineKit.Peer,
-    messageList: MessageListAppKit,
+    messageList: any ChatMessageListController,
     chat: InlineKit.Chat?,
     peerUser: InlineKit.User?,
     dependencies: AppDependencies,

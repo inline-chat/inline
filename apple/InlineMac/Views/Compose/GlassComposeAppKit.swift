@@ -48,7 +48,7 @@ class GlassComposeAppKit: NSView {
 
   // MARK: - State
 
-  weak var messageList: MessageListAppKit?
+  weak var messageList: (any ChatMessageListController)?
   weak var parentChatView: ChatViewAppKit?
 
   var viewModel: MessagesProgressiveViewModel? {
@@ -518,7 +518,7 @@ class GlassComposeAppKit: NSView {
 
   init(
     peerId: InlineKit.Peer,
-    messageList: MessageListAppKit,
+    messageList: any ChatMessageListController,
     chat: InlineKit.Chat?,
     peerUser: InlineKit.User?,
     dependencies: AppDependencies,
@@ -1323,7 +1323,7 @@ class GlassComposeAppKit: NSView {
       clear()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-        self.state.scrollToBottom()
+        if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
       }
     } catch {
       log.error("Failed to send voice recording", error: error)
@@ -2560,7 +2560,7 @@ class GlassComposeAppKit: NSView {
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
       // Scroll to new message
-      self.state.scrollToBottom()
+      if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
     }
 
     ignoreNextHeightChange = false
@@ -2839,7 +2839,7 @@ class GlassComposeAppKit: NSView {
     }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-      self.state.scrollToBottom()
+      if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
     }
   }
 

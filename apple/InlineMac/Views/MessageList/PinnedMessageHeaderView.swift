@@ -22,6 +22,8 @@ final class PinnedMessageHeaderView: NSView {
   private let peerId: Peer
   private let chatId: Int64
   private let dependencies: AppDependencies
+  private let usesPreparedObservation: Bool
+  private var lastPreparedPinnedMessage: PreparedPinnedMessage?
   private let log = Log.scoped("PinnedMessageHeaderView")
   private static let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
 
@@ -68,11 +70,14 @@ final class PinnedMessageHeaderView: NSView {
     dependencies: AppDependencies,
     peerId: Peer,
     chatId: Int64,
-    initialPinnedMessage: PreparedPinnedMessage? = nil
+    initialPinnedMessage: PreparedPinnedMessage? = nil,
+    usesPreparedObservation: Bool = false
   ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chatId = chatId
+    self.usesPreparedObservation = usesPreparedObservation
+    lastPreparedPinnedMessage = initialPinnedMessage
     if #available(macOS 26.0, *) {
       let glassView = PinnedMessageGlassBackgroundView(cornerRadius: pinnedHeaderCornerRadius)
       backgroundView = glassView
@@ -168,10 +173,52 @@ final class PinnedMessageHeaderView: NSView {
       os_signpost(.end, log: Self.signpostLog, name: "PinnedHeaderStartObserving", signpostID: signpostID)
     }
 
+    if usesPreparedObservation {
+      observePreparedPinnedMessage()
+      return
+    }
     observePinnedMessages()
     if let currentMessageId, messageObservation == nil {
       observePinnedMessageContent(messageId: currentMessageId)
     }
+  }
+
+  /// The experimental list already owns a complete first-frame snapshot. Read
+  /// subsequent pin and content changes together off-main, retaining that
+  /// presentation until a new snapshot is ready.
+  private func observePreparedPinnedMessage() {
+    pinnedMessageObservation = ValueObservation
+      .tracking { [chatId] db -> PreparedPinnedMessage? in
+        guard let pinned = try PinnedMessage
+          .filter(Column("chatId") == chatId)
+          .order(PinnedMessage.Columns.position.asc)
+          .fetchOne(db) else { return nil }
+        let message = try FullMessage.queryRequest()
+          .filter(Column("messageId") == pinned.messageId && Column("chatId") == chatId)
+          .fetchOne(db)
+        return PreparedPinnedMessage(messageId: pinned.messageId, message: message)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .async(onQueue: .main))
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Prepared pinned message observation failed: \(completion)")
+        },
+        receiveValue: { [weak self] pinned in
+          guard let self, pinned != lastPreparedPinnedMessage else { return }
+          lastPreparedPinnedMessage = pinned
+          currentMessageId = pinned?.messageId
+          if let pinned {
+            if let message = pinned.message {
+              configurePinnedMessage(message)
+            } else {
+              showPinnedMessageUnavailable(messageId: pinned.messageId, shouldFetch: true)
+            }
+            setVisible(true)
+          } else {
+            setVisible(false)
+          }
+        }
+      )
   }
 
   private func observePinnedMessages() {

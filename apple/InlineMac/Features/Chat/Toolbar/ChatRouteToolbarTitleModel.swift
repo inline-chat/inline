@@ -526,6 +526,15 @@ final class ChatRouteToolbarTitleModel {
   }
 
   private func loadInitialSnapshot() {
+    // Direct-message presentation already prefers this exact cached user in
+    // resolvedUserInfo(). Reuse it for the experimental first frame; the
+    // existing asynchronous snapshot still refreshes the backing chat state.
+    if ExperimentalMessageListFeature.isEnabled,
+       let userID = peer.asUserId(),
+       let userInfo = ObjectCache.shared.getUser(id: userID) {
+      loadedUserInfo = userInfo
+      return
+    }
     guard let snapshot = try? db.reader.read({ db in
       try Self.fetchSnapshot(peer: peer, db: db)
     }) else { return }
