@@ -522,6 +522,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getBotConfigurationCatalog // = 140
   case updateDialogTranslation // = 141
   case transcribeVoiceDraft // = 142
+  case requestBotFilesystem // = 143
+  case answerBotFilesystem // = 144
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -672,6 +674,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 140: self = .getBotConfigurationCatalog
     case 141: self = .updateDialogTranslation
     case 142: self = .transcribeVoiceDraft
+    case 143: self = .requestBotFilesystem
+    case 144: self = .answerBotFilesystem
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -820,6 +824,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getBotConfigurationCatalog: return 140
     case .updateDialogTranslation: return 141
     case .transcribeVoiceDraft: return 142
+    case .requestBotFilesystem: return 143
+    case .answerBotFilesystem: return 144
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -968,6 +974,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getBotConfigurationCatalog,
     .updateDialogTranslation,
     .transcribeVoiceDraft,
+    .requestBotFilesystem,
+    .answerBotFilesystem,
   ]
 
 }
@@ -1938,11 +1946,20 @@ public nonisolated struct BotEvent: Sendable {
     set {event = .chatSettingsItemInvoked(newValue)}
   }
 
+  public var filesystemRequested: BotFilesystemRequested {
+    get {
+      if case .filesystemRequested(let v)? = event {return v}
+      return BotFilesystemRequested()
+    }
+    set {event = .filesystemRequested(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Event: Equatable, Sendable {
     case chatSettingsRequested(BotChatSettingsRequested)
     case chatSettingsItemInvoked(BotChatSettingsItemInvoked)
+    case filesystemRequested(BotFilesystemRequested)
 
   }
 
@@ -8138,6 +8155,22 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .transcribeVoiceDraft(newValue)}
   }
 
+  public var requestBotFilesystem: RequestBotFilesystemInput {
+    get {
+      if case .requestBotFilesystem(let v)? = input {return v}
+      return RequestBotFilesystemInput()
+    }
+    set {input = .requestBotFilesystem(newValue)}
+  }
+
+  public var answerBotFilesystem: AnswerBotFilesystemInput {
+    get {
+      if case .answerBotFilesystem(let v)? = input {return v}
+      return AnswerBotFilesystemInput()
+    }
+    set {input = .answerBotFilesystem(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -8282,6 +8315,8 @@ public nonisolated struct RpcCall: Sendable {
     case getBotConfigurationCatalog(GetBotConfigurationCatalogInput)
     case updateDialogTranslation(UpdateDialogTranslationInput)
     case transcribeVoiceDraft(TranscribeVoiceDraftInput)
+    case requestBotFilesystem(RequestBotFilesystemInput)
+    case answerBotFilesystem(AnswerBotFilesystemInput)
 
   }
 
@@ -9431,6 +9466,22 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .transcribeVoiceDraft(newValue)}
   }
 
+  public var requestBotFilesystem: RequestBotFilesystemResult {
+    get {
+      if case .requestBotFilesystem(let v)? = _storage._result {return v}
+      return RequestBotFilesystemResult()
+    }
+    set {_uniqueStorage()._result = .requestBotFilesystem(newValue)}
+  }
+
+  public var answerBotFilesystem: AnswerBotFilesystemResult {
+    get {
+      if case .answerBotFilesystem(let v)? = _storage._result {return v}
+      return AnswerBotFilesystemResult()
+    }
+    set {_uniqueStorage()._result = .answerBotFilesystem(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -9575,6 +9626,8 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case getBotConfigurationCatalog(GetBotConfigurationCatalogResult)
     case updateDialogTranslation(UpdateDialogTranslationResult)
     case transcribeVoiceDraft(TranscribeVoiceDraftResult)
+    case requestBotFilesystem(RequestBotFilesystemResult)
+    case answerBotFilesystem(AnswerBotFilesystemResult)
 
   }
 
@@ -19758,12 +19811,23 @@ public nonisolated struct BotChatSettingsFolder: Sendable {
   /// Clears the value of `localPickerCapability`. Subsequent reads from it will return its default value.
   public mutating func clearLocalPickerCapability() {self._localPickerCapability = nil}
 
+  /// Owner-only remote directory browsing; absent/zero means unsupported.
+  public var remoteBrowserVersion: UInt32 {
+    get {_remoteBrowserVersion ?? 0}
+    set {_remoteBrowserVersion = newValue}
+  }
+  /// Returns true if `remoteBrowserVersion` has been explicitly set.
+  public var hasRemoteBrowserVersion: Bool {self._remoteBrowserVersion != nil}
+  /// Clears the value of `remoteBrowserVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearRemoteBrowserVersion() {self._remoteBrowserVersion = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _localPickerPort: UInt32? = nil
   fileprivate var _localPickerCapability: String? = nil
+  fileprivate var _remoteBrowserVersion: UInt32? = nil
 }
 
 public nonisolated struct BotChatSettingsFolderOption: Sendable {
@@ -21442,6 +21506,302 @@ public nonisolated struct TranscribeVoiceDraftResult: Sendable {
   public init() {}
 }
 
+/// Owner-only, ephemeral remote filesystem control plane. These paths and
+/// entries must never enter chat history, sync buckets, or diagnostic payloads.
+public nonisolated struct RequestBotFilesystemInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var botUserID: Int64 = 0
+
+  public var hostInstallationID: String = String()
+
+  public var operation: RequestBotFilesystemInput.Operation = .unspecified
+
+  /// Empty starts at the host home directory; otherwise an absolute path.
+  public var path: String = String()
+
+  /// Exclusive filename cursor for bounded, lexically ordered listing pages.
+  public var after: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Operation: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case list // = 1
+    case registerFolder // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .list
+      case 2: self = .registerFolder
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .list: return 1
+      case .registerFolder: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [RequestBotFilesystemInput.Operation] = [
+      .unspecified,
+      .list,
+      .registerFolder,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public nonisolated struct BotFilesystemEntry: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var name: String = String()
+
+  public var kind: BotFilesystemEntry.Kind = .unspecified
+
+  public var size: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case file // = 1
+    case directory // = 2
+    case symlink // = 3
+    case other // = 4
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .file
+      case 2: self = .directory
+      case 3: self = .symlink
+      case 4: self = .other
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .file: return 1
+      case .directory: return 2
+      case .symlink: return 3
+      case .other: return 4
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BotFilesystemEntry.Kind] = [
+      .unspecified,
+      .file,
+      .directory,
+      .symlink,
+      .other,
+    ]
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct BotFilesystemListing: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var path: String = String()
+
+  public var parentPath: String {
+    get {_parentPath ?? String()}
+    set {_parentPath = newValue}
+  }
+  /// Returns true if `parentPath` has been explicitly set.
+  public var hasParentPath: Bool {self._parentPath != nil}
+  /// Clears the value of `parentPath`. Subsequent reads from it will return its default value.
+  public mutating func clearParentPath() {self._parentPath = nil}
+
+  public var entries: [BotFilesystemEntry] = []
+
+  public var nextAfter: String {
+    get {_nextAfter ?? String()}
+    set {_nextAfter = newValue}
+  }
+  /// Returns true if `nextAfter` has been explicitly set.
+  public var hasNextAfter: Bool {self._nextAfter != nil}
+  /// Clears the value of `nextAfter`. Subsequent reads from it will return its default value.
+  public mutating func clearNextAfter() {self._nextAfter = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _parentPath: String? = nil
+  fileprivate var _nextAfter: String? = nil
+}
+
+public nonisolated struct BotFilesystemResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var result: BotFilesystemResponse.OneOf_Result? = nil
+
+  public var listing: BotFilesystemListing {
+    get {
+      if case .listing(let v)? = result {return v}
+      return BotFilesystemListing()
+    }
+    set {result = .listing(newValue)}
+  }
+
+  public var workspaceID: String {
+    get {
+      if case .workspaceID(let v)? = result {return v}
+      return String()
+    }
+    set {result = .workspaceID(newValue)}
+  }
+
+  /// Short, safe user-facing error; never OS error strings or credentials.
+  public var problem: String {
+    get {
+      if case .problem(let v)? = result {return v}
+      return String()
+    }
+    set {result = .problem(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Result: Equatable, Sendable {
+    case listing(BotFilesystemListing)
+    case workspaceID(String)
+    /// Short, safe user-facing error; never OS error strings or credentials.
+    case problem(String)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct RequestBotFilesystemResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var response: BotFilesystemResponse {
+    get {_response ?? BotFilesystemResponse()}
+    set {_response = newValue}
+  }
+  /// Returns true if `response` has been explicitly set.
+  public var hasResponse: Bool {self._response != nil}
+  /// Clears the value of `response`. Subsequent reads from it will return its default value.
+  public mutating func clearResponse() {self._response = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _response: BotFilesystemResponse? = nil
+}
+
+public nonisolated struct BotFilesystemRequested: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var requestID: UInt64 = 0
+
+  public var actorUserID: Int64 = 0
+
+  public var chatID: Int64 = 0
+
+  public var input: RequestBotFilesystemInput {
+    get {_input ?? RequestBotFilesystemInput()}
+    set {_input = newValue}
+  }
+  /// Returns true if `input` has been explicitly set.
+  public var hasInput: Bool {self._input != nil}
+  /// Clears the value of `input`. Subsequent reads from it will return its default value.
+  public mutating func clearInput() {self._input = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _input: RequestBotFilesystemInput? = nil
+}
+
+public nonisolated struct AnswerBotFilesystemInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var requestID: UInt64 = 0
+
+  public var response: BotFilesystemResponse {
+    get {_response ?? BotFilesystemResponse()}
+    set {_response = newValue}
+  }
+  /// Returns true if `response` has been explicitly set.
+  public var hasResponse: Bool {self._response != nil}
+  /// Clears the value of `response`. Subsequent reads from it will return its default value.
+  public mutating func clearResponse() {self._response = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _response: BotFilesystemResponse? = nil
+}
+
+public nonisolated struct AnswerBotFilesystemResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
@@ -21477,7 +21837,7 @@ nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProv
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0")
 }
 
 nonisolated extension GridConnectionUnavailableReason: SwiftProtobuf._ProtoNameProviding {
@@ -21968,7 +22328,7 @@ nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension BotEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotEvent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_settings_requested\0\u{3}chat_settings_item_invoked\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_settings_requested\0\u{3}chat_settings_item_invoked\0\u{3}filesystem_requested\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22002,6 +22362,19 @@ nonisolated extension BotEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
           self.event = .chatSettingsItemInvoked(v)
         }
       }()
+      case 3: try {
+        var v: BotFilesystemRequested?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .filesystemRequested(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .filesystemRequested(v)
+        }
+      }()
       default: break
       }
     }
@@ -22020,6 +22393,10 @@ nonisolated extension BotEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     case .chatSettingsItemInvoked?: try {
       guard case .chatSettingsItemInvoked(let v)? = self.event else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .filesystemRequested?: try {
+      guard case .filesystemRequested(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     }()
     case nil: break
     }
@@ -28538,7 +28915,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30380,6 +30757,32 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .transcribeVoiceDraft(v)
         }
       }()
+      case 144: try {
+        var v: RequestBotFilesystemInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .requestBotFilesystem(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .requestBotFilesystem(v)
+        }
+      }()
+      case 145: try {
+        var v: AnswerBotFilesystemInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .answerBotFilesystem(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .answerBotFilesystem(v)
+        }
+      }()
       default: break
       }
     }
@@ -30958,6 +31361,14 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .transcribeVoiceDraft(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 143)
     }()
+    case .requestBotFilesystem?: try {
+      guard case .requestBotFilesystem(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 144)
+    }()
+    case .answerBotFilesystem?: try {
+      guard case .answerBotFilesystem(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 145)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -30973,7 +31384,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -32842,6 +33253,32 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .transcribeVoiceDraft(v)
           }
         }()
+        case 144: try {
+          var v: RequestBotFilesystemResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .requestBotFilesystem(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .requestBotFilesystem(v)
+          }
+        }()
+        case 145: try {
+          var v: AnswerBotFilesystemResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .answerBotFilesystem(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .answerBotFilesystem(v)
+          }
+        }()
         default: break
         }
       }
@@ -33421,6 +33858,14 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .transcribeVoiceDraft?: try {
         guard case .transcribeVoiceDraft(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 143)
+      }()
+      case .requestBotFilesystem?: try {
+        guard case .requestBotFilesystem(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 144)
+      }()
+      case .answerBotFilesystem?: try {
+        guard case .answerBotFilesystem(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 145)
       }()
       case nil: break
       }
@@ -48725,7 +49170,7 @@ nonisolated extension BotChatSettingsButton: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension BotChatSettingsFolder: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotChatSettingsFolder"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{3}recent_folders\0\u{3}host_installation_id\0\u{3}host_label\0\u{3}allows_local_picker\0\u{3}local_picker_port\0\u{3}local_picker_capability\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{3}recent_folders\0\u{3}host_installation_id\0\u{3}host_label\0\u{3}allows_local_picker\0\u{3}local_picker_port\0\u{3}local_picker_capability\0\u{3}remote_browser_version\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -48740,6 +49185,7 @@ nonisolated extension BotChatSettingsFolder: SwiftProtobuf.Message, SwiftProtobu
       case 5: try { try decoder.decodeSingularBoolField(value: &self.allowsLocalPicker) }()
       case 6: try { try decoder.decodeSingularUInt32Field(value: &self._localPickerPort) }()
       case 7: try { try decoder.decodeSingularStringField(value: &self._localPickerCapability) }()
+      case 8: try { try decoder.decodeSingularUInt32Field(value: &self._remoteBrowserVersion) }()
       default: break
       }
     }
@@ -48771,6 +49217,9 @@ nonisolated extension BotChatSettingsFolder: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._localPickerCapability {
       try visitor.visitSingularStringField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._remoteBrowserVersion {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -48782,6 +49231,7 @@ nonisolated extension BotChatSettingsFolder: SwiftProtobuf.Message, SwiftProtobu
     if lhs.allowsLocalPicker != rhs.allowsLocalPicker {return false}
     if lhs._localPickerPort != rhs._localPickerPort {return false}
     if lhs._localPickerCapability != rhs._localPickerCapability {return false}
+    if lhs._remoteBrowserVersion != rhs._remoteBrowserVersion {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -51740,6 +52190,377 @@ nonisolated extension TranscribeVoiceDraftResult: SwiftProtobuf.Message, SwiftPr
 
   public static func ==(lhs: TranscribeVoiceDraftResult, rhs: TranscribeVoiceDraftResult) -> Bool {
     if lhs.text != rhs.text {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RequestBotFilesystemInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RequestBotFilesystemInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{3}host_installation_id\0\u{1}operation\0\u{1}path\0\u{1}after\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.hostInstallationID) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.operation) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.path) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.after) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 2)
+    }
+    if !self.hostInstallationID.isEmpty {
+      try visitor.visitSingularStringField(value: self.hostInstallationID, fieldNumber: 3)
+    }
+    if self.operation != .unspecified {
+      try visitor.visitSingularEnumField(value: self.operation, fieldNumber: 4)
+    }
+    if !self.path.isEmpty {
+      try visitor.visitSingularStringField(value: self.path, fieldNumber: 5)
+    }
+    if !self.after.isEmpty {
+      try visitor.visitSingularStringField(value: self.after, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RequestBotFilesystemInput, rhs: RequestBotFilesystemInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.hostInstallationID != rhs.hostInstallationID {return false}
+    if lhs.operation != rhs.operation {return false}
+    if lhs.path != rhs.path {return false}
+    if lhs.after != rhs.after {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RequestBotFilesystemInput.Operation: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OPERATION_UNSPECIFIED\0\u{1}LIST\0\u{1}REGISTER_FOLDER\0")
+}
+
+nonisolated extension BotFilesystemEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotFilesystemEntry"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}kind\0\u{1}size\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.size) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
+    }
+    if self.size != 0 {
+      try visitor.visitSingularUInt64Field(value: self.size, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotFilesystemEntry, rhs: BotFilesystemEntry) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.size != rhs.size {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotFilesystemEntry.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}FILE\0\u{1}DIRECTORY\0\u{1}SYMLINK\0\u{1}OTHER\0")
+}
+
+nonisolated extension BotFilesystemListing: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotFilesystemListing"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}path\0\u{3}parent_path\0\u{1}entries\0\u{3}next_after\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.path) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._parentPath) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.entries) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._nextAfter) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.path.isEmpty {
+      try visitor.visitSingularStringField(value: self.path, fieldNumber: 1)
+    }
+    try { if let v = self._parentPath {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    if !self.entries.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.entries, fieldNumber: 3)
+    }
+    try { if let v = self._nextAfter {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotFilesystemListing, rhs: BotFilesystemListing) -> Bool {
+    if lhs.path != rhs.path {return false}
+    if lhs._parentPath != rhs._parentPath {return false}
+    if lhs.entries != rhs.entries {return false}
+    if lhs._nextAfter != rhs._nextAfter {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotFilesystemResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotFilesystemResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}listing\0\u{3}workspace_id\0\u{1}problem\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: BotFilesystemListing?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .listing(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .listing(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.result != nil {try decoder.handleConflictingOneOf()}
+          self.result = .workspaceID(v)
+        }
+      }()
+      case 3: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.result != nil {try decoder.handleConflictingOneOf()}
+          self.result = .problem(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.result {
+    case .listing?: try {
+      guard case .listing(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .workspaceID?: try {
+      guard case .workspaceID(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case .problem?: try {
+      guard case .problem(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotFilesystemResponse, rhs: BotFilesystemResponse) -> Bool {
+    if lhs.result != rhs.result {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RequestBotFilesystemResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RequestBotFilesystemResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}response\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._response) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._response {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RequestBotFilesystemResult, rhs: RequestBotFilesystemResult) -> Bool {
+    if lhs._response != rhs._response {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotFilesystemRequested: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotFilesystemRequested"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}actor_user_id\0\u{3}chat_id\0\u{1}input\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.actorUserID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._input) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.requestID, fieldNumber: 1)
+    }
+    if self.actorUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.actorUserID, fieldNumber: 2)
+    }
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 3)
+    }
+    try { if let v = self._input {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotFilesystemRequested, rhs: BotFilesystemRequested) -> Bool {
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.actorUserID != rhs.actorUserID {return false}
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs._input != rhs._input {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AnswerBotFilesystemInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AnswerBotFilesystemInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}response\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._response) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.requestID, fieldNumber: 1)
+    }
+    try { if let v = self._response {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AnswerBotFilesystemInput, rhs: AnswerBotFilesystemInput) -> Bool {
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs._response != rhs._response {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AnswerBotFilesystemResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AnswerBotFilesystemResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AnswerBotFilesystemResult, rhs: AnswerBotFilesystemResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

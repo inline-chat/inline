@@ -43,7 +43,8 @@ public enum BotChatSettingsModel {
       hostLabel: String,
       allowsLocalPicker: Bool,
       localPickerPort: UInt16?,
-      localPickerCapability: String?
+      localPickerCapability: String?,
+      remoteBrowserVersion: UInt32 = 0
     )
   }
 
@@ -71,6 +72,7 @@ public enum BotChatSettingsModel {
     public let allowsLocalPicker: Bool
     public let localPickerPort: UInt16?
     public let localPickerCapability: String?
+    public var remoteBrowserVersion: UInt32 = 0
     public let pickerTitle = "Pick a Folder…"
 
     public var remotePickerMessage: String {
@@ -97,7 +99,8 @@ public extension BotChatSettingsModel.Control {
       hostLabel,
       allowsLocalPicker,
       localPickerPort,
-      localPickerCapability
+      localPickerCapability,
+      remoteBrowserVersion
     ) = self,
           let selectedFolder = recentFolders.first(where: { $0.value == value })
     else { return nil }
@@ -108,7 +111,8 @@ public extension BotChatSettingsModel.Control {
       hostLabel: hostLabel,
       allowsLocalPicker: allowsLocalPicker,
       localPickerPort: localPickerPort,
-      localPickerCapability: localPickerCapability
+      localPickerCapability: localPickerCapability,
+      remoteBrowserVersion: remoteBrowserVersion
     )
   }
 }
@@ -286,7 +290,8 @@ public extension BotChatSettingsModel.Document {
         hostLabel: folder.hostLabel,
         allowsLocalPicker: folder.allowsLocalPicker,
         localPickerPort: localPickerPort,
-        localPickerCapability: localPickerCapability
+        localPickerCapability: localPickerCapability,
+        remoteBrowserVersion: folder.remoteBrowserVersion
       )
     case nil:
       // Unknown future oneof fields decode as nil. Keep the rest of the
@@ -341,7 +346,8 @@ public extension BotChatSettingsModel.Document {
           hostLabel,
           allowsLocalPicker,
           localPickerPort,
-          localPickerCapability
+          localPickerCapability,
+          remoteBrowserVersion
         ), .string(nextValue))
           where recentFolders.contains(where: { $0.value == nextValue && !$0.isDisabled }):
           nextControl = .folder(
@@ -351,7 +357,8 @@ public extension BotChatSettingsModel.Document {
             hostLabel: hostLabel,
             allowsLocalPicker: allowsLocalPicker,
             localPickerPort: localPickerPort,
-            localPickerCapability: localPickerCapability
+            localPickerCapability: localPickerCapability,
+            remoteBrowserVersion: remoteBrowserVersion
           )
         default:
           return item

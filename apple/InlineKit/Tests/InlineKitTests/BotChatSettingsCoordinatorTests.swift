@@ -7,6 +7,35 @@ import Testing
 @Suite("Bot chat settings coordinator", .serialized)
 @MainActor
 struct BotChatSettingsCoordinatorTests {
+  @Test("a registered folder refreshes the catalog before selection")
+  func registeredFolderSelection() async throws {
+    let responses = SettingsResponseSequence(responses: [
+      folderDocumentResponse(revision: "before", includeNew: false),
+      folderDocumentResponse(revision: "after", includeNew: true),
+    ])
+    let mutations = InvocationCounter()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in await responses.next() },
+      itemInvoker: { _, botID, itemID, value, revision in
+        #expect(botID == 20)
+        #expect(itemID == "folder")
+        #expect(value == .string("workspace-new"))
+        #expect(revision == "after")
+        await mutations.increment()
+        return folderDocumentResponse(revision: "selected", includeNew: true)
+      }
+    )
+    defer { coordinator.cancel() }
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.phase == .loaded }
+    try await coordinator.prepareRegisteredFolder("workspace-new", botID: 20)
+    coordinator.invoke(itemID: "folder", value: .string("workspace-new"))
+    await waitUntilAsync { await mutations.count == 1 }
+    #expect(await mutations.count == 1)
+  }
+
   @Test("cancelled discovery callbacks cannot invalidate a restarted observation")
   func cancelledDiscoveryCallbackDoesNotInvalidateRestartedObservation() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
@@ -865,4 +894,28 @@ private func replyThreadsValue(in document: BotChatSettingsModel.Document?) -> S
         case let .select(value, _) = item.control
   else { return nil }
   return value
+}
+
+private func folderDocumentResponse(revision: String, includeNew: Bool) -> InlineProtocol.BotChatSettingsResponse {
+  .with {
+    $0.result = .document(.with {
+      $0.version = 1
+      $0.revision = revision
+      $0.sections = [.with {
+        $0.id = "project"
+        $0.items = [.with {
+          $0.id = "folder"
+          $0.label = "Folder"
+          $0.control = .folder(.with {
+            $0.value = "workspace-old"
+            $0.hostInstallationID = "host-one"
+            $0.hostLabel = "Remote Mac"
+            $0.remoteBrowserVersion = 1
+            $0.recentFolders = [.with { $0.value = "workspace-old"; $0.label = "Old" }]
+            if includeNew { $0.recentFolders.append(.with { $0.value = "workspace-new"; $0.label = "New" }) }
+          })
+        }]
+      }]
+    })
+  }
 }

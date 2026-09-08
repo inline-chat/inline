@@ -394,6 +394,26 @@ public final class BotChatSettingsCoordinator {
     startRequest(botID: selectedBotID)
   }
 
+  /// Registration adds a new opaque choice. Fetch it before the ordinary
+  /// mutation pipeline validates and optimistically selects that choice.
+  public func prepareRegisteredFolder(_ workspaceID: String, botID: Int64) async throws {
+    guard selectedBotID == botID, !hasPendingMutation(for: botID) else { throw CancellationError() }
+    let expectedGeneration = generation
+    cancelActiveRequest()
+    let token = documentCache?.beginWrite(accountID: accountID, peer: peer, botID: botID)
+    defer { documentCache?.finishWrite(token, accountID: accountID, peer: peer, botID: botID) }
+    let response = try await settingsRequester(peer, botID)
+    try Task.checkCancellation()
+    guard generation == expectedGeneration, selectedBotID == botID, !hasPendingMutation(for: botID),
+          accountID == nil || Auth.shared.getCurrentUserId() == accountID else { throw CancellationError() }
+    guard case let .document(source)? = response.result,
+          let document = parseDocument(source),
+          document.sections.flatMap(\.items).contains(where: { item in
+            !item.isDisabled && item.control.folderPresentation?.recentFolders.contains(where: { $0.value == workspaceID && !$0.isDisabled }) == true
+          }) else { throw BotChatSettingsCoordinatorError.invalidResponse }
+    applyRequestResponse(response, botID: botID, cacheWriteToken: token)
+  }
+
   public func invoke(itemID: String, value: BotChatSettingsMutationValue?) {
     guard let botID = selectedBotID,
           var state = stateByBotID[botID],

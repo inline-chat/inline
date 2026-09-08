@@ -1,4 +1,5 @@
 import { transcribeVoiceDraft } from "./voice.transcribeDraft"
+import { requestBotFilesystem, answerBotFilesystem } from "@in/server/functions/bot.filesystem"
 import { Method, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getMe } from "@in/server/realtime/handlers/getMe"
@@ -381,6 +382,16 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "setMyBotCapabilities", setMyBotCapabilities: result }
     }
 
+    case Method.REQUEST_BOT_FILESYSTEM: {
+      if (call.input.oneofKind !== "requestBotFilesystem") throw RealtimeRpcError.BadRequest()
+      const result = await requestBotFilesystem(call.input.requestBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId })
+      return { oneofKind: "requestBotFilesystem", requestBotFilesystem: result }
+    }
+    case Method.ANSWER_BOT_FILESYSTEM: {
+      if (call.input.oneofKind !== "answerBotFilesystem") throw RealtimeRpcError.BadRequest()
+      const result = await answerBotFilesystem(call.input.answerBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId })
+      return { oneofKind: "answerBotFilesystem", answerBotFilesystem: result }
+    }
     case Method.REQUEST_BOT_CHAT_SETTINGS: {
       if (call.input.oneofKind !== "requestBotChatSettings") throw RealtimeRpcError.BadRequest()
       const result = await requestBotChatSettingsHandler(call.input.requestBotChatSettings, handlerContext)

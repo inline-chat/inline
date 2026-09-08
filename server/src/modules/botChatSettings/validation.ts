@@ -187,6 +187,7 @@ function normalizeItem(item: BotChatSettingsItem): BotChatSettingsItem {
             ),
             hostLabel: displayComponent(item.control.folder.hostLabel, BOT_CHAT_SETTINGS_LIMITS.label, true),
             allowsLocalPicker: item.control.folder.allowsLocalPicker,
+            ...(item.control.folder.remoteBrowserVersion === 1 ? { remoteBrowserVersion: 1 } : {}),
             localPickerPort,
             localPickerCapability,
           },

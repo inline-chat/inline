@@ -4,6 +4,24 @@ import Testing
 
 @Suite("Bot chat settings models")
 struct BotChatSettingsModelsTests {
+  @Test("remote browsing requires an explicit capability")
+  func remoteBrowserCapability() throws {
+    var source = makeDocument()
+    for sectionIndex in source.sections.indices {
+      for itemIndex in source.sections[sectionIndex].items.indices {
+        guard case var .folder(folder)? = source.sections[sectionIndex].items[itemIndex].control else { continue }
+        folder.remoteBrowserVersion = 1
+        source.sections[sectionIndex].items[itemIndex].control = .folder(folder)
+      }
+    }
+    let enabled = try BotChatSettingsModel.Document(protocolDocument: source)
+    let enabledFolder = try #require(enabled.sections.flatMap(\.items).compactMap { $0.control.folderPresentation }.first)
+    #expect(enabledFolder.remoteBrowserVersion == 1)
+    let legacy = try BotChatSettingsModel.Document(protocolDocument: makeDocument())
+    let legacyFolder = try #require(legacy.sections.flatMap(\.items).compactMap { $0.control.folderPresentation }.first)
+    #expect(legacyFolder.remoteBrowserVersion == 0)
+  }
+
   @Test("maps every V1 control")
   func mapsControls() throws {
     let document = try BotChatSettingsModel.Document(protocolDocument: makeDocument())

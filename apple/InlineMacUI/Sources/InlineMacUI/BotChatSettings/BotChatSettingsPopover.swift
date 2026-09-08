@@ -2,6 +2,8 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+public typealias BotChatSettingsRemoteFolderPicker = @MainActor @Sendable (_ hostInstallationID: String, _ botUserID: Int64, _ hostLabel: String) async throws -> String
+
 public typealias BotChatSettingsLocalFolderPicker = @MainActor @Sendable (
   _ hostInstallationID: String,
   _ botUserID: Int64,
@@ -38,6 +40,7 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
   private let coordinator: BotChatSettingsCoordinator
   private let showsThreadConfiguration: Bool
   private let threadConfiguration: ThreadConfiguration
+  private let remoteFolderPicker: BotChatSettingsRemoteFolderPicker?
   private let localFolderPicker: BotChatSettingsLocalFolderPicker?
   private let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
 
@@ -45,12 +48,14 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
     coordinator: BotChatSettingsCoordinator,
     showsThreadConfiguration: Bool,
     @ViewBuilder threadConfiguration: () -> ThreadConfiguration,
+    remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil,
     localFolderPicker: BotChatSettingsLocalFolderPicker? = nil,
     localFolderPickerAvailable: @escaping BotChatSettingsLocalPickerAvailability = { _, _, _, _ in false }
   ) {
     self.coordinator = coordinator
     self.showsThreadConfiguration = showsThreadConfiguration
     self.threadConfiguration = threadConfiguration()
+    self.remoteFolderPicker = remoteFolderPicker
     self.localFolderPicker = localFolderPicker
     self.localFolderPickerAvailable = localFolderPickerAvailable
   }
@@ -64,6 +69,7 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
         botUserID: coordinator.selectedBot?.id,
         showsThreadConfiguration: showsThreadConfiguration,
         threadConfiguration: threadConfiguration,
+        remoteFolderPicker: remoteFolderPicker,
         localFolderPicker: localFolderPicker,
         localFolderPickerAvailable: localFolderPickerAvailable
       )
@@ -134,6 +140,7 @@ private struct BotChatSettingsPopoverContent<ThreadConfiguration: View>: View {
   let botUserID: Int64?
   let showsThreadConfiguration: Bool
   let threadConfiguration: ThreadConfiguration
+  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
 
@@ -202,6 +209,7 @@ private struct BotChatSettingsPopoverContent<ThreadConfiguration: View>: View {
         document: document,
         pendingItemIDs: state.pendingItemIDs,
         botUserID: botUserID,
+        remoteFolderPicker: remoteFolderPicker,
         localFolderPicker: localFolderPicker,
         localFolderPickerAvailable: localFolderPickerAvailable,
         onInvoke: coordinator.invoke(itemID:value:)
@@ -277,6 +285,7 @@ private struct BotChatSettingsDocumentView: View {
   let document: BotChatSettingsModel.Document
   let pendingItemIDs: Set<String>
   let botUserID: Int64?
+  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
@@ -294,7 +303,8 @@ private struct BotChatSettingsDocumentView: View {
           pendingItemIDs: pendingItemIDs,
           sharedDisabledReason: sharedDisabledReason,
           botUserID: botUserID,
-          localFolderPicker: localFolderPicker,
+          remoteFolderPicker: remoteFolderPicker,
+        localFolderPicker: localFolderPicker,
           localFolderPickerAvailable: localFolderPickerAvailable,
           onInvoke: onInvoke
         )
@@ -341,6 +351,7 @@ private struct BotChatSettingsSectionView: View {
   let pendingItemIDs: Set<String>
   let sharedDisabledReason: String?
   let botUserID: Int64?
+  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
@@ -369,7 +380,8 @@ private struct BotChatSettingsSectionView: View {
           isPending: pendingItemIDs.contains(item.id),
           showsDisabledReason: item.disabledReason != sharedDisabledReason,
           botUserID: botUserID,
-          localFolderPicker: localFolderPicker,
+          remoteFolderPicker: remoteFolderPicker,
+        localFolderPicker: localFolderPicker,
           localFolderPickerAvailable: localFolderPickerAvailable,
           onInvoke: onInvoke
         )
@@ -386,6 +398,7 @@ private struct BotChatSettingsItemView: View {
   let isPending: Bool
   let showsDisabledReason: Bool
   let botUserID: Int64?
+  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
@@ -515,7 +528,8 @@ private struct BotChatSettingsItemView: View {
           isDisabled: isDisabled,
           disabledReason: item.disabledReason,
           botUserID: botUserID,
-          localFolderPicker: localFolderPicker,
+          remoteFolderPicker: remoteFolderPicker,
+        localFolderPicker: localFolderPicker,
           localFolderPickerAvailable: localFolderPickerAvailable,
           onSelect: { onInvoke(item.id, .string($0)) },
           onPickedFolder: { onInvoke(item.id, .string($0)) }
@@ -589,6 +603,7 @@ private struct BotChatSettingsFolderControl: View {
   let isDisabled: Bool
   let disabledReason: String?
   let botUserID: Int64?
+  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onSelect: (String) -> Void
@@ -603,6 +618,10 @@ private struct BotChatSettingsFolderControl: View {
           let capability = presentation.localPickerCapability
     else { return nil }
     return (port, capability)
+  }
+
+  private var canBrowseRemotely: Bool {
+    presentation.remoteBrowserVersion == 1 && remoteFolderPicker != nil && botUserID != nil
   }
 
   private var canPickLocally: Bool {
@@ -638,7 +657,7 @@ private struct BotChatSettingsFolderControl: View {
           }
           Divider()
           Button(presentation.pickerTitle, action: pickFolder)
-            .disabled(!canPickLocally || isPickingFolder)
+            .disabled((!canPickLocally && !canBrowseRemotely) || isPickingFolder)
         } label: {
           Text(presentation.selectedFolder.label)
             .lineLimit(1)
@@ -659,7 +678,7 @@ private struct BotChatSettingsFolderControl: View {
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity, alignment: .trailing)
-      if !canPickLocally {
+      if !canPickLocally && !canBrowseRemotely {
         Text(pickerUnavailableReason)
           .font(.caption2)
           .foregroundStyle(.tertiary)
@@ -698,6 +717,22 @@ private struct BotChatSettingsFolderControl: View {
   }
 
   private func pickFolder() {
+    if canBrowseRemotely, let remoteFolderPicker, let botUserID {
+      isPickingFolder = true
+      pickerError = nil
+      Task { @MainActor in
+        do {
+          let workspaceID = try await remoteFolderPicker(presentation.hostInstallationID, botUserID, presentation.hostLabel)
+          guard !Task.isCancelled else { return }
+          onPickedFolder(workspaceID)
+        } catch is CancellationError {
+        } catch {
+          pickerError = "Couldn’t choose that folder. Try again."
+        }
+        isPickingFolder = false
+      }
+      return
+    }
     guard canPickLocally, let localFolderPicker, let botUserID, let endpoint = pickerEndpoint else { return }
     isPickingFolder = true
     pickerError = nil
@@ -720,6 +755,7 @@ private struct BotChatSettingsFolderControl: View {
 
   private var accessibilityHint: String {
     if let disabledReason { return disabledReason }
+    if canBrowseRemotely { return "Browse files and choose a folder on the agent’s machine." }
     if canPickLocally { return "Choose a recent folder or pick one on this Mac." }
     return "\(pickerUnavailableReason) Use \(presentation.commandFallback)."
   }

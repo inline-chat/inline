@@ -41,6 +41,23 @@ struct BotChatSettingsToolbarButton: View {
             update: updateAgentContext
           )
         },
+        remoteFolderPicker: { hostInstallationID, botUserID, hostLabel in
+          guard let parent = NSApp.keyWindow?.parent ?? NSApp.mainWindow ?? NSApp.keyWindow else {
+            throw CancellationError()
+          }
+          toolbarState.dismissPresentation()
+          let client = RemoteFilesystemClient(peer: coordinator.peer, botID: botUserID, hostID: hostInstallationID)
+          let workspaceID = try await RemoteFolderBrowser.pick(on: parent, hostLabel: hostLabel) { path, after, register in
+            let response = try await client.request(path: path, after: after, register: register)
+            if case let .workspaceID(workspaceID)? = response.result {
+              try await coordinator.prepareRegisteredFolder(workspaceID, botID: botUserID)
+            }
+            return response
+          }
+          guard coordinator.selectedBotID == botUserID else { throw CancellationError() }
+          toolbarState.presentBotSettings()
+          return workspaceID
+        },
         localFolderPicker: { hostInstallationID, botUserID, port, capability in
           let panel = NSOpenPanel()
           panel.title = "Pick a Project Folder"
@@ -51,13 +68,15 @@ struct BotChatSettingsToolbarButton: View {
           guard panel.runModal() == .OK, let folderURL = panel.url else {
             throw CancellationError()
           }
-          return try await LocalAgentWorkspaceRegistrar.register(
+          let workspaceID = try await LocalAgentWorkspaceRegistrar.register(
             folderURL: folderURL,
             hostInstallationID: hostInstallationID,
             botUserID: botUserID,
             port: port,
             capability: capability
           )
+          try await coordinator.prepareRegisteredFolder(workspaceID, botID: botUserID)
+          return workspaceID
         },
         localFolderPickerAvailable: { hostInstallationID, botUserID, port, capability in
           await LocalAgentWorkspaceRegistrar.isAvailable(

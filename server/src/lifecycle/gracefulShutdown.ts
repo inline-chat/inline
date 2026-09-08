@@ -1,3 +1,4 @@
+import { botFilesystemBroker } from "@in/server/modules/botFilesystem/broker"
 import * as Sentry from "@sentry/bun"
 import { closeDb } from "@in/server/db"
 import { shutdownApnProvider } from "@in/server/libs/apn"
@@ -76,7 +77,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   stopNativeUploadWorker: () => nativeUploadWorker.stop(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
   stopGridProviderEffects: () => stopGridProviderEffectWorker(),
-  stopBotChatSettings: () => shutdownBotChatSettingsBroker(),
+  stopBotChatSettings: () => { shutdownBotChatSettingsBroker(); botFilesystemBroker.shutdown() },
   stopServer: (server, closeActiveConnections) => server.stop(closeActiveConnections),
   closeConnections: () => connectionManager.shutdown(),
   shutdownPresence: () => presenceManager.shutdown(),
