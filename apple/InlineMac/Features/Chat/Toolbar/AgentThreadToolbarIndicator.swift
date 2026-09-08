@@ -28,6 +28,7 @@ final class AgentThreadToolbarModel: ObservableObject {
   @Published private(set) var presentation: AgentThreadToolbarPresentation?
   @Published private(set) var catalog: AgentConfigurationCatalogSnapshot?
   @Published private(set) var context: InlineProtocol.AgentThreadContext?
+  @Published private(set) var canEditProject = false
   @Published private(set) var canEdit = false
   @Published private(set) var editabilityResolved = false
   @Published private(set) var isUpdating = false
@@ -84,6 +85,7 @@ final class AgentThreadToolbarModel: ObservableObject {
     presentation = nil
     catalog = nil
     context = nil
+    canEditProject = false
     canEdit = false
     editabilityResolved = false
     isUpdating = false
@@ -168,14 +170,20 @@ final class AgentThreadToolbarModel: ObservableObject {
     return reasoning.filter { supported.contains($0.id) }
   }
 
+  func contextSelectingProject(_ id: String?) -> InlineProtocol.AgentThreadContext? {
+    guard canEditProject, let id else { return nil }
+    return updatedContext { $0.projectID = id }
+  }
+
   func contextSelectingModel(_ id: String?) -> InlineProtocol.AgentThreadContext? {
     updatedContext { configuration in
       if let id { configuration.modelID = id } else { configuration.clearModelID() }
       let nextModelID = id ?? catalog?.defaultModelID
-      if configuration.hasReasoningEffortID,
-         reasoningOptions(forModelID: nextModelID)?.contains(where: {
-           $0.id == configuration.reasoningEffortID
-         }) != true
+      if nextModelID != effectiveModelID,
+         let model = catalog?.models?.first(where: { $0.id == nextModelID }),
+         configuration.hasReasoningEffortID,
+         !model.reasoningEffortIDs.isEmpty,
+         !model.reasoningEffortIDs.contains(configuration.reasoningEffortID)
       {
         configuration.clearReasoningEffortID()
       }
@@ -240,6 +248,7 @@ final class AgentThreadToolbarModel: ObservableObject {
     guard loadedIdentity != identity else { return }
     loadedIdentity = identity
     catalog = nil
+    canEditProject = false
     canEdit = false
     editabilityResolved = false
     generation &+= 1
@@ -258,6 +267,7 @@ final class AgentThreadToolbarModel: ObservableObject {
     presentation = nil
     catalog = nil
     context = nil
+    canEditProject = false
     canEdit = false
     editabilityResolved = false
     isUpdating = false
@@ -311,12 +321,26 @@ final class AgentThreadToolbarModel: ObservableObject {
       editabilityResolved = true
     }
 
+    if canEdit,
+       let response = try? await Api.realtime.callRpcDirect(
+         method: .getAgentSession,
+         input: .getAgentSession(.with {
+           $0.peerID = peer.toInputPeer()
+           $0.botUserID = identity.botUserID
+         })
+       ),
+       case let .getAgentSession(result) = response,
+       isCurrent(identity, generation: generation)
+    {
+      canEditProject = !result.hasConnection
+    }
+
     do {
       let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(
         botUserID: identity.botUserID,
         peer: peer
       )
-      if isCurrent(identity, generation: generation) {
+      if let refreshed, isCurrent(identity, generation: generation) {
         catalog = refreshed
       }
     } catch {
@@ -386,7 +410,7 @@ final class AgentThreadToolbarModel: ObservableObject {
 
   private static func automaticTitle(_ label: String) -> String {
     String(
-      localized: "Automatic — \(label)",
+      localized: "Use default — \(label)",
       comment:
         "Reset label for an Agent setting. The variable is the current harness-selected option name."
     )
@@ -462,12 +486,17 @@ struct AgentThreadSettingsSection: View {
             selectionTitle: projectTitle,
             selectionDescription: selectedProjectDescription,
             options: projectOptions,
-            selectedID: model.explicitProjectID,
-            automaticTitle: model.automaticProjectTitle,
-            isEditable: false,
-            isUpdating: false,
-            helpText: "Project is chosen when the thread is created.",
-            select: { _ in }
+            selectedID: model.effectiveProjectID,
+            automaticTitle: nil,
+            isEditable: model.canEditProject,
+            isUpdating: model.isUpdating,
+            helpText: model.canEditProject
+              ? "Changing project starts or resumes this chat’s session in that project."
+              : "Project changes are available for chats that aren’t linked to an existing session.",
+            select: { id in
+              guard let context = model.contextSelectingProject(id) else { return }
+              model.performUpdate(context, using: update)
+            }
           )
         }
 
@@ -502,7 +531,7 @@ struct AgentThreadSettingsSection: View {
         }
 
         if model.editabilityResolved, !model.canEdit, showsModel || showsReasoning {
-          Label("Only the Agent owner can change Model and Reasoning.", systemImage: "lock")
+          Label("Only the Agent owner can change these settings.", systemImage: "lock")
             .font(.caption2)
             .foregroundStyle(.tertiary)
         }

@@ -34,15 +34,6 @@ private struct AllChatsComposeAgentConfiguration: Equatable {
   let reasoningID: String?
 }
 
-private enum AllChatsAgentConfigurationIssue: String, PrivacySafeErrorCategoryProviding {
-  case staleSelection = "agent_configuration:stale_selection"
-  case catalogUnavailable = "agent_configuration:catalog_unavailable"
-
-  var privacySafeErrorCategory: String {
-    rawValue
-  }
-}
-
 enum AllChatsNewThreadComposePlacement {
   case top
   case bottom
@@ -304,7 +295,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   var modelTitle: String? {
     guard let effectiveModelID else { return nil }
-    return agentCatalog?.models?.first(where: { $0.id == effectiveModelID })?.label
+    return agentCatalog?.models?.first(where: { $0.id == effectiveModelID })?.label ?? selectedModelID
   }
 
   var reasoningTitle: String? {
@@ -343,9 +334,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     return .with {
       $0.botUserID = choice.bot.id
       if let agent = choice.agent { $0.agentID = agent.id }
-      if selectedProjectID != nil || selectedModelID != nil || selectedReasoningID != nil {
+      if effectiveProjectID != nil || selectedModelID != nil || selectedReasoningID != nil {
         $0.configuration = .with {
-          if let selectedProjectID { $0.projectID = selectedProjectID }
+          if let effectiveProjectID { $0.projectID = effectiveProjectID }
           if let selectedModelID { $0.modelID = selectedModelID }
           if let selectedReasoningID { $0.reasoningEffortID = selectedReasoningID }
         }
@@ -435,12 +426,17 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   func selectModel(_ id: String?) {
-    selectedModelID = id
-    if let selectedReasoningID,
-       availableReasoningOptions?.contains(where: { $0.id == selectedReasoningID }) != true
+    let nextModelID = id ?? agentCatalog?.defaultModelID
+    if nextModelID != effectiveModelID,
+       let model = agentCatalog?.models?.first(where: { $0.id == nextModelID }),
+       let reasoning = selectedReasoningID,
+       !model.reasoningEffortIDs.isEmpty,
+       !model.reasoningEffortIDs.contains(reasoning)
     {
-      self.selectedReasoningID = nil
+      // The user changed models; use the new model's default if necessary.
+      selectedReasoningID = nil
     }
+    selectedModelID = id
     saveCurrentAgentConfiguration()
   }
 
@@ -531,37 +527,28 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     // The mention establishes the Chat's Agent target immediately. A catalog
     // is optional and only controls whether configuration pickers appear.
     selectedAgentChoiceID = choice.id
+    let saved = preferences.agentConfiguration(for: choice)
+    selectedProjectID = saved.projectID
+    selectedModelID = saved.modelID
+    selectedReasoningID = saved.reasoningID
 
     agentCatalogTask = Task { [weak self] in
       guard let self else { return }
       if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: choice.bot.id),
          !Task.isCancelled,
          isCurrentMention(choice) {
-        applyAgentSelection(choice, catalog: cached, persistSanitizedSelection: false)
+        applyAgentSelection(choice, catalog: cached)
       }
 
       do {
         let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(botUserID: choice.bot.id)
         guard !Task.isCancelled, isCurrentMention(choice) else { return }
         if let refreshed {
-          applyAgentSelection(choice, catalog: refreshed, persistSanitizedSelection: true)
-        } else {
-          resetUnavailableAgentConfiguration(for: choice)
+          applyAgentSelection(choice, catalog: refreshed)
         }
       } catch {
         guard !Task.isCancelled, isCurrentMention(choice) else { return }
         log.error("Could not refresh Agent configuration catalog", error: error)
-        if preferences.agentConfiguration(for: choice) != AllChatsComposeAgentConfiguration(
-          projectID: nil,
-          modelID: nil,
-          reasoningID: nil
-        ) {
-          clearExplicitAgentConfiguration()
-          saveCurrentAgentConfiguration()
-          ToastCenter.shared.showInfo(String(
-            localized: "Couldn’t verify these Agent settings, so they were reset to Automatic."
-          ))
-        }
       }
     }
   }
@@ -580,38 +567,12 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func applyAgentSelection(
     _ choice: AllChatsAgentChoice,
-    catalog: AgentConfigurationCatalogSnapshot,
-    persistSanitizedSelection: Bool
+    catalog: AgentConfigurationCatalogSnapshot
   ) {
-    let saved = preferences.agentConfiguration(for: choice)
+    // Refresh options without replacing explicit selections. Missing catalog
+    // entries are not evidence that the provider can no longer use a choice.
     selectedAgentChoiceID = choice.id
     agentCatalog = catalog
-    selectedProjectID = saved.projectID.flatMap { id in
-      catalog.projects?.contains(where: { $0.id == id }) == true ? id : nil
-    }
-    selectedModelID = saved.modelID.flatMap { id in
-      catalog.models?.contains(where: { $0.id == id }) == true ? id : nil
-    }
-    selectedReasoningID = saved.reasoningID.flatMap { id in
-      availableReasoningOptions?.contains(where: { $0.id == id }) == true ? id : nil
-    }
-    let discardedSelection = saved != AllChatsComposeAgentConfiguration(
-      projectID: selectedProjectID,
-      modelID: selectedModelID,
-      reasoningID: selectedReasoningID
-    )
-    if persistSanitizedSelection {
-      saveCurrentAgentConfiguration()
-    }
-    if persistSanitizedSelection, discardedSelection {
-      log.error(
-        "Discarded stale Agent configuration",
-        error: AllChatsAgentConfigurationIssue.staleSelection
-      )
-      ToastCenter.shared.showInfo(String(
-        localized: "Some Agent settings were no longer available and were reset to Automatic."
-      ))
-    }
   }
 
   private func clearAgentSelection() {
@@ -628,24 +589,6 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     selectedProjectID = nil
     selectedModelID = nil
     selectedReasoningID = nil
-  }
-
-  private func resetUnavailableAgentConfiguration(for choice: AllChatsAgentChoice) {
-    let discardedSelection = preferences.agentConfiguration(for: choice) != AllChatsComposeAgentConfiguration(
-      projectID: nil,
-      modelID: nil,
-      reasoningID: nil
-    )
-    clearAgentConfiguration()
-    guard discardedSelection else { return }
-    saveCurrentAgentConfiguration()
-    log.error(
-      "Discarded Agent configuration without a current catalog",
-      error: AllChatsAgentConfigurationIssue.catalogUnavailable
-    )
-    ToastCenter.shared.showInfo(String(
-      localized: "These Agent settings are no longer available and were reset to Automatic."
-    ))
   }
 
   private func saveCurrentAgentConfiguration() {
@@ -665,7 +608,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     in options: [AgentConfigurationOption]?
   ) -> String? {
     guard let id else { return nil }
-    return options?.first(where: { $0.id == id })?.label
+    return options?.first(where: { $0.id == id })?.label ?? id
   }
 
   private func automaticTitle(
@@ -678,7 +621,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func automaticTitle(_ label: String) -> String {
     String(
-      localized: "Automatic — \(label)",
+      localized: "Use default — \(label)",
       comment:
         "Reset label for an Agent setting. The variable is the current harness-selected option name."
     )
@@ -1442,9 +1385,9 @@ private struct AllChatsComposeAccessoryView: View {
       if let projects = model.agentCatalog?.projects, let title = model.projectTitle {
         AgentConfigurationMenu(
           title: title,
-          automaticTitle: model.automaticProjectTitle,
+          automaticTitle: nil,
           options: projects,
-          selection: model.selectedProjectID,
+          selection: model.effectiveProjectID,
           isDisabled: model.isSubmitting,
           tooltipTitle: "Project",
           tooltipDescription: "Choose the project for this thread only.",

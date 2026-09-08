@@ -1,5 +1,4 @@
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
-import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
@@ -300,57 +299,9 @@ export async function validateAgentThreadContext(
     }
   }
 
-  let configuration = normalized.configuration
-  if (configuration) {
-    const capability = (await BotCapabilitiesModel.getForBotUserId(botUserId)).find(
-      (item) => item.kind === AGENT_CONFIGURATION_CAPABILITY_KIND && item.version === AGENT_CONFIGURATION_VERSION,
-    )
-    const catalog = decodeAgentConfigurationCatalog(capability?.payload ?? null)
-    if (!catalog) {
-      configuration = undefined
-      discarded.push("configuration_unavailable")
-    } else {
-      const projectIds = new Set(catalog.projects?.options.map((option) => option.id) ?? [])
-      const reasoningIds = new Set(catalog.reasoning?.options.map((option) => option.id) ?? [])
-      let projectId = configuration.projectId
-      let modelId = configuration.modelId
-      let reasoningEffortId = configuration.reasoningEffortId
-
-      if (projectId && !projectIds.has(projectId)) {
-        projectId = undefined
-        discarded.push("project_unavailable")
-      }
-
-      const selectedModel = catalog.models?.options.find((option) => option.id === modelId)
-      if (modelId && !selectedModel) {
-        modelId = undefined
-        discarded.push("model_unavailable")
-      }
-
-      const effectiveModelId = modelId ?? catalog.models?.defaultModelId
-      const effectiveModel = catalog.models?.options.find((option) => option.id === effectiveModelId)
-
-      if (reasoningEffortId && catalog.models && !effectiveModel) {
-        reasoningEffortId = undefined
-        discarded.push("model_required")
-      } else if (reasoningEffortId && !reasoningIds.has(reasoningEffortId)) {
-        reasoningEffortId = undefined
-        discarded.push("reasoning_unavailable")
-      } else if (
-        reasoningEffortId &&
-        effectiveModel &&
-        effectiveModel.reasoningEffortIds.length > 0 &&
-        !effectiveModel.reasoningEffortIds.includes(reasoningEffortId)
-      ) {
-        reasoningEffortId = undefined
-        discarded.push("reasoning_unsupported")
-      }
-
-      configuration = projectId || modelId || reasoningEffortId
-        ? { projectId, modelId, reasoningEffortId }
-        : undefined
-    }
-  }
+  // Catalogs are cached presentation data. Only the provider can determine
+  // current availability; never erase an explicit choice based on stale metadata.
+  const configuration = normalized.configuration
 
   const sanitized = { botUserId: normalized.botUserId, agentId, configuration }
   if (discarded.length > 0) {

@@ -617,7 +617,7 @@ describe("messages.createChat", () => {
     })
   })
 
-  test("creates the thread and clears configuration when its catalog is unavailable", async () => {
+  test("preserves explicit settings when its catalog is unavailable", async () => {
     const owner = await testUtils.createUser("agent-context-catalog-owner@example.com")
     const bot = await testUtils.createUser("agent-context-catalog-bot@example.com")
     await db
@@ -631,7 +631,7 @@ describe("messages.createChat", () => {
         participants: [{ userId: BigInt(bot.id) }],
         agentContext: {
           botUserId: BigInt(bot.id),
-          configuration: { modelId: "provider-model" },
+          configuration: { projectId: "workspace-home", modelId: "gpt-6-astra", reasoningEffortId: "low" },
         },
       },
       { ...mockFunctionContext, currentUserId: owner.id },
@@ -645,11 +645,11 @@ describe("messages.createChat", () => {
     expect(decodeAgentThreadContext(saved?.agentContext ?? null)).toEqual({
       botUserId: BigInt(bot.id),
       agentId: undefined,
-      configuration: undefined,
+      configuration: { projectId: "workspace-home", modelId: "gpt-6-astra", reasoningEffortId: "low" },
     })
   })
 
-  test("keeps valid Agent configuration items while clearing invalid ones", async () => {
+  test("preserves provider selections independently of a stale catalog", async () => {
     const owner = await testUtils.createUser("agent-context-items-owner@example.com")
     const bot = await testUtils.createUser("agent-context-items-bot@example.com")
     await db
@@ -709,9 +709,9 @@ describe("messages.createChat", () => {
       botUserId: BigInt(bot.id),
       agentId: undefined,
       configuration: {
-        projectId: undefined,
+        projectId: "stale-project",
         modelId: "valid-model",
-        reasoningEffortId: undefined,
+        reasoningEffortId: "high",
       },
     })
 
