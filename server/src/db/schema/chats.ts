@@ -19,6 +19,8 @@ export const chats = pgTable(
     id: integer().primaryKey().generatedByDefaultAsIdentity(),
     type: chatTypeEnum().notNull(),
     title: varchar({ length: 150 }),
+    /** null is legacy/unknown; false stays retryable until generation succeeds. */
+    autoTitleGenerated: boolean("auto_title_generated").default(false),
     description: text(),
 
     /** Most recent message id */

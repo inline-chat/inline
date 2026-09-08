@@ -3,6 +3,7 @@ import Foundation
 public enum InlineCommandAction: Hashable, Sendable {
   case collapseHistory
   case createSubthread
+  case renameThread
 }
 
 public struct InlineCommandDefinition: Identifiable, Hashable, Sendable {
@@ -23,6 +24,11 @@ public struct InlineCommandDefinition: Identifiable, Hashable, Sendable {
 /// to present and what local action to run; they never turn an app command into outgoing chat text.
 public enum InlineCommandRegistry {
   public static let commands: [InlineCommandDefinition] = [
+    InlineCommandDefinition(
+      command: "rename",
+      description: "Rename this thread.",
+      action: .renameThread
+    ),
     InlineCommandDefinition(
       command: "clear",
       description: "Collapse history for you — nothing is deleted.",

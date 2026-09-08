@@ -47,6 +47,7 @@ type UpdateThreadInfoInput = {
     | { kind: "empty" }
     | { kind: "untitledExact"; currentTitle: string | null }
   isUntitled?: boolean
+  autoTitleGenerated?: boolean
 }
 
 export async function updateChatInfo(
@@ -138,6 +139,10 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       }
     }
 
+    if (input.autoTitleGenerated === true) {
+      await AccessGuards.ensureChatAccess(chat, input.currentUserId, tx)
+    }
+
     const currentAgentContext = chatAgentContext(chat)
     if (agentContextProvided) {
       if (
@@ -163,14 +168,20 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
         ? !isNonEmpty(chat.title)
         : chat.isUntitled === true && chat.title === input.titleGuard.currentTitle
 
-      if (!titleGuardMatches) {
+      if (!titleGuardMatches || (input.autoTitleGenerated === true && chat.autoTitleGenerated === true)) {
         return { chat, didUpdate: false }
       }
     }
 
     const normalizedEmoji = emojiProvided ? (nextEmoji && nextEmoji.length > 0 ? nextEmoji : null) : undefined
 
-    const shouldUpdateTitle = titleProvided && chat.title !== nextTitle
+    // Saving the same text manually still claims title ownership. Likewise,
+    // matching a placeholder counts as a completed automatic generation.
+    const shouldUpdateTitle = titleProvided && (
+      chat.title !== nextTitle ||
+      chat.isUntitled !== (input.isUntitled === true ? true : null) ||
+      (input.autoTitleGenerated === true && chat.autoTitleGenerated !== true)
+    )
     const shouldUpdateEmoji = emojiProvided && chat.emoji !== normalizedEmoji
     const encodedAgentContext = input.agentContext ? encodeAgentThreadContext(input.agentContext) : undefined
     const shouldUpdateAgentContext = agentContextProvided && encodedAgentContext !== undefined &&
@@ -205,6 +216,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
     if (shouldUpdateTitle) {
       updateFields.title = nextTitle
       updateFields.isUntitled = input.isUntitled === true ? true : null
+      if (input.autoTitleGenerated === true) updateFields.autoTitleGenerated = true
     }
 
     if (shouldUpdateEmoji) {

@@ -5,6 +5,7 @@ import { buildSystemMessageUpdate } from "./insert"
 const chat: DbChat = {
   id: 10,
   type: "thread",
+  autoTitleGenerated: false,
   title: "Roadmap",
   description: null,
   lastMsgId: 7,

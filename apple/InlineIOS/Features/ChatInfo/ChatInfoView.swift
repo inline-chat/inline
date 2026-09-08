@@ -182,9 +182,12 @@ struct ChatInfoView: View {
     return presentedChatItem.id == chatItem.id
   }
 
-  init(chatItem: SpaceChatItem, isPresentedModally: Bool = false) {
+  init(chatItem: SpaceChatItem, isPresentedModally: Bool = false, initiallyEditingInfo: Bool = false) {
     self.chatItem = chatItem
     self.isPresentedModally = isPresentedModally
+    _isEditingInfo = State(initialValue: initiallyEditingInfo)
+    _draftTitle = State(initialValue: initiallyEditingInfo ? (chatItem.chat?.title ?? "") : "")
+    _draftEmoji = State(initialValue: initiallyEditingInfo ? (chatItem.chat?.emoji ?? "") : "")
     _participantsWithMembersViewModel = StateObject(wrappedValue: ChatParticipantsWithMembersViewModel(
       db: AppDatabase.shared,
       chatId: chatItem.chat?.id ?? 0
@@ -348,6 +351,7 @@ struct ChatInfoView: View {
       .coordinateSpace(name: "mainScroll")
     }
     .onAppear {
+      if isEditingInfo { startEditingChatInfo() }
       subscribeToChatUpdates()
       subscribeToDialogNotificationUpdates()
       Task {

@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 
 public class ChatContainerView: UIView {
+  var onRenameThread: (() -> Bool)?
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
@@ -86,6 +87,9 @@ public class ChatContainerView: UIView {
     view.executeInlineCommand = { [weak self] action in
       guard let self else { return nil }
       switch action {
+      case .renameThread:
+        guard onRenameThread?() == true else { return nil }
+        return .completed
       case .collapseHistory:
         guard let maxID = messagesCollectionView.highestPositiveMessageId else { return nil }
         try await messagesCollectionView.collapseHistory(maxID: maxID)
@@ -878,6 +882,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let collapsedMaxId: Int64?
   let isPreview: Bool
   let theme: IOSThemeSnapshot
+  var onRenameThread: (() -> Bool)? = nil
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
@@ -888,6 +893,7 @@ struct ChatViewUIKit: UIViewRepresentable {
       isPreview: isPreview,
       theme: theme
     )
+    view.onRenameThread = isPreview ? nil : onRenameThread
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
@@ -897,6 +903,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   }
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
+    view.onRenameThread = isPreview ? nil : onRenameThread
     view.applyTheme(theme)
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {

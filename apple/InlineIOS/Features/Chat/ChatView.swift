@@ -62,6 +62,7 @@ struct ChatView: View {
   @State private var isBotChatSettingsPresented = false
   @State private var translationPlacement: ChatTranslationPlacement
   @State private var presentedChatInfo: SpaceChatItem?
+  @State private var renameRequested = false
   @Namespace private var chatInfoTransition
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
@@ -249,9 +250,9 @@ struct ChatView: View {
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }
-    .sheet(item: $presentedChatInfo) { chatItem in
+    .sheet(item: $presentedChatInfo, onDismiss: { renameRequested = false }) { chatItem in
       NavigationStack {
-        ChatInfoView(chatItem: chatItem, isPresentedModally: true)
+        ChatInfoView(chatItem: chatItem, isPresentedModally: true, initiallyEditingInfo: renameRequested)
       }
       .navigationTransition(.zoom(sourceID: TransitionID.chatInfo, in: chatInfoTransition))
       .presentationDetents([.large])
@@ -607,7 +608,22 @@ struct ChatView: View {
         focusRequestRevision: router.presentationResetRevision,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
         isPreview: preview,
-        theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
+        theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme)),
+        onRenameThread: {
+          guard !preview, peerId.asThreadId() != nil else {
+            ToastManager.shared.showToast("Only threads can be renamed.", type: .error)
+            return false
+          }
+          // ChatInfo retains its participant/space-role fallback while an older
+          // cached chat has no server-provided permission value yet.
+          guard let item = fullChatViewModel.chatItem, item.chat?.canUpdateInfo != false else {
+            ToastManager.shared.showToast("You can’t rename this thread.", type: .error)
+            return false
+          }
+          renameRequested = true
+          presentedChatInfo = item
+          return true
+        }
       )
       // Respect the iPad detail column without changing phone or preview
       // safe-area behavior, including the existing keyboard handling.

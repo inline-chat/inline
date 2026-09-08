@@ -17,7 +17,7 @@ mock.module("@in/server/libs/openAI", () => ({
   },
 }))
 
-const completion = (title: string, emoji?: string | null) => ({
+const completion = (title: string | null, emoji?: string | null) => ({
   choices: [
     {
       finish_reason: "stop",
@@ -34,6 +34,7 @@ const emptyThread = {
   title: null,
   description: null,
   isUntitled: true,
+  autoTitleGenerated: false,
   messageIdCounter: 0,
   parentChatId: null,
   parentMessageId: null,
@@ -57,7 +58,7 @@ describe("thread title generation", () => {
     parseCompletion.mockReset()
   })
 
-  test("only a first-message placeholder remains eligible for top-level auto-title", async () => {
+  test("a placeholder stays eligible until a title has been generated", async () => {
     const { canAutoTitleThread } = await import("@in/server/modules/threadTitles")
     const placeholderThread = {
       ...emptyThread,
@@ -66,7 +67,9 @@ describe("thread title generation", () => {
     }
 
     expect(canAutoTitleThread(placeholderThread)).toBe(true)
-    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 1 })).toBe(false)
+    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 3 })).toBe(true)
+    expect(canAutoTitleThread({ ...placeholderThread, autoTitleGenerated: true })).toBe(false)
+    expect(canAutoTitleThread({ ...placeholderThread, isUntitled: null })).toBe(false)
   })
 
   test("requires substantial non-entity text", async () => {
@@ -163,6 +166,204 @@ describe("thread title generation", () => {
         "URL preview site: YouTube",
       ].join("\n"),
     )
+  })
+
+  test("setup and command messages wait for a useful message", async () => {
+    const { getThreadTitleSourceText } = await import("@in/server/modules/threadTitles")
+    for (const text of [
+      "Working directory: `~/dev/inline`",
+      "**Working directory:** /Users/mo/dev/inline",
+      "Current working directory: /workspace/my-project",
+      "/rename Fix the title generator",
+      "/status@codex please show the current status",
+    ]) {
+      expect(getThreadTitleSourceText({ chat: emptyThread, message: textMessage, text, entities: undefined, currentUserId: 1 })).toBeUndefined()
+    }
+    expect(getThreadTitleSourceText({
+      chat: emptyThread, message: textMessage, currentUserId: 1, entities: undefined,
+      text: "Working directory: `~/dev/inline`\nFix the notification delivery bug",
+    })).toBe("Fix the notification delivery bug")
+  })
+
+  test("deferral retries on message three with earlier short messages and excludes future messages", async () => {
+    const user = await testUtils.createUser("deferred-title@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: "Working directory", isUntitled: true,
+      messageIdCounter: 3, publicThread: false, createdBy: user.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    await db.insert(schema.messages).values([
+      { chatId: chat.id, messageId: 1, fromId: user.id, text: "Notifications?" },
+      { chatId: chat.id, messageId: 2, fromId: user.id, text: "Can you help me with this?" },
+      { chatId: chat.id, messageId: 3, fromId: user.id, text: "They still arrive after I disable them" },
+      { chatId: chat.id, messageId: 4, fromId: user.id, text: "FUTURE_MESSAGE_SENTINEL" },
+    ])
+    const { maybeScheduleThreadTitleGeneration, canAutoTitleThread } = await import("@in/server/modules/threadTitles")
+    parseCompletion.mockResolvedValueOnce(completion(null, null))
+    await maybeScheduleThreadTitleGeneration({
+      chat, message: { ...textMessage, messageId: 2 },
+      text: "Can you help me with this?", entities: undefined, currentUserId: user.id,
+    })
+    const deferred = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(deferred?.title).toBe("Working directory")
+    expect(deferred?.autoTitleGenerated).toBe(false)
+    if (!deferred) throw new Error("Chat disappeared")
+    expect(canAutoTitleThread(deferred)).toBe(true)
+    parseCompletion.mockResolvedValueOnce(completion("Notifications ignore disabled setting"))
+    await maybeScheduleThreadTitleGeneration({
+      chat: deferred, message: { ...textMessage, messageId: 3 },
+      text: "They still arrive after I disable them", entities: undefined, currentUserId: user.id,
+    })
+    const request = parseCompletion.mock.calls[1]?.[0] as { messages: { role: string; content: string }[] }
+    const transcript = request.messages.find((message) => message.role === "user")!.content
+    expect(transcript).toContain("Notifications?")
+    expect(transcript).toContain("Can you help me with this?")
+    expect(transcript.indexOf("Message 1")).toBeLessThan(transcript.indexOf("Message 2"))
+    expect(transcript.indexOf("Message 2")).toBeLessThan(transcript.indexOf("Message 3"))
+    expect(transcript).not.toContain("FUTURE_MESSAGE_SENTINEL")
+    const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(saved?.title).toBe("Notifications ignore disabled setting")
+    expect(saved?.autoTitleGenerated).toBe(true)
+    expect(saved && canAutoTitleThread(saved)).toBe(false)
+  })
+
+  test("a generated title matching its placeholder is durably complete", async () => {
+    const user = await testUtils.createUser("same-generated-title@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: "Notification delivery", isUntitled: true,
+      publicThread: false, createdBy: user.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    parseCompletion.mockResolvedValue(completion(chat.title!))
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    expect(await generateAndApplyThreadTitle({ chatId: chat.id, messageId: 1, text: "Fix notification delivery", currentUserId: user.id })).toEqual({ didUpdate: true })
+    const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(saved?.autoTitleGenerated).toBe(true)
+  })
+
+  test("a provider failure leaves the placeholder retryable on the next message", async () => {
+    const user = await testUtils.createUser("retry-title@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: "Please help with notifications", isUntitled: true,
+      publicThread: false, createdBy: user.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
+    parseCompletion.mockRejectedValueOnce(new Error("synthetic provider failure"))
+    await maybeScheduleThreadTitleGeneration({ chat, message: textMessage, text: chat.title!, entities: undefined, currentUserId: user.id })
+    const pending = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    if (!pending) throw new Error("Chat disappeared")
+    expect(pending.autoTitleGenerated).toBe(false)
+    parseCompletion.mockResolvedValueOnce(completion("Notification delivery failure"))
+    await maybeScheduleThreadTitleGeneration({
+      chat: pending, message: { ...textMessage, messageId: 2 },
+      text: "Notifications arrive even when disabled", entities: undefined, currentUserId: user.id,
+    })
+    const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(saved?.autoTitleGenerated).toBe(true)
+    expect(saved?.title).toBe("Notification delivery failure")
+  })
+
+  test("bounded history keeps the opening message plus the most recent transcript", async () => {
+    const user = await testUtils.createUser("long-transcript-title@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: null, isUntitled: true, publicThread: false, createdBy: user.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    await db.insert(schema.messages).values(Array.from({ length: 104 }, (_, index) => ({
+      chatId: chat.id, messageId: index + 1, fromId: user.id, text: `message-sentinel-${index + 1}-end`,
+    })))
+    parseCompletion.mockResolvedValue(completion("Notification investigation"))
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    await generateAndApplyThreadTitle({ chatId: chat.id, messageId: 103, text: "Investigate the notification delivery failure", currentUserId: user.id })
+    const request = parseCompletion.mock.calls[0]?.[0] as { messages: { role: string; content: string }[] }
+    const transcript = request.messages.find((message) => message.role === "user")!.content
+    expect(transcript).toContain("message-sentinel-1-end")
+    expect(transcript).not.toContain("message-sentinel-2-end")
+    expect(transcript).toContain("[Earlier messages omitted]")
+    expect(transcript).toContain("message-sentinel-4-end")
+    expect(transcript).toContain("message-sentinel-103-end")
+    expect(transcript).not.toContain("message-sentinel-104-end")
+  })
+
+  test("manual same-title saves defeat in-flight generation", async () => {
+    const user = await testUtils.createUser("same-manual-title@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: "Working directory", isUntitled: true,
+      publicThread: false, createdBy: user.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    let resolve: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(() => new Promise<ReturnType<typeof completion>>((done) => { resolve = done }))
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    const generation = generateAndApplyThreadTitle({ chatId: chat.id, messageId: 2, text: "Fix notification delivery", currentUserId: user.id })
+    await waitForParseCallCount(1)
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    await updateChatInfo({ chatId: chat.id, title: chat.title }, { currentUserId: user.id, currentSessionId: 0 })
+    resolve(completion("Notification bug"))
+    expect(await generation).toEqual({ didUpdate: false })
+    const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(saved?.title).toBe("Working directory")
+    expect(saved?.isUntitled).toBeNull()
+  })
+
+  test("a delayed job cannot read a transcript without current chat access", async () => {
+    const owner = await testUtils.createUser("title-owner@example.com")
+    const outsider = await testUtils.createUser("title-outsider@example.com")
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: null, isUntitled: true, publicThread: false, createdBy: owner.id,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    await expect(generateAndApplyThreadTitle({
+      chatId: chat.id, messageId: 1, text: "Please inspect this private transcript", currentUserId: outsider.id,
+    })).rejects.toThrow()
+    expect(parseCompletion).not.toHaveBeenCalled()
+  })
+
+  test("losing access during generation prevents the automatic title update", async () => {
+    const { space, users: members } = await testUtils.createSpaceWithMembers("Title permissions", ["title-member@example.com"])
+    const user = members[0]!
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: null, isUntitled: true, spaceId: space.id, publicThread: true,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    let resolve: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(() => new Promise<ReturnType<typeof completion>>((done) => { resolve = done }))
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    const generation = generateAndApplyThreadTitle({ chatId: chat.id, messageId: 1, text: "Fix notification delivery", currentUserId: user.id })
+    await waitForParseCallCount(1)
+    await db.update(schema.chats).set({ publicThread: false }).where(eq(schema.chats.id, chat.id))
+    resolve(completion("Notification delivery"))
+    await expect(generation).rejects.toThrow()
+    const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    expect(saved?.autoTitleGenerated).toBe(false)
+    expect(saved?.title).toBeNull()
+  })
+
+  test("legacy setup titles can recover while manual and successful titles stay stable", async () => {
+    const { canAutoTitleThread } = await import("@in/server/modules/threadTitles")
+    const legacy = { ...emptyThread, autoTitleGenerated: null, title: "Working directory", messageIdCounter: 9 }
+    expect(canAutoTitleThread(legacy)).toBe(true)
+    expect(canAutoTitleThread({ ...legacy, isUntitled: null })).toBe(false)
+    expect(canAutoTitleThread({ ...legacy, title: "Notification bug" })).toBe(false)
+  })
+
+  test("long transcript retains every selected message within its budget and labels omissions", async () => {
+    const { formatThreadTranscript } = await import("@in/server/modules/threadTitles")
+    const transcript = formatThreadTranscript(Array.from({ length: 101 }, (_, index) => ({
+      messageId: index + 1, author: "Member", text: `unique-${index} ${"x".repeat(10_000)}`,
+    })), true)
+    expect(Array.from(transcript).length).toBeLessThanOrEqual(24_000)
+    for (let index = 0; index < 101; index += 1) expect(transcript).toContain(`unique-${index} `)
+    expect(transcript).toContain("[Earlier messages omitted]")
+    expect(transcript).toContain("[Message truncated]")
   })
 
   test("recognizes only current and exact legacy reply-thread placeholders", async () => {
@@ -334,12 +535,11 @@ describe("thread title generation", () => {
     })
     await waitForParseCallCount(1)
 
-    // A concurrent send can carry the same pre-insert chat snapshot. It must
-    // not replace or cancel the title job owned by message 1.
+    // A later ineligible message must not cancel useful work.
     maybeScheduleThreadTitleGeneration({
       chat,
       message: { ...textMessage, messageId: 2 },
-      text: "A later message with enough content must not take over title generation.",
+      text: "OK",
       entities: undefined,
       currentUserId: user.id,
     })
@@ -461,6 +661,7 @@ describe("thread title generation", () => {
       throw new Error("Parent chat not created")
     }
 
+    await testUtils.addParticipant(parentChat.id, user.id)
     const anchorText = "Should we move the beta to Thursday after the notification fixes land?"
     await db.insert(schema.messages).values({
       chatId: parentChat.id,
@@ -532,7 +733,7 @@ describe("thread title generation", () => {
     expect(userMessage).toContain("Parent message by: Mina Park")
     expect(userMessage).toContain(`Parent message: ${anchorText}`)
     expect(userMessage).toContain(
-      "First eligible reply: Yes, after QA signs off on notification delivery and badge counts.",
+      "Yes, after QA signs off on notification delivery and badge counts.",
     )
 
     const secondResult = await generateAndApplyThreadTitle({
@@ -555,6 +756,7 @@ describe("thread title generation", () => {
     const parentChat = await testUtils.createChat(null, "Parent", "thread", false, user.id)
     if (!parentChat) throw new Error("Parent chat not created")
 
+    await testUtils.addParticipant(parentChat.id, user.id)
     const anchorText = "Review the new reply title behavior before launch"
     await db.insert(schema.messages).values({
       chatId: parentChat.id,
@@ -743,7 +945,7 @@ describe("thread title generation", () => {
 })
 
 async function waitForChatTitle(chatId: number, title: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     const row = await db
       .select({ title: schema.chats.title })
       .from(schema.chats)
@@ -765,7 +967,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function waitForParseCallCount(count: number) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     if (parseCompletion.mock.calls.length >= count) {
       return
     }

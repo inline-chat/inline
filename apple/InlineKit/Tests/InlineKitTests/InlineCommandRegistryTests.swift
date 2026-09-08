@@ -17,6 +17,11 @@ struct InlineCommandRegistryTests {
 
   @Test("only standalone local commands resolve")
   func standaloneResolution() {
+    #expect(InlineCommandRegistry.action(forStandaloneText: "/rename") == .renameThread)
+    #expect(InlineCommandRegistry.action(forStandaloneText: "  /RENAME\n") == .renameThread)
+    #expect(InlineCommandRegistry.action(forStandaloneText: "/rename@bot") == nil)
+    #expect(InlineCommandRegistry.action(forStandaloneText: "hello /rename") == nil)
+    #expect(InlineCommandRegistry.suggestions(matching: "rename").first?.action == .renameThread)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/clear") == .collapseHistory)
     #expect(InlineCommandRegistry.action(forStandaloneText: "  /CLEAR\n") == .collapseHistory)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/thread") == .createSubthread)

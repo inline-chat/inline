@@ -1897,6 +1897,19 @@ class LegacyComposeAppKit: NSView {
       do {
         let execution: InlineCommandExecution
         switch action {
+        case .renameThread:
+          guard invocationPeerId.asThreadId() != nil else {
+            ToastCenter.shared.showError("Only threads can be renamed.")
+            return
+          }
+          focusWindowIfNeeded()
+          guard MainWindowOpenCoordinator.shared.isViewingChat(invocationPeerId),
+                MainWindowOpenCoordinator.shared.renameThread()
+          else {
+            ToastCenter.shared.showError("Couldn’t open title editing for this thread.")
+            return
+          }
+          execution = .completed
         case .collapseHistory:
           guard let messageList,
                 let maxID = messageList.highestPositiveMessageId
