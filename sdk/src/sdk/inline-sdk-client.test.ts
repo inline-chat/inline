@@ -5953,6 +5953,40 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it.each(["chat", "space"] as const)("releases the %s live cursor after a non-final page reaches the target", async (kind) => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport,
+      state: new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 }, lastSeqBySpaceId: { "10": 1 } }),
+    })
+    await connectAndOpen(client, transport)
+    const internal = client as any
+    const catchup = kind === "chat"
+      ? internal.requestCatchUpChat({ chatId: 10n, updateSeq: 2 })
+      : internal.requestCatchUpSpace({ spaceId: 10n, updateSeq: 2 })
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)!
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 90n,
+      body: { oneofKind: "rpcResult", rpcResult: {
+        reqMsgId: rpc.id,
+        result: { oneofKind: "getUpdates", getUpdates: {
+          seq: 2n, date: 20n, final: false, updates: [],
+          skippedSequences: irrelevantSkippedSequences(1, 2),
+          resultType: GetUpdatesResult_ResultType.SLICE,
+        } },
+      } },
+    }))
+    await catchup
+    // Exercise the live acknowledgement cursor path after catch-up has returned.
+    if (kind === "chat") internal.bumpChatSeq(10n, 3, "live")
+    else internal.bumpSpaceSeq(10n, 3, "live")
+    const state = client.exportState()
+    expect(kind === "chat" ? state.lastSeqByChatId?.["10"] : state.lastSeqBySpaceId?.["10"]).toBe(3)
+    expect(transport.sent.filter((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)).toHaveLength(1)
+    await client.close()
+  })
+
   it("skips catch-up when chat already has in-flight catch-up task", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({

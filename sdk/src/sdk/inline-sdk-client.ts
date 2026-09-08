@@ -2130,12 +2130,8 @@ export class InlineSdkClient {
         return
       }
 
-      const latest = this.catchUpRequestedByChatId.get(chatId)
-      const syncedSeq = this.state.lastSeqByChatId?.[key] ?? 0
-      if (!latest || (latest.endSeq != null && latest.endSeq <= syncedSeq)) {
-        this.catchUpRequestedByChatId.delete(chatId)
-        return
-      }
+      // Re-read the latest demand through the completion path above so a
+      // non-final page reaching its target also releases the live cursor fence.
     }
   }
 
@@ -2303,12 +2299,8 @@ export class InlineSdkClient {
         return
       }
 
-      const latest = this.catchUpRequestedBySpaceId.get(spaceId)
-      const syncedSeq = this.state.lastSeqBySpaceId?.[key] ?? 0
-      if (!latest || (latest.endSeq != null && latest.endSeq <= syncedSeq)) {
-        this.catchUpRequestedBySpaceId.delete(spaceId)
-        return
-      }
+      // Re-read the latest demand through the completion path above so a
+      // non-final page reaching its target also releases the live cursor fence.
     }
   }
 
