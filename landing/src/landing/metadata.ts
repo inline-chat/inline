@@ -1,6 +1,6 @@
 import { LANDING_COPY } from "./content"
 
-const title = `Inline — ${LANDING_COPY.headline}`
+const title = `Inline: ${LANDING_COPY.headline}`
 const description = LANDING_COPY.summaryLines.join(" ")
 const url = "https://inline.chat/"
 const image = "https://inline.chat/twitter-og.jpg"
