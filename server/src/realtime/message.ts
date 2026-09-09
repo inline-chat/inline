@@ -376,6 +376,36 @@ export const sendMessageToRealtimeBot = async (
   return connections.length
 }
 
+/** Selects one exact authenticated bot socket for a private request/reply flow. */
+export const getRealtimeBotConnection = (
+  botUserId: number,
+): { connectionId: string; sessionId: number } | undefined => {
+  const connection = connectionManager
+    .getUserConnections(botUserId)
+    .find((candidate) => candidate.isBot === true && candidate.sessionId !== undefined)
+  if (!connection?.sessionId) return undefined
+  return { connectionId: connection.connectionId, sessionId: connection.sessionId }
+}
+
+/** Sends private material only to the exact authenticated bot socket selected above. */
+export const sendMessageToRealtimeBotConnection = async (
+  botUserId: number,
+  connectionId: string,
+  payload: ServerMessage["payload"],
+): Promise<boolean> => {
+  const connection = connectionManager.getConnection(connectionId)
+  if (connection?.userId !== botUserId || connection.isBot !== true) return false
+
+  sendRaw(connection.ws, {
+    id: genId(),
+    body: {
+      oneofKind: "message",
+      message: { payload },
+    },
+  })
+  return true
+}
+
 /**
  * Sends session-scoped material only to sockets authenticated by the exact app
  * session. A user may have several active sessions, and one session may own

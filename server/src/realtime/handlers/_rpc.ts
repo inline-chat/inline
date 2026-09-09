@@ -384,12 +384,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.REQUEST_BOT_FILESYSTEM: {
       if (call.input.oneofKind !== "requestBotFilesystem") throw RealtimeRpcError.BadRequest()
-      const result = await requestBotFilesystem(call.input.requestBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId })
+      const result = await requestBotFilesystem(call.input.requestBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId, currentConnectionId: handlerContext.connectionId })
       return { oneofKind: "requestBotFilesystem", requestBotFilesystem: result }
     }
     case Method.ANSWER_BOT_FILESYSTEM: {
       if (call.input.oneofKind !== "answerBotFilesystem") throw RealtimeRpcError.BadRequest()
-      const result = await answerBotFilesystem(call.input.answerBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId })
+      const result = await answerBotFilesystem(call.input.answerBotFilesystem, { currentSessionId: handlerContext.sessionId, currentUserId: handlerContext.userId, currentConnectionId: handlerContext.connectionId })
       return { oneofKind: "answerBotFilesystem", answerBotFilesystem: result }
     }
     case Method.REQUEST_BOT_CHAT_SETTINGS: {

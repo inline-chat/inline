@@ -33,6 +33,7 @@ export enum ConnVersion {
 type WS = ElysiaWS<any, any>
 
 interface Connection {
+  connectionId: string
   ws: WS
 
   version: ConnVersion
@@ -107,7 +108,7 @@ class ConnectionManager {
     log.debug("Adding new connection")
     //const id = nanoid()
     const id = this.getConnectionIdFromWs(ws)
-    const connection: Connection = { ws, version }
+    const connection: Connection = { connectionId: id, ws, version }
     this.connections.set(id, connection)
 
     // Start timeout, if not authenticated in 20 seconds, close the connection
