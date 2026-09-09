@@ -252,6 +252,8 @@ message Dialog {
   optional int64 collapsed_max_id = 17;
   // Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
   optional int64 folder_id = 18;
+  // Personal translation preference, shared by all sessions of this account.
+  optional bool translation_enabled = 19;
 }
 
 message DialogFolder {
@@ -1587,8 +1589,10 @@ enum Method {
   GET_USERS = 138;
   GET_BOT_SKILLS = 139;
   GET_BOT_CONFIGURATION_CATALOG = 140;
-  REQUEST_BOT_FILESYSTEM = 141;
-  ANSWER_BOT_FILESYSTEM = 142;
+  UPDATE_DIALOG_TRANSLATION = 141;
+  TRANSCRIBE_VOICE_DRAFT = 142;
+  REQUEST_BOT_FILESYSTEM = 143;
+  ANSWER_BOT_FILESYSTEM = 144;
 }
 
 message RpcCall {
@@ -1734,8 +1738,10 @@ message RpcCall {
     GetUsersInput getUsers = 139;
     GetBotSkillsInput getBotSkills = 140;
     GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
-    RequestBotFilesystemInput requestBotFilesystem = 142;
-    AnswerBotFilesystemInput answerBotFilesystem = 143;
+    UpdateDialogTranslationInput updateDialogTranslation = 142;
+    TranscribeVoiceDraftInput transcribeVoiceDraft = 143;
+    RequestBotFilesystemInput requestBotFilesystem = 144;
+    AnswerBotFilesystemInput answerBotFilesystem = 145;
   }
 }
 
@@ -1883,8 +1889,10 @@ message RpcResult {
     GetUsersResult getUsers = 139;
     GetBotSkillsResult getBotSkills = 140;
     GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
-    RequestBotFilesystemResult requestBotFilesystem = 142;
-    AnswerBotFilesystemResult answerBotFilesystem = 143;
+    UpdateDialogTranslationResult updateDialogTranslation = 142;
+    TranscribeVoiceDraftResult transcribeVoiceDraft = 143;
+    RequestBotFilesystemResult requestBotFilesystem = 144;
+    AnswerBotFilesystemResult answerBotFilesystem = 145;
   }
 }
 
@@ -2352,6 +2360,22 @@ message UpdateDialogFollowModeInput {
 }
 
 message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
+message UpdateDialogTranslationInput {
+  InputPeer peer_id = 1;
+  // Required presence distinguishes an explicit disable from malformed input.
+  optional bool enabled = 2;
+  // One-time import of a legacy device's enabled choice. Only valid with
+  // enabled=true; never overrides an explicit synced disable.
+  bool import_legacy_enabled = 3;
+}
+
+message UpdateDialogTranslationResult { repeated Update updates = 1; }
+
+message UpdateDialogTranslation {
+  Peer peer_id = 1;
+  bool enabled = 2;
+}
 
 message CollapseHistoryInput {
   InputPeer peer_id = 1;
@@ -3657,6 +3681,7 @@ message Update {
     UpdateUserAddedToChat user_added_to_chat = 47;
     UpdateUserRemovedFromChat user_removed_from_chat = 48;
     ChatAcknowledgement acknowledgement = 49;
+    UpdateDialogTranslation dialog_translation = 50;
   }
 }
 
@@ -4738,6 +4763,14 @@ message AcknowledgeMessagesInput {
 message AcknowledgeMessagesResult { repeated Update updates = 1; }
 
 message ChatAcknowledgements { repeated ChatAcknowledgement cursors = 1; }
+
+// Transient dictation audio. Creates no stored file or chat message.
+message TranscribeVoiceDraftInput {
+  bytes audio = 1;
+  string mime_type = 2;
+  uint32 duration = 3;
+}
+message TranscribeVoiceDraftResult { string text = 1; }
 
 // Owner-only, ephemeral remote filesystem control plane. These paths and
 // entries must never enter chat history, sync buckets, or diagnostic payloads.

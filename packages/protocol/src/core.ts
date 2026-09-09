@@ -765,6 +765,12 @@ export interface Dialog {
      * @generated from protobuf field: optional int64 folder_id = 18;
      */
     folderId?: bigint;
+    /**
+     * Personal translation preference, shared by all sessions of this account.
+     *
+     * @generated from protobuf field: optional bool translation_enabled = 19;
+     */
+    translationEnabled?: boolean;
 }
 /**
  * @generated from protobuf message DialogFolder
@@ -4514,15 +4520,27 @@ export interface RpcCall {
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogInput;
     } | {
+        oneofKind: "updateDialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslationInput updateDialogTranslation = 142;
+         */
+        updateDialogTranslation: UpdateDialogTranslationInput;
+    } | {
+        oneofKind: "transcribeVoiceDraft";
+        /**
+         * @generated from protobuf field: TranscribeVoiceDraftInput transcribeVoiceDraft = 143;
+         */
+        transcribeVoiceDraft: TranscribeVoiceDraftInput;
+    } | {
         oneofKind: "requestBotFilesystem";
         /**
-         * @generated from protobuf field: RequestBotFilesystemInput requestBotFilesystem = 142;
+         * @generated from protobuf field: RequestBotFilesystemInput requestBotFilesystem = 144;
          */
         requestBotFilesystem: RequestBotFilesystemInput;
     } | {
         oneofKind: "answerBotFilesystem";
         /**
-         * @generated from protobuf field: AnswerBotFilesystemInput answerBotFilesystem = 143;
+         * @generated from protobuf field: AnswerBotFilesystemInput answerBotFilesystem = 145;
          */
         answerBotFilesystem: AnswerBotFilesystemInput;
     } | {
@@ -5375,15 +5393,27 @@ export interface RpcResult {
          */
         getBotConfigurationCatalog: GetBotConfigurationCatalogResult;
     } | {
+        oneofKind: "updateDialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslationResult updateDialogTranslation = 142;
+         */
+        updateDialogTranslation: UpdateDialogTranslationResult;
+    } | {
+        oneofKind: "transcribeVoiceDraft";
+        /**
+         * @generated from protobuf field: TranscribeVoiceDraftResult transcribeVoiceDraft = 143;
+         */
+        transcribeVoiceDraft: TranscribeVoiceDraftResult;
+    } | {
         oneofKind: "requestBotFilesystem";
         /**
-         * @generated from protobuf field: RequestBotFilesystemResult requestBotFilesystem = 142;
+         * @generated from protobuf field: RequestBotFilesystemResult requestBotFilesystem = 144;
          */
         requestBotFilesystem: RequestBotFilesystemResult;
     } | {
         oneofKind: "answerBotFilesystem";
         /**
-         * @generated from protobuf field: AnswerBotFilesystemResult answerBotFilesystem = 143;
+         * @generated from protobuf field: AnswerBotFilesystemResult answerBotFilesystem = 145;
          */
         answerBotFilesystem: AnswerBotFilesystemResult;
     } | {
@@ -6585,6 +6615,50 @@ export interface UpdateDialogFollowModeResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslationInput
+ */
+export interface UpdateDialogTranslationInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Required presence distinguishes an explicit disable from malformed input.
+     *
+     * @generated from protobuf field: optional bool enabled = 2;
+     */
+    enabled?: boolean;
+    /**
+     * One-time import of a legacy device's enabled choice. Only valid with
+     * enabled=true; never overrides an explicit synced disable.
+     *
+     * @generated from protobuf field: bool import_legacy_enabled = 3;
+     */
+    importLegacyEnabled: boolean;
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslationResult
+ */
+export interface UpdateDialogTranslationResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateDialogTranslation
+ */
+export interface UpdateDialogTranslation {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
 }
 /**
  * @generated from protobuf message CollapseHistoryInput
@@ -10047,6 +10121,12 @@ export interface Update {
          */
         acknowledgement: ChatAcknowledgement;
     } | {
+        oneofKind: "dialogTranslation";
+        /**
+         * @generated from protobuf field: UpdateDialogTranslation dialog_translation = 50;
+         */
+        dialogTranslation: UpdateDialogTranslation;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -13081,6 +13161,34 @@ export interface ChatAcknowledgements {
     cursors: ChatAcknowledgement[];
 }
 /**
+ * Transient dictation audio. Creates no stored file or chat message.
+ *
+ * @generated from protobuf message TranscribeVoiceDraftInput
+ */
+export interface TranscribeVoiceDraftInput {
+    /**
+     * @generated from protobuf field: bytes audio = 1;
+     */
+    audio: Uint8Array;
+    /**
+     * @generated from protobuf field: string mime_type = 2;
+     */
+    mimeType: string;
+    /**
+     * @generated from protobuf field: uint32 duration = 3;
+     */
+    duration: number;
+}
+/**
+ * @generated from protobuf message TranscribeVoiceDraftResult
+ */
+export interface TranscribeVoiceDraftResult {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+}
+/**
  * Owner-only, ephemeral remote filesystem control plane. These paths and
  * entries must never enter chat history, sync buckets, or diagnostic payloads.
  *
@@ -14026,13 +14134,21 @@ export enum Method {
      */
     GET_BOT_CONFIGURATION_CATALOG = 140,
     /**
-     * @generated from protobuf enum value: REQUEST_BOT_FILESYSTEM = 141;
+     * @generated from protobuf enum value: UPDATE_DIALOG_TRANSLATION = 141;
      */
-    REQUEST_BOT_FILESYSTEM = 141,
+    UPDATE_DIALOG_TRANSLATION = 141,
     /**
-     * @generated from protobuf enum value: ANSWER_BOT_FILESYSTEM = 142;
+     * @generated from protobuf enum value: TRANSCRIBE_VOICE_DRAFT = 142;
      */
-    ANSWER_BOT_FILESYSTEM = 142
+    TRANSCRIBE_VOICE_DRAFT = 142,
+    /**
+     * @generated from protobuf enum value: REQUEST_BOT_FILESYSTEM = 143;
+     */
+    REQUEST_BOT_FILESYSTEM = 143,
+    /**
+     * @generated from protobuf enum value: ANSWER_BOT_FILESYSTEM = 144;
+     */
+    ANSWER_BOT_FILESYSTEM = 144
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -16106,7 +16222,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] },
             { no: 17, name: "collapsed_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 19, name: "translation_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -16174,6 +16291,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional int64 folder_id */ 18:
                     message.folderId = reader.int64().toBigInt();
                     break;
+                case /* optional bool translation_enabled */ 19:
+                    message.translationEnabled = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16240,6 +16360,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional int64 folder_id = 18; */
         if (message.folderId !== undefined)
             writer.tag(18, WireType.Varint).int64(message.folderId);
+        /* optional bool translation_enabled = 19; */
+        if (message.translationEnabled !== undefined)
+            writer.tag(19, WireType.Varint).bool(message.translationEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23025,8 +23148,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput },
-            { no: 142, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
-            { no: 143, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput }
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput },
+            { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "input", T: () => TranscribeVoiceDraftInput },
+            { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
+            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -23879,13 +24004,25 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotConfigurationCatalog)
                     };
                     break;
-                case /* RequestBotFilesystemInput requestBotFilesystem */ 142:
+                case /* UpdateDialogTranslationInput updateDialogTranslation */ 142:
+                    message.input = {
+                        oneofKind: "updateDialogTranslation",
+                        updateDialogTranslation: UpdateDialogTranslationInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogTranslation)
+                    };
+                    break;
+                case /* TranscribeVoiceDraftInput transcribeVoiceDraft */ 143:
+                    message.input = {
+                        oneofKind: "transcribeVoiceDraft",
+                        transcribeVoiceDraft: TranscribeVoiceDraftInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).transcribeVoiceDraft)
+                    };
+                    break;
+                case /* RequestBotFilesystemInput requestBotFilesystem */ 144:
                     message.input = {
                         oneofKind: "requestBotFilesystem",
                         requestBotFilesystem: RequestBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).requestBotFilesystem)
                     };
                     break;
-                case /* AnswerBotFilesystemInput answerBotFilesystem */ 143:
+                case /* AnswerBotFilesystemInput answerBotFilesystem */ 145:
                     message.input = {
                         oneofKind: "answerBotFilesystem",
                         answerBotFilesystem: AnswerBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).answerBotFilesystem)
@@ -24323,12 +24460,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141; */
         if (message.input.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
-        /* RequestBotFilesystemInput requestBotFilesystem = 142; */
+        /* UpdateDialogTranslationInput updateDialogTranslation = 142; */
+        if (message.input.oneofKind === "updateDialogTranslation")
+            UpdateDialogTranslationInput.internalBinaryWrite(message.input.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* TranscribeVoiceDraftInput transcribeVoiceDraft = 143; */
+        if (message.input.oneofKind === "transcribeVoiceDraft")
+            TranscribeVoiceDraftInput.internalBinaryWrite(message.input.transcribeVoiceDraft, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
+        /* RequestBotFilesystemInput requestBotFilesystem = 144; */
         if (message.input.oneofKind === "requestBotFilesystem")
-            RequestBotFilesystemInput.internalBinaryWrite(message.input.requestBotFilesystem, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
-        /* AnswerBotFilesystemInput answerBotFilesystem = 143; */
+            RequestBotFilesystemInput.internalBinaryWrite(message.input.requestBotFilesystem, writer.tag(144, WireType.LengthDelimited).fork(), options).join();
+        /* AnswerBotFilesystemInput answerBotFilesystem = 145; */
         if (message.input.oneofKind === "answerBotFilesystem")
-            AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
+            AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(145, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24483,8 +24626,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult },
-            { no: 142, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
-            { no: 143, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult }
+            { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult },
+            { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "result", T: () => TranscribeVoiceDraftResult },
+            { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
+            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -25337,13 +25482,25 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotConfigurationCatalog)
                     };
                     break;
-                case /* RequestBotFilesystemResult requestBotFilesystem */ 142:
+                case /* UpdateDialogTranslationResult updateDialogTranslation */ 142:
+                    message.result = {
+                        oneofKind: "updateDialogTranslation",
+                        updateDialogTranslation: UpdateDialogTranslationResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogTranslation)
+                    };
+                    break;
+                case /* TranscribeVoiceDraftResult transcribeVoiceDraft */ 143:
+                    message.result = {
+                        oneofKind: "transcribeVoiceDraft",
+                        transcribeVoiceDraft: TranscribeVoiceDraftResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).transcribeVoiceDraft)
+                    };
+                    break;
+                case /* RequestBotFilesystemResult requestBotFilesystem */ 144:
                     message.result = {
                         oneofKind: "requestBotFilesystem",
                         requestBotFilesystem: RequestBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).requestBotFilesystem)
                     };
                     break;
-                case /* AnswerBotFilesystemResult answerBotFilesystem */ 143:
+                case /* AnswerBotFilesystemResult answerBotFilesystem */ 145:
                     message.result = {
                         oneofKind: "answerBotFilesystem",
                         answerBotFilesystem: AnswerBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).answerBotFilesystem)
@@ -25781,12 +25938,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141; */
         if (message.result.oneofKind === "getBotConfigurationCatalog")
             GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
-        /* RequestBotFilesystemResult requestBotFilesystem = 142; */
+        /* UpdateDialogTranslationResult updateDialogTranslation = 142; */
+        if (message.result.oneofKind === "updateDialogTranslation")
+            UpdateDialogTranslationResult.internalBinaryWrite(message.result.updateDialogTranslation, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
+        /* TranscribeVoiceDraftResult transcribeVoiceDraft = 143; */
+        if (message.result.oneofKind === "transcribeVoiceDraft")
+            TranscribeVoiceDraftResult.internalBinaryWrite(message.result.transcribeVoiceDraft, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
+        /* RequestBotFilesystemResult requestBotFilesystem = 144; */
         if (message.result.oneofKind === "requestBotFilesystem")
-            RequestBotFilesystemResult.internalBinaryWrite(message.result.requestBotFilesystem, writer.tag(142, WireType.LengthDelimited).fork(), options).join();
-        /* AnswerBotFilesystemResult answerBotFilesystem = 143; */
+            RequestBotFilesystemResult.internalBinaryWrite(message.result.requestBotFilesystem, writer.tag(144, WireType.LengthDelimited).fork(), options).join();
+        /* AnswerBotFilesystemResult answerBotFilesystem = 145; */
         if (message.result.oneofKind === "answerBotFilesystem")
-            AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(143, WireType.LengthDelimited).fork(), options).join();
+            AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(145, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29724,6 +29887,168 @@ class UpdateDialogFollowModeResult$Type extends MessageType<UpdateDialogFollowMo
  * @generated MessageType for protobuf message UpdateDialogFollowModeResult
  */
 export const UpdateDialogFollowModeResult = new UpdateDialogFollowModeResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslationInput$Type extends MessageType<UpdateDialogTranslationInput> {
+    constructor() {
+        super("UpdateDialogTranslationInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "import_legacy_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslationInput>): UpdateDialogTranslationInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.importLegacyEnabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslationInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslationInput): UpdateDialogTranslationInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                case /* bool import_legacy_enabled */ 3:
+                    message.importLegacyEnabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslationInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool enabled = 2; */
+        if (message.enabled !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        /* bool import_legacy_enabled = 3; */
+        if (message.importLegacyEnabled !== false)
+            writer.tag(3, WireType.Varint).bool(message.importLegacyEnabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslationInput
+ */
+export const UpdateDialogTranslationInput = new UpdateDialogTranslationInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslationResult$Type extends MessageType<UpdateDialogTranslationResult> {
+    constructor() {
+        super("UpdateDialogTranslationResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslationResult>): UpdateDialogTranslationResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslationResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslationResult): UpdateDialogTranslationResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslationResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslationResult
+ */
+export const UpdateDialogTranslationResult = new UpdateDialogTranslationResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogTranslation$Type extends MessageType<UpdateDialogTranslation> {
+    constructor() {
+        super("UpdateDialogTranslation", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogTranslation>): UpdateDialogTranslation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogTranslation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogTranslation): UpdateDialogTranslation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogTranslation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogTranslation
+ */
+export const UpdateDialogTranslation = new UpdateDialogTranslation$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CollapseHistoryInput$Type extends MessageType<CollapseHistoryInput> {
     constructor() {
@@ -40253,7 +40578,8 @@ class Update$Type extends MessageType<Update> {
             { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
             { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
             { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
-            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
+            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
+            { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -40550,6 +40876,12 @@ class Update$Type extends MessageType<Update> {
                         acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).acknowledgement)
                     };
                     break;
+                case /* UpdateDialogTranslation dialog_translation */ 50:
+                    message.update = {
+                        oneofKind: "dialogTranslation",
+                        dialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogTranslation)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -40706,6 +41038,9 @@ class Update$Type extends MessageType<Update> {
         /* ChatAcknowledgement acknowledgement = 49; */
         if (message.update.oneofKind === "acknowledgement")
             ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogTranslation dialog_translation = 50; */
+        if (message.update.oneofKind === "dialogTranslation")
+            UpdateDialogTranslation.internalBinaryWrite(message.update.dialogTranslation, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -50046,6 +50381,116 @@ class ChatAcknowledgements$Type extends MessageType<ChatAcknowledgements> {
  * @generated MessageType for protobuf message ChatAcknowledgements
  */
 export const ChatAcknowledgements = new ChatAcknowledgements$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranscribeVoiceDraftInput$Type extends MessageType<TranscribeVoiceDraftInput> {
+    constructor() {
+        super("TranscribeVoiceDraftInput", [
+            { no: 1, name: "audio", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "duration", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TranscribeVoiceDraftInput>): TranscribeVoiceDraftInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.audio = new Uint8Array(0);
+        message.mimeType = "";
+        message.duration = 0;
+        if (value !== undefined)
+            reflectionMergePartial<TranscribeVoiceDraftInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranscribeVoiceDraftInput): TranscribeVoiceDraftInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes audio */ 1:
+                    message.audio = reader.bytes();
+                    break;
+                case /* string mime_type */ 2:
+                    message.mimeType = reader.string();
+                    break;
+                case /* uint32 duration */ 3:
+                    message.duration = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranscribeVoiceDraftInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes audio = 1; */
+        if (message.audio.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.audio);
+        /* string mime_type = 2; */
+        if (message.mimeType !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.mimeType);
+        /* uint32 duration = 3; */
+        if (message.duration !== 0)
+            writer.tag(3, WireType.Varint).uint32(message.duration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranscribeVoiceDraftInput
+ */
+export const TranscribeVoiceDraftInput = new TranscribeVoiceDraftInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranscribeVoiceDraftResult$Type extends MessageType<TranscribeVoiceDraftResult> {
+    constructor() {
+        super("TranscribeVoiceDraftResult", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TranscribeVoiceDraftResult>): TranscribeVoiceDraftResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<TranscribeVoiceDraftResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranscribeVoiceDraftResult): TranscribeVoiceDraftResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranscribeVoiceDraftResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranscribeVoiceDraftResult
+ */
+export const TranscribeVoiceDraftResult = new TranscribeVoiceDraftResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class RequestBotFilesystemInput$Type extends MessageType<RequestBotFilesystemInput> {
     constructor() {
