@@ -4170,6 +4170,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::UserAddedToChat(_) => "user_added_to_chat",
         Update::UserRemovedFromChat(_) => "user_removed_from_chat",
         Update::Acknowledgement(_) => "acknowledgement",
+        Update::DialogTranslation(_) => "dialog_translation",
     }
 }
 

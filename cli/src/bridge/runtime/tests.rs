@@ -746,7 +746,7 @@ async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         });
     let resolution = conversation_for_settings_event(&route, &unauthorized_filesystem_event, None)
         .await
-    .expect("filesystem authorization should be resolved without storage mutation");
+        .expect("filesystem authorization should be resolved without storage mutation");
     assert!(matches!(
         resolution,
         SettingsConversationResolution::Unauthorized
