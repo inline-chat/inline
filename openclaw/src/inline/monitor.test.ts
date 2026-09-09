@@ -12821,6 +12821,8 @@ describe("inline/monitor", () => {
           BodyForAgent: "",
           media: [{
             path: "/tmp/current-photo.jpg",
+            fileName: "current-photo.jpg",
+            messageId: "7301",
             contentType: "image/jpeg",
             kind: "image",
             transcribed: false,
@@ -13001,6 +13003,8 @@ describe("inline/monitor", () => {
           CommandBody: "",
           media: [{
             path: "/tmp/spec.pdf",
+            fileName: "spec.pdf",
+            messageId: "7303",
             contentType: "application/pdf",
             kind: "document",
             transcribed: false,
@@ -13085,6 +13089,8 @@ describe("inline/monitor", () => {
           BodyForAgent: "",
           media: [{
             path: "/tmp/image-document.png",
+            fileName: "image-document.png",
+            messageId: "7306",
             contentType: "image/png",
             kind: "image",
             transcribed: false,
@@ -13167,6 +13173,8 @@ describe("inline/monitor", () => {
           CommandBody: "",
           media: [{
             path: "/tmp/flattened-photo.jpg",
+            fileName: "flattened-photo.jpg",
+            messageId: "7304",
             contentType: "image/jpeg",
             kind: "image",
             transcribed: false,
@@ -13328,6 +13336,8 @@ describe("inline/monitor", () => {
           RawBody: "",
           media: [{
             path: "/tmp/fallback-voice.ogg",
+            fileName: "fallback-voice.ogg",
+            messageId: "7402",
             contentType: "audio/ogg",
             kind: "audio",
             transcribed: false,
@@ -13336,6 +13346,40 @@ describe("inline/monitor", () => {
       )
     })
 
+    await handle.stop()
+  })
+
+  it("keeps preview images alongside unavailable native media", async () => {
+    const previewUrl = "https://cdn.inline.chat/preview.png"
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: {
+        id: 7403n, date: 1_700_000_133n, fromId: 42n, message: "",
+        media: { media: { oneofKind: "document", document: { document: {
+          id: 902n, fileName: "missing.pdf", mimeType: "application/pdf",
+        } } } },
+        attachments: { attachments: [{ attachment: { oneofKind: "urlPreview", urlPreview: {
+          id: 903n, url: "https://example.com/design", title: "Design",
+          photo: { id: 904n, sizes: [{ w: 100, h: 100, cdnUrl: previewUrl }] },
+        } } }] },
+      } as any }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      mediaByUrl: { [previewUrl]: { contentType: "image/png", fileName: "preview.png" } },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(expect.objectContaining({
+        media: [
+          expect.objectContaining({ kind: "document", fileName: "missing.pdf", messageId: "7403" }),
+          expect.objectContaining({ kind: "image", path: "/tmp/preview.png", fileName: "preview.png", messageId: "7403" }),
+        ],
+      }))
+    })
     await handle.stop()
   })
 

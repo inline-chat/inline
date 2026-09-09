@@ -2961,6 +2961,7 @@ async function resolveInlineInboundMedia(params: {
     }
   >()
 
+  const out: InlineInboundMediaInfo[] = []
   const messageId = String(params.message.id)
   const inlineMediaKind = content.media?.kind === "photo"
     ? "image"
@@ -2979,12 +2980,12 @@ async function resolveInlineInboundMedia(params: {
       kind: inlineMediaKind ?? "document",
     })
   } else if (inlineMediaKind) {
-    return [{
+    out.push({
       kind: inlineMediaKind,
       ...(content.media?.fileName ? { fileName: content.media.fileName } : {}),
       ...(content.media?.mimeType ? { contentType: content.media.mimeType } : {}),
       messageId,
-    }]
+    })
   }
 
   for (const attachment of content.attachments) {
@@ -2995,7 +2996,6 @@ async function resolveInlineInboundMedia(params: {
     })
   }
 
-  const out: InlineInboundMediaInfo[] = []
   for (const [url, candidate] of candidates.entries()) {
     try {
       const filePathHint = resolveFilePathHint({ sourceUrl: url, preferredName: candidate.fileName })
@@ -3013,9 +3013,14 @@ async function resolveInlineInboundMedia(params: {
         fetched.fileName ?? candidate.fileName ?? undefined,
       )
       const contentType = saved.contentType ?? fetchedContentType
+      const fileName = fetched.fileName ?? candidate.fileName
       out.push({
         path: saved.path,
         ...(contentType ? { contentType } : {}),
+        ...(fileName ? { fileName } : {}),
+        // Documents may contain image/audio bytes; keep the host's MIME inference.
+        ...(candidate.kind !== "document" ? { kind: candidate.kind } : {}),
+        messageId,
       })
     } catch (err) {
       params.log?.warn?.(`inline: failed to download inbound media ${url}: ${String(err)}`)
