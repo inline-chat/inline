@@ -72,13 +72,16 @@ class FailingStateStore implements InlineSdkStateStore {
 }
 
 describe("InlineSdkClient", () => {
-  it("can be constructed without a custom transport and close() is a no-op before connect()", async () => {
+  it("closes the event stream and disposes the client before connect()", async () => {
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
       token: "test-token",
     })
+    const nextEvent = client.events()[Symbol.asyncIterator]().next()
 
     await expect(client.close()).resolves.toBeUndefined()
+    await expect(nextEvent).resolves.toEqual({ done: true, value: undefined })
+    await expect(client.connect()).rejects.toThrow("SDK client is closed")
   })
 
   it("keeps close disconnect-only when a credential owner is configured", async () => {

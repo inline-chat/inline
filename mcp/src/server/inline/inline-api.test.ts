@@ -103,9 +103,17 @@ describe("createInlineApi", () => {
     expect(realtimeSdk.client.close).toHaveBeenCalledTimes(1)
   })
 
-  it("closes before connecting without waiting on the event stream", async () => {
+  it("closes before connecting and joins the event stream", async () => {
+    let finishDrain: ((result: IteratorResult<unknown>) => void) | undefined
     realtimeSdk.client.events.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<unknown>>((resolve) => {
+          finishDrain = resolve
+        }),
+      }),
+    })
+    realtimeSdk.client.close.mockImplementationOnce(async () => {
+      finishDrain?.({ value: undefined, done: true })
     })
     const api = createInlineApi({
       baseUrl: "https://api.inline.test",

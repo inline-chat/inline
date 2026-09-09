@@ -254,7 +254,6 @@ export function createInlineApi(params: {
   const allowedSpaceIdList = params.allowed.allowedSpaceIds
   const allowedSpaceIds = new Set(params.allowed.allowedSpaceIds.map((id) => id.toString()))
   let connected: Promise<void> | null = null
-  let connectedSuccessfully = false
   let eligibleChatsCache:
     | {
         expiresAtMs: number
@@ -275,7 +274,6 @@ export function createInlineApi(params: {
       })
     }
     await connected
-    connectedSuccessfully = true
   }
 
   const allowDms = params.allowed.allowDms === true
@@ -790,7 +788,7 @@ export function createInlineApi(params: {
   return {
     async close() {
       await client.close()
-      if (connectedSuccessfully) await eventDrain
+      await eventDrain
     },
 
     async listSpaces({ query, limit }) {

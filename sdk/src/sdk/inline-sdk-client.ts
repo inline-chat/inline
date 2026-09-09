@@ -394,17 +394,17 @@ export class InlineSdkClient {
 
   /**
    * Disconnects without revoking credentials and ends this instance's event
-   * stream. After closing a started client, construct a new client to reconnect.
-   * Calling close before the first connection attempt is a no-op.
+   * stream. After closing, construct a new client to connect again.
    */
   async close(): Promise<void> {
-    if (!this.started) return
+    const wasStarted = this.started
     this.closed = true
     this.started = false
 
     this.rejectOpen(new Error("closed"))
 
     this.eventStream.close()
+    if (!wasStarted) return
     await settleWithin(
       this.protocol.stopTransport(),
       closeJoinTimeoutMs,
