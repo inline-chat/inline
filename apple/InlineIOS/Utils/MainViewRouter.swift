@@ -2,6 +2,7 @@ import Auth
 import Combine
 import Foundation
 import InlineKit
+import Logger
 import Sentry
 import SwiftUI
 import UIKit
@@ -27,16 +28,17 @@ public class MainViewRouter: ObservableObject {
       persistentStorage: AppDatabase.shared.isPersistent
     )
 
-    // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
-    Task { @MainActor [weak self] in
-      guard let self else { return }
-      Auth.shared.$status
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] status in
-          self?.handle(status: status)
-        }
-        .store(in: &cancellables)
-    }
+    // Seed from the ready credential cache instead of waiting for its initial UI replay.
+    // Keep subsequent transitions ordered, without another main-queue hop or restarting
+    // the local profile read when the initial authenticated status is replayed.
+    Auth.shared.$status
+      .dropFirst()
+      .prepend(Auth.shared.getStatus())
+      .removeDuplicates()
+      .sink { [weak self] status in
+        self?.handle(status: status)
+      }
+      .store(in: &cancellables)
   }
 
   deinit {
@@ -55,18 +57,18 @@ public class MainViewRouter: ObservableObject {
       return
     }
 
-    // Keep onboarding mounted while admitting persistent storage and realtime. The transition to
-    // Main is then a single visible swap; only an actual admission failure enters startup recovery.
+    // Keep onboarding mounted until local storage and profile state choose the destination.
+    // Realtime startup must not delay a completed account's cached UI.
     guard Auth.shared.getHasPendingAccountTransition() == false else {
       self.route = .loading
       return
     }
     transitionTask = Task { @MainActor [weak self] in
-      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-      let realtimeAdmitted = await Api.admitPersistentStorage()
+      if !AppDatabase.shared.isPersistent {
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      }
       guard !Task.isCancelled else { return }
       guard AppDatabase.shared.isPersistent,
-            realtimeAdmitted,
             Auth.shared.getHasPendingAccountTransition() == false,
             Auth.shared.getStatus().isAuthenticated
       else {
@@ -92,11 +94,12 @@ public class MainViewRouter: ObservableObject {
       guard !Task.isCancelled,
             Auth.shared.getHasPendingAccountTransition() == false
       else { return }
-      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      if !AppDatabase.shared.isPersistent {
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      }
       guard !Task.isCancelled, AppDatabase.shared.isPersistent else { return }
       switch Auth.shared.getStatus() {
       case .authenticated, .authenticatedV3:
-        guard await Api.admitPersistentStorage() else { return }
         await self?.resolveAuthenticatedRoute()
       case .unauthenticated, .reauthRequired:
         self?.route = .onboarding
@@ -123,6 +126,9 @@ public class MainViewRouter: ObservableObject {
       } else {
         route = .main
       }
+      PerformanceTrace.event("StartupRouteResolved", category: .launch)
+      // Publish the locally resolved route before waiting for any realtime owners.
+      _ = await Api.admitPersistentStorage()
     } catch {
       guard !Task.isCancelled,
             (try? Auth.shared.handle.validateAccountMutation(account)) != nil
@@ -157,12 +163,12 @@ public class MainViewRouter: ObservableObject {
       case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
-          // Ensure `AppDatabase.shared` isn't stuck on an in-memory fallback from pre-unlock startup.
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          let realtimeAdmitted = await Api.admitPersistentStorage()
+          // Only pre-unlock/fallback storage needs promotion; normal launches keep their writer.
+          if !AppDatabase.shared.isPersistent {
+            _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          }
           guard !Task.isCancelled,
                 AppDatabase.shared.isPersistent,
-                realtimeAdmitted,
                 Auth.shared.getHasPendingAccountTransition() == false,
                 Auth.shared.getStatus().isAuthenticated
           else { return }
@@ -171,7 +177,9 @@ public class MainViewRouter: ObservableObject {
       case .unauthenticated, .reauthRequired:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          if !AppDatabase.shared.isPersistent {
+            _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          }
           guard !Task.isCancelled,
                 AppDatabase.shared.isPersistent,
                 Auth.shared.getHasPendingAccountTransition() == false
@@ -227,8 +235,8 @@ struct IOSStartupLoadingView: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      ProgressView()
       if showsRecovery {
+        ProgressView()
         Text("Inline is taking longer to open")
           .font(.headline)
         Text(explanation)
@@ -243,10 +251,6 @@ struct IOSStartupLoadingView: View {
           .disabled(router.isRetryingStartup)
           .padding(.top, 4)
         }
-      } else {
-        Text("Loading…")
-          .font(.headline)
-          .foregroundStyle(.secondary)
       }
     }
     .padding(24)

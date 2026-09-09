@@ -27,21 +27,23 @@ enum StartupLoadingReason: String, Sendable {
   case credentials
   case keychain
   case database
+  case profile
   case accountRecovery = "account_recovery"
   case presentation
 
-  static func current(status: AuthStatus, hasPendingAccountTransition: Bool) -> Self {
+  static func current(status: AuthStatus, hasPendingAccountTransition: Bool, persistentStorage: Bool) -> Self {
     guard !hasPendingAccountTransition else { return .accountRecovery }
     switch status {
     case .hydrating: return .credentials
     case .locked: return .keychain
     case .loggingOut: return .accountRecovery
-    case .authenticated, .authenticatedV3, .unauthenticated, .reauthRequired: return .database
+    case .authenticated, .authenticatedV3: return persistentStorage ? .profile : .database
+    case .unauthenticated, .reauthRequired: return .database
     }
   }
 
   var allowsRetry: Bool {
-    self == .credentials || self == .keychain || self == .database
+    self == .credentials || self == .keychain || self == .database || self == .profile
   }
 }
 
@@ -124,23 +126,24 @@ class MainWindowViewModel: ObservableObject {
   private var transitionTask: Task<Void, Never>?
   private var startupRetryTask: Task<Void, Never>?
 
-  init() {
+  @MainActor init() {
     topLevelRoute = TopLevelRoute.initial(
       for: Auth.shared.getStatus(),
       persistentStorage: AppDatabase.shared.isPersistent
     )
     startupLoadingReason = Self.currentStartupLoadingReason()
 
-    // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
-    Task { @MainActor [weak self] in
-      guard let self else { return }
-      Auth.shared.$status
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] status in
-          self?.handle(status: status)
-        }
-        .store(in: &cancellables)
-    }
+    // Seed from the ready credential cache instead of waiting for its initial UI replay.
+    // Keep subsequent transitions ordered, without another main-queue hop or restarting
+    // the local profile read when the initial authenticated status is replayed.
+    Auth.shared.$status
+      .dropFirst()
+      .prepend(Auth.shared.getStatus())
+      .removeDuplicates()
+      .sink { [weak self] status in
+        self?.handle(status: status)
+      }
+      .store(in: &cancellables)
   }
 
   deinit {
@@ -191,11 +194,12 @@ class MainWindowViewModel: ObservableObject {
       guard !Task.isCancelled,
             Auth.shared.getHasPendingAccountTransition() == false
       else { return }
-      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      if !AppDatabase.shared.isPersistent {
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      }
       guard !Task.isCancelled, AppDatabase.shared.isPersistent else { return }
       switch Auth.shared.getStatus() {
       case .authenticated, .authenticatedV3:
-        guard await Api.admitPersistentStorage() else { return }
         await self?.resolveAuthenticatedRoute()
       case .unauthenticated, .reauthRequired:
         self?.topLevelRoute = .onboarding
@@ -208,7 +212,8 @@ class MainWindowViewModel: ObservableObject {
   private static func currentStartupLoadingReason() -> StartupLoadingReason {
     .current(
       status: Auth.shared.getStatus(),
-      hasPendingAccountTransition: Auth.shared.getHasPendingAccountTransition()
+      hasPendingAccountTransition: Auth.shared.getHasPendingAccountTransition(),
+      persistentStorage: AppDatabase.shared.isPersistent
     )
   }
 
@@ -235,18 +240,18 @@ class MainWindowViewModel: ObservableObject {
       return
     }
 
-    // Keep onboarding mounted while admitting persistent storage and realtime. The transition to
-    // Main is then a single visible swap; only an actual admission failure enters startup recovery.
+    // Keep onboarding mounted until local storage and profile state choose the destination.
+    // Realtime startup must not delay a completed account's cached UI.
     guard Auth.shared.getHasPendingAccountTransition() == false else {
       topLevelRoute = .loading
       return
     }
     transitionTask = Task { @MainActor [weak self] in
-      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-      let realtimeAdmitted = await Api.admitPersistentStorage()
+      if !AppDatabase.shared.isPersistent {
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      }
       guard !Task.isCancelled else { return }
       guard AppDatabase.shared.isPersistent,
-            realtimeAdmitted,
             Auth.shared.getHasPendingAccountTransition() == false,
             Auth.shared.getStatus().isAuthenticated
       else {
@@ -286,6 +291,9 @@ class MainWindowViewModel: ObservableObject {
       guard (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
       onboardingInitialRoute = userID == nil ? .welcome : .profile
       topLevelRoute = userID == nil ? .main : .onboarding
+      PerformanceTrace.event("StartupRouteResolved", category: .launch)
+      // Publish the locally resolved route before waiting for any realtime owners.
+      _ = await Api.admitPersistentStorage()
     } catch {
       guard !Task.isCancelled,
             (try? Auth.shared.handle.validateAccountMutation(account)) != nil
@@ -312,11 +320,11 @@ class MainWindowViewModel: ObservableObject {
       case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          let realtimeAdmitted = await Api.admitPersistentStorage()
+          if !AppDatabase.shared.isPersistent {
+            _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          }
           guard !Task.isCancelled,
                 AppDatabase.shared.isPersistent,
-                realtimeAdmitted,
                 Auth.shared.getHasPendingAccountTransition() == false,
                 Auth.shared.getStatus().isAuthenticated
           else { return }
@@ -326,7 +334,9 @@ class MainWindowViewModel: ObservableObject {
       case .unauthenticated, .reauthRequired:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          if !AppDatabase.shared.isPersistent {
+            _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          }
           guard !Task.isCancelled,
                 AppDatabase.shared.isPersistent,
                 Auth.shared.getHasPendingAccountTransition() == false

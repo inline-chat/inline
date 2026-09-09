@@ -340,8 +340,8 @@ private struct MainWindowLoadingView: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      ProgressView()
       if showsRecovery {
+        ProgressView()
         Text("Inline is taking longer to open")
           .font(.headline)
         explanation
@@ -367,10 +367,6 @@ private struct MainWindowLoadingView: View {
             .frame(maxWidth: 380)
             .padding(.top, 6)
         }
-      } else {
-        Text("Loading...")
-          .font(.headline)
-          .foregroundStyle(.secondary)
       }
     }
     .padding(24)
@@ -397,6 +393,8 @@ private struct MainWindowLoadingView: View {
       Text("Inline can’t access your saved sign-in details. If macOS is showing a permission prompt, respond to it, then try again.")
     case .database:
       Text("Inline is still opening your local data. Quit and reopen Inline if this continues. Your saved data won’t be reset.")
+    case .profile:
+      Text("Inline couldn’t finish checking your saved profile. Check your connection, then try again.")
     case .accountRecovery:
       Text("Inline is finishing account recovery. Quit and reopen Inline to continue recovery safely.")
     case .presentation:

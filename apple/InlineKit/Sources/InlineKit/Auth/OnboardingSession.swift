@@ -1,6 +1,7 @@
 import Auth
 import Foundation
 import InlineProtocol
+import Logger
 import RealtimeV2
 
 /// Uses the existing account and connection owners for short onboarding operations.
@@ -28,22 +29,48 @@ public enum OnboardingSession {
   /// Resolve before constructing the authenticated root. A missing cache row is unknown, not complete.
   @MainActor
   public static func pendingProfileUserID() async throws -> Int64? {
-    let account = try Auth.shared.handle.beginAccountMutation()
-    var user = try await User.fetch(id: account.userID, from: AppDatabase.shared)
-    if user == nil {
+    try await pendingProfileUserID(database: AppDatabase.shared, auth: Auth.shared.handle) { account in
       let result = try await withConnection(realtime: Api.realtime, accountToken: account) { realtime in
         try await realtime.callRpcDirect(method: .getMe, input: .getMe(.init()), accountToken: account)
       }
-      guard case let .getMe(response) = result, response.hasUser, response.user.id == account.userID else {
+      guard case let .getMe(response) = result, response.hasUser else {
         throw RealtimeDirectRpcError.notAuthorized
       }
-      user = try await AppDatabase.shared.dbWriter.write { db in
-        try Auth.shared.handle.validateAccountMutation(account)
-        return try User.save(db, user: response.user)
+      return response.user
+    }
+  }
+
+  /// The normal path only reads local data. Construct/start realtime only in the missing-row branch.
+  @MainActor
+  static func pendingProfileUserID(
+    database: AppDatabase,
+    auth: AuthHandle,
+    fetchMissingUser: (AuthAccountMutationToken) async throws -> InlineProtocol.User
+  ) async throws -> Int64? {
+    try Task.checkCancellation()
+    let account = try auth.beginAccountMutation()
+    let cacheSpan = PerformanceTrace.begin("StartupProfileCacheRead", category: .launch)
+    var user: User?
+    do {
+      defer { cacheSpan.end() }
+      user = try await User.fetch(id: account.userID, from: database)
+    }
+    try Task.checkCancellation()
+    try auth.validateAccountMutation(account)
+    if user == nil {
+      let recoverySpan = PerformanceTrace.begin("StartupProfileRecovery", category: .launch)
+      defer { recoverySpan.end() }
+      let remoteUser = try await fetchMissingUser(account)
+      try Task.checkCancellation()
+      try auth.validateAccountMutation(account)
+      guard remoteUser.id == account.userID else { throw RealtimeDirectRpcError.notAuthorized }
+      user = try await database.dbWriter.write { db in
+        try auth.validateAccountMutation(account)
+        return try User.save(db, user: remoteUser)
       }
     }
     try Task.checkCancellation()
-    try Auth.shared.handle.validateAccountMutation(account)
+    try auth.validateAccountMutation(account)
     return requiresSetup(pendingSetup: user?.pendingSetup, firstName: user?.firstName) ? account.userID : nil
   }
 }
