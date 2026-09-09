@@ -15,6 +15,7 @@ import { updateChatInfo } from "@in/server/functions/messages.updateChatInfo"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { insertSystemMessage } from "@in/server/modules/systemMessages/insert"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { DialogFollowMode, MessageSubthread_Kind, MessageEntity_Type } from "@inline-chat/protocol/core"
 
@@ -177,6 +178,88 @@ describe("messages.createSubthread", () => {
     }
     expect(editedAnchor.editMessage.message?.replies?.chatId).toBe(BigInt(childChatId))
     expect(editedAnchor.editMessage.message?.subthread?.kind).toBe(MessageSubthread_Kind.REPLY)
+  })
+
+  test("projects usable reply-thread titles and hides only pending placeholders", async () => {
+    const creator = await testUtils.createUser("reply-thread-card-title@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    const anchorText = "Should the launch checklist include rollback ownership?"
+    const encryptedAnchor = encryptMessage(anchorText)
+    if (!encryptedAnchor) {
+      throw new Error("Anchor encryption failed")
+    }
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: creator.id,
+      textEncrypted: encryptedAnchor.encrypted,
+      textIv: encryptedAnchor.iv,
+      textTag: encryptedAnchor.authTag,
+    })
+
+    const replyThread = await createSubthread(
+      { parentChatId: BigInt(parentChat.id), parentMessageId: 1n },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const replyThreadId = Number(replyThread.chat.id)
+    const projectedTitle = async (): Promise<string | undefined> => {
+      const result = await getMessages(
+        {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: BigInt(parentChat.id) },
+            },
+          },
+          messageIds: [1n],
+        },
+        testUtils.functionContext({ userId: creator.id }),
+      )
+      return result.messages[0]?.subthread?.title
+    }
+
+    expect(await projectedTitle()).toBeUndefined()
+
+    await db
+      .update(schema.chats)
+      .set({
+        autoTitleGenerated: true,
+      })
+      .where(eq(schema.chats.id, replyThreadId))
+    expect(await projectedTitle()).toBe(anchorText)
+
+    await db
+      .update(schema.chats)
+      .set({
+        title: "Human-owned launch plan",
+        isUntitled: null,
+        autoTitleGenerated: false,
+      })
+      .where(eq(schema.chats.id, replyThreadId))
+    expect(await projectedTitle()).toBe("Human-owned launch plan")
+
+    await db
+      .update(schema.chats)
+      .set({
+        title: anchorText,
+        isUntitled: true,
+        autoTitleGenerated: null,
+      })
+      .where(eq(schema.chats.id, replyThreadId))
+    expect(await projectedTitle()).toBeUndefined()
+
+    await db
+      .update(schema.chats)
+      .set({
+        title: "Legacy generated launch plan",
+      })
+      .where(eq(schema.chats.id, replyThreadId))
+    expect(await projectedTitle()).toBe("Legacy generated launch plan")
   })
 
   test("retries one anchored creation as the same reply thread", async () => {

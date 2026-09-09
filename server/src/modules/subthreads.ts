@@ -11,6 +11,7 @@ import {
   users,
   type DbChat,
   type DbDialog,
+  type DbMessage,
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { Transaction } from "@in/server/db/types"
@@ -37,6 +38,7 @@ import {
   getInheritedAccessUserIds as resolveInheritedAccessUserIds,
   getTopLevelAccessUserIds as resolveTopLevelAccessUserIds,
 } from "@in/server/modules/authorization/threadAccess"
+import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 
 const log = new Log("modules.subthreads")
 
@@ -266,6 +268,15 @@ type ChildThreadProjection = {
   kind: MessageSubthread_Kind.REPLY | MessageSubthread_Kind.SUBTHREAD
   title: string | null
   isUntitled: boolean | null
+  autoTitleGenerated: boolean | null
+  anchorMessage?: ReplyThreadTitleAnchor
+}
+
+type StoredReplyThreadAnchor = {
+  text: DbMessage["text"]
+  textEncrypted: DbMessage["textEncrypted"]
+  textIv: DbMessage["textIv"]
+  textTag: DbMessage["textTag"]
 }
 
 type ThreadActivity = {
@@ -331,8 +342,14 @@ export async function getMessageThreadProjectionsByParent(input: {
       parentMessageId: chats.parentMessageId,
       title: chats.title,
       isUntitled: chats.isUntitled,
+      autoTitleGenerated: chats.autoTitleGenerated,
+      anchorText: messages.text,
+      anchorTextEncrypted: messages.textEncrypted,
+      anchorTextIv: messages.textIv,
+      anchorTextTag: messages.textTag,
     })
     .from(chats)
+    .leftJoin(messages, and(eq(messages.chatId, chats.parentChatId), eq(messages.messageId, chats.parentMessageId)))
     .where(replyParentFilter)
 
   const placedSubthreads = await query
@@ -342,6 +359,7 @@ export async function getMessageThreadProjectionsByParent(input: {
       parentMessageId: messages.messageId,
       title: chats.title,
       isUntitled: chats.isUntitled,
+      autoTitleGenerated: chats.autoTitleGenerated,
     })
     .from(subthreadParentMessages)
     .innerJoin(messages, eq(messages.globalId, subthreadParentMessages.parentMessageGlobalId))
@@ -351,10 +369,23 @@ export async function getMessageThreadProjectionsByParent(input: {
   const childThreads: ChildThreadProjection[] = [
     ...replyThreads.flatMap((thread): ChildThreadProjection[] =>
       thread.parentChatId == null || thread.parentMessageId == null ? [] : [{
-        ...thread,
+        chatId: thread.chatId,
         parentChatId: thread.parentChatId,
         parentMessageId: thread.parentMessageId,
         kind: MessageSubthread_Kind.REPLY,
+        title: thread.title,
+        isUntitled: thread.isUntitled,
+        autoTitleGenerated: thread.autoTitleGenerated,
+        anchorMessage: thread.isUntitled === true && thread.autoTitleGenerated == null
+          ? {
+              text: storedReplyThreadAnchorText({
+                text: thread.anchorText,
+                textEncrypted: thread.anchorTextEncrypted,
+                textIv: thread.anchorTextIv,
+                textTag: thread.anchorTextTag,
+              }),
+            }
+          : undefined,
       }]),
     ...placedSubthreads.map((thread): ChildThreadProjection => ({
       ...thread,
@@ -380,9 +411,7 @@ export async function getMessageThreadProjectionsByParent(input: {
       kind: childThread.kind,
       title: childThread.kind === MessageSubthread_Kind.SUBTHREAD
         ? title ?? GENERIC_SUBTHREAD_TITLE
-        : childThread.isUntitled === true
-          ? undefined
-          : title,
+        : usableReplyThreadTitle(childThread),
       messageCount: activity.messageCount,
       hasUnread: activity.hasUnread,
       recentAuthorUserIds: activity.recentAuthorUserIds,
@@ -432,6 +461,36 @@ const emptyThreadActivity: ThreadActivity = {
 const normalizedTitle = (title: string | null): string | undefined => {
   const normalized = title?.trim()
   return normalized ? normalized : undefined
+}
+
+const storedReplyThreadAnchorText = (anchor: StoredReplyThreadAnchor): string | null => {
+  if (anchor.textEncrypted && anchor.textIv && anchor.textTag) {
+    return decryptMessage({
+      encrypted: anchor.textEncrypted,
+      iv: anchor.textIv,
+      authTag: anchor.textTag,
+    })
+  }
+
+  return anchor.text
+}
+
+const usableReplyThreadTitle = (thread: ChildThreadProjection): string | undefined => {
+  const title = normalizedTitle(thread.title)
+  if (!title) {
+    return undefined
+  }
+
+  if (thread.autoTitleGenerated === true || thread.isUntitled !== true) {
+    return title
+  }
+
+  if (thread.autoTitleGenerated === false) {
+    return undefined
+  }
+
+  // Pre-completion-bit rows can only be classified against their exact anchor placeholder.
+  return isDefaultReplyThreadTitle(title, thread.anchorMessage) ? undefined : title
 }
 
 async function getThreadActivityByChatId(input: {
