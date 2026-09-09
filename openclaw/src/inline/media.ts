@@ -36,6 +36,7 @@ type InlineMediaLoadContext = {
   mediaAccess?: InlineMediaAccess
   mediaLocalRoots?: InlineMediaLocalRoots
   mediaReadFile?: InlineMediaReadFile
+  signal?: AbortSignal
 }
 type InlineWebMediaOptions = {
   maxBytes?: number
@@ -43,6 +44,7 @@ type InlineWebMediaOptions = {
   readFile?: InlineMediaReadFile
   hostReadCapability?: boolean
   workspaceDir?: string
+  signal?: AbortSignal
 }
 type LoadWebMediaCompat = (
   mediaUrl: string,
@@ -214,13 +216,14 @@ function buildInlineMediaLoadOptions(params: {
   const explicitLocalRoots = params.mediaAccess?.localRoots ?? params.mediaLocalRoots
   const readFile = params.mediaAccess?.readFile ?? params.mediaReadFile
   const workspaceDir = params.mediaAccess?.workspaceDir
+  const signal = params.signal
   const localRoots =
     explicitLocalRoots === "any" || explicitLocalRoots?.length
       ? explicitLocalRoots
       : readFile
         ? "any"
         : undefined
-  if (!localRoots && !readFile && !workspaceDir) {
+  if (!localRoots && !readFile && !workspaceDir && !signal) {
     return params.maxBytes
   }
   return {
@@ -228,6 +231,7 @@ function buildInlineMediaLoadOptions(params: {
     ...(localRoots ? { localRoots } : {}),
     ...(readFile ? { readFile, hostReadCapability: true } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
+    ...(signal ? { signal } : {}),
   }
 }
 
@@ -259,6 +263,7 @@ export async function uploadInlineMediaFromUrl(params: {
   mediaAccess?: InlineMediaAccess
   mediaLocalRoots?: readonly string[]
   mediaReadFile?: InlineMediaReadFile
+  signal?: AbortSignal
 }): Promise<InlineSdkSendMessageMedia> {
   const maxBytes = resolveMediaMaxBytes({
     cfg: params.cfg,
@@ -271,6 +276,7 @@ export async function uploadInlineMediaFromUrl(params: {
   let uploadType: InlineUploadType | undefined
   let fileName: string | undefined
   try {
+    params.signal?.throwIfAborted()
     loaded = await loadWebMediaCompat(
       params.mediaUrl,
       buildInlineMediaLoadOptions({
@@ -278,8 +284,10 @@ export async function uploadInlineMediaFromUrl(params: {
         ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
         ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
         ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+        ...(params.signal ? { signal: params.signal } : {}),
       }),
     )
+    params.signal?.throwIfAborted()
     if (!loaded) {
       throw new Error("inline media upload: media load returned no data")
     }
@@ -309,6 +317,7 @@ export async function uploadInlineMediaFromUrl(params: {
       file: loaded.buffer,
       fileName,
       ...(detectedMime ? { contentType: detectedMime } : {}),
+      ...(params.signal ? { signal: params.signal } : {}),
       ...(uploadType === "video"
         ? {
             width: DEFAULT_VIDEO_WIDTH,

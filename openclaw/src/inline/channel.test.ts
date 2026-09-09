@@ -339,8 +339,32 @@ describe("inline/channel", () => {
     })
     expect(inlineChannelPlugin.outbound.extractMarkdownImages).toBe(true)
     expect(inlineChannelPlugin.outbound.preferFinalAssistantVisibleText).toBe(true)
+    expect(inlineChannelPlugin.outbound.deliveryCapabilities?.durableFinal).toEqual({
+      text: true,
+      media: true,
+      payload: true,
+      silent: true,
+      replyTo: true,
+      thread: true,
+      nativeQuote: false,
+      messageSendingHooks: true,
+      batch: true,
+    })
     expect(inlineChannelPlugin.message).toMatchObject({
       id: "inline",
+      durableFinal: {
+        capabilities: {
+          text: true,
+          media: true,
+          payload: true,
+          silent: true,
+          replyTo: true,
+          thread: true,
+          nativeQuote: false,
+          messageSendingHooks: true,
+          batch: true,
+        },
+      },
       live: {
         capabilities: {
           draftPreview: true,
@@ -567,6 +591,8 @@ describe("inline/channel", () => {
     })).toBeUndefined()
     expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "8" })).toBe(true)
     expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "9" })).toBe(false)
+    expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:user:42", targetKey: "user:42" })).toBe(true)
+    expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:user:42", targetKey: "chat:42" })).toBe(false)
     const context = plugin.threading?.buildToolContext?.({ cfg: {}, context: {
       To: "inline:8", NativeChannelId: "7", CurrentMessageId: "123", MessageThreadId: "8",
     } })
@@ -2030,13 +2056,14 @@ describe("inline/channel", () => {
       },
     } satisfies OpenClawConfig
 
-    await inlineChannelPlugin.outbound.sendText?.({
+    const result = await inlineChannelPlugin.outbound.sendText?.({
       cfg,
       to: "chat:7",
       text: "hi",
       accountId: "default",
     } as any)
 
+    expect(result).toMatchObject({ channel: "inline", messageId: "", chatId: "7" })
     expect(connect).toHaveBeenCalled()
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 7n, text: "hi", parseMarkdown: true }),
@@ -2089,6 +2116,100 @@ describe("inline/channel", () => {
     )
   })
 
+  it("message sendText honors cancellation before provider dispatch", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const abortController = new AbortController()
+    abortController.abort(new Error("cancelled by host"))
+    const onPlatformSendDispatch = vi.fn(async () => {})
+    const assertDirectAdapterHandoff = vi.fn(() => {})
+
+    await expect(
+      inlineChannelPlugin.message?.send?.text?.({
+        cfg: {
+          channels: {
+            inline: {
+              token: "token",
+              baseUrl: "https://api.inline.chat",
+            },
+          },
+        } satisfies OpenClawConfig,
+        to: "chat:7",
+        text: "do not send",
+        accountId: "default",
+        signal: abortController.signal,
+        deliveryQueueId: "cancelled-delivery",
+        deliveryPartIndex: 0,
+        onPlatformSendDispatch,
+        assertDirectAdapterHandoff,
+      } as any),
+    ).rejects.toMatchObject({
+      name: "PlatformMessageNotDispatchedError",
+      code: "OPENCLAW_PLATFORM_MESSAGE_NOT_DISPATCHED",
+      retryable: true,
+    })
+
+    expect(connect).toHaveBeenCalledWith(abortController.signal)
+    expect(onPlatformSendDispatch).not.toHaveBeenCalled()
+    expect(assertDirectAdapterHandoff).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it.each(["text", "media"] as const)("message %s cancels during dispatch refresh before SDK handoff", async (kind) => {
+    vi.resetModules()
+    const controller = new AbortController()
+    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        sendMessage = sendMessage
+        uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
+        close = vi.fn(async () => {})
+      },
+    })
+    const loadWebMedia = vi.fn(async () => ({
+      buffer: Buffer.from([1, 2, 3]), contentType: "image/png", kind: "image", fileName: "image.png",
+    }))
+    mockOpenClawMediaSdk({ loadWebMedia, detectMime: vi.fn(async () => "image/png") })
+    await setInlineTestRuntime({ loadWebMedia, detectMime: vi.fn(async () => "image/png") })
+    const { inlineChannelPlugin } = await import("./channel")
+    const onDeliveryResult = vi.fn(async () => {})
+    const assertDirectAdapterHandoff = vi.fn(() => {})
+    await expect(inlineChannelPlugin.message?.send?.[kind]?.({
+      cfg: { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } },
+      to: "chat:7",
+      text: "cancel during refresh",
+      mediaUrl: "https://example.com/image.png",
+      signal: controller.signal,
+      onPlatformSendDispatch: async () => { controller.abort(new Error("cancelled during refresh")) },
+      assertDirectAdapterHandoff,
+      onDeliveryResult,
+    } as any)).rejects.toMatchObject({
+      name: "PlatformMessageNotDispatchedError",
+      message: "cancelled during refresh",
+    })
+    expect(assertDirectAdapterHandoff).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(onDeliveryResult).not.toHaveBeenCalled()
+  })
+
   it("outbound sendText suppresses copied OpenClaw runtime context", async () => {
     vi.resetModules()
 
@@ -2129,8 +2250,30 @@ describe("inline/channel", () => {
       ].join("\n"),
       accountId: "default",
     } as any)
+    const onDeliveryResult = vi.fn(async () => {})
+    const messageResult = await inlineChannelPlugin.message?.send?.text?.({
+      cfg,
+      to: "chat:7",
+      text: [
+        "OpenClaw runtime context for the immediately preceding user message.",
+        "This context is runtime-generated, not user-authored. Keep internal details private.",
+        "",
+        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+      ].join("\n"),
+      accountId: "default",
+      onDeliveryResult,
+    } as any)
 
-    expect(result).toMatchObject({ channel: "inline", messageId: "", chatId: "7" })
+    expect(result).toMatchObject({ outcome: "not_sent", channel: "inline", messageId: "", chatId: "7" })
+    expect(messageResult).toMatchObject({
+      outcome: "not_sent",
+      receipt: {
+        platformMessageIds: [],
+        parts: [],
+      },
+    })
+    expect(messageResult).not.toHaveProperty("messageId")
+    expect(onDeliveryResult).not.toHaveBeenCalled()
     expect(connect).not.toHaveBeenCalled()
     expect(sendMessage).not.toHaveBeenCalled()
     expect(close).not.toHaveBeenCalled()
@@ -2955,7 +3098,10 @@ describe("inline/channel", () => {
         mediaUrl: mediaPath,
         accountId: "default",
       } as any),
-    ).rejects.toThrow("not under an allowed directory")
+    ).rejects.toMatchObject({
+      name: "PlatformMessageNotDispatchedError",
+      message: expect.stringContaining("not under an allowed directory"),
+    })
 
     expect(loadWebMedia).toHaveBeenCalledTimes(1)
     expect(loadWebMedia).toHaveBeenCalledWith(mediaPath, expect.any(Number))
@@ -3042,12 +3188,21 @@ describe("inline/channel", () => {
     expect(close).toHaveBeenCalled()
   })
 
-  it("outbound sendPayload sends multi-media replies and routes thread payloads", async () => {
+  it("message sendPayload reports every multi-media delivery and reuses stable retry identities", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
     const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
-    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    const messageIdsByRandomId = new Map<bigint, bigint>()
+    const sendMessage = vi.fn(async (input: { randomId?: bigint }) => {
+      const randomId = input.randomId
+      if (randomId == null) return { messageId: null }
+      const existing = messageIdsByRandomId.get(randomId)
+      if (existing != null) return { messageId: existing }
+      const messageId = BigInt(55 + messageIdsByRandomId.size)
+      messageIdsByRandomId.set(randomId, messageId)
+      return { messageId }
+    })
     const close = vi.fn(async () => {})
 
     mockRealtimeSdk({
@@ -3095,9 +3250,14 @@ describe("inline/channel", () => {
       },
     } satisfies OpenClawConfig
 
-    await inlineChannelPlugin.outbound.sendPayload?.({
+    const abortController = new AbortController()
+    const onPlatformSendDispatch = vi.fn(async () => {})
+    const assertDirectAdapterHandoff = vi.fn(() => {})
+    const onDeliveryResult = vi.fn(async () => {})
+    const send = () => inlineChannelPlugin.message?.send?.payload?.({
       cfg,
       to: "chat:7",
+      text: "caption",
       payload: {
         text: "caption",
         mediaUrls: ["https://example.com/1.png", "https://example.com/2.png"],
@@ -3105,7 +3265,16 @@ describe("inline/channel", () => {
       replyToId: "9",
       threadId: "8",
       accountId: "default",
+      silent: true,
+      signal: abortController.signal,
+      deliveryQueueId: "delivery-queue-1",
+      deliveryPartIndex: 3,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
+      onDeliveryResult,
     } as any)
+    const firstResult = await send()
+    const secondResult = await send()
 
     expect(sendMessage).toHaveBeenNthCalledWith(
       1,
@@ -3114,17 +3283,62 @@ describe("inline/channel", () => {
         text: "caption",
         replyToMsgId: 9n,
         parseMarkdown: true,
+        sendMode: "silent",
+        randomId: expect.any(BigInt),
       }),
     )
     expect(sendMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         chatId: 8n,
+        sendMode: "silent",
+        randomId: expect.any(BigInt),
       }),
     )
     const secondCall = sendMessage.mock.calls[1]?.[0]
     expect(secondCall?.replyToMsgId).toBeUndefined()
     expect(secondCall?.parseMarkdown).toBeUndefined()
+    expect(secondCall?.randomId).not.toBe(sendMessage.mock.calls[0]?.[0]?.randomId)
+    expect(sendMessage.mock.calls[2]?.[0]?.randomId).toBe(sendMessage.mock.calls[0]?.[0]?.randomId)
+    expect(sendMessage.mock.calls[3]?.[0]?.randomId).toBe(sendMessage.mock.calls[1]?.[0]?.randomId)
+    expect(firstResult).toMatchObject({
+      messageId: "55",
+      receipt: {
+        primaryPlatformMessageId: "55",
+        platformMessageIds: ["55", "56"],
+      },
+    })
+    expect(secondResult).toMatchObject({
+      messageId: "55",
+      receipt: {
+        primaryPlatformMessageId: "55",
+        platformMessageIds: ["55", "56"],
+      },
+    })
+    expect(onDeliveryResult).toHaveBeenCalledTimes(4)
+    expect(onDeliveryResult).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ messageId: "55" }),
+    )
+    expect(onDeliveryResult).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ messageId: "56" }),
+    )
+    expect(onPlatformSendDispatch).toHaveBeenCalledTimes(4)
+    expect(assertDirectAdapterHandoff).toHaveBeenCalledTimes(4)
+    expect(connect).toHaveBeenCalledTimes(4)
+    expect(connect).toHaveBeenCalledWith(abortController.signal)
+    expect(uploadFile).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: abortController.signal }),
+    )
+
+    // A later upload failure must not erase the already acknowledged first part.
+    onDeliveryResult.mockClear()
+    uploadFile.mockResolvedValueOnce({ fileUniqueId: "INP_1", photoId: 101n })
+    uploadFile.mockRejectedValueOnce(new Error("second upload failed"))
+    await expect(send()).rejects.toMatchObject({ name: "PlatformMessageNotDispatchedError" })
+    expect(onDeliveryResult).toHaveBeenCalledTimes(1)
+    expect(onDeliveryResult).toHaveBeenCalledWith(expect.objectContaining({ messageId: "55" }))
   })
 
   it("outbound sendPayload maps presentation buttons to Inline actions", async () => {

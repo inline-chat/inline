@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { unlink } from "node:fs/promises"
 import path from "node:path"
 import {
@@ -8,7 +9,11 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/core"
 import { parseAgentSessionKey, parseThreadSessionSuffix } from "openclaw/plugin-sdk/routing"
-import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-outbound"
+import {
+  createChannelMessageAdapterFromOutbound,
+  createMessageReceiptFromOutboundResults,
+} from "openclaw/plugin-sdk/channel-outbound"
+import { PlatformMessageNotDispatchedError } from "openclaw/plugin-sdk/error-runtime"
 import {
   presentationToInteractiveReply,
   renderMessagePresentationFallbackText,
@@ -90,6 +95,45 @@ import {
 import { INLINE_DEFAULT_REQUIRE_MENTION } from "./config-schema.js"
 
 const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()
+
+type InlinePlatformSendResult = {
+  outcome?: "not_sent"
+  messageId: string
+  chatId: string
+}
+
+type InlinePlatformSendContext = {
+  signal?: AbortSignal | undefined
+  deliveryQueueId?: string | undefined
+  deliveryPartIndex?: number | undefined
+  deliverySubpartIndex?: number | undefined
+  onPlatformSendDispatch?: (() => Promise<void>) | undefined
+  assertDirectAdapterHandoff?: (() => void) | undefined
+}
+
+function inlineErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function asInlinePlatformNotDispatched(error: unknown): PlatformMessageNotDispatchedError {
+  if (error instanceof PlatformMessageNotDispatchedError) return error
+  return new PlatformMessageNotDispatchedError(inlineErrorMessage(error), { cause: error })
+}
+
+function deriveInlineDeliveryRandomId(context: InlinePlatformSendContext): bigint | undefined {
+  const queueId = context.deliveryQueueId?.trim()
+  if (!queueId) return undefined
+  const digest = createHash("sha256")
+    .update("openclaw:inline:delivery:v1\0")
+    .update(queueId)
+    .update("\0")
+    .update(String(context.deliveryPartIndex ?? 0))
+    .update("\0")
+    .update(String(context.deliverySubpartIndex ?? 0))
+    .digest()
+  const value = digest.readBigInt64BE(0)
+  return value === 0n ? 1n : value
+}
 
 function resolveInlineStatePath(accountId: string): string {
   return path.join(getInlineRuntime().state.resolveStateDir(), "channels", "inline", `${accountId}.json`)
@@ -463,7 +507,7 @@ function normalizeInlineConversationId(raw: string): string | null {
 function resolveInlineSessionTarget(params: { id: string }): string | undefined {
   const raw = params.id.trim().replace(/^inline:/i, "").trim()
   if (!raw) return undefined
-  const target = /^chat:/i.test(raw) ? raw : `chat:${raw}`
+  const target = /^(?:chat|user):/i.test(raw) ? raw : `chat:${raw}`
   try {
     return parseInlineExplicitTarget(target)?.to
   } catch {
@@ -905,33 +949,36 @@ async function sendMessageInline(params: {
   accountId?: string | null
   replyToId?: string | null
   threadId?: string | number | null
-}): Promise<{ messageId: string; chatId: string }> {
-  const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
-  if (!account.configured || !account.baseUrl) {
-    throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
-  }
-  const token = await resolveInlineToken(account)
-
-  const target = parseInlineOutboundTarget({
-    raw: params.to,
-    context: "sendText",
-  })
-  const visibleText = sanitizeInlineVisibleText(params.text)
-  if (visibleText.shouldSkip) {
-    return {
-      messageId: "",
-      chatId: target.kind === "user" ? `user:${target.normalizedNumeric}` : target.normalizedNumeric,
-    }
-  }
-  const text = sanitizeInlineOutgoingText(visibleText.text)
-
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-
-  await client.connect()
+  silent?: boolean | undefined
+} & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
+  let platformSendStarted = false
+  let client: InlineSdkClient | null = null
   try {
+    const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
+    if (!account.configured || !account.baseUrl) {
+      throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
+    }
+    const token = await resolveInlineToken(account)
+    const target = parseInlineOutboundTarget({
+      raw: params.to,
+      context: "sendText",
+    })
+    const visibleText = sanitizeInlineVisibleText(params.text)
+    if (visibleText.shouldSkip) {
+      return {
+        outcome: "not_sent",
+        messageId: "",
+        chatId: target.kind === "user" ? `user:${target.normalizedNumeric}` : target.normalizedNumeric,
+      }
+    }
+    const text = sanitizeInlineOutgoingText(visibleText.text)
+
+    client = new InlineSdkClient({
+      baseUrl: account.baseUrl,
+      token,
+    })
+    await client.connect(params.signal)
+
     // Inline "threads" are modeled as chats (chatId). OpenClaw's threadId is not a message id.
     // Only map OpenClaw replyToId -> Inline replyToMsgId.
     const replyToMsgId = parseInlineId(params.replyToId)
@@ -949,13 +996,22 @@ async function sendMessageInline(params: {
             threadId: params.threadId ?? null,
           })
         : null
+    const randomId = deriveInlineDeliveryRandomId(params)
+    params.signal?.throwIfAborted()
+    await params.onPlatformSendDispatch?.()
+    // No await between the final cancellation/custody checks and SDK handoff.
+    params.signal?.throwIfAborted()
+    params.assertDirectAdapterHandoff?.()
+    platformSendStarted = true
     const result = await client
       .sendMessage({
         ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
         text,
+        ...(randomId != null ? { randomId } : {}),
         ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         parseMarkdown: account.config.parseMarkdown ?? true,
+        ...(params.silent ? { sendMode: "silent" as const } : {}),
       })
       .catch((error: unknown) => {
         throw wrapInlineTargetError({
@@ -965,8 +1021,6 @@ async function sendMessageInline(params: {
           resolvedTarget,
         })
       })
-    const bestEffort =
-      result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     if (resolvedTarget.kind === "chat") {
       recordInlineOutboundThreadParticipation({
         accountId: account.accountId,
@@ -976,12 +1030,15 @@ async function sendMessageInline(params: {
       })
     }
     return {
-      messageId: bestEffort,
+      messageId: result.messageId != null ? String(result.messageId) : "",
       chatId:
         effectiveChatId != null ? String(effectiveChatId) : formatInlineResultChatId(resolvedTarget),
     }
+  } catch (error) {
+    if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
+    throw error
   } finally {
-    await client.close().catch(() => {})
+    await client?.close().catch(() => {})
   }
 }
 
@@ -997,28 +1054,30 @@ async function sendMediaInline(params: {
   mediaAccess?: Parameters<typeof uploadInlineMediaFromUrl>[0]["mediaAccess"]
   mediaLocalRoots?: readonly string[]
   mediaReadFile?: (filePath: string) => Promise<Buffer>
-}): Promise<{ messageId: string; chatId: string }> {
-  const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
-  if (!account.configured || !account.baseUrl) {
-    throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
-  }
-  const token = await resolveInlineToken(account)
-
-  const target = parseInlineOutboundTarget({
-    raw: params.to,
-    context: "sendMedia",
-  })
-  const replyToMsgId = parseInlineId(params.replyToId)
-  const visibleText = sanitizeInlineVisibleText(params.text)
-  const caption = visibleText.shouldSkip ? "" : sanitizeInlineOutgoingText(visibleText.text).trim()
-
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-
-  await client.connect()
+  silent?: boolean | undefined
+} & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
+  let platformSendStarted = false
+  let client: InlineSdkClient | null = null
   try {
+    const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
+    if (!account.configured || !account.baseUrl) {
+      throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
+    }
+    const token = await resolveInlineToken(account)
+    const target = parseInlineOutboundTarget({
+      raw: params.to,
+      context: "sendMedia",
+    })
+    const replyToMsgId = parseInlineId(params.replyToId)
+    const visibleText = sanitizeInlineVisibleText(params.text)
+    const caption = visibleText.shouldSkip ? "" : sanitizeInlineOutgoingText(visibleText.text).trim()
+
+    client = new InlineSdkClient({
+      baseUrl: account.baseUrl,
+      token,
+    })
+    await client.connect(params.signal)
+
     const resolvedTarget = await resolveInlineOutboundTarget({
       client,
       context: "sendMedia",
@@ -1041,15 +1100,25 @@ async function sendMediaInline(params: {
       ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
       ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
       ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+      ...(params.signal ? { signal: params.signal } : {}),
     })
+    const randomId = deriveInlineDeliveryRandomId(params)
+    params.signal?.throwIfAborted()
+    await params.onPlatformSendDispatch?.()
+    // No await between the final cancellation/custody checks and SDK handoff.
+    params.signal?.throwIfAborted()
+    params.assertDirectAdapterHandoff?.()
+    platformSendStarted = true
     const result = await client
       .sendMessage({
         ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
         ...(caption ? { text: caption } : {}),
         media,
+        ...(randomId != null ? { randomId } : {}),
         ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         ...(caption ? { parseMarkdown: account.config.parseMarkdown ?? true } : {}),
+        ...(params.silent ? { sendMode: "silent" as const } : {}),
       })
       .catch((error: unknown) => {
         throw wrapInlineTargetError({
@@ -1059,8 +1128,6 @@ async function sendMediaInline(params: {
           resolvedTarget,
         })
       })
-    const bestEffort =
-      result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     if (resolvedTarget.kind === "chat") {
       recordInlineOutboundThreadParticipation({
         accountId: account.accountId,
@@ -1070,12 +1137,15 @@ async function sendMediaInline(params: {
       })
     }
     return {
-      messageId: bestEffort,
+      messageId: result.messageId != null ? String(result.messageId) : "",
       chatId:
         effectiveChatId != null ? String(effectiveChatId) : formatInlineResultChatId(resolvedTarget),
     }
+  } catch (error) {
+    if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
+    throw error
   } finally {
-    await client.close().catch(() => {})
+    await client?.close().catch(() => {})
   }
 }
 
@@ -1213,8 +1283,23 @@ const resolveInlineAllowlistGroupOverrides = createFlatAllowlistOverrideResolver
   resolveEntries: (value) => value?.allowFrom,
 })
 
+const inlineDurableFinalDeliveryCapabilities = {
+  text: true,
+  media: true,
+  payload: true,
+  silent: true,
+  replyTo: true,
+  thread: true,
+  nativeQuote: false,
+  messageSendingHooks: true,
+  batch: true,
+} as const
+
 const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound"]> = {
   deliveryMode: "direct",
+  deliveryCapabilities: {
+    durableFinal: inlineDurableFinalDeliveryCapabilities,
+  },
   targetsMatchForReplySuppression: ({ originTarget, targetKey, targetThreadId }) => {
     const origin = resolveInlineSessionTarget({ id: originTarget })
     const destination = resolveInlineSessionTarget({ id: targetThreadId ?? targetKey })
@@ -1247,17 +1332,25 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
       ...(interactive ? { interactive } : {}),
     }
   },
-  sendPayload: async ({
-    cfg,
-    to,
-    payload,
-    accountId,
-    replyToId,
-    threadId,
-    mediaAccess,
-    mediaLocalRoots,
-    mediaReadFile,
-  }) => {
+  sendPayload: async (context) => {
+    const {
+      cfg,
+      to,
+      payload,
+      accountId,
+      replyToId,
+      threadId,
+      mediaAccess,
+      mediaLocalRoots,
+      mediaReadFile,
+      silent,
+      deliveryQueueId,
+      deliveryPartIndex,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
+      onDeliveryResult,
+    } = context
+    const { signal } = context as typeof context & Pick<InlinePlatformSendContext, "signal">
     const text =
       resolveInlineInteractiveTextFallback({
         text: payload.text ?? undefined,
@@ -1269,11 +1362,13 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     const payloadReplyToId = typeof payload.replyToId === "string" ? payload.replyToId.trim() : null
     const effectiveReplyToId = payloadReplyToId || replyToId || null
     const actions = resolveInlinePayloadActions(payload as Record<string, unknown>)
-    const mediaUrls = payload.mediaUrls?.length
+    const mediaUrls = (payload.mediaUrls?.length
       ? payload.mediaUrls
       : payload.mediaUrl
         ? [payload.mediaUrl]
-        : []
+        : [])
+      .map((url) => url.trim())
+      .filter(Boolean)
 
     if (mediaUrls.length === 0) {
       const result = await sendMessageInline({
@@ -1284,16 +1379,35 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
         accountId: accountId ?? null,
         replyToId: effectiveReplyToId,
         threadId: threadId ?? null,
+        silent,
+        signal,
+        deliveryQueueId,
+        deliveryPartIndex,
+        onPlatformSendDispatch,
+        assertDirectAdapterHandoff,
       })
-      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+      const delivery = {
+        ...(result.outcome ? { outcome: result.outcome } : {}),
+        channel: "inline" as const,
+        to,
+        messageId: result.messageId,
+        chatId: result.chatId,
+      }
+      if (result.outcome !== "not_sent") await onDeliveryResult?.(delivery)
+      return delivery
     }
 
-    let finalResult: { messageId: string; chatId: string } | null = null
+    const deliveries: Array<{
+      channel: "inline"
+      to: string
+      messageId: string
+      chatId: string
+    }> = []
     for (let index = 0; index < mediaUrls.length; index += 1) {
       const mediaUrl = mediaUrls[index]
-      if (!mediaUrl?.trim()) continue
+      if (!mediaUrl) continue
       const isFirst = index === 0
-      finalResult = await sendMediaInline({
+      const result = await sendMediaInline({
         cfg,
         to,
         text: isFirst ? text : "",
@@ -1305,9 +1419,25 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
         ...(mediaAccess ? { mediaAccess } : {}),
         ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
         ...(mediaReadFile ? { mediaReadFile } : {}),
+        silent,
+        signal,
+        deliveryQueueId,
+        deliveryPartIndex,
+        deliverySubpartIndex: index,
+        onPlatformSendDispatch,
+        assertDirectAdapterHandoff,
       })
+      const delivery = {
+        channel: "inline" as const,
+        to,
+        messageId: result.messageId,
+        chatId: result.chatId,
+      }
+      deliveries.push(delivery)
+      await onDeliveryResult?.(delivery)
     }
 
+    const finalResult = deliveries.at(-1)
     if (!finalResult) {
       const result = await sendMessageInline({
         cfg,
@@ -1317,12 +1447,51 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
         accountId: accountId ?? null,
         replyToId: effectiveReplyToId,
         threadId: threadId ?? null,
+        silent,
+        signal,
+        deliveryQueueId,
+        deliveryPartIndex,
+        onPlatformSendDispatch,
+        assertDirectAdapterHandoff,
       })
-      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+      const delivery = {
+        ...(result.outcome ? { outcome: result.outcome } : {}),
+        channel: "inline" as const,
+        to,
+        messageId: result.messageId,
+        chatId: result.chatId,
+      }
+      if (result.outcome !== "not_sent") await onDeliveryResult?.(delivery)
+      return delivery
     }
-    return { channel: "inline", to, messageId: finalResult.messageId, chatId: finalResult.chatId }
+    const receipt = createMessageReceiptFromOutboundResults({
+      results: deliveries,
+      kind: "media",
+      ...(threadId != null ? { threadId: String(threadId) } : {}),
+      ...(effectiveReplyToId ? { replyToId: effectiveReplyToId } : {}),
+    })
+    return {
+      ...finalResult,
+      messageId: receipt.primaryPlatformMessageId ?? finalResult.messageId,
+      receipt,
+    }
   },
-  sendText: async ({ cfg, to, text, accountId, replyToId, threadId }) => {
+  sendText: async (context) => {
+    const {
+      cfg,
+      to,
+      text,
+      accountId,
+      replyToId,
+      threadId,
+      silent,
+      deliveryQueueId,
+      deliveryPartIndex,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
+      onDeliveryResult,
+    } = context
+    const { signal } = context as typeof context & Pick<InlinePlatformSendContext, "signal">
     // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
     const result = await sendMessageInline({
       cfg,
@@ -1331,21 +1500,43 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
       accountId: accountId ?? null,
       replyToId: replyToId ?? null,
       threadId: threadId ?? null,
+      silent,
+      signal,
+      deliveryQueueId,
+      deliveryPartIndex,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
     })
-    return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+    const delivery = {
+      ...(result.outcome ? { outcome: result.outcome } : {}),
+      channel: "inline" as const,
+      to,
+      messageId: result.messageId,
+      chatId: result.chatId,
+    }
+    if (result.outcome !== "not_sent") await onDeliveryResult?.(delivery)
+    return delivery
   },
-  sendMedia: async ({
-    cfg,
-    to,
-    text,
-    mediaUrl,
-    accountId,
-    replyToId,
-    threadId,
-    mediaAccess,
-    mediaLocalRoots,
-    mediaReadFile,
-  }) => {
+  sendMedia: async (context) => {
+    const {
+      cfg,
+      to,
+      text,
+      mediaUrl,
+      accountId,
+      replyToId,
+      threadId,
+      mediaAccess,
+      mediaLocalRoots,
+      mediaReadFile,
+      silent,
+      deliveryQueueId,
+      deliveryPartIndex,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
+      onDeliveryResult,
+    } = context
+    const { signal } = context as typeof context & Pick<InlinePlatformSendContext, "signal">
     if (!mediaUrl) {
       const result = await sendMessageInline({
         cfg,
@@ -1354,8 +1545,22 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
         accountId: accountId ?? null,
         replyToId: replyToId ?? null,
         threadId: threadId ?? null,
+        silent,
+        signal,
+        deliveryQueueId,
+        deliveryPartIndex,
+        onPlatformSendDispatch,
+        assertDirectAdapterHandoff,
       })
-      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+      const delivery = {
+        ...(result.outcome ? { outcome: result.outcome } : {}),
+        channel: "inline" as const,
+        to,
+        messageId: result.messageId,
+        chatId: result.chatId,
+      }
+      if (result.outcome !== "not_sent") await onDeliveryResult?.(delivery)
+      return delivery
     }
 
     // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
@@ -1370,8 +1575,21 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
       ...(mediaAccess ? { mediaAccess } : {}),
       ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
       ...(mediaReadFile ? { mediaReadFile } : {}),
+      silent,
+      signal,
+      deliveryQueueId,
+      deliveryPartIndex,
+      onPlatformSendDispatch,
+      assertDirectAdapterHandoff,
     })
-    return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+    const delivery = {
+      channel: "inline" as const,
+      to,
+      messageId: result.messageId,
+      chatId: result.chatId,
+    }
+    await onDeliveryResult?.(delivery)
+    return delivery
   },
 }
 
@@ -1394,21 +1612,46 @@ function toInlineMessageBridgeResult(
 const inlineMessageAdapter = createChannelMessageAdapterFromOutbound<OpenClawConfig>({
   id: "inline",
   outbound: {
-    sendText: async ({ onDeliveryResult, ...ctx }) => {
-      const result = toInlineMessageBridgeResult(await inlineOutbound.sendText!(ctx))
-      await onDeliveryResult?.(result)
-      return result
-    },
-    sendMedia: async ({ onDeliveryResult, ...ctx }) => {
-      const result = toInlineMessageBridgeResult(await inlineOutbound.sendMedia!(ctx))
-      await onDeliveryResult?.(result)
-      return result
-    },
-    sendPayload: async ({ onDeliveryResult, ...ctx }) => {
-      const result = toInlineMessageBridgeResult(await inlineOutbound.sendPayload!(ctx))
-      await onDeliveryResult?.(result)
-      return result
-    },
+    deliveryCapabilities: { durableFinal: inlineDurableFinalDeliveryCapabilities },
+    sendText: async ({ onDeliveryResult, ...ctx }) =>
+      toInlineMessageBridgeResult(
+        await inlineOutbound.sendText!({
+          ...ctx,
+          ...(onDeliveryResult
+            ? {
+                onDeliveryResult: async (result) => {
+                  await onDeliveryResult(toInlineMessageBridgeResult(result))
+                },
+              }
+            : {}),
+        } as Parameters<NonNullable<typeof inlineOutbound.sendText>>[0]),
+      ),
+    sendMedia: async ({ onDeliveryResult, ...ctx }) =>
+      toInlineMessageBridgeResult(
+        await inlineOutbound.sendMedia!({
+          ...ctx,
+          ...(onDeliveryResult
+            ? {
+                onDeliveryResult: async (result) => {
+                  await onDeliveryResult(toInlineMessageBridgeResult(result))
+                },
+              }
+            : {}),
+        } as Parameters<NonNullable<typeof inlineOutbound.sendMedia>>[0]),
+      ),
+    sendPayload: async ({ onDeliveryResult, ...ctx }) =>
+      toInlineMessageBridgeResult(
+        await inlineOutbound.sendPayload!({
+          ...ctx,
+          ...(onDeliveryResult
+            ? {
+                onDeliveryResult: async (result) => {
+                  await onDeliveryResult(toInlineMessageBridgeResult(result))
+                },
+              }
+            : {}),
+        } as Parameters<NonNullable<typeof inlineOutbound.sendPayload>>[0]),
+      ),
   },
   live: {
     capabilities: {
