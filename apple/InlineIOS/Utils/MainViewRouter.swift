@@ -12,6 +12,7 @@ public enum MainRoutes: Equatable {
   case onboarding
 }
 
+@MainActor
 public class MainViewRouter: ObservableObject {
   let onboardingNavigation = OnboardingNavigation()
   @Published var route: MainRoutes
