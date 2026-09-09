@@ -51,6 +51,7 @@ describe("oauth authorize proxy", () => {
     const [url, init] = fetchMock.mock.calls.at(-1) ?? []
     expect(String(url)).toBe("https://api.inline.chat/oauth/authorize/send-email-code")
     expect((init as RequestInit).method).toBe("POST")
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal)
   })
 
   it("forwards token and revoke aliases", async () => {

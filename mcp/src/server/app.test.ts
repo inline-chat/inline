@@ -86,6 +86,23 @@ describe("mcp app", () => {
     expect(await res.json()).toEqual({ error: "oauth_upstream_unavailable" })
   })
 
+  it("rejects oversized oauth proxy bodies before contacting upstream", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }))
+    const app = createApp({
+      issuer: "https://mcp.inline.chat",
+      oauthProxyBaseUrl: "https://api.inline.chat",
+    })
+
+    const res = await app.fetch(new Request("https://mcp.inline.chat/oauth/token", {
+      method: "POST",
+      body: "x".repeat(64 * 1024 + 1),
+    }))
+
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: "request_too_large" })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("rate limits mcp initialization requests", async () => {
     const app = createApp({
       issuer: "http://localhost:1234",

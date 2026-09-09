@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer"
 import { lookup } from "node:dns/promises"
-import { isIP } from "node:net"
+import { request as httpsRequest } from "node:https"
+import { BlockList, isIP } from "node:net"
 import * as z from "zod/v4"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
@@ -23,6 +24,7 @@ import { logMessagesSendAudit } from "./audit-log"
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 const MAX_UPLOAD_REDIRECTS = 3
+const UPLOAD_DNS_TIMEOUT_MS = 5_000
 const UPLOAD_FETCH_TIMEOUT_MS = 15_000
 const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
@@ -462,7 +464,7 @@ function parseIpv4(address: string): number[] | null {
 function isPrivateIpv4(address: string): boolean {
   const octets = parseIpv4(address)
   if (!octets) return true
-  const [a, b] = octets
+  const [a, b, c] = octets
   if (a === 10) return true
   if (a === 127) return true
   if (a === 169 && b === 254) return true
@@ -470,31 +472,41 @@ function isPrivateIpv4(address: string): boolean {
   if (a === 192 && b === 168) return true
   if (a === 100 && b >= 64 && b <= 127) return true
   if (a === 0) return true
+  if (a === 192 && b === 0 && c === 0) return true
+  if (a === 192 && b === 0 && c === 2) return true
+  if (a === 192 && b === 31 && c === 196) return true
+  if (a === 192 && b === 52 && c === 193) return true
+  if (a === 192 && b === 88 && c === 99) return true
+  if (a === 192 && b === 175 && c === 48) return true
+  if (a === 198 && (b === 18 || b === 19)) return true
+  if (a === 198 && b === 51 && c === 100) return true
+  if (a === 203 && b === 0 && c === 113) return true
   if (a >= 224) return true
   return false
 }
 
+const globalIpv6Range = new BlockList()
+globalIpv6Range.addSubnet("2000::", 3, "ipv6")
+const specialIpv6Ranges = new BlockList()
+specialIpv6Ranges.addSubnet("2001::", 23, "ipv6")
+specialIpv6Ranges.addSubnet("2001:db8::", 32, "ipv6")
+specialIpv6Ranges.addSubnet("2002::", 16, "ipv6")
+specialIpv6Ranges.addSubnet("3fff::", 20, "ipv6")
+
 function isPrivateIpv6(address: string): boolean {
   const lowered = address.toLowerCase().split("%", 1)[0] ?? ""
   if (!lowered) return true
-  if (lowered === "::" || lowered === "::1") return true
-  if (lowered.startsWith("fc") || lowered.startsWith("fd")) return true
-  if (lowered.startsWith("fe8") || lowered.startsWith("fe9") || lowered.startsWith("fea") || lowered.startsWith("feb")) return true
-  if (lowered.startsWith("ff")) return true
-  if (lowered.startsWith("2001:db8")) return true
-  const mappedV4 = lowered.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-  if (mappedV4) return isPrivateIpv4(mappedV4[1] ?? "")
-  return false
+  return !globalIpv6Range.check(lowered, "ipv6") || specialIpv6Ranges.check(lowered, "ipv6")
 }
 
-function isPrivateAddress(address: string): boolean {
+export function isUnsafeRemoteAddress(address: string): boolean {
   const ipVersion = isIP(address)
   if (ipVersion === 4) return isPrivateIpv4(address)
   if (ipVersion === 6) return isPrivateIpv6(address)
   return true
 }
 
-async function assertSafeRemoteUrl(url: URL): Promise<void> {
+async function resolveSafeRemoteAddress(url: URL): Promise<{ address: string; hostname: string }> {
   if (url.protocol !== "https:") {
     throw new Error("url must use https")
   }
@@ -502,31 +514,43 @@ async function assertSafeRemoteUrl(url: URL): Promise<void> {
     throw new Error("url must not include credentials")
   }
 
-  const hostname = url.hostname.trim().toLowerCase().replace(/\.+$/, "")
+  const rawHostname = url.hostname.trim().toLowerCase()
+  const hostname = (rawHostname.startsWith("[") && rawHostname.endsWith("]")
+    ? rawHostname.slice(1, -1)
+    : rawHostname).replace(/\.+$/, "")
   if (!hostname) throw new Error("invalid url hostname")
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
     throw new Error("url host is not allowed")
   }
 
   if (isIP(hostname)) {
-    if (isPrivateAddress(hostname)) {
+    if (isUnsafeRemoteAddress(hostname)) {
       throw new Error("url host resolves to a private or local address")
     }
-    return
+    return { address: hostname, hostname }
   }
 
   let resolved: { address: string }[]
+  let dnsTimer: ReturnType<typeof setTimeout> | undefined
   try {
-    resolved = await lookup(hostname, { all: true, verbatim: true })
+    resolved = await Promise.race([
+      lookup(hostname, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) => {
+        dnsTimer = setTimeout(() => reject(new Error("dns lookup timed out")), UPLOAD_DNS_TIMEOUT_MS)
+      }),
+    ])
   } catch {
     throw new Error("unable to resolve url host")
+  } finally {
+    if (dnsTimer) clearTimeout(dnsTimer)
   }
   if (resolved.length === 0) throw new Error("unable to resolve url host")
   for (const address of resolved) {
-    if (isPrivateAddress(address.address)) {
+    if (isUnsafeRemoteAddress(address.address)) {
       throw new Error("url host resolves to a private or local address")
     }
   }
+  return { address: resolved[0]!.address, hostname }
 }
 
 function isRedirectStatus(status: number): boolean {
@@ -580,38 +604,91 @@ function redactUrl(raw: URL): string {
   return url.toString()
 }
 
-async function readResponseBytesLimited(response: Response, maxBytes: number): Promise<Uint8Array> {
-  const body = response.body
-  if (!body) return new Uint8Array()
-  const reader = body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
+type PinnedHttpsResponse = { status: number; headers: Headers; bytes: Uint8Array }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    total += value.byteLength
-    if (total > maxBytes) {
-      try {
-        await reader.cancel("file_too_large")
-      } catch {
-      }
-      throw new Error(`file exceeds ${maxBytes} bytes limit`)
+function fetchPinnedHttps(url: URL, target: { address: string; hostname: string }): Promise<PinnedHttpsResponse> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (result: PinnedHttpsResponse) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(result)
     }
-    chunks.push(value)
-  }
+    const fail = (error: unknown) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      reject(error)
+    }
 
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return out
+    const request = httpsRequest({
+      protocol: "https:",
+      hostname: target.address,
+      port: url.port ? Number(url.port) : 443,
+      method: "GET",
+      path: `${url.pathname}${url.search}`,
+      servername: isIP(target.hostname) ? undefined : target.hostname,
+      rejectUnauthorized: true,
+      headers: { accept: "*/*", "accept-encoding": "identity", host: url.host },
+    }, (response) => {
+      const headers = new Headers()
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) headers.append(name, item)
+        } else if (value !== undefined) {
+          headers.set(name, value)
+        }
+      }
+      const status = response.statusCode ?? 502
+      if (isRedirectStatus(status) || status < 200 || status >= 300) {
+        response.destroy()
+        finish({ status, headers, bytes: new Uint8Array() })
+        return
+      }
+
+      const contentEncoding = headers.get("content-encoding")?.trim().toLowerCase()
+      if (contentEncoding && contentEncoding !== "identity") {
+        response.destroy()
+        fail(new Error("url source returned unsupported content encoding"))
+        return
+      }
+
+      const contentLengthHeader = headers.get("content-length")
+      if (contentLengthHeader) {
+        const parsed = Number(contentLengthHeader)
+        if (Number.isFinite(parsed) && parsed > MAX_UPLOAD_BYTES) {
+          response.destroy()
+          fail(new Error(`file exceeds ${MAX_UPLOAD_BYTES} bytes limit`))
+          return
+        }
+      }
+
+      const chunks: Buffer[] = []
+      let total = 0
+      response.on("data", (chunk: Buffer) => {
+        total += chunk.byteLength
+        if (total > MAX_UPLOAD_BYTES) {
+          response.destroy()
+          fail(new Error(`file exceeds ${MAX_UPLOAD_BYTES} bytes limit`))
+          return
+        }
+        chunks.push(chunk)
+      })
+      response.once("end", () => {
+        const bytes = Buffer.concat(chunks, total)
+        finish({ status, headers, bytes: Uint8Array.from(bytes) })
+      })
+      response.once("error", fail)
+    })
+    request.once("error", fail)
+    timer = setTimeout(() => request.destroy(new Error("url source request timed out")), UPLOAD_FETCH_TIMEOUT_MS)
+    request.end()
+  })
 }
 
-async function loadUploadSourceFromUrl(urlInput: string): Promise<ResolvedUploadSource> {
+export async function loadUploadSourceFromUrl(urlInput: string): Promise<ResolvedUploadSource> {
   let current: URL
   try {
     current = new URL(urlInput)
@@ -620,24 +697,13 @@ async function loadUploadSourceFromUrl(urlInput: string): Promise<ResolvedUpload
   }
 
   for (let redirectCount = 0; redirectCount <= MAX_UPLOAD_REDIRECTS; redirectCount++) {
-    await assertSafeRemoteUrl(current)
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), UPLOAD_FETCH_TIMEOUT_MS)
-    let response: Response
+    const target = await resolveSafeRemoteAddress(current)
+    let response: PinnedHttpsResponse
     try {
-      response = await fetch(current, {
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          accept: "*/*",
-        },
-      })
+      response = await fetchPinnedHttps(current, target)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`failed to fetch url source (${message})`)
-    } finally {
-      clearTimeout(timeout)
     }
 
     if (isRedirectStatus(response.status)) {
@@ -647,19 +713,10 @@ async function loadUploadSourceFromUrl(urlInput: string): Promise<ResolvedUpload
       continue
     }
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`url source responded with status ${response.status}`)
     }
-
-    const contentLengthHeader = response.headers.get("content-length")
-    if (contentLengthHeader) {
-      const parsed = Number(contentLengthHeader)
-      if (Number.isFinite(parsed) && parsed > MAX_UPLOAD_BYTES) {
-        throw new Error(`file exceeds ${MAX_UPLOAD_BYTES} bytes limit`)
-      }
-    }
-
-    const bytes = await readResponseBytesLimited(response, MAX_UPLOAD_BYTES)
+    const bytes = response.bytes
     if (bytes.byteLength === 0) throw new Error("downloaded file is empty")
 
     const inferredContentType = normalizeMime(response.headers.get("content-type")?.split(";", 1)[0] ?? undefined)

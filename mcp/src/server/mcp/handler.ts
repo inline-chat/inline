@@ -116,6 +116,7 @@ async function introspectAccessToken(
         "x-inline-mcp-secret": config.oauthInternalSharedSecret,
       },
       body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(10_000),
     })
   } catch {
     return {

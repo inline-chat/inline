@@ -93,7 +93,7 @@ describe("/mcp", () => {
   })
 
   it("rejects invalid access tokens from introspection", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ active: false }), { status: 401 }))
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ active: false }), { status: 401 }))
 
     const app = createApp({
       issuer: "http://localhost:8791",
@@ -108,6 +108,8 @@ describe("/mcp", () => {
       }),
     )
     expect(res.status).toBe(401)
+    const [, fetchInit] = fetchMock.mock.calls[0]!
+    expect((fetchInit as RequestInit).signal).toBeInstanceOf(AbortSignal)
   })
 
   it("returns 502 when introspection upstream is unavailable", async () => {

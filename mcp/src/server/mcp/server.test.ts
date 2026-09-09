@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
-import { createInlineMcpServer } from "./server"
+import { createInlineMcpServer, isUnsafeRemoteAddress } from "./server"
 import type { McpGrant } from "./grant"
 import type {
   InlineApi,
@@ -262,6 +262,37 @@ describe("mcp tool server", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
+
+  it.each([
+    "0.0.0.0",
+    "10.0.0.1",
+    "100.64.0.1",
+    "127.0.0.1",
+    "169.254.1.1",
+    "172.16.0.1",
+    "192.0.2.1",
+    "192.168.0.1",
+    "198.18.0.1",
+    "198.51.100.1",
+    "203.0.113.1",
+    "224.0.0.1",
+    "::1",
+    "::ffff:127.0.0.1",
+    "fc00::1",
+    "fe80::1",
+    "2001:db8::1",
+    "2002:0a00:0001::",
+    "ff02::1",
+  ])("classifies non-public remote address %s as unsafe", (address) => {
+    expect(isUnsafeRemoteAddress(address)).toBe(true)
+  })
+
+  it.each(["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111", "2001:4860:4860::8888"])(
+    "classifies public remote address %s as safe",
+    (address) => {
+      expect(isUnsafeRemoteAddress(address)).toBe(false)
+    },
+  )
 
   it("tools/list exposes instructions, output schemas, annotations, and auth metadata", async () => {
     const inline = createInlineStub({})
@@ -1602,6 +1633,33 @@ describe("mcp tool server", () => {
     expect(res.result.isError).toBe(true)
     expect(res.result.content?.[0]?.text).toContain("https")
   })
+
+  it.each(["https://127.0.0.1/file.png", "https://[::1]/file.png"])(
+    "files.upload rejects local url %s without fetching it",
+    async (url) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch")
+      const inline = createInlineStub({})
+      const server = createInlineMcpServer({ grant, inline })
+      const authInfo = createAuthInfo(["messages:write"])
+      const { transport, sent } = await connectAndInitialize(server, authInfo)
+
+      await sendRequest(
+        transport,
+        {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "files.upload", arguments: { url } },
+        } as any,
+        { authInfo },
+      )
+
+      const res = await waitForResponse(sent, 2)
+      expect(res.result.isError).toBe(true)
+      expect(res.result.content?.[0]?.text).toContain("private or local")
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
 
   it.each(["legacy", "submission-v2"] as const)("%s sends rich Markdown unchanged through text, captions, and batches", async (contractVersion) => {
     const markdown = "    code();\n\n# Update\n\n**Ready** ~~old~~ ==new== <u>reviewed</u> $x^2$\n\n| Task | Status |\n| --- | --- |\n| Tests | Passed |\n"

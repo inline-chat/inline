@@ -18,6 +18,10 @@ const PROXIED_OAUTH_PATHS = new Set([
   "/oauth/revoke",
   "/revoke",
 ])
+const MAX_OAUTH_PROXY_BODY_BYTES = 64 * 1024
+const OAUTH_PROXY_TIMEOUT_MS = 15_000
+
+class OAuthRequestTooLargeError extends Error {}
 
 function oauthEndpoint(base: string, path: string): string {
   const normalizedBase = base.endsWith("/") ? base : `${base}/`
@@ -30,6 +34,40 @@ function normalizeForwardedFor(value: string | null): string {
   return first && first.length > 0 ? first : "unknown"
 }
 
+async function readRequestBodyLimited(req: Request): Promise<Uint8Array> {
+  const contentLength = Number(req.headers.get("content-length"))
+  if (Number.isFinite(contentLength) && contentLength > MAX_OAUTH_PROXY_BODY_BYTES) {
+    throw new OAuthRequestTooLargeError()
+  }
+  if (!req.body) return new Uint8Array()
+
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    total += value.byteLength
+    if (total > MAX_OAUTH_PROXY_BODY_BYTES) {
+      try {
+        await reader.cancel("oauth_request_too_large")
+      } catch {
+      }
+      throw new OAuthRequestTooLargeError()
+    }
+    chunks.push(value)
+  }
+
+  const body = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return body
+}
+
 async function proxyToOauthServer(req: Request, url: URL, config: McpConfig): Promise<Response> {
   const upstreamUrl = new URL(`${url.pathname}${url.search}`, config.oauthProxyBaseUrl)
 
@@ -40,9 +78,12 @@ async function proxyToOauthServer(req: Request, url: URL, config: McpConfig): Pr
   headers.set("x-forwarded-proto", url.protocol.replace(":", ""))
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD"
-  const body = hasBody ? await req.arrayBuffer() : undefined
+  const body = hasBody ? await readRequestBodyLimited(req) : undefined
   if (!hasBody) {
     headers.delete("content-length")
+  } else {
+    headers.delete("transfer-encoding")
+    headers.set("content-length", String(body?.byteLength ?? 0))
   }
 
   const upstream = await fetch(upstreamUrl, {
@@ -50,6 +91,7 @@ async function proxyToOauthServer(req: Request, url: URL, config: McpConfig): Pr
     headers,
     body,
     redirect: "manual",
+    signal: AbortSignal.timeout(OAUTH_PROXY_TIMEOUT_MS),
   })
 
   return new Response(upstream.body, {
@@ -102,7 +144,10 @@ export const OAuth = {
 
     try {
       return await proxyToOauthServer(req, url, config)
-    } catch {
+    } catch (error) {
+      if (error instanceof OAuthRequestTooLargeError) {
+        return withJson({ error: "request_too_large" }, { status: 413 })
+      }
       return withJson({ error: "oauth_upstream_unavailable" }, { status: 502 })
     }
   },
