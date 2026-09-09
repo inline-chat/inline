@@ -3529,19 +3529,9 @@ private extension MessagesCollectionView {
       else {
         return
       }
-      let coverage = viewModel.historyCoverage
-      if coverage != lastVisibleReadCoverage {
-        lastVisibleReadCoverage = coverage
-        lastVisibleReadCandidateID = nil
-      }
-      guard let highestVisibleIncomingID = highestVisibleIncomingMessageID(in: collectionView) else { return }
-      guard highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0) else { return }
-      lastVisibleReadCandidateID = highestVisibleIncomingID
-      UnreadManager.shared.readVisible(
-        peerId: peerId,
-        chatId: chatId,
-        highestVisibleIncomingID: highestVisibleIncomingID
-      )
+      // Temporary read-on-open workaround: do not wait for history coverage or
+      // an advancing incoming marker. readAll clears locally before sending.
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
     }
 
     private func highestVisibleIncomingMessageID(in collectionView: UICollectionView) -> Int64? {

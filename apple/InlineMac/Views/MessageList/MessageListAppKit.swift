@@ -3511,20 +3511,10 @@ class MessageListAppKit: NSViewController {
           !view.isHiddenOrHasHiddenAncestor
     else { return }
 
-    let coverage = chatRows.historyCoverage
-    if coverage != lastVisibleReadCoverage {
-      lastVisibleReadCoverage = coverage
-      lastVisibleReadCandidateID = nil
-    }
-    guard let highestVisibleIncomingID = highestVisibleIncomingMessageID() else { return }
-    guard highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0) else { return }
-    lastVisibleReadCandidateID = highestVisibleIncomingID
-    UnreadManager.shared.readVisible(
-      peerId: peerId,
-      chatId: chatId,
-      highestVisibleIncomingID: highestVisibleIncomingID
-    )
-    if isAtBottom, coverage.isAtCertifiedLiveEnd { markMessagesSeen() }
+    // Temporary read-on-open workaround: do not wait for history coverage or
+    // an advancing incoming marker. readAll clears locally before sending.
+    UnreadManager.shared.readAll(peerId, chatId: chatId)
+    if isAtBottom { markMessagesSeen() }
   }
 
   private func highestVisibleIncomingMessageID() -> Int64? {
