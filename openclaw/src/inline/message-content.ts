@@ -115,6 +115,10 @@ function compactWhitespace(raw: string | undefined): string {
   return (raw ?? "").replace(/\s+/g, " ").trim()
 }
 
+function normalizeRawMessageText(raw: string | undefined): string {
+  return (raw ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim()
+}
+
 function bestPhotoSize(photo: {
   sizes?: Array<{ w?: number; h?: number; size?: number; cdnUrl?: string }>
 }): {
@@ -454,7 +458,7 @@ function formatEntitySummary(entity: InlineMessageEntitySummary): string {
 }
 
 export function summarizeInlineMessageContent(message: Message): InlineMessageContent {
-  const rawText = compactWhitespace(message.message)
+  const rawText = normalizeRawMessageText(message.message)
   const media = messageMediaSummary(message)
   const attachments = messageAttachmentSummaries(message)
   const entities = messageEntitySummaries(message)

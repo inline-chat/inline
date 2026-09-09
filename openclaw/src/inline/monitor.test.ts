@@ -269,7 +269,14 @@ type MonitorSetup = {
     interactive?: unknown
     channelData?: Record<string, unknown>
   }>
+  observedDeliveryBeforeDispatchError?: boolean
   dispatchReplyResult?: {
+    counts?: Partial<Record<"tool" | "block" | "final", number>>
+    settledReceipt?: {
+      anyVisibleDelivered: boolean
+      counts: Partial<Record<"tool" | "block" | "final", { delivered: number; failedAfterSend: number }>>
+    }
+    deferredToActiveRun?: "steer" | "followup"
     queuedFinal?: boolean
     observedReplyDelivery?: boolean
     noVisibleReplyFallbackDelivered?: boolean
@@ -558,6 +565,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const dispatchReply = vi.fn(async ({ ctx, dispatcherOptions, replyOptions }: any) => {
     await setup.dispatchReplyBlocker?.({ ctx, dispatcherOptions, replyOptions })
     const dispatchError = setup.dispatchReplyErrors?.shift()
+    if (setup.observedDeliveryBeforeDispatchError) await replyOptions?.onObservedReplyDelivery?.()
     if (dispatchError) throw dispatchError
     if (setup.dispatchTypingLifecycle) {
       await (dispatcherOptions.onReplyStart ?? dispatcherOptions.typingCallbacks?.onReplyStart)?.()
@@ -3381,7 +3389,7 @@ describe("inline/monitor", () => {
             id: 1001n,
             date: 1_700_000_000n,
             fromId: 42n,
-            message: "hello from dm",
+            message: "hello from dm\r\nsecond line\rthird line",
             replyToMsgId: 9n,
           },
         },
@@ -3413,6 +3421,9 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           ChatType: "direct",
           InboundEventKind: "user_request",
+          Body: "hello from dm\nsecond line\nthird line",
+          BodyForAgent: "hello from dm\nsecond line\nthird line",
+          RawBody: "hello from dm\nsecond line\nthird line",
           ReplyToId: "9",
           From: "inline:42",
           To: "inline:7",
@@ -9856,6 +9867,57 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it.each([
+    ["observed source delivery", { observedReplyDelivery: true }],
+    ["a host-delivered fallback", { noVisibleReplyFallbackDelivered: true }],
+    ["a locally delivered reply", {}],
+    ["a settled visible receipt", { settledReceipt: { anyVisibleDelivered: true, counts: {} } }],
+    ["host tool delivery", { counts: { tool: 1 } }],
+    ["host block delivery", { counts: { block: 1 } }],
+    ["host final delivery", { counts: { final: 1 } }],
+    ["delivery before dispatch throws", {}],
+    ["a turn steered into the active run", { deferredToActiveRun: "steer" }],
+    ["a followup accepted by the active run", { deferredToActiveRun: "followup" }],
+  ] as const)("does not append an empty-response error after %s and a later failure", async (label, dispatchReplyResult) => {
+    const localReply = label === "a locally delivered reply"
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 6741n,
+        message: { id: 57051n, date: 1_700_000_014n, fromId: 42n, message: "dm" },
+      }],
+      chats: { "6741": { kind: "direct", title: "Alice" } },
+      ...(localReply ? { dispatchReplyPayload: { text: "Here is the answer." } } : {}),
+      ...(label === "delivery before dispatch throws" ? {
+        observedDeliveryBeforeDispatchError: true,
+        dispatchReplyErrors: [new Error("failure after successful delivery")],
+      } : {}),
+      skipInfos: [{ reason: "empty" }],
+      dispatchErrorInfos: [{ kind: "final" }],
+      dispatchReplyResult,
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    if (label === "delivery before dispatch throws") {
+      await expect(waitForMockPromise(harness.calls.dispatchReply)).rejects.toThrow("failure after successful delivery")
+    } else {
+      await waitForMockPromise(harness.calls.dispatchReply)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(harness.calls.sendMessage).toHaveBeenCalledTimes(localReply ? 1 : 0)
+    if (localReply) {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "Here is the answer." }),
+      )
+    }
+    await handle.stop()
+  })
+
   it("suppresses an empty skip when source delivery is message-tool-only", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -9932,7 +9994,10 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("retains a real failure fallback for message-tool-only dispatch", async () => {
+  it.each([
+    { queuedFinal: true },
+    { queuedFinal: true, counts: { final: 1 }, settledReceipt: { anyVisibleDelivered: false, counts: {} } },
+  ])("retains a real failure fallback without confirmed delivery: %j", async (receipt) => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -9952,7 +10017,7 @@ describe("inline/monitor", () => {
       skipInfos: [{ reason: "empty" }],
       dispatchErrorInfos: [{ kind: "final" }],
       dispatchReplyResult: {
-        queuedFinal: true,
+        ...receipt,
         sourceReplyDeliveryMode: "message_tool_only",
       },
     })
@@ -12731,7 +12796,7 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:image>",
+          Body: "",
           InboundHistory: [
             expect.objectContaining({
               body: "link preview (Design mock): https://example.com/design",
@@ -12753,7 +12818,7 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          BodyForAgent: "<media:image>",
+          BodyForAgent: "",
           media: [{
             path: "/tmp/current-photo.jpg",
             contentType: "image/jpeg",
@@ -12930,10 +12995,10 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:document>",
-          BodyForAgent: "<media:document>",
-          RawBody: "<media:document>",
-          CommandBody: "<media:document>",
+          Body: "",
+          BodyForAgent: "",
+          RawBody: "",
+          CommandBody: "",
           media: [{
             path: "/tmp/spec.pdf",
             contentType: "application/pdf",
@@ -13016,8 +13081,8 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:document>",
-          BodyForAgent: "<media:document>",
+          Body: "",
+          BodyForAgent: "",
           media: [{
             path: "/tmp/image-document.png",
             contentType: "image/png",
@@ -13096,10 +13161,10 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:image>",
-          BodyForAgent: "<media:image>",
-          RawBody: "<media:image>",
-          CommandBody: "<media:image>",
+          Body: "",
+          BodyForAgent: "",
+          RawBody: "",
+          CommandBody: "",
           media: [{
             path: "/tmp/flattened-photo.jpg",
             contentType: "image/jpeg",
@@ -13258,9 +13323,9 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:audio>",
-          BodyForAgent: "<media:audio>",
-          RawBody: "<media:audio>",
+          Body: "",
+          BodyForAgent: "",
+          RawBody: "",
           media: [{
             path: "/tmp/fallback-voice.ogg",
             contentType: "audio/ogg",
@@ -13327,14 +13392,18 @@ describe("inline/monitor", () => {
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.not.objectContaining({
-          media: expect.anything(),
-        }),
-      )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:document>",
-          BodyForAgent: "<media:document>",
+          Body: "",
+          BodyForAgent: "",
+          media: [
+            expect.objectContaining({
+              contentType: "application/pdf",
+              fileName: "broken-spec.pdf",
+              kind: "document",
+              messageId: "7302",
+              transcribed: false,
+            }),
+          ],
           ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
@@ -13412,15 +13481,19 @@ describe("inline/monitor", () => {
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.not.objectContaining({
-          media: expect.anything(),
-        }),
-      )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          RawBody: "<media:document>",
-          Body: "<media:document>",
-          BodyForAgent: "<media:document>",
+          RawBody: "",
+          Body: "",
+          BodyForAgent: "",
+          media: [
+            expect.objectContaining({
+              contentType: "application/pdf",
+              fileName: "huge-spec.pdf",
+              kind: "document",
+              messageId: "7304",
+              transcribed: false,
+            }),
+          ],
           ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",

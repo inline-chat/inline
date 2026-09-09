@@ -23,6 +23,8 @@ import {
   createTransportActivityStatusPatch,
 } from "openclaw/plugin-sdk/gateway-runtime"
 import {
+  hasFinalInboundReplyDispatch,
+  hasVisibleInboundReplyDispatch,
   classifyChannelInboundEvent,
   createChannelInboundDebouncer,
   resolveUnmentionedGroupInboundPolicy,
@@ -325,8 +327,11 @@ type HistoryContext = {
 }
 
 type InlineInboundMediaInfo = {
-  path: string
+  path?: string
   contentType?: string | undefined
+  fileName?: string | undefined
+  kind?: "image" | "video" | "audio" | "document" | undefined
+  messageId?: string | undefined
 }
 
 type InlineEditStreamState = {
@@ -396,7 +401,7 @@ type InlineDispatchReplyInfo = {
   reason?: string
 }
 
-type InlineDispatchResult = {
+type InlineDispatchResult = NonNullable<Parameters<typeof hasVisibleInboundReplyDispatch>[0]> & {
   queuedFinal?: boolean
   observedReplyDelivery?: boolean
   noVisibleReplyFallbackDelivered?: boolean
@@ -2909,34 +2914,20 @@ function resolveInlineMediaMaxBytes(params: {
 
 function buildInlineInboundMediaFacts(media: InlineInboundMediaInfo[]) {
   return toInboundMediaFacts(media.map((item) => ({
-    path: item.path,
+    ...(item.path ? { path: item.path } : {}),
     ...(item.contentType?.trim() ? { contentType: item.contentType.trim() } : {}),
+    ...(item.fileName?.trim() ? { fileName: item.fileName.trim() } : {}),
+    ...(item.kind ? { kind: item.kind } : {}),
+    ...(item.messageId ? { messageId: item.messageId } : {}),
   })))
 }
 
-function buildInlineAttachmentPlaceholder(content: ReturnType<typeof summarizeInlineMessageContent>): string {
-  const media = content.media
-  if (!media) return ""
-  switch (media.kind) {
-    case "photo":
-      return "<media:image>"
-    case "video":
-      return "<media:video>"
-    case "document":
-      return "<media:document>"
-    case "voice":
-      return "<media:audio>"
-    default:
-      return ""
-  }
-}
-
 function buildInlineInboundBodyText(content: ReturnType<typeof summarizeInlineMessageContent>): string {
-  const textWithPlaceholder = [content.rawText, buildInlineAttachmentPlaceholder(content)]
-    .filter(Boolean)
-    .join("\n")
-    .trim()
-  return textWithPlaceholder || content.text
+  if (content.rawText) return content.rawText
+  if (content.media?.kind === "nudge" || (!content.media && content.attachmentText)) {
+    return content.text
+  }
+  return ""
 }
 
 function resolveFilePathHint(params: { sourceUrl: string; preferredName?: string | null | undefined }): string | undefined {
@@ -2966,20 +2957,41 @@ async function resolveInlineInboundMedia(params: {
     {
       fileName?: string | null
       mimeType?: string | null
+      kind: "image" | "video" | "audio" | "document"
     }
   >()
+
+  const messageId = String(params.message.id)
+  const inlineMediaKind = content.media?.kind === "photo"
+    ? "image"
+    : content.media?.kind === "video"
+      ? "video"
+      : content.media?.kind === "voice"
+        ? "audio"
+        : content.media?.kind === "document"
+          ? "document"
+          : null
 
   if (content.media?.url) {
     candidates.set(content.media.url, {
       fileName: content.media.fileName ?? null,
       mimeType: content.media.mimeType ?? null,
+      kind: inlineMediaKind ?? "document",
     })
+  } else if (inlineMediaKind) {
+    return [{
+      kind: inlineMediaKind,
+      ...(content.media?.fileName ? { fileName: content.media.fileName } : {}),
+      ...(content.media?.mimeType ? { contentType: content.media.mimeType } : {}),
+      messageId,
+    }]
   }
 
   for (const attachment of content.attachments) {
     if (attachment.kind !== "urlPreview" || !attachment.previewImageUrl) continue
     candidates.set(attachment.previewImageUrl, {
       mimeType: null,
+      kind: "image",
     })
   }
 
@@ -3007,6 +3019,12 @@ async function resolveInlineInboundMedia(params: {
       })
     } catch (err) {
       params.log?.warn?.(`inline: failed to download inbound media ${url}: ${String(err)}`)
+      out.push({
+        kind: candidate.kind,
+        ...(candidate.fileName ? { fileName: candidate.fileName } : {}),
+        ...(candidate.mimeType ? { contentType: candidate.mimeType } : {}),
+        messageId,
+      })
     }
   }
 
@@ -3365,7 +3383,7 @@ export async function monitorInlineProvider(params: {
     const meResult = await client.invokeRaw(Method.GET_ME, {
       oneofKind: "getMe",
       getMe: {},
-    })
+    }, { signal: abortSignal })
     if (meResult.oneofKind !== "getMe" || !meResult.getMe.user) {
       throw new Error("missing user")
     }
@@ -3893,7 +3911,7 @@ export async function monitorInlineProvider(params: {
         currentAttachmentText = currentContent.attachmentText || null
         currentEntityText = currentContent.entityText || null
       }
-      if (!rawBody) return
+      if (!rawBody && !currentContent?.media && !currentContent?.attachments.length) return
       commandTarget = resolveInlineCommandTarget(rawBody, botUsername)
       if (commandTarget.targeted && !commandTarget.addressedToMe) {
         runtime.log?.(`inline: drop command targeted at another bot chat=${String(chatId)}`)
@@ -5902,6 +5920,9 @@ export async function monitorInlineProvider(params: {
     }
 
     const replyOptions = {
+      onObservedReplyDelivery: async () => {
+        delivered = true
+      },
       ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
       blockReplyTimeoutMs: 25_000,
       ...(streamViaEditMessage
@@ -6493,10 +6514,14 @@ export async function monitorInlineProvider(params: {
       ) {
         delivered = true
       }
-      const hostHandledTurn =
-        dispatchResult.queuedFinal === true ||
-        dispatchResult.observedReplyDelivery === true ||
-        dispatchResult.noVisibleReplyFallbackDelivered === true
+      // Use the host's settled receipt and delivery counts, as native channels do.
+      // A queued final alone is not proof of delivery after an error callback.
+      const hostDeliveredReply = hasVisibleInboundReplyDispatch(
+        { ...dispatchResult, queuedFinal: false },
+        { fallbackDelivered: dispatchResult.noVisibleReplyFallbackDelivered === true },
+      )
+      const hostHandledTurn = hasFinalInboundReplyDispatch(dispatchResult) || hostDeliveredReply
+      const deferredToActiveRun = dispatchResult.deferredToActiveRun != null
       const deliberateSilence =
         skippedSilently || dispatchResult.deliberateSilentTerminalReply === true
       const skipFallbackSuppressed =
@@ -6505,7 +6530,7 @@ export async function monitorInlineProvider(params: {
         dispatchResult.noVisibleReplyFallbackEligible === true
       const explicitFailure = dispatchError != null || failedNonSilent
       if (
-        !delivered && !adoptingThread &&
+        !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
             !deliberateSilence &&
