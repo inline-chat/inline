@@ -77,7 +77,7 @@ import Testing
     for event in permutations([0, 1, 2])[index] {
       switch event {
       case 0:
-        s.send(.snapshot(BucketID(1), position(3)))
+        s.send(.snapshot(BucketID(1), position(3), generation: 1))
         snapshotArrived = true
       case 1: s.send(.catchUp(BucketID(1), through: 4))
       default:

@@ -9,21 +9,28 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
   var session: Session = .stopped
   var authentication: Authentication?
   var credentialOperations: [OperationID: PendingCredential] = [:]
+  var restorationRejected = false
+  var restoringTransactions = false
   var transactions: [TransactionID: PendingTransaction<Payload>] = [:]
   var submissionOrder: [TransactionID] = []
   var finished: [TransactionID: TransactionOutcome] = [:]
+  var transactionReservations: Set<TransactionID> = []
+  var bucketReservations: Set<BucketID> = []
   var requests: [OperationID: PendingRequest<Payload>] = [:]
   var database: [OperationID: PendingDatabase<Payload>] = [:]
+  var bucketOrder: [BucketID] = []
   var buckets: [BucketID: Bucket<Payload>] = [:]
+  var bootstrap: Bootstrap<Payload>?
   var discovery: Discovery?
   var lastSyncBucket: BucketID?
   var lastSyncWasDiscovery = true
-  var directQueue: [Payload] = []
+  var directQueue: [QueuedCall<Payload>] = []
   var lastAdmission: AdmissionClass = .direct
   var closing: Set<OperationID> = []
   var sending: Set<OperationID> = []
   var reportedDrained = false
   var output: [Output<Payload>] = []
+  var needsPumpAgain = false
 
   public init(configuration: Configuration = Configuration()) { self.configuration = configuration }
 
@@ -32,7 +39,11 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       [session.deadline, authentication?.deadline] + requests.values.map { Optional($0.deadline) }
       + database.values.map(\.retryAt) + transactions.values.map(\.retryAt)
       + buckets.values.map(\.retryAt) + [discovery?.retryAt]
-    return times.compactMap { $0 }.min()
+      + (bootstrap?.retryAt.values.map { Optional($0) } ?? [])
+    return (times + directQueue.map(\.expiresAt)).compactMap { $0 }.min()
+  }
+  public var outstandingReservations: Int {
+    transactionReservations.count + bucketReservations.count
   }
   public var outstandingRequests: Int { requests.count }
   public var outstandingSends: Int { sending.count }
@@ -64,9 +75,10 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       disconnect(connection)
     }
     switch input {
-    case .start(let newGeneration):
+    case .start(let newGeneration, let startup):
       guard newGeneration > generation else {
-        return [.event(.blocked("account generation must increase")), .wait(until: nextDeadline)]
+        output.append(.event(.blocked("account generation must increase")))
+        break
       }
       stopAdmission()
       generation = newGeneration
@@ -74,13 +86,36 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       submissionOrder = []
       finished = [:]
       buckets = [:]
+      bucketOrder = []
       discovery = nil
+      bootstrap = nil
       lastSyncBucket = nil
       lastSyncWasDiscovery = true
       directQueue = []
       active = true
       reportedDrained = false
+      restorationRejected = false
+      restoringTransactions = startup == .restore
+      if restoringTransactions { _ = write(.loadTransactions) }
       connect()
+    case .retryRestoration:
+      if active, restoringTransactions, restorationRejected {
+        restorationRejected = false
+        _ = write(.loadTransactions)
+      }
+    case .retryBucket(let key, let sourceGeneration):
+      if active, sourceGeneration == generation {
+        buckets[key]?.blocked = false
+      }
+    case .bootstrap(let user):
+      if active, bootstrap == nil, discovery == nil, buckets[user]?.pending == nil,
+        buckets[user]?.repair == nil, buckets[user]?.blocked != true
+      {
+        bootstrap = Bootstrap(user: user)
+      } else {
+        output.append(
+          .event(.blocked("bootstrap requires an idle, unblocked User bucket and discovery owner")))
+      }
     case .connected(let id):
       if case .connecting(id, _) = session {
         session = .authorizing(id, deadline: now + configuration.requestTimeout)
@@ -93,7 +128,8 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       closing.remove(id)
       if session.connection == id { disconnect(id, alreadyClosed: true) }
     case .submit(let spec):
-      guard active, transactions[spec.id] == nil, finished[spec.id] == nil,
+      guard active, session != .rejected, !restoringTransactions, transactions[spec.id] == nil,
+        finished[spec.id] == nil,
         !spec.requires.contains(spec.id), !introducesCycle(spec)
       else {
         output.append(.event(.submissionRejected(spec.id)))
@@ -114,15 +150,21 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
           }
         }
       }
+    case .request(let call): enqueue(call)
+    case .cancelCall(let id): cancelCall(id)
     case .call(let payload):
-      if active { directQueue.append(payload) }
+      if active, session != .rejected, directQueue.count < configuration.maxQueuedCalls {
+        directQueue.append(QueuedCall(id: nil, payload: payload, expiresAt: nil))
+      } else {
+        output.append(.event(.blocked("direct queue unavailable")))
+      }
     case .catchUp(let key, let target):
       if active {
         demand(key, through: target)
         observeDiscoveryDemand(key, through: target)
       }
-    case .live(let key, let update):
-      if active {
+    case .live(let key, let update, let sourceGeneration):
+      if active, sourceGeneration == generation {
         guard update.hasSequence, update.sequence > 0 else { break }
         demand(key, through: update.sequence)
         observeDiscoveryDemand(key, through: update.sequence)
@@ -148,9 +190,9 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
           }
         }
       }
-    case .snapshot(let key, let position):
-      if active, position.sequence >= 0, position.date >= 0 {
-        if buckets[key] == nil { buckets[key] = Bucket() }
+    case .snapshot(let key, let position, let sourceGeneration):
+      if active, sourceGeneration == generation, position.sequence >= 0, position.date >= 0 {
+        ensureBucket(key)
         if position.sequence >= (buckets[key]?.cursor ?? 0) {
           buckets[key]?.cursor = position.sequence
           let date = max(buckets[key]?.date ?? 0, position.date)
@@ -162,6 +204,10 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       }
     case .discover(let after):
       if active, after >= 0 {
+        if bootstrap != nil {
+          bootstrap?.discoverAfter = true
+          break
+        }
         if discovery == nil {
           discovery = Discovery(after: after)
           for key in buckets.keys.sorted() {
@@ -199,8 +245,9 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
     var previousOutputCount: Int
     repeat {
       previousOutputCount = output.count
+      needsPumpAgain = false
       pump()
-    } while output.count != previousOutputCount
+    } while output.count != previousOutputCount || needsPumpAgain
     if !active, database.isEmpty, credentialOperations.isEmpty, closing.isEmpty, sending.isEmpty,
       !reportedDrained
     {
@@ -224,10 +271,18 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       closing.insert(connection)
       output.append(.close(connection))
     }
+    for call in directQueue {
+      if let id = call.id { output.append(.event(.callFinished(id, .cancelled))) }
+    }
     for attempt in requests.keys.sorted(by: { $0.serial < $1.serial }) {
       output.append(.cancel(attempt))
+      if case .directCall(let id, _) = requests[attempt]?.owner {
+        output.append(.event(.callFinished(id, .cancelled)))
+      }
     }
     requests = [:]
+    transactionReservations = []
+    bucketReservations = []
     active = false
     session = .stopped
     directQueue = []
@@ -238,6 +293,7 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
     for key in transactions.keys { transactions[key]?.retryAt = nil }
     for key in buckets.keys { buckets[key]?.retryAt = nil }
     discovery?.retryAt = nil
+    bootstrap?.retryAt = [:]
   }
 
   mutating func expire() {
@@ -266,12 +322,13 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       return
     }
     switch (request.owner, response) {
+    case (.bootstrap(let owner), _): bootstrapResponse(owner, response)
     case (.transaction(let key), .result(let payload)):
       transactions[key]?.phase = .applying
       _ = write(.applyTransaction(key, payload))
     case (.transaction(let key), .rejected): settle(key, .failed)
-    case (.bucket(let key, let from, let target), .page(let page)):
-      receivedPage(page, bucket: key, from: from, target: target)
+    case (.bucket(let key, let from, let target, let admission), .page(let page)):
+      receivedPage(page, bucket: key, from: from, target: target, admission: admission)
     case (.captureLatest(let key, let start, let latest, let minimum), .head(let position)):
       buckets[key]?.pending = nil
       if let current = buckets[key]?.position,
@@ -309,113 +366,21 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
         demand(key, through: target > 0 ? target : nil)
         if target == 0 { discovery?.requiredLatest[key] = buckets[key]?.latest }
       }
+    case (.directCall(let id, _), .result(let payload)):
+      output.append(.event(.callFinished(id, .result(payload))))
     case (.direct, .result(let payload)): output.append(.event(.directFinished(attempt, payload)))
     default:
       switch request.owner {
       case .transaction(let key): settle(key, .executionUnknown)
-      case .bucket(let key, _, _), .captureLatest(let key, _, _, _), .repair(let key):
+      case .bucket(let key, _, _, _), .captureLatest(let key, _, _, _), .repair(let key):
         buckets[key]?.pending = nil
         buckets[key]?.blocked = true
+      case .bootstrap: break
       case .discovery: discovery = nil
+      case .directCall(let id, _): output.append(.event(.callFinished(id, .failed)))
       case .direct: output.append(.event(.directFinished(attempt, nil)))
       }
       output.append(.event(.blocked("unexpected response kind")))
-    }
-  }
-
-  var reservedRequests: Int {
-    transactions.values.filter { $0.phase == .marking }.count + requests.count
-  }
-  mutating func pump() {
-    guard active else { return }
-    pumpAuthorization()
-    for operation in database.keys.sorted(by: { $0.serial < $1.serial }) {
-      if let pending = database[operation], let time = pending.retryAt, time <= now {
-        database[operation]?.retryAt = nil
-        output.append(.database(operation, pending.work))
-      }
-    }
-    for key in submissionOrder {
-      guard let transaction = transactions[key], transaction.phase == .ready else { continue }
-      if let retry = transaction.retryAt, retry > now { continue }
-      transactions[key]?.retryAt = nil
-      if transaction.spec.requires.contains(where: {
-        finished[$0] != nil && finished[$0] != .applied
-      }) {
-        settle(key, .dependencyFailed)
-        continue
-      }
-      guard transaction.spec.requires.allSatisfy({ finished[$0] == .applied }),
-        session.openConnection != nil,
-        reservedRequests < configuration.capacity, nextAdmission == .transaction
-      else { continue }
-      if let lane = transaction.spec.lane, !transaction.ownsLane {
-        let laneBusy = transactions.values.contains { $0.ownsLane && $0.spec.lane == lane }
-        // Arrival order, not transaction numeric identity, establishes lane ordering.
-        let earlier = submissionOrder.prefix(while: { $0 != key }).contains {
-          transactions[$0]?.spec.lane == lane
-        }
-        if laneBusy || earlier { continue }
-      }
-      transactions[key]?.ownsLane = true
-      transactions[key]?.phase = .marking
-      lastAdmission = .transaction
-      _ = write(.markDispatching(key))
-    }
-    if !lastSyncWasDiscovery { pumpDiscovery() }
-    pumpBuckets()
-    pumpDiscovery()
-    while !directQueue.isEmpty, session.openConnection != nil,
-      reservedRequests < configuration.capacity, nextAdmission == .direct
-    {
-      lastAdmission = .direct
-      _ = transmit(.direct(directQueue.removeFirst()), owner: .direct)
-    }
-  }
-
-  /// Fairness is between the three concrete producers, not a generic task scheduler.
-  var nextAdmission: AdmissionClass? {
-    let transactionReady = submissionOrder.contains { key in
-      guard let transaction = transactions[key], transaction.phase == .ready,
-        transaction.retryAt.map({ $0 <= now }) ?? true,
-        transaction.spec.requires.allSatisfy({ finished[$0] == .applied })
-      else { return false }
-      guard let lane = transaction.spec.lane, !transaction.ownsLane else { return true }
-      return !transactions.values.contains(where: { $0.ownsLane && $0.spec.lane == lane })
-        && !submissionOrder.prefix(while: { $0 != key }).contains(where: {
-          transactions[$0]?.spec.lane == lane
-        })
-    }
-    let bucketReady = buckets.values.contains { bucket in
-      guard let cursor = bucket.cursor, bucket.pending == nil, !bucket.blocked,
-        bucket.hasDemand, bucket.retryAt.map({ $0 <= now }) ?? true
-      else { return false }
-      if let repair = bucket.repair {
-        if case .fetching = repair.phase { return true }
-        return false
-      }
-      let canApplyLive =
-        bucket.latest == bucket.completedLatest && cursor >= bucket.requiresAuthoritativeThrough
-        && cursor < Int64.max
-        && bucket.buffer[cursor + 1] != nil
-      return !canApplyLive
-    }
-    let discoveryReady =
-      discovery.map {
-        $0.pending == nil && $0.checkpoint == nil && ($0.retryAt.map { $0 <= now } ?? true)
-      } ?? false
-    let order: [AdmissionClass]
-    switch lastAdmission {
-    case .transaction: order = [.sync, .direct, .transaction]
-    case .sync: order = [.direct, .transaction, .sync]
-    case .direct: order = [.transaction, .sync, .direct]
-    }
-    return order.first { candidate in
-      switch candidate {
-      case .transaction: transactionReady
-      case .sync: bucketReady || discoveryReady
-      case .direct: !directQueue.isEmpty
-      }
     }
   }
 

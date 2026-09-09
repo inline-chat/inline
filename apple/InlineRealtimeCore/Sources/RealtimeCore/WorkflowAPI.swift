@@ -4,10 +4,22 @@ extension RealtimeCore {
   public mutating func start(generation: UInt64, at time: Tick) -> [Output<Payload>] {
     handle(.start(generation: generation), at: time)
   }
+  public mutating func bootstrap(user: BucketID, at time: Tick) -> [Output<Payload>] {
+    handle(.bootstrap(user: user), at: time)
+  }
+  public mutating func restore(generation: UInt64, at time: Tick) -> [Output<Payload>] {
+    handle(.start(generation: generation, transactions: .restore), at: time)
+  }
   public mutating func submit(_ transaction: Transaction<Payload>, at time: Tick) -> [Output<
     Payload
   >] {
     handle(.submit(transaction), at: time)
+  }
+  public mutating func request(_ call: Call<Payload>, at time: Tick) -> [Output<Payload>] {
+    handle(.request(call), at: time)
+  }
+  public mutating func cancel(_ call: CallID, at time: Tick) -> [Output<Payload>] {
+    handle(.cancelCall(call), at: time)
   }
   public mutating func call(_ payload: Payload, at time: Tick) -> [Output<Payload>] {
     handle(.call(payload), at: time)
@@ -37,13 +49,15 @@ extension RealtimeCore {
   ) -> [Output<Payload>] {
     handle(.response(attempt, response), at: time)
   }
-  public mutating func receive(_ update: Update<Payload>, in bucket: BucketID, at time: Tick)
+  public mutating func receive(
+    _ update: Update<Payload>, in bucket: BucketID, generation: UInt64, at time: Tick
+  )
     -> [Output<Payload>]
   {
-    handle(.live(bucket, update), at: time)
+    handle(.live(bucket, update, generation: generation), at: time)
   }
   public mutating func databaseFinished(
-    _ operation: OperationID, result: DatabaseResult, at time: Tick
+    _ operation: OperationID, result: DatabaseResult<Payload>, at time: Tick
   ) -> [Output<Payload>] {
     handle(.databaseFinished(operation, result), at: time)
   }

@@ -88,7 +88,11 @@ extension RealtimeCore {
     credential(.createTemporary(permanent: stored.permanent))
   }
   mutating func rejectAuthorization() {
-    if let connection = authentication?.connection { disconnect(connection) }
+    if let connection = session.connection { disconnect(connection) }
+    for call in directQueue {
+      if let id = call.id { output.append(.event(.callFinished(id, .failed))) }
+    }
+    directQueue = []
     session = .rejected
     output.append(.event(.authorizationRejected))
   }

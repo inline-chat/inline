@@ -144,7 +144,9 @@ import Testing
     let current = try s.open(generation: 2)
     #expect(!s.send(.connected(old)).contains(.event(.online)))
     s.send(.authorizationRevoked(current))
-    #expect(dbWork(try s.queue(1)).isEmpty)
+    #expect(
+      s.send(.submit(Tx(id: TransactionID(1), payload: "rejected"))).contains(
+        .event(.submissionRejected(TransactionID(1)))))
     #expect(transmissions(s.send(.timeout, at: 1_000)).isEmpty)
     #expect(s.core.nextDeadline == nil)
   }

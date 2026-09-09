@@ -61,7 +61,7 @@ import Testing
     let read = try operation(s.send(.catchUp(BucketID(1), through: 2)))
     let rpc = try attempt(s.send(.databaseFinished(read, .bucketState(position(0)))))
     let commit = try operation(s.send(.response(rpc, .page(page(0, 2)))))
-    s.send(.snapshot(BucketID(1), position(5)))
+    s.send(.snapshot(BucketID(1), position(5), generation: 1))
     s.send(.databaseFinished(commit, .committed(position(2))))
     #expect(s.core.cursor(for: BucketID(1)) == 5)
   }
@@ -103,7 +103,7 @@ import Testing
     let read = try operation(s.send(.catchUp(BucketID(1), through: 1)))
     let rpc = try attempt(s.send(.databaseFinished(read, .bucketState(position(0)))))
     for sequence in 2...4 {
-      s.send(.live(BucketID(1), Update(sequence: Int64(sequence), payload: "live")))
+      s.send(.live(BucketID(1), Update(sequence: Int64(sequence), payload: "live"), generation: 1))
     }
     let commit = try operation(s.send(.response(rpc, .page(page(0, 1)))))
     #expect(

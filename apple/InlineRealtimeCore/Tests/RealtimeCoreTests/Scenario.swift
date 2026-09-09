@@ -19,7 +19,14 @@ struct Scenario {
     if let time { now = time }
     let actions = core.handle(input, at: now)
     trace += actions
-    #expect(core.outstandingRequests <= core.configuration.capacity)
+    if core.active {
+      #expect(
+        core.transactionReservations
+          == Set(core.transactions.filter { $0.value.phase == .marking }.keys))
+    }
+    #expect(core.outstandingRequests + core.outstandingReservations <= core.configuration.capacity)
+    #expect(
+      core.outstandingSends + core.outstandingReservations <= core.configuration.maxPendingSends)
     #expect(core.nextDeadline.map { $0 > now } ?? true, "No unexplained zero-time wake: \(actions)")
     return actions
   }

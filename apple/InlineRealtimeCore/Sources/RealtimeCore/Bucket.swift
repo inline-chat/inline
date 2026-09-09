@@ -1,4 +1,6 @@
 struct Bucket<Payload: Equatable & Sendable>: Sendable {
+  var admission: BucketAdmission?
+  var admissionForNetwork = false
   var cursor: Int64?
   var date: Int64 = 0
   var pass: CatchUpPass?
@@ -17,9 +19,22 @@ struct Bucket<Payload: Equatable & Sendable>: Sendable {
 }
 
 extension RealtimeCore {
+  /// Cache stable key order once per insertion, not once per I/O completion.
+  mutating func ensureBucket(_ key: BucketID) {
+    guard buckets[key] == nil else { return }
+    buckets[key] = Bucket()
+    var lower = 0
+    var upper = bucketOrder.count
+    while lower < upper {
+      let middle = lower + (upper - lower) / 2
+      if bucketOrder[middle] < key { lower = middle + 1 } else { upper = middle }
+    }
+    bucketOrder.insert(key, at: lower)
+  }
+
   mutating func demand(_ key: BucketID, through target: Int64?) {
     if let target, target < 0 { return }
-    if buckets[key] == nil { buckets[key] = Bucket() }
+    ensureBucket(key)
     if let target {
       let nextTarget = max(buckets[key]?.target ?? 0, target)
       buckets[key]?.target = nextTarget

@@ -82,4 +82,29 @@ import Testing
     #expect(s.core.outstandingSends == 0)
   }
 
+  @Test func invalidStartCannotDiscardEffectsFromAnExpiredSession() throws {
+    var s = Scenario()
+    let connection = try s.open()
+    let marker = try operation(s.queue(1))
+    _ = try attempt(s.send(.databaseFinished(marker, .done)))
+    let expired = s.send(.start(generation: 1), at: 1_000_000)
+    #expect(expired.contains(.close(connection)))
+    #expect(dbWork(expired).contains(.settle(TransactionID(1), .executionUnknown)))
+    #expect(expired.contains(.event(.blocked("account generation must increase"))))
+  }
+
+  @Test func bucketKindIsPartOfIdentity() throws {
+    var s = Scenario()
+    try s.open()
+    let chat = BucketID(1, kind: .chat)
+    let space = BucketID(1, kind: .space)
+    s.send(.snapshot(chat, position(10), generation: 1))
+    s.send(.snapshot(space, .zero, generation: 1))
+    #expect(
+      transmissions(s.send(.catchUp(space, through: 1))) == [.fetch(space, from: 0, through: 1)])
+    #expect(s.core.cursor(for: chat) == 10)
+    #expect(s.core.cursor(for: space) == 0)
+    #expect(chat != space)
+  }
+
 }

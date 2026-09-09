@@ -30,6 +30,10 @@ extension RealtimeCore {
 
   mutating func disconnect(_ connection: OperationID, alreadyClosed: Bool = false) {
     cancelAuthorization()
+    for key in buckets.keys {
+      releaseBucketReservation(key)
+      buckets[key]?.admission = nil
+    }
     if !alreadyClosed {
       closing.insert(connection)
       output.append(.close(connection))

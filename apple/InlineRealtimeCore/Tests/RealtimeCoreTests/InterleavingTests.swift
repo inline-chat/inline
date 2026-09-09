@@ -66,7 +66,7 @@ private struct RandomOrder {
             // The failed completion relinquished this ID. A duplicate cannot commit.
             #expect(dbWork(s.send(.databaseFinished(id, .done))).isEmpty)
           } else {
-            let result: DatabaseResult
+            let result: DatabaseResult<String>
             switch work {
             case .loadBucket: result = .bucketState(position(0))
             case .applyPage(_, _, let page):

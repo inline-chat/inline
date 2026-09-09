@@ -57,7 +57,7 @@ import Testing
     try s.open()
     let load = try operation(s.send(.catchUp(BucketID(1), through: 3)))
     let rpc = try attempt(s.send(.databaseFinished(load, .bucketState(position(1, date: 10)))))
-    s.send(.snapshot(BucketID(1), position(1, date: 11)))
+    s.send(.snapshot(BucketID(1), position(1, date: 11), generation: 1))
     let stale = s.send(.response(rpc, .page(page(1, 3))))
     #expect(dbWork(stale).isEmpty)
     #expect(transmissions(stale) == [.fetch(BucketID(1), from: 1, through: 3)])

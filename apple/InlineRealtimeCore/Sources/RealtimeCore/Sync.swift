@@ -1,7 +1,7 @@
 extension RealtimeCore {
   mutating func receivedPage(
     _ page: Page<Payload>, bucket key: BucketID,
-    from start: SyncPosition, target: Int64
+    from start: SyncPosition, target: Int64, admission: BucketAdmission?
   ) {
     guard buckets[key]?.position == start else {
       // A snapshot committed while the fetch was running. Do not even propose
@@ -15,8 +15,7 @@ extension RealtimeCore {
       buckets[key]?.blocked = true
       output.append(.event(.blocked("malformed or non-progress page")))
     case .apply:
-      let operation = write(.applyPage(key, expected: start, page))
-      buckets[key]?.pending = operation
+      writePage(key, expected: start, page: page, admission: admission)
     case .repair(let boundary, let reason):
       buckets[key]?.pending = nil
       buckets[key]?.repair = BucketRepair(boundary: boundary, expected: start, reason: reason)
@@ -24,12 +23,11 @@ extension RealtimeCore {
   }
 
   mutating func pumpBuckets() {
-    let keys = buckets.keys.sorted()
-    let ordered =
-      lastSyncBucket.map { last in
-        keys.filter { $0 > last } + keys.filter { $0 <= last }
-      } ?? keys
-    for key in ordered {
+    let keys = bucketOrder
+    let start = lastSyncBucket.flatMap { last in keys.firstIndex { $0 > last } } ?? 0
+    for offset in keys.indices {
+      let key = keys[(start + offset) % keys.count]
+      if bootstrap?.user == key && bootstrap?.blocksUser == true { continue }
       guard var bucket = buckets[key], bucket.pending == nil, !bucket.blocked else { continue }
       if let retry = bucket.retryAt, retry > now { continue }
       bucket.retryAt = nil
@@ -73,6 +71,8 @@ extension RealtimeCore {
         buckets[key] = bucket
       }
       if !bucket.hasDemand {
+        releaseBucketReservation(key)
+        buckets[key]?.admission = nil
         if !bucket.notified {
           buckets[key]?.notified = true
           output.append(.event(.caughtUp(key, through: position.sequence)))
@@ -84,6 +84,10 @@ extension RealtimeCore {
         position.sequence < Int64.max,
         bucket.buffer[position.sequence + 1] != nil
       {
+        if configuration.bucketAdmission == .removalFenced && bucket.admission == nil {
+          captureAdmission(key, position: position, network: false)
+          continue
+        }
         var updates: [Update<Payload>] = []
         var end = position.sequence
         while end < Int64.max, let update = bucket.buffer[end + 1] {
@@ -93,10 +97,10 @@ extension RealtimeCore {
         let page = Page(
           through: end, date: max(position.date, updates.map(\.date).max() ?? 0), final: false,
           updates: updates)
-        let operation = write(.applyPage(key, expected: position, page))
-        buckets[key]?.pending = operation
-      } else if session.openConnection != nil, reservedRequests < configuration.capacity,
-        nextAdmission == .sync
+        writePage(key, expected: position, page: page, admission: bucket.admission)
+      } else if session.openConnection != nil,
+        bucketReservations.contains(key)
+          || (reservedRequests < configuration.capacity && nextAdmission == .sync)
       {
         lastAdmission = .sync
         lastSyncBucket = key
@@ -108,12 +112,20 @@ extension RealtimeCore {
               key, from: position, latest: bucket.latest, minimum: bucket.target))
           buckets[key]?.pending = operation
         } else {
+          if configuration.bucketAdmission == .removalFenced
+            && (bucket.admission == nil || !bucket.admissionForNetwork)
+          {
+            captureAdmission(key, position: position, network: true)
+            continue
+          }
           let pass =
             bucket.pass ?? CatchUpPass(target: bucket.target, latest: bucket.completedLatest)
           buckets[key]?.pass = pass
+          releaseBucketReservation(key)
+          buckets[key]?.admission = nil
           let operation = transmit(
             .fetch(key, from: position.sequence, through: pass.target),
-            owner: .bucket(key, from: position, target: pass.target))
+            owner: .bucket(key, from: position, target: pass.target, admission: bucket.admission))
           buckets[key]?.pending = operation
         }
       }
@@ -142,10 +154,13 @@ extension RealtimeCore {
     var seen: Set<BucketID> = []
     while let child = work.popLast() {
       if child == parent { return true }
-      if seen.insert(child).inserted,
-        let descendants = buckets[child]?.repair?.snapshot?.children.keys
-      {
-        work.append(contentsOf: descendants)
+      if seen.insert(child).inserted {
+        if let descendants = buckets[child]?.repair?.snapshot?.children.keys {
+          work.append(contentsOf: descendants)
+        }
+        if child == bootstrap?.user, let children = bootstrap?.children.keys {
+          work.append(contentsOf: children)
+        }
       }
     }
     return false

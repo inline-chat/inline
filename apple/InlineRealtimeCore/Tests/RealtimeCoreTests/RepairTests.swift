@@ -62,7 +62,7 @@ extension Scenario {
     try s.open()
     let load = try operation(s.send(.catchUp(BucketID(1), through: 2)))
     let rpc = try attempt(s.send(.databaseFinished(load, .bucketState(.zero))))
-    s.send(.live(BucketID(1), Update(sequence: 1, payload: "old grant")))
+    s.send(.live(BucketID(1), Update(sequence: 1, payload: "old grant"), generation: 1))
     let repairPage = Page<String>(
       through: 2, date: 1, final: true,
       skipped: [
@@ -80,7 +80,7 @@ extension Scenario {
     try s.open()
     let load = try operation(s.send(.catchUp(BucketID(1), through: 1)))
     let rpc = try attempt(s.send(.databaseFinished(load, .bucketState(.zero))))
-    s.send(.live(BucketID(1), Update(sequence: 1, payload: "revoked")))
+    s.send(.live(BucketID(1), Update(sequence: 1, payload: "revoked"), generation: 1))
     let candidate = Page<String>(
       through: 1, date: 1, final: true, skipped: [SkippedSequence(1, reason: .irrelevant)])
     let actions = s.send(.response(rpc, .page(candidate)))

@@ -8,13 +8,13 @@ import Testing
     var s = Scenario()
     try s.open()
     let bucket = BucketID(1)
-    s.send(.snapshot(bucket, position(0)))
+    s.send(.snapshot(bucket, position(0), generation: 1))
     let actions = s.send(
       .live(
         bucket,
         Update(
           sequence: 1, payload: "unknown", date: 1,
-          hasSequence: !missingSequence, supported: false)))
+          hasSequence: !missingSequence, supported: false), generation: 1))
     #expect(dbWork(actions).isEmpty)
     #expect(s.core.cursor(for: bucket) == 0)
     if !missingSequence {
@@ -28,7 +28,7 @@ import Testing
     var s = Scenario()
     try s.open()
     let bucket = BucketID(1)
-    s.send(.snapshot(bucket, position(5)))
+    s.send(.snapshot(bucket, position(5), generation: 1))
     let discover = try attempt(s.send(.discover(after: 1)))
     let captureActions = s.send(
       .response(discover, .discovery(checkpoint: 2, targets: [bucket: 0])))
@@ -47,9 +47,9 @@ import Testing
     var s = Scenario()
     try s.open()
     let bucket = BucketID(1)
-    s.send(.snapshot(bucket, position(1)))
+    s.send(.snapshot(bucket, position(1), generation: 1))
     let capture = try attempt(s.send(.catchUp(bucket, through: nil)))
-    s.send(.snapshot(bucket, position(10, date: 10)))
+    s.send(.snapshot(bucket, position(10, date: 10), generation: 1))
     let completed = s.send(.response(capture, .head(position(5))))
     #expect(completed.contains(.event(.caughtUp(bucket, through: 10))))
     #expect(s.core.buckets[bucket]?.blocked == false)
@@ -61,8 +61,8 @@ import Testing
     try s.open()
     let hot = BucketID(1)
     let other = BucketID(2)
-    s.send(.snapshot(hot, position(0)))
-    s.send(.snapshot(other, position(0)))
+    s.send(.snapshot(hot, position(0), generation: 1))
+    s.send(.snapshot(other, position(0), generation: 1))
     let first = try attempt(s.send(.catchUp(hot, through: 100)))
     s.send(.catchUp(other, through: 1))
     s.send(.discover(after: 1))
@@ -83,7 +83,7 @@ import Testing
       }.first)
     let keys = (1...32).map { BucketID(Int64($0)) }
     for key in keys {
-      s.send(.snapshot(key, .zero))
+      s.send(.snapshot(key, .zero, generation: 1))
       s.send(.catchUp(key, through: 2))
     }
     s.send(.discover(after: 1))
@@ -126,10 +126,10 @@ import Testing
     try s.open()
     let key = BucketID(1)
     let read = try operation(s.send(.catchUp(key, through: 2)))
-    s.send(.live(key, Update(sequence: 2, payload: "before", date: 1)))
-    s.send(.live(key, Update(sequence: 2, payload: "after", date: 1)))
-    s.send(.live(key, Update(sequence: 1, payload: "one", date: 1)))
-    s.send(.live(key, Update(sequence: 2, payload: "after", date: 1)))
+    s.send(.live(key, Update(sequence: 2, payload: "before", date: 1), generation: 1))
+    s.send(.live(key, Update(sequence: 2, payload: "after", date: 1), generation: 1))
+    s.send(.live(key, Update(sequence: 1, payload: "one", date: 1), generation: 1))
+    s.send(.live(key, Update(sequence: 2, payload: "after", date: 1), generation: 1))
     let fetch = s.send(.databaseFinished(read, .bucketState(.zero)))
     #expect(dbWork(fetch).isEmpty)
     #expect(transmissions(fetch) == [.fetch(key, from: 0, through: 2)])
@@ -139,10 +139,10 @@ import Testing
     var s = Scenario()
     try s.open()
     let key = BucketID(1)
-    s.send(.snapshot(key, .zero))
+    s.send(.snapshot(key, .zero, generation: 1))
     let first = try attempt(s.send(.catchUp(key, through: 1)))
     let discovery = try attempt(s.send(.discover(after: 1)))
-    s.send(.live(key, Update(sequence: 2, payload: "two", date: 1)))
+    s.send(.live(key, Update(sequence: 2, payload: "two", date: 1), generation: 1))
     s.send(.response(discovery, .discovery(checkpoint: 2, targets: [key: 1])))
     let firstApply = try operation(s.send(.response(first, .page(page(0, 1)))))
     let second = s.send(.databaseFinished(firstApply, .committed(position(1))))

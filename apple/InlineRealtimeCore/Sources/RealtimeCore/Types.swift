@@ -11,10 +11,18 @@ public struct TransactionID: Hashable, Comparable, Sendable {
   public init(_ rawValue: Int64) { self.rawValue = rawValue }
   public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
+public enum BucketKind: Int, Sendable { case user, space, chat }
 public struct BucketID: Hashable, Comparable, Sendable {
+  public let kind: BucketKind
   public let rawValue: Int64
-  public init(_ rawValue: Int64) { self.rawValue = rawValue }
-  public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+  public init(_ rawValue: Int64, kind: BucketKind = .chat) {
+    self.kind = kind
+    self.rawValue = rawValue
+  }
+  public static let user = BucketID(0, kind: .user)
+  public static func < (lhs: Self, rhs: Self) -> Bool {
+    lhs.kind == rhs.kind ? lhs.rawValue < rhs.rawValue : lhs.kind.rawValue < rhs.kind.rawValue
+  }
 }
 public enum ReplayPolicy: Equatable, Sendable { case neverReplay, replaySafe }
 
@@ -75,11 +83,20 @@ public struct Page<Payload: Equatable & Sendable>: Equatable, Sendable {
   }
 }
 public enum DatabaseWork<Payload: Equatable & Sendable>: Equatable, Sendable {
+  case importBootstrapProjection(BootstrapProjection, checkpoint: SyncPosition, Payload)
+  case admitBootstrap(
+    BucketID, before: SyncPosition, after: SyncPosition,
+    projections: [BootstrapProjection: ProjectionReceipt<Payload>],
+    children: [BucketID: SyncPosition])
+  case storeBootstrapCheckpoint(Int64)
+  case loadTransactions
   case optimistic(Transaction<Payload>)
   case store(Transaction<Payload>)
   case markDispatching(TransactionID)
   case applyTransaction(TransactionID, Payload)
   case settle(TransactionID, TransactionOutcome)
+  case captureBucketAdmission(BucketID, expected: SyncPosition, network: Bool)
+  case applyAdmittedPage(BucketID, BucketAdmission, Page<Payload>)
   case loadBucket(BucketID)
   case applyPage(BucketID, expected: SyncPosition, Page<Payload>)
   case importRepair(BucketID, expected: SyncPosition, RepairSnapshot<Payload>)
@@ -87,8 +104,11 @@ public enum DatabaseWork<Payload: Equatable & Sendable>: Equatable, Sendable {
     BucketID, expected: SyncPosition, RepairSnapshot<Payload>, children: [BucketID: SyncPosition])
   case storeCheckpoint(Int64)
 }
-public enum DatabaseResult: Equatable, Sendable {
+public enum DatabaseResult<Payload: Equatable & Sendable>: Equatable, Sendable {
+  case transactions(TransactionRestoration<Payload>)
+  case projection(ProjectionReceipt<Payload>)
   case done
+  case admission(BucketAdmission)
   case bucketState(SyncPosition)
   /// Transactional evidence, not a cursor-only read. For repair finalization,
   /// the writer must revalidate every child even if the parent is already newer.
@@ -100,6 +120,8 @@ public enum TransactionOutcome: Equatable, Sendable {
   case applied, executionUnknown, cancelled, failed, dependencyFailed
 }
 public enum Request<Payload: Equatable & Sendable>: Equatable, Sendable {
+  case bootstrapCheckpoint
+  case bootstrapProjection(BootstrapProjection, checkpoint: SyncPosition)
   case transaction(TransactionID, Payload)
   case fetch(BucketID, from: Int64, through: Int64)
   case captureLatest(BucketID)
@@ -119,20 +141,25 @@ public enum Response<Payload: Equatable & Sendable>: Equatable, Sendable {
 }
 public enum SendFailure: Sendable { case knownUnsent, executionUnknown }
 public enum Input<Payload: Equatable & Sendable>: Sendable {
-  case start(generation: UInt64)
+  case start(generation: UInt64, transactions: TransactionStartup = .empty)
+  case retryRestoration
+  case retryBucket(BucketID, generation: UInt64)
+  case bootstrap(user: BucketID)
   case connected(OperationID)
   case credentialsFinished(OperationID, CredentialResult)
   case authorizationRevoked(OperationID)
   case disconnected(OperationID)
   case submit(Transaction<Payload>)
+  case request(Call<Payload>)
+  case cancelCall(CallID)
   case call(Payload)
   case cancel(TransactionID)
   case catchUp(BucketID, through: Int64?)
-  case live(BucketID, Update<Payload>)
+  case live(BucketID, Update<Payload>, generation: UInt64)
   /// An external writer has already committed this evidence. This is not a write request.
-  case snapshot(BucketID, SyncPosition)
+  case snapshot(BucketID, SyncPosition, generation: UInt64)
   case discover(after: Int64)
-  case databaseFinished(OperationID, DatabaseResult)
+  case databaseFinished(OperationID, DatabaseResult<Payload>)
   case response(OperationID, Response<Payload>)
   case sendFinished(OperationID)
   case sendFailed(OperationID, SendFailure)
@@ -141,10 +168,16 @@ public enum Input<Payload: Equatable & Sendable>: Sendable {
 }
 public enum ClientEvent<Payload: Equatable & Sendable>: Equatable, Sendable {
   case online
+  case bootstrapFinished
+  case restorationRejected
+  case bootstrapBlocked(Set<BucketID>)
+  case transactionsReady
   case authorizationRejected
   case transactionFinished(TransactionID, TransactionOutcome)
   case submissionRejected(TransactionID)
   case directFinished(OperationID, Payload?)
+  case callFinished(CallID, CallOutcome<Payload>)
+  case callRejected(CallID)
   case caughtUp(BucketID, through: Int64)
   case checkpointStored(Int64)
   case blocked(String)
@@ -161,15 +194,23 @@ public enum Output<Payload: Equatable & Sendable>: Equatable, Sendable {
   case wait(until: Tick?)
 }
 public struct Configuration: Sendable {
-  public var capacity: Int
-  public var requestTimeout: Tick
-  public var retryDelay: Tick
-  public var maxBufferedUpdates: Int
+  public let bucketAdmission: BucketAdmissionPolicy
+  public let maxPendingSends: Int
+  public let maxQueuedCalls: Int
+  public let capacity: Int
+  public let requestTimeout: Tick
+  public let retryDelay: Tick
+  public let maxBufferedUpdates: Int
   public init(
     capacity: Int = 4, requestTimeout: Tick = 100, retryDelay: Tick = 10,
-    maxBufferedUpdates: Int = 64
+    maxBufferedUpdates: Int = 64, maxQueuedCalls: Int = 256, maxPendingSends: Int = 256,
+    bucketAdmission: BucketAdmissionPolicy = .cursorOnly
   ) {
     precondition(capacity > 0 && requestTimeout > 0 && retryDelay > 0 && maxBufferedUpdates > 0)
+    precondition(maxQueuedCalls > 0 && maxPendingSends > 0)
+    self.maxPendingSends = maxPendingSends
+    self.bucketAdmission = bucketAdmission
+    self.maxQueuedCalls = maxQueuedCalls
     self.capacity = capacity
     self.requestTimeout = requestTimeout
     self.retryDelay = retryDelay
