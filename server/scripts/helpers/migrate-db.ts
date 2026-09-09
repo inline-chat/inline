@@ -11,11 +11,13 @@ export const migrateDb = async () => {
 
   const migrationClient = postgres(databaseUrl, { max: 1 })
 
-  // This will run migrations on the database, skipping the ones already applied
-  await migrate(drizzle(migrationClient), {
-    migrationsFolder: resolve(__dirname, "../../drizzle"),
-    migrationsTable: "_migrations",
-  })
-
-  await migrationClient.end({ timeout: 5 })
+  try {
+    // This will run migrations on the database, skipping the ones already applied
+    await migrate(drizzle(migrationClient), {
+      migrationsFolder: resolve(__dirname, "../../drizzle"),
+      migrationsTable: "_migrations",
+    })
+  } finally {
+    await migrationClient.end({ timeout: 5 })
+  }
 }

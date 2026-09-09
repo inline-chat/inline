@@ -43,6 +43,7 @@
     "lint:apple": "bash scripts/apple/swiftlint.sh",
     "check:apple": "bash scripts/apple/check-source-contracts.sh && bash scripts/apple/swiftlint.sh --quiet --reporter summary",
     "db:migrate": "cd server && bun run db:migrate",
+    "db:dangerously-reset-db": "cd server && bun run db:dangerously-reset-db",
     "db:generate": "cd server && bun run db:generate",
     "ios:debug": "bash scripts/ios/open-debug-app.sh",
     "macos:debug": "bash scripts/macos/open-debug-app.sh",
