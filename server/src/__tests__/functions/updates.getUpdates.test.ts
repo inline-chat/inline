@@ -1,5 +1,9 @@
 import { describe, test, expect } from "bun:test"
-import { getUpdates, replayRequiresAuthoritativeRepair } from "@in/server/functions/updates.getUpdates"
+import {
+  GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES,
+  getUpdates,
+  replayRequiresAuthoritativeRepair,
+} from "@in/server/functions/updates.getUpdates"
 import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
 import { createUserGroup, updateUserGroup } from "@in/server/modules/userGroups"
 import { testUtils, setupTestLifecycle } from "../setup"
@@ -7,12 +11,25 @@ import { db } from "../../db"
 import { updates, UpdateBucket } from "../../db/schema/updates"
 import {
   DialogNotificationSettings_Mode,
+  GetUpdatesResult as GetUpdatesResultMessage,
   GetUpdatesResult_ResultType,
+  RealtimeV3Response,
   type GetUpdatesInput,
   InputPeer,
   Member_Role,
   SyncSkippedSequence_Reason,
 } from "@inline-chat/protocol/core"
+import {
+  MAX_PACKET_BYTES,
+  decodeAbridgedPacket,
+  decodeInlineApplicationObject,
+  decodeRpcResult,
+  decryptRecord,
+  encodeAbridgedPacket,
+  encodeInlineResult,
+  encodeRpcResult,
+  encryptRecord,
+} from "@inline-chat/protocol/secure"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -43,6 +60,50 @@ const insertServerUpdate = async (params: {
     payload: record.encrypted,
     date: now,
   })
+}
+
+const transportTestAuthKey = new Uint8Array(256)
+const transportTestMessageSeconds = 1_000_000
+const transportTestMessageId = (BigInt(transportTestMessageSeconds) << 32n) | 1n
+
+const realtimeV3WebSocketFrame = (result: Awaited<ReturnType<typeof getUpdates>>): Uint8Array => {
+  const applicationPayload = RealtimeV3Response.toBinary({
+    body: {
+      oneofKind: "rpcResult",
+      rpcResult: {
+        reqMsgId: 1n,
+        result: { oneofKind: "getUpdates", getUpdates: result },
+      },
+    },
+  })
+  const body = encodeRpcResult(1n, encodeInlineResult(applicationPayload))
+  const paddingLength = 12 + ((16 - ((32 + body.length + 12) % 16)) % 16)
+  const record = encryptRecord(transportTestAuthKey, "server-to-client", {
+    serverSalt: 1n,
+    sessionId: 2n,
+    messageId: transportTestMessageId,
+    sequenceNumber: 1,
+    body,
+  }, new Uint8Array(paddingLength))
+  return encodeAbridgedPacket(record)
+}
+
+const decodeGetUpdatesFrame = (frame: Uint8Array) => {
+  const fields = decryptRecord(decodeAbridgedPacket(frame), transportTestAuthKey, {
+    direction: "server-to-client",
+    sessionId: 2n,
+    validServerSalts: new Set([1n]),
+    nowSeconds: transportTestMessageSeconds,
+  })
+  const rpcResult = decodeRpcResult(fields.body)
+  const application = decodeInlineApplicationObject(rpcResult.result)
+  if (application.kind !== "result") throw new Error("Expected Inline application result")
+  const response = RealtimeV3Response.fromBinary(application.payload)
+  if (response.body.oneofKind !== "rpcResult" ||
+      response.body.rpcResult.result.oneofKind !== "getUpdates") {
+    throw new Error("Expected getUpdates RPC result")
+  }
+  return response.body.rpcResult.result.getUpdates
 }
 
 describe("getUpdates", () => {
@@ -173,6 +234,298 @@ describe("getUpdates", () => {
     expect(capped.seq).toBe(100n)
     expect(capped.final).toBe(false)
     expect(capped.updates).toHaveLength(100)
+  })
+
+  test("byte-slices a large contiguous catch-up page without losing sequence progress", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Byte-Bounded Catch-Up", [
+      "byte-page-early-sender@example.com",
+      "byte-page-late-sender@example.com",
+      "byte-page-viewer@example.com",
+    ])
+    const earlySender = users[0]
+    const lateSender = users[1]
+    const viewer = users[2]
+    if (!earlySender || !lateSender || !viewer || !space) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Byte-Bounded Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+    await testUtils.addParticipant(chat.id, earlySender.id)
+    await testUtils.addParticipant(chat.id, lateSender.id)
+    await testUtils.addParticipant(chat.id, viewer.id)
+
+    const expectedMessages = new Map<number, {
+      chatId: bigint
+      fromId: bigint
+      id: bigint
+      message: string
+      out: boolean
+    }>()
+    for (let seq = 1; seq <= 16; seq += 1) {
+      const sender = seq <= 8 ? earlySender : lateSender
+      const message = `${seq}:${"x".repeat(80_000)}`
+      expectedMessages.set(seq, {
+        chatId: BigInt(chat.id),
+        fromId: BigInt(sender.id),
+        id: BigInt(seq),
+        message,
+        out: false,
+      })
+      await db.insert(messages).values({
+        chatId: chat.id,
+        messageId: seq,
+        fromId: sender.id,
+        text: message,
+      })
+      await insertServerUpdate({
+        bucket: UpdateBucket.Chat,
+        entityId: chat.id,
+        seq,
+        payload: {
+          oneofKind: "newMessage",
+          newMessage: { chatId: BigInt(chat.id), msgId: BigInt(seq) },
+        },
+      })
+    }
+
+    const bucket: GetUpdatesInput["bucket"] = {
+      type: {
+        oneofKind: "chat",
+        chat: {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+        },
+      },
+    }
+    const deliveredSequences: number[] = []
+    let cursor = 0
+    let final = false
+    let pages = 0
+
+    while (!final && pages < 10) {
+      const page = await getUpdates({
+        bucket,
+        startSeq: BigInt(cursor),
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 100,
+      }, { currentUserId: viewer.id } as any)
+      expect(GetUpdatesResultMessage.toBinary(page).length)
+        .toBeLessThanOrEqual(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+      const frame = realtimeV3WebSocketFrame(page)
+      expect(frame.length).toBeLessThanOrEqual(1_048_576)
+      const decodedPage = decodeGetUpdatesFrame(frame)
+      expect(decodedPage.seq).toBe(page.seq)
+      expect(decodedPage.updates.map((update) => update.seq))
+        .toEqual(page.updates.map((update) => update.seq))
+      expect(decodedPage.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
+      const expectedSenderIds = new Set<bigint>()
+      for (const update of decodedPage.updates) {
+        const seq = Number(update.seq)
+        const expected = expectedMessages.get(seq)
+        expect(expected).toBeDefined()
+        expect(update.update.oneofKind).toBe("newMessage")
+        if (!expected || update.update.oneofKind !== "newMessage") {
+          throw new Error(`Missing expected message for sequence ${seq}`)
+        }
+        const message = update.update.newMessage.message
+        expect(message).toBeDefined()
+        if (!message) throw new Error(`Missing decoded message for sequence ${seq}`)
+        expect({
+          chatId: message.chatId,
+          fromId: message.fromId,
+          id: message.id,
+          message: message.message,
+          out: message.out,
+        }).toEqual(expected)
+        expect(message.peerId?.type.oneofKind).toBe("chat")
+        if (message.peerId?.type.oneofKind === "chat") {
+          expect(message.peerId.type.chat.chatId).toBe(BigInt(chat.id))
+        }
+        expectedSenderIds.add(expected.fromId)
+      }
+      const sortIds = (left: bigint, right: bigint) => Number(left - right)
+      const sidecarUserIds = decodedPage.sidecars?.users.map((user) => user.id).sort(sortIds) ?? []
+      expect(sidecarUserIds).toEqual(Array.from(expectedSenderIds).sort(sortIds))
+      for (const senderId of [BigInt(earlySender.id), BigInt(lateSender.id)]) {
+        expect(sidecarUserIds.includes(senderId)).toBe(expectedSenderIds.has(senderId))
+      }
+      expect(Number(page.seq)).toBeGreaterThan(cursor)
+      deliveredSequences.push(...decodedPage.updates.map((update) => Number(update.seq)))
+      cursor = Number(page.seq)
+      final = page.final === true
+      pages += 1
+    }
+
+    expect(final).toBe(true)
+    expect(pages).toBeGreaterThan(1)
+    expect(cursor).toBe(16)
+    expect(deliveredSequences).toEqual(Array.from({ length: 16 }, (_, index) => index + 1))
+  })
+
+  test("byte-slices mixed delivered and skipped user sequences without losing either", async () => {
+    const user = await testUtils.createUser("byte-page-mixed-skips@example.com")
+    if (!user) throw new Error("Fixture creation failed")
+
+    const expectedBios = new Map<number, string>()
+    for (let seq = 1; seq <= 100; seq += 1) {
+      if (seq % 10 === 0) {
+        await insertServerUpdate({
+          bucket: UpdateBucket.User,
+          entityId: user.id,
+          seq,
+          payload: { oneofKind: undefined },
+        })
+        continue
+      }
+
+      // Deliberately large replay envelopes force a byte boundary while the
+      // alternating opaque records exercise the independent skip accounting.
+      const bio = `${seq}:${"b".repeat(18_000)}`
+      expectedBios.set(seq, bio)
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: {
+          oneofKind: "updatedUser",
+          updatedUser: {
+            user: {
+              id: BigInt(100_000 + seq),
+              firstName: `User ${seq}`,
+              bio,
+            },
+          },
+        },
+      })
+    }
+
+    const deliveredSequences: number[] = []
+    const skippedSequences: number[] = []
+    let cursor = 0
+    let final = false
+    let pages = 0
+
+    while (!final && pages < 10) {
+      const page = await getUpdates({
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: BigInt(cursor),
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 100,
+      }, { currentUserId: user.id } as any)
+      expect(GetUpdatesResultMessage.toBinary(page).length)
+        .toBeLessThanOrEqual(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+      const decodedPage = decodeGetUpdatesFrame(realtimeV3WebSocketFrame(page))
+      expect(decodedPage.seq).toBe(page.seq)
+
+      for (const update of decodedPage.updates) {
+        const seq = Number(update.seq)
+        const expectedBio = expectedBios.get(seq)
+        expect(expectedBio).toBeDefined()
+        expect(update.update.oneofKind).toBe("updatedUser")
+        if (!expectedBio || update.update.oneofKind !== "updatedUser") {
+          throw new Error(`Missing expected user update for sequence ${seq}`)
+        }
+        expect(update.update.updatedUser.user).toMatchObject({
+          id: BigInt(100_000 + seq),
+          firstName: `User ${seq}`,
+          bio: expectedBio,
+        })
+        deliveredSequences.push(seq)
+      }
+
+      const pageSkippedSequences = decodedPage.skippedSequences.map((skipped) => {
+        expect(skipped.reason).toBe(SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET)
+        return Number(skipped.seq)
+      })
+      skippedSequences.push(...pageSkippedSequences)
+      const accountedSequences = [
+        ...decodedPage.updates.map((update) => Number(update.seq)),
+        ...pageSkippedSequences,
+      ].sort((left, right) => left - right)
+      expect(accountedSequences).toEqual(
+        Array.from({ length: Number(page.seq) - cursor }, (_, index) => cursor + index + 1),
+      )
+      expect(Number(page.seq)).toBeGreaterThan(cursor)
+      cursor = Number(page.seq)
+      final = page.final === true
+      pages += 1
+    }
+
+    expect(final).toBe(true)
+    expect(pages).toBeGreaterThan(1)
+    expect(cursor).toBe(100)
+    expect(deliveredSequences).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1).filter((seq) => seq % 10 !== 0),
+    )
+    expect(skippedSequences).toEqual(Array.from({ length: 10 }, (_, index) => (index + 1) * 10))
+  })
+
+  test("returns one indivisible update intact above the compatibility byte target", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Single Oversized Catch-Up", [
+      "single-oversized@example.com",
+    ])
+    const user = users[0]
+    if (!user || !space) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Single Oversized Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+    const expectedMessage = "x".repeat(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES + 50_000)
+    await db.insert(messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: user.id,
+      text: expectedMessage,
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "newMessage",
+        newMessage: { chatId: BigInt(chat.id), msgId: 1n },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: {
+        type: {
+          oneofKind: "chat",
+          chat: {
+            peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+          },
+        },
+      },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 1000,
+      limit: 100,
+    }, { currentUserId: user.id } as any)
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.seq).toBe(1n)
+    expect(result.final).toBe(true)
+    expect(result.updates).toHaveLength(1)
+    expect(result.updates[0]?.seq).toBe(1)
+    expect(GetUpdatesResultMessage.toBinary(result).length)
+      .toBeGreaterThan(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+    const frame = realtimeV3WebSocketFrame(result)
+    expect(frame.length).toBeGreaterThan(1_048_576)
+    expect(frame.length).toBeLessThanOrEqual(MAX_PACKET_BYTES + 4)
+    const decoded = decodeGetUpdatesFrame(frame)
+    expect(decoded.seq).toBe(1n)
+    expect(decoded.updates).toHaveLength(1)
+    const decodedUpdate = decoded.updates[0]
+    expect(decodedUpdate?.update.oneofKind).toBe("newMessage")
+    if (decodedUpdate?.update.oneofKind !== "newMessage") {
+      throw new Error("Expected decoded newMessage update")
+    }
+    expect(decodedUpdate.update.newMessage.message).toMatchObject({
+      id: 1n,
+      fromId: BigInt(user.id),
+      chatId: BigInt(chat.id),
+      message: expectedMessage,
+      out: true,
+    })
   })
 
   test("rejects invalid page limits", async () => {

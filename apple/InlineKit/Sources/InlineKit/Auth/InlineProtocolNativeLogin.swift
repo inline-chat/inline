@@ -461,7 +461,7 @@ public actor InlineProtocolNativeLogin {
         message: error.message,
         code: Int(error.code)
       )
-    case .invalidKey, .outboundBufferOverflow, .protocolFailure, .unexpectedResponse,
+    case .inboundMessageTooLarge, .invalidKey, .outboundBufferOverflow, .protocolFailure, .unexpectedResponse,
          .updateBufferOverflow:
       RealtimeDirectRpcError.unknown(connectionError)
     }

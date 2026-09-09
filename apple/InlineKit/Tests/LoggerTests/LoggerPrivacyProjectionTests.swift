@@ -354,6 +354,10 @@ struct LoggerPrivacyProjectionTests {
         "pending_probe": 1,
         "queued_write": 256,
         "queued_bytes": 16 * 1_024 * 1_024,
+        "maximum_message_bytes": 16 * 1_024 * 1_024 + 4,
+        "transport_generation": 3,
+        "during_handshake": false,
+        "inbound_message_too_large": true,
         "inbound_update_overflow": 1,
         "outbound_write_overflow": 0,
         "direct_capacity_rejections": 3,
@@ -367,6 +371,10 @@ struct LoggerPrivacyProjectionTests {
     #expect(try #require(projection.data["pending_probe"] as? Double) == 1)
     #expect(try #require(projection.data["queued_write"] as? Double) == 256)
     #expect(try #require(projection.data["queued_bytes"] as? Double) == 16 * 1_024 * 1_024)
+    #expect(try #require(projection.data["maximum_message_bytes"] as? Double) == 16 * 1_024 * 1_024 + 4)
+    #expect(try #require(projection.data["transport_generation"] as? Double) == 3)
+    #expect(try #require(projection.data["during_handshake"] as? Bool) == false)
+    #expect(try #require(projection.data["inbound_message_too_large"] as? Bool))
     #expect(try #require(projection.data["inbound_update_overflow"] as? Double) == 1)
     #expect(try #require(projection.data["outbound_write_overflow"] as? Double) == 0)
     #expect(try #require(projection.data["direct_capacity_rejections"] as? Double) == 3)

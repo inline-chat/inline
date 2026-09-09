@@ -119,7 +119,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       return
     }
 
-    let wsTask = session.webSocketTask(with: url)
+    let wsTask = InlineWebSocketTransportPolicy.makeTask(using: session, url: url)
     task = wsTask
 
     wsTask.resume()

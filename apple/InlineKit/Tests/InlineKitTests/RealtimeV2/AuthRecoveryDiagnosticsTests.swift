@@ -85,6 +85,11 @@ struct AuthRecoveryDiagnosticsTests {
         for: InlineProtocolV3ConnectionError.invalidKey
       ) == .error
     )
+    #expect(
+      InlineProtocolV3Transport.startFailureLogLevel(
+        for: InlineProtocolV3ConnectionError.inboundMessageTooLarge
+      ) == .error
+    )
   }
 
   @Test("captures an authenticated snapshot missed by the auth observer")

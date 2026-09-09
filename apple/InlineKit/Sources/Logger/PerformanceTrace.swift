@@ -121,6 +121,7 @@ public enum PerformanceTrace {
     "large_url_preview_count",
     "last_sync_age_sec",
     "max_attempts",
+    "maximum_message_bytes",
     "measured_height",
     "oldest_queue_age_ms",
     "outstanding",
@@ -138,12 +139,15 @@ public enum PerformanceTrace {
     "stabilized_height",
     "threshold_ms",
     "target_seq",
+    "transport_generation",
     "updates",
     "visible_count",
     "window_saturations",
   ]
   private static let breadcrumbBooleanKeys: Set<String> = [
     "cold_start",
+    "during_handshake",
+    "inbound_message_too_large",
     "interrupted",
     "requested",
     "success",

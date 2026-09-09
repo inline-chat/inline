@@ -627,7 +627,8 @@ public actor InlineProtocolV3Transport: Transport {
       .timeout,
       .updateBufferOverflow:
       return .warning
-    case .invalidKey,
+    case .inboundMessageTooLarge,
+      .invalidKey,
       .protocolFailure,
       .unexpectedResponse:
       return .error

@@ -1,5 +1,11 @@
-import type { GetUpdatesInput, GetUpdatesResult, InputPeer, Peer } from "@inline-chat/protocol/core"
-import { GetUpdatesResult_ResultType } from "@inline-chat/protocol/core"
+import {
+  GetUpdatesResult as GetUpdatesResultMessage,
+  GetUpdatesResult_ResultType,
+  type GetUpdatesInput,
+  type GetUpdatesResult,
+  type InputPeer,
+  type Peer,
+} from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { UpdateBoxInput } from "@in/server/db/models/updates"
 import type { DbChat } from "@in/server/db/schema"
@@ -17,6 +23,10 @@ import { Log } from "@in/server/utils/log"
 const PAGE_LIMIT = 100
 const REPLAY_LIMIT = 10_000
 const MAX_DATABASE_SEQUENCE = 2_147_483_647
+// Released Apple clients use Foundation's 1 MiB WebSocket receive default. Target
+// normal multi-record results below 1,000,000 bytes so realtime envelopes,
+// encryption padding, and abridged framing retain more than 48 KiB of headroom.
+export const GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES = 1_000_000
 const log = new Log("updates.getUpdates")
 
 export const replayRequiresAuthoritativeRepair = (startSeq: number, latestSeq: number): boolean =>
@@ -94,14 +104,6 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     latestDate,
   } = fetchTiming.value
   const fetchMs = fetchTiming.ms
-
-  let pageSeq = seqStart
-  let pageDate: Date | null = null
-  if (dbUpdates.length > 0) {
-    const lastRecord = dbUpdates[dbUpdates.length - 1]!
-    pageSeq = lastRecord.seq
-    pageDate = lastRecord.date
-  }
 
   const seqDifference = latestSeq - seqStart
   if (replayRequiresAuthoritativeRepair(seqStart, latestSeq)) {
@@ -194,55 +196,89 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const inflateMs = elapsedMs(inflateStartedAt)
 
-  const updates = inflatedUpdates
-  assertPageSequenceAccounting(dbUpdates, updates, skippedSequences)
-  const final = latestSeq <= pageSeq
+  assertPageSequenceAccounting(dbUpdates, inflatedUpdates, skippedSequences)
   const sidecarsStartedAt = performance.now()
-  const sidecars =
-    descriptor.scope === "chat"
-      ? await Sync.buildChatSidecarsForUpdates({
-          chatId: descriptor.chatId,
-          updates,
-          userId: context.currentUserId,
-        })
-      : descriptor.scope === "user"
-        ? await Sync.buildUserSidecarsForUpdates({
+  const buildCandidate = async (databaseUpdateCount: number) => {
+    const candidateDatabaseUpdates = dbUpdates.slice(0, databaseUpdateCount)
+    const includedSequences = new Set(candidateDatabaseUpdates.map((update) => update.seq))
+    const updates = inflatedUpdates.filter((update) => includedSequences.has(Number(update.seq ?? 0)))
+    const candidateSkippedSequences = skippedSequences.filter((skipped) =>
+      includedSequences.has(Number(skipped.seq))
+    )
+    assertPageSequenceAccounting(candidateDatabaseUpdates, updates, candidateSkippedSequences)
+
+    const lastRecord = candidateDatabaseUpdates.at(-1)
+    const pageSeq = lastRecord?.seq ?? seqStart
+    const sidecars =
+      descriptor.scope === "chat"
+        ? await Sync.buildChatSidecarsForUpdates({
+            chatId: descriptor.chatId,
             updates,
             userId: context.currentUserId,
           })
-        : await Sync.buildSpaceSidecarsForUpdates({
-            spaceId: descriptor.spaceId,
-            updates,
-            userId: context.currentUserId,
-          })
+        : descriptor.scope === "user"
+          ? await Sync.buildUserSidecarsForUpdates({
+              updates,
+              userId: context.currentUserId,
+            })
+          : await Sync.buildSpaceSidecarsForUpdates({
+              spaceId: descriptor.spaceId,
+              updates,
+              userId: context.currentUserId,
+            })
+    const result: GetUpdatesResult = {
+      updates,
+      seq: BigInt(pageSeq),
+      date: encodeOptionalDate(lastRecord?.date),
+      final: latestSeq <= pageSeq,
+      resultType: updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE,
+      sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
+      skippedSequences: candidateSkippedSequences,
+    }
+    return {
+      databaseUpdateCount,
+      responseBytes: GetUpdatesResultMessage.toBinary(result).length,
+      result,
+    }
+  }
+
+  let candidate = await buildCandidate(dbUpdates.length)
+  while (
+    candidate.responseBytes > GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES &&
+    candidate.databaseUpdateCount > 1
+  ) {
+    candidate = await buildCandidate(Math.max(1, Math.floor(candidate.databaseUpdateCount / 2)))
+  }
   const sidecarsMs = elapsedMs(sidecarsStartedAt)
 
-  let resultType = updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE
+  // A single logical update is indivisible in the released protocol. Return it
+  // intact so clients with the protocol-aligned transport budget can advance;
+  // TOO_LONG would divert them to an equally large authoritative snapshot.
+  const singleRecordExceedsCompatibilityTarget =
+    candidate.databaseUpdateCount === 1 &&
+    candidate.responseBytes > GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES
 
   logGetUpdatesTiming({
     scope: descriptor.scope,
-    result: updates.length === 0 ? "empty" : "slice",
+    result: candidate.result.updates.length === 0 ? "empty" : "slice",
     totalMs: elapsedMs(startedAt),
     resolveMs,
     fetchMs,
     inflateMs,
     sidecarsMs,
     dbUpdates: dbUpdates.length,
-    updates: updates.length,
+    returnedDbUpdates: candidate.databaseUpdateCount,
+    updates: candidate.result.updates.length,
     pageLimit,
     replayLimit: REPLAY_LIMIT,
     seqDifference,
+    responseBytes: candidate.responseBytes,
+    compatibilityTargetBytes: GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES,
+    byteLimited: candidate.databaseUpdateCount < dbUpdates.length,
+    singleRecordExceedsCompatibilityTarget,
   })
 
-  return {
-    updates,
-    seq: BigInt(pageSeq),
-    date: encodeOptionalDate(pageDate),
-    final,
-    resultType,
-    sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
-    skippedSequences,
-  }
+  return candidate.result
 }
 
 const findDatabasePageGap = (
@@ -329,16 +365,25 @@ type GetUpdatesTiming = {
   inflateMs: number
   sidecarsMs: number
   dbUpdates: number
+  returnedDbUpdates?: number
   updates: number
   pageLimit: number
   replayLimit: number
   seqDifference: number
+  responseBytes?: number
+  compatibilityTargetBytes?: number
+  byteLimited?: boolean
+  singleRecordExceedsCompatibilityTarget?: boolean
 }
 
 const logGetUpdatesTiming = (timing: GetUpdatesTiming): void => {
   const message = "getUpdates timing"
-  if (timing.totalMs >= 500) {
+  if (timing.totalMs >= 500 || timing.singleRecordExceedsCompatibilityTarget) {
     log.warn(message, timing)
+  } else if (timing.byteLimited) {
+    // Production drops debug logs. Preserve rare compatibility pagination in
+    // Sentry Logs without promoting an expected recovery page to an issue.
+    log.info(message, timing)
   } else {
     log.debug(message, timing)
   }

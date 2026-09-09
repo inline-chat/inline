@@ -586,6 +586,9 @@ private actor SentryReporter {
       sentryScope.setTag(value: entry.scope, key: "scope")
       sentryScope.setTag(value: entry.fileName, key: "source_file")
       sentryScope.setExtra(value: entry.error ?? "none", key: "error_category")
+      if let errorCategory = entry.error {
+        sentryScope.setTag(value: errorCategory, key: "error_category")
+      }
       sentryScope.setExtra(value: entry.line, key: "line")
       if let http {
         sentryScope.setTag(value: "http.request_failed", key: "event")

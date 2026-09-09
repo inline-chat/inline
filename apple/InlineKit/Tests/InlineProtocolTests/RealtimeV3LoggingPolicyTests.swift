@@ -47,6 +47,11 @@ struct RealtimeV3LoggingPolicyTests {
   func protocolFailuresRemainErrors() {
     #expect(
       InlineProtocolV3Connection.failureLogLevel(
+        for: InlineProtocolV3ConnectionError.inboundMessageTooLarge
+      ) == .error
+    )
+    #expect(
+      InlineProtocolV3Connection.failureLogLevel(
         for: InlineProtocolV3ConnectionError.invalidKey
       ) == .error
     )
@@ -64,6 +69,10 @@ struct RealtimeV3LoggingPolicyTests {
 
   @Test("connection failures expose bounded privacy-safe categories")
   func connectionFailuresExposePrivacySafeCategories() {
+    #expect(
+      InlineProtocolV3ConnectionError.inboundMessageTooLarge.privacySafeErrorCategory
+        == "realtime_v3:inbound_message_too_large"
+    )
     #expect(
       InlineProtocolV3ConnectionError.invalidKey.privacySafeErrorCategory
         == "realtime_v3:invalid_key"
@@ -84,5 +93,15 @@ struct RealtimeV3LoggingPolicyTests {
     let rpcCategory = InlineProtocolV3ConnectionError.rpc(rpcError).privacySafeErrorCategory
     #expect(rpcCategory == "realtime_v3:rpc:5:400")
     #expect(!rpcCategory.contains(rpcError.message))
+  }
+
+  @Test("normalizes Foundation's oversized-message receive failure")
+  func normalizesOversizedMessageFailure() {
+    let error = NSError(
+      domain: NSPOSIXErrorDomain,
+      code: Int(POSIXErrorCode.EMSGSIZE.rawValue)
+    )
+    let normalized = InlineProtocolV3Connection.normalizedWebSocketReceiveError(error)
+    #expect(normalized as? InlineProtocolV3ConnectionError == .inboundMessageTooLarge)
   }
 }

@@ -261,6 +261,7 @@ public enum InlineProtocolV3ConnectionError:
   case authorizationInvalidated
   case closed
   case commitOutcomeUnknown
+  case inboundMessageTooLarge
   case invalidKey
   case outboundBufferOverflow
   case protocolFailure
@@ -282,6 +283,8 @@ public enum InlineProtocolV3ConnectionError:
       "realtime_v3:closed"
     case .commitOutcomeUnknown:
       "realtime_v3:commit_outcome_unknown"
+    case .inboundMessageTooLarge:
+      "realtime_v3:inbound_message_too_large"
     case .invalidKey:
       "realtime_v3:invalid_key"
     case .outboundBufferOverflow:
@@ -414,7 +417,7 @@ public actor InlineProtocolV3Connection {
     while !InlineObfuscatedClientCarrier.isValidHeader(header)
     let carrier = try InlineObfuscatedClientCarrier(randomHeader: header)
     let session = URLSession(configuration: .ephemeral)
-    let task = session.webSocketTask(with: options.url)
+    let task = InlineWebSocketTransportPolicy.makeTask(using: session, url: options.url)
     let closeAttempt: @Sendable () -> Void = {
       task.cancel(with: .goingAway, reason: nil)
       session.invalidateAndCancel()
@@ -1170,6 +1173,23 @@ public actor InlineProtocolV3Connection {
         ]
       )
     }
+    if terminationErrorValue == .inboundMessageTooLarge {
+      PerformanceTrace.breadcrumb(
+        "realtime_transport_message_too_large",
+        category: "realtime.transport",
+        level: .error,
+        data: [
+          "during_handshake": false,
+          "inbound_message_too_large": true,
+          "maximum_message_bytes": InlineWebSocketTransportPolicy.maximumIncomingMessageBytes,
+          "pending_rpc": pendingRPCCount,
+          "pending_probe": pendingProbeCount,
+          "queued_write": queuedWriteCount,
+          "queued_bytes": queuedWriteBytes,
+          "transport_generation": 3,
+        ]
+      )
+    }
     let message = if closeCode == .normalClosure {
       "Connection closed pending_rpc=\(pendingRPCCount) pending_probe=\(pendingProbeCount) queued_write=\(queuedWriteCount)"
     } else {
@@ -1215,7 +1235,8 @@ public actor InlineProtocolV3Connection {
       .timeout,
       .updateBufferOverflow:
       return .warning
-    case .invalidKey,
+    case .inboundMessageTooLarge,
+      .invalidKey,
       .protocolFailure,
       .unexpectedResponse:
       return .error
@@ -1232,7 +1253,7 @@ public actor InlineProtocolV3Connection {
 
   private func receivePacket() async throws -> [UInt8] {
     while true {
-      let message = try await task.receive()
+      let message = try await Self.receiveWebSocketMessage(from: task)
       let wire: [UInt8] = switch message {
       case let .data(data): Array(data)
       case let .string(string): Array(string.utf8)
@@ -1321,7 +1342,10 @@ public actor InlineProtocolV3Connection {
     carrier: InlineObfuscatedClientCarrier, task: URLSessionWebSocketTask
   ) async throws -> [UInt8] {
     while true {
-      guard case let .data(data) = try await task.receive() else {
+      guard case let .data(data) = try await receiveWebSocketMessage(
+        from: task,
+        duringHandshake: true
+      ) else {
         throw InlineProtocolV3ConnectionError.protocolFailure
       }
       switch try InlineSecureTransport.decodeAbridgedFrame(carrier.inbound.process(Array(data))) {
@@ -1329,6 +1353,41 @@ public actor InlineProtocolV3Connection {
       case .quickAck: continue
       }
     }
+  }
+
+  private static func receiveWebSocketMessage(
+    from task: URLSessionWebSocketTask,
+    duringHandshake: Bool = false
+  ) async throws -> URLSessionWebSocketTask.Message {
+    do {
+      return try await task.receive()
+    } catch {
+      let normalized = normalizedWebSocketReceiveError(error)
+      if duringHandshake,
+         normalized as? InlineProtocolV3ConnectionError == .inboundMessageTooLarge
+      {
+        PerformanceTrace.breadcrumb(
+          "realtime_transport_message_too_large",
+          category: "realtime.transport",
+          level: .error,
+          data: [
+            "during_handshake": true,
+            "inbound_message_too_large": true,
+            "maximum_message_bytes": InlineWebSocketTransportPolicy.maximumIncomingMessageBytes,
+            "transport_generation": 3,
+          ]
+        )
+      }
+      throw normalized
+    }
+  }
+
+  static func normalizedWebSocketReceiveError(_ error: any Error) -> any Error {
+    let nsError = error as NSError
+    guard nsError.domain == NSPOSIXErrorDomain,
+          nsError.code == Int(POSIXErrorCode.EMSGSIZE.rawValue)
+    else { return error }
+    return InlineProtocolV3ConnectionError.inboundMessageTooLarge
   }
 }
 

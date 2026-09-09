@@ -335,7 +335,7 @@ actor WebSocketTransport: NSObject, Sendable {
       ]
     )
     log.info("Connecting to \(urlString)")
-    webSocketTask = session!.webSocketTask(with: url)
+    webSocketTask = InlineWebSocketTransportPolicy.makeTask(using: session!, url: url)
     webSocketTask?.priority = URLSessionTask.highPriority
     webSocketTask?.resume()
   }

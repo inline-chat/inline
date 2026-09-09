@@ -205,6 +205,15 @@ struct InlineProtocolNativeLoginTests {
     }
   }
 
+  @Test("native login does not mispresent an oversized transport message as an auth failure")
+  func nativeLoginPresentsOversizedTransportMessageAsUnknown() {
+    let presented = InlineProtocolNativeLogin.presentationError(
+      InlineProtocolV3ConnectionError.inboundMessageTooLarge
+    )
+
+    #expect((presented as? RealtimeDirectRpcError)?.privacySafeErrorCategory == "realtime_rpc:unknown")
+  }
+
   @Test("native completion invokes the injected local commit boundary before returning")
   func invokesInjectedCommitBoundary() async throws {
     let auth = Auth.mocked(authenticated: false)
