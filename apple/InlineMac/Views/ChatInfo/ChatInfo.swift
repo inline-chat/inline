@@ -1682,7 +1682,7 @@ private struct ChatInfoDocumentRow: NSViewRepresentable {
     let preferredWidth = DocumentPresentationPlan.preferredWidth(for: documentMessage.document)
     let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? preferredWidth
 
-    CGSize(
+    return CGSize(
       width: width,
       height: DocumentPresentationPlan.preferredHeight(for: documentMessage.document)
     )
