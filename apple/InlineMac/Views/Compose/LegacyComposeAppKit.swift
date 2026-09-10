@@ -85,6 +85,7 @@ class LegacyComposeAppKit: NSView {
   private var voiceButtonTrailingConstraint: NSLayoutConstraint?
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
   private var voiceEscapeKeyUnsubscribe: (() -> Void)?
+  private var voiceReturnKeyUnsubscribe: (() -> Void)?
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
 
   // [uniqueId: FileMediaItem]
@@ -759,7 +760,10 @@ class LegacyComposeAppKit: NSView {
       return
     }
 
-    guard voiceEscapeKeyUnsubscribe == nil, voiceSpaceKeyUnsubscribe == nil else { return }
+    guard voiceEscapeKeyUnsubscribe == nil,
+          voiceReturnKeyUnsubscribe == nil,
+          voiceSpaceKeyUnsubscribe == nil
+    else { return }
 
     voiceEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
@@ -780,11 +784,25 @@ class LegacyComposeAppKit: NSView {
         }
       }
     )
+
+    if voiceViewModel.inputMode == .transcribe {
+      voiceReturnKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
+        for: .returnKey,
+        key: "compose_voice_return_\(peerId)",
+        handler: { [weak self] _ in
+          Task { @MainActor [weak self] in
+            self?.sendVoiceRecording()
+          }
+        }
+      )
+    }
   }
 
   private func removeVoiceKeyHandlers() {
     voiceEscapeKeyUnsubscribe?()
     voiceEscapeKeyUnsubscribe = nil
+    voiceReturnKeyUnsubscribe?()
+    voiceReturnKeyUnsubscribe = nil
     voiceSpaceKeyUnsubscribe?()
     voiceSpaceKeyUnsubscribe = nil
   }
