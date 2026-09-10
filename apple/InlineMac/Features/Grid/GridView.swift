@@ -55,6 +55,10 @@ struct GridView: View {
 
       if #available(macOS 26.0, *) {
         ToolbarSpacer(.flexible)
+      } else {
+        ToolbarItem {
+          Spacer()
+        }
       }
 
       ToolbarItem {
@@ -139,6 +143,7 @@ private struct GridAdvancedMenu: View {
         .labelStyle(.iconOnly)
     }
     .menuIndicator(.hidden)
+    .tint(.primary)
     .help("Grid Options")
   }
 }

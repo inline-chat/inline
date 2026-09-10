@@ -21,14 +21,14 @@ struct MacToolbarItem<Content: View>: ToolbarContent {
   private let placement: ToolbarItemPlacement
   private let priority: MacToolbarVisibilityPriority
   private let label: String?
-  private let isNavigational: Bool
+  private let isNavigational: Bool?
   private let content: () -> Content
 
   init(
     placement: ToolbarItemPlacement = .automatic,
     priority: MacToolbarVisibilityPriority,
     label: String? = nil,
-    isNavigational: Bool = false,
+    isNavigational: Bool? = nil,
     @ViewBuilder content: @escaping () -> Content
   ) {
     self.placement = placement
@@ -55,7 +55,7 @@ private extension View {
   func toolbarItemAppKitConfiguration(
     priority: NSToolbarItem.VisibilityPriority? = nil,
     label: String? = nil,
-    isNavigational: Bool = false
+    isNavigational: Bool? = nil
   ) -> some View {
     modifier(ToolbarItemAppKitConfigurationModifier(
       priority: priority,
@@ -68,11 +68,11 @@ private extension View {
 private struct ToolbarItemAppKitConfigurationModifier: ViewModifier {
   let priority: NSToolbarItem.VisibilityPriority?
   let label: String?
-  let isNavigational: Bool
+  let isNavigational: Bool?
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if priority == nil, label == nil, isNavigational == false {
+    if priority == nil, label == nil, isNavigational == nil {
       content
     } else {
       content
@@ -82,7 +82,10 @@ private struct ToolbarItemAppKitConfigurationModifier: ViewModifier {
               item.visibilityPriority = priority
             }
 
-            item.isNavigational = isNavigational
+            // Preserve the navigation role SwiftUI derives from placement by default.
+            if let isNavigational {
+              item.isNavigational = isNavigational
+            }
 
             if let label {
               item.label = label

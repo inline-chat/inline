@@ -59,6 +59,7 @@ private struct NavigationHistoryButton: View {
       direction.go(nav)
     }
     .menuIndicator(.hidden)
+    .tint(.primary)
     .disabled(direction.isEnabled(nav) == false)
   }
 }

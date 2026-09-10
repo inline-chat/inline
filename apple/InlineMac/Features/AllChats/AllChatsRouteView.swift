@@ -108,6 +108,10 @@ struct AllChatsRouteView: View {
 
       if #available(macOS 26.0, *) {
         ToolbarSpacer(.flexible)
+      } else {
+        ToolbarItem {
+          Spacer()
+        }
       }
 
       if filter == .chats {

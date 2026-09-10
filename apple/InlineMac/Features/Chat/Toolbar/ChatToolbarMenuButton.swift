@@ -127,9 +127,11 @@ struct ChatToolbarMenuButton: View {
         }
       }
     } label: {
-      Image(systemName: "ellipsis")
+      Label("More", systemImage: "ellipsis")
+        .labelStyle(.iconOnly)
     }
     .menuIndicator(.hidden)
+    .tint(.primary)
     .accessibilityLabel("More")
     .help("More")
     .sheet(isPresented: $showRenameSheet) {

@@ -82,6 +82,7 @@ struct ChatToolbarShareButton: View {
         .labelStyle(.iconOnly)
     }
     .menuIndicator(.hidden)
+    .tint(.primary)
     .accessibilityLabel("Share")
     .help("Share")
     .sheet(isPresented: $isVisibilityPickerPresented) {

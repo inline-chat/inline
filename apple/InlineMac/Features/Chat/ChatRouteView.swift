@@ -225,6 +225,10 @@ struct ChatRouteView: View {
 
         if #available(macOS 26.0, *) {
           ToolbarSpacer(.flexible)
+        } else {
+          ToolbarItem {
+            Spacer()
+          }
         }
 
         if botPresenceController.toolbarItem(for: peer) != nil {
