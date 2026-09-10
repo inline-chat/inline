@@ -387,7 +387,7 @@ struct InlineTooltipTests {
     window.orderOut(nil)
   }
 
-  @Test("First hover waits longer and immediate handoff expires after 300 milliseconds")
+  @Test("First hover waits 900 milliseconds and immediate handoff expires after 300 milliseconds")
   @MainActor
   func tooltipTiming() async throws {
     let manager = InlineTooltipManager.shared
@@ -409,7 +409,7 @@ struct InlineTooltipTests {
     #expect((window.childWindows ?? []).isEmpty)
 
     manager.show(InlineTooltipContent("Delayed"), anchoredTo: target)
-    try await Task.sleep(for: .milliseconds(1_000))
+    try await Task.sleep(for: .milliseconds(700))
     #expect((window.childWindows ?? []).isEmpty)
 
     try await Task.sleep(for: .milliseconds(350))

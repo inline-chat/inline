@@ -6,7 +6,7 @@ public final class InlineTooltipManager: NSObject {
   public static let shared = InlineTooltipManager()
 
   private enum Timing {
-    static let initialDelay: Duration = .milliseconds(1_200)
+    static let initialDelay: Duration = .milliseconds(900)
     static let handoffGraceMilliseconds: Int64 = 300
     static let exitGrace: Duration = .milliseconds(handoffGraceMilliseconds)
     static let handoffWindow = TimeInterval(handoffGraceMilliseconds) / 1_000
