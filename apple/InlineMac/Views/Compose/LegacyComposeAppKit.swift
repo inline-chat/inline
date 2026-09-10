@@ -1320,9 +1320,13 @@ class LegacyComposeAppKit: NSView {
       return textViewHeight
     }
 
+    // Keep the original single-line height even with unusually tall typing metrics.
+    let verticalPadding = textViewContentHeight <= textEditor.getTypingLineHeight()
+      ? Theme.composeVerticalPadding
+      : textEditor.verticalPadding
     textViewHeight = min(300.0, max(
       textEditor.minHeight,
-      textViewContentHeight + textEditor.verticalPadding * 2
+      textViewContentHeight + verticalPadding * 2
     ))
 
     return textViewHeight

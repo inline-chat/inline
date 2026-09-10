@@ -24,7 +24,11 @@ class ComposeTextEditor: NSView {
 
   var minHeight: CGFloat { mode.textMinHeight }
   var minTextHeight: CGFloat { mode.textMinHeight - 2 * Theme.composeVerticalPadding }
-  let verticalPadding: CGFloat = Theme.composeVerticalPadding
+  // Legacy multiline text needs breathing room once it outgrows the centered
+  // single-line row. Its height calculation uses this same inset.
+  var verticalPadding: CGFloat {
+    mode.usesInputStyleTextInsets ? Theme.composeVerticalPadding : 8
+  }
   let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
   private var usesInputStyleTextInsets: Bool {
     initiallySingleLine || mode.usesInputStyleTextInsets
@@ -140,7 +144,7 @@ class ComposeTextEditor: NSView {
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentInsets = mode.usesInputStyleTextInsets
       ? NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
-      : NSEdgeInsets(top: verticalPadding, left: 8, bottom: verticalPadding, right: 8)
+      : NSEdgeInsets(top: Theme.composeVerticalPadding, left: 8, bottom: Theme.composeVerticalPadding, right: 8)
     scrollView.verticalScrollElasticity = .none
     addSubview(scrollView)
 
