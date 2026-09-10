@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import QuartzCore
 
 final class ComposeAttachments: NSView {
   private weak var compose: (any ComposeAttachmentOwner)?
@@ -21,13 +22,8 @@ final class ComposeAttachments: NSView {
 
   private var mediaDataSource: NSCollectionViewDiffableDataSource<MediaSection, String>!
   private var documentDataSource: NSCollectionViewDiffableDataSource<DocumentSection, String>!
-  // AppKit diffable insert animations can be inconsistent in some drag/drop paths
-  // (especially when the NSTextView text system owns the operation).
-  // Keep a small explicit fade-in for newly inserted items.
-  // TODO(@mo): Investigate AppKit animation suppression during text-system drag ops.
-  private var pendingInsertionIds: Set<String> = []
-  private var lastMediaIds: Set<String> = []
-
+  private var pendingMediaInsertionIds: Set<String> = []
+  private var pendingDocumentInsertionIds: Set<String> = []
   private var horizontalContentInset: CGFloat = 0 {
     didSet {
       updateHorizontalInsets()
@@ -52,7 +48,6 @@ final class ComposeAttachments: NSView {
   private var documentScrollHeightConstraint: NSLayoutConstraint!
   private var documentCollectionHeightConstraint: NSLayoutConstraint!
   private var mediaTopConstraint: NSLayoutConstraint!
-  private var mediaBottomConstraint: NSLayoutConstraint!
   private var documentsLeadingConstraint: NSLayoutConstraint!
   private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
   private var isExternallyCollapsed = false
@@ -138,21 +133,13 @@ final class ComposeAttachments: NSView {
     let mediaHeight = (isExternallyCollapsed || (attachments.isEmpty && videoAttachments.isEmpty))
       ? 0
       : (Theme.composeAttachmentImageHeight + 2 * verticalPadding)
-    let collectionHeight = (isExternallyCollapsed || (attachments.isEmpty && videoAttachments.isEmpty))
-      ? 0
-      : Theme.composeAttachmentImageHeight
-    let padding = collectionHeight == 0 ? 0 : verticalPadding
-    let documentContentHeight = isExternallyCollapsed ? 0 : documentContentHeight(hasMedia: collectionHeight > 0)
+    let documentContentHeight = isExternallyCollapsed ? 0 : documentContentHeight(hasMedia: mediaHeight > 0)
     let documentViewportHeight = min(documentContentHeight, maxDocumentViewportHeight)
 
     let applyChanges = {
       self.heightConstraint.constant = newHeight
-      self.mediaScrollHeightConstraint.constant = mediaHeight
-      self.mediaCollectionHeightConstraint.constant = collectionHeight
       self.documentScrollHeightConstraint.constant = documentViewportHeight
       self.documentCollectionHeightConstraint.constant = documentContentHeight
-      self.mediaTopConstraint.constant = padding
-      self.mediaBottomConstraint.constant = -padding
       self.mediaScrollView.isHidden = mediaHeight == 0
       self.documentScrollView.isHidden = self.isExternallyCollapsed || self.documentModels.isEmpty
       self.documentLayout.sectionInset = (!self.isExternallyCollapsed && mediaHeight == 0 && !self.documentModels.isEmpty)
@@ -192,7 +179,9 @@ final class ComposeAttachments: NSView {
     clipsToBounds = true
 
     heightConstraint = heightAnchor.constraint(equalToConstant: getHeight())
-    mediaScrollHeightConstraint = mediaScrollView.heightAnchor.constraint(equalToConstant: 0)
+    mediaScrollHeightConstraint = mediaScrollView.heightAnchor.constraint(
+      equalToConstant: Theme.composeAttachmentImageHeight + 2 * verticalPadding
+    )
     documentScrollHeightConstraint = documentScrollView.heightAnchor.constraint(equalToConstant: 0)
 
     mediaCollectionView.delegate = self
@@ -215,10 +204,9 @@ final class ComposeAttachments: NSView {
       equalTo: clipView.topAnchor,
       constant: verticalPadding
     )
-    mediaBottomConstraint = mediaCollectionView.bottomAnchor.constraint(
-      equalTo: clipView.bottomAnchor,
-      constant: -verticalPadding
-    )
+    // Keep the horizontal viewport and its document at their full row height.
+    // The outer attachment strip clips them during compose expansion/collapse;
+    // shrinking the viewport itself gives AppKit invalid horizontal item sizes.
     mediaCollectionHeightConstraint = mediaCollectionView.heightAnchor.constraint(
       equalToConstant: Theme.composeAttachmentImageHeight
     )
@@ -229,7 +217,6 @@ final class ComposeAttachments: NSView {
     NSLayoutConstraint.activate([
       mediaCollectionView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
       mediaTopConstraint,
-      mediaBottomConstraint,
       mediaCollectionView.widthAnchor.constraint(greaterThanOrEqualTo: clipView.widthAnchor),
       mediaCollectionHeightConstraint,
     ])
@@ -259,22 +246,20 @@ final class ComposeAttachments: NSView {
       documentScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       documentScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       documentScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      documentScrollView.topAnchor.constraint(equalTo: mediaScrollView.bottomAnchor),
     ])
 
-    applyMediaSnapshot(animating: false)
-    applyDocumentSnapshot(animating: false)
+    applyMediaSnapshot()
+    applyDocumentSnapshot()
     updateHeight(animated: false)
   }
 
   // MARK: - Media
 
   public func removeImageView(id: String) {
-    attachments.removeValue(forKey: id)
+    guard attachments.removeValue(forKey: id) != nil else { return }
     orderedMediaIds.removeAll { $0 == id }
     mediaMeta.removeValue(forKey: id)
-    pendingInsertionIds.remove(id)
-    applyMediaSnapshot(animating: true)
+    applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
@@ -295,7 +280,7 @@ final class ComposeAttachments: NSView {
     attachmentView.translatesAutoresizingMaskIntoConstraints = false
 
     attachments[id] = attachmentView
-    applyMediaSnapshot(animating: true)
+    applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
@@ -340,16 +325,15 @@ final class ComposeAttachments: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
 
     videoAttachments[id] = view
-    applyMediaSnapshot(animating: true)
+    applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
   public func removeVideoView(id: String) {
-    videoAttachments.removeValue(forKey: id)
+    guard videoAttachments.removeValue(forKey: id) != nil else { return }
     orderedMediaIds.removeAll { $0 == id }
     mediaMeta.removeValue(forKey: id)
-    pendingInsertionIds.remove(id)
-    applyMediaSnapshot(animating: true)
+    applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
@@ -394,7 +378,7 @@ final class ComposeAttachments: NSView {
     if !orderedDocumentIds.contains(id) {
       orderedDocumentIds.append(id)
     }
-    applyDocumentSnapshot(animating: true, reloading: id)
+    applyDocumentSnapshot(reloading: id)
     updateHeight(animated: true)
   }
 
@@ -403,21 +387,21 @@ final class ComposeAttachments: NSView {
     if !orderedDocumentIds.contains(id) {
       orderedDocumentIds.append(id)
     }
-    applyDocumentSnapshot(animating: true, reloading: id)
+    applyDocumentSnapshot(reloading: id)
     updateHeight(animated: true)
   }
 
   public func removeDocumentView(id: String) {
     guard documentModels.removeValue(forKey: id) != nil else { return }
     orderedDocumentIds.removeAll { $0 == id }
-    applyDocumentSnapshot(animating: true)
+    applyDocumentSnapshot()
     updateHeight(animated: true)
   }
 
   public func clearDocumentViews(animated: Bool = false) {
     documentModels.removeAll()
     orderedDocumentIds.removeAll()
-    applyDocumentSnapshot(animating: animated)
+    applyDocumentSnapshot()
   }
 
   // MARK: - Clear
@@ -428,13 +412,11 @@ final class ComposeAttachments: NSView {
     videoAttachments.removeAll()
     orderedMediaIds.removeAll()
     mediaMeta.removeAll()
-    pendingInsertionIds.removeAll()
-    lastMediaIds.removeAll()
 
     // Clear documents
     clearDocumentViews(animated: animated)
 
-    applyMediaSnapshot(animating: animated)
+    applyMediaSnapshot()
     updateHeight(animated: animated)
   }
 
@@ -458,27 +440,21 @@ final class ComposeAttachments: NSView {
         attachmentItem.configureEmpty()
       }
 
-      if self.pendingInsertionIds.contains(id) {
-        attachmentItem.animateInsertion()
-        self.pendingInsertionIds.remove(id)
-      }
-
       return attachmentItem
     }
   }
 
-  private func applyMediaSnapshot(animating: Bool) {
-    let newIds = Set(orderedMediaIds)
-    let inserted = newIds.subtracting(lastMediaIds)
-    if !inserted.isEmpty {
-      pendingInsertionIds.formUnion(inserted)
-    }
-    lastMediaIds = newIds
-
+  private func applyMediaSnapshot() {
+    let ids = Set(orderedMediaIds)
+    pendingMediaInsertionIds.formIntersection(ids)
+    pendingMediaInsertionIds.formUnion(ids.subtracting(mediaDataSource.snapshot().itemIdentifiers))
     var snapshot = NSDiffableDataSourceSnapshot<MediaSection, String>()
     snapshot.appendSections([.media])
     snapshot.appendItems(orderedMediaIds, toSection: .media)
-    mediaDataSource.apply(snapshot, animatingDifferences: animating)
+    // Pending imports can remove/reinsert the same ID in one turn. Keep snapshot
+    // ownership synchronous; fade displayed items independently of diffable updates.
+    mediaScrollView.layoutSubtreeIfNeeded()
+    mediaDataSource.apply(snapshot, animatingDifferences: false)
   }
 
   private func makeDocumentDataSource() -> NSCollectionViewDiffableDataSource<DocumentSection, String> {
@@ -498,14 +474,17 @@ final class ComposeAttachments: NSView {
     }
   }
 
-  private func applyDocumentSnapshot(animating: Bool, reloading id: String? = nil) {
+  private func applyDocumentSnapshot(reloading id: String? = nil) {
+    let ids = Set(orderedDocumentIds)
+    pendingDocumentInsertionIds.formIntersection(ids)
+    pendingDocumentInsertionIds.formUnion(ids.subtracting(documentDataSource.snapshot().itemIdentifiers))
     var snapshot = NSDiffableDataSourceSnapshot<DocumentSection, String>()
     snapshot.appendSections([.documents])
     snapshot.appendItems(orderedDocumentIds, toSection: .documents)
     if let id, documentDataSource.snapshot().indexOfItem(id) != nil {
       snapshot.reloadItems([id])
     }
-    documentDataSource.apply(snapshot, animatingDifferences: animating)
+    documentDataSource.apply(snapshot, animatingDifferences: false)
   }
 
   private func clampedWidth(for aspectRatio: CGFloat) -> CGFloat {
@@ -554,6 +533,34 @@ final class ComposeAttachments: NSView {
 // MARK: - Collection View
 
 extension ComposeAttachments: NSCollectionViewDelegateFlowLayout {
+  func collectionView(
+    _ collectionView: NSCollectionView,
+    willDisplay item: NSCollectionViewItem,
+    forRepresentedObjectAt indexPath: IndexPath
+  ) {
+    let isInsertion: Bool
+    if collectionView === mediaCollectionView {
+      isInsertion = mediaDataSource.itemIdentifier(for: indexPath).map {
+        pendingMediaInsertionIds.remove($0) != nil
+      } ?? false
+    } else {
+      isInsertion = documentDataSource.itemIdentifier(for: indexPath).map {
+        pendingDocumentInsertionIds.remove($0) != nil
+      } ?? false
+    }
+    guard isInsertion, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+
+    // Animate presentation only. The model remains fully visible if AppKit
+    // interrupts the animation, removes the view, or reuses the collection item.
+    item.view.wantsLayer = true
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = 0
+    fade.toValue = 1
+    fade.duration = 0.2
+    fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    item.view.layer?.add(fade, forKey: "composeAttachmentInsertion")
+  }
+
   func collectionView(
     _ collectionView: NSCollectionView,
     layout collectionViewLayout: NSCollectionViewLayout,
@@ -622,7 +629,6 @@ private final class AttachmentCollectionItem: NSCollectionViewItem {
 
   override func loadView() {
     view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
   }
 
   override func prepareForReuse() {
@@ -646,18 +652,9 @@ private final class AttachmentCollectionItem: NSCollectionViewItem {
   }
 
   func configureEmpty() {
+    view.layer?.removeAnimation(forKey: "composeAttachmentInsertion")
+    view.alphaValue = 1
     view.subviews.forEach { $0.removeFromSuperview() }
-  }
-
-  func animateInsertion() {
-    view.wantsLayer = true
-    view.alphaValue = 0
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-      context.allowsImplicitAnimation = true
-      view.animator().alphaValue = 1
-    }
   }
 }
 
@@ -670,6 +667,8 @@ private final class DocumentAttachmentCollectionItem: NSCollectionViewItem {
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    view.layer?.removeAnimation(forKey: "composeAttachmentInsertion")
+    view.alphaValue = 1
     (view as? AttachmentHostView)?.host(nil)
   }
 
