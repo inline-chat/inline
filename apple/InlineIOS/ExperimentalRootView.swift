@@ -133,7 +133,6 @@ private struct ExperimentalAuthedRootView: View {
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
   @State private var isCleaningOpenChats = false
-  @State private var isNotificationSettingsPresented = false
   @State private var iPadCommandRequest: IPadCommandRequest?
   @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
   @State private var homeBootstrapRetryTask: Task<Void, Never>?
@@ -1062,6 +1061,12 @@ private struct ExperimentalAuthedRootView: View {
       ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
       ToolbarItem(placement: .topBarTrailing) {
+        NotificationSettingsButton(notificationSettings: notificationSettings)
+      }
+
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+      ToolbarItem(placement: .topBarTrailing) {
         accountButton()
       }
       .sharedBackgroundVisibility(.hidden)
@@ -1076,6 +1081,10 @@ private struct ExperimentalAuthedRootView: View {
           connectionProgressIndicator(connectionState)
         }
         overflowMenu()
+      }
+
+      ToolbarItem(placement: .topBarTrailing) {
+        NotificationSettingsButton(notificationSettings: notificationSettings)
       }
 
       ToolbarItem(placement: .topBarTrailing) {
@@ -1147,8 +1156,6 @@ private struct ExperimentalAuthedRootView: View {
 
   private func overflowMenu() -> some View {
     ExperimentalOverflowMenuButton(
-      notificationSubtitle: String(localized: notificationSettings.mode.valueTitle),
-      notificationSystemImage: notificationSettings.mode.systemImage,
       itemSize: selectedChatItemRenderMode,
       sortMode: ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity,
       allChatsFilter: showsAllChatsFilter
@@ -1156,9 +1163,6 @@ private struct ExperimentalAuthedRootView: View {
         : nil,
       homeSpaceExclusionMenu: homeSpaceExclusionMenu,
       activeSpaceName: activeSpace?.displayName,
-      onNotifications: {
-        isNotificationSettingsPresented = true
-      },
       onArchive: {
         openHomeDestination(.archived)
       },
@@ -1191,14 +1195,6 @@ private struct ExperimentalAuthedRootView: View {
     .frame(width: usesIPadSplitView ? 44 : 28, height: usesIPadSplitView ? 44 : 28)
     .accessibilityLabel(usesIPadSplitView ? "Chat List Options" : "More")
     .accessibilityIdentifier("chatListOptions")
-    .popover(isPresented: $isNotificationSettingsPresented) {
-      NotificationSettingsPopoverContent(
-        notificationSettings: notificationSettings,
-        onSelection: { isNotificationSettingsPresented = false }
-      )
-      .frame(idealWidth: 360, idealHeight: 480)
-      .presentationCompactAdaptation(.popover)
-    }
   }
 
   private var selectedChatItemRenderMode: ExperimentalHomeChatItemRenderMode {
@@ -1392,14 +1388,11 @@ private struct ExperimentalHomeSpaceExclusionMenu: Equatable {
 }
 
 private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
-  let notificationSubtitle: String
-  let notificationSystemImage: String
   let itemSize: ExperimentalHomeChatItemRenderMode
   let sortMode: ExperimentalHomeSortMode
   let allChatsFilter: ChatListFilter?
   let homeSpaceExclusionMenu: ExperimentalHomeSpaceExclusionMenu?
   let activeSpaceName: String?
-  let onNotifications: () -> Void
   let onArchive: () -> Void
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
@@ -1427,14 +1420,6 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   }
 
   private func makeMenu() -> UIMenu {
-    let notifications = UIAction(
-      title: "Notifications",
-      subtitle: notificationSubtitle,
-      image: UIImage(systemName: notificationSystemImage)
-    ) { _ in
-      onNotifications()
-    }
-
     let archivedChats = UIAction(
       title: "Archived Chats",
       image: UIImage(systemName: "archivebox")
@@ -1516,7 +1501,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
 
     let viewSection = UIMenu(
       options: .displayInline,
-      children: [notifications] + (filterMenu.map { [$0] } ?? []) + [viewOptions, archivedChats]
+      children: (filterMenu.map { [$0] } ?? []) + [viewOptions, archivedChats]
     )
 
     let cleanupSection = onCleanup.map { onCleanup in

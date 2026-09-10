@@ -21,6 +21,8 @@ struct NotificationSettingsButton: View {
 
   var body: some View {
     button
+      .accessibilityLabel("Notifications")
+      .accessibilityValue(Text(notificationSettings.mode.valueTitle))
       .popover(isPresented: $presented) {
         NotificationSettingsPopoverContent(
           notificationSettings: notificationSettings,
@@ -140,7 +142,7 @@ private struct NotificationSettingsList: View {
         NotificationSettingsItem(
           systemImage: "at",
           title: "Any message to you",
-          description: "Mentions, direct messages, and replies to you",
+          description: "Mentions, direct messages, and replies to you. Recommended.",
           selected: notificationSettings.mode == .mentions || notificationSettings.mode == .importantOnly,
           value: NotificationMode.mentions,
           onChange: {
