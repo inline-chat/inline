@@ -420,6 +420,14 @@ class GlassComposeAppKit: NSView {
       presentation: layout == .accessoryBar ? .accessoryBar : .standard
     )
     view.delegate = self
+    view.isNewThreadEnabledProvider = { [weak self] in
+      guard let self else { return false }
+      return commandLaunchState().isEnabled && chatId != nil && inlineCommandTask == nil
+    }
+    view.onNewThread = { [weak self] in
+      guard let self, commandLaunchState().isEnabled, chatId != nil else { return }
+      performInlineCommand(.createSubthread, fromMenu: true)
+    }
     view.isCommandsEnabledProvider = { [weak self] in
       self?.commandLaunchState().isEnabled == true
     }
@@ -2652,15 +2660,15 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  private func performInlineCommand(_ action: InlineCommandAction) {
+  private func performInlineCommand(_ action: InlineCommandAction, fromMenu: Bool = false) {
     guard inlineCommandTask == nil else { return }
     let invocationPeerId = peerId
     let invocationText = textEditor.plainText
     let invocationAttributedText = NSAttributedString(attributedString: textEditor.attributedString)
     let normalizedInvocation = invocationText.trimmingCharacters(in: .whitespacesAndNewlines)
     let replyingToMsgId = state.replyingToMsgId
-    guard normalizedInvocation.hasPrefix("/"),
-          !normalizedInvocation.dropFirst().contains(where: { $0.isWhitespace }),
+    guard fromMenu || (normalizedInvocation.hasPrefix("/") &&
+          !normalizedInvocation.dropFirst().contains(where: { $0.isWhitespace })),
           state.editingMsgId == nil,
           state.forwardContext == nil,
           attachmentItems.isEmpty,
@@ -2712,7 +2720,7 @@ class GlassComposeAppKit: NSView {
           attachmentItems.isEmpty &&
           !drafts2.hasPendingAttachments(peer: invocationPeerId) &&
           !voiceViewModel.isActive
-        if invocationIsUnchanged {
+        if !fromMenu, invocationIsUnchanged {
           clearInlineCommandText()
         }
 

@@ -32,6 +32,8 @@ class ComposeMenuButton: NSView {
   }
 
   weak var delegate: ComposeMenuButtonDelegate?
+  var isNewThreadEnabledProvider: (() -> Bool)?
+  var onNewThread: (() -> Void)?
   var isCommandsEnabledProvider: (() -> Bool)?
   var isSendSilentlyEnabledProvider: (() -> Bool)?
   var onToggleSendSilently: (() -> Void)?
@@ -175,6 +177,16 @@ class ComposeMenuButton: NSView {
         menu.addItem(.separator())
       }
 
+      let threadItem = NSMenuItem(
+        title: "New Thread",
+        action: #selector(createThread),
+        keyEquivalent: ""
+      )
+      threadItem.target = self
+      threadItem.image = NSImage(systemSymbolName: "bubble.left.and.bubble.right", accessibilityDescription: nil)
+      threadItem.isEnabled = isNewThreadEnabledProvider?() ?? false
+      menu.addItem(threadItem)
+
       let commandsItem = NSMenuItem(
         title: "Show Commands",
         action: #selector(showCommands),
@@ -228,6 +240,11 @@ class ComposeMenuButton: NSView {
 
   @objc private func toggleSendSilently() {
     onToggleSendSilently?()
+  }
+
+  @objc private func createThread() {
+    guard isNewThreadEnabledProvider?() == true else { return }
+    onNewThread?()
   }
 
   @objc private func showCommands() {
