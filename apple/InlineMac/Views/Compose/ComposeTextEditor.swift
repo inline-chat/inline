@@ -246,80 +246,54 @@ class ComposeTextEditor: NSView {
     heightConstraint.animator().constant = height
   }
 
-  var initialPlaceholderPosition: CGPoint? = nil
   var isPlaceholderVisible: Bool = false
 
   func showPlaceholder(_ show: Bool) {
     if isPlaceholderVisible == show, !(show && placeholder.superview == nil) { return }
     isPlaceholderVisible = show
 
-    if show {
-      if placeholder.superview == nil {
-        addSubview(placeholder)
-        NSLayoutConstraint.activate([
-          placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-          placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-          placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        layoutSubtreeIfNeeded()
-      }
+    if placeholder.superview == nil {
+      guard show else { return }
+      placeholder.alphaValue = 0
+      addSubview(placeholder)
+      NSLayoutConstraint.activate([
+        placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+        placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+        placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
+      ])
+      layoutSubtreeIfNeeded()
     }
 
-    if initialPlaceholderPosition == nil {
-      initialPlaceholderPosition = placeholder.layer?.position
+    // Animate an offset from AppKit's current layout position, never a cached
+    // absolute position. Keeping the view attached also avoids removal races.
+    let layer = placeholder.layer
+    let presentation = layer?.presentation()
+    let opacity = presentation?.opacity ?? Float(placeholder.alphaValue)
+    let offset: CGFloat
+    if opacity > 0, let layer, let presentation {
+      offset = presentation.position.x - layer.position.x
+    } else {
+      offset = show ? 15 : 0
     }
-
-    let initialPosition = initialPlaceholderPosition ?? .zero
-
-    let offsetX = 15.0
-    let offsetY = 0.0
-
-    CATransaction.begin()
-
-    CATransaction.setCompletionBlock {
-      if !show {
-        self.placeholder.removeFromSuperview()
-      }
-    }
-
-    let animationGroup = CAAnimationGroup()
-    animationGroup.duration = show ? 0.2 : 0.1
-    animationGroup.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
 
     let fade = CABasicAnimation(keyPath: "opacity")
-    if show {
-      fade.fromValue = 0.0
-      fade.toValue = 1.0
-    } else {
-      fade.fromValue = 1.0
-      fade.toValue = 0.0
-    }
+    fade.fromValue = opacity
+    fade.toValue = show ? 1.0 : 0.0
 
-    let move = CABasicAnimation(keyPath: "position")
-    let endPosition: CGPoint?
-    if show {
-      move.fromValue = CGPoint(
-        x: initialPosition.x + offsetX,
-        y: initialPosition.y + offsetY
-      )
-      endPosition = initialPosition
-      move.toValue = endPosition
-    } else {
-      endPosition = CGPoint(
-        x: initialPosition.x + offsetX,
-        y: initialPosition.y + offsetY
-      )
-      move.fromValue = initialPosition
-      move.toValue = endPosition
-    }
+    let move = CABasicAnimation(keyPath: "position.x")
+    move.isAdditive = true
+    move.fromValue = offset
+    move.toValue = show ? 0.0 : 15.0
 
-    animationGroup.animations = [fade, move]
+    let animation = CAAnimationGroup()
+    animation.animations = [fade, move]
+    animation.duration = show ? 0.2 : 0.1
+    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
 
-    // Update the actual properties to match final state
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
     placeholder.alphaValue = show ? 1 : 0
-    placeholder.layer?.position = endPosition ?? .zero
-
-    placeholder.layer?.add(animationGroup, forKey: nil)
+    layer?.add(animation, forKey: "placeholderVisibility")
     CATransaction.commit()
   }
 
