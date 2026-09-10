@@ -2882,6 +2882,8 @@ actor FetchLimiter {
     resumeWaitersIfPossible()
   }
 
+  var waitingCount: Int { waiters.count }
+
   func acquire() async -> Bool {
     if inFlight < limit {
       inFlight += 1
@@ -3213,7 +3215,9 @@ actor BucketActor {
         }
         return
       }
-      await fetchNewUpdates()
+      // The ordered receive loop awaits this handler. Its RPC replies cannot
+      // be consumed until we return, so transfer recovery to the fetch owner.
+      Task { await self.fetchNewUpdates() }
       return
     }
 
@@ -3516,6 +3520,7 @@ actor BucketActor {
         }
       } else {
         finishedWithoutRetry = false
+        reportRecoveryFailure()
         scheduleRetry()
         break
       }
@@ -3602,6 +3607,7 @@ actor BucketActor {
   /// The page start state is part of the apply-owner CAS, so a same-bucket live
   /// update cannot race a page between its read and cursor commit.
   private func fetchNewUpdatesOnce() async -> Bool {
+    lastFetchFailurePhase = "unavailable"
     retryUsesRateLimitDelay = false
     guard let client else {
       log.error("client is nil, cannot fetch updates")
@@ -3622,6 +3628,7 @@ actor BucketActor {
     var pageCount = 0
     var resultLabel = "unknown"
     defer {
+      lastFetchFailurePhase = resultLabel
       span.end(
         "bucket=\(key.traceKind) result=\(resultLabel) pages=\(pageCount) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
       )
@@ -3635,6 +3642,7 @@ actor BucketActor {
 
     do {
       if needsUserProjectionRepair {
+        resultLabel = "user_projection_repair_failed"
         guard let outcome = await sync.repairUserBucket(
           targetState: BucketState(date: date, seq: seq),
           reason: "repair_child_access_changed",
@@ -3701,6 +3709,26 @@ actor BucketActor {
         queueSpan.end(
           "bucket=\(key.traceKind) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: queueStartedAt))"
         )
+
+        // Limiter suspension can outlive this bucket or its captured cursor.
+        // Do not spend an RPC (or hold shutdown) on work already superseded.
+        guard !isInvalidated, !Task.isCancelled else {
+          await fetchLimiter.release()
+          resultLabel = "cancelled"
+          return true
+        }
+        guard seq == pageStartState.seq, date == pageStartState.date else {
+          await fetchLimiter.release()
+          if seq >= hardEndSeq {
+            completeLatestDemand(passLatestGeneration)
+            await sync.bucketDidAdvance(
+              key: key, state: BucketState(date: date, seq: seq),
+              authoritative: passLatestGeneration != nil && !hasLatestDemand
+            )
+          }
+          resultLabel = "superseded_while_queued"
+          return true
+        }
 
         let rpcStartedAt = Date()
         let rpcSpan = PerformanceTrace.begin(
@@ -3990,13 +4018,17 @@ actor BucketActor {
         retryUsesRateLimitDelay = true
       }
       await sync.recordBucketFetchFailure()
-      resultLabel = "error"
+      resultLabel = retryUsesRateLimitDelay ? "rate_limited" : "request_failed"
       return false
     }
   }
 
   private func captureLatestSequence(client: ProtocolClientType) async throws -> Int64? {
     guard await fetchLimiter.acquire() else { return nil }
+    guard !isInvalidated, !Task.isCancelled else {
+      await fetchLimiter.release()
+      return nil
+    }
     let result: InlineProtocol.RpcResult.OneOf_Result?
     do {
       switch key {
@@ -4066,7 +4098,21 @@ actor BucketActor {
     return errorCode == .rateLimit || code == 429
   }
 
+  private var lastFetchFailurePhase = "unavailable"
+  private var reportedRecoveryFailures = Set<String>()
+
+  private func reportRecoveryFailure() {
+    guard !Task.isCancelled else { return }
+    let failure = SyncRecoveryFailure(bucketKind: key.traceKind, phase: lastFetchFailurePhase)
+    // Report every distinct failure in an unresolved episode. Repeated retries
+    // retain their existing breadcrumbs/counters without flooding Sentry.
+    if reportedRecoveryFailures.insert(failure.privacySafeErrorCategory).inserted {
+      log.error("sync catch-up requires recovery", error: failure)
+    }
+  }
+
   private func resetRetryState() {
+    reportedRecoveryFailures.removeAll(keepingCapacity: true)
     retryAttempt = 0
     retryUsesRateLimitDelay = false
     reportedInvalidEnvelopeFingerprints.removeAll(keepingCapacity: true)

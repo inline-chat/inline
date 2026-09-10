@@ -3485,6 +3485,13 @@ final class SyncTests {
     #expect(actorReady)
 
     let result = await sync.runDebugBucketScenario(.overflowBufferAndRecover, key: key)
+    // Injection releases the receive handler before the RPC completes. Observe
+    // the committed outcome instead of assuming synchronous network recovery.
+    let recovered = await waitForCondition {
+      let bucket = await sync.getStats().buckets.first(where: { $0.key == key })
+      return bucket?.seq == overflowTarget && bucket?.isFetching == false && bucket?.needsFetch == false
+    }
+    #expect(recovered)
     let stats = await sync.getStats()
 
     #expect(result.succeeded)
