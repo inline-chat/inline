@@ -284,6 +284,7 @@ class GlassComposeAppKit: NSView {
   private let drafts2 = Drafts2.shared
   private var initializedDraft = false
   private var didRequestFinalDraftPersistence = false
+  private var isCancellingTranscriptionForRemoval = false
   private var draftEntitySaveTask: Task<Void, Never>?
   private var draftAttachmentObserverCancel: (@Sendable () -> Void)?
   private var isSubmittingNewThread = false
@@ -491,6 +492,11 @@ class GlassComposeAppKit: NSView {
     if case .chat = usage {
       hydrateInitialDraftIfNeeded()
 
+      // Refresh state skipped while a previous host was being removed.
+      updateVoiceAvailability(phase: voiceViewModel.phase)
+      updateVoiceKeyHandlers(phase: voiceViewModel.phase)
+      updateHeight(animate: false, voicePhase: voiceViewModel.phase)
+
       DispatchQueue.main.async { [weak self] in
         self?.focus()
       }
@@ -513,13 +519,22 @@ class GlassComposeAppKit: NSView {
   override func viewWillMove(toSuperview newSuperview: NSView?) {
     if case .chat = usage {
       if newSuperview == nil {
-        if voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
+        cancelTranscriptionForRemoval()
         requestImmediateDraftPersistenceIfNeeded()
       } else {
         didRequestFinalDraftPersistence = false
       }
     }
     super.viewWillMove(toSuperview: newSuperview)
+  }
+
+  private func cancelTranscriptionForRemoval() {
+    guard voiceViewModel.inputMode == .transcribe, voiceViewModel.isActive else { return }
+    // cancel() publishes phase synchronously. AppKit may already be finalizing
+    // the host's sibling views, so the phase sink must not relayout this tree.
+    isCancellingTranscriptionForRemoval = true
+    defer { isCancellingTranscriptionForRemoval = false }
+    voiceViewModel.cancel()
   }
 
   // MARK: Initialization
@@ -1048,8 +1063,10 @@ class GlassComposeAppKit: NSView {
       voiceViewModel.$phase
         .sink { [weak self] phase in
           guard let self else { return }
-          updateVoiceAvailability(phase: phase)
+          // Keyboard handlers must be removed even when presentation is suppressed.
           updateVoiceKeyHandlers(phase: phase)
+          guard !isCancellingTranscriptionForRemoval else { return }
+          updateVoiceAvailability(phase: phase)
           updateHeight(animate: true, voicePhase: phase)
         }
         .store(in: &cancellables)
@@ -4086,7 +4103,7 @@ extension GlassComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
   func hostWillMove(toSuperview newSuperview: NSView?) {
     guard case .chat = usage else { return }
     if newSuperview == nil {
-      if voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
+      cancelTranscriptionForRemoval()
       requestImmediateDraftPersistenceIfNeeded()
     } else {
       didRequestFinalDraftPersistence = false
