@@ -26,6 +26,13 @@ type AcknowledgedChannelItem<T> = {
   acknowledge: (applied: boolean) => void
 }
 
+export class ChannelConsumerError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ChannelConsumerError"
+  }
+}
+
 export class AsyncChannelOverflowError extends Error {
   constructor(readonly capacity: number) {
     super(`Async channel capacity ${capacity} exceeded`)
@@ -49,7 +56,7 @@ export class AsyncChannel<T> implements AsyncIterable<T> {
 
   constructor(
     private readonly capacity = Number.POSITIVE_INFINITY,
-    private readonly byteLimit?: AsyncChannelByteLimit<T>,
+    private readonly byteLimit?: AsyncChannelByteLimit<T>
   ) {
     if (capacity !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(capacity) || capacity <= 0)) {
       throw new Error("AsyncChannel capacity must be a positive safe integer")
@@ -137,11 +144,16 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
   private closed = false
   private failure: Error | null = null
   private iteratorClaimed = false
+  private consumption: {
+    handler: (value: T) => Promise<void>
+    key: (value: T) => string | null
+    concurrency: number
+    active: Map<AcknowledgedChannelItem<T>, string | null>
+    resolve: () => void
+    reject: (error: Error) => void
+  } | null = null
 
-  constructor(
-    private readonly capacity: number,
-    private readonly byteLimit?: AsyncChannelByteLimit<T>,
-  ) {
+  constructor(private readonly capacity: number, private readonly byteLimit?: AsyncChannelByteLimit<T>) {
     if (!Number.isSafeInteger(capacity) || capacity <= 0) {
       throw new Error("AcknowledgedAsyncChannel capacity must be a positive safe integer")
     }
@@ -152,7 +164,7 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
 
   send(value: T): Promise<boolean> {
     if (this.closed) return Promise.resolve(false)
-    if (!this.waiter && this.queue.length >= this.capacity) {
+    if (!this.waiter && this.queue.length + (this.consumption?.active.size ?? 0) >= this.capacity) {
       throw new AsyncChannelOverflowError(this.capacity)
     }
     const bytes = this.byteLimit?.byteLength(value) ?? 0
@@ -173,6 +185,7 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
         waiter.resolve({ value, done: false })
       } else {
         this.queue.push(item)
+        this.pumpConsumption()
       }
     })
   }
@@ -189,6 +202,13 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
     if (this.closed) return
     this.closed = true
     this.failure = error
+    const consumption = this.consumption
+    this.consumption = null
+    if (consumption) {
+      for (const item of consumption.active.keys()) item.acknowledge(false)
+      if (error) consumption.reject(error)
+      else consumption.resolve()
+    }
     this.active?.acknowledge(false)
     this.active = null
     for (const item of this.queue) item.acknowledge(false)
@@ -202,6 +222,69 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
     else waiter.resolve({ value: undefined as T, done: true })
   }
 
+  /** Process independent keys concurrently without acknowledging queued work.
+   * A null key is a global barrier. Rejection fails the stream, retaining cursors.
+   */
+  consume(handler: (value: T) => Promise<void>, key: (value: T) => string | null, concurrency = 8): Promise<void> {
+    if (this.iteratorClaimed)
+      return Promise.reject(new ChannelConsumerError("AcknowledgedAsyncChannel supports one consumer"))
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+      return Promise.reject(new ChannelConsumerError("Consumer concurrency must be a positive safe integer"))
+    }
+    if (this.closed) return this.failure ? Promise.reject(this.failure) : Promise.resolve()
+    this.iteratorClaimed = true
+    return new Promise<void>((resolve, reject) => {
+      this.consumption = { handler, key, concurrency, active: new Map(), resolve, reject }
+      this.pumpConsumption()
+    })
+  }
+
+  private pumpConsumption() {
+    const owner = this.consumption
+    if (!owner || this.closed) return
+    try {
+      while (owner.active.size < owner.concurrency && this.queue.length > 0) {
+        if ([...owner.active.values()].includes(null)) return
+        const keys = new Set(owner.active.values())
+        let index = -1
+        let key: string | null = null
+        for (let i = 0; i < this.queue.length; i++) {
+          const candidate = this.queue[i]!
+          const candidateKey = owner.key(candidate.value)
+          if (candidateKey === null) {
+            if (i === 0 && owner.active.size === 0) index = i
+            break
+          }
+          if (!keys.has(candidateKey)) {
+            index = i
+            key = candidateKey
+            break
+          }
+        }
+        if (index < 0) return
+        const item = this.queue.splice(index, 1)[0]!
+        owner.active.set(item, key)
+        void Promise.resolve()
+          .then(() => owner.handler(item.value))
+          .then(
+            () => {
+              if (this.consumption !== owner) return
+              owner.active.delete(item)
+              this.bufferedBytes -= item.bytes
+              item.acknowledge(true)
+              this.pumpConsumption()
+            },
+            (error: unknown) => {
+              if (this.consumption === owner)
+                this.fail(error instanceof Error ? error : new Error("Inbound handler failed"))
+            }
+          )
+      }
+    } catch (error) {
+      this.fail(error instanceof Error ? error : new Error("Inbound routing failed"))
+    }
+  }
+
   [Symbol.asyncIterator](): AsyncIterator<T> {
     if (this.iteratorClaimed) {
       return {
@@ -209,9 +292,11 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
       }
     }
     this.iteratorClaimed = true
+    let returned = false
 
     return {
       next: () => {
+        if (returned) return Promise.resolve({ value: undefined as T, done: true })
         if (this.active) {
           this.bufferedBytes -= this.active.bytes
           this.active.acknowledge(true)
@@ -237,6 +322,10 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
         })
       },
       return: () => {
+        if (returned) return Promise.resolve({ value: undefined as T, done: true })
+        returned = true
+        this.waiter?.resolve({ value: undefined as T, done: true })
+        this.waiter = null
         if (this.active) {
           this.bufferedBytes -= this.active.bytes
           this.active.acknowledge(false)

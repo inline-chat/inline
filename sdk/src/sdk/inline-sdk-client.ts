@@ -18,6 +18,7 @@ import {
   Method,
   type Message,
   type Peer,
+  RpcError_Code,
   type RpcCall,
   type RpcResult,
   SyncSkippedSequence_Reason,
@@ -33,7 +34,7 @@ import {
   type UploadByteSource,
 } from "@inline-chat/protocol/uploads"
 import { asInlineId, type InlineIdLike } from "../ids.js"
-import { AcknowledgedAsyncChannel } from "../utils/async-channel.js"
+import { AcknowledgedAsyncChannel, ChannelConsumerError } from "../utils/async-channel.js"
 import {
   ProtocolClient,
   ProtocolClientError,
@@ -277,8 +278,11 @@ export class InlineSdkClient {
   private peerResolutionRequestedByChatId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private recoveryReconnectInFlight: Promise<void> | null = null
   private degradedUpdateBuckets = new Map<string, InlineSdkUpdateBucketRef>()
+  private discoveryRetry: { attempt: number; reported: Set<string>; timer?: ReturnType<typeof setTimeout> } | null = null
+  private recoveryRetries = new Map<string, { attempt: number; failure: string; reported: Set<string>; timer?: ReturnType<typeof setTimeout> }>()
   private liveCursorFences = new Set<string>()
   private liveAdmittedSeqByBucket = new Map<string, number>()
+  private liveDeliveriesByBucket = new Map<string, Set<Promise<boolean>>>()
   private discoveryRound: DiscoveryRound | null = null
   private discoveryInFlight: Promise<void> | null = null
   private discoveryCommitInFlight: Promise<void> | null = null
@@ -400,6 +404,7 @@ export class InlineSdkClient {
     const wasStarted = this.started
     this.closed = true
     this.started = false
+    this.cancelRecoveryRetries()
 
     this.rejectOpen(new Error("closed"))
 
@@ -485,6 +490,24 @@ export class InlineSdkClient {
 
   events(): AsyncIterable<InlineInboundEvent> {
     return this.eventStream
+  }
+
+  /** Runs unrelated chat/space handlers concurrently while preserving each bucket's
+   * order. Cursors acknowledge handler completion, never queue admission. Events
+   * without a bucket act as barriers; this and events() share one consumer.
+   * Closing rejects pending receipts without joining arbitrary host work. Hosts
+   * should cancel their handlers using their own lifecycle AbortSignal.
+   */
+  consumeEvents(handler: (event: InlineInboundEvent) => Promise<void>, options?: { concurrency?: number }): Promise<void> {
+    return this.eventStream.consume(handler, (event) => {
+      const bucket = this.bucketForEvent(event)
+      if (bucket?.kind === "user") return null
+      if (bucket) return this.updateBucketKey(bucket)
+      return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null
+    }, options?.concurrency).catch(async (error: unknown) => {
+      if (!(error instanceof ChannelConsumerError)) await this.close()
+      throw error
+    })
   }
 
   exportState(): InlineSdkState {
@@ -976,6 +999,7 @@ export class InlineSdkClient {
       this.log.error?.("SDK listener crashed", failure)
       this.started = false
       this.closed = true
+      this.cancelRecoveryRetries()
       this.rejectOpen(failure)
       this.eventStream.fail(failure)
       void this.protocol.stopTransport().catch((stopError) => {
@@ -988,6 +1012,7 @@ export class InlineSdkClient {
     if (this.authenticationError) return
     this.authenticationError = error
     this.started = false
+    this.cancelRecoveryRetries()
     this.rejectOpen(error)
     this.eventStream.close()
 
@@ -999,6 +1024,7 @@ export class InlineSdkClient {
   }
 
   private async onOpen() {
+    this.cancelRecoveryRetries()
     this.requestCatchUpUser()
     for (const bucket of this.degradedUpdateBuckets.values()) {
       this.requestCatchUpForDegradedBucket(bucket)
@@ -1052,6 +1078,7 @@ export class InlineSdkClient {
   private async initializeDateCursor() {
     if (this.discoveryInFlight) return this.discoveryInFlight
     if (this.discoveryCommitInFlight) return this.discoveryCommitInFlight
+    if (this.discoveryRetry?.timer) return
 
     const round: DiscoveryRound = {
       resultReceived: false,
@@ -1087,9 +1114,19 @@ export class InlineSdkClient {
       round.collectingHints = false
       this.tryCommitDiscoveryRound(round)
     } catch (error) {
-      // Not all deployments may support this yet; treat as best-effort.
       this.log.warn?.("GET_UPDATES_STATE failed (continuing without date cursor)", error)
       if (this.discoveryRound === round) this.discoveryRound = null
+      // Older servers may reject discovery permanently. Retry transport and
+      // server availability failures without adding a live-delivery barrier.
+      if (error instanceof ProtocolClientError && (error.code === "timeout" ||
+          error.code === "not-connected" || error.code === "capacity-exceeded" ||
+          error.rpcCode === RpcError_Code.INTERNAL_ERROR || error.rpcCode === 500 ||
+          error.rpcCode === RpcError_Code.RATE_LIMIT || error.rpcCode === 429)) {
+        this.scheduleDiscoveryRetry(error.rpcCode === RpcError_Code.RATE_LIMIT || error.rpcCode === 429
+          ? "rate_limited" : "discovery_failed")
+      } else {
+        this.log.error?.("Sync discovery unavailable", { reason: "request_rejected" })
+      }
     }
   }
 
@@ -1112,16 +1149,19 @@ export class InlineSdkClient {
         if (this.discoveryRound !== round) return
         if (saved) {
           this.discoveryRound = null
+          clearTimeout(this.discoveryRetry?.timer)
+          this.discoveryRetry = null
           return
         }
 
         // A checkpoint is not committed until its state-store write succeeds.
-        // Restore the old in-memory cursor so the next reconnect retries the
+        // Restore the old in-memory cursor so autonomous recovery retries the
         // same discovery date rather than skipping over an unpersisted round.
         this.state.dateCursor = previousDateCursor
         this.scheduleStateSave()
         this.discoveryRound = null
         this.log.warn?.("Failed to persist discovery checkpoint; preserving previous date cursor")
+        this.scheduleDiscoveryRetry("checkpoint_write_failed")
       })
       .finally(() => {
         if (this.discoveryCommitInFlight === commit) this.discoveryCommitInFlight = null
@@ -1502,15 +1542,25 @@ export class InlineSdkClient {
       this.requestRecoveryReconnect("inbound-event-buffer-overflow")
       return Promise.resolve(false)
     }
-    return acknowledged.then((applied) => {
+    const bucket = source === "live" ? this.sequencedBucketForEvent(event) : undefined
+    const key = bucket ? this.updateBucketKey(bucket) : undefined
+    const deliveries = key ? (this.liveDeliveriesByBucket.get(key) ?? new Set<Promise<boolean>>()) : undefined
+    const delivery = acknowledged.then((applied) => {
       if (applied) {
         onApplied?.()
         if (source === "live") this.settleLiveEvent(event)
       } else if (source === "live" && this.started) {
         this.recoverLiveEvent(event, "consumer-did-not-apply")
       }
+      deliveries?.delete(delivery)
+      if (key && deliveries?.size === 0) this.liveDeliveriesByBucket.delete(key)
       return applied
     })
+    if (key && deliveries) {
+      deliveries.add(delivery)
+      this.liveDeliveriesByBucket.set(key, deliveries)
+    }
+    return delivery
   }
 
   private bucketForEvent(event: InlineInboundEvent): InlineSdkUpdateBucketRef | undefined {
@@ -1718,18 +1768,24 @@ export class InlineSdkClient {
 
   private requestCatchUpForDegradedBucket(bucket: InlineSdkUpdateBucketRef) {
     switch (bucket.kind) {
-      case "chat":
-        if (bucket.peer && this.isReliableChatPeer(bucket.peer)) {
-          this.requestCatchUpChat({ chatId: bucket.chatId, peer: bucket.peer })
+      case "chat": {
+        const request = this.catchUpRequestedByChatId.get(bucket.chatId) ??
+          this.peerResolutionRequestedByChatId.get(bucket.chatId)
+        const updateSeq = request && !request.toLatest ? request.endSeq : undefined
+        const peer = bucket.peer ?? this.persistedChatPeer(bucket.chatId)
+        if (peer && this.isReliableChatPeer(peer)) {
+          this.requestCatchUpChat({ chatId: bucket.chatId, peer, updateSeq })
         } else {
-          const persistedPeer = this.persistedChatPeer(bucket.chatId)
-          if (persistedPeer) this.requestCatchUpChat({ chatId: bucket.chatId, peer: persistedPeer })
-          else this.resolvePersistedChatPeer(bucket.chatId)
+          this.resolvePersistedChatPeer(bucket.chatId, updateSeq)
         }
         return
-      case "space":
-        this.requestCatchUpSpace({ spaceId: bucket.spaceId })
+      }
+      case "space": {
+        const request = this.catchUpRequestedBySpaceId.get(bucket.spaceId)
+        this.requestCatchUpSpace({ spaceId: bucket.spaceId,
+          updateSeq: request && !request.toLatest ? request.endSeq : undefined })
         return
+      }
       case "user":
         this.requestCatchUpUser(true)
         return
@@ -1926,12 +1982,14 @@ export class InlineSdkClient {
 
   private bumpChatSeq(chatId: bigint, seq: number, source?: UpdateSource) {
     if (source === "user" || source === "space" || source === "chat") return
-    if (source === "live" && this.liveCursorFences.has(`chat:${chatId}`)) return
+    if (source === "live" && this.liveCursorFences.has(`chat:${chatId}`) &&
+        seq !== (this.state.lastSeqByChatId?.[chatId.toString()] ?? 0) + 1) return
     if (!Number.isFinite(seq)) return
     if (!this.state.lastSeqByChatId) this.state.lastSeqByChatId = {}
     const key = chatId.toString()
     const prev = this.state.lastSeqByChatId[key] ?? 0
     if (seq > prev) {
+      this.resetRecoveryBackoff({ kind: "chat", chatId })
       this.state.lastSeqByChatId[key] = seq
       this.scheduleStateSave()
     }
@@ -1940,12 +1998,14 @@ export class InlineSdkClient {
 
   private bumpSpaceSeq(spaceId: bigint, seq: number, source?: UpdateSource) {
     if (source === "user" || source === "space" || source === "chat") return
-    if (source === "live" && this.liveCursorFences.has(`space:${spaceId}`)) return
+    if (source === "live" && this.liveCursorFences.has(`space:${spaceId}`) &&
+        seq !== (this.state.lastSeqBySpaceId?.[spaceId.toString()] ?? 0) + 1) return
     if (!Number.isFinite(seq)) return
     if (!this.state.lastSeqBySpaceId) this.state.lastSeqBySpaceId = {}
     const key = spaceId.toString()
     const prev = this.state.lastSeqBySpaceId[key] ?? 0
     if (seq > prev) {
+      this.resetRecoveryBackoff({ kind: "space", spaceId })
       this.state.lastSeqBySpaceId[key] = seq
       this.scheduleStateSave()
     }
@@ -1960,10 +2020,12 @@ export class InlineSdkClient {
 
   private bumpUserSeq(seq: number, source?: UpdateSource) {
     if (source === "user" || source === "space" || source === "chat") return
-    if (source === "live" && this.liveCursorFences.has("user")) return
+    if (source === "live" && this.liveCursorFences.has("user") &&
+        seq !== (this.state.lastUserSeq ?? 0) + 1) return
     if (!Number.isFinite(seq) || seq <= 0) return
     const prev = this.state.lastUserSeq ?? 0
     if (seq > prev) {
+      this.resetRecoveryBackoff({ kind: "user" })
       this.state.lastUserSeq = seq
       this.scheduleStateSave()
     }
@@ -1979,16 +2041,18 @@ export class InlineSdkClient {
       return this.userCatchUpInFlight
     }
 
+    if (this.recoveryRetries.get("user")?.timer) return null
     this.fenceLiveCursor({ kind: "user" })
     this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0)
       .catch((error) => {
-        this.markUpdateBucketDegraded({ kind: "user" })
+        this.recordCatchUpFailure({ kind: "user" }, error)
         this.log.warn?.("GET_UPDATES user catch-up failed; bucket remains degraded", {
           error: extractErrorMessage(error),
         })
       })
       .finally(() => {
         this.userCatchUpInFlight = null
+        this.scheduleRecoveryRetry({ kind: "user" })
       })
     return this.userCatchUpInFlight
   }
@@ -2049,7 +2113,7 @@ export class InlineSdkClient {
         })
       }
       if (deliveredSeq <= cursor && !payload.final) {
-        this.markUpdateBucketDegraded({ kind: "user" })
+        this.markUpdateBucketDegraded({ kind: "user" }, "non_progress")
         this.log.warn?.("GET_UPDATES user catch-up made no progress; bucket remains degraded", {
           cursor,
           deliveredSeq,
@@ -2089,11 +2153,12 @@ export class InlineSdkClient {
 
     const existing = this.catchUpInFlightByChatId.get(params.chatId)
     if (existing) return existing
+    if (this.recoveryRetries.get(`chat:${params.chatId}`)?.timer) return Promise.resolve()
 
+    const initialDemand = this.catchUpRequestedByChatId.get(params.chatId)
     const task = this.drainCatchUpChat(params.chatId)
       .catch((error) => {
-        this.catchUpRequestedByChatId.delete(params.chatId)
-        this.markUpdateBucketDegraded({ kind: "chat", chatId: params.chatId, peer: params.peer })
+        this.recordCatchUpFailure({ kind: "chat", chatId: params.chatId, peer: params.peer }, error, this.catchUpRequestedByChatId.get(params.chatId) !== initialDemand)
         this.log.warn?.("GET_UPDATES chat catch-up failed; bucket remains degraded", {
           chatId: params.chatId.toString(),
           error: extractErrorMessage(error),
@@ -2101,6 +2166,7 @@ export class InlineSdkClient {
       })
       .finally(() => {
         this.catchUpInFlightByChatId.delete(params.chatId)
+        this.scheduleRecoveryRetry({ kind: "chat", chatId: params.chatId })
       })
     this.catchUpInFlightByChatId.set(params.chatId, task)
     return task
@@ -2126,6 +2192,8 @@ export class InlineSdkClient {
       const stop = await this.doCatchUpChat(chatId, request.peer, startSeq, endSeq)
       if (stop) {
         if (this.catchUpRequestedByChatId.get(chatId) !== request) continue
+        // Failure is not completion: keep the target for its retry owner.
+        if (this.degradedUpdateBuckets.has(`chat:${chatId}`)) return
         this.catchUpRequestedByChatId.delete(chatId)
         return
       }
@@ -2204,7 +2272,7 @@ export class InlineSdkClient {
         })
       }
       if (deliveredSeq <= cursor && !payload.final) {
-        this.markUpdateBucketDegraded({ kind: "chat", chatId, peer })
+        this.markUpdateBucketDegraded({ kind: "chat", chatId, peer }, "non_progress")
         this.log.warn?.("GET_UPDATES made no progress; bucket remains degraded", {
           chatId: chatId.toString(),
           cursor,
@@ -2228,7 +2296,7 @@ export class InlineSdkClient {
           continue
         }
         if (endSeq != null && deliveredSeq < endSeq) {
-          this.markUpdateBucketDegraded({ kind: "chat", chatId, peer })
+          this.markUpdateBucketDegraded({ kind: "chat", chatId, peer }, "target_not_reached")
           this.log.warn?.("GET_UPDATES final chat page remained behind the requested target", {
             chatId: chatId.toString(),
             requestedEndSeq: endSeq,
@@ -2258,11 +2326,12 @@ export class InlineSdkClient {
 
     const existing = this.catchUpInFlightBySpaceId.get(params.spaceId)
     if (existing) return existing
+    if (this.recoveryRetries.get(`space:${params.spaceId}`)?.timer) return Promise.resolve()
 
+    const initialDemand = this.catchUpRequestedBySpaceId.get(params.spaceId)
     const task = this.drainCatchUpSpace(params.spaceId)
       .catch((error) => {
-        this.catchUpRequestedBySpaceId.delete(params.spaceId)
-        this.markUpdateBucketDegraded({ kind: "space", spaceId: params.spaceId })
+        this.recordCatchUpFailure({ kind: "space", spaceId: params.spaceId }, error, this.catchUpRequestedBySpaceId.get(params.spaceId) !== initialDemand)
         this.log.warn?.("GET_UPDATES space catch-up failed; bucket remains degraded", {
           spaceId: params.spaceId.toString(),
           error: extractErrorMessage(error),
@@ -2270,6 +2339,7 @@ export class InlineSdkClient {
       })
       .finally(() => {
         this.catchUpInFlightBySpaceId.delete(params.spaceId)
+        this.scheduleRecoveryRetry({ kind: "space", spaceId: params.spaceId })
       })
     this.catchUpInFlightBySpaceId.set(params.spaceId, task)
     return task
@@ -2295,6 +2365,8 @@ export class InlineSdkClient {
       const stop = await this.doCatchUpSpace(spaceId, startSeq, endSeq)
       if (stop) {
         if (this.catchUpRequestedBySpaceId.get(spaceId) !== request) continue
+        // Failure is not completion: keep the target for its retry owner.
+        if (this.degradedUpdateBuckets.has(`space:${spaceId}`)) return
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
       }
@@ -2375,7 +2447,7 @@ export class InlineSdkClient {
         })
       }
       if (deliveredSeq <= cursor && !payload.final) {
-        this.markUpdateBucketDegraded({ kind: "space", spaceId })
+        this.markUpdateBucketDegraded({ kind: "space", spaceId }, "non_progress")
         this.log.warn?.("GET_UPDATES space made no progress; bucket remains degraded", {
           spaceId: spaceId.toString(),
           cursor,
@@ -2396,7 +2468,7 @@ export class InlineSdkClient {
           continue
         }
         if (endSeq != null && deliveredSeq < endSeq) {
-          this.markUpdateBucketDegraded({ kind: "space", spaceId })
+          this.markUpdateBucketDegraded({ kind: "space", spaceId }, "target_not_reached")
           this.log.warn?.("GET_UPDATES final space page remained behind the requested target", {
             spaceId: spaceId.toString(),
             requestedEndSeq: endSeq,
@@ -2424,6 +2496,8 @@ export class InlineSdkClient {
     })
     const existing = this.peerResolutionInFlightByChatId.get(chatId)
     if (existing) return existing
+    if (this.recoveryRetries.get(`chat:${chatId}`)?.timer) return Promise.resolve()
+    const initialDemand = this.peerResolutionRequestedByChatId.get(chatId)
     const task = this.getChat({ chatId })
       .then(async (chat) => {
         const peer = chat.peer
@@ -2441,7 +2515,7 @@ export class InlineSdkClient {
         })
       })
       .catch((error) => {
-        this.markUpdateBucketDegraded({ kind: "chat", chatId })
+        this.recordCatchUpFailure({ kind: "chat", chatId }, error, this.peerResolutionRequestedByChatId.get(chatId) !== initialDemand)
         this.log.warn?.("Unable to resolve legacy chat peer; bucket remains degraded", {
           chatId: chatId.toString(),
           error: extractErrorMessage(error),
@@ -2449,7 +2523,8 @@ export class InlineSdkClient {
       })
       .finally(() => {
         this.peerResolutionInFlightByChatId.delete(chatId)
-        this.peerResolutionRequestedByChatId.delete(chatId)
+        if (!this.degradedUpdateBuckets.has(`chat:${chatId}`)) this.peerResolutionRequestedByChatId.delete(chatId)
+        this.scheduleRecoveryRetry({ kind: "chat", chatId })
       })
     this.peerResolutionInFlightByChatId.set(chatId, task)
     return task
@@ -2498,7 +2573,7 @@ export class InlineSdkClient {
   ): boolean | undefined {
     if (payload.resultType !== GetUpdatesResult_ResultType.SLICE &&
       payload.resultType !== GetUpdatesResult_ResultType.EMPTY) {
-      this.markUpdateBucketDegraded(bucket)
+      this.markUpdateBucketDegraded(bucket, "invalid_page_type")
       this.log.warn?.("GET_UPDATES returned an invalid page result type; bucket remains degraded", {
         bucket: this.updateBucketKey(bucket),
         resultType: payload.resultType,
@@ -2508,7 +2583,7 @@ export class InlineSdkClient {
 
     const deliveredSeq = Number(payload.seq)
     if (!Number.isSafeInteger(deliveredSeq) || deliveredSeq < startSeq) {
-      this.markUpdateBucketDegraded(bucket)
+      this.markUpdateBucketDegraded(bucket, "invalid_page_cursor")
       this.log.warn?.("GET_UPDATES page moved backwards or returned an invalid seq; bucket remains degraded", {
         bucket: this.updateBucketKey(bucket),
         startSeq,
@@ -2521,7 +2596,7 @@ export class InlineSdkClient {
     for (const update of payload.updates) {
       const seq = update.seq
       if (!Number.isSafeInteger(seq) || seq == null || seq <= startSeq || seq > deliveredSeq || accounted.has(seq)) {
-        this.markUpdateBucketDegraded(bucket)
+        this.markUpdateBucketDegraded(bucket, "invalid_update_sequence")
         this.log.warn?.("GET_UPDATES page included an invalid or duplicate update seq; bucket remains degraded", {
           bucket: this.updateBucketKey(bucket),
           seq,
@@ -2535,7 +2610,7 @@ export class InlineSdkClient {
     for (const skipped of payload.skippedSequences) {
       const seq = Number(skipped.seq)
       if (!Number.isSafeInteger(seq) || seq <= startSeq || seq > deliveredSeq || accounted.has(seq)) {
-        this.markUpdateBucketDegraded(bucket)
+        this.markUpdateBucketDegraded(bucket, "invalid_skipped_sequence")
         this.log.warn?.("GET_UPDATES page included an invalid or duplicate skipped seq; bucket remains degraded", {
           bucket: this.updateBucketKey(bucket),
           seq,
@@ -2551,7 +2626,7 @@ export class InlineSdkClient {
           break
         case SyncSkippedSequence_Reason.REASON_UNSPECIFIED:
         default:
-          this.markUpdateBucketDegraded(bucket)
+          this.markUpdateBucketDegraded(bucket, "unknown_skip_reason")
           this.log.warn?.("GET_UPDATES page included an unsupported skipped-sequence reason; bucket remains degraded", {
             bucket: this.updateBucketKey(bucket),
             reason: skipped.reason,
@@ -2561,7 +2636,7 @@ export class InlineSdkClient {
     }
 
     if (accounted.size !== deliveredSeq - startSeq) {
-      this.markUpdateBucketDegraded(bucket)
+      this.markUpdateBucketDegraded(bucket, "unaccounted_gap")
       this.log.warn?.("GET_UPDATES page did not account for every advanced sequence; bucket remains degraded", {
         bucket: this.updateBucketKey(bucket),
         startSeq,
@@ -2647,7 +2722,7 @@ export class InlineSdkClient {
       this.clearUpdateBucketDegraded(bucket)
       return true
     } catch (error) {
-      this.markUpdateBucketDegraded(bucket)
+      this.markUpdateBucketDegraded(bucket, "repair_failed")
       this.log.warn?.("Authoritative update repair failed; bucket remains degraded", {
         bucket: this.updateBucketKey(bucket),
         error: extractErrorMessage(error),
@@ -2661,7 +2736,18 @@ export class InlineSdkClient {
     source: UpdateSource,
     bucket: InlineSdkUpdateBucketRef,
   ): Promise<boolean> {
+    // A gap fences new live admission, but already admitted contiguous work still
+    // owns its receipts. Join that prefix before replaying the authoritative page
+    // so recovery cannot enqueue a second copy behind a slow host handler.
+    const liveDeliveries = this.liveDeliveriesByBucket.get(this.updateBucketKey(bucket))
+    if (liveDeliveries && (await Promise.all(liveDeliveries)).some(applied => !applied)) {
+      this.markUpdateBucketDegraded(bucket, "host_unacknowledged")
+      return false
+    }
+    if (this.closed) return false
+    const appliedThrough = this.bucketCursor(bucket)
     for (const update of updates) {
+      if (update.seq != null && update.seq > 0 && update.seq <= appliedThrough) continue
       if (update.update.oneofKind === "chatSkipPts" && source === "chat") {
         continue
       }
@@ -2676,7 +2762,7 @@ export class InlineSdkClient {
       if (accepted === true) continue
 
       if (accepted === false) {
-        this.markUpdateBucketDegraded(bucket)
+        this.markUpdateBucketDegraded(bucket, "host_unacknowledged")
         this.log.warn?.("GET_UPDATES event was not acknowledged by the SDK host; cursor remains unchanged", {
           bucket: this.updateBucketKey(bucket),
           updateKind: update.update.oneofKind,
@@ -2700,8 +2786,97 @@ export class InlineSdkClient {
     return true
   }
 
-  private markUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef) {
-    this.degradedUpdateBuckets.set(this.updateBucketKey(bucket), bucket)
+  private recordCatchUpFailure(bucket: InlineSdkUpdateBucketRef, error: unknown, hasNewerDemand = false) {
+    const rpcCode = error instanceof ProtocolClientError ? error.rpcCode : undefined
+    if (!hasNewerDemand && bucket.kind !== "user" && (rpcCode === RpcError_Code.PEER_ID_INVALID ||
+      rpcCode === RpcError_Code.CHAT_ID_INVALID || rpcCode === RpcError_Code.SPACE_ID_INVALID)) {
+      // An authoritative access rejection retires demand, not cached data or
+      // the cursor. A newer hint received during this request first gets its
+      // own attempt, since access may have changed while the RPC was in flight.
+      this.clearUpdateBucketDegraded(bucket)
+      if (bucket.kind === "chat") {
+        this.catchUpRequestedByChatId.delete(bucket.chatId)
+        this.peerResolutionRequestedByChatId.delete(bucket.chatId)
+      } else this.catchUpRequestedBySpaceId.delete(bucket.spaceId)
+      const round = this.discoveryRound
+      if (round) {
+        round.targets.delete(this.updateBucketKey(bucket))
+        this.tryCommitDiscoveryRound(round)
+      }
+      this.log.error?.("Sync bucket unavailable", { bucketKind: bucket.kind, reason: "access_rejected" })
+      return
+    }
+    this.markUpdateBucketDegraded(bucket, rpcCode === RpcError_Code.RATE_LIMIT || rpcCode === 429
+      ? "rate_limited" : error instanceof ProtocolClientError ? error.code : "request_failed")
+  }
+
+  private markUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef, failure = "incomplete") {
+    const key = this.updateBucketKey(bucket)
+    this.degradedUpdateBuckets.set(key, bucket)
+    const retry = this.recoveryRetries.get(key) ?? { attempt: 0, failure, reported: new Set<string>() }
+    retry.failure = failure
+    this.recoveryRetries.set(key, retry)
+    queueMicrotask(() => this.scheduleRecoveryRetry(bucket))
+  }
+
+  private resetRecoveryBackoff(bucket: InlineSdkUpdateBucketRef) {
+    const retry = this.recoveryRetries.get(this.updateBucketKey(bucket))
+    if (retry) retry.attempt = 0
+  }
+
+  private cancelRecoveryRetries() {
+    clearTimeout(this.discoveryRetry?.timer)
+    this.discoveryRetry = null
+    for (const retry of this.recoveryRetries.values()) clearTimeout(retry.timer)
+    this.recoveryRetries.clear()
+  }
+
+  private scheduleDiscoveryRetry(reason: string) {
+    if (!this.started || this.closed || this.protocol.getDiagnostics().state !== "open") return
+    const retry = this.discoveryRetry ?? { attempt: 0, reported: new Set<string>() }
+    if (retry.timer) return
+    if (!retry.reported.has(reason)) {
+      retry.reported.add(reason)
+      this.log.error?.("Sync recovery scheduled", { bucketKind: "discovery", reason })
+    }
+    const delayMs = reason === "rate_limited" ? 60_000
+      : Math.min(30_000, 1_000 * 2 ** Math.min(retry.attempt, 5))
+    retry.attempt++
+    retry.timer = setTimeout(() => {
+      retry.timer = undefined
+      if (this.started && !this.closed && this.protocol.getDiagnostics().state === "open") {
+        void this.initializeDateCursor()
+      }
+    }, delayMs)
+    retry.timer.unref?.()
+    this.discoveryRetry = retry
+  }
+
+  private scheduleRecoveryRetry(bucket: InlineSdkUpdateBucketRef) {
+    const key = this.updateBucketKey(bucket)
+    if (!this.started || this.closed || !this.degradedUpdateBuckets.has(key)) return
+    if (bucket.kind === "chat" && (this.catchUpInFlightByChatId.has(bucket.chatId) ||
+      this.peerResolutionInFlightByChatId.has(bucket.chatId))) return
+    if (bucket.kind === "space" && this.catchUpInFlightBySpaceId.has(bucket.spaceId)) return
+    if (bucket.kind === "user" && this.userCatchUpInFlight) return
+    const retry = this.recoveryRetries.get(key) ?? { attempt: 0, failure: "incomplete", reported: new Set<string>() }
+    if (retry.timer || this.protocol.getDiagnostics().state !== "open") return
+    // Normal recovery stays responsive; repeated failures never form a hot loop.
+    const delayMs = retry.failure === "rate_limited" ? 60_000
+      : Math.min(5_000, 1_000 * 2 ** Math.min(retry.attempt, 3))
+    if (!retry.reported.has(retry.failure)) {
+      retry.reported.add(retry.failure)
+      this.log.error?.("Sync recovery scheduled", { bucketKind: bucket.kind, reason: retry.failure })
+    }
+    retry.attempt++
+    retry.timer = setTimeout(() => {
+      retry.timer = undefined
+      if (!this.started || this.closed || this.protocol.getDiagnostics().state !== "open") return
+      const pending = this.degradedUpdateBuckets.get(key)
+      if (pending) this.requestCatchUpForDegradedBucket(pending)
+    }, delayMs)
+    retry.timer.unref?.()
+    this.recoveryRetries.set(key, retry)
   }
 
   private fenceLiveCursor(bucket: InlineSdkUpdateBucketRef) {
@@ -2711,6 +2886,8 @@ export class InlineSdkClient {
   private clearUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef) {
     const key = this.updateBucketKey(bucket)
     this.degradedUpdateBuckets.delete(key)
+    clearTimeout(this.recoveryRetries.get(key)?.timer)
+    this.recoveryRetries.delete(key)
     this.liveCursorFences.delete(key)
     this.liveAdmittedSeqByBucket.delete(key)
   }

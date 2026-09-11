@@ -78,7 +78,9 @@ describe("AcknowledgedAsyncChannel", () => {
 
     expect(await iterator.next()).toEqual({ value: 1, done: false })
     let settled = false
-    void acknowledgement.then(() => { settled = true })
+    void acknowledgement.then(() => {
+      settled = true
+    })
     await Promise.resolve()
     expect(settled).toBe(false)
 
@@ -140,4 +142,88 @@ describe("AcknowledgedAsyncChannel", () => {
     await expect(queued).resolves.toBe(false)
     await expect(channel.send("12345")).resolves.toBe(false)
   })
+})
+
+describe("Acknowledged concurrent consumption", () => {
+  it("keeps global barriers ordered and counts held receipts against capacity", async () => {
+    const channel = new AcknowledgedAsyncChannel<{ key: string | null; id: number }>(4)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const processed: number[] = []
+    const consuming = channel.consume(
+      async (value) => {
+        if (value.id === 1) await gate
+        processed.push(value.id)
+      },
+      (value) => value.key,
+      2
+    )
+    const receipts = [
+      channel.send({ key: "a", id: 1 }),
+      channel.send({ key: null, id: 2 }),
+      channel.send({ key: "b", id: 3 }),
+      channel.send({ key: "a", id: 4 }),
+    ]
+    expect(() => channel.send({ key: "c", id: 5 })).toThrow(AsyncChannelOverflowError)
+    await Promise.resolve()
+    expect(processed).toEqual([])
+    release()
+    expect(await Promise.all(receipts)).toEqual([true, true, true, true])
+    expect(processed.indexOf(1)).toBeLessThan(processed.indexOf(2))
+    expect(processed.indexOf(2)).toBeLessThan(processed.indexOf(3))
+    expect(processed.indexOf(2)).toBeLessThan(processed.indexOf(4))
+    channel.close()
+    await consuming
+  })
+
+  it("handler failure rejects queued and in-flight receipts without later accidental acknowledgement", async () => {
+    const channel = new AcknowledgedAsyncChannel<string>(4)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const consuming = channel.consume(
+      async (key) => {
+        if (key === "a") await gate
+        else throw new Error("handler rejected")
+      },
+      (key) => key,
+      2
+    )
+    const failed = expect(consuming).rejects.toThrow("handler rejected")
+    const receipts = [channel.send("a"), channel.send("b"), channel.send("a")]
+    await failed
+    expect(await Promise.all(receipts)).toEqual([false, false, false])
+    release()
+    await Promise.resolve()
+    expect(await channel.send("a")).toBe(false)
+  })
+})
+
+it("returning a waiting iterator cannot steal work from its replacement", async () => {
+  const channel = new AcknowledgedAsyncChannel<number>(4)
+  const iterator = channel[Symbol.asyncIterator]()
+  const waiting = iterator.next()
+  await iterator.return!()
+  const received: number[] = []
+  const consuming = channel.consume(
+    async (value) => {
+      received.push(value)
+    },
+    () => "chat"
+  )
+  const receipt = channel.send(1)
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(received).toEqual([1])
+  await expect(waiting).resolves.toEqual({ done: true, value: undefined })
+  await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  await iterator.return!()
+  await expect(receipt).resolves.toBe(true)
+  await expect(channel.send(2)).resolves.toBe(true)
+  expect(received).toEqual([1, 2])
+  channel.close()
+  await consuming
 })

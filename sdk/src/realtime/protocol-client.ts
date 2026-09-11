@@ -603,6 +603,7 @@ const normalizeRpcTimeoutMs = (timeoutMs: number | null | undefined, fallback: n
 }
 
 export class ProtocolClientError extends Error {
+  readonly rpcCode?: number
   constructor(
     readonly code:
       | "not-authorized"
@@ -617,6 +618,7 @@ export class ProtocolClientError extends Error {
   ) {
     super(details?.message ?? code)
     this.name = `ProtocolClientError:${code}`
+    this.rpcCode = details?.code
   }
 }
 

@@ -2950,7 +2950,9 @@ describe("InlineSdkClient", () => {
       expect(ev3.value.seq).toBe(4)
     }
 
-    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(1)
+    // The contiguous live prefix was acknowledged by requesting ev2. The
+    // recovery page remains uncommitted until its delete event is acknowledged.
+    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(2)
     const next = iter.next()
     await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 5)
     await client.close()
