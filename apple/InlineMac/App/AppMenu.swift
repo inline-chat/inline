@@ -46,7 +46,6 @@ final class AppMenu: NSObject {
     self.dependencies = dependencies
     mainMenu.removeAllItems()
     chatMenuItems.removeAll()
-    NSApp.mainMenu = mainMenu
 
     setupApplicationMenu()
     setupFileMenu()
@@ -57,6 +56,10 @@ final class AppMenu: NSObject {
     setupSpaceMenu()
     setupWindowMenu()
     setupHelpMenu()
+
+    // Install the completed menu so AppKit can add its native Edit commands,
+    // including Emoji & Symbols with the user's macOS keyboard shortcut.
+    NSApp.mainMenu = mainMenu
   }
 
   @MainActor private func setupApplicationMenu() {
@@ -455,22 +458,8 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
 
-    editMenu.addItem(NSMenuItem.separator())
-
-    editMenu.addItem(
-      withTitle: "Start Dictation…",
-      action: Selector(("startDictation:")),
-      keyEquivalent: ""
-    )
-
-    let emojiItem = NSMenuItem(
-      title: "Emoji & Symbols",
-      action: #selector(NSApplication.orderFrontCharacterPalette(_:)),
-      keyEquivalent: " "
-    )
-    emojiItem.keyEquivalentModifierMask = [.control, .command]
-    emojiItem.target = NSApp
-    editMenu.addItem(emojiItem)
+    // AppKit supplies Dictation and Emoji & Symbols when the completed main
+    // menu is installed. Keep their shortcut and responder routing native.
   }
 
   private func setupFormatMenu() {
