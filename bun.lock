@@ -49,9 +49,9 @@
     },
     "openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.67",
+      "version": "0.0.68",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.17",
+        "@inline-chat/realtime-sdk": "0.0.18",
         "zod": "4.4.3",
       },
       "devDependencies": {

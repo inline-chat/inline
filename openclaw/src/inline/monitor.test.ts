@@ -92,6 +92,7 @@ type MonitorHarness = {
 }
 
 type MonitorSetup = {
+  eventClient?: import("@inline-chat/realtime-sdk").InlineSdkClient
   me?: {
     userId?: bigint
     username?: string
@@ -1029,8 +1030,15 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             },
           },
         }))
-        close = closeClient
-        events = vi.fn(() => eventsGenerator())
+        close = async () => {
+          await closeClient()
+          await setup.eventClient?.close()
+        }
+        events = vi.fn(() => setup.eventClient?.events() ?? eventsGenerator())
+        consumeEvents = async (handle: (event: any) => Promise<void>) => {
+          if (setup.eventClient) return setup.eventClient.consumeEvents(handle)
+          for await (const event of eventsGenerator()) await handle(event)
+        }
       },
     }
   })
@@ -14749,4 +14757,76 @@ describe("inline/monitor", () => {
 
     await handle.stop()
   })
+})
+
+
+it("the real SDK delivers a different chat through the monitor while a reaction lookup is held", async () => {
+  const { InlineSdkClient } = await vi.importActual<typeof import("@inline-chat/realtime-sdk")>("@inline-chat/realtime-sdk")
+  const { MockTransport } = await import("../../../sdk/src/realtime/mock-transport.js")
+  const { Method, ServerProtocolMessage, Update } = await import("../../../packages/protocol/src/core.js")
+  const transport = new MockTransport()
+  const send = transport.send.bind(transport)
+  transport.send = async message => {
+    await send(message)
+    if (message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE) {
+      await transport.emitMessage(ServerProtocolMessage.create({body: {oneofKind: "rpcResult", rpcResult: {
+        reqMsgId: message.id, result: {oneofKind: "getUpdatesState", getUpdatesState: {date: 100n, updatesFound: false}},
+      }}}))
+    }
+  }
+  const client = new InlineSdkClient({token: "test", transport, state: {
+    load: async () => ({version: 1, lastSeqByChatId: {"88": 1, "99": 1}}), save: async () => {},
+  }})
+  const flush = async () => { for (let i = 0; i < 100; i++) await Promise.resolve() }
+  const connecting = client.connect()
+  await flush()
+  await transport.connect()
+  await flush()
+  await transport.emitMessage(ServerProtocolMessage.create({body: {oneofKind: "connectionOpen", connectionOpen: {}}}))
+  await connecting
+  const harness = await setupMonitorHarness({
+    eventClient: client, events: [],
+    chats: {"88": {kind: "group", title: "Group"}, "99": {kind: "direct", title: "Alice", peerUserId: 42n}},
+    participants: {"88": [{id: 51n, firstName: "Alice", bot: false}], "99": [{id: 42n, firstName: "Bob", bot: false}]},
+  })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {release = resolve})
+  const original = harness.calls.invokeRaw.getMockImplementation()!
+  let lookupStarted = false
+  harness.calls.invokeRaw.mockImplementation(async (...args) => {
+    if (args[0] === 13 && args[1]?.getChatParticipants?.chatId === 88n) {lookupStarted = true; await gate}
+    return original(...args)
+  })
+  const handle = await harness.monitorInlineProvider({
+    cfg: {} as any,
+    account: buildAccount({dmPolicy: "open", groupPolicy: "open", reactionNotifications: "all"}),
+    runtime: {log: vi.fn(), error: vi.fn()} as any,
+    abortSignal: new AbortController().signal,
+    log: {info: vi.fn(), warn: vi.fn(), error: vi.fn()},
+  })
+  try {
+    await transport.emitMessage(ServerProtocolMessage.create({body: {oneofKind: "message", message: {
+      payload: {oneofKind: "update", update: {updates: [
+        Update.create({seq: 2, date: 100n, update: {oneofKind: "updateReaction", updateReaction: {
+          reaction: {chatId: 88n, messageId: 5001n, userId: 51n, emoji: "🔥", date: 100n},
+        }}}),
+        Update.create({seq: 2, date: 100n, update: {oneofKind: "newMessage", newMessage: {message: {
+          id: 2n, chatId: 99n, fromId: 42n, message: "hello", date: BigInt(Math.floor(Date.now()/1000)),
+          peerId: {type: {oneofKind: "user", user: {userId: 42n}}},
+        }}}}),
+      ]}},
+    }}}))
+    await waitFor(() => {
+      expect(lookupStarted).toBe(true)
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    })
+    expect(client.exportState().lastSeqByChatId?.["88"]).toBe(1)
+    expect(client.exportState().lastSeqByChatId?.["99"]).toBe(2)
+    release()
+    await waitFor(() => expect(client.exportState().lastSeqByChatId?.["88"]).toBe(2))
+  } finally {
+    release()
+    await handle.stop()
+    await client.close()
+  }
 })

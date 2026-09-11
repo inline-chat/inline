@@ -1,3 +1,4 @@
+import { reportOpenClawPluginError } from "../telemetry.js"
 import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { beginInlineActiveThreadRoute, type ActiveInlineThreadRoute } from "./active-thread-route.js"
@@ -3354,6 +3355,9 @@ export async function monitorInlineProvider(params: {
     },
     error: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
+      if (msg === "Sync recovery scheduled" || msg === "Sync bucket unavailable" || msg === "Sync discovery unavailable") {
+        reportOpenClawPluginError("sdk.sync_recovery", new Error(line))
+      }
       log?.error(line)
       if (isRecoverableInlineConnectionError(line)) {
         recoverableConnectionError = line
@@ -7555,8 +7559,11 @@ export async function monitorInlineProvider(params: {
 
   const loop = (async () => {
     try {
-      for await (const event of client.events()) {
-        if (abortSignal.aborted) break
+      await client.consumeEvents(async (event) => {
+        if (abortSignal.aborted) {
+          await client.close()
+          return
+        }
         const rawEvent = event as Record<string, unknown>
 
         if (event.kind === "bot.chatSettings.request") {
@@ -7564,7 +7571,7 @@ export async function monitorInlineProvider(params: {
             "agent settings request",
             () => answerOpenClawBotSettingsRequest(event),
           )
-          continue
+          return
         }
 
         if (event.kind === "bot.chatSettings.item.invoke") {
@@ -7573,7 +7580,7 @@ export async function monitorInlineProvider(params: {
             () => answerOpenClawBotSettingsMutation(event),
             { serialKey: `agent-settings:${String(event.chatId)}` },
           )
-          continue
+          return
         }
 
         if (event.kind === "message.new") {
@@ -7581,12 +7588,12 @@ export async function monitorInlineProvider(params: {
             ...event.message,
             chatId: event.chatId,
           } as Message
-          if (msg.out || msg.fromId === meId) continue
+          if (msg.out || msg.fromId === meId) return
           if (!claimInlineInboundMessageInstance({
             seen: seenInboundMessageInstances,
             chatId: event.chatId,
             message: msg,
-          })) continue
+          })) return
           if (
             isInlineAbortRequestMessage(msg, botUsername) &&
             await isAuthorizedInlineAbortMessage({ chatId: event.chatId, msg })
@@ -7597,20 +7604,20 @@ export async function monitorInlineProvider(params: {
               { chatId: event.chatId, msg },
               "priority abort dispatch",
             )
-            continue
+            return
           }
           if (voiceTranscriptWaitMs > 0 && shouldWaitForInlineVoiceTranscript(msg)) {
             holdInlineVoiceMessage({
               chatId: event.chatId,
               msg,
             })
-            continue
+            return
           }
           scheduleInboundMessage({
             chatId: event.chatId,
             msg,
           })
-          continue
+          return
         }
 
         if (event.kind === "message.edit") {
@@ -7618,9 +7625,9 @@ export async function monitorInlineProvider(params: {
             ...event.message,
             chatId: event.chatId,
           } as Message
-          if (msg.out || msg.fromId === meId) continue
+          if (msg.out || msg.fromId === meId) return
           if (await handlePendingInlineVoiceEdit({ chatId: event.chatId, msg })) {
-            continue
+            return
           }
           await queueInlineMessageLifecycleSystemEvent({
             action: "edited",
@@ -7628,7 +7635,7 @@ export async function monitorInlineProvider(params: {
             messageIds: [msg.id],
             senderId: msg.fromId,
           })
-          continue
+          return
         }
 
         if (event.kind === "message.delete") {
@@ -7637,17 +7644,17 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
             messageIds: event.messageIds,
           })
-          continue
+          return
         }
 
         if (event.kind === "reaction.add") {
-          if (event.reaction.userId === meId) continue
+          if (event.reaction.userId === meId) return
           const shouldQueue = await shouldQueueInlineReactionSystemEvent({
             chatId: event.chatId,
             messageId: event.reaction.messageId,
             senderId: event.reaction.userId,
           })
-          if (!shouldQueue) continue
+          if (!shouldQueue) return
 
           await queueInlineReactionSystemEvent({
             action: "added",
@@ -7656,17 +7663,17 @@ export async function monitorInlineProvider(params: {
             senderId: event.reaction.userId,
             emoji: event.reaction.emoji,
           })
-          continue
+          return
         }
 
         if (event.kind === "reaction.delete") {
-          if (event.userId === meId) continue
+          if (event.userId === meId) return
           const shouldQueue = await shouldQueueInlineReactionSystemEvent({
             chatId: event.chatId,
             messageId: event.messageId,
             senderId: event.userId,
           })
-          if (!shouldQueue) continue
+          if (!shouldQueue) return
 
           await queueInlineReactionSystemEvent({
             action: "removed",
@@ -7675,12 +7682,12 @@ export async function monitorInlineProvider(params: {
             senderId: event.userId,
             emoji: event.emoji,
           })
-          continue
+          return
         }
 
         if (rawEvent["kind"] === "chat.participant.add") {
           const eventChatId = rawEvent["chatId"] as bigint | undefined
-          if (!eventChatId) continue
+          if (!eventChatId) return
           const participant = rawEvent["participant"] as { userId?: bigint; date?: bigint } | undefined
           const eventDate = rawEvent["date"] as bigint | undefined
           const recovered = await recoverInlineJoinMentions({
@@ -7708,7 +7715,7 @@ export async function monitorInlineProvider(params: {
               { serializeWithChat: true },
             )
           }
-          continue
+          return
         }
 
         if (rawEvent["kind"] === "message.action.invoke") {
@@ -7721,9 +7728,9 @@ export async function monitorInlineProvider(params: {
           const eventDate = rawEvent["date"] as bigint | undefined
 
           if (!actorUserId || !interactionId || !actionId || !targetMessageId || !eventChatId || !eventDate || !data) {
-            continue
+            return
           }
-          if (actorUserId === meId) continue
+          if (actorUserId === meId) return
 
           scheduleImmediateInboundMessage(
             {
@@ -7748,9 +7755,9 @@ export async function monitorInlineProvider(params: {
             "inline action dispatch",
             { serializeWithChat: true },
           )
-          continue
+          return
         }
-      }
+      })
     } catch (err) {
       publishStatus({ connected: false, lastError: String(err) })
       runtime.error?.(`inline monitor loop crashed: ${String(err)}`)
