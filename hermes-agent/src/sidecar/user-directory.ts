@@ -1,4 +1,4 @@
-import { Method, type User } from "@inline-chat/realtime-sdk"
+import { Method, ProtocolClientError, type User } from "@inline-chat/realtime-sdk"
 
 const DEFAULT_PROFILE_TTL_MS = 10 * 60_000
 const DEFAULT_MAX_PROFILES = 5_000
@@ -34,6 +34,7 @@ type UserDirectoryOptions = {
 
 export class InlineUserDirectory {
   private readonly profiles = new Map<string, CachedProfile>()
+  private readonly lookupTimeouts = new Map<Method, number>()
   private readonly hydratedChats = new Map<string, number>()
   private readonly chatFetches = new Map<string, Promise<boolean>>()
   private directoryExpiresAt = 0
@@ -150,10 +151,10 @@ export class InlineUserDirectory {
     if (existing) return existing
 
     const fetch = (async () => {
-      const result = await this.client.invokeUncheckedRaw(Method.GET_CHAT_PARTICIPANTS, {
+      const result = await this.invokeLookup(Method.GET_CHAT_PARTICIPANTS, {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId },
-      }, { timeoutMs: 1_500 })
+      })
       this.remember(readUsers(result, "getChatParticipants"))
       this.hydratedChats.delete(key)
       this.hydratedChats.set(key, this.now() + this.ttlMs)
@@ -174,15 +175,29 @@ export class InlineUserDirectory {
     return await fetch
   }
 
+  private async invokeLookup(method: Method.GET_CHAT_PARTICIPANTS | Method.GET_CHATS, input: unknown): Promise<unknown> {
+    const timeoutMs = this.lookupTimeouts.get(method) ?? 1_500
+    try {
+      return await this.client.invokeUncheckedRaw(method, input, { timeoutMs })
+    } catch (error) {
+      // Learn a budget for this RPC instead of permanently rejecting a healthy
+      // but slower server. Keep the original SDK ceiling and only two entries.
+      if (error instanceof ProtocolClientError && error.code === "timeout") {
+        this.lookupTimeouts.set(method, Math.max(this.lookupTimeouts.get(method) ?? 0, Math.min(30_000, timeoutMs * 2)))
+      }
+      throw error
+    }
+  }
+
   private async hydrateDirectory(): Promise<boolean> {
     if (this.directoryExpiresAt > this.now()) return true
     if (this.directoryFetch) return this.directoryFetch
 
     const fetch = (async () => {
-      const result = await this.client.invokeUncheckedRaw(Method.GET_CHATS, {
+      const result = await this.invokeLookup(Method.GET_CHATS, {
         oneofKind: "getChats",
         getChats: {},
-      }, { timeoutMs: 1_500 })
+      })
       this.remember(readUsers(result, "getChats"))
       this.directoryExpiresAt = this.now() + this.ttlMs
       return true

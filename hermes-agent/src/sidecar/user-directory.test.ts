@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { Method, type User } from "@inline-chat/realtime-sdk"
+import { describe, expect, it, vi } from "vitest"
+import { Method, ProtocolClientError, type User } from "@inline-chat/realtime-sdk"
 import { InlineUserDirectory } from "./user-directory.js"
 
 const user = (id: bigint, values: Partial<User> = {}): User => ({ id, ...values })
@@ -151,4 +151,31 @@ describe("InlineUserDirectory", () => {
 
     expect(requests).toBe(5)
   })
+})
+
+
+it.each([false, true])("a consistently slow directory can recover after an initial fast timeout (direct=%s)", async direct => {
+  vi.useFakeTimers()
+  try {
+    const directory = new InlineUserDirectory({
+      async invokeUncheckedRaw(method, _input, options) {
+        const kind = method === Method.GET_CHAT_PARTICIPANTS ? "getChatParticipants" : "getChats"
+        if (!direct && method === Method.GET_CHATS) return {oneofKind: kind, [kind]: {users: []}}
+        let responseTimer: ReturnType<typeof setTimeout> | undefined
+        let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+        try {
+          return await new Promise((resolve, reject) => {
+            responseTimer = setTimeout(() => resolve({oneofKind: kind, [kind]: {users: [user(42n, {bot: false})]}}), 2_000)
+            timeoutTimer = setTimeout(() => reject(new ProtocolClientError("timeout")), options?.timeoutMs ?? 30_000)
+          })
+        } finally { clearTimeout(responseTimer); clearTimeout(timeoutTimer) }
+      },
+    })
+    const first = directory.resolveWithProvenance({userId: 42n, chatId: 7n, direct})
+    await vi.advanceTimersByTimeAsync(1_501)
+    expect((await first).provenanceVerified).toBe(false)
+    const retry = directory.resolveWithProvenance({userId: 42n, chatId: 7n, direct})
+    await vi.advanceTimersByTimeAsync(2_001)
+    expect(await retry).toMatchObject({provenanceVerified: true, profile: {id: "42", bot: false}})
+  } finally { vi.useRealTimers() }
 })

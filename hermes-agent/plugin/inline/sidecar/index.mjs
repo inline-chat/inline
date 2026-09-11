@@ -47400,6 +47400,7 @@ var DEFAULT_MAX_PROFILES = 5000;
 class InlineUserDirectory {
   client;
   profiles = new Map;
+  lookupTimeouts = new Map;
   hydratedChats = new Map;
   chatFetches = new Map;
   directoryExpiresAt = 0;
@@ -47506,10 +47507,10 @@ class InlineUserDirectory {
     if (existing)
       return existing;
     const fetch2 = (async () => {
-      const result = await this.client.invokeUncheckedRaw(Method.GET_CHAT_PARTICIPANTS, {
+      const result = await this.invokeLookup(Method.GET_CHAT_PARTICIPANTS, {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId }
-      }, { timeoutMs: 1500 });
+      });
       this.remember(readUsers(result, "getChatParticipants"));
       this.hydratedChats.delete(key);
       this.hydratedChats.set(key, this.now() + this.ttlMs);
@@ -47527,16 +47528,27 @@ class InlineUserDirectory {
     this.chatFetches.set(key, fetch2);
     return await fetch2;
   }
+  async invokeLookup(method, input) {
+    const timeoutMs = this.lookupTimeouts.get(method) ?? 1500;
+    try {
+      return await this.client.invokeUncheckedRaw(method, input, { timeoutMs });
+    } catch (error) {
+      if (error instanceof ProtocolClientError && error.code === "timeout") {
+        this.lookupTimeouts.set(method, Math.max(this.lookupTimeouts.get(method) ?? 0, Math.min(30000, timeoutMs * 2)));
+      }
+      throw error;
+    }
+  }
   async hydrateDirectory() {
     if (this.directoryExpiresAt > this.now())
       return true;
     if (this.directoryFetch)
       return this.directoryFetch;
     const fetch2 = (async () => {
-      const result = await this.client.invokeUncheckedRaw(Method.GET_CHATS, {
+      const result = await this.invokeLookup(Method.GET_CHATS, {
         oneofKind: "getChats",
         getChats: {}
-      }, { timeoutMs: 1500 });
+      });
       this.remember(readUsers(result, "getChats"));
       this.directoryExpiresAt = this.now() + this.ttlMs;
       return true;
