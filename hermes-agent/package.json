@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/hermes-agent-adapter",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "Hermes Agent platform adapter for Inline, with a native Python plugin and bundled Inline realtime sidecar.",
   "license": "Apache-2.0",
   "type": "module",
@@ -51,7 +51,7 @@
   },
   "scripts": {
     "build": "mkdir -p plugin/inline/sidecar && bun build ./src/install.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle && bun build ./src/sidecar/index.ts --outdir plugin/inline/sidecar --entry-naming 'index.mjs' --target=node --format=esm --packages=bundle && tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "bunx oxlint --ignore-path ../.oxlintignore scripts/release-stage.mjs src/install.ts src/sidecar/contract.ts src/sidecar/index.ts src/sidecar/telemetry.ts src/sidecar/telemetry.test.ts src/sidecar/user-directory.ts src/sidecar/user-directory.test.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts tests/telemetry-python.test.ts vitest.config.ts",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore scripts/release-stage.mjs src/install.ts src/sidecar/contract.ts src/sidecar/index.ts src/sidecar/telemetry.ts src/sidecar/telemetry.test.ts src/sidecar/user-directory.ts src/sidecar/user-directory.test.ts src/sidecar/inbound-delivery.ts src/sidecar/inbound-delivery.test.ts src/sidecar/inbound-stream.ts src/sidecar/inbound-stream.test.ts tests/inbound-flow.test.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts tests/telemetry-python.test.ts vitest.config.ts",
     "pretest": "bun run build",
     "prepack": "bun run build",
     "prepublishOnly": "bun run check",
@@ -62,7 +62,7 @@
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.17",
+    "@inline-chat/realtime-sdk": "0.0.18",
     "yaml": "2.9.0"
   },
   "devDependencies": {

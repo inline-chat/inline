@@ -15,12 +15,12 @@
     },
     "hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.16",
+      "version": "0.0.17",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.17",
+        "@inline-chat/realtime-sdk": "0.0.18",
         "yaml": "2.9.0",
       },
       "devDependencies": {

@@ -22,7 +22,7 @@ type CachedProfile = {
 }
 
 type UserDirectoryClient = {
-  invokeUncheckedRaw(method: Method, input: unknown): Promise<unknown>
+  invokeUncheckedRaw(method: Method, input: unknown, options?: { timeoutMs: number }): Promise<unknown>
 }
 
 type UserDirectoryOptions = {
@@ -64,7 +64,7 @@ export class InlineUserDirectory {
   ): Promise<InlineUserResolution> {
     const userId = params.userId.toString()
     const cached = this.getFresh(userId)
-    if (hasDisplayIdentity(cached) && cached.bot != null) {
+    if (cached?.bot != null) {
       return { profile: cached, provenanceVerified: true }
     }
 
@@ -78,7 +78,7 @@ export class InlineUserDirectory {
     } else {
       const chatHydrated = await this.hydrateChat(params.chatId)
       const participant = this.getFresh(userId)
-      if (hasDisplayIdentity(participant)) {
+      if (participant?.bot != null || hasDisplayIdentity(participant)) {
         return {
           profile: participant,
           provenanceVerified: chatHydrated || participant.bot != null,
@@ -153,7 +153,7 @@ export class InlineUserDirectory {
       const result = await this.client.invokeUncheckedRaw(Method.GET_CHAT_PARTICIPANTS, {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId },
-      })
+      }, { timeoutMs: 1_500 })
       this.remember(readUsers(result, "getChatParticipants"))
       this.hydratedChats.delete(key)
       this.hydratedChats.set(key, this.now() + this.ttlMs)
@@ -182,7 +182,7 @@ export class InlineUserDirectory {
       const result = await this.client.invokeUncheckedRaw(Method.GET_CHATS, {
         oneofKind: "getChats",
         getChats: {},
-      })
+      }, { timeoutMs: 1_500 })
       this.remember(readUsers(result, "getChats"))
       this.directoryExpiresAt = this.now() + this.ttlMs
       return true

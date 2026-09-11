@@ -1,5 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http"
-import { once } from "node:events"
+import { InboundStream } from "./inbound-stream.js"
+import { deliverInboundEvent } from "./inbound-delivery.js"
 import { timingSafeEqual } from "node:crypto"
 import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
@@ -39,8 +40,6 @@ import {
   SidecarError,
   asOptionalRecord,
   asRecord,
-  inboundEventNeedsSenderResolution,
-  normalizeInboundEvent,
   normalizeError,
   normalizeUploadKind,
   parseOptionalInt,
@@ -119,8 +118,8 @@ let meUsername: string | null = null
 let connectError: string | null = null
 let connectAttempts = 0
 let nextConnectRetryAt: string | null = null
-let consumer: ServerResponse | null = null
-let consumerWaiters: Array<() => void> = []
+const inboundStream = new InboundStream()
+const inboundAbort = new AbortController()
 
 const clientOptions: InlineSdkClientOptions = {
   token,
@@ -200,15 +199,12 @@ async function connectClientLoop() {
 
 async function consumeEvents() {
   try {
-    for await (const event of client.events()) {
-      const senderResolution = inboundEventNeedsSenderResolution(event)
-        ? await resolveInboundSender(event)
-        : { provenanceVerified: true }
-      const normalized = normalizeInboundEvent(event, meId, senderResolution.profile, meUsername)
-      await deliver(senderResolution.provenanceVerified
-        ? normalized
-        : { ...asRecord(normalized), _inlineSenderProvenanceVerified: false })
-    }
+    await client.consumeEvents(async (event) => {
+      await deliverInboundEvent(event, {
+        meId, meUsername, signal: inboundAbort.signal,
+        resolveSender: resolveInboundSender, deliver,
+      })
+    })
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false })
@@ -1075,6 +1071,7 @@ type SidecarClient = {
   close(): Promise<void>
   getDiagnostics(): unknown
   events(): AsyncIterable<GenericInboundEvent>
+  consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>): Promise<void>
   getChat(params: { chatId: bigint }): Promise<{
     chatId: bigint
     title: string
@@ -1097,7 +1094,7 @@ type SidecarClient = {
   setMyBotCapabilities(params: { capabilities: Array<{ kind: BotCapability_Kind; version: number }> }): Promise<unknown>
   answerBotChatSettings(params: { requestId: bigint; response: BotChatSettingsResponse }): Promise<void>
   invoke(method: Method, input: unknown): Promise<unknown>
-  invokeUncheckedRaw(method: Method, input: unknown): Promise<unknown>
+  invokeUncheckedRaw(method: Method, input: unknown, options?: { timeoutMs: number }): Promise<unknown>
 }
 
 function createClient(options: InlineSdkClientOptions): SidecarClient {
@@ -1198,6 +1195,10 @@ class MockInlineClient implements SidecarClient {
       mock: true,
       calls: this.calls,
     }
+  }
+
+  async consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>): Promise<void> {
+    for await (const event of this.events()) await handler(event)
   }
 
   events(): AsyncIterable<GenericInboundEvent> {
@@ -1517,38 +1518,16 @@ server.listen(port, bind, () => {
 setupShutdown()
 
 function attachConsumer(res: ServerResponse) {
-  if (consumer) {
-    consumer.end()
-    consumer = null
-  }
   res.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
-  consumer = res
-  const waiters = consumerWaiters
-  consumerWaiters = []
-  for (const resolve of waiters) resolve()
-  res.on("close", () => {
-    if (consumer === res) consumer = null
-  })
+  inboundStream.attach(res)
 }
 
 async function deliver(event: Json) {
-  while (!stopping) {
-    if (!consumer) {
-      await new Promise<void>((resolve) => consumerWaiters.push(resolve))
-      continue
-    }
-    try {
-      const ok = consumer.write(JSON.stringify(event) + "\n")
-      if (!ok) await once(consumer, "drain")
-      return
-    } catch {
-      consumer = null
-    }
-  }
+  await inboundStream.deliver(event)
 }
 
 function inputPeerFromTarget(target: Target) {
@@ -1651,6 +1630,9 @@ function redactError(error: unknown): string {
 
 function log(level: string, args: unknown[]) {
   const message = args.map((arg) => typeof arg === "string" ? arg : JSON.stringify(safeJson(arg))).join(" ")
+  if (level === "error" && (args[0] === "Sync recovery scheduled" || args[0] === "Sync bucket unavailable" || args[0] === "Sync discovery unavailable")) {
+    reportHermesPluginError("sdk.sync_recovery", new Error(redactError(message)))
+  }
   console.error(`inline-sidecar:${level}: ${redactError(message)}`)
 }
 
@@ -1704,8 +1686,8 @@ async function shutdown(code: number) {
   if (stopping) return
   stopping = true
   try {
-    consumer?.end()
-    consumer = null
+    inboundAbort.abort()
+    inboundStream.close()
     server.close()
     await client.close()
   } catch (error) {
