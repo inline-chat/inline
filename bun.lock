@@ -420,6 +420,7 @@
     },
   },
   "overrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.98",
     "@inline-chat/protocol": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
   },
