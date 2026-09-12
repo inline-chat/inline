@@ -43,6 +43,7 @@ struct MacNotificationPlaygroundPresentation: Equatable, Sendable {
 
 struct MacIncomingNotificationContext: Sendable {
   let dialog: Dialog
+  let notificationSelection: DialogNotificationSettingSelection
   let directReplySenderID: Int64?
   let replyThreadAnchorSenderID: Int64?
 
@@ -52,13 +53,28 @@ struct MacIncomingNotificationContext: Sendable {
     chatID: Int64,
     replyToMessageID: Int64?
   ) throws -> Self? {
-    guard let row = try Row.fetchOne(
+    let rows = try Row.fetchAll(
       db,
       sql: """
+      WITH RECURSIVE ancestry(id, parentChatId, peerUserId, depth, path) AS (
+        SELECT id, parentChatId, peerUserId, 0, printf('/%lld/', id) FROM chat WHERE id = ?
+        UNION ALL
+        SELECT parent.id, parent.parentChatId, parent.peerUserId, ancestry.depth + 1,
+               ancestry.path || printf('%lld/', parent.id)
+        FROM chat AS parent JOIN ancestry ON parent.id = ancestry.parentChatId
+        WHERE instr(ancestry.path, printf('/%lld/', parent.id)) = 0
+      )
       SELECT dialog.*,
+             preference.notificationSettings AS inheritedNotificationSettings,
              directReply.fromId AS directReplySenderID,
              replyThreadAnchor.fromId AS replyThreadAnchorSenderID
       FROM dialog
+      LEFT JOIN ancestry ON 1 = 1
+      -- Match Dialog.getDialogId using the primary key, without scanning all dialogs.
+      LEFT JOIN dialog AS preference
+        ON preference.id = COALESCE(ancestry.peerUserId,
+          CASE WHEN ancestry.id < 500 THEN ancestry.id ELSE -ancestry.id END)
+       AND preference.chatId = ancestry.id
       LEFT JOIN chat AS notificationChat
         ON notificationChat.id = ?
       LEFT JOIN message AS directReply
@@ -68,18 +84,35 @@ struct MacIncomingNotificationContext: Sendable {
        AND replyThreadAnchor.messageId = notificationChat.parentMessageId
       WHERE dialog.id = ?
         AND \(Dialog.catalogActiveSQL)
-      LIMIT 1
+      ORDER BY ancestry.depth
       """,
       arguments: [
+        chatID,
         chatID,
         chatID,
         replyToMessageID,
         Dialog.getDialogId(peerId: peerID),
       ]
-    ) else { return nil }
+    )
+    guard let row = rows.first else { return nil }
+    let dialog = try Dialog(row: row)
 
-    return try Self(
-      dialog: Dialog(row: row),
+    let notificationSelection = rows.lazy.compactMap { row -> DialogNotificationSettingSelection? in
+      let data: Data? = row["inheritedNotificationSettings"]
+      guard let data,
+            let settings = try? InlineProtocol.DialogNotificationSettings(serializedBytes: data)
+      else { return nil }
+      switch settings.mode {
+      case .all: return .all
+      case .mentions: return .mentions
+      case .none: return DialogNotificationSettingSelection.none
+      case .unspecified, .UNRECOGNIZED: return nil
+      }
+    }.first ?? dialog.notificationSelection
+
+    return Self(
+      dialog: dialog,
+      notificationSelection: notificationSelection,
       directReplySenderID: row["directReplySenderID"],
       replyThreadAnchorSenderID: row["replyThreadAnchorSenderID"]
     )

@@ -14,7 +14,7 @@ import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
-import { chats, dialogs, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { chats, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
@@ -35,6 +35,7 @@ import {
   resolveEffectiveNotificationMode,
 } from "@in/server/modules/notifications/dialogNotificationSettings"
 import { normalizeGlobalNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
+import { getInheritedDialogNotificationSettings } from "@in/server/modules/notifications/inheritedDialogNotificationSettings"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -1274,23 +1275,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const senderPhoto = await getCachedUserProfilePhoto(messageInfo.message.fromId)
 
   const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
-  const dialogNotificationSettingsByUserId = new Map<number, ReturnType<typeof decodeDialogNotificationSettings>>()
-  if (recipientUserIds.length > 0) {
-    const dialogRows = await db
-      .select({
-        userId: dialogs.userId,
-        notificationSettings: dialogs.notificationSettings,
-      })
-      .from(dialogs)
-      .where(and(eq(dialogs.chatId, chat.id), inArray(dialogs.userId, recipientUserIds)))
-
-    dialogRows.forEach((dialogRow) => {
-      dialogNotificationSettingsByUserId.set(
-        dialogRow.userId,
-        decodeDialogNotificationSettings(dialogRow.notificationSettings),
-      )
-    })
-  }
+  const dialogNotificationSettingsByUserId = await getInheritedDialogNotificationSettings(chat.id, recipientUserIds)
 
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads

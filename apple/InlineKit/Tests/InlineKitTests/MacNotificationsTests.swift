@@ -279,6 +279,65 @@ struct MacNotificationsTests {
 
 @Suite("Mac notification database context")
 struct MacNotificationDatabaseContextTests {
+  @Test("nested replies inherit the nearest explicit preference, including hidden thread and DM parents", arguments: [false, true])
+  func inheritsParentNotificationPreferences(rootIsDM: Bool) throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    try queue.write { db in
+      try User(id: 7, email: nil, firstName: "Peer").insert(db)
+      for id in [Int64(100), 600, 601] {
+        let chat = Chat(
+          id: id, date: Date(timeIntervalSince1970: 1), type: id == 100 && rootIsDM ? .privateChat : .thread,
+          title: "Thread", spaceId: nil,
+          peerUserId: id == 100 && rootIsDM ? 7 : nil,
+          parentChatId: id == 100 ? nil : id == 600 ? 100 : 600,
+          parentMessageId: id == 100 ? nil : 1
+        )
+        try chat.insert(db)
+        // No intermediate dialog: inheritance must walk chat ancestry, not dialogs.
+        if id != 600 {
+          var dialog = Dialog(optimisticForChat: chat)
+          if id == 100 {
+            dialog.notificationSettings = .with { $0.mode = .mentions }
+            dialog.archived = true
+            dialog.chatListHidden = true
+          }
+          try dialog.insert(db)
+        }
+      }
+      func selection() throws -> DialogNotificationSettingSelection {
+        let context = try #require(try MacIncomingNotificationContext.fetch(
+          db, peerID: .thread(id: 601), chatID: 601, replyToMessageID: nil
+        ))
+        return context.notificationSelection
+      }
+      #expect(try selection() == .mentions)
+      var parent = try #require(try Dialog.get(peerId: rootIsDM ? .user(id: 7) : .thread(id: 100)).fetchOne(db))
+      parent.notificationSettings = .with { $0.mode = .none }
+      try parent.update(db)
+      #expect(try selection() == .none)
+
+      let middleChat = try #require(try Chat.fetchOne(db, key: 600))
+      var middle = Dialog(optimisticForChat: middleChat)
+      middle.notificationSettings = .with { $0.mode = .all }
+      try middle.insert(db)
+      #expect(try selection() == .all)
+      var child = try #require(try Dialog.get(peerId: .thread(id: 601)).fetchOne(db))
+      child.notificationSettings = .with { $0.mode = .none }
+      try child.update(db)
+      #expect(try selection() == .none)
+
+      child.notificationSettings = .with { $0.mode = .UNRECOGNIZED(99) }
+      try child.update(db)
+      middle.notificationSettings = nil
+      try middle.update(db)
+      #expect(try selection() == .none)
+      parent.notificationSettings = nil
+      try parent.update(db)
+      #expect(try selection() == .global)
+    }
+  }
+
   @Test("resolves unread and reply relevance in one context fetch")
   func resolvesUnreadAndReplyRelevance() throws {
     let currentUserID: Int64 = 7

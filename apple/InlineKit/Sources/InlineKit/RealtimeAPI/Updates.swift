@@ -2415,7 +2415,7 @@ extension InlineProtocol.UpdateNewMessage {
             replyToMessageID: replyToMessageID
           ) else { return }
 
-          let dialogSelection = context.dialog.notificationSelection
+          let dialogSelection = context.notificationSelection
           let isUnread = context.isUnread(messageID: msg.messageId)
           let isPersonallyAddressed = context.isPersonallyAddressed(
             message: message,

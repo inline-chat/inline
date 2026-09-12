@@ -105,7 +105,6 @@ private struct ChatToolbarNotificationPresentations: ViewModifier {
 private struct ChatToolbarNotificationPopover: View {
   @ObservedObject var model: ChatToolbarNotificationModel
   @ObservedObject private var appSettings = AppSettings.shared
-  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @FocusState private var focusedOption: DialogNotificationSettingSelection?
   @State private var hoveredOption: DialogNotificationSettingSelection?
@@ -236,7 +235,7 @@ private struct ChatToolbarNotificationPopover: View {
   private func description(for option: DialogNotificationSettingSelection) -> String {
     switch option {
       case .global:
-        "Uses global: \(globalModeTitle)."
+        "Uses parent or global settings."
       case .all:
         "Every message."
       case .mentions:
@@ -263,21 +262,6 @@ private struct ChatToolbarNotificationPopover: View {
         focusedOption = options[(index + 1) % options.count]
       default:
         break
-    }
-  }
-
-  private var globalModeTitle: String {
-    switch notificationSettings.mode {
-      case .all:
-        "All"
-      case .mentions:
-        "Any message to you"
-      case .onlyMentions:
-        "Only mentions"
-      case .importantOnly:
-        "Any message to you"
-      case .none:
-        "None"
     }
   }
 }

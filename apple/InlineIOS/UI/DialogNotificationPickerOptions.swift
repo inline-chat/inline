@@ -3,9 +3,9 @@ import SwiftUI
 
 enum DialogNotificationSettingsPresentation {
   static let globalDescription: LocalizedStringResource =
-    "Follows your global setting for every chat."
+    "Follows the parent chat’s settings, or your global settings for a top-level chat."
   static let overrideDescription: LocalizedStringResource =
-    "Overrides your global setting for this chat."
+    "Overrides inherited notification settings for this chat."
   static let overrideOptions: [DialogNotificationSettingSelection] = [.all, .mentions, .none]
 
   static func title(
@@ -14,7 +14,7 @@ enum DialogNotificationSettingsPresentation {
   ) -> LocalizedStringResource {
     switch selection {
     case .global:
-      globalTitle(for: globalMode)
+      "Default"
     case .all:
       "All"
     case .mentions:
@@ -30,33 +30,13 @@ enum DialogNotificationSettingsPresentation {
   ) -> String {
     switch selection {
     case .global:
-      switch globalMode {
-      case .all:
-        "bell.fill"
-      case .mentions, .importantOnly, .onlyMentions:
-        "at"
-      case .none:
-        "bell.slash.fill"
-      }
+      "bell"
     case .all:
       "bell.fill"
     case .mentions:
       "at"
     case .none:
       "bell.slash.fill"
-    }
-  }
-
-  private static func globalTitle(for mode: NotificationMode) -> LocalizedStringResource {
-    switch mode {
-    case .all:
-      "All"
-    case .mentions, .importantOnly:
-      "Any message to you"
-    case .onlyMentions:
-      "Only mentions"
-    case .none:
-      "None"
     }
   }
 }

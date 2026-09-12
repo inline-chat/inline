@@ -36,7 +36,7 @@ public extension DialogNotificationSettingSelection {
   var title: String {
     switch self {
       case .global:
-        "Use Global"
+        "Default"
       case .all:
         "All"
       case .mentions:
@@ -62,7 +62,7 @@ public extension DialogNotificationSettingSelection {
   var menuDescription: String {
     switch self {
       case .global:
-        "Use your global notification settings for this chat."
+        "Use the parent chat’s notification settings, or your global settings for a top-level chat."
       case .all:
         "Notify for every message in this chat."
       case .mentions:
