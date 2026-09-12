@@ -1,0 +1,55 @@
+{
+  "name": "@inline-chat/chat-sdk",
+  "version": "0.1.0",
+  "description": "Inline Bot API adapter for Vercel Chat SDK",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "chat-sdk"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "chat-sdk",
+    "chat-adapter",
+    "inline"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test src",
+    "lint": "oxlint src"
+  },
+  "dependencies": {
+    "@inline-chat/bot-client": "^0.1.1",
+    "@inline-chat/bot-api-types": "^0.1.2"
+  },
+  "peerDependencies": {
+    "chat": "^4.40.0"
+  },
+  "devDependencies": {
+    "@chat-adapter/state-memory": "4.40.0",
+    "@types/node": "^20.11.30",
+    "chat": "4.40.0",
+    "typescript": "^5.8.3",
+    "oxlint": "^1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
