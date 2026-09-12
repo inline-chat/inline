@@ -11,9 +11,7 @@ extension RealtimeCore {
     }
     switch page.decision(from: start, through: target) {
     case .reject:
-      buckets[key]?.pending = nil
-      buckets[key]?.blocked = true
-      output.append(.event(.blocked("malformed or non-progress page")))
+      retrySync(key, reason: .invalidPage)
     case .apply:
       writePage(key, expected: start, page: page, admission: admission)
     case .repair(let boundary, let reason):
@@ -28,13 +26,23 @@ extension RealtimeCore {
     for offset in keys.indices {
       let key = keys[(start + offset) % keys.count]
       if bootstrap?.user == key && bootstrap?.blocksUser == true { continue }
-      guard var bucket = buckets[key], bucket.pending == nil, !bucket.blocked else { continue }
+      guard var bucket = buckets[key], bucket.pending == nil, !bucket.blocked, !bucket.inaccessible
+      else { continue }
       if let retry = bucket.retryAt, retry > now { continue }
       bucket.retryAt = nil
       buckets[key] = bucket
       guard let position = bucket.position else {
         let operation = write(.loadBucket(key))
         buckets[key]?.pending = operation
+        continue
+      }
+      if bucket.needsAudit {
+        bucket.repair = BucketRepair(
+          boundary: bucket.repair?.boundary ?? position, expected: position,
+          reason: .dependencyChanged)
+        bucket.needsAudit = false
+        bucket.retryAt = now + configuration.retryDelay
+        buckets[key] = bucket
         continue
       }
       if let repair = bucket.repair {
@@ -65,7 +73,10 @@ extension RealtimeCore {
         }
         continue
       }
-      if let pass = bucket.pass, position.sequence >= pass.target {
+      if let pass = bucket.pass,
+        position.sequence > pass.target
+          || (position.sequence == pass.target && !pass.needsFinalPage)
+      {
         bucket.completedLatest = max(bucket.completedLatest, pass.latest)
         bucket.pass = nil
         buckets[key] = bucket
@@ -79,7 +90,7 @@ extension RealtimeCore {
         }
         continue
       }
-      if bucket.latest == bucket.completedLatest,
+      if bucket.pass?.needsFinalPage != true, bucket.latest == bucket.completedLatest,
         position.sequence >= bucket.requiresAuthoritativeThrough,
         position.sequence < Int64.max,
         bucket.buffer[position.sequence + 1] != nil
@@ -106,6 +117,11 @@ extension RealtimeCore {
         lastSyncBucket = key
         lastSyncWasDiscovery = false
         if bucket.pass == nil && bucket.latest > bucket.completedLatest {
+          // A latest demand can arrive while a finite fetch's admission read is
+          // outstanding. Transfer its slot to the head request, then capture new
+          // durable evidence for the eventual page fetch.
+          releaseBucketReservation(key)
+          buckets[key]?.admission = nil
           let operation = transmit(
             .captureLatest(key),
             owner: .captureLatest(
@@ -133,15 +149,22 @@ extension RealtimeCore {
   }
 
   mutating func receivedRepair(_ snapshot: RepairSnapshot<Payload>, bucket key: BucketID) {
-    guard let repair = buckets[key]?.repair,
-      snapshot.position.sequence >= repair.boundary.sequence,
+    guard let repair = buckets[key]?.repair else { return }
+    if buckets[key]?.needsAudit == true {
+      buckets[key]?.pending = nil
+      return
+    }
+    guard snapshot.position.sequence >= repair.boundary.sequence,
       snapshot.position.date >= repair.boundary.date, snapshot.position.date > 0,
-      !snapshot.children.keys.contains(key), snapshot.children.values.allSatisfy({ $0 >= 0 }),
-      !repairCycle(parent: key, children: Set(snapshot.children.keys))
+      snapshot.children.values.allSatisfy({ $0 >= 0 })
     else {
+      retrySync(key, reason: .invalidRepairSnapshot)
+      return
+    }
+    guard !repairCycle(parent: key, children: Set(snapshot.children.keys)) else {
       buckets[key]?.pending = nil
       buckets[key]?.blocked = true
-      output.append(.event(.blocked("invalid repair snapshot or dependency cycle")))
+      output.append(.event(.syncBlocked(key, .dependencyCycle)))
       return
     }
     buckets[key]?.repair?.snapshot = snapshot
@@ -173,5 +196,80 @@ extension RealtimeCore {
       guard let demand = repair.requiredLatest[key] else { return false }
       return bucket.completedLatest >= demand
     }
+  }
+}
+
+// Durable receipts advance this workflow only after its own contract accepts them.
+extension RealtimeCore {
+  mutating func completeSyncWrite(
+    _ work: DatabaseWork<Payload>, _ result: DatabaseResult<Payload>
+  ) -> Bool {
+    switch (work, result) {
+    case (.importRepair(let key, _, _), .failed) where buckets[key]?.needsAudit == true,
+      (.finalizeRepair(let key, _, _, _), .failed) where buckets[key]?.needsAudit == true:
+      // A failed old write is finished. Retry the new audit, not invalidated evidence.
+      buckets[key]?.pending = nil
+    case (.captureBucketAdmission(let key, let expected, let network), .admission(let evidence))
+    where evidence.position.sequence >= 0 && evidence.position.date >= 0:
+      admissionFinished(key, expected: expected, network: network, evidence: evidence)
+    case (.loadBucket(let key), .bucketState(let position))
+    where position.sequence >= 0 && position.date >= 0:
+      buckets[key]?.pending = nil
+      if position.sequence >= (buckets[key]?.cursor ?? 0) {
+        buckets[key]?.cursor = position.sequence
+        let date = max(buckets[key]?.date ?? 0, position.date)
+        buckets[key]?.date = date
+      }
+    case (.applyPage(let key, let expected, let page), .committed(let position))
+    where position.sequence == page.through
+      && position.date >= max(expected.date, max(page.date, page.updates.map(\.date).max() ?? 0)):
+      buckets[key]?.pending = nil
+      if position.sequence >= (buckets[key]?.cursor ?? 0) {
+        buckets[key]?.cursor = position.sequence
+        let date = max(buckets[key]?.date ?? 0, position.date)
+        buckets[key]?.date = date
+      }
+      buckets[key]?.pass?.needsFinalPage = !page.final
+      let cursor = buckets[key]?.cursor ?? position.sequence
+      let buffer = buckets[key]?.buffer.filter { $0.key > cursor } ?? [:]
+      buckets[key]?.buffer = buffer
+    case (.importRepair(let key, _, let snapshot), .done):
+      buckets[key]?.pending = nil
+      buckets[key]?.repair?.phase = .waitingForChildren
+      if buckets[key]?.needsAudit == true { return true }
+      for child in snapshot.children.keys.sorted() {
+        let target = snapshot.children[child]!
+        demand(child, through: target > 0 ? target : nil)
+        if target == 0 {
+          let latest = buckets[child]?.latest
+          buckets[key]?.repair?.requiredLatest[child] = latest
+        }
+      }
+    case (.finalizeRepair(let key, _, let snapshot, _), .committed(let position))
+    where position.sequence >= snapshot.position.sequence && position.date >= snapshot.position.date:
+      buckets[key]?.pending = nil
+      buckets[key]?.repair = nil
+      if position.sequence >= (buckets[key]?.cursor ?? 0) {
+        buckets[key]?.cursor = position.sequence
+        let date = max(buckets[key]?.date ?? 0, position.date)
+        buckets[key]?.date = date
+      }
+    case (.applyPage(let key, _, _), .conflict), (.importRepair(let key, _, _), .conflict),
+      (.finalizeRepair(let key, _, _, _), .conflict):
+      // Conflict can mean destructive removal, not merely a newer cursor.
+      // Retain demand, but reacquire payload authority instead of repeatedly
+      // replaying the live values whose admission just failed.
+      buckets[key]?.buffer = [:]
+      let authoritativeThrough = max(
+        buckets[key]?.requiresAuthoritativeThrough ?? 0, buckets[key]?.target ?? 0)
+      buckets[key]?.requiresAuthoritativeThrough = authoritativeThrough
+      buckets[key]?.cursor = nil
+      buckets[key]?.date = 0
+      buckets[key]?.repair = nil
+      let reload = write(.loadBucket(key))
+      buckets[key]?.pending = reload
+    default: return false
+    }
+    return true
   }
 }

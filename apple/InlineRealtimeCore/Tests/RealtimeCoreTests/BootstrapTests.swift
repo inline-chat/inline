@@ -140,7 +140,7 @@ extension Scenario {
     #expect(s.core.cursor(for: BucketID(100)) == nil)
     #expect(transmissions(s.send(.timeout, at: 10)) == [.bootstrapCheckpoint])
   }
-  @Test func blockedChildIsReportedAndExplicitRetryResumesBootstrap() throws {
+  @Test func malformedChildAutomaticallyRetriesAndResumesBootstrap() throws {
     var s = Scenario(capacity: 3)
     try s.open()
     let child = BucketID(1)
@@ -148,9 +148,9 @@ extension Scenario {
     let fetch = try attempt(s.send(.catchUp(child, through: 1)))
     s.send(.response(fetch, .page(Page(through: 1, date: 1, final: true))))
     let blocked = try s.bootstrapChildren([child: 1])
-    #expect(blocked.contains(.event(.bootstrapBlocked([child]))))
+    #expect(!blocked.contains(.event(.bootstrapBlocked([child]))))
     #expect(!s.send(.timeout).contains(.event(.bootstrapBlocked([child]))))
-    let retry = try attempt(s.send(.retryBucket(child, generation: 1)))
+    let retry = try attempt(s.send(.timeout, at: 10))
     let apply = try operation(s.send(.response(retry, .page(page(0, 1)))))
     let admission = s.send(.databaseFinished(apply, .committed(position(1))))
     #expect(dbWork(admission).contains { if case .admitBootstrap = $0 { true } else { false } })
@@ -170,7 +170,7 @@ extension Scenario {
         .repairSnapshot(
           RepairSnapshot(payload: "cycle", position: position(2), children: [user: 10]))))
     #expect(dbWork(cyclic).isEmpty)
-    #expect(cyclic.contains(.event(.blocked("invalid repair snapshot or dependency cycle"))))
+    #expect(cyclic.contains(.event(.syncBlocked(BucketID(1), .dependencyCycle))))
     #expect(cyclic.contains(.event(.bootstrapBlocked([child]))))
   }
   @Test func bootstrapCannotOverlapAnAlreadyIssuedUserFetch() throws {

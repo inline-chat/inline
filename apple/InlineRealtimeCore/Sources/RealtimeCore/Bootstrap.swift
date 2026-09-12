@@ -33,6 +33,7 @@ struct Bootstrap<Payload: Equatable & Sendable>: Sendable {
   var latest: [BucketID: UInt64] = [:]
   var reportedBlocked: Set<BucketID> = []
   var discoverAfter = false
+  var needsAudit = false
   var blocksUser: Bool {
     switch phase {
     case .replaying, .checkpoint: false
@@ -60,6 +61,17 @@ extension RealtimeCore {
   }
   mutating func pumpBootstrap() {
     guard let state = bootstrap else { return }
+    if state.needsAudit {
+      // Re-audit only after this workflow's admitted work has actually finished.
+      // Operation IDs then fence duplicate receipts without overlapping audits.
+      guard state.pending.isEmpty, state.phase != .admitting, state.phase != .checkpoint,
+        buckets[state.user]?.pending == nil
+      else { return }
+      bootstrap = Bootstrap(user: state.user)
+      bootstrap?.discoverAfter = state.discoverAfter
+      bootstrap?.retryAt[.before] = now + configuration.retryDelay
+      return
+    }
     for (owner, deadline) in state.retryAt where deadline <= now {
       bootstrap?.retryAt.removeValue(forKey: owner)
     }
@@ -176,5 +188,58 @@ extension RealtimeCore {
       bootstrap?.retryAt[owner] = now + configuration.retryDelay
       output.append(.event(.blocked("invalid bootstrap response; retry retained")))
     }
+  }
+}
+
+// Durable receipts advance this workflow only after its own contract accepts them.
+extension RealtimeCore {
+  mutating func completeBootstrapWrite(
+    _ work: DatabaseWork<Payload>, _ result: DatabaseResult<Payload>
+  ) -> Bool {
+    switch (work, result) {
+    case (.admitBootstrap, .failed) where bootstrap?.needsAudit == true:
+      bootstrap?.phase = .children
+    case (.importBootstrapProjection(let kind, _, _), .projection(let receipt))
+    where receipt.seeds.allSatisfy({
+      $0.key != bootstrap?.user && $0.value.sequence >= 0 && $0.value.date >= 0
+    })
+      && receipt.targets.allSatisfy({ $0.key != bootstrap?.user && $0.value >= 0 }):
+      bootstrap?.pending.removeValue(forKey: .projection(kind))
+      bootstrap?.receipts[kind] = receipt
+      if bootstrap?.receipts.count == BootstrapProjection.allCases.count {
+        bootstrap?.phase = .after
+      }
+    case (.admitBootstrap(let user, let before, let after, _, _), .committed(let position))
+    where position.sequence >= before.sequence && position.date >= before.date:
+      ensureBucket(user)
+      if position.sequence >= (buckets[user]?.cursor ?? 0) {
+        buckets[user]?.cursor = position.sequence
+        let date = max(buckets[user]?.date ?? 0, position.date)
+        buckets[user]?.date = date
+      }
+      bootstrap?.phase = .replaying
+      demand(user, through: after.sequence)
+    case (.admitBootstrap, .conflict):
+      // Projections may remain durable, but their admission evidence is obsolete.
+      // Start a new P0/projection audit without inventing a baseline or checkpoint.
+      if let previous = bootstrap {
+        bootstrap = Bootstrap(user: previous.user)
+        bootstrap?.discoverAfter = previous.discoverAfter
+        bootstrap?.retryAt[.before] = now + configuration.retryDelay
+      }
+    case (.storeBootstrapCheckpoint(let checkpoint), .done):
+      if bootstrap?.needsAudit == true {
+        bootstrap?.phase = .children
+        output.append(.event(.checkpointStored(checkpoint)))
+        return true
+      }
+      let discoverAfter = bootstrap?.discoverAfter == true
+      bootstrap = nil
+      output.append(.event(.checkpointStored(checkpoint)))
+      output.append(.event(.bootstrapFinished))
+      if discoverAfter { discovery = Discovery(after: checkpoint) }
+    default: return false
+    }
+    return true
   }
 }

@@ -46,7 +46,7 @@ import Testing
     let first = s.send(.response(head, .head(position(4))))
     #expect(s.core.cursor(for: BucketID(1)) == 0)
     #expect(transmissions(first) == [.fetch(BucketID(1), from: 0, through: 4)])
-    let commit = try operation(s.send(.response(try attempt(first), .page(page(0, 2)))))
+    let commit = try operation(s.send(.response(try attempt(first), .page(page(0, 2, final: false)))))
     let second = s.send(.databaseFinished(commit, .committed(position(2))))
     #expect(transmissions(second) == [.fetch(BucketID(1), from: 2, through: 4)])
     #expect(!second.contains(.event(.caughtUp(BucketID(1), through: 2))))
@@ -65,9 +65,10 @@ import Testing
     let commit = try operation(s.send(.response(fresh, .page(page(1, 3)))))
     #expect(
       s.send(.databaseFinished(commit, .committed(position(3, date: 1)))).contains(
-        .event(.blocked("database result does not match issued work"))))
+        .event(.databaseContractViolation(commit))))
     s.send(.databaseFinished(commit, .committed(position(3, date: 11))))
-    #expect(s.core.cursor(for: BucketID(1)) == 3)
+    #expect(s.core.cursor(for: BucketID(1)) == 1)
+    #expect(!s.core.active)
   }
 
   @Test func updateDatesAndUnsupportedConstructorsAreNotDiscarded() {

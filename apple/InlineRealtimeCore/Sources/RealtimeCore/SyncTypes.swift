@@ -18,7 +18,7 @@ public struct SkippedSequence: Equatable, Sendable {
     self.reason = reason
   }
 }
-public enum RepairReason: Equatable, Sendable { case historyExpired, serverClassifiedGap }
+public enum RepairReason: Equatable, Sendable { case historyExpired, serverClassifiedGap, dependencyChanged }
 public enum PageDecision: Equatable, Sendable {
   case apply(SyncPosition)
   case repair(SyncPosition, RepairReason)

@@ -44,12 +44,20 @@ import Testing
     #expect(transmissions(result) == [.fetch(BucketID(1), from: 0, through: 2)])
   }
 
-  @Test func mismatchedDatabaseResultDoesNotAcknowledgeOrLoseWork() throws {
+  @Test func mismatchedDatabaseResultRetiresIOAndDrainsWithoutInventingACallback() throws {
     var s = Scenario()
-    try s.open()
+    let connection = try s.open()
     let marker = try operation(s.queue(1))
-    #expect(transmissions(s.send(.databaseFinished(marker, .committed(position(9))))).isEmpty)
-    #expect(transmissions(s.send(.databaseFinished(marker, .done))).count == 1)
+    let failed = s.send(.databaseFinished(marker, .committed(position(9))))
+    #expect(failed.contains(.event(.databaseContractViolation(marker))))
+    #expect(transmissions(failed).isEmpty)
+    #expect(s.core.outstandingDatabaseOperations == 0)
+    #expect(!s.core.active)
+    #expect(s.core.outcome(for: TransactionID(1)) == nil)
+    #expect(s.send(.disconnected(connection)).contains(.event(.drained)))
+    #expect(transmissions(s.send(.databaseFinished(marker, .done))).isEmpty)
+    try s.open(generation: 2)
+    #expect(s.core.active)
   }
 
   @Test func cancelDuringApplyWaitsForActualOutcome() throws {

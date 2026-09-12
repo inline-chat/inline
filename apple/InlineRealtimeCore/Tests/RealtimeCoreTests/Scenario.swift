@@ -76,9 +76,9 @@ func transmissions(_ actions: [Action]) -> [Request<String>] {
 func dbWork(_ actions: [Action]) -> [DatabaseWork<String>] {
   actions.compactMap { if case .database(_, let work) = $0 { work } else { nil } }
 }
-func page(_ start: Int64, _ end: Int64) -> Page<String> {
+func page(_ start: Int64, _ end: Int64, final: Bool = true) -> Page<String> {
   Page(
-    through: end, date: 1, final: false,
+    through: end, date: 1, final: final,
     updates: start < end ? ((start + 1)...end).map { Update(sequence: $0, payload: "u\($0)") } : [])
 }
 func permutations<T>(_ values: [T]) -> [[T]] {

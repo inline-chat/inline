@@ -1,7 +1,7 @@
 /// Discovery checkpoints cannot pass the exact child targets they introduced.
 struct Discovery: Sendable {
   var after: Int64
-  var requested = true
+  var requested = false
   var pending: OperationID?
   var checkpoint: Int64?
   var targets: [BucketID: Int64] = [:]
@@ -36,7 +36,6 @@ extension RealtimeCore {
         } else if session.openConnection != nil, reservedRequests < configuration.capacity,
           nextAdmission == .sync
         {
-          discovery?.requested = false
           lastAdmission = .sync
           lastSyncWasDiscovery = true
           let attempt = transmit(.discover(after: recovery.after), owner: .discovery)
@@ -53,5 +52,21 @@ extension RealtimeCore {
       guard let latest = recovery.requiredLatest[key] else { return false }
       return bucket.completedLatest >= latest
     }
+  }
+}
+
+// Durable receipts advance this workflow only after its own contract accepts them.
+extension RealtimeCore {
+  mutating func completeDiscoveryWrite(
+    _ work: DatabaseWork<Payload>, _ result: DatabaseResult<Payload>
+  ) -> Bool {
+    switch (work, result) {
+    case (.storeCheckpoint(let checkpoint), .done):
+      output.append(.event(.checkpointStored(checkpoint)))
+      let again = discovery?.requested == true
+      discovery = again ? Discovery(after: checkpoint) : nil
+    default: return false
+    }
+    return true
   }
 }

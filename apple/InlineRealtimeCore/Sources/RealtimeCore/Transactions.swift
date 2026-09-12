@@ -46,3 +46,39 @@ extension RealtimeCore {
     return false
   }
 }
+
+// Durable receipts advance this workflow only after its own contract accepts them.
+extension RealtimeCore {
+  mutating func completeTransactionsWrite(
+    _ work: DatabaseWork<Payload>, _ result: DatabaseResult<Payload>
+  ) -> Bool {
+    switch (work, result) {
+    case (.optimistic(let spec), .done):
+      transactions[spec.id]?.phase = .storing
+      _ = write(.store(spec))
+    case (.store(let spec), .done):
+      transactions[spec.id]?.phase = .ready
+      if transactions[spec.id]?.cancellationRequested == true { settle(spec.id, .cancelled) }
+    case (.markDispatching(let key), .done):
+      transactionReservations.remove(key)
+      guard let transaction = transactions[key] else { return false }
+      if transaction.cancellationRequested {
+        settle(key, .cancelled)
+      } else if session.openConnection != nil {
+        let attempt = transmit(
+          .transaction(key, transaction.spec.payload), owner: .transaction(key))
+        transactions[key]?.phase = .requesting(attempt)
+      } else {
+        transactions[key]?.phase = .ready
+      }
+    case (.applyTransaction(let key, _), .done): settle(key, .applied)
+    case (.settle(let key, let outcome), .done):
+      finished[key] = outcome
+      transactions.removeValue(forKey: key)
+      submissionOrder.removeAll { $0 == key }
+      output.append(.event(.transactionFinished(key, outcome)))
+    default: return false
+    }
+    return true
+  }
+}

@@ -211,7 +211,7 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
         if discovery == nil {
           discovery = Discovery(after: after)
           for key in buckets.keys.sorted() {
-            guard let bucket = buckets[key], bucket.hasDemand else { continue }
+            guard let bucket = buckets[key], !bucket.inaccessible, bucket.hasDemand else { continue }
             observeDiscoveryDemand(
               key,
               through: bucket.latest > bucket.completedLatest ? nil : bucket.target)
@@ -321,6 +321,18 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       requestFailed(request, uncertain: false)
       return
     }
+    if case .bucketUnavailable = response {
+      switch request.owner {
+      case .bucket(let key, _, _, _), .captureLatest(let key, _, _, _), .repair(let key):
+        if key.kind != .user && key != bootstrap?.user {
+          retireBucket(key)
+        } else {
+          retrySync(key, reason: .unexpectedResponse)
+        }
+        return
+      default: break
+      }
+    }
     switch (request.owner, response) {
     case (.bootstrap(let owner), _): bootstrapResponse(owner, response)
     case (.transaction(let key), .result(let payload)):
@@ -337,17 +349,15 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
         buckets[key]?.pass = CatchUpPass(
           target: max(current.sequence, max(minimum, position.sequence)), latest: latest)
       } else {
-        buckets[key]?.blocked = true
-        output.append(.event(.blocked("invalid latest coordinate")))
+        retrySync(key, reason: .invalidHead)
       }
     case (.repair(let key), .repairSnapshot(let snapshot)): receivedRepair(snapshot, bucket: key)
     case (.discovery, .discovery(let checkpoint, let targets)):
       guard let current = discovery, checkpoint >= current.after,
         targets.values.allSatisfy({ $0 >= 0 })
       else {
-        discovery?.pending = nil
-        output.append(.event(.blocked("invalid discovery")))
-        discovery = nil
+        requestFailed(request, uncertain: false)
+        output.append(.event(.blocked("invalid discovery; retry retained")))
         return
       }
       discovery?.pending = nil
@@ -373,10 +383,9 @@ public struct RealtimeCore<Payload: Equatable & Sendable>: Sendable {
       switch request.owner {
       case .transaction(let key): settle(key, .executionUnknown)
       case .bucket(let key, _, _, _), .captureLatest(let key, _, _, _), .repair(let key):
-        buckets[key]?.pending = nil
-        buckets[key]?.blocked = true
+        retrySync(key, reason: .unexpectedResponse)
       case .bootstrap: break
-      case .discovery: discovery = nil
+      case .discovery: requestFailed(request, uncertain: false)
       case .directCall(let id, _): output.append(.event(.callFinished(id, .failed)))
       case .direct: output.append(.event(.directFinished(attempt, nil)))
       }

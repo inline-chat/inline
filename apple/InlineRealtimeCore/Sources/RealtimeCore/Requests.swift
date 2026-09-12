@@ -53,8 +53,7 @@ extension RealtimeCore {
         transactions[key]?.retryAt = now + configuration.retryDelay
       }
     case .bucket(let key, _, _, _), .captureLatest(let key, _, _, _), .repair(let key):
-      buckets[key]?.pending = nil
-      buckets[key]?.retryAt = now + configuration.retryDelay
+      retrySync(key, reason: .requestFailed)
     case .discovery:
       discovery?.pending = nil
       discovery?.retryAt = now + configuration.retryDelay

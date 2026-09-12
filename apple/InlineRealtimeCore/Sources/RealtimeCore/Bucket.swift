@@ -13,9 +13,15 @@ struct Bucket<Payload: Equatable & Sendable>: Sendable {
   var pending: OperationID?
   var retryAt: Tick?
   var blocked = false
+  var inaccessible = false
+  var needsAudit = false
   var buffer: [Int64: Update<Payload>] = [:]
   var notified = false
-  var hasDemand: Bool { cursor == nil || target > (cursor ?? 0) || latest > completedLatest }
+  var hasDemand: Bool {
+    needsAudit || repair != nil || cursor == nil || target > (cursor ?? 0)
+      || latest > completedLatest
+      || pass?.needsFinalPage == true
+  }
 }
 
 extension RealtimeCore {
@@ -35,6 +41,7 @@ extension RealtimeCore {
   mutating func demand(_ key: BucketID, through target: Int64?) {
     if let target, target < 0 { return }
     ensureBucket(key)
+    buckets[key]?.inaccessible = false
     if let target {
       let nextTarget = max(buckets[key]?.target ?? 0, target)
       buckets[key]?.target = nextTarget
@@ -48,6 +55,8 @@ extension RealtimeCore {
 struct CatchUpPass: Sendable {
   let target: Int64
   let latest: UInt64
+  // Durable position and completion of a server pass are separate evidence.
+  var needsFinalPage = false
 }
 struct BucketRepair<Payload: Equatable & Sendable>: Sendable {
   enum Phase: Sendable { case fetching, importing, waitingForChildren, finalizing }

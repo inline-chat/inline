@@ -77,6 +77,7 @@ extension RealtimeCore {
     let bucketReady = buckets.contains { key, bucket in
       if bootstrap?.user == key && bootstrap?.blocksUser == true { return false }
       guard let cursor = bucket.cursor, bucket.pending == nil, !bucket.blocked,
+        !bucket.inaccessible,
         bucket.hasDemand, bucket.retryAt.map({ $0 <= now }) ?? true
       else { return false }
       if let repair = bucket.repair {
@@ -84,7 +85,8 @@ extension RealtimeCore {
         return false
       }
       let canApplyLive =
-        bucket.latest == bucket.completedLatest && cursor >= bucket.requiresAuthoritativeThrough
+        bucket.pass?.needsFinalPage != true && bucket.latest == bucket.completedLatest
+        && cursor >= bucket.requiresAuthoritativeThrough
         && cursor < Int64.max
         && bucket.buffer[cursor + 1] != nil
       return !canApplyLive

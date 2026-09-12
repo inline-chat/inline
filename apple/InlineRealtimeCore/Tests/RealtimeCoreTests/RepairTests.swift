@@ -114,6 +114,6 @@ extension Scenario {
       payload: "catalog", position: position(2), children: [BucketID(1): 2])
     let rejected = s.send(.response(repair, .repairSnapshot(circular)))
     #expect(dbWork(rejected).isEmpty)
-    #expect(rejected.contains(.event(.blocked("invalid repair snapshot or dependency cycle"))))
+    #expect(rejected.contains(.event(.syncBlocked(BucketID(1), .dependencyCycle))))
   }
 }

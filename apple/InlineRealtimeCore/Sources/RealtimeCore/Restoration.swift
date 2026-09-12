@@ -80,3 +80,20 @@ extension RealtimeCore {
     return true
   }
 }
+
+// Durable receipts advance this workflow only after its own contract accepts them.
+extension RealtimeCore {
+  mutating func completeRestorationWrite(
+    _ work: DatabaseWork<Payload>, _ result: DatabaseResult<Payload>
+  ) -> Bool {
+    switch (work, result) {
+    case (.loadTransactions, .transactions(let snapshot)):
+      if !restoreTransactions(snapshot) {
+        restorationRejected = true
+        output.append(.event(.restorationRejected))
+      }
+    default: return false
+    }
+    return true
+  }
+}

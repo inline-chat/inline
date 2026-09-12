@@ -66,7 +66,7 @@ import Testing
     let first = try attempt(s.send(.catchUp(hot, through: 100)))
     s.send(.catchUp(other, through: 1))
     s.send(.discover(after: 1))
-    let actions = s.send(.response(first, .page(page(0, 1))))
+    let actions = s.send(.response(first, .page(page(0, 1, final: false))))
     #expect(transmissions(actions) == [.discover(after: 1)])
     // Hot bucket becomes runnable again before the request slot frees.
     s.send(.databaseFinished(try operation(actions), .committed(position(1))))
@@ -96,9 +96,9 @@ import Testing
       let action = work.removeFirst()
       steps += 1
       switch action {
-      case .transmit(let id, _, .fetch(let key, let from, _)):
+      case .transmit(let id, _, .fetch(let key, let from, let target)):
         visited.insert(key)
-        work += s.send(.response(id, .page(page(from, from + 1))))
+        work += s.send(.response(id, .page(page(from, from + 1, final: from + 1 == target))))
         work += s.send(.sendFinished(id))
       case .transmit(let id, _, .discover):
         discovered = true

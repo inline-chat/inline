@@ -137,6 +137,8 @@ public enum Response<Payload: Equatable & Sendable>: Equatable, Sendable {
   case discovery(checkpoint: Int64, targets: [BucketID: Int64])
   /// Authoritative proof that execution did not occur; eligible for later retry.
   case rejectedBeforeExecution
+  /// Authoritative terminal access loss for the requested Chat or Space.
+  case bucketUnavailable
   case rejected
 }
 public enum SendFailure: Sendable { case knownUnsent, executionUnknown }
@@ -170,6 +172,8 @@ public enum ClientEvent<Payload: Equatable & Sendable>: Equatable, Sendable {
   case online
   case bootstrapFinished
   case restorationRejected
+  /// Adapter completion violated the issued work contract; admission is stopped.
+  case databaseContractViolation(OperationID)
   case bootstrapBlocked(Set<BucketID>)
   case transactionsReady
   case authorizationRejected
@@ -178,6 +182,9 @@ public enum ClientEvent<Payload: Equatable & Sendable>: Equatable, Sendable {
   case directFinished(OperationID, Payload?)
   case callFinished(CallID, CallOutcome<Payload>)
   case callRejected(CallID)
+  case bucketRetired(BucketID)
+  case syncBlocked(BucketID, SyncBlockReason)
+  case syncRetryScheduled(BucketID, SyncRetryReason, at: Tick)
   case caughtUp(BucketID, through: Int64)
   case checkpointStored(Int64)
   case blocked(String)

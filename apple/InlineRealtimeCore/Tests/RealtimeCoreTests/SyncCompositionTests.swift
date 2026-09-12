@@ -50,7 +50,7 @@ import Testing
         s.send(.databaseFinished(read, .bucketState(position(5, date: 10)))))
       let stale = s.send(.response(capture, .head(head)))
       #expect(transmissions(stale).isEmpty)
-      #expect(stale.contains(.event(.blocked("invalid latest coordinate"))))
+      #expect(stale.contains(.event(.syncRetryScheduled(BucketID(1), .invalidHead, at: 10))))
       #expect(s.core.cursor(for: BucketID(1)) == 5)
     }
   }
@@ -91,9 +91,9 @@ import Testing
       let rejected = s.send(
         .response(rpc, .page(Page(through: 2, date: 1, final: true, updates: updates))))
       #expect(dbWork(rejected).isEmpty)
-      #expect(rejected.contains(.event(.blocked("malformed or non-progress page"))))
+      #expect(rejected.contains(.event(.syncRetryScheduled(BucketID(1), .invalidPage, at: 10))))
       #expect(s.core.cursor(for: BucketID(1)) == 0)
-      #expect(s.core.nextDeadline == 1_000_000)
+      #expect(s.core.nextDeadline == 10)
     }
   }
 
