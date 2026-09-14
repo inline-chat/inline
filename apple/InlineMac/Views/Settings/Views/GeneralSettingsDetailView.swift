@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct GeneralSettingsDetailView: View {
@@ -84,6 +85,21 @@ struct GeneralSettingsDetailView: View {
           .pickerStyle(.menu)
         } label: {
           SettingsRowLabel("Hold")
+        }
+
+        LabeledContent {
+          Picker("Swipe to Reply", selection: $appSettings.messageSwipeToReplyDirection) {
+            ForEach(MessageSwipeToReplyDirection.allCases) { direction in
+              Text(direction.title).tag(direction)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        } label: {
+          SettingsRowLabel(
+            "Swipe to Reply",
+            description: "Choose which direction to swipe a message when replying."
+          )
         }
 
         Toggle(isOn: $appSettings.translationUIEnabled) {

@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 import TextProcessing
 import Translation
@@ -21,6 +22,8 @@ struct SettingsNavigationRow<Destination: View>: View {
 struct GeneralSettingsView: View {
   @AppStorage(InAppLinkPreferences.openLinksInAppKey)
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
+  @AppStorage(MessageSwipeToReplyDirection.storageKey)
+  private var swipeToReplyDirection = MessageSwipeToReplyDirection.defaultValue
   @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
@@ -41,6 +44,20 @@ struct GeneralSettingsView: View {
         }
       } footer: {
         Text("Turn supported pasted links into compact text links. Use Undo or Backspace to restore the URL.")
+      }
+
+      Section {
+        SettingsItem(icon: "arrow.left.arrow.right", iconColor: .green, title: "Swipe to Reply") {
+          Picker("Swipe to Reply", selection: $swipeToReplyDirection) {
+            ForEach(MessageSwipeToReplyDirection.allCases) { direction in
+              Text(direction.title).tag(direction)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
+      } footer: {
+        Text("Choose which direction to swipe a message when replying.")
       }
 
       Section("Language & Translation") {

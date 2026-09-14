@@ -25,6 +25,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   static let reuseIdentifier = "MessageCell"
   static let sendAnimationHorizontalPadding: CGFloat = 8
+  /// Keeps the reply control centered on the same side guide as 42-point controls
+  /// with a 16-point outer inset, regardless of the indicator's own frame size.
+  private static let replyIndicatorSideCenterInset: CGFloat = 37
   private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
   private static let insertionContentTransform = contentTransform.scaledBy(x: 0.985, y: 0.985)
 
@@ -45,6 +48,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
+  private var swipeDirection = MessageSwipeToReplyDirection.defaultValue
   private weak var swipedAvatarOverlayView: UIView?
   private var prevText: String?
   private var canReply: Bool = true
@@ -652,6 +656,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   // MARK: - Constraints
 
   var replyViewCenterYConstraint: NSLayoutConstraint!
+  private var replyIndicatorLeftCenterConstraint: NSLayoutConstraint?
+  private var replyIndicatorRightCenterConstraint: NSLayoutConstraint?
 
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
@@ -810,11 +816,6 @@ extension MessageCollectionViewCell {
       }
     }
 
-    // If the gesture starts as a rightward swipe, let the navigation controller
-    // (back swipe) handle it by declining recognition here.
-    let isLikelyBackSwipe = velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
-    if isLikelyBackSwipe { return false }
-
     // Calculate angle and only allow nearly horizontal swipes
     // An 16 degree angle corresponds to tan(16°) ≈ 0.287
     // This means vertical component should be at most 0.287 times the horizontal component
@@ -822,18 +823,31 @@ extension MessageCollectionViewCell {
     let maxAngleTangent: CGFloat = 0.4452286853 // tan(24°)
     let isHorizontalEnough = abs(velocity.y) <= abs(velocity.x) * maxAngleTangent
 
-    return abs(velocity.x) > abs(velocity.y) && isHorizontalEnough // Must be predominantly horizontal
+    guard abs(velocity.x) > abs(velocity.y), isHorizontalEnough else { return false }
+
+    let direction = MessageSwipeToReplyDirection.stored()
+    guard direction.accepts(velocity.x) else { return false }
+
+    return true
   }
 
   func gestureRecognizer(
     _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
   ) -> Bool {
-    // Allow the system's interactive pop (back swipe) recognizer to proceed when present.
-    if otherGestureRecognizer is UIScreenEdgePanGestureRecognizer {
-      return true
-    }
     return false
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    guard gestureRecognizer == panGesture else { return false }
+    guard otherGestureRecognizer is UIScreenEdgePanGestureRecognizer else { return false }
+
+    // A configured reply swipe on a replyable message exclusively owns the
+    // touch. The system back gesture can proceed only if this pan is rejected.
+    return true
   }
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -847,12 +861,14 @@ extension MessageCollectionViewCell {
 
     switch gesture.state {
       case .began:
+        swipeDirection = MessageSwipeToReplyDirection.stored()
         swipedAvatarOverlayView?.transform = .identity
         swipedAvatarOverlayView = grabOverlappingAvatar?(contentView)
         initialTranslation = translation.x
         replyIndicator.isHidden = false
         replyIndicator.alpha = 1
         replyIndicator.reset()
+        updateReplyIndicatorPosition()
       case .changed:
         handleSwipeProgress(translation: translation, velocity: velocity)
       case .ended, .cancelled:
@@ -864,16 +880,14 @@ extension MessageCollectionViewCell {
 
   private func handleSwipeProgress(translation: CGPoint, velocity: CGPoint) {
     let adjustedTranslation = translation.x - initialTranslation
-    let isTrailingSwipe = adjustedTranslation < 0
-
-    guard isTrailingSwipe else {
+    guard swipeDirection.accepts(adjustedTranslation) else {
       resetSwipeState(releaseAvatar: false)
       return
     }
 
     let maxTranslation: CGFloat = 80
     let progress = min(abs(adjustedTranslation) / maxTranslation, 1)
-    let boundedTranslation = -maxTranslation * progress
+    let boundedTranslation = swipeDirection.horizontalSign * maxTranslation * progress
 
     messageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     nameLabel.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
@@ -901,10 +915,7 @@ extension MessageCollectionViewCell {
 
   private func finalizeSwipe(translation: CGPoint, velocity: CGPoint) {
     let adjustedTranslation = translation.x - initialTranslation
-    let isTrailingSwipe = adjustedTranslation < 0
-
-    // Only trigger for trailing swipes (left direction)
-    guard isTrailingSwipe else {
+    guard swipeDirection.accepts(adjustedTranslation) else {
       UIView.animate(withDuration: 0.4) {
         self.messageView?.transform = .identity
         self.nameLabel.transform = .identity
@@ -961,11 +972,25 @@ extension MessageCollectionViewCell {
     NSLayoutConstraint.activate(
       [
         replyViewCenterYConstraint,
-        replyIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: 0),
         replyIndicator.widthAnchor.constraint(equalToConstant: 40),
         replyIndicator.heightAnchor.constraint(equalToConstant: 40),
       ]
     )
+
+    replyIndicatorLeftCenterConstraint = replyIndicator.centerXAnchor.constraint(
+      equalTo: contentView.leftAnchor,
+      constant: Self.replyIndicatorSideCenterInset
+    )
+    replyIndicatorRightCenterConstraint = replyIndicator.centerXAnchor.constraint(
+      equalTo: contentView.rightAnchor,
+      constant: -Self.replyIndicatorSideCenterInset
+    )
+    updateReplyIndicatorPosition()
+  }
+
+  private func updateReplyIndicatorPosition() {
+    replyIndicatorLeftCenterConstraint?.isActive = swipeDirection.revealsLeftEdge
+    replyIndicatorRightCenterConstraint?.isActive = !swipeDirection.revealsLeftEdge
   }
 
   func setupSwipeGestures() {

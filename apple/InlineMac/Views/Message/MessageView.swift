@@ -4244,6 +4244,7 @@ class MessageViewAppKit: NSView {
   // Track swipe state
   private var isSwipeInProgress = false
   private var swipeOffset: CGFloat = 0
+  private var swipeDirection = MessageSwipeToReplyDirection.defaultValue
   private var swipeAnimationView: NSView?
   private var hasTriggerHapticFeedback = false
   private var swipeThreshold: CGFloat = 50.0
@@ -4272,6 +4273,7 @@ class MessageViewAppKit: NSView {
       // Start of a horizontal scroll
       isSwipeInProgress = true
       swipeOffset = 0
+      swipeDirection = AppSettings.shared.messageSwipeToReplyDirection
       hasTriggerHapticFeedback = false
       didReachThreshold = false
       swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
@@ -4281,34 +4283,28 @@ class MessageViewAppKit: NSView {
       // Create animation view if needed
       if swipeAnimationView == nil {
         swipeAnimationView = createReplyIndicator()
-        addSubview(swipeAnimationView!)
+        addSubview(swipeAnimationView!, positioned: .below, relativeTo: nil)
         swipeAnimationView?.alphaValue = 0
       }
 
       // Position the animation view
       if let animView = swipeAnimationView {
         let yPosition = bubbleView.bounds.midY - animView.bounds.height / 2
-        animView.frame.origin = NSPoint(x: bounds.width, y: yPosition)
+        let xPosition = swipeDirection.revealsLeftEdge ? -animView.bounds.width : bounds.width
+        animView.frame.origin = NSPoint(x: xPosition, y: yPosition)
       }
     }
 
     if isSwipeInProgress {
-      // Update swipe offset based on scroll delta
-      // Note: scrollingDeltaX is positive for right-to-left swipes on some systems
-      // We need to ensure we're getting a negative value for left swipes
-      let deltaX = event.scrollingDeltaX
+      swipeOffset += event.scrollingDeltaX
 
-      // Adjust the swipe offset - we want negative values for left swipes
-      swipeOffset += deltaX
-
-      // Only handle left swipes (negative swipeOffset)
-      if swipeOffset < 0 {
+      if swipeDirection.accepts(swipeOffset) {
         // Calculate swipe progress (0 to 1)
         let progress = min(1.0, abs(swipeOffset) / swipeThreshold)
 
         // Update position using layer transform on self
         let maxOffset: CGFloat = 40.0
-        let offset = -min(maxOffset, abs(swipeOffset)) // Negative for left movement
+        let offset = swipeDirection.boundedOffset(swipeOffset, maximum: maxOffset)
 
         // Apply transform to root view layer
         wantsLayer = true
@@ -4332,7 +4328,7 @@ class MessageViewAppKit: NSView {
           didReachThreshold = false
         }
       } else {
-        // Reset for right swipes
+        // Reset motion opposite the configured reply direction.
         layer?.transform = CATransform3DIdentity
         swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
         swipeAnimationView?.alphaValue = 0
@@ -4342,10 +4338,8 @@ class MessageViewAppKit: NSView {
       if event.phase == .ended || event.phase == .cancelled {
         isSwipeInProgress = false
 
-        let direction = swipeOffset > 0 ? "right" : "left"
-
         // Check if swipe was far enough to trigger reply
-        if abs(swipeOffset) > swipeThreshold, direction == "left" {
+        if abs(swipeOffset) > swipeThreshold, swipeDirection.accepts(swipeOffset) {
           // Guard again in case state changed mid-gesture
           guard fullMessage.canReply, !isAnchorMessage else {
             // Reset and exit

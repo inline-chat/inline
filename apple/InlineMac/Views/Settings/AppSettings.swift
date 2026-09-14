@@ -5,6 +5,7 @@ import Foundation
 import GRDB
 import InlineKit
 import InlineMacUI
+import InlineUI
 import MacTheme
 import SwiftUI
 import TextProcessing
@@ -346,6 +347,15 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var messageSwipeToReplyDirection: MessageSwipeToReplyDirection {
+    didSet {
+      UserDefaults.standard.set(
+        messageSwipeToReplyDirection.rawValue,
+        forKey: MessageSwipeToReplyDirection.storageKey
+      )
+    }
+  }
+
   @Published var openReplyThreadsInSidePane: Bool {
     didSet {
       UserDefaults.standard.set(openReplyThreadsInSidePane, forKey: Self.openReplyThreadsInSidePaneKey)
@@ -526,6 +536,7 @@ final class AppSettings: ObservableObject {
     } else {
       messageHoldAction = .defaultHold
     }
+    messageSwipeToReplyDirection = MessageSwipeToReplyDirection.stored()
     openReplyThreadsInSidePane =
       UserDefaults.standard.object(forKey: Self.openReplyThreadsInSidePaneKey) as? Bool ?? false
 
