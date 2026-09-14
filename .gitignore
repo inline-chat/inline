@@ -183,3 +183,7 @@ target/
 scripts/.release-tmp/
 !cli/src/bridge/adapter_locks/amp/dist/
 !cli/src/bridge/adapter_locks/amp/dist/index.js
+
+# Embedded CLI adapter lockfiles are required by Rust include_bytes!.
+!cli/src/bridge/adapter_locks/amp/package-lock.json
+!cli/src/bridge/adapter_locks/claude/package-lock.json

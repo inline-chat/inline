@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const pluginRoot = path.join(root, "plugins", "codex");
+const pluginRoot = path.join(root, "plugins", "chatgpt");
 const canonicalSkillRoot = path.join(root, "skills", "inline");
 const bundledSkillRoot = path.join(pluginRoot, "skills", "inline");
 
@@ -28,7 +28,7 @@ async function requirePluginFile(relativePath, field) {
   const absolutePath = path.resolve(pluginRoot, relativePath);
   check(
     absolutePath.startsWith(`${pluginRoot}${path.sep}`),
-    `${field} must stay inside plugins/codex`,
+    `${field} must stay inside plugins/chatgpt`,
   );
   const metadata = await lstat(absolutePath);
   check(metadata.isFile(), `${field} must reference a regular file`);
@@ -60,7 +60,7 @@ async function checkSkillMirror() {
   const bundledFiles = await collectFiles(bundledSkillRoot);
   check(
     JSON.stringify(canonicalFiles) === JSON.stringify(bundledFiles),
-    "plugins/codex/skills/inline must contain the same files as skills/inline",
+    "plugins/chatgpt/skills/inline must contain the same files as skills/inline",
   );
 
   for (const relativePath of canonicalFiles) {
@@ -70,7 +70,7 @@ async function checkSkillMirror() {
     ]);
     check(
       canonical.equals(bundled),
-      `plugins/codex/skills/inline/${relativePath} differs from skills/inline/${relativePath}`,
+      `plugins/chatgpt/skills/inline/${relativePath} differs from skills/inline/${relativePath}`,
     );
   }
 }
@@ -83,12 +83,12 @@ check(Array.isArray(marketplace.plugins), "marketplace plugins must be an array"
 const entry = marketplace.plugins.find((plugin) => plugin.name === "inline");
 check(entry, "marketplace must contain the inline plugin");
 check(entry.source?.source === "local", "inline plugin source must be local");
-check(entry.source?.path === "./plugins/codex", "inline plugin path must be ./plugins/codex");
+check(entry.source?.path === "./plugins/chatgpt", "inline plugin path must be ./plugins/chatgpt");
 check(entry.policy?.installation === "AVAILABLE", "inline plugin must be available to install");
 check(entry.policy?.authentication === "ON_INSTALL", "inline authentication must happen on install");
 check(entry.category === "Communication", "inline marketplace category must be Communication");
 
-const manifest = await readJson("plugins/codex/.codex-plugin/plugin.json");
+const manifest = await readJson("plugins/chatgpt/.codex-plugin/plugin.json");
 check(manifest.name === entry.name, "plugin and marketplace names must match");
 check(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(manifest.version), "plugin version must be semver");
 check(manifest.skills === "./skills/", "plugin skills path must be ./skills/");
@@ -115,16 +115,16 @@ for (const field of ["composerIcon", "logo", "logoDark"]) {
   await requirePluginFile(pluginInterface[field], field);
 }
 
-const mcp = await readJson("plugins/codex/.mcp.json");
+const mcp = await readJson("plugins/chatgpt/.mcp.json");
 const server = mcp.mcpServers?.inline;
 check(server?.type === "http", "Inline MCP server must use HTTP");
 check(server?.url === "https://mcp.inline.chat/mcp/v2", "Inline MCP server URL is incorrect");
 check(server?.oauth_resource === "https://mcp.inline.chat", "Inline OAuth resource is incorrect");
 
 for (const relativePath of [
-  "plugins/codex/assets/inline.png",
-  "plugins/codex/README.md",
-  "plugins/codex/skills/inline/SKILL.md",
+  "plugins/chatgpt/assets/inline.png",
+  "plugins/chatgpt/README.md",
+  "plugins/chatgpt/skills/inline/SKILL.md",
 ]) {
   await requireRegularFile(relativePath);
 }

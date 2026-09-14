@@ -33,7 +33,8 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^9.0.3",
-    "remark-gfm": "^4.0.0"
+    "remark-gfm": "^4.0.0",
+    "@inline/config": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

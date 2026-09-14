@@ -15,11 +15,10 @@ This checkout is a **private repository preparation candidate**. It includes the
 | `landing/` | Website and product documentation |
 | `proto/` | Canonical protocol schemas |
 | `packages/` | Inline SDK, MCP server and shared libraries |
-| `plugins/` | [Codex](plugins/codex/README.md), [OpenClaw](plugins/openclaw/README.md), [Hermes](plugins/hermes-agent/README.md), [Chat SDK adapter](plugins/chat-sdk/README.md) |
+| `plugins/` | [ChatGPT integration](plugins/chatgpt/README.md), [OpenClaw](plugins/openclaw/README.md), [Hermes](plugins/hermes-agent/README.md), [Chat SDK plugin](plugins/chat-sdk-plugin/README.md) |
 | `cli/`, `crates/` | Rust CLI and shared crates |
 | `skills/inline/` | Distributable Inline skill |
-| `desktop/` | Windows desktop application |
-| `web/`, `mobile/` | Inactive drafts |
+| `apps/web/`, `apps/mobile/`, `apps/desktop/` | Experimental placeholders; no runnable clients |
 
 Integration packages are versioned independently. All workspaces are contained in this repository.
 

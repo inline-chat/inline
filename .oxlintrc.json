@@ -19,7 +19,7 @@
     {
       "files": [
         "web/src/**/*.{ts,tsx}",
-        "web/packages/client/src/**/*.{ts,tsx}"
+        "landing/packages/client/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": [
         "web/src/testing/**",

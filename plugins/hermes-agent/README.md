@@ -96,7 +96,7 @@ Tasks:
 For local development:
 
 ```sh
-cd hermes-agent
+cd plugins/hermes-agent
 bun run build
 node dist/install.js install --link --hermes-home ~/.hermes
 cd ~/dev/hermes-agent
@@ -210,7 +210,7 @@ those exact bytes. It prints the artifact path, SHA-256, and file list so the
 trusted-publishing workflow can hash-check and publish the same artifact.
 
 Maintainers should also run the manual live-test and publish checklist in
-[`hermes-agent/RELEASE.md`](https://github.com/inline-chat/inline/blob/main/hermes-agent/RELEASE.md).
+[`plugins/hermes-agent/RELEASE.md`](https://github.com/inline-chat/inline/blob/main/plugins/hermes-agent/RELEASE.md).
 
 ## Smoke Test
 

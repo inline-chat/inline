@@ -122,6 +122,6 @@ jobs:
         run: bun run --cwd packages/bot-client build
       - name: Check adapter
         run: |
-          bun run --cwd plugins/chat-sdk typecheck
-          bun run --cwd plugins/chat-sdk test
-          bun run --cwd plugins/chat-sdk build
+          bun run --cwd plugins/chat-sdk-plugin typecheck
+          bun run --cwd plugins/chat-sdk-plugin test
+          bun run --cwd plugins/chat-sdk-plugin build

@@ -16,8 +16,8 @@
       "@inline-chat/bot-api-types/*": ["../packages/bot-api-types/src/*"],
       "@inline-chat/oauth-core": ["../packages/oauth-core/src/index.ts"],
       "@inline-chat/oauth-core/*": ["../packages/oauth-core/src/*"],
-      "@inline-chat/url-preview": ["../packages/url-preview/src/index.ts"],
-      "@inline-chat/url-preview/*": ["../packages/url-preview/src/*"]
+      "@inline-chat/url-preview": ["./packages/url-preview/src/index.ts"],
+      "@inline-chat/url-preview/*": ["./packages/url-preview/src/*"]
     },
     "types": ["bun"]
   },

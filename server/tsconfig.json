@@ -16,7 +16,7 @@
       "path": "../packages/bot-api-types"
     },
     {
-      "path": "../packages/url-preview"
+      "path": "./packages/url-preview"
     }
   ],
 

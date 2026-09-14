@@ -8,7 +8,7 @@ The following components retain **Apache License 2.0** (`Apache-2.0`). Their lic
 
 | Paths | Components |
 | --- | --- |
-| `plugins/codex/`, `plugins/openclaw/`, `plugins/hermes-agent/`, `plugins/chat-sdk/` | Public integrations |
+| `plugins/chatgpt/`, `plugins/openclaw/`, `plugins/hermes-agent/`, `plugins/chat-sdk-plugin/` | Public integrations |
 | `packages/sdk/`, `packages/mcp/`, `packages/bot-client/`, `packages/oauth-core/`, `packages/protocol/`, `packages/bot-api-types/` | Public SDK, MCP, authentication, protocol and bot libraries |
 | `cli/`, `crates/` | CLI and shared Rust crates |
 | `skills/inline/` | Distributable Inline skill |

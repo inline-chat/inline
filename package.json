@@ -5,23 +5,19 @@
   "workspaces": [
     "server",
     "cli",
-    "web",
-    "web/packages/*",
     "landing",
-    "mobile",
     "packages/bot-client",
     "packages/bot-api-types",
     "packages/mcp",
     "packages/oauth-core",
     "packages/protocol",
     "packages/sdk",
-    "packages/url-preview",
     "server/packages/*",
-    "landing/packages/*",
     "scripts",
     "plugins/openclaw",
     "plugins/hermes-agent",
-    "plugins/chat-sdk"
+    "plugins/chat-sdk-plugin",
+    "landing/packages/*"
   ],
   "catalog": {
     "@effect/platform-bun": "4.0.0-beta.98",
@@ -55,12 +51,12 @@
     "release:cli": "bun run ./scripts/release-cli.ts",
     "release:npm": "bun run ./scripts/release-npm.ts",
     "check:codex-plugin": "bun run ./scripts/check-codex-plugin.mjs",
-    "build:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-client build && bun run --cwd packages/mcp build && bun run --cwd plugins/openclaw build && bun run --cwd plugins/hermes-agent build && bun run --cwd plugins/chat-sdk build",
+    "build:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-client build && bun run --cwd packages/mcp build && bun run --cwd plugins/openclaw build && bun run --cwd plugins/hermes-agent build && bun run --cwd plugins/chat-sdk-plugin build",
     "ci:cli": "bun run --cwd cli ci",
     "precommit:cli": "bun run --cwd cli precommit",
-    "typecheck:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/sdk build && bun run --cwd packages/protocol typecheck && bun run --cwd packages/oauth-core typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/bot-api-types typecheck && bun run --cwd packages/bot-client typecheck && bun run --cwd packages/mcp typecheck && bun run --cwd plugins/openclaw typecheck && bun run --cwd plugins/hermes-agent typecheck && bun run --cwd cli typecheck && bun run --cwd plugins/chat-sdk typecheck",
-    "lint:integrations": "bun run --cwd packages/protocol lint && bun run --cwd packages/oauth-core lint && bun run --cwd packages/sdk lint && bun run --cwd packages/bot-api-types lint && bun run --cwd packages/bot-client lint && bun run --cwd packages/mcp lint && bun run --cwd plugins/openclaw lint && bun run --cwd plugins/hermes-agent lint && bun run --cwd cli lint && bun run --cwd plugins/chat-sdk lint",
-    "test:integrations": "bun run --cwd packages/protocol test && bun run --cwd packages/oauth-core test && bun run --cwd packages/sdk test && bun run --cwd packages/bot-api-types test && bun run --cwd packages/bot-client test && bun run --cwd packages/mcp test && bun run --cwd plugins/openclaw test && bun run --cwd plugins/hermes-agent test && bun run --cwd cli test && bun run --cwd plugins/chat-sdk test",
+    "typecheck:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/sdk build && bun run --cwd packages/protocol typecheck && bun run --cwd packages/oauth-core typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/bot-api-types typecheck && bun run --cwd packages/bot-client typecheck && bun run --cwd packages/mcp typecheck && bun run --cwd plugins/openclaw typecheck && bun run --cwd plugins/hermes-agent typecheck && bun run --cwd cli typecheck && bun run --cwd plugins/chat-sdk-plugin typecheck",
+    "lint:integrations": "bun run --cwd packages/protocol lint && bun run --cwd packages/oauth-core lint && bun run --cwd packages/sdk lint && bun run --cwd packages/bot-api-types lint && bun run --cwd packages/bot-client lint && bun run --cwd packages/mcp lint && bun run --cwd plugins/openclaw lint && bun run --cwd plugins/hermes-agent lint && bun run --cwd cli lint && bun run --cwd plugins/chat-sdk-plugin lint",
+    "test:integrations": "bun run --cwd packages/protocol test && bun run --cwd packages/oauth-core test && bun run --cwd packages/sdk test && bun run --cwd packages/bot-api-types test && bun run --cwd packages/bot-client test && bun run --cwd packages/mcp test && bun run --cwd plugins/openclaw test && bun run --cwd plugins/hermes-agent test && bun run --cwd cli test && bun run --cwd plugins/chat-sdk-plugin test",
     "proto:sync-rust": "bun run scripts/sync-public-artifacts.ts"
   },
   "overrides": {

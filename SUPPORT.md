@@ -6,4 +6,4 @@ Integration-specific setup and troubleshooting are documented with each package 
 
 Self-hosting is not yet a supported offering. External pull requests are closed.
 
-Do not include credentials, private conversations or personal account information in public reports. A verified private vulnerability-reporting channel must be configured before this preparation candidate is published.
+Do not include credentials, private conversations or personal account information in public reports. For vulnerabilities, use [GitHub private vulnerability reporting](https://github.com/inline-chat/inline/security/advisories/new). See [SECURITY.md](SECURITY.md).

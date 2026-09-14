@@ -1,4 +1,4 @@
-name: Proto Drift (Web)
+name: Proto Drift (TypeScript)
 
 on:
   pull_request:
@@ -6,7 +6,8 @@ on:
     paths:
       - "proto/**"
       - "scripts/**"
-      - "web/**"
+      - "packages/protocol/**"
+      - "server/src/protocol/**"
       - "package.json"
       - "bun.lock"
 
