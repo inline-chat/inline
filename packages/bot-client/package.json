@@ -1,0 +1,46 @@
+{
+  "name": "@inline-chat/bot-client",
+  "version": "0.1.1",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/bot-client"
+  },
+  "type": "module",
+  "files": [
+    "dist/index.d.ts",
+    "dist/index.js",
+    "dist/inline-bot-client.d.ts",
+    "dist/inline-bot-client.js",
+    "dist/types.d.ts",
+    "dist/types.js"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun run --cwd ../bot-api-types build && tsc -p tsconfig.json",
+    "typecheck": "bun run --cwd ../bot-api-types build && tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@inline-chat/bot-api-types": "^0.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "^5.8.3",
+    "vitest": "4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@inline-chat/realtime-sdk",
+  "version": "0.0.18",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/sdk"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "bun run typecheck && bun run lint && bun run test && bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
+    "test": "vitest run --coverage",
+    "prepack": "bun run build",
+    "release:preflight": "npm publish --dry-run --access public"
+  },
+  "dependencies": {
+    "@inline-chat/protocol": "0.0.10",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/ws": "^8.5.12",
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "5.8.3",
+    "vitest": "4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

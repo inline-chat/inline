@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "inline": {
+      "type": "http",
+      "url": "https://mcp.inline.chat/mcp/v2",
+      "oauth_resource": "https://mcp.inline.chat"
+    }
+  }
+}

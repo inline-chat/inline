@@ -19,5 +19,6 @@
     "oxlint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+coverage/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.tsbuildinfo
+.DS_Store

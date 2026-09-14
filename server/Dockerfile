@@ -8,10 +8,6 @@ COPY server ./server
 COPY landing ./landing
 COPY packages ./packages
 COPY scripts ./scripts
-ARG INLINE_PUBLIC_REPO
-ARG INLINE_PUBLIC_REF
-ARG INLINE_PUBLIC_REF_FILE
-RUN INLINE_PUBLIC_REQUIRED_MANIFESTS="packages/bot-client/package.json packages/mcp/package.json packages/oauth-core/package.json packages/openclaw/package.json packages/sdk/package.json" bash scripts/ci/ensure-public-workspaces.sh
 RUN bun scripts/docker/prune-workspace.ts @inline-chat/server out
 
 FROM base AS development-dependencies

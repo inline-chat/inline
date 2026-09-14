@@ -1,8 +1,13 @@
 {
   "name": "@inline-chat/bot-api-types",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/bot-api-types"
+  },
   "type": "module",
   "files": [
     "dist"
@@ -18,13 +23,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint --ignore-path ../../.oxlintignore src",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
     "test": "echo \"No tests yet for @inline-chat/bot-api-types\""
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "oxlint": "catalog:",
-    "typescript": "catalog:"
+    "@types/node": "^20.11.30",
+    "typescript": "^5.8.3"
   },
   "publishConfig": {
     "access": "public"

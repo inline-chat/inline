@@ -2,6 +2,7 @@
 **/.cache
 **/build
 .env
+.env.*
 .env.test
 .env.prod
 .env.staging
@@ -20,6 +21,7 @@ yarn.lock
 # Local temp
 .tmp/
 .traces/
+.context/
 .context/snapshots/
 
 # React
@@ -170,3 +172,14 @@ docs/superpowers
 .context/profiles
 .wip
 .running
+
+# Consolidated tooling outputs and local coordination
+target/
+**/__pycache__/
+*.py[cod]
+.wip
+.running
+.committing
+scripts/.release-tmp/
+!cli/src/bridge/adapter_locks/amp/dist/
+!cli/src/bridge/adapter_locks/amp/dist/index.js

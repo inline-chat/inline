@@ -48,5 +48,6 @@
     "vite-plugin-stylex": "^0.13.0",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "catalog:"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

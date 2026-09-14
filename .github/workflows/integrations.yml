@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  codex-plugin:
+    name: Codex plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Check plugin bundle
+        run: bun run check:codex-plugin
+
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler systemd
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check CLI, including generated systemd units
+        run: bun run --cwd cli ci
+
+  mcp:
+    name: MCP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build MCP dependencies
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/sdk build
+
+      - name: Check MCP
+        run: bun run --cwd packages/mcp typecheck
+
+      - name: Build MCP
+        run: bun run --cwd packages/mcp build
+
+      - name: Lint MCP
+        run: bun run --cwd packages/mcp lint
+
+      - name: Test MCP
+        run: bun run --cwd packages/mcp test
+
+  openclaw:
+    name: OpenClaw
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build OpenClaw dependencies
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/bot-api-types build
+          bun run --cwd packages/sdk build
+
+      - name: Check OpenClaw
+        run: bun run --cwd plugins/openclaw check
+
+  chat-sdk:
+    name: Vercel Chat SDK adapter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build adapter dependencies
+        run: bun run --cwd packages/bot-client build
+      - name: Check adapter
+        run: |
+          bun run --cwd plugins/chat-sdk typecheck
+          bun run --cwd plugins/chat-sdk test
+          bun run --cwd plugins/chat-sdk build

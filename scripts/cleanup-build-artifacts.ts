@@ -283,7 +283,7 @@ async function collectNodeModulesViteDirs(): Promise<string[]> {
     "node_modules/.vite",
     "landing/node_modules/.vite",
     "landing/packages/client/node_modules/.vite",
-    "packages/openclaw/node_modules/.vite",
+    "plugins/openclaw/node_modules/.vite",
     "packages/bot-api/node_modules/.vite",
     "packages/mcp/node_modules/.vite",
     "packages/sdk/node_modules/.vite",

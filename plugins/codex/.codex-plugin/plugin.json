@@ -1,0 +1,47 @@
+{
+  "name": "inline",
+  "version": "0.1.0",
+  "description": "Find people and conversations, read and search scoped work chats, create threads, upload files, and send messages through Inline.",
+  "author": {
+    "name": "Inline",
+    "url": "https://inline.chat"
+  },
+  "homepage": "https://inline.chat/docs",
+  "repository": "https://github.com/inline-chat/inline",
+  "license": "Apache-2.0",
+  "keywords": [
+    "inline",
+    "chat",
+    "work chat",
+    "messaging",
+    "threads",
+    "collaboration",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Inline",
+    "shortDescription": "Work with Inline chats, threads, and messages",
+    "longDescription": "Inline brings scoped work chat into Codex. Find people and conversations, summarize unread threads, search message history, create conversations, upload files, and send messages with explicit write intent.",
+    "developerName": "Inline",
+    "category": "Communication",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://inline.chat",
+    "privacyPolicyURL": "https://inline.chat/legal/privacy",
+    "termsOfServiceURL": "https://inline.chat/legal/terms",
+    "defaultPrompt": [
+      "Summarize my unread Inline conversations and highlight what needs my attention",
+      "Find the Inline thread about a topic and summarize the decision",
+      "Draft a reply to the relevant Inline conversation and ask before sending"
+    ],
+    "composerIcon": "./assets/inline.png",
+    "logo": "./assets/inline.png",
+    "logoDark": "./assets/inline.png",
+    "screenshots": []
+  }
+}

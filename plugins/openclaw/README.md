@@ -1,0 +1,405 @@
+# @inline-openclaw/inline
+
+OpenClaw channel plugin for interacting with an OpenClaw agent via **Inline**.
+
+Status: **beta** (solid foundation; expect iteration).
+
+Quick setup guide: [docs/openclaw-setup.md](docs/openclaw-setup.md).
+Create bot/token guide: [docs/create-inline-bot.md](docs/create-inline-bot.md).
+
+Supports:
+
+- Inline DMs (`ChatType=direct`)
+- Inline chats as conversations (`ChatType=group`)
+- Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
+- Inline reply threads: tools can create and reply in real Inline reply-thread chats.
+- Inline media upload/send for images, videos, and documents from `mediaUrl` payloads.
+- Native-style file upload action via `upload-file`.
+- Native-style file download action via `download-file`.
+- Inline message forwarding via `forward`/`forwardMessages` message tool actions.
+- Inline compose indicators via `typing`, `stop-typing`, upload-state actions, and `recording-voice`.
+- Emoji reactions via message tool actions (`react`, `reactions`).
+- Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
+
+Reply-thread behavior:
+
+- Parent-chat conversations stay in the parent chat by default.
+- `replyThreadMode: "auto"` also creates a child reply thread when the triggering parent-chat message explicitly asks OpenClaw to reply in a thread.
+- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery; each triggering parent-chat message gets its own child reply thread.
+- `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
+- `thread-create` creates a top-level Inline thread when called with participants or `spaceId`, and creates a real Inline reply thread when called with a parent chat target or anchor. `thread-reply` sends into the child reply-thread chat id returned by reply-thread creation.
+- Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
+- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` can continue without an explicit bot mention by default, matching Slack-style thread behavior.
+- Authorized users can run `/follow` in a DM, group, or reply thread to keep eligible unmentioned activity relevant, and `/unfollow` to explicitly opt out.
+
+## Install
+
+The current Inline plugin targets OpenClaw `2026.8.x` from `2026.8.2`. Install
+the plugin version for your OpenClaw release line:
+
+| OpenClaw line | Inline plugin | Exact install |
+| --- | --- | --- |
+| `2026.8.x` (`>=2026.8.2`) | `0.0.68` | `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities` |
+| `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
+| `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
+
+`@latest` follows the newest supported OpenClaw line; it is not a compatibility
+alias for older host APIs.
+
+## Compatibility
+
+| Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `0.0.68` | `>=2026.8.2 <2026.9.0` | `0.0.18` | Current | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
+| `0.0.67` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
+| `0.0.66` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+| `0.0.65` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
+| `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
+| `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
+
+From npm:
+
+```sh
+openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
+```
+
+If the plugin is already installed, update in place:
+
+```sh
+openclaw plugins update inline --accept-capabilities
+openclaw gateway restart
+openclaw plugins list
+openclaw plugins inspect inline --json
+openclaw channels status --channel inline --probe --json
+openclaw message send --channel inline --target chat:123 --message "Inline smoke test" --dry-run
+```
+
+After initial installation, an OpenClaw owner can run `/inline_update` from
+Inline. The command delegates to OpenClaw's tracked-plugin updater with explicit
+capability consent, strips credential variables from the updater process, and
+asks for `/restart` after OpenClaw reports a successful update. Other authorized
+chat members cannot update host plugins.
+
+Installed skills are published to Inline for Skilled Agent selection on gateway
+start and whenever OpenClaw emits `skill_changed`. Any authorized bot user can
+run `/inline_sync` to force an immediate command-and-skill catalog republish,
+then open or reopen Inline's Skilled Agent editor to load it. `/inline_version`
+shows the loaded plugin/OpenClaw versions, safe install source and timestamps
+when OpenClaw provides them, and the last in-process catalog-sync result. These
+commands never print tokens, paths, package specs, or raw configuration.
+
+After updating, verify that `openclaw plugins list` shows `inline`, `openclaw channels status --channel inline --probe --json` reports Inline configured/running, and `openclaw plugins inspect inline --json` reports the expected package version.
+
+From a local checkout (dev):
+
+```sh
+cd /path/to/inline/openclaw
+bun run build
+npm pack --ignore-scripts --pack-destination /tmp
+openclaw plugins install npm-pack:/tmp/inline-openclaw-inline-<version>.tgz --force --accept-capabilities
+```
+
+## Configure
+
+Channel config lives under `channels.inline` (supports account settings, block streaming/chunking, and group tool policy).
+
+Plugin id is `inline` (for `plugins.entries.*`).
+If you enable explicitly, use:
+
+```yaml
+plugins:
+  entries:
+    inline:
+      enabled: true
+```
+
+Minimal setup (token field only):
+
+```yaml
+channels:
+  inline:
+    enabled: true
+    token: "<INLINE_BOT_TOKEN>"
+```
+
+You can also leave `token` unset and provide `INLINE_TOKEN` in the gateway environment.
+`INLINE_BOT_TOKEN` is accepted as a compatibility alias.
+
+`baseUrl` defaults to `https://api.inline.chat`.
+`dmPolicy` defaults to `pairing` (recommended starting point).
+`defaultTo` is optional and gives outbound sends a fallback target when no explicit target is supplied.
+`groupPolicy` defaults to `"open"`, and `requireMention` defaults to `true`, so group chats are broadly available but only explicit mentions wake the bot unless configured otherwise.
+
+### Who can talk to the bot?
+
+Use these settings together:
+
+| Area | Setting | Meaning |
+| --- | --- | --- |
+| DMs | `dmPolicy: "pairing"` | Users can request access; allowlisted users are accepted. This is the default. |
+| DMs | `dmPolicy: "allowlist"` + `allowFrom` | Only listed Inline user ids can DM the bot. |
+| DMs | `dmPolicy: "open"` + `allowFrom: ["*"]` | Any Inline user can DM the bot. Use only for public/demo bots. |
+| DMs | `dmPolicy: "disabled"` | DM messages are ignored. |
+| Groups | `groupPolicy: "open"` | Any group chat can reach the bot; this is the default. `requireMention` also defaults to `true`, so ambient messages do not wake it. |
+| Groups | `groupPolicy: "allowlist"` + `groups` | Only listed group chat ids can reach the bot. Setup keeps `requireMention: true` unless explicitly overridden. |
+| Groups | `groupPolicy: "disabled"` | Group messages are ignored. |
+| Group senders | `groupAllowFrom` or `groups.<chat>.allowFrom` | Optional sender allowlist inside allowed groups. Per-group entries override the account-wide list for that group. Leave empty to allow any sender in an allowed group. |
+
+Accepted Inline user ids: `123`, `user:123`, `inline:123`, or `inline:user:123`.
+Accepted group ids: `123`, `chat:123`, `inline:123`, or `*`.
+
+Example:
+
+```yaml
+channels:
+  inline:
+    enabled: true
+    baseUrl: "https://api.inline.chat"
+    token: "<INLINE_BOT_TOKEN>"
+    defaultTo: "chat:123" # optional fallback for outbound sends without --target
+
+    # DMs:
+    dmPolicy: "pairing" # pairing|allowlist|open|disabled
+    allowFrom:
+      - "inline:123" # or "user:123" or just "123"
+
+    # Native exec/plugin approvals:
+    execApprovals:
+      enabled: "auto" # auto|true|false
+      approvers:
+        - "user:123" # Inline user ids only; chat ids are not approvers
+      target: "dm" # dm|channel|both
+
+    # Group threads/chats:
+    groupPolicy: "open" # open|allowlist|disabled; default open
+    groupAllowFrom:
+      - "inline:123" # or "user:123" or just "123"
+    requireMention: true # optional: default is true
+    replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
+    replyThreadMode: "auto" # auto|thread|main; auto threads only explicit requests, thread always routes top-level turns
+    replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
+    replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
+
+    # Inbound context history (used to build richer thread context for the agent):
+    historyLimit: 50      # group chats
+    dmHistoryLimit: 6     # direct messages
+
+    # Streaming + chunking:
+    mediaMaxMb: 20
+    debounceMs: 1200 # optional: coalesce rapid same-sender Inline messages; global alternative: messages.inbound.byChannel.inline
+    voiceTranscriptWaitMs: 8000 # wait for Inline's voice auto-transcript edit before falling back to audio STT; set 0 to disable
+    blockStreaming: true
+    streamViaEditMessage: true # optional: paragraph-level text streaming via send+edit fallback; off by default
+    chunkMode: "newline" # length|newline
+    blockStreamingCoalesce:
+      minChars: 600
+      idleMs: 700
+      maxChars: 2200
+
+    # Group-level tool policy (for agent tool access in group sessions):
+    groups:
+      "88":
+        requireMention: false
+        replyThreadRequireExplicitMention: true
+        replyThreadParentHistoryLimit: 2
+        allowFrom:
+          - "42"
+        tools:
+          allow: ["message", "web.search"]
+        toolsBySender:
+          "42":
+            allow: ["message"]
+```
+
+Per-account override:
+
+```yaml
+channels:
+  inline:
+    accounts:
+      work:
+        token: "<INLINE_BOT_TOKEN>"
+        defaultTo: "user:123"
+        replyThreadMode: "main"
+```
+
+Reply behavior summary:
+
+- Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender allowlists and is always a hard gate; an `@mention`, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn should invoke the agent. Delivery decides whether the accepted reply stays in the parent chat or an existing/new reply thread.
+- `replyToId` is always an Inline message id.
+- Inline reply threads are separate and use OpenClaw `threadId`.
+- Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
+- Use `replyThreadMode: "thread"` when every parent-chat bot turn should move into a child reply thread anchored to the triggering parent message.
+- In an Inline group, authorized users can run `/threadreply` to choose the chat's mode with buttons, or `/threadreply thread|main|auto|inherit|status`.
+- Authorized users can run `/follow` in an Inline DM, group, or reply thread to opt into eligible unmentioned activity waking OpenClaw. `/unfollow` explicitly opts that dialog out so server auto-follow heuristics do not turn it back on and suppresses automatic reply-thread and reply-to-bot wakes; explicit mentions and authorized commands/callbacks remain available.
+- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` continue without `@bot` by default unless the dialog is explicitly unfollowed. Reply threads also use persisted recent participation state as a fallback. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- In an allowed group with `requireMention: true`, an explicit mention wakes the bot. Authorized callbacks/commands and configured reply-to-bot or followed/bot-participated thread behavior may also wake it unless the dialog is explicitly unfollowed. A leading concrete mention of another person overrides inferred follow/reply attention unless this bot is also explicitly mentioned. Unmentioned turns that pass access remain non-responsive and may only contribute bounded history context.
+- `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
+
+If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
+
+## Native Exec Approvals
+
+Inline supports the same native approval flow as bundled chat providers. Configure `channels.inline.execApprovals.approvers` with Inline user ids, or leave it unset and use numeric IDs in `commands.ownerAllowFrom`. Accepted approver ids are `123`, `user:123`, `inline:123`, or `inline:user:123`; `chat:<id>` entries are ignored because group chats are not approvers.
+
+`execApprovals.target` defaults to `dm`. Use `channel` or `both` only for trusted chats because approval messages include command details. Inline approval buttons send `/approve ...` callbacks, and OpenClaw clears the buttons after resolution or expiry.
+
+## Outbound Target Semantics
+
+For `message send`/plugin outbound sends:
+
+- Use `openclaw message send --channel inline --target chat:<id> --message "..."`.
+- If `channels.inline.defaultTo` is set, OpenClaw uses it when no explicit target is supplied. Named accounts can override it with `channels.inline.accounts.<account>.defaultTo`.
+- Some OpenClaw CLI help text lists only built-in channel ids, but installed plugin channel ids such as `inline` are accepted.
+- `chat:<id>` targets a chat id.
+- `user:<id>` targets a user id (DM peer).
+- `inline:user:<id>` and `inline:chat:<id>` are accepted and normalized.
+- User directory IDs and `channels resolve --kind user` outputs are returned as `user:<id>` to keep DM targets explicit.
+- Bare numeric ids are disambiguated against Inline directory data:
+  - matches chat only -> sent as chat id
+  - matches user only -> sent as user id
+  - matches both -> rejected (use explicit `chat:` or `user:`)
+  - matches neither -> treated as chat id (legacy behavior)
+
+## Message Tool RPC Actions
+
+The plugin exposes Inline RPC-backed actions through OpenClaw's `message` tool.
+Most Inline RPC-backed actions use a numeric chat id via `to`, `chatId`, or `channelId`.
+Direct DM sends can also target `user:<id>`.
+
+- Sending: `send`, `sendAttachment`, `upload-file`, `forward`, `forwardMessages`
+- Replying: `reply`, `thread-reply`
+- Reactions: `react`, `reactions`
+- Reading/searching/translating: `read`, `get-messages`, `getMessages`, `download-file`, `bot-commands`, `botCommands`, `peer-bot-commands`, `peerBotCommands`, `search`, `translate`, `translateMessages`
+- Editing: `edit`
+- Channels/threads: `channel-info`, `channel-edit`, `renameGroup`, `channel-list`, `channel-create`, `channel-delete`, `channel-move`, `thread-list`, `thread-create`
+- Participants: `addParticipant`, `removeParticipant`, `kick`, `leaveGroup`, `member-info`, `invite-to-space`, `inviteToSpace`
+- Message lifecycle: `delete`, `unsend`, `delete-attachment`, `deleteMessageAttachment`
+- Message pins: `pin`, `unpin`, `list-pins`
+- Space permissions: `permissions`
+
+Inline reply-thread semantics:
+
+- `read` supports latest reads plus `before`/`offsetId` for older history, `after` for newer history, and `messageId`/`anchorId` for around-window reads. In reply-thread turns it defaults to the current reply-thread chat when `to`/`chatId`/`threadId` is omitted.
+- `get-messages`/`getMessages` fetches exact message ids from a target chat/user/reply thread and returns the same media-aware payloads as `read`/`search`.
+- `download-file` downloads Inline message media or URL-preview images to a local temp path. Pass `mediaUrl`/`url` directly, or pass `messageId` with optional `mediaId`/`attachmentId`; inside an Inline turn it defaults to the current chat/thread and current message.
+- `peer-bot-commands`/`bot-commands` reads Inline bot commands available in a target chat/user/reply thread. In reply-thread turns it can inspect inherited parent-chat bot commands.
+- `channel-edit` can rename (`title`/`name`/`threadName`), update `emoji`, and change space-thread visibility with `isPublic` or `visibility: "public"|"private"`. Private visibility changes require `participant`/`participants`.
+- `upload-file` is the native OpenClaw alias for `sendAttachment`; use `filePath`, `path`, `media`, `mediaUrl`, or `url` for the file/media source.
+- Inline `buttons` rows support `callback_data` for callbacks and `copy_text`/`copyText` for client-side copy buttons. JSON `callback_data` can include `callbackToast` or `toast` for an immediate short acknowledgement when pressed.
+- Agent-authored callback buttons use `agent:` action IDs. A press is acknowledged immediately and becomes a normal agent turn with the actor, chat, source message, interaction, action ID, and callback data. The normal response edits the source message; omitted buttons clear its old buttons and returned buttons replace them. Adapter-owned command, approval, thread, and model controls use `system:` IDs and keep their deterministic handlers.
+- `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id.
+- If `threadId` is missing, `thread-reply` can use the current reply-thread context or a saved route from `thread-create` when called with the parent chat target plus `parentMessageId`.
+- Ordinary `send`, `reply`, and attachment actions inherit the current child when they target its parent; an unrelated explicit destination remains unrelated. Current supported OpenClaw hosts cannot validate and mirror an explicit child-to-parent escape reliably, so Inline rejects those flags when they request that ambiguous parent escape. Explicit unrelated destinations and explicit child targets remain supported.
+- `thread-create` creates a top-level Inline thread when called without a parent target. Use `participant`/`participants` for a private thread, or `spaceId` with `isPublic: true` for a public space thread. If `spaceId` is present and no participants are supplied, Inline defaults `thread-create` to a public space thread.
+- `thread-create` creates a real reply thread from a parent chat when `to`/`chatId`/`channelId` is supplied, or when an explicit `replyToId`/`messageId` anchor can be paired with the current channel context.
+- `forward`/`forwardMessages` forwards one or more source `messageId`/`messageIds` to a destination `to`/`chatId`/`userId`. The source can be `from`/`source`/`fromChatId`/`fromUserId`; when omitted in an Inline conversation, it defaults to the current chat.
+- `delete-attachment` removes a URL-preview attachment from a message authored by the current bot/user. Use `attachments[].id` from `read` or `search` as `attachmentId`.
+- `pin`/`unpin` use `messageId` and default to the current Inline chat/thread when no target is passed; `list-pins` also defaults to the current chat/thread.
+- `invite-to-space` invites one user per call into a space using `userId`/`user`/`participant`, `email`, or `phoneNumber`; pass `role: "admin"` for admin invites or omit it for a member invite.
+- In `replyThreadMode: "auto"`, explicit user requests such as "reply in a thread" create and answer in a child reply thread automatically; the `thread-create` and `thread-reply` message-tool actions remain available for manual tool use.
+- Parent typing stops before reply-thread handoff; subsequent typing, presence, and answers stay in the child. If required creation cannot be confirmed, Inline reports a short error in the parent without generating the answer there.
+- Reply threads can be created from both DM and group parent chats. A first-level DM child keeps direct-message access policy and no-mention behavior even though Inline encodes the child as a chat. Session isolation follows OpenClaw’s `session.dmScope`; use `per-channel-peer` for separate sender transcripts. The host default `main` shares DM transcripts and is unsuitable when an untrusted participant can join a DM child.
+- A message tool that creates a reply thread during a response moves subsequent visible typing, presence, and delivery to that child. The OpenClaw run and transcript keep the session in which the turn started; the next child message opens the child session. The adapter leaves final suppression to OpenClaw and does not discard a final merely because a tool sent something. Host dedupe varies by action, text, route, and streaming path; identical tool/final output can still repeat, and host streaming suppression can hide distinct text. No OpenClaw internals are patched. Any commentary already sent before creation remains in the parent.
+- Saved thread routes are scoped to the parent message. A missing current-message route never selects an unrelated active thread, and an agent without its own active route cannot inherit another agent's route.
+- Anchored creation reuses the server's existing child only for the same parent-message anchor. Inside a child, unanchored creation reuses that child; an explicit child-local anchor can create a nested Inline reply thread. Nested creation is a durable destination operation and does not move the current generated turn, so send nested content with `thread-reply` using the returned child id. This adapter only guarantees root-DM policy/session projection for first-level DM reply children; nested DM children remain an explicit advanced path.
+- A repeated unanchored `thread-create` that still targets the stale parent during the same live handoff also reuses that handoff's child.
+- During parent-to-child handoff, the exact source parent reply reference is stripped from stale-parent/implicit sends. Other references explicitly targeting the parent are rejected. Omitted destinations inherit the child, and explicitly targeted child-local numeric IDs are preserved even if they equal the parent's source ID. Numeric IDs alone cannot prove which chat an arbitrary reference came from.
+- A mentioned Inline Agent specialization is retained with the saved reply-thread route, so later child follow-ups normally do not require another Agent mention. If local route state expires or is lost, mention the Agent again.
+- Parent DM history is omitted for participants added only to its child. `inline_parent_context` also validates the trusted Inline requester against the actual parent DM peer, including explicit parent overrides. Group history and non-Inline operator tool access keep their existing bot-token access contract.
+- Per-DM reply mode and parent-history limits are honored. The existing `/threadreply` command is group-only; configure DMs through Agent Settings or config.
+- Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
+
+You can gate action groups from config:
+
+```yaml
+channels:
+  inline:
+    reactionNotifications: own # off | own | all | allowlist
+    reactionAllowlist:
+      - "inline:123"
+    actions:
+      send: true
+      reply: true
+      reactions: true
+      read: true
+      search: true
+      translate: true
+      edit: true
+      channels: true
+      participants: true
+      delete: true
+      pins: true
+      permissions: true
+```
+
+Named accounts can override the same `reactionNotifications` mode and `reactionAllowlist`.
+
+## Extra Agent Tools
+
+The plugin also registers dedicated tools outside the `message` action surface.
+
+`inline_parent_context` fetches more parent-chat history for the current Inline reply-thread session when the automatic context window is not enough.
+
+- Defaults to the current reply thread when invoked from one
+- Optional inputs: `threadId`, `parentChatId`, `parentMessageId`, `beforeMessageId`, `afterMessageId`, `messageId`/`aroundMessageId`, `mode`, `limit`, `beforeLimit`, `afterLimit`, `includeAnchor`, `accountId`
+- Supports `latest`, `older`, `newer`, and `around` history windows; the reply-thread default is an `around` window anchored to the parent/root message
+- Returned messages are ordered oldest to newest and include media/entity summaries
+
+`inline_members` handles space-member discovery:
+
+- Optional input: `spaceId`/`space`; when omitted inside an Inline space chat or reply thread, the plugin infers the current space
+- Optional filters: `query`, `userId`, `limit`, `accountId`
+- Returned members include explicit DM targets like `user:123`
+
+`inline_nudge` sends an Inline nudge to a chat or user target.
+
+`inline_forward` forwards existing Inline message ids between chats or users.
+
+`inline_bot_presence` updates the bot's on-screen body state in Inline without sending a chat message. Use `action: "get"` to inspect the current avatar/state for a chat or user target.
+
+`inline_update_profile` updates the authenticated bot's Inline display name and/or profile photo. Use it only for explicit profile-setup requests.
+
+`inline_bot_avatar` installs, replaces, or clears the bot's on-screen avatar. Set/install uses a local or remote `.zip` avatar package; clearing uses `action: "clear"` or `clear: true`. It is for avatar setup/removal, not mood or presence changes.
+
+The plugin also registers `inline_bot_commands` for Inline bot command management (v1):
+
+- `action: "get"` -> calls `getMyCommands`
+- `action: "set"` -> calls `setMyCommands` with Inline Bot API `commands[]`
+- `action: "delete"` -> calls `deleteMyCommands`
+- Limits follow Inline Bot API: max `100` commands, `command` max `32`, `description` max `256`, charset `^[a-z0-9_]+$`
+
+Bot command sync:
+
+- On `gateway_start` and OpenClaw's `skill_changed` event, the plugin republishes bot commands and installed skills for each enabled/configured Inline account.
+- Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
+- Inline also registers `/threadreply` to manage this group's reply-thread mode, `/follow` and `/unfollow` for explicit dialog relevance, `/inline_sync` for a manual catalog refresh, `/inline_version` for safe runtime/install information, and owner-only `/inline_update` for tracked plugin updates.
+- Inline accepts `/command@botusername` when the suffix matches the active bot and ignores commands targeted at another bot, including in followed threads.
+- The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
+- Inline-owned `/follow`, `/unfollow`, `/threadreply`, `/inline_update`, `/inline_sync`, and `/inline_version` entries are preserved when a larger host command set is truncated to the Bot API's 100-command limit or retried after `BOT_COMMANDS_TOO_MUCH`; catalog sync logs how many entries were omitted.
+- Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
+- Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
+
+Multi-account:
+
+```yaml
+channels:
+  inline:
+    accounts:
+      default:
+        baseUrl: "https://api.inline.chat"
+        token: "<BOT_TOKEN_A>"
+      work:
+        baseUrl: "https://api.inline.chat"
+        token: "<BOT_TOKEN_B>"
+```
+
+## Quick Troubleshooting
+
+- `plugin not found: inline` / `plugins.entries.inline: plugin not found: inline`
+  - Ensure the plugin is installed and discovered (`openclaw plugins list`).
+- `doctor --fix` suggests Inline changes even though channel is healthy
+  - Keep the plugin entry id as `inline`, then re-run `openclaw plugins list` and `openclaw channels status`.
+- `Inline: SETUP / no token`
+  - Ensure `channels.inline.token`, `INLINE_TOKEN`, or `INLINE_BOT_TOKEN` is set and plugin is updated (`openclaw plugins update inline`).
+  - If using `dmPolicy: "open"`, ensure `allowFrom: ["*"]`.

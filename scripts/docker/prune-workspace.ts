@@ -64,9 +64,7 @@ for (const workspacePath of selectedWorkspacePaths) {
 await regenerateLockfile(jsonDir, resolve(outputDir, "bun.lock"))
 
 async function regenerateLockfile(installDir: string, outputLockfilePath: string) {
-  // Public workspaces are materialized from a separate pinned checkout in
-  // container builds. Generate from the selected manifests alone so the
-  // pruned lock cannot inherit workspace snapshots from another checkout.
+  // Resolve only the selected workspace closure for this container build.
   const install = Bun.spawn(["bun", "install", "--lockfile-only"], {
     cwd: installDir,
     stdout: "inherit",
@@ -145,7 +143,7 @@ function hasGlob(pattern: string): boolean {
 
 function shouldCopyWorkspaceEntry(path: string): boolean {
   const name = basename(path)
-  return name !== "node_modules" && name !== "dist" && name !== ".turbo" && name !== ".DS_Store" && !name.endsWith(".tsbuildinfo")
+  return !name.startsWith(".env") && name !== ".build" && name !== "target" && name !== "node_modules" && name !== "dist" && name !== ".turbo" && name !== ".DS_Store" && !name.endsWith(".tsbuildinfo")
 }
 
 function collectWorkspaceClosure(

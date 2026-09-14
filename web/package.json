@@ -75,5 +75,6 @@
   },
   "browserslist": [
     "last 2 Chrome versions"
-  ]
+  ],
+  "license": "AGPL-3.0-only"
 }

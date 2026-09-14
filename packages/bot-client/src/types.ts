@@ -1,0 +1,148 @@
+export { BOT_DEFAULT_UPDATE_KEYS, BOT_ID_MAX } from "@inline-chat/bot-api-types"
+
+export type {
+  BotActivationReason,
+  BotApiEnvelope,
+  BotApiError,
+  BotApiSuccess,
+  BotAttachment,
+  BotChat,
+  BotChatParticipant,
+  BotSpaceMember,
+  BotChatLastMessage,
+  BotChatType,
+  BotCommand,
+  BotSkill,
+  BotDefaultUpdateKey,
+  BotEventChat,
+  BotEventMessage,
+  BotFile,
+  BotInputId,
+  BotMedia,
+  BotParticipationChange,
+  BotMessageAction,
+  BotMessageEntityType,
+  BotMessage,
+  BotMessageEntityOutput,
+  BotMessageReaction,
+  BotMessageTrigger,
+  BotMethodEnvelope,
+  BotMethodName,
+  BotMethodParams,
+  BotMethodParamsByName,
+  BotMethodResult,
+  BotMethodResultByName,
+  BotPeer,
+  BotPeerId,
+  BotRichBlock,
+  BotRichMessage,
+  BotRichText,
+  BotSpace,
+  BotTargetInput,
+  BotUpdate,
+  BotUpdateKey,
+  BotUser,
+  BotAgent,
+  BotReaction,
+  BotSearchFilter,
+  CreateReplyThreadParams,
+  CreateReplyThreadResult,
+  CreateAgentParams,
+  CreateAgentResult,
+  CreateThreadParams,
+  CreateThreadResult,
+  AnswerMessageActionParams,
+  BotChatAction,
+  DeleteReactionParams,
+  DeleteWebhookParams,
+  DeleteWebhookResult,
+  DeleteMessageParams,
+  DeleteMessagesParams,
+  DeleteAgentParams,
+  DeleteAgentResult,
+  EditMessageActionsParams,
+  EditMessageActionsResult,
+  ForwardMessageParams,
+  ForwardMessageResult,
+  ForwardMessagesParams,
+  ForwardMessagesResult,
+  EditMessageTextParams,
+  EditMessageTextResult,
+  EmptyResult,
+  GetChatHistoryParams,
+  GetChatHistoryResult,
+  GetChatParams,
+  GetChatResult,
+  GetChatParticipantParams,
+  GetChatParticipantResult,
+  GetChatParticipantCountParams,
+  GetChatParticipantCountResult,
+  GetAgentParams,
+  GetAgentResult,
+  GetMyAgentsResult,
+  AddThreadParticipantParams,
+  RemoveThreadParticipantParams,
+  GetFileParams,
+  GetFileResult,
+  GetMeResult,
+  GetSpaceParams,
+  GetSpaceResult,
+  GetMessagesParams,
+  GetMessagesResult,
+  GetUpdatesParams,
+  GetUpdatesResult,
+  GetWebhookInfoResult,
+  GetMyCommandsResult,
+  GetMySkillsResult,
+  SetMyCommandsParams,
+  SetMySkillsParams,
+  SendMessageParams,
+  SendMessageResult,
+  SendReactionParams,
+  SendChatActionParams,
+  PinMessageParams,
+  UnpinMessageParams,
+  SetThreadTitleParams,
+  SearchMessagesParams,
+  SearchMessagesResult,
+  SetWebhookParams,
+  SetWebhookResult,
+  UpdateAgentParams,
+  UpdateAgentResult,
+  WebhookInfo,
+  UploadFileParams,
+  UploadFileResult,
+} from "@inline-chat/bot-api-types"
+
+export type InlineBotClientOptions = {
+  // Defaults to https://api.inline.chat
+  baseUrl?: string
+  token: string
+  authMode?: "header" | "path"
+
+  // Dependency injection for tests / alternate runtimes.
+  fetch?: typeof fetch
+}
+
+export type InlineBotClientRequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  headers?: Record<string, string>
+  body?: unknown
+  query?: Record<string, unknown>
+  signal?: AbortSignal
+}
+
+export type InlineBotClientResponse<T> = {
+  status: number
+  headers: Headers
+  data: T
+}
+
+export type InlineBotClientPostEncoding = "json" | "query"
+
+export type InlineBotClientMethodOptions = {
+  headers?: Record<string, string>
+  signal?: AbortSignal
+  // For POST methods only. Defaults to "json".
+  postAs?: InlineBotClientPostEncoding
+}

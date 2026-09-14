@@ -53,7 +53,7 @@ Optional controls:
 
 - `--project PATH`: identify the active project to protect in `safe` and clean in `extra`/`deep`; defaults to the current directory.
 - `--dev-root PATH`: add a root searched for stale developer outputs; repeat as needed. Roots are canonicalized before scanning, and filesystem root, mounted volumes, and CoreDevice projections are refused. Defaults to `~/dev` when present.
-- `--protect PATH`: exclude an additional active project or dependency root from every inventory; repeat as needed. The expected `inline-public` sibling is protected automatically when auditing this private Inline checkout.
+- `--protect PATH`: exclude an additional active project or dependency root from every inventory; repeat as needed. Use it for active neighboring checkouts as well.
 - `--older-than DAYS`: age threshold for stale targets; defaults to 7 days for `cold` and 30 days otherwise.
 - `--json`: emit machine-readable audit output.
 

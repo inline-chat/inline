@@ -1,0 +1,4 @@
+[build]
+# Keep one workspace target without accumulating large per-crate incremental caches.
+# Opt in locally with CARGO_INCREMENTAL=1 when the extra disk use is acceptable.
+incremental = false

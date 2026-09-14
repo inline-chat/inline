@@ -1,0 +1,7 @@
+interface:
+  display_name: "Inline"
+  short_description: "Work with Inline through MCP or the CLI"
+  default_prompt: "Use $inline to access the relevant Inline conversation through the available MCP, CLI, or local-agent tools, read its context, and help me act on it."
+
+policy:
+  allow_implicit_invocation: true

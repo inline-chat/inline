@@ -13,13 +13,15 @@
     "packages/bot-api-types",
     "packages/mcp",
     "packages/oauth-core",
-    "packages/openclaw",
     "packages/protocol",
     "packages/sdk",
     "packages/url-preview",
     "server/packages/*",
     "landing/packages/*",
-    "scripts"
+    "scripts",
+    "plugins/openclaw",
+    "plugins/hermes-agent",
+    "plugins/chat-sdk"
   ],
   "catalog": {
     "@effect/platform-bun": "4.0.0-beta.98",
@@ -38,7 +40,7 @@
     "dev:server": "cd server && bun run dev",
     "dev:landing": "cd landing && bun run dev",
     "generate:proto": "cd scripts && bun run generate",
-    "public:sync": "bun run scripts/sync-public-artifacts.ts",
+    "public:sync": "bun run proto:sync-rust",
     "matrix-inline:e2e": "bun run scripts/matrix-inline-e2e.ts",
     "lint:apple": "bash scripts/apple/swiftlint.sh",
     "check:apple": "bash scripts/apple/check-source-contracts.sh && bash scripts/apple/swiftlint.sh --quiet --reporter summary",
@@ -49,12 +51,24 @@
     "macos:debug": "bash scripts/macos/open-debug-app.sh",
     "macos:grid-logs": "bash scripts/macos/stream-grid-logs.sh",
     "cleanup:builds": "cd scripts && bun run cleanup:builds",
-    "cleanup:builds:deep": "cd scripts && bun run cleanup:builds:deep"
+    "cleanup:builds:deep": "cd scripts && bun run cleanup:builds:deep",
+    "release:cli": "bun run ./scripts/release-cli.ts",
+    "release:npm": "bun run ./scripts/release-npm.ts",
+    "check:codex-plugin": "bun run ./scripts/check-codex-plugin.mjs",
+    "build:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-client build && bun run --cwd packages/mcp build && bun run --cwd plugins/openclaw build && bun run --cwd plugins/hermes-agent build && bun run --cwd plugins/chat-sdk build",
+    "ci:cli": "bun run --cwd cli ci",
+    "precommit:cli": "bun run --cwd cli precommit",
+    "typecheck:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/sdk build && bun run --cwd packages/protocol typecheck && bun run --cwd packages/oauth-core typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd packages/bot-api-types typecheck && bun run --cwd packages/bot-client typecheck && bun run --cwd packages/mcp typecheck && bun run --cwd plugins/openclaw typecheck && bun run --cwd plugins/hermes-agent typecheck && bun run --cwd cli typecheck && bun run --cwd plugins/chat-sdk typecheck",
+    "lint:integrations": "bun run --cwd packages/protocol lint && bun run --cwd packages/oauth-core lint && bun run --cwd packages/sdk lint && bun run --cwd packages/bot-api-types lint && bun run --cwd packages/bot-client lint && bun run --cwd packages/mcp lint && bun run --cwd plugins/openclaw lint && bun run --cwd plugins/hermes-agent lint && bun run --cwd cli lint && bun run --cwd plugins/chat-sdk lint",
+    "test:integrations": "bun run --cwd packages/protocol test && bun run --cwd packages/oauth-core test && bun run --cwd packages/sdk test && bun run --cwd packages/bot-api-types test && bun run --cwd packages/bot-client test && bun run --cwd packages/mcp test && bun run --cwd plugins/openclaw test && bun run --cwd plugins/hermes-agent test && bun run --cwd cli test && bun run --cwd plugins/chat-sdk test",
+    "proto:sync-rust": "bun run scripts/sync-public-artifacts.ts"
   },
   "overrides": {
     "@effect/platform-node-shared": "4.0.0-beta.98",
     "@inline-chat/protocol": "workspace:*",
-    "@inline-chat/realtime-sdk": "workspace:*"
+    "@inline-chat/realtime-sdk": "workspace:*",
+    "@inline-chat/oauth-core": "workspace:*",
+    "@inline-chat/bot-api-types": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
@@ -63,5 +77,6 @@
   },
   "dependencies": {
     "zustand": "^5.0.9"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }
