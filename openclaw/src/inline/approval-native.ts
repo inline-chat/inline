@@ -16,7 +16,6 @@ import {
 } from "openclaw/plugin-sdk/approval-reply-runtime"
 import type {
   ExecApprovalRequest,
-  PluginApprovalRequest,
 } from "openclaw/plugin-sdk/approval-runtime"
 import type { ChannelApprovalCapability } from "openclaw/plugin-sdk/channel-contract"
 import { loadBundledEntryExportSync } from "openclaw/plugin-sdk/channel-entry-contract"
@@ -27,6 +26,7 @@ import {
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime"
 import { listInlineAccountIds } from "./accounts.js"
+import { INLINE_APPROVAL_EVENT_KINDS, type InlineApprovalRequest as ApprovalRequest } from "./approval-contract.js"
 import {
   getInlineExecApprovalApprovers,
   isInlineExecApprovalApprover,
@@ -37,7 +37,6 @@ import {
   shouldHandleInlineExecApprovalRequest,
 } from "./exec-approvals.js"
 
-type ApprovalRequest = ExecApprovalRequest | PluginApprovalRequest
 type InlineOriginTarget = { to: string; threadId?: string }
 
 function accountParams(params: {
@@ -223,7 +222,7 @@ const inlineNativeApprovalCapability = createApproverRestrictedNativeApprovalCap
   resolveApproverDmTargets: resolveInlineApproverDmTargets,
   notifyOriginWhenDmOnly: true,
   nativeRuntime: createLazyChannelApprovalNativeRuntimeAdapter({
-    eventKinds: ["exec", "plugin"],
+    eventKinds: INLINE_APPROVAL_EVENT_KINDS,
     isConfigured: ({ cfg, accountId }) =>
       isInlineExecApprovalClientEnabled(accountParams({ cfg, accountId })),
     shouldHandle: ({ cfg, accountId, request }) =>

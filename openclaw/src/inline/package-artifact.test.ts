@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, realpath, symlink } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "node:os"
 import { execFile as execFileCallback } from "node:child_process"
@@ -32,14 +32,14 @@ describe("packed artifact", () => {
     const packageDir = path.resolve(__dirname, "..", "..")
 
     const packResult = await execFile(
-      "npm",
-      ["pack", "--pack-destination", packDir],
+      "bun",
+      ["pm", "pack", "--destination", packDir, "--quiet"],
       { cwd: packageDir },
     )
     const packedFile = packResult.stdout.trim().split("\n").at(-1)
     expect(packedFile).toBeTruthy()
 
-    const tarballPath = path.join(packDir, packedFile!)
+    const tarballPath = path.resolve(packDir, packedFile!)
     await execFile("tar", ["-xzf", tarballPath, "-C", extractDir])
 
     const packedPackageDir = path.join(extractDir, "package")
@@ -134,7 +134,23 @@ describe("packed artifact", () => {
     expect(approvalHandlerRuntime).toContain("inlineApprovalNativeRuntime")
     expect(approvalHandlerRuntime).toContain("createChannelApprovalNativeRuntimeAdapter")
 
-    const builtEntryUrl = pathToFileURL(path.join(packageDir, "dist", "index.js")).href
+    // Execute the extracted tarball with only the selected host available.
+    // Importing workspace dist here would miss missing files and host leakage.
+    await mkdir(path.join(packedPackageDir, "node_modules"))
+    await symlink(
+      await realpath(process.env.OPENCLAW_COMPAT_HOST_ROOT ?? path.join(packageDir, "node_modules", "openclaw")),
+      path.join(packedPackageDir, "node_modules", "openclaw"),
+      "dir",
+    )
+    const bundledMap = JSON.parse(await readFile(path.join(distDir, "channel-plugin-api.js.map"), "utf8")) as {
+      sources: string[]; sourcesContent: string[]
+    }
+    for (const sdkFile of ["sdk/inline-sdk-client.js", "realtime/protocol-client.js", "utils/async-channel.js"]) {
+      const index = bundledMap.sources.findIndex(source => source.endsWith(`/sdk/dist/${sdkFile}`))
+      expect(index, `bundled SDK ${sdkFile}`).toBeGreaterThanOrEqual(0)
+      expect(bundledMap.sourcesContent[index]).toBe(await readFile(path.resolve(packageDir, "../sdk/dist", sdkFile), "utf8"))
+    }
+    const builtEntryUrl = pathToFileURL(path.join(distDir, "index.js")).href
     const runtimeProbe = await execFile(
       process.execPath,
       [
@@ -171,7 +187,7 @@ describe("packed artifact", () => {
           }));
         `,
       ],
-      { cwd: packageDir },
+      { cwd: packedPackageDir },
     )
     expect(JSON.parse(runtimeProbe.stdout)).toEqual({
       id: "inline",

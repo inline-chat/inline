@@ -29,6 +29,40 @@ function buildExecRequest(overrides?: Partial<ExecApprovalRequest["request"]>): 
 }
 
 describe("inline/native approvals", () => {
+  it("renders system change approvals with the host's exact decision commands", async () => {
+    const request = {
+      ...buildExecRequest(),
+      approvalKind: "system-agent",
+      request: { ...buildExecRequest().request, proposalHash: "proposal-1" },
+    } as any
+    const view = {
+      approvalKind: "system-agent", phase: "pending", operationSummary: "Enable the requested integration",
+      agentId: "main", actions: [
+        { decision: "allow-once", label: "Approve", command: `/approve ${request.id} allow-once` },
+        { decision: "deny", label: "Deny", command: `/approve ${request.id} deny` },
+      ],
+    } as any
+    const payload = await inlineApprovalNativeRuntime.presentation.buildPendingPayload({
+      cfg: {} as OpenClawConfig, request, approvalKind: "system-agent" as any,
+      nowMs: request.createdAtMs, view,
+    })
+    expect(inlineApprovalNativeRuntime.eventKinds).toContain("system-agent")
+    expect(payload.text).toContain("OpenClaw change requires approval")
+    expect(payload.text).toContain(view.operationSummary)
+    expect(payload.text).not.toContain("Exec approval")
+    expect(payload.actions?.rows[0]?.actions.map(action => action.text)).toEqual(["Approve", "Deny"])
+    for (const [index, action] of (payload.actions?.rows[0]?.actions ?? []).entries()) {
+      expect(action.action.oneofKind).toBe("callback")
+      if (action.action.oneofKind === "callback") {
+        expect(Buffer.from(action.action.callback.data).toString()).toBe(view.actions[index].command)
+      }
+    }
+    await expect(inlineApprovalNativeRuntime.presentation.buildPendingPayload({
+      cfg: {} as OpenClawConfig, request, approvalKind: "system-agent" as any,
+      nowMs: request.createdAtMs, view: { ...view, approvalKind: "exec" },
+    })).rejects.toThrow("request and view kinds do not match")
+  })
+
   it("resolves Inline approvers from execApprovals and owner fallback", () => {
     const cfg = {
       commands: {

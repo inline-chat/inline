@@ -82,11 +82,20 @@ jobs:
         run: bun run --cwd mcp test
 
   openclaw:
-    name: OpenClaw
+    name: OpenClaw (${{ matrix.host }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ["2026.8.2", "2026.9.1", "latest"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -104,4 +113,17 @@ jobs:
           bun run --cwd sdk build
 
       - name: Check OpenClaw
+        if: matrix.host == 'latest'
         run: bun run --cwd openclaw check
+
+      - name: Install compatibility host
+        env:
+          OPENCLAW_VERSION: ${{ matrix.host }}
+        run: |
+          host_dir="$RUNNER_TEMP/inline-openclaw-host"
+          mkdir -p "$host_dir"
+          bun -e 'await Bun.write(process.argv[1], JSON.stringify({private: true, dependencies: {openclaw: process.env.OPENCLAW_VERSION}}))' "$host_dir/package.json"
+          bun install --cwd "$host_dir" --ignore-scripts
+
+      - name: Check released host source and packed runtime
+        run: bun run --cwd openclaw check:host "$RUNNER_TEMP/inline-openclaw-host/node_modules/openclaw"

@@ -1,5 +1,6 @@
 import type {
   ChannelApprovalCapabilityHandlerContext,
+  ChannelApprovalKind,
   PendingApprovalView,
 } from "openclaw/plugin-sdk/approval-handler-runtime"
 import { createChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime"
@@ -9,7 +10,6 @@ import {
   buildPluginApprovalPendingReplyPayload,
 } from "openclaw/plugin-sdk/approval-reply-runtime"
 import type {
-  ExecApprovalRequest,
   PluginApprovalRequest,
 } from "openclaw/plugin-sdk/approval-runtime"
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env"
@@ -22,6 +22,7 @@ import {
   type MessageActions,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineMessageActionsParam } from "./actions.js"
+import { INLINE_APPROVAL_EVENT_KINDS, type InlineApprovalRequest as ApprovalRequest } from "./approval-contract.js"
 import {
   isInlineExecApprovalHandlerConfigured,
   shouldHandleInlineExecApprovalRequest,
@@ -31,7 +32,6 @@ import { resolveInlineReplyThreadChatId } from "./reply-threads.js"
 
 const log = createSubsystemLogger("inline/approvals")
 
-type ApprovalRequest = ExecApprovalRequest | PluginApprovalRequest
 type InlinePendingDelivery = {
   text: string
   actions?: MessageActions
@@ -168,10 +168,27 @@ function buildInlineApprovalActions(view: PendingApprovalView): MessageActions |
 
 function buildPendingPayload(params: {
   request: ApprovalRequest
-  approvalKind: "exec" | "plugin"
+  approvalKind: ChannelApprovalKind
   nowMs: number
   view: PendingApprovalView
 }): InlinePendingDelivery {
+  // Structural narrowing keeps this source type-checkable against 2026.8,
+  // whose PendingApprovalView union predates system change approvals.
+  if (String(params.approvalKind) === "system-agent") {
+    const view = params.view
+    if (String(view.approvalKind) !== "system-agent" || !("operationSummary" in view)
+      || typeof view.operationSummary !== "string") {
+      throw new Error("system-agent approval request and view kinds do not match")
+    }
+    const text = sanitizeInlineOutgoingText([
+      "🔒 OpenClaw change requires approval",
+      `Change: ${view.operationSummary}`,
+      `Agent: ${"agentId" in view ? view.agentId ?? "unknown" : "unknown"}`,
+      `Expires in: ${Math.max(0, Math.ceil((params.request.expiresAtMs - params.nowMs) / 1_000))}s`,
+    ].join("\n"))
+    const actions = buildInlineApprovalActions(view)
+    return { text, ...(actions ? { actions } : {}) }
+  }
   const execView = params.view.approvalKind === "exec" ? params.view : null
   const payload =
     params.approvalKind === "plugin"
@@ -210,7 +227,7 @@ export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAda
   InlinePendingApproval,
   never
 >({
-  eventKinds: ["exec", "plugin"],
+  eventKinds: INLINE_APPROVAL_EVENT_KINDS,
   availability: {
     isConfigured: (params) => {
       const resolved = resolveHandlerContext(params)

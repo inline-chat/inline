@@ -8,21 +8,24 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 
 Choose the Inline plugin version that matches the installed OpenClaw line:
 
-- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.67` — `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities`
+- OpenClaw `2026.8.2` and newer, including `2026.9.x`: Inline plugin `0.0.69` — `openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities`
 - OpenClaw `2026.7.x` (`>=2026.7.1`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 - OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 
-On 2026.8, `--accept-capabilities` noninteractively approves the capabilities
+On 2026.8.2 and newer, `--accept-capabilities` noninteractively approves the capabilities
 declared by the trusted first-party Inline package. Older supported hosts do not
 recognize that flag.
 
-Install the exact version for your host line:
+The current plugin has no upper host version cap. For OpenClaw 2026.9.3 and
+newer, use Node 24.16+ on 24.x or Node 26.1+ (Node 26 recommended).
+
+Install the current version:
 
 ```sh
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities
 ```
 
-If already installed on 2026.8, repair or update to the matched version:
+If already installed on a supported host, update in place:
 
 ```sh
 openclaw plugins update inline --accept-capabilities

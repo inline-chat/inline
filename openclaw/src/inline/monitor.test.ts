@@ -199,7 +199,7 @@ type MonitorSetup = {
         documentRevision: string
       }
   >
-  eventLoopError?: Error
+  eventLoopError?: Error | (() => Promise<Error>)
   chats: Record<string, {
     kind: "direct" | "group"
     title?: string
@@ -926,7 +926,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           date: event.date ?? 1_700_000_000n,
         }
       }
-      if (setup.eventLoopError) throw setup.eventLoopError
+      if (setup.eventLoopError) {
+        throw typeof setup.eventLoopError === "function" ? await setup.eventLoopError() : setup.eventLoopError
+      }
     }
 
     return {
@@ -2721,6 +2723,85 @@ describe("inline/monitor", () => {
     )
 
     await handle.stop()
+  })
+
+  it.each(["cooperative", "unresponsive"])("stops a %s host reply and fences late sends", async (mode) => {
+    let release!: () => void
+    let runSignal: AbortSignal | undefined
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: {
+        id: 1001n, date: 1_700_000_000n, fromId: 42n, message: "long task",
+      } }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyPayload: { text: "late reply" },
+      partialReplies: [{ text: "late partial reply" }],
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        runSignal = replyOptions.abortSignal
+        if (mode === "cooperative") runSignal?.addEventListener("abort", release, { once: true })
+        await blocked
+      },
+    })
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal, log,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      expect(runSignal).toBeInstanceOf(AbortSignal)
+      if (mode === "unresponsive") vi.useFakeTimers()
+      const stopping = handle.stop()
+      expect(runSignal?.aborted).toBe(true)
+      if (mode === "unresponsive") await vi.advanceTimersByTimeAsync(15_000)
+      await stopping
+      await handle.done
+      if (mode === "unresponsive") expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("shutdown grace expired"))
+      release()
+      await waitForMockPromise(harness.calls.dispatchReply, 0)
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      release()
+      vi.useRealTimers()
+      await handle.stop()
+    }
+  })
+
+  it("cancels an active host reply when the SDK event loop fails", async () => {
+    const failure = new Error("event stream failed during dispatch")
+    let failLoop!: (error: Error) => void
+    const loopFailure = new Promise<Error>(resolve => { failLoop = resolve })
+    let runSignal: AbortSignal | undefined
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: {
+        id: 1001n, date: 1_700_000_000n, fromId: 42n, message: "long task",
+      } }],
+      eventLoopError: () => loopFailure,
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyPayload: { text: "late reply" },
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        runSignal = replyOptions.abortSignal
+        await new Promise<void>(resolve => runSignal?.addEventListener("abort", () => resolve(), { once: true }))
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    const finished = expect(handle.done).rejects.toThrow(failure.message)
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      failLoop(failure)
+      await finished
+      expect(runSignal?.aborted).toBe(true)
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      failLoop(failure)
+      await handle.stop()
+    }
   })
 
   it("dispatches stop requests without waiting for an active inbound run", async () => {

@@ -34,33 +34,49 @@ Reply-thread behavior:
 
 ## Install
 
-The current Inline plugin targets OpenClaw `2026.8.x` from `2026.8.2`. Install
+The current Inline plugin supports OpenClaw `2026.8.2` and newer, including
+`2026.9.x`, with no upper version cap. It is built against `2026.9.4`. Install
 the plugin version for your OpenClaw release line:
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.x` (`>=2026.8.2`) | `0.0.68` | `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities` |
+| `2026.8.2` and newer | `0.0.69` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
-`@latest` follows the newest supported OpenClaw line; it is not a compatibility
-alias for older host APIs.
+The minimum supported host remains `2026.8.2`. Newer host versions are not
+blocked by package metadata. OpenClaw 2026.9.3 and newer require Node 24.16+
+on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 ## Compatibility
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.68` | `>=2026.8.2 <2026.9.0` | `0.0.18` | Current | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
-| `0.0.67` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
-| `0.0.66` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
-| `0.0.65` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
-| `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
-| `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
+| `0.0.69` | `>=2026.8.2` | `0.0.18` | Current | Supports September system change approvals and cancels pending replies during channel shutdown. |
+| `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
+| `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
+| `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+| `0.0.65` | `2026.8.2` | `0.0.17` | Previous | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
+| `0.0.64` | `2026.8.2` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
+
+### Release 0.0.69
+
+- Removes the host upper bound and supports September system change approvals while retaining August APIs.
+- Cancels reply generation when the channel stops, suppresses late sends, and bounds shutdown waits.
+- Retains realtime SDK `0.0.18`: finite-target catch-up fence release, autonomous recovery after timeouts, authoritative DM deletion buckets, and concurrent handlers with ordered acknowledgements.
+- Tests the extracted package against released hosts and checks that the bundled SDK matches the validated build.
+
+The CI host matrix runs on `2026.8.2`, `2026.9.1`, and npm `latest`.
+To check an installed host locally after building the SDK:
+
+```sh
+bun run --cwd openclaw check:host /path/to/node_modules/openclaw
+```
 
 From npm:
 
 ```sh
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
