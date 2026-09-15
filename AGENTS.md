@@ -6,10 +6,9 @@ Inline is a native work chat application with a Bun/TypeScript server, Apple cli
 
 - `apple/`: iOS and macOS clients; `server/`: backend; `landing/`: website and product docs.
 - `proto/`: canonical schemas; `packages/`: Inline SDK, MCP server and shared libraries.
-- `plugins/`: Codex, OpenClaw, Hermes and Vercel Chat SDK integrations.
+- `plugins/`: ChatGPT/Codex, OpenClaw, Hermes and Vercel Chat SDK integrations.
 - `cli/`, `crates/`, `vendor/`: Rust CLI and its workspace dependencies.
 - `skills/inline/`: distributable Inline skill; keep `plugins/chatgpt/skills/inline/` identical.
-- `apps/web/`, `apps/mobile/`, `apps/desktop/`: README-only experimental placeholders.
 - Landing owns its transitional browser libraries under `landing/packages/`; URL preview lives in `server/packages/url-preview/`.
 
 ## Rules

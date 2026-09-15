@@ -1,10 +1,12 @@
-# Inline ChatGPT integration
+# Inline ChatGPT plugin
 
-This directory is reserved for the ChatGPT integration. The current bundle still uses Codex plugin packaging and installation commands; ChatGPT Store submission compatibility has not yet been established.
+Connect Inline to ChatGPT to work with your chats. The repository also includes a Codex plugin with the hosted Inline MCP connection and bundled Inline skill.
 
-The existing integration accesses Inline work chats through the hosted Inline MCP server and bundled Inline skill.
+## Install in ChatGPT
 
-## Install
+[Add Inline from the ChatGPT plugin store](https://chatgpt.com/plugins/plugin_asdk_app_6a660963e7b481918e10c08dd1e0430f?q=inline).
+
+## Install in Codex
 
 With the Inline CLI installed, use the idempotent shortcut:
 
