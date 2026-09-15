@@ -40,7 +40,7 @@ the plugin version for your OpenClaw release line:
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.2` and newer | `0.0.69` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities` |
+| `2026.8.2` and newer | `0.0.70` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
@@ -52,14 +52,16 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.69` | `>=2026.8.2` | `0.0.18` | Current | Supports September system change approvals and cancels pending replies during channel shutdown. |
+| `0.0.70` | `>=2026.8.2` | `0.0.18` | Current | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
+| `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 | `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
 | `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
 | `0.0.65` | `2026.8.2` | `0.0.17` | Previous | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
-| `0.0.64` | `2026.8.2` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
 
-### Release 0.0.69
+### Release 0.0.70
+
+- Matches native Telegram by suppressing empty-response fallbacks in message-tool-only mode and honoring host send-policy denial, including after delivery errors.
 
 - Removes the host upper bound and supports September system change approvals while retaining August APIs.
 - Cancels reply generation when the channel stops, suppresses late sends, and bounds shutdown waits.
@@ -76,7 +78,7 @@ bun run --cwd openclaw check:host /path/to/node_modules/openclaw
 From npm:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:

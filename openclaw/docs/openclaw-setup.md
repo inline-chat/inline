@@ -8,7 +8,7 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 
 Choose the Inline plugin version that matches the installed OpenClaw line:
 
-- OpenClaw `2026.8.2` and newer, including `2026.9.x`: Inline plugin `0.0.69` — `openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities`
+- OpenClaw `2026.8.2` and newer, including `2026.9.x`: Inline plugin `0.0.70` — `openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities`
 - OpenClaw `2026.7.x` (`>=2026.7.1`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 - OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 
@@ -22,7 +22,7 @@ newer, use Node 24.16+ on 24.x or Node 26.1+ (Node 26 recommended).
 Install the current version:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.69 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities
 ```
 
 If already installed on a supported host, update in place:

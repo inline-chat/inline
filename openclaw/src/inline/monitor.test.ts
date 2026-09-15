@@ -284,6 +284,7 @@ type MonitorSetup = {
     noVisibleReplyFallbackEligible?: boolean
     deliberateSilentTerminalReply?: boolean
     sourceReplyDeliveryMode?: string
+    sendPolicyDenied?: boolean
   }
   deliveryResults?: unknown[]
   replyPipeline?: {
@@ -10007,7 +10008,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("suppresses an empty skip when source delivery is message-tool-only", async () => {
+  it.each([false, true])("suppresses message-tool-only silence when fallback eligibility is %s", async (eligible) => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -10025,7 +10026,7 @@ describe("inline/monitor", () => {
         "6742": { kind: "direct", title: "Alice" },
       },
       skipInfos: [{ reason: "empty" }],
-      dispatchReplyResult: { sourceReplyDeliveryMode: "message_tool_only" },
+      dispatchReplyResult: { sourceReplyDeliveryMode: "message_tool_only", noVisibleReplyFallbackEligible: eligible },
     })
 
     const handle = await harness.monitorInlineProvider({
@@ -10041,6 +10042,31 @@ describe("inline/monitor", () => {
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
+  })
+
+  it.each([false, true])("honors host send-policy denial when delivery failure is %s", async (failed) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 6742n, message: {
+        id: 57052n, date: 1_700_000_014n, fromId: 42n, message: "dm",
+      } }],
+      chats: { "6742": { kind: "direct", title: "Alice" } },
+      skipInfos: [{ reason: "empty" }],
+      ...(failed ? { dispatchErrorInfos: [{ kind: "final" }] } : {}),
+      dispatchReplyResult: { sendPolicyDenied: true, noVisibleReplyFallbackEligible: true },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitForMockPromise(harness.calls.dispatchReply)
+      await new Promise(resolve => setTimeout(resolve, 25))
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      await handle.stop()
+    }
   })
 
   it("recovers only when the host declares a no-visible-response fallback eligible", async () => {

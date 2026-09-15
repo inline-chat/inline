@@ -409,6 +409,7 @@ type InlineDispatchResult = NonNullable<Parameters<typeof hasVisibleInboundReply
   noVisibleReplyFallbackEligible?: boolean
   deliberateSilentTerminalReply?: boolean
   sourceReplyDeliveryMode?: string
+  sendPolicyDenied?: boolean
 }
 
 type InlineReplyDeliveryResult = {
@@ -6550,11 +6551,12 @@ export async function monitorInlineProvider(params: {
         dispatchResult.noVisibleReplyFallbackEligible === true
       const explicitFailure = dispatchError != null || failedNonSilent
       if (
-        !abortSignal.aborted && !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
+        !abortSignal.aborted && dispatchResult.sendPolicyDenied !== true &&
+        !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
-            !deliberateSilence &&
-            ((skippedNonSilent && !skipFallbackSuppressed) || hostRequestedNoVisibleRecovery)))
+            !deliberateSilence && !skipFallbackSuppressed &&
+            (skippedNonSilent || hostRequestedNoVisibleRecovery)))
       ) {
         botPresenceLifecycle.fail()
         const fallbackText =
