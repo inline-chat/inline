@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
-import { chatParticipants, type DbChat, userNotDeleted, users } from "@in/server/db/schema"
+import { userNotDeleted, users } from "@in/server/db/schema"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
   botPresenceStateTimeoutMs,
   expireBotPresenceState,
@@ -37,7 +38,7 @@ export const setBotPresenceStateFn = async (
   await requireBot(botUserId)
 
   const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context)
-  await requireBotInChat(chat, botUserId)
+  await AccessGuards.ensureChatAccess(chat, botUserId)
 
   const state = setBotPresenceState(botUserId, chat.id, inputState)
   const updateGroup = await getUpdateGroupFromInputPeer(peerIdInput, context)
@@ -165,25 +166,6 @@ async function requireBot(botUserId: number) {
 
   if (!row) {
     throw RealtimeRpcError.UserIdInvalid()
-  }
-}
-
-async function requireBotInChat(chat: DbChat, botUserId: number) {
-  if (chat.type === "private") {
-    if (chat.minUserId === botUserId || chat.maxUserId === botUserId) {
-      return
-    }
-    throw RealtimeRpcError.PeerIdInvalid()
-  }
-
-  const [participant] = await db
-    .select({ id: chatParticipants.id })
-    .from(chatParticipants)
-    .where(and(eq(chatParticipants.chatId, chat.id), eq(chatParticipants.userId, botUserId)))
-    .limit(1)
-
-  if (!participant) {
-    throw RealtimeRpcError.PeerIdInvalid()
   }
 }
 

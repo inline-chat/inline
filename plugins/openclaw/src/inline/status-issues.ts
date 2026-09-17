@@ -11,6 +11,7 @@ type InlineProbeSummary = {
 
 type InlineDiagnosticsSummary = {
   protocol?: {
+    connectionAttemptNo?: number
     lastFailureAt?: number
     lastFailureReason?: string | undefined
     ping?: {
@@ -18,8 +19,9 @@ type InlineDiagnosticsSummary = {
     }
   }
   transport?: {
-    reconnectCount?: number
+    connectionAttemptNo?: number
     lastReconnectCause?: string | undefined
+    lastReconnectScheduledAt?: number
   }
 }
 
@@ -60,6 +62,9 @@ function readInlineDiagnosticsSummary(value: unknown): InlineDiagnosticsSummary 
     ...(protocolValue
       ? {
           protocol: {
+            ...(typeof protocolValue.connectionAttemptNo === "number"
+              ? { connectionAttemptNo: protocolValue.connectionAttemptNo }
+              : {}),
             ...(typeof protocolValue.lastFailureAt === "number"
               ? { lastFailureAt: protocolValue.lastFailureAt }
               : {}),
@@ -79,11 +84,14 @@ function readInlineDiagnosticsSummary(value: unknown): InlineDiagnosticsSummary 
     ...(transportValue
       ? {
           transport: {
-            ...(typeof transportValue.reconnectCount === "number"
-              ? { reconnectCount: transportValue.reconnectCount }
+            ...(typeof transportValue.connectionAttemptNo === "number"
+              ? { connectionAttemptNo: transportValue.connectionAttemptNo }
               : {}),
             ...(asString(transportValue.lastReconnectCause)
               ? { lastReconnectCause: asString(transportValue.lastReconnectCause) }
+              : {}),
+            ...(typeof transportValue.lastReconnectScheduledAt === "number"
+              ? { lastReconnectScheduledAt: transportValue.lastReconnectScheduledAt }
               : {}),
           },
         }
@@ -191,16 +199,22 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
     }
 
     const diagnostics = readInlineDiagnosticsSummary((entry as Record<string, unknown>).diagnostics)
+    const connectionAttemptNo = Math.max(
+      0,
+      asFiniteNumber(diagnostics.protocol?.connectionAttemptNo) ?? 0,
+      asFiniteNumber(diagnostics.transport?.connectionAttemptNo) ?? 0,
+    )
     if (
-      isRecentTimestamp(diagnostics.protocol?.lastFailureAt) &&
-      (diagnostics.transport?.reconnectCount ?? 0) >= 3
+      connectionAttemptNo >= 3 &&
+      (isRecentTimestamp(diagnostics.protocol?.lastFailureAt) ||
+        isRecentTimestamp(diagnostics.transport?.lastReconnectScheduledAt))
     ) {
       issues.push({
         channel: "inline",
         accountId,
         kind: "runtime",
         message:
-          `Inline connection is flapping (${diagnostics.transport?.reconnectCount ?? 0} reconnects). ` +
+          `Inline connection is repeatedly reconnecting (attempt ${connectionAttemptNo}). ` +
           `${diagnostics.protocol?.lastFailureReason ?? diagnostics.transport?.lastReconnectCause ?? "Recent reconnect failures detected."}`,
         fix: "Inspect gateway logs for websocket close/error details and verify Inline API/network stability.",
       })

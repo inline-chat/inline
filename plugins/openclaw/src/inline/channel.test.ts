@@ -1839,10 +1839,13 @@ describe("inline/channel", () => {
         lastStartAt: Date.now() - 121_000,
         diagnostics: {
           protocol: {
+            connectionAttemptNo: 5,
             lastFailureAt: Date.now(),
             lastFailureReason: "authentication timeout after 10000ms",
             transport: {
+              connectionAttemptNo: 5,
               reconnectCount: 5,
+              lastReconnectScheduledAt: Date.now(),
               lastReconnectCause: "ping-timeout",
             },
             ping: {
@@ -1853,9 +1856,76 @@ describe("inline/channel", () => {
       },
     ])
 
-    expect(issues.some((issue) => issue.message.includes("flapping"))).toBe(true)
+    expect(
+      issues.some((issue) => issue.message.includes("repeatedly reconnecting (attempt 5)")),
+    ).toBe(true)
     expect(issues.some((issue) => issue.message.includes("ping watchdog"))).toBe(true)
     expect(issues.some((issue) => issue.message.includes("running but not connected"))).toBe(true)
+  })
+
+  it("does not treat a lifetime reconnect count as a current reconnect loop", async () => {
+    vi.resetModules()
+    const { collectInlineStatusIssues } = await import("./status-issues")
+
+    const issues = collectInlineStatusIssues([
+      {
+        accountId: "default",
+        enabled: true,
+        configured: true,
+        running: true,
+        connected: true,
+        diagnostics: {
+          protocol: {
+            connectionAttemptNo: 0,
+            lastFailureAt: Date.now(),
+            lastFailureReason: "previous connection failure",
+            transport: {
+              connectionAttemptNo: 0,
+              reconnectCount: 50,
+              lastReconnectScheduledAt: Date.now(),
+              lastReconnectCause: "close",
+            },
+          },
+        },
+      },
+    ])
+
+    expect(issues.some((issue) => issue.message.includes("repeatedly reconnecting"))).toBe(false)
+  })
+
+  it("detects an active transport reconnect loop without a protocol failure timestamp", async () => {
+    vi.resetModules()
+    const { collectInlineStatusIssues } = await import("./status-issues")
+
+    const issues = collectInlineStatusIssues([
+      {
+        accountId: "default",
+        enabled: true,
+        configured: true,
+        running: true,
+        connected: false,
+        lastStartAt: Date.now(),
+        diagnostics: {
+          protocol: {
+            connectionAttemptNo: 0,
+            transport: {
+              connectionAttemptNo: 4,
+              reconnectCount: 40,
+              lastReconnectScheduledAt: Date.now(),
+              lastReconnectCause: "socket-error",
+            },
+          },
+        },
+      },
+    ])
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.message.includes("repeatedly reconnecting (attempt 4)") &&
+          issue.message.includes("socket-error"),
+      ),
+    ).toBe(true)
   })
 
   it("does not flag Inline connecting state during startup grace", async () => {

@@ -199,7 +199,7 @@ type MonitorSetup = {
         documentRevision: string
       }
   >
-  eventLoopError?: Error
+  eventLoopError?: Error | (() => Promise<Error>)
   chats: Record<string, {
     kind: "direct" | "group"
     title?: string
@@ -284,6 +284,7 @@ type MonitorSetup = {
     noVisibleReplyFallbackEligible?: boolean
     deliberateSilentTerminalReply?: boolean
     sourceReplyDeliveryMode?: string
+    sendPolicyDenied?: boolean
   }
   deliveryResults?: unknown[]
   replyPipeline?: {
@@ -926,7 +927,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           date: event.date ?? 1_700_000_000n,
         }
       }
-      if (setup.eventLoopError) throw setup.eventLoopError
+      if (setup.eventLoopError) {
+        throw typeof setup.eventLoopError === "function" ? await setup.eventLoopError() : setup.eventLoopError
+      }
     }
 
     return {
@@ -2054,6 +2057,63 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it.each([
+    "Sync recovery scheduled",
+    "Sync bucket unavailable",
+    "Sync discovery unavailable",
+  ])("keeps the %s SDK recovery diagnostic out of sticky channel errors", async (message) => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    let sdkLogger: {
+      error?: (msg: string, meta?: unknown) => void
+    } | null = null
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      captureSdkLogger: (logger) => {
+        sdkLogger = logger
+      },
+      getDiagnostics: () => ({
+        protocol: { state: "open" },
+        sync: { state: "degraded", degradedBuckets: [{ kind: "user" }] },
+      }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      account: buildAccount(),
+      cfg: {},
+      runtime: {} as any,
+      abortSignal: new AbortController().signal,
+      log,
+      statusSink: (patch: Record<string, unknown>) => {
+        statusPatches.push(patch)
+      },
+    })
+
+    expect(sdkLogger?.error).toBeTypeOf("function")
+    const priorPatchCount = statusPatches.length
+    sdkLogger?.error?.(message, { bucketKind: "user", reason: "request_failed" })
+
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining(message))
+    expect(statusPatches.slice(priorPatchCount)).toEqual([
+      expect.objectContaining({
+        diagnostics: expect.objectContaining({
+          sync: { state: "degraded", degradedBuckets: [{ kind: "user" }] },
+        }),
+      }),
+    ])
+    expect(statusPatches.slice(priorPatchCount)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lastError: expect.anything(),
+        }),
+      ]),
+    )
+
+    await handle.stop()
+  })
+
   it("publishes terminal authentication failures after startup", async () => {
     const statusPatches: Array<Record<string, unknown>> = []
     const harness = await setupMonitorHarness({
@@ -2721,6 +2781,85 @@ describe("inline/monitor", () => {
     )
 
     await handle.stop()
+  })
+
+  it.each(["cooperative", "unresponsive"])("stops a %s host reply and fences late sends", async (mode) => {
+    let release!: () => void
+    let runSignal: AbortSignal | undefined
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: {
+        id: 1001n, date: 1_700_000_000n, fromId: 42n, message: "long task",
+      } }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyPayload: { text: "late reply" },
+      partialReplies: [{ text: "late partial reply" }],
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        runSignal = replyOptions.abortSignal
+        if (mode === "cooperative") runSignal?.addEventListener("abort", release, { once: true })
+        await blocked
+      },
+    })
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal, log,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      expect(runSignal).toBeInstanceOf(AbortSignal)
+      if (mode === "unresponsive") vi.useFakeTimers()
+      const stopping = handle.stop()
+      expect(runSignal?.aborted).toBe(true)
+      if (mode === "unresponsive") await vi.advanceTimersByTimeAsync(15_000)
+      await stopping
+      await handle.done
+      if (mode === "unresponsive") expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("shutdown grace expired"))
+      release()
+      await waitForMockPromise(harness.calls.dispatchReply, 0)
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      release()
+      vi.useRealTimers()
+      await handle.stop()
+    }
+  })
+
+  it("cancels an active host reply when the SDK event loop fails", async () => {
+    const failure = new Error("event stream failed during dispatch")
+    let failLoop!: (error: Error) => void
+    const loopFailure = new Promise<Error>(resolve => { failLoop = resolve })
+    let runSignal: AbortSignal | undefined
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: {
+        id: 1001n, date: 1_700_000_000n, fromId: 42n, message: "long task",
+      } }],
+      eventLoopError: () => loopFailure,
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyPayload: { text: "late reply" },
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        runSignal = replyOptions.abortSignal
+        await new Promise<void>(resolve => runSignal?.addEventListener("abort", () => resolve(), { once: true }))
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    const finished = expect(handle.done).rejects.toThrow(failure.message)
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      failLoop(failure)
+      await finished
+      expect(runSignal?.aborted).toBe(true)
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      failLoop(failure)
+      await handle.stop()
+    }
   })
 
   it("dispatches stop requests without waiting for an active inbound run", async () => {
@@ -9926,7 +10065,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("suppresses an empty skip when source delivery is message-tool-only", async () => {
+  it.each([false, true])("suppresses message-tool-only silence when fallback eligibility is %s", async (eligible) => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -9944,7 +10083,7 @@ describe("inline/monitor", () => {
         "6742": { kind: "direct", title: "Alice" },
       },
       skipInfos: [{ reason: "empty" }],
-      dispatchReplyResult: { sourceReplyDeliveryMode: "message_tool_only" },
+      dispatchReplyResult: { sourceReplyDeliveryMode: "message_tool_only", noVisibleReplyFallbackEligible: eligible },
     })
 
     const handle = await harness.monitorInlineProvider({
@@ -9960,6 +10099,31 @@ describe("inline/monitor", () => {
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
+  })
+
+  it.each([false, true])("honors host send-policy denial when delivery failure is %s", async (failed) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 6742n, message: {
+        id: 57052n, date: 1_700_000_014n, fromId: 42n, message: "dm",
+      } }],
+      chats: { "6742": { kind: "direct", title: "Alice" } },
+      skipInfos: [{ reason: "empty" }],
+      ...(failed ? { dispatchErrorInfos: [{ kind: "final" }] } : {}),
+      dispatchReplyResult: { sendPolicyDenied: true, noVisibleReplyFallbackEligible: true },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitForMockPromise(harness.calls.dispatchReply)
+      await new Promise(resolve => setTimeout(resolve, 25))
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      await handle.stop()
+    }
   })
 
   it("recovers only when the host declares a no-visible-response fallback eligible", async () => {

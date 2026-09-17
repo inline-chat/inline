@@ -6,10 +6,6 @@ import {
   matchesApprovalRequestFilters,
 } from "openclaw/plugin-sdk/approval-client-runtime"
 import { resolveApprovalRequestChannelAccountId } from "openclaw/plugin-sdk/approval-native-runtime"
-import type {
-  ExecApprovalRequest,
-  PluginApprovalRequest,
-} from "openclaw/plugin-sdk/approval-runtime"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
   normalizeLowercaseStringOrEmpty,
@@ -17,8 +13,8 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime"
 import { listInlineAccountIds, resolveInlineAccount } from "./accounts.js"
 import { normalizeAccountId } from "../openclaw-compat.js"
+import type { InlineApprovalRequest as ApprovalRequest } from "./approval-contract.js"
 
-type ApprovalRequest = ExecApprovalRequest | PluginApprovalRequest
 type InlineExecApprovalConfig = {
   enabled?: boolean | "auto"
   approvers?: Array<string | number>
@@ -116,8 +112,12 @@ function countInlineExecApprovalEligibleAccounts(params: {
   }).length
 }
 
-function isExecApprovalRequest(request: ApprovalRequest): request is ExecApprovalRequest {
-  return "command" in request.request
+function isExecApprovalRequest(request: ApprovalRequest): boolean {
+  // System-agent requests also carry a command. Respect explicit ownership
+  // before falling back to the legacy exec request shape.
+  return request.approvalKind != null
+    ? request.approvalKind === "exec"
+    : "command" in request.request && !("proposalHash" in request.request)
 }
 
 function isTargetForwardingMode(mode?: string): boolean {

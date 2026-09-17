@@ -23,13 +23,90 @@ type InlineInstallRecord = {
 }
 
 type InlinePluginInspection = {
-  plugin?: { version?: string }
-  source?: { kind?: string }
+  plugin?: { version?: unknown }
+  install?: {
+    source?: unknown
+    version?: unknown
+    resolvedVersion?: unknown
+    resolvedAt?: unknown
+    installedAt?: unknown
+  }
+  source?: { kind?: unknown }
 }
 
 type InlineInstallMetadata = {
   record: InlineInstallRecord | undefined
   timestampIsFilesystemMetadata: boolean
+}
+
+const PLUGIN_INSPECTION_TIMEOUT_MS = 2_000
+
+function safeInstallSource(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const source = value.trim()
+  return /^[a-z0-9][a-z0-9._-]{0,31}$/i.test(source) ? source : undefined
+}
+
+function safeVersion(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const version = value.trim()
+  return /^[a-z0-9][a-z0-9.+_-]{0,127}$/i.test(version) ? version : undefined
+}
+
+function safeTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 128 || Number.isNaN(new Date(value).valueOf())) {
+    return undefined
+  }
+  return value
+}
+
+function inspectedInstallRecord(inspection: InlinePluginInspection): Partial<InlineInstallRecord> {
+  const source = safeInstallSource(inspection.install?.source) ?? safeInstallSource(inspection.source?.kind)
+  const version = safeVersion(inspection.install?.version) ?? safeVersion(inspection.plugin?.version)
+  const resolvedVersion = safeVersion(inspection.install?.resolvedVersion)
+  const resolvedAt = safeTimestamp(inspection.install?.resolvedAt)
+  const installedAt = safeTimestamp(inspection.install?.installedAt)
+
+  return {
+    ...(source ? { source } : {}),
+    ...(version ? { version } : {}),
+    ...(resolvedVersion ? { resolvedVersion } : {}),
+    ...(resolvedAt ? { resolvedAt } : {}),
+    ...(installedAt ? { installedAt } : {}),
+  }
+}
+
+function savedInstallRecord(value: unknown): InlineInstallRecord | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+  const candidate = value as Record<string, unknown>
+  const source = safeInstallSource(candidate.source)
+  const version = safeVersion(candidate.version)
+  const resolvedVersion = safeVersion(candidate.resolvedVersion)
+  const resolvedAt = safeTimestamp(candidate.resolvedAt)
+  const installedAt = safeTimestamp(candidate.installedAt)
+  const record = {
+    ...(source ? { source } : {}),
+    ...(version ? { version } : {}),
+    ...(resolvedVersion ? { resolvedVersion } : {}),
+    ...(resolvedAt ? { resolvedAt } : {}),
+    ...(installedAt ? { installedAt } : {}),
+  }
+  return Object.keys(record).length > 0 ? record : undefined
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Timed out inspecting the Inline plugin installation")), timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function formatTimestamp(value: string | undefined): string {
@@ -48,23 +125,25 @@ function summarizeSync(status: InlineCatalogSyncStatus | undefined): string {
 
 function installRecord(api: OpenClawPluginApi): InlineInstallRecord | undefined {
   const plugins = (api.config as {
-    plugins?: { installs?: Record<string, InlineInstallRecord> }
+    plugins?: { installs?: Record<string, unknown> }
   }).plugins
-  return plugins?.installs?.[api.id] ?? plugins?.installs?.inline
+  return savedInstallRecord(plugins?.installs?.[api.id] ?? plugins?.installs?.inline)
 }
 
 async function resolveInstallMetadata(api: OpenClawPluginApi): Promise<InlineInstallMetadata> {
   let record = installRecord(api)
 
   try {
-    if (await api.runtime.gateway.isAvailable()) {
-      const inspection = await api.runtime.gateway.request<InlinePluginInspection>("plugins.inspect", {
+    const inspection = await withTimeout((async () => {
+      if (!await api.runtime.gateway.isAvailable()) return undefined
+      return await api.runtime.gateway.request<InlinePluginInspection>("plugins.inspect", {
         pluginId: api.id,
       })
+    })(), PLUGIN_INSPECTION_TIMEOUT_MS)
+    if (inspection) {
       record = {
         ...record,
-        ...(inspection.plugin?.version ? { version: inspection.plugin.version } : {}),
-        ...(inspection.source?.kind ? { source: inspection.source.kind } : {}),
+        ...inspectedInstallRecord(inspection),
       }
     }
   } catch {

@@ -30,7 +30,7 @@ describe("plugin sdk runtime imports", () => {
     const srcRoot = path.join(import.meta.dirname, ".")
     const files = listRuntimeSourceFiles(srcRoot)
     const offenders: string[] = []
-    const runtimeNamedRootImportRe = /import\s*\{[\s\S]*?\}\s*from\s*"openclaw\/plugin-sdk"/gu
+    const runtimeNamedRootImportRe = /import\s*\{[^}]*\}\s*from\s*"openclaw\/plugin-sdk"/u
 
     for (const filePath of files) {
       const text = readFileSync(filePath, "utf8")

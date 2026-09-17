@@ -409,6 +409,7 @@ type InlineDispatchResult = NonNullable<Parameters<typeof hasVisibleInboundReply
   noVisibleReplyFallbackEligible?: boolean
   deliberateSilentTerminalReply?: boolean
   sourceReplyDeliveryMode?: string
+  sendPolicyDenied?: boolean
 }
 
 type InlineReplyDeliveryResult = {
@@ -913,6 +914,12 @@ function isRecoverableInlineConnectionError(line: string): boolean {
 
 function isNonStickyInlineSdkWarning(line: string): boolean {
   return line.startsWith("GET_UPDATES_STATE failed (continuing without date cursor)")
+}
+
+function isNonStickyInlineSdkRecoveryDiagnostic(message: string): boolean {
+  return message === "Sync recovery scheduled" ||
+    message === "Sync bucket unavailable" ||
+    message === "Sync discovery unavailable"
 }
 
 function isInlineConnectionRecovered(diagnostics: unknown): boolean {
@@ -3294,7 +3301,9 @@ export async function monitorInlineProvider(params: {
   statusSink?: StatusSink
 }): Promise<InlineMonitorHandle> {
   let { cfg } = params
-  const { account, runtime, abortSignal, log, statusSink } = params
+  const { account, runtime, log, statusSink } = params
+  const shutdown = new AbortController()
+  const abortSignal = AbortSignal.any([params.abortSignal, shutdown.signal])
   const core = getInlineRuntime()
 
   if (!account.configured || !account.baseUrl) {
@@ -3355,10 +3364,15 @@ export async function monitorInlineProvider(params: {
     },
     error: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
-      if (msg === "Sync recovery scheduled" || msg === "Sync bucket unavailable" || msg === "Sync discovery unavailable") {
+      const isRecoveryDiagnostic = isNonStickyInlineSdkRecoveryDiagnostic(msg)
+      if (isRecoveryDiagnostic) {
         reportOpenClawPluginError("sdk.sync_recovery", new Error(line))
       }
       log?.error(line)
+      if (isRecoveryDiagnostic) {
+        pushDiagnostics()
+        return
+      }
       if (isRecoverableInlineConnectionError(line)) {
         recoverableConnectionError = line
       } else {
@@ -3901,6 +3915,7 @@ export async function monitorInlineProvider(params: {
   }
 
   const handleInboundNow = async (input: InlineParsedInboundEvent): Promise<void> => {
+    if (abortSignal.aborted) return
     const chatId = input.chatId
     const msg = input.msg
     const rawBodyOverride = input.rawBodyOverride ?? null
@@ -5361,7 +5376,7 @@ export async function monitorInlineProvider(params: {
       closing: false,
     }
     const renderInlineProgressPlaceholder = async (): Promise<void> => {
-      if (!progressPlaceholderEnabled || progressState.closing || adoptingThread) return
+      if (abortSignal.aborted || !progressPlaceholderEnabled || progressState.closing || adoptingThread) return
       const text = sanitizeInlineDeliveryText(
         formatChannelProgressDraftText({
           entry: account.config,
@@ -5373,7 +5388,7 @@ export async function monitorInlineProvider(params: {
 
       progressState.opChain = progressState.opChain
         .then(async () => {
-          if (progressState.closing || text === progressState.text) return
+          if (abortSignal.aborted || progressState.closing || text === progressState.text) return
           if (progressState.messageId == null) {
             const sent = await client.sendMessage({
               chatId: deliveryChatId,
@@ -5488,6 +5503,7 @@ export async function monitorInlineProvider(params: {
         Math.max(INLINE_EDIT_STREAM_MIN_INTERVAL_MS, Math.ceil(requestDurationMs * 1.25)),
       )
     const sendEditStreamSnapshot = async (snapshot: InlineEditStreamSnapshot): Promise<void> => {
+      if (abortSignal.aborted) return
       try {
         if (editStreamState.messageId == null) {
           let sent: Awaited<ReturnType<typeof client.sendMessage>>
@@ -5548,6 +5564,11 @@ export async function monitorInlineProvider(params: {
       }
     }
     const scheduleEditStreamDrain = (): void => {
+      if (abortSignal.aborted) {
+        editStreamState.pendingSnapshot = null
+        clearEditStreamTimer()
+        return
+      }
       if (
         editStreamState.failed ||
         editStreamState.inFlight != null ||
@@ -5811,7 +5832,7 @@ export async function monitorInlineProvider(params: {
       await resetEditStreamForAssistantMessage()
     }
     const handlePartialStreamPayload = (payload: InlineReplyPayload): void => {
-      if (adoptingThread) return
+      if (abortSignal.aborted || adoptingThread) return
       const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
       if (!visiblePayload) return
       const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
@@ -5929,6 +5950,7 @@ export async function monitorInlineProvider(params: {
     }
 
     const replyOptions = {
+      abortSignal,
       onObservedReplyDelivery: async () => {
         delivered = true
       },
@@ -6135,7 +6157,7 @@ export async function monitorInlineProvider(params: {
       let undeliveredFinalActions: MessageActions | undefined
       try {
         const dispatch = await dispatchInlineReplyWithSessionInitRetry({
-          shouldRetry: () => !delivered && !skippedNonSilent && !failedNonSilent,
+          shouldRetry: () => !abortSignal.aborted && !delivered && !skippedNonSilent && !failedNonSilent,
           onRetry: (retry, delayMs) => {
             log?.warn(
               `[${account.accountId}] AGENT_DISPATCH_TRACE phase=session_init_conflict_retry ` +
@@ -6152,6 +6174,7 @@ export async function monitorInlineProvider(params: {
               payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
             ) => {
+              if (abortSignal.aborted) return inlineReplyDeliveryResult(false)
               let payloadVisible = false
               const markPayloadVisible = () => {
                 delivered = true
@@ -6539,11 +6562,12 @@ export async function monitorInlineProvider(params: {
         dispatchResult.noVisibleReplyFallbackEligible === true
       const explicitFailure = dispatchError != null || failedNonSilent
       if (
+        !abortSignal.aborted && dispatchResult.sendPolicyDenied !== true &&
         !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
-            !deliberateSilence &&
-            ((skippedNonSilent && !skipFallbackSuppressed) || hostRequestedNoVisibleRecovery)))
+            !deliberateSilence && !skipFallbackSuppressed &&
+            (skippedNonSilent || hostRequestedNoVisibleRecovery)))
       ) {
         botPresenceLifecycle.fail()
         const fallbackText =
@@ -6568,13 +6592,17 @@ export async function monitorInlineProvider(params: {
       }
     } finally {
       endActiveThreadRoute()
+      if (abortSignal.aborted) {
+        runTypingCleanup()
+        botPresenceLifecycle.cleanup()
+      }
       if (adoptedThreadThisTurn) {
         await sendDeliveryTyping(deliveryChatId, false).catch((error) =>
           runtime.error?.(`inline adopted thread typing cleanup failed: ${String(error)}`))
         botPresenceLifecycle.cleanup()
       }
       await setParentThreadCreationTyping(false)
-      if (callbackActionEvent && !callbackActionAnswered) {
+      if (!abortSignal.aborted && callbackActionEvent && !callbackActionAnswered) {
         try {
           await answerCallbackIfNeeded()
         } catch (error) {
@@ -7358,12 +7386,15 @@ export async function monitorInlineProvider(params: {
     run: () => Promise<void>,
     options?: { serialKey?: string },
   ): void => {
+    if (abortSignal.aborted) return
     let task: Promise<void>
     try {
       if (options?.serialKey) {
         const serialKey = options.serialKey
         const previous = inboundTaskChains.get(serialKey) ?? Promise.resolve()
-        task = previous.catch(() => undefined).then(run)
+        task = previous.catch(() => undefined).then(() => {
+          if (!abortSignal.aborted) return run()
+        })
         const settled = task.catch(() => undefined)
         inboundTaskChains.set(serialKey, settled)
         const cleanup = () => {
@@ -7552,8 +7583,32 @@ export async function monitorInlineProvider(params: {
   }
 
   const drainInboundTasks = async (): Promise<void> => {
-    while (pendingInboundTasks.size > 0) {
-      await Promise.allSettled(pendingInboundTasks)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const drained = (async () => {
+      while (pendingInboundTasks.size > 0) {
+        await Promise.allSettled(pendingInboundTasks)
+      }
+    })()
+    // Match native channel shutdown: cooperative runs receive cancellation;
+    // a host callback that ignores it must not hold the gateway restart forever.
+    let onAbort: (() => void) | undefined
+    try {
+      await Promise.race([
+        drained,
+        new Promise<void>((resolve) => {
+          onAbort = () => {
+            timer = setTimeout(() => {
+              log?.warn(`[${account.accountId}] inline shutdown grace expired with pending inbound work`)
+              resolve()
+            }, 15_000)
+          }
+          if (abortSignal.aborted) onAbort()
+          else abortSignal.addEventListener("abort", onAbort, { once: true })
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+      if (onAbort) abortSignal.removeEventListener("abort", onAbort)
     }
   }
 
@@ -7778,6 +7833,7 @@ export async function monitorInlineProvider(params: {
       return
     }
     stopPromise = (async () => {
+      shutdown.abort()
       clearInterval(diagnosticsTimer)
       clearPendingInlineVoiceMessages()
       await client.close().catch(() => {})
@@ -7787,18 +7843,19 @@ export async function monitorInlineProvider(params: {
     await stopPromise
   }
 
-  abortSignal.addEventListener(
+  params.abortSignal.addEventListener(
     "abort",
     () => {
       void stop()
     },
     { once: true },
   )
+  if (params.abortSignal.aborted) void stop()
 
   const done = loop.then(
     drainInboundTasks,
     async (error) => {
-      await drainInboundTasks()
+      await stop()
       throw error
     },
   )
