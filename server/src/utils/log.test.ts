@@ -1,4 +1,5 @@
 import { describe, expect, it, spyOn } from "bun:test"
+import * as Sentry from "@sentry/bun"
 import { beforeSendLog, Log, LogLevel, redactString, redactValue } from "./log"
 
 describe("log levels", () => {
@@ -25,6 +26,54 @@ describe("log levels", () => {
 })
 
 describe("log redaction", () => {
+  it("bounds deep, cyclic, binary and accessor metadata without exposing its contents", () => {
+    const privateValue = "private-synthetic-payload"
+    let nested: unknown = { payload: privateValue }
+    for (let i = 0; i < 10; i++) nested = { nested }
+    const cyclic: Record<string, unknown> = { nested, bytes: Buffer.from(privateValue) }
+    cyclic["self"] = cyclic
+    Object.defineProperty(cyclic, "getter", { enumerable: true, get() { throw new Error(privateValue) } })
+    const output = JSON.stringify(redactValue(cyclic))
+    expect(output).not.toContain(privateValue)
+    expect(output).toContain("<truncated>")
+    expect(output).toContain("<circular>")
+    expect(output).toContain("<binary>")
+    expect(output).toContain("<accessor>")
+  })
+
+  it("removes filenames and URL credentials at console and Sentry sinks", () => {
+    const previousDebug = process.env["DEBUG"]
+    process.env["DEBUG"] = "1"
+    const consoleSpy = spyOn(console, "warn").mockImplementation(() => {})
+    const sentrySpy = spyOn(Sentry.logger, "warn").mockImplementation(() => {})
+    try {
+      const metadata = { fileName: "private-filename.pdf", url: "https://host.test/private?sig=signed-secret" }
+      new Log("redaction-test", LogLevel.WARN).warn("Failed https://host.test/private?sig=signed-secret", metadata)
+      for (const calls of [consoleSpy.mock.calls, sentrySpy.mock.calls]) {
+        const output = JSON.stringify(calls)
+        expect(output).not.toContain("private-filename")
+        expect(output).not.toContain("signed-secret")
+        expect(output).toContain("redacted")
+      }
+      let nested: unknown = { token: "deep-secret" }
+      for (let i = 0; i < 10; i++) nested = { nested }
+      const sentry = beforeSendLog({ level: "warn", message: "safe", attributes: { nested } })
+      expect(JSON.stringify(sentry)).not.toContain("deep-secret")
+    } finally {
+      consoleSpy.mockRestore()
+      sentrySpy.mockRestore()
+      if (previousDebug === undefined) Reflect.deleteProperty(process.env, "DEBUG")
+      else process.env["DEBUG"] = previousDebug
+    }
+  })
+
+  it("does not let malformed diagnostics break redaction or expose a raw fallback", () => {
+    expect(redactValue(new Date(NaN))).toBe("<unserializable>")
+    const error = new Error("safe")
+    Object.defineProperty(error, "message", { get() { throw new Error("private-diagnostic") } })
+    expect(redactValue(error)).toBe("<unserializable>")
+  })
+
   it("redacts bearer and path tokens in strings", () => {
     const rawToken = "123:INabcdefghijklmnopqrstuvwxyz"
     const encodedToken = "123%3AINabcdefghijklmnopqrstuvwxyz"

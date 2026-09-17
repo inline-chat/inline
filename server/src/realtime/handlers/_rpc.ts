@@ -1,3 +1,4 @@
+import { PREAUTH_METHODS } from "@in/server/realtime/admission"
 import { transcribeVoiceDraft } from "./voice.transcribeDraft"
 import { requestBotFilesystem, answerBotFilesystem } from "@in/server/functions/bot.filesystem"
 import { Method, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
@@ -159,7 +160,7 @@ import {
 const log = new Log("Realtime.RPC")
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
-  // user still unauthenticated here.
+  if (!handlerContext.userId && !PREAUTH_METHODS.has(call.method)) throw RealtimeRpcError.Unauthenticated()
   log.trace("rpc call", Method[call.method])
 
   switch (call.method) {

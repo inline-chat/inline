@@ -1,3 +1,4 @@
+import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import {
   AuthBeginResult_Delivery,
   type AuthBeginRequest,
@@ -228,6 +229,7 @@ export class InlineProtocolAuthOperations {
     const now = new Date()
     const rateStart = new Date(now.getTime() - RATE_WINDOW_MS)
     const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS)
+    await assertOtpDeliveryAllowed({ channel: identifier.delivery, contact: identifier.value, ip: context.metadata?.ip })
     const encryptedIdentifier = this.challengeCipher.encrypt(challengeId, identifier.value)
     await db.transaction(async (tx) => {
       // Serialize overlapping quota dimensions across connections/processes.

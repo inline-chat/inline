@@ -1,3 +1,4 @@
+import { admitPreauthMessage } from "./admission"
 import { connectionManager } from "@in/server/ws/connections"
 import {
   ClientMessage,
@@ -163,6 +164,8 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
     sendRpcReply,
   }
 
+  const releaseAdmission = admitPreauthMessage(conn ?? ws, Boolean(conn?.userId), message.body.oneofKind === "connectionInit")
+  if (!releaseAdmission) { ws.close(); return }
   try {
     switch (message.body.oneofKind) {
       case "connectionInit":
@@ -297,6 +300,8 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         },
       })
     }
+  } finally {
+    releaseAdmission()
   }
 }
 

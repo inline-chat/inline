@@ -9,6 +9,7 @@ import { SessionsModel } from "@in/server/db/models/sessions"
 import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
 
 let deliveredCode: string | undefined
+let deliveredEmails = 0
 let preludeGeneratedSends = 0
 let preludeCustomSends = 0
 let preludeChecks = 0
@@ -18,6 +19,7 @@ const priorPhoneCodeMode = process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"]
 
 mock.module("@in/server/utils/email", () => ({
   sendEmail: async (input: { content: { variables: { code: string } } }) => {
+    deliveredEmails++
     deliveredCode = input.content.variables.code
   },
 }))
@@ -57,6 +59,7 @@ describe("Inline Protocol native authentication lifecycle", () => {
 
   beforeEach(async () => {
     deliveredCode = undefined
+    deliveredEmails = 0
     preludeGeneratedSends = 0
     preludeCustomSends = 0
     preludeChecks = 0
@@ -322,14 +325,15 @@ describe("Inline Protocol native authentication lifecycle", () => {
     await expect(operations.complete({ challengeId: begun.challengeId, code }, context)).rejects.toThrow()
   })
 
-  test("parallel code sends cannot overrun the shared challenge quota", async () => {
+  test("parallel code sends respect the contact cooldown before delivery", async () => {
     const results = await Promise.allSettled(Array.from({ length: 8 }, () => operations.begin({
       identifier: { oneofKind: "email", email: "quota@example.com" },
       client: { deviceId: "quota-device" },
     }, context)))
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(5)
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(3)
-    expect(await db.select().from(schema.inlineProtocolAuthChallenges)).toHaveLength(5)
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(7)
+    expect(deliveredEmails).toBe(1)
+    expect(await db.select().from(schema.inlineProtocolAuthChallenges)).toHaveLength(1)
   })
 
   test.each(["identifier", "network", "device"])("code sends across keys share the %s quota", async (dimension) => {
@@ -349,8 +353,9 @@ describe("Inline Protocol native authentication lifecycle", () => {
       identifier: { oneofKind: "email", email: dimension === "identifier" ? "shared@example.com" : `person${index}@example.com` },
       client: { deviceId: dimension === "device" ? "shared-device" : `device-${index}` },
     }, context)))
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(5)
-    expect(await db.select().from(schema.inlineProtocolAuthChallenges)).toHaveLength(5)
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(dimension === "identifier" ? 1 : 5)
+    expect(deliveredEmails).toBe(dimension === "identifier" ? 1 : 5)
+    expect(await db.select().from(schema.inlineProtocolAuthChallenges)).toHaveLength(dimension === "identifier" ? 1 : 5)
   })
 
   test("a valid proof remains usable after the invite-required response", async () => {

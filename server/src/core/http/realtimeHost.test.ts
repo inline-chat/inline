@@ -87,6 +87,90 @@ const upgrade = (
 }
 
 describe("raw Bun realtime transport", () => {
+  it("rejects excess upgrades before allocating a protocol session", async () => {
+    let upgrades = 0
+    const transport = makeCoreRealtimeTransport(makeContext({ open: () => Effect.die("not exercised") }))
+    const server = {
+      requestIP: () => ({ address: "192.0.2.1" }),
+      upgrade: () => { upgrades++; return true },
+    } as unknown as Server<RealtimeWebSocketData>
+    const request = new Request("http://inline.test/realtime")
+    for (let i = 0; i < 120; i++) expect(transport.tryUpgrade(request, server)).toBe(true)
+    const rejected = transport.tryUpgrade(request, server)
+    expect(rejected).toBeInstanceOf(Response)
+    expect((rejected as Response).status).toBe(429)
+    expect(upgrades).toBe(120)
+    await transport.shutdown()
+  })
+
+  it("bounds work before awaiting a slow session handler", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    let handled = 0
+    let rejected = 0
+    const transport = makeCoreRealtimeTransport(makeContext({
+      open: (peer) => Effect.succeed({
+        connectionId: peer.id, isAuthenticated: () => true, close: Effect.void,
+        handle: () => Effect.promise(async () => { handled++; await pending }),
+      }),
+    }))
+    const data = upgrade(transport, new Request("http://inline.test/realtime"))
+    const socket = { data, close: () => { rejected++ }, sendBinary: () => 1 } as unknown as ServerWebSocket<RealtimeWebSocketData>
+    await transport.websocket.open?.(socket)
+    await data.connection
+    const frame = Buffer.from(ClientMessage.toBinary({ id: 1n, seq: 1, body: { oneofKind: "ping", ping: { nonce: 1n } } }))
+    const requests = Array.from({ length: 40 }, () => transport.websocket.message(socket, frame))
+    await Promise.resolve()
+    expect(handled).toBeLessThanOrEqual(32)
+    expect(rejected).toBeGreaterThan(0)
+    release()
+    await Promise.all(requests)
+    expect(data.pendingMessages).toBe(0)
+    expect(data.pendingBytes).toBe(0)
+    await transport.websocket.close?.(socket, 1000, "test")
+    await transport.shutdown()
+  })
+
+  it("rejects large pre-auth frames before decoding", async () => {
+    let handled = 0
+    let rejected = 0
+    const transport = makeCoreRealtimeTransport(makeContext({
+      open: (peer) => Effect.succeed({ connectionId: peer.id, close: Effect.void,
+        handle: () => Effect.sync(() => { handled++ }) }),
+    }))
+    const data = upgrade(transport, new Request("http://inline.test/realtime"))
+    const socket = { data, close: () => { rejected++ }, sendBinary: () => 1 } as unknown as ServerWebSocket<RealtimeWebSocketData>
+    await transport.websocket.open?.(socket)
+    await data.connection
+    await transport.websocket.message(socket, Buffer.alloc(65_537))
+    expect(handled).toBe(0)
+    expect(rejected).toBe(1)
+    await transport.websocket.close?.(socket, 1000, "test")
+    await transport.shutdown()
+  })
+
+  it("rejects large frames even while opening a session and bounds retained authenticated bytes", async () => {
+    const transport = makeCoreRealtimeTransport(makeContext({ open: () => Effect.die("not exercised") }))
+    const data = upgrade(transport, new Request("http://inline.test/realtime"))
+    let release!: () => void
+    data.connection = new Promise((resolve) => { release = () => resolve(undefined) })
+    const closes: number[] = []
+    const socket = { data, close: (code: number) => { closes.push(code) } } as unknown as ServerWebSocket<RealtimeWebSocketData>
+    await transport.websocket.message(socket, Buffer.alloc(65_537))
+    expect(closes).toEqual([1009])
+    data.isAuthenticated = () => true
+    const frame = Buffer.alloc(16 * 1024 * 1024)
+    const first = transport.websocket.message(socket, frame)
+    const second = transport.websocket.message(socket, frame)
+    await transport.websocket.message(socket, frame)
+    expect(closes).toEqual([1009, 1013])
+    expect(data.pendingBytes).toBe(32 * 1024 * 1024)
+    release()
+    await Promise.all([first, second])
+    expect(data.pendingBytes).toBe(0)
+    await transport.shutdown()
+  })
+
   it("pins transport settings and bounded trusted metadata", () => {
     const transport =
       makeCoreRealtimeTransport(

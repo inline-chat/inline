@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import { app } from "../legacyServer"
 import { db } from "@in/server/db"
-import { inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
+import { authDeliveryBudgets, inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { hashLoginCode, hashToken } from "@in/server/utils/auth"
 import { setupTestLifecycle } from "./setup"
@@ -213,7 +213,7 @@ describe("API Endpoints", () => {
       })
     })
 
-    it("creates independent email login challenges during active TTL", async () => {
+    it("enforces the resend cooldown while preserving independent outstanding challenges", async () => {
       const email = "stable-code@example.com"
 
       const firstSend = new Request("http://localhost/v1/sendEmailCode", {
@@ -238,6 +238,13 @@ describe("API Endpoints", () => {
         body: JSON.stringify({ email }),
       })
 
+      const throttled = await testServer.handle(secondSend.clone())
+      expect(throttled.status).toBe(420)
+      expect(await throttled.json()).toMatchObject({ ok: false, error: "FLOOD" })
+      expect(await db.select().from(loginCodes).where(eq(loginCodes.email, email))).toHaveLength(1)
+
+      // Expire only the synthetic delivery budget; the original login challenge remains valid.
+      await db.update(authDeliveryBudgets).set({ expiresAt: new Date(Date.now() - 1) })
       const secondResponse = await testServer.handle(secondSend)
       expect(secondResponse.status).toBe(200)
       const secondJson = await secondResponse.json()

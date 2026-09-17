@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { app } from "../../legacyServer"
 import { db } from "@in/server/db"
-import { loginCodes, sessions, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
+import { authDeliveryBudgets, loginCodes, sessions, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { generateTotpCode } from "@in/server/utils/totp"
@@ -85,6 +85,16 @@ describe("Admin auth", () => {
     expect(codes[0]?.code).toBeNull()
     expect(codes[0]?.codeHash).toBeDefined()
     expect(codes[0]?.challengeId).toBe(firstJson.challengeToken)
+
+    const throttled = await app.handle(
+      buildRequest("/admin/auth/send-email-code", {
+        method: "POST", body: { email },
+      }),
+    )
+    expect(throttled.status).toBe(429)
+    expect(await throttled.json()).toEqual({ ok: false, error: "too_many_requests" })
+    expect(await db.select().from(loginCodes).where(eq(loginCodes.email, email))).toHaveLength(1)
+    await db.update(authDeliveryBudgets).set({ expiresAt: new Date(Date.now() - 1) })
 
     const secondResponse = await app.handle(
       buildRequest("/admin/auth/send-email-code", {

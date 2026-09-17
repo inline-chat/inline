@@ -1,3 +1,7 @@
+import type { Transaction } from "@in/server/db/types"
+import { InlineError } from "@in/server/types/errors"
+import { recordAdminLoginFailure, completeAdminPasswordLogin } from "@in/server/modules/auth/adminLoginAttempts"
+import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import { Elysia, t } from "elysia"
 import type { Server } from "bun"
 import os from "node:os"
@@ -46,9 +50,6 @@ const ADMIN_TTL_MS = 1000 * 60 * 60 * 24 * 3
 const ADMIN_COOKIE_MAX_AGE = Math.floor(ADMIN_TTL_MS / 1000)
 const ADMIN_PASSWORD_MIN_LENGTH = 12
 const STEP_UP_WINDOW_MS = 1000 * 60 * 15
-const ADMIN_LOGIN_MAX_ATTEMPTS = 5
-const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15
-const ADMIN_LOGIN_RESET_MS = 1000 * 60 * 60 * 24
 const ADMIN_LOGIN_IP_MAX_ATTEMPTS = 30
 const ADMIN_LOGIN_IP_WINDOW_MS = 1000 * 60 * 15
 const ADMIN_ACTIVE_USERS_LIMIT = 200
@@ -149,9 +150,13 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       }
 
       try {
-        const challengeToken = await sendAdminLoginCode(email)
+        const challengeToken = await sendAdminLoginCode(email, getRequestIp(request, server))
         return challengeToken ? { ok: true, challengeToken } : { ok: true }
       } catch (error) {
+        if (error instanceof InlineError && error.type === "FLOOD") {
+          set.status = 429
+          return { ok: false, error: "too_many_requests" }
+        }
         Log.shared.error("Admin send email code failed", error)
         set.status = 500
         return { ok: false, error: "send_failed" }
@@ -285,20 +290,6 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         return { ok: false, error: "login_locked" }
       }
 
-      let failedAttempts = adminUser.failedLoginAttempts
-
-      if (
-        adminUser.lastLoginAttemptAt &&
-        now.getTime() - adminUser.lastLoginAttemptAt.getTime() > ADMIN_LOGIN_RESET_MS &&
-        adminUser.failedLoginAttempts > 0
-      ) {
-        await db
-          .update(superadminUsers)
-          .set({ failedLoginAttempts: 0, loginLockedUntil: null, lastLoginAttemptAt: null })
-          .where(eq(superadminUsers.id, adminUser.id))
-        failedAttempts = 0
-      }
-
       if (!adminUser.passwordHash) {
         set.status = 403
         return { ok: false, error: "password_not_set" }
@@ -306,18 +297,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
 
       const passwordValid = await Bun.password.verify(body.password ?? "", adminUser.passwordHash)
       if (!passwordValid) {
-        const nextAttempts = failedAttempts + 1
-        const lockedUntil =
-          nextAttempts >= ADMIN_LOGIN_MAX_ATTEMPTS ? new Date(now.getTime() + ADMIN_LOGIN_LOCK_MS) : null
-
-        await db
-          .update(superadminUsers)
-          .set({
-            failedLoginAttempts: nextAttempts,
-            lastLoginAttemptAt: now,
-            loginLockedUntil: lockedUntil,
-          })
-          .where(eq(superadminUsers.id, adminUser.id))
+        const lockedUntil = await recordAdminLoginFailure(adminUser.id)
 
         if (lockedUntil) {
           set.status = 429
@@ -332,18 +312,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       if (totpEnabled) {
         const secret = getTotpSecret(adminUser)
         if (!secret || !verifyTotpCode(secret, body.totpCode ?? "")) {
-          const nextAttempts = failedAttempts + 1
-          const lockedUntil =
-            nextAttempts >= ADMIN_LOGIN_MAX_ATTEMPTS ? new Date(now.getTime() + ADMIN_LOGIN_LOCK_MS) : null
-
-          await db
-            .update(superadminUsers)
-            .set({
-              failedLoginAttempts: nextAttempts,
-              lastLoginAttemptAt: now,
-              loginLockedUntil: lockedUntil,
-            })
-            .where(eq(superadminUsers.id, adminUser.id))
+          const lockedUntil = await recordAdminLoginFailure(adminUser.id)
 
           if (lockedUntil) {
             set.status = 429
@@ -373,12 +342,11 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       }
 
       const userAgent = request.headers.get("user-agent") ?? ""
-      const { token } = await createAdminSession({
-        userId: user.id,
-        ip,
-        userAgent,
-        stepUpAt: totpEnabled ? new Date() : null,
-      })
+      const session = await completeAdminPasswordLogin(adminUser, (tx) => createAdminSession({
+        userId: user.id, ip, userAgent, stepUpAt: totpEnabled ? new Date() : null,
+      }, tx))
+      if (!session) { set.status = 429; return { ok: false, error: "login_locked" } }
+      const { token } = session
 
       const secure = isProd
       const adminCookie = cookie as AdminCookieStore
@@ -390,11 +358,6 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         path: "/",
         maxAge: ADMIN_COOKIE_MAX_AGE,
       })
-
-      await db
-        .update(superadminUsers)
-        .set({ failedLoginAttempts: 0, loginLockedUntil: null, lastLoginAttemptAt: now })
-        .where(eq(superadminUsers.id, adminUser.id))
 
       clearAdminIpAttempts(ip)
 
@@ -1646,11 +1609,12 @@ const getTotpSecret = (adminUser: typeof superadminUsers.$inferSelect) => {
   })
 }
 
-const sendAdminLoginCode = async (email: string): Promise<string> => {
+const sendAdminLoginCode = async (email: string, ip?: string): Promise<string> => {
   const existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
   const existingUser = existingUsers[0] ? existingUsers[0].pendingSetup !== true : false
   const firstName = existingUsers[0]?.firstName ?? undefined
 
+  await assertOtpDeliveryAllowed({ channel: "email", contact: email, ip })
   const { code, challengeToken } = await issueEmailLoginChallenge({ email })
 
   await sendEmail({
@@ -1717,13 +1681,13 @@ type CreateAdminSessionInput = {
   stepUpAt?: Date | null
 }
 
-const createAdminSession = async ({ userId, ip, userAgent, stepUpAt }: CreateAdminSessionInput) => {
+const createAdminSession = async ({ userId, ip, userAgent, stepUpAt }: CreateAdminSessionInput, query: Pick<Transaction, "insert"> = db) => {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + ADMIN_TTL_MS)
   const idleExpiresAt = new Date(now.getTime() + ADMIN_IDLE_MS)
   const { token, tokenHash } = await generateToken(userId)
 
-  await db.insert(superadminSessions).values({
+  await query.insert(superadminSessions).values({
     userId,
     tokenHash,
     lastSeenAt: now,

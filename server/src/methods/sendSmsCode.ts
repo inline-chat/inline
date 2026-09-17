@@ -1,3 +1,4 @@
+import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
@@ -53,6 +54,8 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
     }
     await assertNewSignupAllowed(existingUser)
+
+    await assertOtpDeliveryAllowed({ channel: "sms", contact: formattedPhoneNumber, ip: context.ip })
 
     // Check the signup gate before spending a provider request on an unknown contact.
     await prelude.sendCode(formattedPhoneNumber)

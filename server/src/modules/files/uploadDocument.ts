@@ -42,7 +42,6 @@ export async function uploadDocument(
     log.error("Document upload failed", {
       error,
       userId: context.userId,
-      fileName: file.name,
       fileSize: file.size,
       mimeType: file.type,
       hasPhotoId: photoId != null,

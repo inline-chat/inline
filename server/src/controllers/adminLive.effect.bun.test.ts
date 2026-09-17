@@ -39,6 +39,8 @@ import {
 import {
   AdminSessionStore,
 } from "./adminSecurity.effect"
+import { encrypt } from "@in/server/modules/encryption/encryption"
+import { generateTotpCode, generateTotpSecret } from "@in/server/utils/totp"
 import {
   AdminSessionStoreLive,
 } from "./adminSecurityLive.effect"
@@ -109,6 +111,34 @@ const handle = (request: Request) =>
 describe("AdminSessionStoreLive", () => {
   setupTestLifecycle()
   afterEach(resetServerConfigCacheForTests)
+
+  it("creates a password and TOTP session and resets failures through the live HTTP route", async () => {
+    const user = await testUtils.createUser("admin-password-security@example.test")
+    const password = "synthetic admin password"
+    const secret = generateTotpSecret()
+    const sealed = encrypt(secret)
+    await db.insert(superadminUsers).values({
+      email: user.email!, userId: user.id,
+      passwordHash: await Bun.password.hash(password, { algorithm: "bcrypt", cost: 4 }),
+      passwordSetAt: new Date(), totpEnabledAt: new Date(),
+      totpSecretEncrypted: sealed.encrypted, totpSecretIv: sealed.iv, totpSecretTag: sealed.authTag,
+      failedLoginAttempts: 2, lastLoginAttemptAt: new Date(),
+    })
+    const response = await handle(new Request("http://inline.test/admin/auth/login", {
+      method: "POST", headers: {
+        origin: "https://admin.inline.chat", "content-type": "application/json", "user-agent": "security-test",
+      },
+      body: JSON.stringify({ email: user.email, password, totpCode: generateTotpCode(secret) }),
+    }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true })
+    expect(response.headers.get("set-cookie")).toContain("inline_admin_session=")
+    const [account] = await db.select().from(superadminUsers).where(eq(superadminUsers.userId, user.id))
+    expect(account!.failedLoginAttempts).toBe(0)
+    const created = await db.select().from(superadminSessions).where(eq(superadminSessions.userId, user.id))
+    expect(created).toHaveLength(1)
+    expect(created[0]!.stepUpAt).not.toBeNull()
+  })
 
   it("loads and refreshes a database-backed admin session", async () => {
     const user = await testUtils.createUser(

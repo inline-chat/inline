@@ -22,6 +22,7 @@ import {
 type LegacyRealtimeSocket = RootContext["ws"]
 
 export interface LegacyRealtimeRuntime {
+  readonly isAuthenticated?: ((connectionId: string) => boolean) | undefined
   readonly addConnection: (
     socket: LegacyRealtimeSocket,
   ) => string
@@ -53,6 +54,7 @@ const loadCurrentRealtimeRuntime: LoadLegacyRealtimeRuntime =
           socket,
           ConnVersion.REALTIME_V1,
         ),
+      isAuthenticated: (id) => Boolean(connectionManager.getConnection(id)?.userId),
       handleMessage,
       removeConnection: (connectionId) =>
         connectionManager.removeConnection(
@@ -98,6 +100,7 @@ export const makeLegacyRealtimeSessions = (
         const session: RealtimeProtocolSession =
           {
             connectionId,
+            isAuthenticated: () => runtime.isAuthenticated?.(connectionId) ?? false,
             handle: (message) =>
               Effect.tryPromise({
                 try: () =>

@@ -1,3 +1,5 @@
+import { reserveOtpDelivery } from "@in/server/modules/auth/otpDeliveryBudget"
+import { recordAdminLoginFailure, completeAdminPasswordLogin } from "@in/server/modules/auth/adminLoginAttempts"
 import {
   Effect,
   Random,
@@ -75,9 +77,6 @@ import {
   isDevAdminLoginAllowed,
 } from "./adminDevAuth.effect"
 
-const ADMIN_LOGIN_MAX_ATTEMPTS = 5
-const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15
-const ADMIN_LOGIN_RESET_MS = 1000 * 60 * 60 * 24
 const ADMIN_LOGIN_IP_MAX_ATTEMPTS = 30
 const ADMIN_LOGIN_IP_WINDOW_MS = 1000 * 60 * 15
 const ADMIN_LOGIN_IP_MAX_KEYS = 10_000
@@ -261,6 +260,10 @@ export const makeAdminAuthOperations =
           } else {
             return jsonResult({ ok: true as const })
           }
+
+          const deliveryAllowed = yield* attempt("admin.auth.send-email-code.budget", () =>
+            reserveOtpDelivery({ channel: "email", contact: email, ip: request.ip }))
+          if (!deliveryAllowed) return yield* reject(429, "too_many_requests")
 
           const challenge = yield* attempt(
             "admin.auth.send-email-code.issue",
@@ -487,35 +490,6 @@ export const makeAdminAuthOperations =
           return yield* reject(429, "login_locked")
         }
 
-        let failedAttempts =
-          adminUser.failedLoginAttempts
-        if (
-          adminUser.lastLoginAttemptAt &&
-          now.getTime() -
-              adminUser.lastLoginAttemptAt.getTime() >
-            ADMIN_LOGIN_RESET_MS &&
-          failedAttempts > 0
-        ) {
-          yield* attempt(
-            "admin.auth.login.reset-attempts",
-            () =>
-              db
-                .update(superadminUsers)
-                .set({
-                  failedLoginAttempts: 0,
-                  loginLockedUntil: null,
-                  lastLoginAttemptAt: null,
-                })
-                .where(
-                  eq(
-                    superadminUsers.id,
-                    adminUser.id,
-                  ),
-                ),
-          )
-          failedAttempts = 0
-        }
-
         const passwordHash = adminUser.passwordHash
         if (!passwordHash) {
           return yield* reject(
@@ -537,33 +511,9 @@ export const makeAdminAuthOperations =
           error: "invalid_credentials" | "invalid_totp",
         ) =>
           Effect.gen(function* () {
-            // FIXME(effect-cutover): replace this retained read-modify-write
-            // counter with one atomic database update under concurrent login failures.
-            const nextAttempts = failedAttempts + 1
-            const lockedUntil =
-              nextAttempts >=
-              ADMIN_LOGIN_MAX_ATTEMPTS
-                ? new Date(
-                    now.getTime() +
-                      ADMIN_LOGIN_LOCK_MS,
-                  )
-                : null
-            yield* attempt(
+            const lockedUntil = yield* attempt(
               "admin.auth.login.record-failure",
-              () =>
-                db
-                  .update(superadminUsers)
-                  .set({
-                    failedLoginAttempts: nextAttempts,
-                    lastLoginAttemptAt: now,
-                    loginLockedUntil: lockedUntil,
-                  })
-                  .where(
-                    eq(
-                      superadminUsers.id,
-                      adminUser.id,
-                    ),
-                  ),
+              () => recordAdminLoginFailure(adminUser.id),
             )
             return yield* reject(
               lockedUntil ? 429 : 401,
@@ -657,37 +607,16 @@ export const makeAdminAuthOperations =
           )
         }
 
-        // TODO(effect-cutover): create the session and reset counters in one
-        // transaction so an infrastructure failure cannot leave a hidden live session.
         const token = yield* attempt(
           "admin.auth.login.create-session",
-          () =>
-            createAdminSession({
-              userId: user.id,
-              ip: request.ip,
-              userAgent: request.userAgent,
-              stepUpAt: totpEnabled
-                ? new Date()
-                : null,
-            }),
+          () => completeAdminPasswordLogin(adminUser, (tx) => createAdminSession({
+            userId: user.id,
+            ip: request.ip,
+            userAgent: request.userAgent,
+            stepUpAt: totpEnabled ? new Date() : null,
+          }, tx)),
         )
-        yield* attempt(
-          "admin.auth.login.reset-success",
-          () =>
-            db
-              .update(superadminUsers)
-              .set({
-                failedLoginAttempts: 0,
-                loginLockedUntil: null,
-                lastLoginAttemptAt: now,
-              })
-              .where(
-                eq(
-                  superadminUsers.id,
-                  adminUser.id,
-                ),
-              ),
-        )
+        if (!token) return yield* reject(429, "login_locked")
         loginIpRateLimiter.clear(ip)
         yield* attempt(
           "admin.auth.login.notify",

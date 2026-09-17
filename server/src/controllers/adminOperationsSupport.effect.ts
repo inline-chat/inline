@@ -1,3 +1,4 @@
+import type { Transaction } from "@in/server/db/types"
 import {
   Effect,
   Schema,
@@ -219,7 +220,7 @@ export const createAdminSession = async (input: {
   readonly ip: string | undefined
   readonly userAgent: string
   readonly stepUpAt?: Date | null | undefined
-}) => {
+}, query: Pick<Transaction, "insert"> = db) => {
   const now = new Date()
   const expiresAt = new Date(
     now.getTime() + ADMIN_TTL_MS,
@@ -230,7 +231,7 @@ export const createAdminSession = async (input: {
   const { token, tokenHash } =
     await generateToken(input.userId)
 
-  await db.insert(superadminSessions).values({
+  await query.insert(superadminSessions).values({
     userId: input.userId,
     tokenHash,
     lastSeenAt: now,

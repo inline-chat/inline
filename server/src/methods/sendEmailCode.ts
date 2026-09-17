@@ -1,3 +1,4 @@
+import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
@@ -49,6 +50,8 @@ export const handler = async (
     let existingUser = isLoginUser(user)
     let needsInviteCode = await isInviteCodeRequired(user)
     let firstName = user?.firstName ?? undefined
+
+    await assertOtpDeliveryAllowed({ channel: "email", contact: email, ip: context.ip })
 
     // store challenge-scoped code
     const { code, challengeToken } = await issueEmailLoginChallenge({ email })

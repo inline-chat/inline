@@ -315,7 +315,6 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
     const cached = await getFreshPreviewCache(previewRoute.url).catch((error) => {
       log.warn("Failed to read URL preview cache", {
         error,
-        url: previewRoute.url,
         messageId: input.message.messageId,
         chatId: input.chatId,
       })
@@ -333,7 +332,6 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
     }).catch((error) => {
       log.warn("Failed to fetch URL preview metadata", {
         error,
-        url: previewRoute.url,
         messageId: input.message.messageId,
         chatId: input.chatId,
       })

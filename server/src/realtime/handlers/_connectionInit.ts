@@ -1,3 +1,5 @@
+import { MAX_USER_CONNECTIONS } from "@in/server/realtime/admission"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { ConnectionInit, ConnectionOpen } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getUserIdFromToken } from "@in/server/modules/auth/sessionAuthentication"
@@ -50,6 +52,10 @@ export const handleConnectionInit = async (
     ).catch((error) => {
       log.error("Failed to store session client metadata", error)
     })
+  }
+
+  if (connectionManager.getUserConnections(userIdFromToken.userId).length >= MAX_USER_CONNECTIONS) {
+    throw RealtimeRpcError.RateLimit()
   }
 
   connectionManager.authenticateConnection(

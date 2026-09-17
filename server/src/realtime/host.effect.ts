@@ -1,3 +1,4 @@
+import { PREAUTH_FRAME_BYTES, REALTIME_FRAME_BYTES } from "./admission"
 import type {
   ClientMessage as ClientMessageType,
 } from "@inline-chat/protocol/core"
@@ -46,6 +47,7 @@ export class RealtimeSessionFailure extends Data.TaggedError(
 }> {}
 
 export interface RealtimeProtocolSession {
+  readonly isAuthenticated?: (() => boolean) | undefined
   readonly connectionId: string
   readonly close: Effect.Effect<
     void,
@@ -107,6 +109,7 @@ export class RealtimeHostOpenFailure extends Data.TaggedError(
 }
 
 export interface RealtimeHostConnection {
+  readonly isAuthenticated?: (() => boolean) | undefined
   readonly connectionId: string
   readonly close: Effect.Effect<void>
   readonly receive: (
@@ -282,6 +285,9 @@ export const makeRealtimeHostConnection =
             )
           }
 
+          if (frame.byteLength > (session.isAuthenticated?.() ? REALTIME_FRAME_BYTES : PREAUTH_FRAME_BYTES)) {
+            return terminate("realtime.frame_limit")
+          }
           return Effect.try({
             try: () =>
               ClientMessage.fromBinary(frame),
@@ -304,6 +310,7 @@ export const makeRealtimeHostConnection =
 
       return {
         connectionId: session.connectionId,
+        isAuthenticated: session.isAuthenticated,
         close,
         receive,
       }

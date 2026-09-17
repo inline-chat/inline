@@ -23,6 +23,7 @@ const SENTRY_USER_DETAIL_ATTRIBUTES = ["user.email", "user.name"]
 export const redactString = (value: string): string => {
   // Avoid leaking tokens in path (e.g. /bot<token>/sendMessage) or in auth headers.
   return value
+    .replace(/\bhttps?:\/\/[^\s<>"']+/gi, "<url>")
     .replace(BEARER_RE, `Bearer ${REDACTED}`)
     .replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
     .replace(AUTH_TOKEN_SEGMENT_RE, `$1${REDACTED}`)
@@ -40,76 +41,64 @@ const shouldRedactKey = (key: string): boolean => {
     k.includes("email") ||
     k.includes("phone") ||
     k.includes("secret") ||
-    k.includes("password")
+    k.includes("password") ||
+    k === "filename" || k === "file_name" ||
+    k === "url" || k.endsWith("url")
   )
 }
 
 export const redactValue = (value: unknown, depth = 0): unknown => {
-  if (depth > 6) return value
-  if (value === null || value === undefined) return value
+  const seen = new WeakSet<object>()
+  let remaining = 1_024
+  const visit = (value: unknown, depth: number): unknown => {
+    if (depth > 6 || remaining-- <= 0) return "<truncated>"
+    if (value === null || value === undefined) return value
+    if (typeof value === "string") return redactString(value).slice(0, 8_192)
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return value
+    if (typeof value !== "object") return "<unsupported>"
+    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return "<binary>"
+    if (value instanceof Date) return Date.prototype.toISOString.call(value)
+    if (value instanceof String) return redactString(String.prototype.toString.call(value)).slice(0, 8_192)
+    if (seen.has(value)) return "<circular>"
+    seen.add(value)
 
-  if (typeof value === "string") return redactString(value)
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return value
-
-  if (value instanceof Error) {
-    // Do not invoke an Error constructor here. Bun retains the constructor's
-    // hidden source location and may render this redaction function as the
-    // apparent failure site even after `stack` is replaced. A prototype clone
-    // remains instanceof Error while preserving the original provenance.
-    const next = Object.create(Object.getPrototypeOf(value)) as Error & Record<string, unknown>
-    Object.defineProperties(next, {
-      name: {
-        configurable: true,
-        writable: true,
-        value: redactString(value.name),
-      },
-      message: {
-        configurable: true,
-        writable: true,
-        value: redactString(value.message),
-      },
-      stack: {
-        configurable: true,
-        writable: true,
-        value: typeof value.stack === "string" ? redactString(value.stack) : value.stack,
-      },
-    })
-    const cause = (value as Error & { cause?: unknown }).cause
-    if (cause !== undefined) {
-      Object.defineProperty(next, "cause", {
-        configurable: true,
-        writable: true,
-        value: redactValue(cause, depth + 1),
-      })
-    }
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "name" || key === "message" || key === "stack" || key === "cause") continue
-      Object.defineProperty(next, key, {
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: shouldRedactKey(key) ? REDACTED : redactValue(nested, depth + 1),
-      })
-    }
-    return next
-  }
-
-  if (Array.isArray(value)) return value.map((v) => redactValue(v, depth + 1))
-
-  if (typeof value === "object") {
-    const obj = value as Record<string, unknown>
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(obj)) {
-      if (shouldRedactKey(k)) {
-        out[k] = REDACTED
-      } else {
-        out[k] = redactValue(v, depth + 1)
+    if (value instanceof Error) {
+      // Preserve provenance without calling a constructor (Bun retains its hidden source location).
+      // Use Error.prototype so custom inspection methods cannot expose the original object.
+      const next = Object.create(Error.prototype) as Error & Record<string, unknown>
+      for (const key of ["name", "message", "stack", "cause"]) {
+        if (!(key in value)) continue
+        Object.defineProperty(next, key, {
+          configurable: true, writable: true,
+          value: visit(Reflect.get(value, key), depth + 1),
+        })
       }
+      for (const key of Object.keys(value).slice(0, 128)) {
+        if (["name", "message", "stack", "cause"].includes(key)) continue
+        const descriptor = Object.getOwnPropertyDescriptor(value, key)
+        Object.defineProperty(next, key, {
+          configurable: true, enumerable: true, writable: true,
+          value: shouldRedactKey(key) ? REDACTED : descriptor && "value" in descriptor
+            ? visit(descriptor.value, depth + 1) : "<accessor>",
+        })
+      }
+      return next
+    }
+    if (Array.isArray(value)) return value.slice(0, 128).map((item) => visit(item, depth + 1))
+    const out: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(value).slice(0, 128)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      out[key] = shouldRedactKey(key) ? REDACTED : descriptor && "value" in descriptor
+        ? visit(descriptor.value, depth + 1) : "<accessor>"
     }
     return out
   }
-
-  return value
+  try {
+    return visit(value, depth)
+  } catch {
+    // Proxies, accessors and invalid Dates must not break request handling or fall back to raw data.
+    return "<unserializable>"
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -370,7 +359,7 @@ export class Log {
 
   private sentryMessage(value: unknown): SentryLogMessage {
     if (typeof value === "string" || value instanceof String) {
-      return value as SentryLogMessage
+      return redactString(value.toString()) as SentryLogMessage
     }
 
     if (isError(value)) {
@@ -388,7 +377,7 @@ export class Log {
     try {
       return redactString(JSON.stringify(toSentryValue(value)) ?? String(value))
     } catch {
-      return String(value)
+      return "<unserializable>"
     }
   }
 

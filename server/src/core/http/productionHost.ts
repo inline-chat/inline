@@ -465,14 +465,9 @@ export const startCoreProductionServer = async <
         if (unsupportedV3 !== undefined) {
           return unsupportedV3
         }
-        if (
-          realtime.tryUpgrade(
-            request,
-            bunServer as never,
-          )
-        ) {
-          return undefined
-        }
+        const realtimeUpgrade = realtime.tryUpgrade(request, bunServer as never)
+        if (realtimeUpgrade instanceof Response) return realtimeUpgrade
+        if (realtimeUpgrade) return undefined
 
         const completeRequest =
           httpDrain.enter()

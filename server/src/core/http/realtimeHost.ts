@@ -1,3 +1,4 @@
+import { makeConnectionAdmission, REALTIME_FRAME_BYTES, PREAUTH_FRAME_BYTES, type ConnectionLease } from "../../realtime/admission"
 import type {
   Server,
   ServerWebSocket,
@@ -39,6 +40,11 @@ export interface RealtimeWebSocketData {
   readonly metadata?:
     | RealtimeRequestMetadata
     | undefined
+  admissionLease?: ConnectionLease | undefined
+  isAuthenticated?: (() => boolean) | undefined
+  pendingMessages?: number | undefined
+  pendingBytes?: number | undefined
+  messageWindow?: { start: number; count: number } | undefined
   closed: boolean
   connection:
     | Promise<
@@ -54,7 +60,7 @@ export interface CoreRealtimeTransport {
     server: Server<
       RealtimeWebSocketData
     >,
-  ) => boolean
+  ) => boolean | Response
   readonly websocket:
     Bun.WebSocketHandler<
       RealtimeWebSocketData
@@ -162,6 +168,9 @@ export const makeCoreRealtimeTransport = <
     Promise<void>
   >()
   let accepting = true
+  const admission = makeConnectionAdmission()
+  let pendingMessages = 0
+  let pendingBytes = 0
 
   const track = (
     operation: Promise<void>,
@@ -219,6 +228,7 @@ export const makeCoreRealtimeTransport = <
       return undefined
     }
 
+    websocket.data.isAuthenticated = exit.value.isAuthenticated
     return exit.value
   }
 
@@ -226,6 +236,7 @@ export const makeCoreRealtimeTransport = <
     Bun.WebSocketHandler<
       RealtimeWebSocketData
     > = {
+      maxPayloadLength: REALTIME_FRAME_BYTES,
       backpressureLimit:
         REALTIME_BACKPRESSURE_LIMIT,
       closeOnBackpressureLimit: false,
@@ -236,35 +247,48 @@ export const makeCoreRealtimeTransport = <
       },
       sendPings: true,
       open: (socket) => {
+        if (socket.data.admissionLease && !socket.data.admissionLease.activate()) { socket.close(1013, "Upgrade expired"); return }
         const connection =
           openConnection(socket)
         socket.data.connection = connection
         connections.add(connection)
       },
-      message: async (
-        socket,
-        message,
-      ) => {
-        const connection =
-          await socket.data.connection
-        if (connection === undefined) {
-          socket.close(
-            1011,
-            "Realtime session is unavailable.",
-          )
+      message: async (socket, message) => {
+        if (socket.data.closed) return
+        const length = typeof message === "string" ? Buffer.byteLength(message) : message.byteLength
+        if (length > (socket.data.isAuthenticated?.() ? REALTIME_FRAME_BYTES : PREAUTH_FRAME_BYTES)) {
+          socket.close(1009, "Realtime frame too large")
           return
         }
-
-        await runPromiseExit(
-          connection.receive(
-            typeof message === "string"
-              ? message
-              : binaryFrame(message),
-          ),
-        )
+        const now = Date.now()
+        let window = socket.data.messageWindow
+        if (!window || now - window.start >= 1_000) {
+          window = { start: now, count: 0 }
+          socket.data.messageWindow = window
+        }
+        if (++window.count > 120 || (socket.data.pendingMessages ?? 0) >= 32 || pendingMessages >= 2_048 ||
+          (socket.data.pendingBytes ?? 0) + length > 32 * 1024 * 1024 || pendingBytes + length > 128 * 1024 * 1024) {
+          socket.close(1013, "Realtime capacity reached")
+          return
+        }
+        socket.data.pendingMessages = (socket.data.pendingMessages ?? 0) + 1
+        socket.data.pendingBytes = (socket.data.pendingBytes ?? 0) + length
+        pendingMessages++
+        pendingBytes += length
+        try {
+          const connection = await socket.data.connection
+          if (!connection || socket.data.closed) { socket.close(1011, "Realtime session unavailable"); return }
+          await runPromiseExit(connection.receive(typeof message === "string" ? message : binaryFrame(message)))
+        } finally {
+          socket.data.pendingMessages--
+          socket.data.pendingBytes -= length
+          pendingMessages--
+          pendingBytes -= length
+        }
       },
       close: (socket) => {
         socket.data.closed = true
+        socket.data.admissionLease?.release()
         const pending =
           socket.data.connection
         if (pending === undefined) {
@@ -301,23 +325,22 @@ export const makeCoreRealtimeTransport = <
         return false
       }
 
-      return server.upgrade(request, {
-        data: {
-          id: decodeConnectionId(
-            crypto.randomUUID(),
-          ),
-          metadata: realtimeMetadata(
-            request,
-            server,
-            clientIpHeader,
-          ),
-          closed: false,
-          connection: undefined,
-        },
-      })
+      const metadata = realtimeMetadata(request, server, clientIpHeader)
+      const lease = admission.acquire(metadata?.ip ?? "unknown")
+      if (!lease) return new Response("Realtime capacity reached", { status: 429, headers: { "Retry-After": "60" } })
+      try {
+        const upgraded = server.upgrade(request, {
+          data: { id: decodeConnectionId(crypto.randomUUID()), metadata, closed: false,
+            connection: undefined, admissionLease: lease },
+        })
+        if (!upgraded) lease.release()
+        return upgraded
+      } catch (error) { lease.release(); throw error }
+
     },
     shutdown: async () => {
       accepting = false
+      admission.shutdown()
       const active = [
         ...connections,
       ]

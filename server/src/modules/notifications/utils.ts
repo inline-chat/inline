@@ -11,7 +11,7 @@ export const isIOSPushSession = (session: SessionWithDecryptedData): session is 
 }
 
 export const setPushType = (notification: Notification, pushType: "alert" | "background") => {
-  ;(notification as any).pushType = pushType
+  notification.pushType = pushType
 }
 
 export const configureBackgroundNotification = ({

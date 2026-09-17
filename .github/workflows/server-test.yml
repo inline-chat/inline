@@ -8,7 +8,7 @@ on:
       - ".github/workflows/server-test.yml"
       - "server/**"
       - "proto/**"
-      - "packages/protocol/**"
+      - "packages/**"
       - "scripts/**"
       - ".oxlintignore"
       - ".oxlintrc.json"
@@ -22,7 +22,7 @@ on:
       - ".github/workflows/server-test.yml"
       - "server/**"
       - "proto/**"
-      - "packages/protocol/**"
+      - "packages/**"
       - "scripts/**"
       - ".oxlintignore"
       - ".oxlintrc.json"
@@ -74,6 +74,12 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Audit server runtime dependencies
+        run: bun server/scripts/security-audit.ts
+
+      - name: Test preview network boundaries
+        run: cd server/packages/url-preview && bun test
 
       - name: Generate protos (drift check)
         env:

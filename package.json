@@ -60,6 +60,7 @@
     "proto:sync-rust": "bun run scripts/sync-public-artifacts.ts"
   },
   "overrides": {
+    "@aws-sdk/core@3.749.0>fast-xml-parser": "4.5.7",
     "@effect/platform-node-shared": "4.0.0-beta.98",
     "@inline-chat/protocol": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
