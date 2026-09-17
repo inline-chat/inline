@@ -171,7 +171,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var slashCommandManager: SlashCommandManager?
   private lazy var mentionedParticipantsAccess = MentionedParticipantsAccessManager(composeView: self)
   var autocompleteManager: ComposeAutocompleteManager?
-  let draftManager = DraftManager(debounceDelay: 2.0)
+  let draftManager: DraftManager
 
   let previewViewModel = SwiftUIPhotoPreviewViewModel()
   let multiPhotoPreviewViewModel = SwiftUIPhotoPreviewViewModel()
@@ -237,7 +237,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     removeObservers()
   }
 
-  override init(frame: CGRect) {
+  override convenience init(frame: CGRect) {
+    self.init(frame: frame, draftManager: DraftManager(debounceDelay: 2.0))
+  }
+
+  init(frame: CGRect, draftManager: DraftManager) {
+    self.draftManager = draftManager
     super.init(frame: frame)
     setupViews()
     setupScenePhaseObserver()
@@ -785,7 +790,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func updateVoiceAvailability(animated: Bool = false) {
     let voiceActive = voiceViewModel.isActive
     let controlState = trailingControlState
-    let shouldShowVoiceButton = controlState == .voice
 
     if voiceActive {
       dismissOverlay()
@@ -795,8 +799,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     voiceInputView.isHidden = !voiceActive
     textView.isHidden = voiceActive
     updateComposeWidth(showsSideButton: !voiceActive, animated: animated)
-    updateVoiceButtonVisibility(visible: !voiceActive && shouldShowVoiceButton, animated: animated)
-    sendButton.isHidden = controlState != .send
+    updateTrailingControlVisibility(controlState, animated: animated)
 
     if voiceActive {
       attachmentScrollView.isHidden = true
@@ -864,6 +867,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self.plusButton.isHidden = !showsSideButton
       self.plusButton.isUserInteractionEnabled = showsSideButton
     }
+  }
+
+  private func updateTrailingControlVisibility(_ state: ComposeTrailingControlState, animated: Bool) {
+    updateVoiceButtonVisibility(visible: state == .voice, animated: animated)
+    sendButton.isHidden = state != .send
   }
 
   private func updateVoiceButtonVisibility(visible: Bool, animated: Bool) {
@@ -1651,7 +1659,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     autocompleteManager?.dismissCompletion()
     textView.text = ""
     textView.showPlaceholder(true)
-    buttonDisappear()
+    updateSendButtonVisibility(syncVoiceAvailability: false)
     clearDraft()
     resetTextViewState()
     updateHeight()
@@ -1769,7 +1777,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     resetFullComposeState(heightBehavior: .normal)
   }
 
-  private func resetFullComposeStateAfterTextSend(
+  func resetFullComposeStateAfterTextSend(
     shouldCoordinateSendAnimationReset: Bool,
     didPrepareSendAnimationPreview: Bool
   ) {
@@ -1822,9 +1830,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     resetHeight(animated: shouldAnimateHeightReset)
     textView.showPlaceholder(true)
-    if !shouldHideSendButtonImmediately {
-      buttonDisappear()
-    }
+    // Programmatic text changes do not call textViewDidChange. Reconcile both
+    // trailing controls after the text and attachments have finished clearing.
+    updateSendButtonVisibility(syncVoiceAvailability: false)
     if !shouldDeferSendHeightReset {
       pendingSendAnimationHeightChange = false
     }
@@ -1832,7 +1840,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     sendButton.configuration?.showsActivityIndicator = false
   }
 
-  private func clearTextOnlyComposeAfterSend(
+  func clearTextOnlyComposeAfterSend(
     shouldCoordinateSendAnimationReset: Bool,
     didPrepareSendAnimationPreview: Bool
   ) {
@@ -2245,6 +2253,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       updateVoiceAvailability(animated: false)
     }
     let controlState = trailingControlState
+    if !syncVoiceAvailability {
+      // Callers coordinating their own height reset still need the microphone
+      // and send button to reflect the current draft.
+      updateTrailingControlVisibility(controlState, animated: false)
+    }
 
     if controlState == .voice || voiceViewModel.isActive {
       buttonDisappear(animated: false)
