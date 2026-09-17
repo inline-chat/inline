@@ -7,6 +7,14 @@ struct MessageListGeometrySnapshotV2 {
     let cell: UICollectionViewCell
     let targetTransform: CGAffineTransform
     let frameInWindow: CGRect
+    let messageID: Int64?
+    let messageView: UIMessageView?
+
+    var isCurrent: Bool {
+      guard let messageCell = cell as? MessageCollectionViewCell else { return cell.superview != nil }
+      return messageCell.message?.id == messageID && messageCell.messageView === messageView
+        && cell.superview != nil
+    }
   }
 
   private let entries: [Entry]
@@ -18,18 +26,22 @@ struct MessageListGeometrySnapshotV2 {
       } else {
         cell.convert(cell.bounds, to: window)
       }
-      return Entry(cell: cell, targetTransform: cell.transform, frameInWindow: frame)
+      let messageCell = cell as? MessageCollectionViewCell
+      return Entry(
+        cell: cell, targetTransform: cell.transform, frameInWindow: frame,
+        messageID: messageCell?.message?.id, messageView: messageCell?.messageView
+      )
     }
   }
 
   func applyTargetTransforms() {
-    for entry in entries {
+    for entry in entries where entry.isCurrent {
       entry.cell.transform = entry.targetTransform
     }
   }
 
   func restorePresentedPositions(window: UIWindow) {
-    for entry in entries {
+    for entry in entries where entry.isCurrent {
       let cell = entry.cell
       let newFrame = cell.convert(cell.bounds, to: window)
       let deltaY = entry.frameInWindow.minY - newFrame.minY

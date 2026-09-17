@@ -1121,16 +1121,31 @@ private extension MessagesCollectionView {
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
     private var v2GeometryAnimator: UIViewPropertyAnimator?
     private var v2GeometryTransitions: [V2GeometryTransition] = []
+    private var pendingV2GeometryTransitions: [V2GeometryTransition] = []
+    private var pendingV2GeometryViewport: V2GeometryViewport?
+    private var v2GeometryFlushScheduled = false
+    private var pendingSnapshotApplies = 0
+
+    @MainActor private struct V2GeometryViewport {
+      let bounds: CGRect
+      let adjustedContentInset: UIEdgeInsets
+      let window: UIWindow
+      let geometry: MessageListGeometrySnapshotV2
+      let anchor: SendAnimationContentAnchor?
+    }
 
     @MainActor private struct V2GeometryTransition {
       weak var cell: MessageCollectionViewCell?
       weak var view: UIMessageView2?
       let layout: MessageBubbleLayoutV2
       let generation: UInt
+      let messageID: Int64
 
       var isCurrent: Bool {
         guard let cell, let view else { return false }
-        return cell.messageView === view && view.geometryTransitionGeneration == generation
+        return cell.messageView === view
+          && cell.message?.id == messageID
+          && view.geometryTransitionGeneration == generation
       }
 
       func apply() {
@@ -2633,42 +2648,97 @@ private extension MessagesCollectionView {
       MessageBubbleLayoutV2
     ) -> Void {
       { [weak self] cell, oldLayout, newLayout in
-        self?.animateV2GeometryChange(in: cell, from: oldLayout, to: newLayout)
+        self?.enqueueV2GeometryChange(in: cell, from: oldLayout, to: newLayout)
       }
     }
 
-    private func animateV2GeometryChange(
-      in changedCell: MessageCollectionViewCell,
+    private func enqueueV2GeometryChange(
+      in cell: MessageCollectionViewCell,
       from oldLayout: MessageBubbleLayoutV2,
       to newLayout: MessageBubbleLayoutV2
     ) {
+      guard let view = cell.messageView as? UIMessageView2, let message = cell.message else { return }
+      let transition = V2GeometryTransition(
+        cell: cell, view: view, layout: newLayout,
+        generation: view.geometryTransitionGeneration, messageID: message.id
+      )
+      // Metadata-only updates need no parent layout. If this row already has
+      // queued geometry, retain its latest destination even when this last
+      // update has the same measured size.
+      if oldLayout == newLayout, !view.hasPendingContentTransition,
+         !pendingV2GeometryTransitions.contains(where: { $0.cell === cell })
+      {
+        transition.apply()
+        transition.finish()
+        return
+      }
+      pendingV2GeometryTransitions.removeAll { !$0.isCurrent || $0.cell === cell }
+      pendingV2GeometryTransitions.append(transition)
+      if pendingV2GeometryViewport == nil,
+         let collectionView = currentCollectionView as? MessagesCollectionView,
+         let window = collectionView.window,
+         collectionView.visibleCells.contains(where: { $0 === cell })
+      {
+        // UIKit may resize rows as registration unwinds. Retain the presented
+        // positions now, without forcing layout, so deferral does not add a jump.
+        pendingV2GeometryViewport = V2GeometryViewport(
+          bounds: collectionView.bounds, adjustedContentInset: collectionView.adjustedContentInset,
+          window: window,
+          geometry: MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window),
+          anchor: makeV2GeometryContentAnchor(around: cell, collectionView: collectionView, window: window)
+        )
+      }
+      scheduleV2GeometryFlush()
+    }
+
+    private func scheduleV2GeometryFlush() {
+      guard !v2GeometryFlushScheduled, !pendingV2GeometryTransitions.isEmpty,
+            pendingSnapshotApplies == 0 else { return }
+      v2GeometryFlushScheduled = true
+      // Cell registration can run inside UIKit's idle prefetch/reconfiguration.
+      // Never invalidate or force parent layout on that stack. One coordinator
+      // transaction consumes the latest generation for every changed row.
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.v2GeometryFlushScheduled = false
+        guard self.pendingSnapshotApplies == 0 else { return }
+        self.flushV2GeometryChanges()
+      }
+    }
+
+    private func flushV2GeometryChanges() {
+      let pending = pendingV2GeometryTransitions.filter(\.isCurrent)
+      let capturedViewport = pendingV2GeometryViewport
+      pendingV2GeometryViewport = nil
+      pendingV2GeometryTransitions.removeAll(keepingCapacity: true)
       guard let collectionView = currentCollectionView as? MessagesCollectionView,
-            let window = collectionView.window,
-            collectionView.indexPath(for: changedCell) != nil,
-            let nextView = changedCell.messageView as? UIMessageView2
-      else {
-        let fallbackView = nextViewIfAvailable(in: changedCell)
-        let transitionGeneration = fallbackView?.geometryTransitionGeneration
-        if let transitionGeneration {
-          fallbackView?.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
-        }
-        if let transitionGeneration {
-          fallbackView?.finishGeometryTransition(generation: transitionGeneration)
+            let window = collectionView.window else {
+        for transition in pending {
+          transition.apply()
+          transition.finish()
         }
         return
       }
-
-      let transitionGeneration = nextView.geometryTransitionGeneration
-
-      guard oldLayout != newLayout || nextView.hasPendingContentTransition else {
-        nextView.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
-        nextView.finishGeometryTransition(generation: transitionGeneration)
-        return
+      let updates = pending.filter { transition in
+        guard let cell = transition.cell, collectionView.indexPath(for: cell) != nil else {
+          transition.apply()
+          transition.finish()
+          return false
+        }
+        return true
       }
+      guard let changedCell = updates.first?.cell else { return }
 
       // Capture the model's destination before finishing at .current changes it
       // to an intermediate transform. Otherwise rapid updates retain a row offset.
-      let geometry = MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window)
+      // A scroll, keyboard inset adjustment, or resize since enqueue takes
+      // precedence over the old viewport. Never pull the user back to it.
+      let viewport = capturedViewport.flatMap {
+        $0.window === window && $0.bounds == collectionView.bounds
+          && $0.adjustedContentInset == collectionView.adjustedContentInset ? $0 : nil
+      }
+      let geometry = viewport?.geometry
+        ?? MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window)
       if let activeAnimator = v2GeometryAnimator {
         v2GeometryAnimator = nil
         if activeAnimator.state == .active {
@@ -2686,14 +2756,12 @@ private extension MessagesCollectionView {
           transition.finish()
           return false
         }
-        return transition.view !== nextView
+        return !updates.contains { $0.view === transition.view }
       }
-      v2GeometryTransitions.append(.init(
-        cell: changedCell, view: nextView, layout: newLayout, generation: transitionGeneration
-      ))
+      v2GeometryTransitions.append(contentsOf: updates)
       let transitions = v2GeometryTransitions
 
-      let anchor = makeV2GeometryContentAnchor(
+      let anchor = viewport?.anchor ?? makeV2GeometryContentAnchor(
         around: changedCell,
         collectionView: collectionView,
         window: window
@@ -2704,8 +2772,10 @@ private extension MessagesCollectionView {
         collectionView.collectionViewLayout.invalidateLayout()
         collectionView.layoutIfNeeded()
         restoreSendAnimationContentAnchor(anchor, in: collectionView)
-        changedCell.layoutIfNeeded()
-        nextView.layoutIfNeeded()
+        for transition in transitions where transition.isCurrent {
+          transition.cell?.layoutIfNeeded()
+          transition.view?.layoutIfNeeded()
+        }
       }
 
       geometry.restorePresentedPositions(window: window)
@@ -2714,7 +2784,9 @@ private extension MessagesCollectionView {
         geometry.applyTargetTransforms()
         for transition in transitions { transition.apply() }
         collectionView.layoutIfNeeded()
-        changedCell.layoutIfNeeded()
+        for transition in transitions where transition.isCurrent {
+          transition.cell?.layoutIfNeeded()
+        }
       }
 
       guard !UIAccessibility.isReduceMotionEnabled else {
@@ -2746,7 +2818,7 @@ private extension MessagesCollectionView {
       collectionView: MessagesCollectionView,
       window: UIWindow
     ) -> SendAnimationContentAnchor? {
-      collectionView.layoutIfNeeded()
+      // Capture the existing viewport before installing the new row sizes.
       let changedFrame = changedCell.convert(changedCell.bounds, to: window)
       let candidates = collectionView.visibleCells.compactMap { cell -> (
         item: MessageListItem,
@@ -2775,10 +2847,6 @@ private extension MessagesCollectionView {
         frameInWindow: changedFrame,
         contentOffset: collectionView.contentOffset
       )
-    }
-
-    private func nextViewIfAvailable(in cell: MessageCollectionViewCell) -> UIMessageView2? {
-      cell.messageView as? UIMessageView2
     }
 
     private func isFirstInGroup(at indexPath: IndexPath) -> Bool {
@@ -2928,7 +2996,12 @@ private extension MessagesCollectionView {
         CATransaction.setAnimationTimingFunction(SendMessageAnimationTiming.verticalMediaTimingFunction)
       }
 
+      pendingSnapshotApplies += 1
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
+        defer {
+          self.pendingSnapshotApplies -= 1
+          self.scheduleV2GeometryFlush()
+        }
         let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
         span.end(
           "sections=\(sectionCount) items=\(itemCount) animated=\(animatingDifferences) duration_ms=\(durationMs)"

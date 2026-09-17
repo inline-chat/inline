@@ -522,41 +522,12 @@ actor WebSocketTransport: NSObject, Sendable {
     // Select an appropriate timeout for this ping.
     let timeout = currentPingTimeout(fast: fastTimeout)
 
-    try await withThrowingTaskGroup(of: Void.self) { group in
-      let hasCompleted = ManagedAtomic<Bool>(false)
-
-      // Timeout task
-      group.addTask {
-        try await Task.sleep(for: .seconds(timeout))
-        if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
-          throw TransportError.connectionTimeout
-        }
-      }
-
-      // Actual ping task
-      group.addTask {
-        try await withCheckedThrowingContinuation { continuation in
-          webSocketTask.sendPing { error in
-            if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
-              if let error {
-                continuation.resume(throwing: error)
-              } else {
-                continuation.resume()
-              }
-            }
-          }
-        }
-      }
-
-      do {
-        try await group.next()
-        group.cancelAll()
-        lastPingSuccessAt = Date()
-      } catch {
-        group.cancelAll()
-        throw error
-      }
+    try await WebSocketPing.perform(
+      timeout: .seconds(timeout), timeoutError: TransportError.connectionTimeout
+    ) { completion in
+      webSocketTask.sendPing(pongReceiveHandler: completion)
     }
+    lastPingSuccessAt = Date()
   }
 
   private let connectionTimeout: TimeInterval = 20.0

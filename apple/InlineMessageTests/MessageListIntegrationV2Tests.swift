@@ -63,7 +63,12 @@ struct MessageListIntegrationV2Tests {
     let firstHandler = try #require(firstRenderer.onGeometryChange)
     var firstDidBind = false
     firstRenderer.onGeometryChange = { old, next in
+      let boundsBeforeBinding = firstRenderer.bubbleView.bounds
       firstHandler(old, next)
+      #expect(
+        firstRenderer.bubbleView.bounds == boundsBeforeBinding,
+        "Cell binding must enqueue geometry, not synchronously install the animation destination"
+      )
       firstDidBind = true
     }
     first.message.text = String(repeating: "First row grows while its neighbor changes. ", count: 12)

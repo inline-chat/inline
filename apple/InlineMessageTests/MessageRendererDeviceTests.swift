@@ -191,6 +191,33 @@ struct MessageRendererDeviceTests {
     Attachment.record(timings.joined(separator: "\n"), named: "message-v2-layout-timings.txt")
   }
 
+  @Test("Tail updates supersede older geometry completions")
+  func tailGeometryGeneration() throws {
+    let scenario = try #require(MessageView2PlaygroundFixtures.scenarios.first)
+    let view = UIMessageView2(
+      fullMessage: scenario.message, spaceId: 9_001, displayMode: .normal,
+      bubbleTailSide: .leading, maximumBubbleContentWidth: 297.5,
+      theme: ThemeManager.shared.snapshot(variant: .light)
+    )
+    view.frame.size = view.sizeThatFits(CGSize(width: 350, height: CGFloat.greatestFiniteMagnitude))
+    view.layoutIfNeeded()
+    let initialGeneration = view.geometryTransitionGeneration
+    view.onGeometryChange = { old, next in
+      view.prepareGeometryTransition(from: old, generation: view.geometryTransitionGeneration)
+      view.applyGeometryTransition(to: next, generation: view.geometryTransitionGeneration)
+    }
+    defer { view.onGeometryChange = nil }
+    view.updateBubbleTail(side: .none, animated: true)
+    #expect(view.geometryTransitionGeneration > initialGeneration)
+    let firstTailGeneration = view.geometryTransitionGeneration
+    view.updateBubbleTail(side: .trailing, animated: true)
+    #expect(view.geometryTransitionGeneration > firstTailGeneration)
+    let currentBounds = view.bubbleView.bounds
+    view.finishGeometryTransition(generation: firstTailGeneration)
+    #expect(view.bubbleView.bounds == currentBounds)
+    view.finishGeometryTransition(generation: view.geometryTransitionGeneration)
+  }
+
   @Test("A streaming update retargets from visible bubble geometry")
   func interruptedStreaming() async throws {
     let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)

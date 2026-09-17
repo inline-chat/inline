@@ -492,6 +492,9 @@ final class UIMessageView2: UIMessageView {
     guard bubbleTailSide != side else { return }
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
     let oldLayout = measuredLayout(containerWidth: width)
+    finishGeometryTransition(generation: geometryTransitionGeneration)
+    transitionOldRichPlan = currentRichPlan
+    geometryTransitionGeneration &+= 1
     bubbleTailSide = side
     bubbleView.configure(side: side, animated: false)
     invalidateMeasuredContent()
