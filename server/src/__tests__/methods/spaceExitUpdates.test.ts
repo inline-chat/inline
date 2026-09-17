@@ -64,6 +64,12 @@ describe("space exit updates", () => {
       { spaceId: space.id, userId: leaver.id, role: "member" },
       { spaceId: space.id, userId: remaining.id, role: "member" },
     ])
+    const [leaverMembership] = await db
+      .select({ id: schema.members.id })
+      .from(schema.members)
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, leaver.id)))
+      .limit(1)
+    if (!leaverMembership) throw new Error("Expected leaver membership")
     const privateChat = await testUtils.createChat(space.id, "Retained leave chat", "thread", false)
     if (!privateChat) throw new Error("Failed to create private chat")
     await db.insert(schema.chatParticipants).values({ chatId: privateChat.id, userId: leaver.id })
@@ -111,7 +117,11 @@ describe("space exit updates", () => {
       if (!spaceRemoval) throw new Error("Expected durable Space removal")
       expect(spaceRemoval.payload.update).toEqual({
         oneofKind: "spaceRemoveMember",
-        spaceRemoveMember: { spaceId: BigInt(space.id), userId: BigInt(leaver.id) },
+        spaceRemoveMember: {
+          spaceId: BigInt(space.id),
+          userId: BigInt(leaver.id),
+          memberId: BigInt(leaverMembership.id),
+        },
       })
       expect(userRemoval?.seq).toBe(previousUserUpdate.seq + 1)
 

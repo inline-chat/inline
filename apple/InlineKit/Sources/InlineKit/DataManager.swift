@@ -74,7 +74,7 @@ public class DataManager: ObservableObject {
           log.error("Failed to save space", error: error)
         }
         do {
-          try Member(from: result.member).save(db)
+          try Member(from: result.member).reconcileProjection(db)
         } catch {
           log.error("Failed to save member", error: error)
         }
@@ -632,7 +632,7 @@ public class DataManager: ObservableObject {
       ? existing?.memberRosterComplete ?? false
       : false
     try space.save(db)
-    try Member(from: result.membership).save(db)
+    try Member(from: result.membership).reconcileProjection(db)
     return TargetedSpaceSnapshotImport(applied: true, catchUpTarget: catchUpTarget)
   }
 
@@ -641,7 +641,7 @@ public class DataManager: ObservableObject {
     let result = try await InlineRPCClient.shared.inviteToSpace(spaceID: spaceId, userID: userId)
     try await writeAccountProjection(token: mutationToken) { db in
       let member = Member(from: result.member)
-      try member.save(db, onConflict: .replace)
+      try member.reconcileProjection(db)
       if result.hasUser { _ = try User.save(db, user: result.user) }
     }
   }

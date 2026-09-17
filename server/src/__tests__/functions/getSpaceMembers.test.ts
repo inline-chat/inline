@@ -26,6 +26,7 @@ describe("getSpaceMembers", () => {
     expect(Array.isArray(result.users)).toBe(true)
     expect(result.members.length).toBe(2)
     expect(result.users.length).toBe(2)
+    expect(result.seq).toBe(space.updateSeq ?? 0)
     // Check that returned user emails match
     const ids = result.users.map((u: any) => u.id)
     expect(ids).toContain(BigInt(users[0].id))

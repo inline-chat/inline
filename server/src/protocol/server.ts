@@ -646,6 +646,10 @@ export interface ServerSpaceUpdateRemoveMember {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 member_id = 3;
+     */
+    memberId?: bigint;
 }
 /**
  * Update for a space when a member's access/role changes
@@ -2698,7 +2702,8 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
     constructor() {
         super("server.ServerSpaceUpdateRemoveMember", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "member_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerSpaceUpdateRemoveMember>): ServerSpaceUpdateRemoveMember {
@@ -2720,6 +2725,9 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 member_id */ 3:
+                    message.memberId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2738,6 +2746,9 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* optional int64 member_id = 3; */
+        if (message.memberId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.memberId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

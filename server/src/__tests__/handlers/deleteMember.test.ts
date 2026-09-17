@@ -93,6 +93,12 @@ describe("deleteMemberHandler", () => {
   })
 
   test("should delete a member from space and return updates", async () => {
+    const [memberBeforeDelete] = await db
+      .select({ id: schema.members.id })
+      .from(schema.members)
+      .where(and(eq(schema.members.userId, memberUser.id), eq(schema.members.spaceId, space.id)))
+      .limit(1)
+    if (!memberBeforeDelete) throw new Error("Expected member before delete")
     const input: DeleteMemberInput = {
       spaceId: BigInt(space.id),
       userId: BigInt(memberUser.id),
@@ -113,6 +119,7 @@ describe("deleteMemberHandler", () => {
         : undefined
     expect(spaceMemberDelete?.userId).toBe(BigInt(memberUser.id))
     expect(spaceMemberDelete?.spaceId).toBe(BigInt(space.id))
+    expect(spaceMemberDelete?.memberId).toBe(BigInt(memberBeforeDelete.id))
 
     let membersMatching = await db
       .select()
@@ -192,6 +199,12 @@ describe("deleteMemberHandler", () => {
   })
 
   test("persists removal independently in the Space and removed-user buckets", async () => {
+    const [memberBeforeDelete] = await db
+      .select({ id: schema.members.id })
+      .from(schema.members)
+      .where(and(eq(schema.members.userId, memberUser.id), eq(schema.members.spaceId, space.id)))
+      .limit(1)
+    if (!memberBeforeDelete) throw new Error("Expected member before delete")
     const priorUserUpdate = await UserBucketUpdates.enqueue({
       userId: memberUser.id,
       update: {
@@ -240,6 +253,11 @@ describe("deleteMemberHandler", () => {
     const durableSpaceRemoval = UpdatesModel.decrypt(durableSpaceRemovalRow)
 
     expect(durableSpaceRemoval.payload.update.oneofKind).toBe("spaceRemoveMember")
+    expect(
+      durableSpaceRemoval.payload.update.oneofKind === "spaceRemoveMember"
+        ? durableSpaceRemoval.payload.update.spaceRemoveMember.memberId
+        : undefined,
+    ).toBe(BigInt(memberBeforeDelete.id))
     expect(durableUserRemoval.seq).toBe(priorUserUpdate.seq + 1)
     expect(durableUserRemoval.seq).not.toBe(durableSpaceRemoval.seq)
   })

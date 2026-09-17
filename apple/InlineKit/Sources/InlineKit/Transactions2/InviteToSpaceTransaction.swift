@@ -126,7 +126,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
         if response.hasMember {
           do {
             let member = Member(from: response.member)
-            try member.save(db)
+            try member.reconcileProjection(db)
           } catch {
             log.error("Failed to save member", error: error)
           }

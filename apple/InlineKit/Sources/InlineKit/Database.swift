@@ -1331,6 +1331,24 @@ public extension AppDatabase {
       try db.execute(sql: "INSERT INTO sync_removal_revision (id, revision) VALUES (1, 0)")
     }
 
+    migrator.registerMigration("sequenced member projection") { db in
+      try db.create(table: "space_member_roster_state") { table in
+        table.column("spaceId", .integer)
+          .primaryKey()
+          .references("space", column: "id", onDelete: .cascade)
+        table.column("observedSeq", .integer).notNull()
+        table.column("snapshotSeq", .integer)
+      }
+      try db.create(table: "space_member_event_state") { table in
+        table.column("spaceId", .integer)
+          .notNull()
+          .references("space", column: "id", onDelete: .cascade)
+        table.column("userId", .integer).notNull()
+        table.column("seq", .integer).notNull()
+        table.primaryKey(["spaceId", "userId"])
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

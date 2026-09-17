@@ -80,7 +80,7 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
       .returning()
     if (!member) throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
 
-    const persisted = await persistLeaveUpdates(tx, space, currentUserId)
+    const persisted = await persistLeaveUpdates(tx, space, currentUserId, member.id)
     const remainingMemberRows = await tx
       .select({ userId: members.userId })
       .from(members)
@@ -100,7 +100,11 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
     void RealtimeUpdates.pushToUser(currentUserId, [{
       update: {
         oneofKind: "spaceMemberDelete",
-        spaceMemberDelete: { spaceId: BigInt(spaceId), userId: BigInt(currentUserId) },
+        spaceMemberDelete: {
+          spaceId: BigInt(spaceId),
+          userId: BigInt(currentUserId),
+          memberId: BigInt(member.id),
+        },
       },
     }]).catch((error: unknown) => {
       log.warn("Failed to publish committed Space leave", { spaceId, userId: currentUserId, error })
@@ -114,7 +118,13 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
   })
   // Space-wide fanout stays outside the affected-user publication lock.
   await notifyGridChanged(gridRemovalState)
-  pushLeaveUpdates({ spaceId, currentUserId, persisted, remainingMemberUserIds })
+  pushLeaveUpdates({
+    spaceId,
+    currentUserId,
+    memberId: member.id,
+    persisted,
+    remainingMemberUserIds,
+  })
   return member
 }
 
@@ -122,12 +132,14 @@ const persistLeaveUpdates = async (
   tx: Transaction,
   space: typeof spaces.$inferSelect,
   userId: number,
+  memberId: number,
 ): Promise<UpdateSeqAndDate> => {
   const spaceUpdate: ServerUpdate["update"] = {
     oneofKind: "spaceRemoveMember",
     spaceRemoveMember: {
       spaceId: BigInt(space.id),
       userId: BigInt(userId),
+      memberId: BigInt(memberId),
     },
   }
   const persisted = await UpdatesModel.insertUpdate(tx, {
@@ -156,11 +168,13 @@ const persistLeaveUpdates = async (
 const pushLeaveUpdates = ({
   spaceId,
   currentUserId,
+  memberId,
   persisted,
   remainingMemberUserIds,
 }: {
   spaceId: number
   currentUserId: number
+  memberId: number
   persisted: UpdateSeqAndDate
   remainingMemberUserIds: number[]
 }) => {
@@ -169,7 +183,11 @@ const pushLeaveUpdates = ({
     date: encodeDateStrict(persisted.date),
     update: {
       oneofKind: "spaceMemberDelete",
-      spaceMemberDelete: { spaceId: BigInt(spaceId), userId: BigInt(currentUserId) },
+      spaceMemberDelete: {
+        spaceId: BigInt(spaceId),
+        userId: BigInt(currentUserId),
+        memberId: BigInt(memberId),
+      },
     },
   }
   remainingMemberUserIds.forEach((userId) => {

@@ -148,13 +148,25 @@ public actor UpdatesEngine: Sendable {
           try deleteChat.apply(db)
 
         case let .spaceMemberAdd(spaceMemberAdd):
-          try spaceMemberAdd.apply(db)
+          try spaceMemberAdd.apply(
+            db,
+            updateSequence: update.hasSeq ? Int64(update.seq) : nil
+          )
 
         case let .spaceMemberDelete(spaceMemberDelete):
-          try spaceMemberDelete.apply(db)
+          try spaceMemberDelete.apply(
+            db,
+            updateSequence: update.hasSeq ? Int64(update.seq) : nil,
+            updateDate: update.hasDate
+              ? Date(timeIntervalSince1970: Double(update.date))
+              : nil
+          )
 
         case let .spaceMemberUpdate(spaceMemberUpdate):
-          try spaceMemberUpdate.apply(db)
+          try spaceMemberUpdate.apply(
+            db,
+            updateSequence: update.hasSeq ? Int64(update.seq) : nil
+          )
 
         case let .joinSpace(joinSpace):
           try joinSpace.apply(db)
@@ -1030,7 +1042,7 @@ public actor UpdatesEngine: Sendable {
         var space = Space(from: snapshot.space)
         space.memberRosterComplete = false
         try space.save(db)
-        try Member(from: snapshot.membership).save(db)
+        try Member(from: snapshot.membership).reconcileProjection(db)
         try SpaceCatalogStore.include(spaceID: repair.spaceID, in: db)
         if snapshot.hasSettings {
           try SpaceRecoverySettings(spaceId: repair.spaceID, settings: snapshot.settings).save(db)
@@ -2794,10 +2806,27 @@ extension InlineProtocol.UpdateMessageActionAnswered {
 }
 
 extension InlineProtocol.UpdateSpaceMemberAdd {
-  func apply(_ db: Database) throws {
-    _ = try User.save(db, user: user)
+  func apply(_ db: Database, updateSequence: Int64? = nil) throws {
     let member = Member(from: member)
-    try member.save(db)
+    guard try !Member.projectionCovers(
+      spaceID: member.spaceId,
+      userID: member.userId,
+      updateSequence: updateSequence,
+      in: db
+    ) else { return }
+    _ = try User.save(db, user: user)
+    try member.reconcileProjection(db)
+    try SpaceMemberEventState.observe(
+      spaceID: member.spaceId,
+      userID: member.userId,
+      sequence: updateSequence,
+      in: db
+    )
+    try SpaceMemberRosterState.observe(
+      spaceID: member.spaceId,
+      sequence: updateSequence,
+      in: db
+    )
     if member.userId == Auth.shared.getCurrentUserId() {
       try SpaceCatalogStore.include(spaceID: member.spaceId, in: db)
     }
@@ -2805,13 +2834,77 @@ extension InlineProtocol.UpdateSpaceMemberAdd {
 }
 
 extension InlineProtocol.UpdateSpaceMemberDelete {
-  func apply(_ db: Database, currentUserID: Int64? = Auth.shared.getCurrentUserId()) throws {
+  func apply(
+    _ db: Database,
+    updateSequence: Int64? = nil,
+    updateDate: Date? = nil,
+    currentUserID: Int64? = Auth.shared.getCurrentUserId()
+  ) throws {
     Log.shared.debug("update space member delete user \(userID) from space \(spaceID)")
+
+    guard try !Member.projectionCovers(
+      spaceID: spaceID,
+      userID: userID,
+      updateSequence: updateSequence,
+      in: db
+    ) else { return }
+
+    let existingMember = try Member
+      .filter(Member.Columns.userId == userID)
+      .filter(Member.Columns.spaceId == spaceID)
+      .fetchOne(db)
+    // Historical removal records predate member_id. Their durable event time
+    // can still prove that they belong to a membership older than the row now
+    // projected locally. Equality is intentionally inconclusive because the
+    // wire timestamp has one-second precision.
+    if !hasMemberID,
+       let existingMember,
+       let updateDate,
+       existingMember.date > updateDate {
+      try SpaceMemberEventState.observe(
+        spaceID: spaceID,
+        userID: userID,
+        sequence: updateSequence,
+        in: db
+      )
+      try SpaceMemberRosterState.observe(
+        spaceID: spaceID,
+        sequence: updateSequence,
+        in: db
+      )
+      return
+    }
+    // Generation-aware deletes cannot remove a later remove/re-add lifecycle.
+    if hasMemberID, let existingMember, existingMember.id != memberID {
+      try SpaceMemberEventState.observe(
+        spaceID: spaceID,
+        userID: userID,
+        sequence: updateSequence,
+        in: db
+      )
+      try SpaceMemberRosterState.observe(
+        spaceID: spaceID,
+        sequence: updateSequence,
+        in: db
+      )
+      return
+    }
 
     try Member
       .filter(Column("userId") == userID)
       .filter(Column("spaceId") == spaceID)
       .deleteAll(db)
+    try SpaceMemberEventState.observe(
+      spaceID: spaceID,
+      userID: userID,
+      sequence: updateSequence,
+      in: db
+    )
+    try SpaceMemberRosterState.observe(
+      spaceID: spaceID,
+      sequence: updateSequence,
+      in: db
+    )
 
     guard userID == currentUserID else { return }
 
@@ -2850,45 +2943,37 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
 }
 
 extension InlineProtocol.UpdateSpaceMemberUpdate {
-  func apply(_ db: Database) throws {
+  func apply(_ db: Database, updateSequence: Int64? = nil) throws {
     let updatedMember = Member(from: member)
 
-    let existingMember = try Member
-      .filter(Member.Columns.userId == updatedMember.userId)
-      .filter(Member.Columns.spaceId == updatedMember.spaceId)
-      .fetchOne(db)
+    guard try !Member.projectionCovers(
+      spaceID: updatedMember.spaceId,
+      userID: updatedMember.userId,
+      updateSequence: updateSequence,
+      in: db
+    ) else { return }
 
-    let previousCanAccessPublic = existingMember?.canAccessPublicChats ?? true
-
-    try updatedMember.save(db)
+    let write = try updatedMember.reconcileProjection(db)
+    try SpaceMemberEventState.observe(
+      spaceID: updatedMember.spaceId,
+      userID: updatedMember.userId,
+      sequence: updateSequence,
+      in: db
+    )
+    try SpaceMemberRosterState.observe(
+      spaceID: updatedMember.spaceId,
+      sequence: updateSequence,
+      in: db
+    )
+    guard write.applied else { return }
+    let previousCanAccessPublic = write.previous?.canAccessPublicChats ?? true
 
     let currentUserId = Auth.shared.getCurrentUserId()
     if updatedMember.userId == currentUserId,
        previousCanAccessPublic == true,
        updatedMember.canAccessPublicChats == false {
-      try removePublicThreadsForSpace(spaceId: updatedMember.spaceId, db: db)
+      try Member.removePublicThreadsForSpace(spaceID: updatedMember.spaceId, in: db)
     }
-  }
-
-  private func removePublicThreadsForSpace(spaceId: Int64, db: Database) throws {
-    try SyncRemovalRevision.advance(db)
-    let publicThreads = try Chat
-      .filter(Chat.Columns.spaceId == spaceId)
-      .filter(Chat.Columns.type == ChatType.thread.rawValue)
-      .filter(Chat.Columns.isPublic == true)
-      .fetchAll(db)
-
-    let chatIds = publicThreads.map(\.id)
-    guard !chatIds.isEmpty else { return }
-
-    try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-    try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-    try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
-    let chatBucketIds = chatIds.map { -$0 }
-    try DbBucketState
-      .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
-      .deleteAll(db)
-    try Chat.filter(chatIds.contains(Column("id"))).deleteAll(db)
   }
 }
 
@@ -2905,7 +2990,7 @@ extension InlineProtocol.UpdateJoinSpace {
       .filter(Member.Columns.spaceId == member.spaceId)
       .fetchOne(db) == nil
     else { return }
-    try member.save(db)
+    try member.insert(db)
   }
 }
 

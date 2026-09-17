@@ -67,7 +67,7 @@ public struct SpaceJoinSnapshotAdmission: Sendable, Codable {
       // metadata while replacing its Member would still regress that bucket.
       return false
     }
-    try Member(from: member).save(db)
+    try Member(from: member).reconcileProjection(db)
     return true
   }
 }

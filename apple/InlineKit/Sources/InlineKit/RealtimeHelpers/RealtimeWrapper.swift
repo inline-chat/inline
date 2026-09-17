@@ -267,7 +267,7 @@ public extension Realtime {
 
     _ = try db.dbWriter.write { db in
       try Auth.shared.handle.validateAccountMutation(mutationToken)
-      try User.save(db, user: result.user)
+      _ = try User.save(db, user: result.user)
     }
 
     log.trace("getMe saved")
@@ -364,20 +364,19 @@ public extension Realtime {
     guard case let .getSpaceMembers(getSpaceMembersInput) = input else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    try await writeAccountProjection(token: mutationToken) { db in
-      try Member
-        .filter(Member.Columns.spaceId == getSpaceMembersInput.spaceID)
-        .deleteAll(db)
-      for user in result.users {
-        _ = try User.save(db, user: user)
-      }
-
-      for member in result.members {
-        try Member(from: member).save(db)
-      }
-      try Space
-        .filter(Space.Columns.id == getSpaceMembersInput.spaceID)
-        .updateAll(db, [Space.Columns.memberRosterComplete.set(to: true)])
+    let imported = try await writeAccountProjection(token: mutationToken) { db in
+      try GetSpaceMembersTransaction.apply(
+        result,
+        spaceID: getSpaceMembersInput.spaceID,
+        in: db
+      )
+    }
+    if let catchUpTarget = imported.catchUpTarget {
+      _ = try await Api.realtime.installSnapshotOutcome(
+        seededStates: [:],
+        catchUpTargets: [.space(id: getSpaceMembersInput.spaceID): catchUpTarget],
+        expectedAccount: mutationToken
+      )
     }
     log.trace("getSpaceMembers saved")
   }
@@ -397,7 +396,7 @@ public extension Realtime {
       do {
         let member = Member(from: result.member)
         // print("member: \(member)")
-        try member.save(db)
+        try member.reconcileProjection(db)
       } catch {
         Log.shared.error("Failed to save member", error: error)
       }

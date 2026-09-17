@@ -9721,6 +9721,12 @@ export interface GetSpaceMembersResult {
      * @generated from protobuf field: repeated User users = 2;
      */
     users: User[];
+    /**
+     * Space-bucket sequence atomically covered by this roster snapshot.
+     *
+     * @generated from protobuf field: optional int32 seq = 3;
+     */
+    seq?: number;
 }
 /**
  * @generated from protobuf message GetUserGroupsInput
@@ -10415,6 +10421,13 @@ export interface UpdateSpaceMemberDelete {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * Immutable ID of the removed membership generation. Older servers may
+     * omit it; generation-aware clients use it to reject delayed removals.
+     *
+     * @generated from protobuf field: optional int64 member_id = 3;
+     */
+    memberId?: bigint;
 }
 /**
  * Update when a space member's access/role changes
@@ -40039,7 +40052,8 @@ class GetSpaceMembersResult$Type extends MessageType<GetSpaceMembersResult> {
     constructor() {
         super("GetSpaceMembersResult", [
             { no: 1, name: "members", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Member },
-            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
+            { no: 3, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<GetSpaceMembersResult>): GetSpaceMembersResult {
@@ -40061,6 +40075,9 @@ class GetSpaceMembersResult$Type extends MessageType<GetSpaceMembersResult> {
                 case /* repeated User users */ 2:
                     message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional int32 seq */ 3:
+                    message.seq = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -40079,6 +40096,9 @@ class GetSpaceMembersResult$Type extends MessageType<GetSpaceMembersResult> {
         /* repeated User users = 2; */
         for (let i = 0; i < message.users.length; i++)
             User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 seq = 3; */
+        if (message.seq !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -41847,7 +41867,8 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
     constructor() {
         super("UpdateSpaceMemberDelete", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "member_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateSpaceMemberDelete>): UpdateSpaceMemberDelete {
@@ -41869,6 +41890,9 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 member_id */ 3:
+                    message.memberId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -41887,6 +41911,9 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* optional int64 member_id = 3; */
+        if (message.memberId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.memberId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

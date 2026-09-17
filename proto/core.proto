@@ -3589,6 +3589,9 @@ message GetSpaceMembersInput { int64 space_id = 1; }
 message GetSpaceMembersResult {
   repeated Member members = 1;
   repeated User users = 2;
+
+  // Space-bucket sequence atomically covered by this roster snapshot.
+  optional int32 seq = 3;
 }
 
 message GetUserGroupsInput { int64 space_id = 1; }
@@ -3801,6 +3804,10 @@ message UpdateSpaceMemberDelete {
 
   // User ID
   int64 user_id = 2;
+
+  // Immutable ID of the removed membership generation. Older servers may
+  // omit it; generation-aware clients use it to reject delayed removals.
+  optional int64 member_id = 3;
 }
 
 // Update when a space member's access/role changes

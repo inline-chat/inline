@@ -16344,9 +16344,21 @@ public nonisolated struct GetSpaceMembersResult: Sendable {
 
   public var users: [User] = []
 
+  /// Space-bucket sequence atomically covered by this roster snapshot.
+  public var seq: Int32 {
+    get {_seq ?? 0}
+    set {_seq = newValue}
+  }
+  /// Returns true if `seq` has been explicitly set.
+  public var hasSeq: Bool {self._seq != nil}
+  /// Clears the value of `seq`. Subsequent reads from it will return its default value.
+  public mutating func clearSeq() {self._seq = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _seq: Int32? = nil
 }
 
 public nonisolated struct GetUserGroupsInput: Sendable {
@@ -17415,9 +17427,22 @@ public nonisolated struct UpdateSpaceMemberDelete: Sendable {
   /// User ID
   public var userID: Int64 = 0
 
+  /// Immutable ID of the removed membership generation. Older servers may
+  /// omit it; generation-aware clients use it to reject delayed removals.
+  public var memberID: Int64 {
+    get {_memberID ?? 0}
+    set {_memberID = newValue}
+  }
+  /// Returns true if `memberID` has been explicitly set.
+  public var hasMemberID: Bool {self._memberID != nil}
+  /// Clears the value of `memberID`. Subsequent reads from it will return its default value.
+  public mutating func clearMemberID() {self._memberID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _memberID: Int64? = nil
 }
 
 /// Update when a space member's access/role changes
@@ -43908,7 +43933,7 @@ nonisolated extension GetSpaceMembersInput: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceMembersResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}members\0\u{1}users\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}members\0\u{1}users\0\u{1}seq\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -43918,24 +43943,33 @@ nonisolated extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobu
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.members) }()
       case 2: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self._seq) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.members.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.members, fieldNumber: 1)
     }
     if !self.users.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 2)
     }
+    try { if let v = self._seq {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetSpaceMembersResult, rhs: GetSpaceMembersResult) -> Bool {
     if lhs.members != rhs.members {return false}
     if lhs.users != rhs.users {return false}
+    if lhs._seq != rhs._seq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -45651,7 +45685,7 @@ nonisolated extension UpdateSpaceMemberAdd: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceMemberDelete"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}user_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}user_id\0\u{3}member_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -45661,24 +45695,33 @@ nonisolated extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProto
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._memberID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.spaceID != 0 {
       try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
     }
     if self.userID != 0 {
       try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
     }
+    try { if let v = self._memberID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateSpaceMemberDelete, rhs: UpdateSpaceMemberDelete) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs.userID != rhs.userID {return false}
+    if lhs._memberID != rhs._memberID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

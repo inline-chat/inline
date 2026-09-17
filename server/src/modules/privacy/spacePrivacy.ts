@@ -2,6 +2,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { members, spaces, type DbMember, type DbSpace } from "@in/server/db/schema"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import type { Transaction } from "@in/server/db/types"
 
 export type SpacePrivacyContext = {
   space: DbSpace
@@ -10,8 +11,13 @@ export type SpacePrivacyContext = {
   canManageMembers: boolean
 }
 
-export async function getSpacePrivacyContext(spaceId: number, userId: number): Promise<SpacePrivacyContext> {
-  const [row] = await db
+export async function getSpacePrivacyContext(
+  spaceId: number,
+  userId: number,
+  options?: { tx?: Transaction },
+): Promise<SpacePrivacyContext> {
+  const executor = options?.tx ?? db
+  const [row] = await executor
     .select({
       space: spaces,
       member: members,

@@ -83,7 +83,10 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
         // returned promises settle. Never add an await before this eviction:
         // the lifecycle helper still owns the membership/re-add boundary here.
         void publishGridMemberAccessRevoked(spaceId, userId)
-        void RealtimeUpdates.pushToUser(userId, [immediateMemberEviction(spaceId, userId)]).catch((error: unknown) => {
+        void RealtimeUpdates.pushToUser(
+          userId,
+          [immediateMemberEviction(spaceId, userId, removedMemberId)],
+        ).catch((error: unknown) => {
           log.warn("Failed to publish committed member eviction", { spaceId, userId, error })
         })
         return undefined
@@ -99,6 +102,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
       pushUpdatesForSpace({
         spaceId,
         userId,
+        memberId: removedMemberId,
         currentUserId: context.currentUserId,
         persisted,
         remainingMemberUserIds,
@@ -221,7 +225,7 @@ async function removeMemberAndGridPresence(
 
     await tx.delete(dialogs).where(and(eq(dialogs.spaceId, spaceId), eq(dialogs.userId, userId)))
 
-    const persisted = await persistSpaceMemberDeleteUpdateInTransaction(tx, space, userId)
+    const persisted = await persistSpaceMemberDeleteUpdateInTransaction(tx, space, userId, removedMember.id)
     const accessAfter = await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
     const lostChatIds = accessEventChatIds.filter((chatId) =>
       removedAccessUserIds(chatId, accessBefore, accessAfter).includes(userId),
@@ -261,12 +265,14 @@ async function removeMemberAndGridPresence(
 const pushUpdatesForSpace = async ({
   spaceId,
   userId,
+  memberId,
   currentUserId,
   persisted,
   remainingMemberUserIds,
 }: {
   spaceId: number
   userId: number
+  memberId: number
   currentUserId: number
   persisted: UpdateSeqAndDate
   remainingMemberUserIds: number[]
@@ -279,6 +285,7 @@ const pushUpdatesForSpace = async ({
       spaceMemberDelete: {
         spaceId: BigInt(spaceId),
         userId: BigInt(userId),
+        memberId: BigInt(memberId),
       },
     },
   }
@@ -297,10 +304,14 @@ const pushUpdatesForSpace = async ({
   }
 }
 
-const immediateMemberEviction = (spaceId: number, userId: number): Update => ({
+const immediateMemberEviction = (spaceId: number, userId: number, memberId: number): Update => ({
   update: {
     oneofKind: "spaceMemberDelete",
-    spaceMemberDelete: { spaceId: BigInt(spaceId), userId: BigInt(userId) },
+    spaceMemberDelete: {
+      spaceId: BigInt(spaceId),
+      userId: BigInt(userId),
+      memberId: BigInt(memberId),
+    },
   },
 })
 
@@ -308,12 +319,14 @@ const persistSpaceMemberDeleteUpdateInTransaction = async (
   tx: Transaction,
   space: typeof spaces.$inferSelect,
   userId: number,
+  memberId: number,
 ): Promise<UpdateSeqAndDate> => {
   const spaceServerUpdatePayload: ServerUpdate["update"] = {
     oneofKind: "spaceRemoveMember",
     spaceRemoveMember: {
       spaceId: BigInt(space.id),
       userId: BigInt(userId),
+      memberId: BigInt(memberId),
     },
   }
 

@@ -195,6 +195,7 @@ message ServerChatUpdateDeleteReaction {
 message ServerSpaceUpdateRemoveMember {
   int64 space_id = 1;
   int64 user_id = 2;
+  optional int64 member_id = 3;
 }
 
 // Update for a space when a member's access/role changes

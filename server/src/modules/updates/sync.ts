@@ -1643,6 +1643,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
           spaceMemberDelete: {
             spaceId: payload.spaceRemoveMember.spaceId,
             userId: payload.spaceRemoveMember.userId,
+            memberId: payload.spaceRemoveMember.memberId,
           },
         },
       }
