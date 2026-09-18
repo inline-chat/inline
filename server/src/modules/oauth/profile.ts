@@ -1,4 +1,4 @@
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
 
 export type OAuthProfile = {
   firstName: string | null
@@ -19,8 +19,8 @@ export function parseOAuthProfile(name: string, username: string) {
   if (!firstName || firstName.length > 256 || lastName.length > 256) {
     return { error: "Enter your name (up to 256 characters per name)." } as const
   }
-  if (handle.length < 2 || handle.length > 256) {
-    return { error: "Choose a username between 2 and 256 characters." } as const
+  if (!isValidUsername(handle)) {
+    return { error: "Choose a username with 2–64 letters, numbers, or underscores." } as const
   }
   return { profile: { firstName, lastName, username: handle } } as const
 }

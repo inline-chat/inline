@@ -25,7 +25,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
 import {
   externalProfilePhotoResolver,
   normalizeExternalUsername,
@@ -61,7 +61,7 @@ export const changeUsernameHandler = async (
 ): Promise<ChangeUsernameResult> => {
   const username = normalizeUsername(input.username)
 
-  if (!username) {
+  if (!input.username.trim()) {
     const { user, update } = await updateUserAndPush(context, { username: null })
     return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [update] }
   }
@@ -173,7 +173,7 @@ export const getExternalProfilePhotoHandler = async (
 }
 
 async function usernameAvailability(username: string, currentUserId: number): Promise<UsernameAvailability> {
-  if (username.length < 2) {
+  if (!isValidUsername(username)) {
     return UsernameAvailability.USERNAME_INVALID
   }
 

@@ -28,6 +28,24 @@ describe("updateProfile", () => {
     expect(storedUser?.username).toBe("profilehandle")
   })
 
+  test("normalizes signup input before storing and checking collisions", async () => {
+    const user = await testUtils.createUser("normalized-profile@example.com")
+    const other = await testUtils.createUser("other-normalized-profile@example.com")
+    expect((await handler({ username: "@@Example Studio@example.com" }, makeContext(user.id))).user.username)
+      .toBe("Example_Studio_example_com")
+    expect((await handler({ username: "@@Example.Studio@example.com" }, makeContext(user.id))).user.username)
+      .toBe("Example_Studio")
+    await expect(handler({ username: "Example-Studio" }, makeContext(other.id))).rejects.toMatchObject({
+      code: InlineError.ApiError.USERNAME_TAKEN[1],
+    })
+    for (const username of ["@@@", "💥", "a".repeat(65)]) {
+      await expect(handler({ username }, makeContext(user.id))).rejects.toMatchObject({
+        code: InlineError.ApiError.USERNAME_INVALID[1],
+      })
+    }
+    expect((await db.select().from(users).where(eq(users.id, user.id)))[0]?.username).toBe("Example_Studio")
+  })
+
   test("ignores undefined optional name fields on username updates", async () => {
     const user = await testUtils.createUser("optional-name-profile@example.com")
 

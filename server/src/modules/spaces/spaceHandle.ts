@@ -2,13 +2,13 @@ import { db } from "@in/server/db"
 import { lower, reservedUsernames, spaces, users } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { normalizeHandleLookup } from "@in/server/utils/normalize"
 import { eq, sql } from "drizzle-orm"
 
 export const MAX_SPACE_HANDLE_LENGTH = 256
 
 export function normalizeSpaceHandle(value: string): string | null {
-  const handle = normalizeUsername(value)
+  const handle = normalizeHandleLookup(value)
   if (handle.length < 2 || handle.length > MAX_SPACE_HANDLE_LENGTH || isReservedUsername(handle)) {
     return null
   }
@@ -26,7 +26,7 @@ export type PublicHandleAvailability = "available" | "current" | "reserved" | "t
 
 /** Serializes server-mediated claims across the user and space handle tables. */
 export async function lockPublicHandleNamespace(tx: Transaction, value: string): Promise<void> {
-  const handle = normalizeUsername(value).toLowerCase()
+  const handle = normalizeHandleLookup(value).toLowerCase()
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${handle}, 0))`)
 }
 
@@ -35,7 +35,7 @@ export async function getPublicHandleAvailability(
   value: string,
   owner: PublicHandleOwner = {},
 ): Promise<PublicHandleAvailability> {
-  const handle = normalizeUsername(value).toLowerCase()
+  const handle = normalizeHandleLookup(value).toLowerCase()
   const [user] = await query
     .select({ id: users.id })
     .from(users)

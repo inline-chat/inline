@@ -5,7 +5,7 @@ import { SessionsModel } from "@in/server/db/models/sessions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
 import { and, eq, sql } from "drizzle-orm"
@@ -36,7 +36,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   const normalizedUsername = normalizeUsername(input.username)
   const normalizedUsernameLower = normalizedUsername.toLowerCase()
 
-  if (!normalizedUsernameLower.endsWith("bot")) {
+  if (!isValidUsername(normalizedUsername) || !normalizedUsernameLower.endsWith("bot")) {
     throw RealtimeRpcError.BadRequest()
   }
 

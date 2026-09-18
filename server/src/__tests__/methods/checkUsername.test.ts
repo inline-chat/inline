@@ -15,6 +15,16 @@ describe("checkUsername", () => {
     ip: "127.0.0.1",
   })
 
+  test("checks canonical collisions and rejects unusable candidates", async () => {
+    const owner = await testUtils.createUser("canonical-owner@example.com")
+    const user = await testUtils.createUser("canonical-check@example.com")
+    await db.update(users).set({ username: "test_person" }).where(eq(users.id, owner.id))
+    expect((await handler({ username: "Test.Person@example.com" }, makeContext(user.id))).available).toBe(false)
+    for (const username of ["", "@@@", "💥", "a", "a".repeat(65)]) {
+      expect((await handler({ username }, makeContext(user.id))).available).toBe(false)
+    }
+  })
+
   test("reports reserved usernames as unavailable", async () => {
     const user = await testUtils.createUser("check-reserved@example.com")
 

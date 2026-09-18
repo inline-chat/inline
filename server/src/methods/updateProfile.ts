@@ -8,7 +8,7 @@ import { TUserInfo, encodeUserInfo } from "@in/server/api-types"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { validateIanaTimezone } from "@in/server/utils/validate"
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import {
   getPublicHandleAvailability,
@@ -53,8 +53,8 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
     if (input.username !== undefined) {
       const username = normalizeUsername(input.username)
-      if (username) {
-        if (username.length < 2) {
+      if (input.username.trim()) {
+        if (!isValidUsername(username)) {
           throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
         }
 

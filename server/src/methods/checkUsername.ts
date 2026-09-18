@@ -3,7 +3,7 @@ import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
 import { getPublicHandleAvailability } from "@in/server/modules/spaces/spaceHandle"
 
 export const Input = Type.Object({
@@ -30,6 +30,7 @@ export const handler = async (
 /// HELPER FUNCTIONS ///
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = normalizeUsername(username).toLowerCase()
+  if (!isValidUsername(normalizedUsername)) return false
   const availability = await getPublicHandleAvailability(db, normalizedUsername, { userId: context.userId })
   return availability === "current" || availability === "available"
 }

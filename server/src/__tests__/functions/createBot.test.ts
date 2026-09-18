@@ -41,6 +41,12 @@ describe("createBot", () => {
     expect(result.token.length).toBeGreaterThan(0)
   })
 
+  test("normalizes bot usernames and enforces the length limit", async () => {
+    const result = await createBot({ name: "Test", username: "@@Déploy-Bot" }, mockFunctionContext)
+    expect(result.bot?.username).toBe("Deploy_Bot")
+    await expect(createBot({ name: "Test", username: "a".repeat(62) + "bot" }, mockFunctionContext)).rejects.toThrow()
+  })
+
   test("should fail with invalid username", async () => {
     const input = {
       name: "Test Bot",

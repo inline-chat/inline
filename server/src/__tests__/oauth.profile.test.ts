@@ -64,6 +64,19 @@ describe("OAuth profile completion", () => {
     expect((await adminOAuthConnections([f.user.id])).get(f.user.id)).toEqual(["chatgpt"])
   })
 
+  it("sanitizes profile handles and rejects normalized collisions and invalid results", async () => {
+    const f = await fixture()
+    expect((await f.profile({ name: "Test", username: "Mixed.Case@example.com" })).status).toBe(200)
+    expect((await db.select().from(users).where(eq(users.id, f.user.id)))[0]?.username).toBe("Mixed_Case")
+    const other = await fixture()
+    for (const username of ["mixed-case", "@@@", "💥", "a".repeat(65)]) {
+      expect((await other.profile({ name: "Test", username })).status).toBe(400)
+    }
+    const [unchanged] = await db.select().from(users).where(eq(users.id, other.user.id))
+    expect(unchanged?.username).toBeNull()
+    expect(unchanged?.pendingSetup).toBe(true)
+  })
+
   it("rejects CSRF, invalid names and taken usernames without completing setup", async () => {
     const f = await fixture()
     const other = await testUtils.createUser("other@example.com")

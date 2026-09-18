@@ -97,7 +97,7 @@ import {
 } from "@in/server/utils/log"
 import {
   normalizeEmail,
-  normalizeUsername,
+  normalizeHandleLookup,
 } from "@in/server/utils/normalize"
 import {
   isReservedUsername,
@@ -222,7 +222,7 @@ const waitlistOperation: AdminOperationsShape["waitlist"] =
     })
 
 const normalizeReservation = (value: string): string | null => {
-  const username = normalizeUsername(value).toLowerCase()
+  const username = normalizeHandleLookup(value).toLowerCase()
   return username.length >= 2 && username.length <= 256
     ? username
     : null

@@ -1,4 +1,4 @@
-import { normalizeUsername } from "@in/server/utils/normalize"
+import { normalizeHandleLookup } from "@in/server/utils/normalize"
 
 export const RESERVED_USERNAMES = [
   "about",
@@ -150,5 +150,5 @@ export const RESERVED_USERNAMES = [
 const reserved = new Set<string>(RESERVED_USERNAMES)
 
 export const isReservedUsername = (username: string): boolean => {
-  return reserved.has(normalizeUsername(username).toLowerCase())
+  return reserved.has(normalizeHandleLookup(username).toLowerCase())
 }

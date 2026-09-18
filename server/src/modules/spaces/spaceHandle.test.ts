@@ -26,6 +26,41 @@ const realtimeContext = (userId: number) => ({
 describe("public handle namespace", () => {
   setupTestLifecycle()
 
+  test("Realtime preserves casing, sanitizes before claiming, and never clears invalid input", async () => {
+    const owner = await testUtils.createUser("sanitize-owner@example.com")
+    const other = await testUtils.createUser("sanitize-other@example.com")
+    const candidate = "@@Example.Studio@example.com"
+    const checked = await checkUsernameHandler({ username: candidate }, realtimeContext(owner.id))
+    expect(checked.username).toBe("Example_Studio")
+    expect(checked.availability).toBe(UsernameAvailability.USERNAME_AVAILABLE)
+    const saved = await changeUsernameHandler({ username: candidate }, realtimeContext(owner.id))
+    expect(saved.user?.username).toBe("Example_Studio")
+    expect((await checkUsernameHandler({ username: "example-studio" }, realtimeContext(other.id))).availability)
+      .toBe(UsernameAvailability.USERNAME_TAKEN)
+    await expect(changeUsernameHandler({ username: "example studio" }, realtimeContext(other.id))).rejects.toThrow()
+    for (const username of ["@@@", "💥", "a".repeat(65)]) {
+      expect((await checkUsernameHandler({ username }, realtimeContext(owner.id))).availability)
+        .toBe(UsernameAvailability.USERNAME_INVALID)
+      await expect(changeUsernameHandler({ username }, realtimeContext(owner.id))).rejects.toThrow()
+    }
+    expect((await db.select().from(users).where(eq(users.id, owner.id)))[0]?.username).toBe("Example_Studio")
+    const changedCase = await changeUsernameHandler({ username: "EXAMPLE_Studio" }, realtimeContext(owner.id))
+    expect(changedCase.user?.username).toBe("EXAMPLE_Studio")
+    await changeUsernameHandler({ username: "" }, realtimeContext(owner.id))
+    expect((await db.select().from(users).where(eq(users.id, owner.id)))[0]?.username).toBeNull()
+  })
+
+  test("checks sanitized usernames against spaces and reservations", async () => {
+    const user = await testUtils.createUser("sanitize-namespace@example.com")
+    await createSpace({ name: "Space", handle: "Shared_Name" }, legacyContext(user.id))
+    await db.insert(reservedUsernames).values({ username: "future_name" })
+    expect(await checkUsernameAvailable("Shared Name", {})).toBe(false)
+    expect(await checkUsernameAvailable("Future-Name", {})).toBe(false)
+    expect((await checkUsernameHandler({ username: "Future.Name" }, realtimeContext(user.id))).availability)
+      .toBe(UsernameAvailability.USERNAME_RESERVED)
+    await expect(changeUsernameHandler({ username: "Shared.Name" }, realtimeContext(user.id))).rejects.toThrow()
+  })
+
   test("prevents a space from claiming a user username", async () => {
     const user = await testUtils.createUser("namespace-user@example.com")
     await updateProfile({ username: "sharedname" }, legacyContext(user.id))
