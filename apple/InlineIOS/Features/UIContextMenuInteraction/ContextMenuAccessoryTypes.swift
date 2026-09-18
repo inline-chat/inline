@@ -55,8 +55,12 @@ struct ContextMenuAccessoryConfiguration {
 enum ContextMenuAccessoryLayout {
   static let reactionPickerMaxWidth: CGFloat = 360
   static let reactionPickerHorizontalMargin: CGFloat = 56
-  static let reactionPickerHeight: CGFloat = 52
-  static let accessoryHostHeight: CGFloat = 64
+  // Keep the iOS touch target independent of the smaller emoji artwork.
+  static let reactionButtonSize: CGFloat = 44
+  static let reactionEmojiPointSize: CGFloat = 26
+  static let reactionPickerContentInset: CGFloat = 4
+  static let reactionPickerHeight: CGFloat = reactionButtonSize + 2 * reactionPickerContentInset
+  static let accessoryHostHeight: CGFloat = reactionPickerHeight + 12
 
   static func reactionPickerWidth(for containerWidth: CGFloat) -> CGFloat {
     let fallbackWidth = UIScreen.main.bounds.width

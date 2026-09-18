@@ -44,6 +44,7 @@ extension UIContextMenuInteraction {
 
       accessoryView?.frame = CGRect(x: 0, y: 0, width: width, height: height)
       accessoryView?.backgroundColor = .clear
+      accessoryView?.clipsToBounds = false
 
       contentView.frame = CGRect(
         x: 0,
