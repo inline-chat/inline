@@ -34,7 +34,24 @@ final class MessagesCollectionView: UICollectionView {
   private let isPreview: Bool
   private var theme: IOSThemeSnapshot
   private var coordinator: Coordinator
-  private var isContextMenuOpen = false
+  private enum ContextMenuPhase {
+    case idle, presented, dismissing
+  }
+
+  private var contextMenuPhase = ContextMenuPhase.idle
+  private var contextMenuConfiguration: UIContextMenuConfiguration?
+  private var contextMenuKeyboardRestorationOffset: CGPoint?
+  var isContextMenuInteractionActive: Bool { contextMenuPhase != .idle }
+  var onContextMenuWillDisplay: (() -> Void)?
+  var onContextMenuDidEnd: (() -> Void)?
+
+  func preserveContextMenuViewportForKeyboardRestoration() {
+    contextMenuKeyboardRestorationOffset = contentOffset
+  }
+
+  func cancelContextMenuKeyboardRestoration() {
+    contextMenuKeyboardRestorationOffset = nil
+  }
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
   private var pendingScrollMessageID: Int64?
@@ -158,6 +175,7 @@ final class MessagesCollectionView: UICollectionView {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
+      cancelContextMenuKeyboardRestoration()
       isKeyboardVisible = false
       keyboardHeight = 0
       cancelSendAnimationScrollAnimations()
@@ -524,6 +542,12 @@ final class MessagesCollectionView: UICollectionView {
     animation: ComposeHeightChangeAnimation,
     scrollToBottomIfNeeded: Bool = true
   ) {
+    if isContextMenuInteractionActive {
+      stopComposeInsetAnimationAtPresentation()
+      self.composeHeight = composeHeight
+      updateContentInsets()
+      return
+    }
     let wasAtBottom = !itemsEmpty && shouldScrollToBottom
     beginScrollAffordanceUpdate()
     defer { endScrollAffordanceUpdate() }
@@ -590,7 +614,7 @@ final class MessagesCollectionView: UICollectionView {
 
   static let messagesBottomPadding = 12.0
   func updateContentInsets() {
-    guard !isContextMenuOpen else {
+    guard contextMenuPhase != .presented else {
       needsContentInsetUpdateAfterContextMenu = true
       return
     }
@@ -639,38 +663,24 @@ final class MessagesCollectionView: UICollectionView {
     contentInsetAdjustmentBehavior = .never
     automaticallyAdjustsScrollIndicatorInsets = false
 
+    let previousOffset = contentOffset
     scrollIndicatorInsets = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset, right: 0)
     contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
+    // UIKit may adjust the offset when an inset changes. During menu dismissal
+    // the preview must land on the same message, including while focus returns.
+    if isContextMenuInteractionActive {
+      setContentOffset(previousOffset, animated: false)
+    }
     layoutIfNeeded()
     coordinator.syncAvatarOverlay(animate: false)
     reconcileScrollAffordance()
   }
 
-  private func updateContentInsetsAfterContextMenuIfNeeded(animated: Bool) {
+  private func updateContentInsetsAfterContextMenuIfNeeded() {
     guard needsContentInsetUpdateAfterContextMenu else { return }
-
-    let wasAtBottom = shouldScrollToBottom
-    guard animated, wasAtBottom, !itemsEmpty else {
-      beginScrollAffordanceUpdate()
-      defer { endScrollAffordanceUpdate() }
-      updateContentInsets()
-      if wasAtBottom, !itemsEmpty {
-        safeScrollToTop(animated: false)
-      }
-      return
-    }
-
     beginScrollAffordanceUpdate()
+    defer { endScrollAffordanceUpdate() }
     updateContentInsets()
-    UIView.animate(
-      withDuration: 0.2,
-      delay: 0,
-      options: [.allowUserInteraction, .beginFromCurrentState]
-    ) {
-      self.safeScrollToTop(animated: false)
-    } completion: { [weak self] _ in
-      self?.endScrollAffordanceUpdate()
-    }
   }
 
   var shouldScrollToBottom: Bool {
@@ -886,8 +896,8 @@ final class MessagesCollectionView: UICollectionView {
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(keyboardWillShow),
-      name: UIResponder.keyboardWillShowNotification,
+      selector: #selector(keyboardWillChangeFrame),
+      name: UIResponder.keyboardWillChangeFrameNotification,
       object: nil
     )
 
@@ -921,42 +931,42 @@ final class MessagesCollectionView: UICollectionView {
   var isKeyboardVisible: Bool = false
   var keyboardHeight: CGFloat = 0
 
-  @objc private func keyboardWillShow(_ notification: Notification) {
-    guard window != nil else { return }
-    let wasAtBottom = shouldScrollToBottom
-
-    isKeyboardVisible = true
-    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-    else {
-      return
-    }
-    let keyboardFrameHeight = keyboardFrame.height
-    keyboardHeight = keyboardFrameHeight
-
-    beginScrollAffordanceUpdate()
-    updateContentInsets()
-    UIView.animate(
-      withDuration: duration,
-      delay: 0,
-      options: [.allowUserInteraction, .beginFromCurrentState]
-    ) {
-      if wasAtBottom, !self.itemsEmpty {
-        self.safeScrollToTop(animated: false)
-      }
-    } completion: { [weak self] _ in
-      self?.endScrollAffordanceUpdate()
-    }
+  @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+    guard let window,
+          let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+          !frame.isNull, !frame.isInfinite else { return }
+    // Work in the upright window coordinate space: this collection is inverted.
+    // An offscreen or floating keyboard must not reserve its full frame height.
+    let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
+    let viewport = convert(bounds, to: window)
+    let overlap = viewport.intersection(keyboardFrame)
+    let height = !overlap.isNull && keyboardFrame.maxY >= viewport.maxY - 1 ? overlap.height : 0
+    updateKeyboardHeight(height, notification: notification)
   }
 
   @objc private func keyboardWillHide(_ notification: Notification) {
     guard window != nil else { return }
-    let wasAtBottom = shouldScrollToBottom
+    updateKeyboardHeight(0, notification: notification)
+  }
 
-    isKeyboardVisible = false
-    keyboardHeight = 0
-    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
+  private func updateKeyboardHeight(_ height: CGFloat, notification: Notification) {
+    let wasAtBottom = shouldScrollToBottom
+    isKeyboardVisible = height > 0
+    keyboardHeight = height
+    if height > 0, let offset = contextMenuKeyboardRestorationOffset {
+      contextMenuKeyboardRestorationOffset = nil
+      updateContentInsets()
+      setContentOffset(clampedSendAnimationContentOffset(offset), animated: false)
       return
+    }
+    if isContextMenuInteractionActive {
+      updateContentInsets()
+      return
+    }
+    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+    var options: UIView.AnimationOptions = [.allowUserInteraction, .beginFromCurrentState]
+    if let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber {
+      options.insert(UIView.AnimationOptions(rawValue: UInt(truncating: curve) << 16))
     }
 
     beginScrollAffordanceUpdate()
@@ -964,7 +974,7 @@ final class MessagesCollectionView: UICollectionView {
     UIView.animate(
       withDuration: duration,
       delay: 0,
-      options: [.allowUserInteraction, .beginFromCurrentState]
+      options: options
     ) {
       if wasAtBottom, !self.itemsEmpty {
         self.safeScrollToTop(animated: false)
@@ -976,6 +986,10 @@ final class MessagesCollectionView: UICollectionView {
 
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
+      if self.isContextMenuInteractionActive {
+        self.updateContentInsets()
+        return
+      }
       let wasAtBottom = self.shouldScrollToBottom
       self.animateWhileSuppressingScrollAffordance(duration: 0.2) {
         self.updateContentInsets()
@@ -1350,7 +1364,13 @@ private extension MessagesCollectionView {
       willDisplayContextMenu configuration: UIContextMenuConfiguration,
       animator: UIContextMenuInteractionAnimating?
     ) {
-      (collectionView as? MessagesCollectionView)?.isContextMenuOpen = true
+      if let collectionView = collectionView as? MessagesCollectionView {
+        collectionView.cancelContextMenuKeyboardRestoration()
+        collectionView.contextMenuConfiguration = configuration
+        collectionView.contextMenuPhase = .presented
+        collectionView.stopComposeInsetAnimationAtPresentation()
+        collectionView.onContextMenuWillDisplay?()
+      }
 
       if collectionContextMenu == nil,
          let int = collectionView.interactions
@@ -1369,24 +1389,41 @@ private extension MessagesCollectionView {
         identifierView.removeFromSuperview()
       }
 
-      let updateInsets: (_ animated: Bool) -> Void = { [weak collectionView] animated in
-        guard let collectionView = collectionView as? MessagesCollectionView else { return }
-        collectionView.updateContentInsetsAfterContextMenuIfNeeded(animated: animated)
+      guard let collectionView = collectionView as? MessagesCollectionView,
+            collectionView.contextMenuConfiguration === configuration else { return }
+      // Release geometry before replay, but keep cell updates and background
+      // taps suspended until UIKit has returned the lifted preview.
+      collectionView.contextMenuPhase = .dismissing
+      let updateInsets = { [weak collectionView] in
+        guard let collectionView,
+              collectionView.contextMenuConfiguration === configuration else { return }
+        collectionView.updateContentInsetsAfterContextMenuIfNeeded()
+      }
+      let completion = { [weak self, weak collectionView] in
+        guard let collectionView,
+              collectionView.contextMenuConfiguration === configuration else { return }
+        collectionView.onContextMenuDidEnd?()
+        // Focus restoration can synchronously deliver one more keyboard frame.
+        updateInsets()
+        collectionView.contextMenuPhase = .idle
+        collectionView.contextMenuConfiguration = nil
+        // If an action kept the keyboard closed, the old keyboard-area offset
+        // can now lie outside the scrollable range even with correct insets.
+        let minY = -collectionView.adjustedContentInset.top
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height
+          + collectionView.adjustedContentInset.bottom)
+        let offset = collectionView.contentOffset
+        collectionView.setContentOffset(
+          CGPoint(x: offset.x, y: min(maxY, max(minY, offset.y))), animated: false
+        )
+        self?.flushDeferredContextMenuMessageUpdates()
       }
       if let animator {
-        animator.addAnimations {
-          updateInsets(true)
-        }
-        animator.addCompletion { [weak self, weak collectionView] in
-          (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
-          self?.flushDeferredContextMenuMessageUpdates()
-        }
+        animator.addAnimations(updateInsets)
+        animator.addCompletion(completion)
       } else {
-        DispatchQueue.main.async { [weak self, weak collectionView] in
-          updateInsets(true)
-          (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
-          self?.flushDeferredContextMenuMessageUpdates()
-        }
+        updateInsets()
+        completion()
       }
     }
 
@@ -3563,7 +3600,7 @@ private extension MessagesCollectionView {
 
         case let .messagesUpdated(_, messageIds, animated):
           if messageViewImplementation == .v2,
-             (currentCollectionView as? MessagesCollectionView)?.isContextMenuOpen == true
+             (currentCollectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true
           {
             // UIKit animates a detached preview back to the source bubble. Reconfiguring the live
             // cell during that dismissal gives the preview and source different destination
@@ -4738,6 +4775,7 @@ private extension MessagesCollectionView {
     private var hasUnreadSinceScroll = false
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+      (scrollView as? MessagesCollectionView)?.cancelContextMenuKeyboardRestoration()
       olderHistoryPagination.beginGesture()
       isUserDragging = true
       isUserScrollInEffect = true

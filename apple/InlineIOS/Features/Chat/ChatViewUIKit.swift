@@ -30,6 +30,7 @@ public class ChatContainerView: UIView {
   }
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
+  private var restoresComposeFocusAfterContextMenu = false
   private lazy var sendAnimationCoordinator: SendMessageAnimationCoordinator? = isPreview
     ? nil
     : SendMessageAnimationCoordinator(hostView: self)
@@ -52,6 +53,17 @@ public class ChatContainerView: UIView {
       theme: theme
     )
     if !isPreview {
+      collectionView.onContextMenuWillDisplay = { [weak self] in
+        guard let self else { return }
+        restoresComposeFocusAfterContextMenu = restoresComposeFocusAfterContextMenu
+          || composeView.textView.isFirstResponder
+        // Cancel an already-tracking background tap as well as rejecting new
+        // taps. Otherwise the long-press touch-up can dismiss the keyboard.
+        keyboardDismissTapGestureRecognizer.isEnabled = false
+      }
+      collectionView.onContextMenuDidEnd = { [weak self] in
+        self?.restoreComposeFocusAfterContextMenu()
+      }
       collectionView.onScrollAffordanceChanged = { [weak self] state in
         self?.scrollButton.setVisible(state.isVisible)
         self?.scrollButton.setHasUnread(state.hasUnread)
@@ -720,6 +732,7 @@ public class ChatContainerView: UIView {
     // Dismiss keyboard as soon as back-swipe begins and guard against auto-refocus after cancel.
     switch gesture.state {
     case .began:
+      messagesCollectionView.cancelContextMenuKeyboardRestoration()
       composeView.textView.isEditable = false
       composeView.textView.resignFirstResponder()
 
@@ -737,8 +750,34 @@ public class ChatContainerView: UIView {
   }
 
   @objc private func handleTapOutsideCompose() {
-    guard composeView.textView.isFirstResponder else { return }
+    guard !messagesCollectionView.isContextMenuInteractionActive,
+          composeView.textView.isFirstResponder else { return }
+    messagesCollectionView.cancelContextMenuKeyboardRestoration()
     composeView.textView.resignFirstResponder()
+  }
+
+  private func restoreComposeFocusAfterContextMenu() {
+    let shouldRestore = restoresComposeFocusAfterContextMenu
+    restoresComposeFocusAfterContextMenu = false
+    keyboardDismissTapGestureRecognizer.isEnabled = true
+
+    // Actions that navigate or present a sheet own focus from this point on.
+    guard shouldRestore,
+          window?.isKeyWindow == true,
+          composeView.textView.isEditable,
+          !composeView.textView.isFirstResponder,
+          let controller = findViewController(),
+          !controller.isBeingDismissed,
+          !controller.isMovingFromParent,
+          controller.presentedViewController == nil,
+          controller.navigationController?.presentedViewController == nil,
+          controller.navigationController.map({ $0.topViewController === controller }) ?? true
+    else { return }
+    // Keyboard notifications can arrive after the menu animator completes.
+    messagesCollectionView.preserveContextMenuViewportForKeyboardRestoration()
+    if !composeView.textView.becomeFirstResponder() {
+      messagesCollectionView.cancelContextMenuKeyboardRestoration()
+    }
   }
 
   private func findViewController() -> UIViewController? {
@@ -848,6 +887,7 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
     shouldReceive touch: UITouch
   ) -> Bool {
     guard gestureRecognizer === keyboardDismissTapGestureRecognizer else { return true }
+    guard !messagesCollectionView.isContextMenuInteractionActive else { return false }
 
     // A date tap owns navigation. Dismissing the keyboard on the same tap can
     // change the list's insets and cancel the scroll started by the button.
