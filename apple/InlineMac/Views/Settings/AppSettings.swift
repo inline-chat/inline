@@ -125,6 +125,7 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
 }
 
 enum MessageGestureAction: String, CaseIterable, Identifiable {
+  case none
   case toggleAck
   case reply
   case toggleHeart
@@ -138,6 +139,8 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
+    case .none:
+      return "Nothing"
     case .toggleAck:
       return "Toggle Ack"
     case .reply:
@@ -159,7 +162,7 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
       "❤️"
     case .toggleThumbsUp:
       "👍"
-    case .reply, .reactionsMenu:
+    case .none, .reply, .reactionsMenu:
       nil
     }
 

@@ -1914,6 +1914,8 @@ class MinimalMessageViewAppKit: NSView {
     source: String,
     blocksText: Bool
   ) {
+    guard action != .none else { return }
+
     MessageGestureTrace.debug(
       "MinimalMessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) point=\(MessageGestureTrace.point(location))"
     )
@@ -1947,6 +1949,8 @@ class MinimalMessageViewAppKit: NSView {
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
     switch action {
+    case .none:
+      return
     case .reply:
       reply()
     case .reactionsMenu:

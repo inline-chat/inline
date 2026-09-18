@@ -77,7 +77,7 @@ struct GeneralSettingsDetailView: View {
 
         LabeledContent {
           Picker("Hold", selection: $appSettings.messageHoldAction) {
-            ForEach(MessageGestureAction.allCases) { action in
+            ForEach(MessageGestureAction.allCases.filter { $0 != .none }) { action in
               Text(action.title).tag(action)
             }
           }

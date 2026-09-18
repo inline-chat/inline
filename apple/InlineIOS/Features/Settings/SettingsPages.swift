@@ -24,6 +24,8 @@ struct GeneralSettingsView: View {
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
   @AppStorage(MessageSwipeToReplyDirection.storageKey)
   private var swipeToReplyDirection = MessageSwipeToReplyDirection.defaultValue
+  @AppStorage(MessageDoubleTapAction.storageKey)
+  private var doubleTapAction = MessageDoubleTapAction.defaultValue
   @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
@@ -58,6 +60,18 @@ struct GeneralSettingsView: View {
         }
       } footer: {
         Text("Choose which direction to swipe a message when replying.")
+      }
+
+      Section {
+        SettingsItem(icon: "hand.tap", iconColor: .blue, title: "Double Tap") {
+          Picker("Double Tap", selection: $doubleTapAction) {
+            ForEach(MessageDoubleTapAction.allCases) { action in
+              Text(action.title).tag(action)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
       }
 
       Section("Language & Translation") {

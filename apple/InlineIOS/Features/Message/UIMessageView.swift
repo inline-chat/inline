@@ -2085,10 +2085,12 @@ class UIMessageView: UIView {
     }
 
     if gestureRecognizer === bubbleDoubleTapGesture {
+      guard MessageDoubleTapAction.stored() != .none else { return false }
       return !isExclusiveMessageTapTarget(at: gestureRecognizer.location(in: self))
     }
 
     if gestureRecognizer === backgroundDoubleTapGesture {
+      guard MessageDoubleTapAction.stored() != .none else { return false }
       let location = gestureRecognizer.location(in: self)
       guard !bubbleView.frame.contains(location) else { return false }
       return !isExclusiveMessageTapTarget(at: location)
@@ -2336,10 +2338,12 @@ class UIMessageView: UIView {
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+    guard MessageDoubleTapAction.stored() != .none else { return }
     toggleAcknowledgement()
   }
 
   @objc private func handleBackgroundDoubleTap(_ gesture: UITapGestureRecognizer) {
+    guard MessageDoubleTapAction.stored() != .none else { return }
     let location = gesture.location(in: self)
     guard !bubbleView.frame.contains(location) else { return }
     guard bubbleView.frame.minY <= location.y, location.y <= bubbleView.frame.maxY else { return }
