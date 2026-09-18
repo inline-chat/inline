@@ -122,7 +122,7 @@ private struct DeveloperInvitePreviewState {
   var role = DeveloperInviteRole.member
   var canAccessPublicChats = true
   var username = "alex"
-  var email = "preview@example.com"
+  var email = "alex@example.com"
   var phone = "+1 415 555 0128"
   var selectedUserID: Int64? = 201
   var unifiedQuery = "alex"
