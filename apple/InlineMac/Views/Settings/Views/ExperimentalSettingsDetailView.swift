@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
@@ -13,9 +14,31 @@ struct ExperimentalSettingsDetailView: View {
   private var quickForwardEnabled = false
   @AppStorage(ExperimentalMessageListFeature.key)
   private var messageListV2Enabled = false
+  @AppStorage(ExperimentalChatSymbol.defaultsKey)
+  private var chatSymbol: ExperimentalChatSymbol = .existing
 
   var body: some View {
     Form {
+      Section {
+        LabeledContent {
+          Picker("Chat Symbol", selection: $chatSymbol) {
+            ForEach(ExperimentalChatSymbol.allCases) { symbol in
+              Label(symbol.title, systemImage: symbol.symbolName ?? ThreadIconDefaults.normalFallbackSymbol)
+                .tag(symbol)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .fixedSize()
+        } label: {
+          SettingsRowLabel("Chat Symbol")
+        }
+      } header: {
+        SettingsSectionHeader("Chat Icons")
+      } footer: {
+        Text("Try symbols in the sidebar and chat toolbars. Custom emoji and reply arrows stay the same. Choose Existing to reset.")
+      }
+
       Section {
         Toggle(isOn: $fileBrowserEnabled) {
           SettingsRowLabel("File Browser", description: "Browse files, images, and videos by chat in a separate Files window.")

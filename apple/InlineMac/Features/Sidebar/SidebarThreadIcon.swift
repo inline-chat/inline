@@ -2,7 +2,32 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+enum ExperimentalChatSymbol: String, CaseIterable, Identifiable {
+  case circle
+  case circleFill = "circle.fill"
+  case document
+  case textPage = "text.page"
+  case message
+  case stackForwardFill = "square.stack.3d.down.forward.fill"
+  case stackRight = "square.stack.3d.down.right"
+  case existing
+
+  static let defaultsKey = "experimental.macChatSymbol"
+
+  var id: String { rawValue }
+  var title: String { self == .existing ? "Existing" : rawValue }
+  // Existing keeps the experiment off by leaving the original fallback symbol unchanged.
+  var symbolName: String? { self == .existing ? nil : rawValue }
+}
+
 struct SidebarThreadIcon: View, Equatable {
+  @AppStorage(ExperimentalChatSymbol.defaultsKey) private var chatSymbol: ExperimentalChatSymbol = .existing
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.emoji == rhs.emoji && lhs.isReplyThread == rhs.isReplyThread &&
+      lhs.size == rhs.size && lhs.shape == rhs.shape
+  }
+
   enum IconShape: Equatable {
     case none
     case roundedSquare
@@ -46,7 +71,8 @@ struct SidebarThreadIcon: View, Equatable {
         isReplyThread: isReplyThread
       ),
       size: threadIconSize,
-      shape: shape.threadIconShape
+      shape: shape.threadIconShape,
+      fallbackSymbolName: isReplyThread ? nil : chatSymbol.symbolName
     )
   }
 

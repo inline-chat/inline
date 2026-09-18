@@ -95,6 +95,7 @@ public struct ThreadIconView: View, Equatable {
   public let symbolColor: ThreadIconSymbolColor
   public let background: ThreadIconBackground
   public let contentScaleMultiplier: CGFloat
+  public let fallbackSymbolName: String?
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -104,7 +105,8 @@ public struct ThreadIconView: View, Equatable {
       lhs.shape == rhs.shape &&
       lhs.symbolColor == rhs.symbolColor &&
       lhs.background == rhs.background &&
-      lhs.contentScaleMultiplier == rhs.contentScaleMultiplier
+      lhs.contentScaleMultiplier == rhs.contentScaleMultiplier &&
+      lhs.fallbackSymbolName == rhs.fallbackSymbolName
   }
 
   public init(
@@ -113,7 +115,8 @@ public struct ThreadIconView: View, Equatable {
     shape: ThreadIconShape = .circle,
     symbolColor: ThreadIconSymbolColor = .secondary,
     background: ThreadIconBackground = .automatic,
-    contentScaleMultiplier: CGFloat = 1
+    contentScaleMultiplier: CGFloat = 1,
+    fallbackSymbolName: String? = nil
   ) {
     self.descriptor = descriptor
     self.size = size
@@ -121,6 +124,7 @@ public struct ThreadIconView: View, Equatable {
     self.symbolColor = symbolColor
     self.background = background
     self.contentScaleMultiplier = max(contentScaleMultiplier, 0)
+    self.fallbackSymbolName = fallbackSymbolName
   }
 
   public var body: some View {
@@ -172,7 +176,7 @@ public struct ThreadIconView: View, Equatable {
         .minimumScaleFactor(0.75)
         .accessibilityHidden(true)
     } else {
-      Image(systemName: ThreadIconDefaults.fallbackSymbolName(isReplyThread: descriptor.isReplyThread))
+      Image(systemName: fallbackSymbolName ?? ThreadIconDefaults.fallbackSymbolName(isReplyThread: descriptor.isReplyThread))
         .font(.system(
           size: resolvedSize * contentScale.symbolRatio * contentScaleMultiplier,
           weight: descriptor.isReplyThread ? .bold : .semibold
