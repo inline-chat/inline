@@ -15,10 +15,11 @@ directory.
 Run checks individually:
 
 ```sh
-bun run --cwd landing docs:check
-bun run --cwd landing test
-bun run --cwd landing typecheck
 bun run --cwd landing build
+bun run --cwd landing typecheck
+bun run --cwd landing lint
+bun run --cwd landing test
+bun run --cwd landing/packages/client test
 ```
 
 Product documentation is in `src/docs/content/`; legal pages are in
