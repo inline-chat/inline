@@ -6,6 +6,7 @@ import { rateLimit } from "elysia-rate-limit"
 import { nanoid } from "nanoid/non-secure"
 import { getIp } from "@in/server/utils/ip"
 import { isProd } from "@in/server/env"
+import { requiresPrivateResponse } from "@in/server/utils/httpPrivacy"
 
 const REQUEST_ID_HEADER = "x-request-id"
 const MAX_REQUEST_ID_LENGTH = 128
@@ -94,6 +95,7 @@ export const setup = new Elysia({ name: "setup" })
     store.requestId = requestId
     set.headers[REQUEST_ID_HEADER] = requestId
     setSecurityHeaders(set)
+    if (requiresPrivateResponse(new URL(request.url).pathname)) set.headers["Cache-Control"] = "no-store"
   })
   // setup cors
   .use(

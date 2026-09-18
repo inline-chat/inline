@@ -13,7 +13,7 @@ export type InlineProtocolReplayOwner = ServerReplayRepository & {
 }
 
 export const makeInlineProtocolReplayRepository = (
-  repository = new InlineProtocolReplayRepository(),
+  repository: InlineProtocolReplayRepository,
 ): InlineProtocolReplayOwner => {
   let closed = false
   let timer: ReturnType<typeof setTimeout> | undefined

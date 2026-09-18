@@ -59,6 +59,7 @@ export const inlineProtocolRequests = pgTable(
     messageId: bigint("message_id", { mode: "bigint" }).notNull(),
     requestDigest: bytea("request_digest").notNull(),
     resultBody: bytea("result_body"),
+    resultFormat: smallint("result_format").notNull().default(0),
     claimedAt: protocolTimestamp("claimed_at").defaultNow().notNull(),
     completedAt: protocolTimestamp("completed_at"),
     expiresAt: protocolTimestamp("expires_at").notNull(),
@@ -72,7 +73,11 @@ export const inlineProtocolRequests = pgTable(
     digestLength: check("inline_protocol_requests_digest_length", sql`octet_length(${table.requestDigest}) = 32`),
     resultLength: check(
       "inline_protocol_requests_result_length",
-      sql`${table.resultBody} is null or octet_length(${table.resultBody}) <= 16777216`,
+      sql`${table.resultBody} is null or octet_length(${table.resultBody}) <= 16777278`,
+    ),
+    resultFormatCheck: check(
+      "inline_protocol_requests_result_format",
+      sql`(${table.resultFormat} = 0 and (${table.resultBody} is null or octet_length(${table.resultBody}) <= 16777216)) or (${table.resultFormat} = 1 and ${table.resultBody} is not null and octet_length(${table.resultBody}) >= 31)`,
     ),
     expiryIndex: index("inline_protocol_requests_expiry_idx").on(table.expiresAt),
   }),

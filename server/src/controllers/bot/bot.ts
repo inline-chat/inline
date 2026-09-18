@@ -1172,6 +1172,10 @@ const botMethods = (authPlugin: any): any => {
 export const botApi: any = new Elysia({ name: "bot-api" })
 
 botApi
+  .onRequest(({ set }: { set: { headers: Record<string, string | number> } }) => {
+    set.headers["Cache-Control"] = "no-store"
+    set.headers["Referrer-Policy"] = "no-referrer"
+  })
   .use(handleBotError)
   // Recommended: Authorization header auth
   .group("/bot", (app: any) => app.use(botMethods(authenticateBotHeader) as any))

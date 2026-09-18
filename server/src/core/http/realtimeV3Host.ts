@@ -22,11 +22,12 @@ import productionTrustRoots from "@inline-chat/protocol/trust-roots/inline-proto
 import { gunzipSync } from "node:zlib"
 import { isIP } from "node:net"
 import { randomBytes } from "node:crypto"
-import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
+import { InlineProtocolReplayRepository, PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import { InlineProtocolAuthorizationKeys } from "@in/server/modules/inlineProtocol/authorizationKeys"
 import { TemporaryAuthorizationKeyStore } from "@in/server/modules/inlineProtocol/temporaryKeys"
 import { makeInlineProtocolReplayRepository } from "@in/server/modules/inlineProtocol/replay"
+import { makeReplayResultCipher } from "@in/server/modules/inlineProtocol/replayCipher"
 import { makeInlineProtocolRsaSigner } from "@in/server/modules/inlineProtocol/rsaSigner"
 import { InlineProtocolAuthOperations } from "@in/server/modules/inlineProtocol/auth"
 import { InlineProtocolOperations } from "@in/server/modules/inlineProtocol/operations"
@@ -97,6 +98,7 @@ type InlineProtocolConnectionState = {
   inboundQueuedBytes: number
   outboundQueuedRecords: number
   outboundQueuedBytes: number
+  resumeOutbound?: () => void
   compatibilityQueuedUpdates: number
   overloaded: boolean
   registered: boolean
@@ -135,11 +137,18 @@ const bytesForFrame = (message: Buffer<ArrayBuffer>): Uint8Array =>
   new Uint8Array(message.buffer, message.byteOffset, message.byteLength)
 
 const closeProtocol = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
+  if (socket.data.state) {
+    socket.data.state.overloaded = true
+    socket.data.state.resumeOutbound?.()
+  }
   if (!socket.data.closed) socket.close(PROTOCOL_CLOSE_CODE, PROTOCOL_CLOSE_REASON)
 }
 
 const closeOverloaded = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
-  if (socket.data.state) socket.data.state.overloaded = true
+  if (socket.data.state) {
+    socket.data.state.overloaded = true
+    socket.data.state.resumeOutbound?.()
+  }
   if (!socket.data.closed) socket.close(OVERLOAD_CLOSE_CODE, OVERLOAD_CLOSE_REASON)
 }
 
@@ -162,7 +171,10 @@ export const makeInlineProtocolRuntime = (
     makeAuthorizationKeyCipher(configuration.authKeyKekRing),
   )
   const temporary = new TemporaryAuthorizationKeyStore(nowSeconds)
-  const replay = makeInlineProtocolReplayRepository()
+  const replay = makeInlineProtocolReplayRepository(new InlineProtocolReplayRepository({
+    ...(configuration.replayResultKeyRing ? { cipher: makeReplayResultCipher(configuration.replayResultKeyRing) } : {}),
+    encryptWrites: configuration.encryptReplayResults,
+  }))
   return {
     rsaKeys: signer.handshakeKeys,
     authorizationKeys: new InlineProtocolAuthorizationKeys(permanent, temporary),
@@ -356,7 +368,7 @@ export const makeInlineProtocolRealtimeTransport = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
     records: number,
     bytes: number,
-    operation: (carrier: ObfuscatedServerHeader) => void,
+    operation: (carrier: ObfuscatedServerHeader) => Promise<void>,
   ): Promise<void> => {
     const state = socket.data.state
     if (!state || socket.data.closed || state.overloaded) return Promise.resolve()
@@ -373,12 +385,12 @@ export const makeInlineProtocolRealtimeTransport = (
     }
     state.outboundQueuedRecords += records
     state.outboundQueuedBytes += bytes
-    state.outboundQueue = state.outboundQueue.then(() => {
+    state.outboundQueue = state.outboundQueue.then(async () => {
       try {
-        if (socket.data.closed) return
+        if (socket.data.closed || state.overloaded) return
         runtime.clock.assertHealthy()
         if (!state.carrier) throw new RangeError("Inline Protocol carrier is unavailable")
-        operation(state.carrier)
+        await operation(state.carrier)
       } finally {
         state.outboundQueuedRecords -= records
         state.outboundQueuedBytes -= bytes
@@ -393,6 +405,29 @@ export const makeInlineProtocolRealtimeTransport = (
     return state.outboundQueue
   }
 
+  const sendCarrierBytes = async (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    bytes: Uint8Array,
+  ): Promise<void> => {
+    const state = socket.data.state!
+    // The carrier has already advanced. A failed send must terminate it, never retry it.
+    const sent = socket.sendBinary(bytes, false)
+    if (sent === 0) throw new RangeError("Carrier write dropped")
+    if (sent !== -1) return
+    // -1 was accepted by Bun. Retain the remaining work within the existing queue budget
+    // and resume only on drain. A slow/disappeared reader cannot hold this queue forever.
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => { closeOverloaded(socket) }, 30_000)
+      timer.unref?.()
+      state.resumeOutbound = () => {
+        clearTimeout(timer)
+        state.resumeOutbound = undefined
+        resolve()
+      }
+    })
+    if (socket.data.closed || state.overloaded) throw new RangeError("Carrier closed under pressure")
+  }
+
   const sendRecords = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
     records: readonly Uint8Array[],
@@ -400,9 +435,10 @@ export const makeInlineProtocolRealtimeTransport = (
     socket,
     records.length,
     records.reduce((total, record) => total + record.length + 4, 0),
-    (carrier) => {
+    async (carrier) => {
       for (const record of records) {
-        socket.sendBinary(carrier.outbound.process(encodeAbridgedPacket(record)), false)
+        if (socket.data.closed || socket.data.state?.overloaded) return
+        await sendCarrierBytes(socket, carrier.outbound.process(encodeAbridgedPacket(record)))
       }
     },
   )
@@ -410,9 +446,9 @@ export const makeInlineProtocolRealtimeTransport = (
   const sendQuickAck = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
     quickAckId: number,
-  ): Promise<void> => enqueueOutbound(socket, 1, 4, (carrier) => {
-    socket.sendBinary(carrier.outbound.process(encodeAbridgedQuickAck(quickAckId)), false)
-  })
+  ): Promise<void> => enqueueOutbound(socket, 1, 4, (carrier) =>
+    sendCarrierBytes(socket, carrier.outbound.process(encodeAbridgedQuickAck(quickAckId))),
+  )
 
   const closeDestroyedSessionAfterWrites = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
@@ -648,6 +684,7 @@ export const makeInlineProtocolRealtimeTransport = (
 
   const close = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
     socket.data.closed = true
+    socket.data.state?.resumeOutbound?.()
     releaseHandshake(socket)
     sockets.delete(socket)
     if (socket.data.state) {
@@ -735,12 +772,17 @@ export const makeInlineProtocolRealtimeTransport = (
       open,
       message: receive,
       close,
+      drain: (socket) => socket.data.state?.resumeOutbound?.(),
     },
     shutdown: async () => {
       accepting = false
       const active = [...sockets]
       const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
-      for (const socket of active) socket.close(1001, "Server shutting down")
+      for (const socket of active) {
+        if (socket.data.state) socket.data.state.overloaded = true
+        socket.data.state?.resumeOutbound?.()
+        socket.close(1001, "Server shutting down")
+      }
       await Promise.allSettled(activeStates.map(drainConnectionState))
       while (drainingConnections.size > 0) {
         await Promise.allSettled(drainingConnections)

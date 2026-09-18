@@ -525,6 +525,7 @@ describe("Effect Bot routes", () => {
           const response = await kernel.handler(request)
 
           expect(response.status, `${authForm}:${method.name}`).toBe(200)
+          expect(response.headers.get("cache-control")).toBe("no-store")
           expect(
             response.headers.get("content-type"),
           ).toContain("application/json")
@@ -782,6 +783,8 @@ describe("Effect Bot routes", () => {
 
       expect(precedenceResponse.status).toBe(200)
       expect(encodedResponse.status).toBe(200)
+      expect(precedenceResponse.headers.get("cache-control")).toBe("no-store")
+      expect(encodedResponse.headers.get("cache-control")).toBe("no-store")
       expect(tokens).toEqual([
         "42:HEADER",
         "42:ENCODED",
@@ -984,6 +987,7 @@ describe("Effect Bot routes", () => {
         unsupportedPost,
         unknownPathToken,
       ]) {
+        expect(response.headers.get("cache-control")).toBe("no-store")
         expect(response.status).toBe(404)
         expect(await response.json()).toEqual({
           ok: false,

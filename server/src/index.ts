@@ -1,5 +1,6 @@
 import "dotenv/config"
 import * as Sentry from "@sentry/bun"
+import { beforeSendEvent, beforeSendSpan } from "@in/server/utils/sentryPrivacy"
 import {
   API_BASE_URL,
   NODE_ENV,
@@ -58,6 +59,9 @@ Sentry.init({
   enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,
+  beforeSend: beforeSendEvent,
+  beforeSendTransaction: beforeSendEvent,
+  beforeSendSpan,
 })
 
 // Some database drivers legitimately share more than Node's default listener

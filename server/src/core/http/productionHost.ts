@@ -53,20 +53,19 @@ import type {
 } from "./middleware"
 import {
   makeCoreRealtimeTransport,
-  type RealtimeWebSocketData,
 } from "./realtimeHost"
 import {
   makeInlineProtocolRealtimeTransport,
   makeInlineProtocolRuntime,
   type InlineProtocolRealtimeTransport,
-  type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
 import {
   loadInlineProtocolConfiguration,
   type InlineProtocolConfiguration,
 } from "../../modules/inlineProtocol/config"
 
-export type CoreWebSocketData = RealtimeWebSocketData | InlineProtocolWebSocketData
+import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
+export type { CoreWebSocketData } from "./combinedWebsocket"
 
 const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS =
   20_000
@@ -390,46 +389,7 @@ export const startCoreProductionServer = async <
         { clientIpHeader },
       )
       : undefined
-    const websocket:
-      Bun.WebSocketHandler<CoreWebSocketData> = {
-        ...realtime.websocket,
-        open: (socket) => {
-          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
-            return realtimeV3?.websocket.open?.(
-              socket as never,
-            )
-          }
-          return realtime.websocket.open?.(
-            socket as never,
-          )
-        },
-        message: (socket, message) => {
-          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
-            return realtimeV3?.websocket.message(
-              socket as never,
-              message,
-            )
-          }
-          return realtime.websocket.message(
-            socket as never,
-            message,
-          )
-        },
-        close: (socket, code, reason) => {
-          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
-            return realtimeV3?.websocket.close?.(
-              socket as never,
-              code,
-              reason,
-            )
-          }
-          return realtime.websocket.close?.(
-            socket as never,
-            code,
-            reason,
-          )
-        },
-      }
+    const websocket = makeCombinedWebsocket(realtime.websocket, realtimeV3?.websocket)
     server = Bun.serve<
       CoreWebSocketData
     >({

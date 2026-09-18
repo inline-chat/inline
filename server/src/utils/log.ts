@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/bun"
 import { styleText } from "node:util"
+import { redactCredentialPath } from "./httpPrivacy"
 
 // cannot depend on env.ts
 const isProd = process.env.NODE_ENV === "production"
@@ -22,8 +23,9 @@ const SENTRY_USER_DETAIL_ATTRIBUTES = ["user.email", "user.name"]
 
 export const redactString = (value: string): string => {
   // Avoid leaking tokens in path (e.g. /bot<token>/sendMessage) or in auth headers.
-  return value
+  return redactCredentialPath(value)
     .replace(/\bhttps?:\/\/[^\s<>"']+/gi, "<url>")
+    .replace(/([?&][^\s=&#]+)=([^&#\s<>"']*)/g, "$1=<redacted>")
     .replace(BEARER_RE, `Bearer ${REDACTED}`)
     .replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
     .replace(AUTH_TOKEN_SEGMENT_RE, `$1${REDACTED}`)
@@ -42,6 +44,8 @@ const shouldRedactKey = (key: string): boolean => {
     k.includes("phone") ||
     k.includes("secret") ||
     k.includes("password") ||
+    k.includes("cookie") ||
+    k === "query" || k === "query_string" || k === "querystring" || k.endsWith(".query") ||
     k === "filename" || k === "file_name" ||
     k === "url" || k.endsWith("url")
   )

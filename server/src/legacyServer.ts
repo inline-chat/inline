@@ -1,5 +1,6 @@
 import "dotenv/config"
 import * as Sentry from "@sentry/bun"
+import { beforeSendEvent, beforeSendSpan } from "@in/server/utils/sentryPrivacy"
 import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, gitCommitSha, version } from "@in/server/buildEnv"
 import {
@@ -21,6 +22,9 @@ Sentry.init({
   enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,
+  beforeSend: beforeSendEvent,
+  beforeSendTransaction: beforeSendEvent,
+  beforeSendSpan,
 })
 
 // Main app

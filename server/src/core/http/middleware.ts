@@ -32,6 +32,7 @@ import {
   type HttpRateLimitPermit,
 } from "./rateLimit"
 import { usesLegacySetupMiddleware } from "./legacySetupCompatibility"
+import { redactCredentialPath, requiresPrivateResponse } from "../../utils/httpPrivacy"
 
 export const CORS_ORIGINS = [
   "https://inline.chat",
@@ -143,6 +144,7 @@ const responseHeaders = (
   isProduction: boolean,
 ): Record<string, string> => ({
   ...commonSecurityHeaders,
+  ...(requiresPrivateResponse(context.path) ? { "cache-control": "no-store" } : {}),
   ...(isProduction
     ? { "strict-transport-security": "max-age=31536000; includeSubDomains" }
     : {}),
@@ -197,7 +199,7 @@ const makeKernelMiddleware = ({
         Effect.provideService(HttpRequestContext, context),
         Effect.annotateLogs({
           "http.method": context.method,
-          "http.path": context.path,
+          "http.path": redactCredentialPath(context.path),
           "http.request_id": context.requestId,
         }),
       )

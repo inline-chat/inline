@@ -11,9 +11,10 @@ import {
 import { sessions } from "@in/server/db/schema/sessions"
 import type { AuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import { InlineProtocolKeyStoreError, InlineProtocolReplayError } from "@in/server/modules/inlineProtocol/errors"
+import { MAX_REPLAY_RESULT_BYTES, type ReplayIdentity, type ReplayResultCipher } from "@in/server/modules/inlineProtocol/replayCipher"
 
 const DEFAULT_REPLAY_TTL_MS = 10 * 60 * 1_000
-const MAX_RESULT_BYTES = 16 * 1024 * 1024
+const MAX_RESULT_BYTES = MAX_REPLAY_RESULT_BYTES
 
 export type PermanentAuthorizationKey = {
   key: Uint8Array
@@ -242,6 +243,26 @@ export type ReplayClaim =
   | { kind: "digest_mismatch" }
 
 export class InlineProtocolReplayRepository {
+  constructor(private readonly storage: { cipher?: ReplayResultCipher; encryptWrites: boolean } = { encryptWrites: false }) {
+    if (storage.encryptWrites && !storage.cipher) throw new InlineProtocolReplayError({ operation: "missing_result_cipher" })
+  }
+
+  private decode(identity: ReplayIdentity, body: Buffer, format: number): Uint8Array {
+    if (format === 0) return Uint8Array.from(body)
+    if (format !== 1 || !this.storage.cipher) throw new InlineProtocolReplayError({ operation: "unsupported_result_format" })
+    return this.storage.cipher.decrypt(identity, body)
+  }
+
+  private encode(identity: ReplayIdentity, body: Uint8Array, previousFormat = 0) {
+    // Compatible-reader rollback must never turn an encrypted result back into plaintext.
+    if (this.storage.encryptWrites || previousFormat === 1) {
+      if (!this.storage.cipher) throw new InlineProtocolReplayError({ operation: "missing_result_cipher" })
+      return { resultBody: this.storage.cipher.encrypt(identity, body), resultFormat: 1 }
+    }
+    if (previousFormat !== 0) throw new InlineProtocolReplayError({ operation: "unsupported_result_format" })
+    return { resultBody: Buffer.from(body), resultFormat: 0 }
+  }
+
   async claim(input: {
     authKeyId: Uint8Array
     protocolSessionId: bigint
@@ -264,6 +285,7 @@ export class InlineProtocolReplayRepository {
       const existing = (await db.select({
         requestDigest: inlineProtocolRequests.requestDigest,
         resultBody: inlineProtocolRequests.resultBody,
+        resultFormat: inlineProtocolRequests.resultFormat,
       }).from(inlineProtocolRequests).where(and(
         eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
         eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
@@ -275,10 +297,10 @@ export class InlineProtocolReplayRepository {
       }
       return existing.resultBody === null
         ? { kind: "in_flight" }
-        : { kind: "completed", resultBody: Uint8Array.from(existing.resultBody) }
+        : { kind: "completed", resultBody: this.decode(input, existing.resultBody, existing.resultFormat) }
     } catch (cause) {
       if (cause instanceof InlineProtocolReplayError) throw cause
-      throw new InlineProtocolReplayError({ operation: "claim", cause })
+      throw new InlineProtocolReplayError({ operation: "claim" })
     }
   }
 
@@ -291,7 +313,7 @@ export class InlineProtocolReplayRepository {
     if (input.resultBody.length > MAX_RESULT_BYTES) throw new InlineProtocolReplayError({ operation: "complete_size" })
     try {
       const updated = await db.update(inlineProtocolRequests).set({
-        resultBody: Buffer.from(input.resultBody),
+        ...this.encode(input, input.resultBody),
         completedAt: new Date(),
       }).where(and(
         eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
@@ -300,8 +322,8 @@ export class InlineProtocolReplayRepository {
         isNull(inlineProtocolRequests.resultBody),
       )).returning({ messageId: inlineProtocolRequests.messageId })
       return updated.length === 1
-    } catch (cause) {
-      throw new InlineProtocolReplayError({ operation: "complete", cause })
+    } catch {
+      throw new InlineProtocolReplayError({ operation: "complete" })
     }
   }
 
@@ -313,6 +335,7 @@ export class InlineProtocolReplayRepository {
     try {
       const row = (await db.select({
         resultBody: inlineProtocolRequests.resultBody,
+        resultFormat: inlineProtocolRequests.resultFormat,
       }).from(inlineProtocolRequests).where(and(
         eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
         eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
@@ -320,9 +343,9 @@ export class InlineProtocolReplayRepository {
       )).limit(1))[0]
       return row?.resultBody === null || row?.resultBody === undefined
         ? undefined
-        : Uint8Array.from(row.resultBody)
-    } catch (cause) {
-      throw new InlineProtocolReplayError({ operation: "result", cause })
+        : this.decode(input, row.resultBody, row.resultFormat)
+    } catch {
+      throw new InlineProtocolReplayError({ operation: "result" })
     }
   }
 
@@ -341,8 +364,8 @@ export class InlineProtocolReplayRepository {
           isNull(inlineProtocolRequests.resultBody),
         )).limit(1))[0]
       return row !== undefined
-    } catch (cause) {
-      throw new InlineProtocolReplayError({ operation: "in_flight", cause })
+    } catch {
+      throw new InlineProtocolReplayError({ operation: "in_flight" })
     }
   }
 
@@ -354,18 +377,58 @@ export class InlineProtocolReplayRepository {
   }): Promise<boolean> {
     if (input.resultBody.length > MAX_RESULT_BYTES) throw new InlineProtocolReplayError({ operation: "replace_size" })
     try {
-      const updated = await db.update(inlineProtocolRequests).set({
-        resultBody: Buffer.from(input.resultBody),
-        completedAt: new Date(),
-      }).where(and(
-        eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
-        eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
-        eq(inlineProtocolRequests.messageId, input.messageId),
-        isNotNull(inlineProtocolRequests.resultBody),
-      )).returning({ messageId: inlineProtocolRequests.messageId })
-      return updated.length === 1
-    } catch (cause) {
-      throw new InlineProtocolReplayError({ operation: "replace_result", cause })
+      return await db.transaction(async (tx) => {
+        const identity = and(
+          eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
+          eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
+          eq(inlineProtocolRequests.messageId, input.messageId),
+        )
+        const row = (await tx.select().from(inlineProtocolRequests).where(identity).for("update"))[0]
+        if (!row?.resultBody) return false
+        // Authenticate existing ciphertext before replacing it; corruption is never a cache miss.
+        this.decode(input, row.resultBody, row.resultFormat)
+        await tx.update(inlineProtocolRequests).set({
+          ...this.encode(input, input.resultBody, row.resultFormat),
+          completedAt: new Date(),
+        }).where(identity)
+        return true
+      })
+    } catch {
+      throw new InlineProtocolReplayError({ operation: "replace_result" })
+    }
+  }
+
+  /** Restartable local/operational tool primitive. Never runs as part of request handling. */
+  async encryptCompletedBatch(limit = 10): Promise<number> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !this.storage.encryptWrites || !this.storage.cipher) {
+      throw new InlineProtocolReplayError({ operation: "encrypt_batch_configuration" })
+    }
+    try {
+      return await db.transaction(async (tx) => {
+        // Select identities only, then load one body at a time to bound retained response bytes.
+        const rows = await tx.select({
+          authKeyId: inlineProtocolRequests.authKeyId,
+          protocolSessionId: inlineProtocolRequests.protocolSessionId,
+          messageId: inlineProtocolRequests.messageId,
+        }).from(inlineProtocolRequests)
+          .where(and(eq(inlineProtocolRequests.resultFormat, 0), isNotNull(inlineProtocolRequests.resultBody)))
+          .orderBy(inlineProtocolRequests.authKeyId, inlineProtocolRequests.protocolSessionId, inlineProtocolRequests.messageId)
+          .limit(limit).for("update", { skipLocked: true })
+        for (const identity of rows) {
+          const condition = and(
+            eq(inlineProtocolRequests.authKeyId, identity.authKeyId),
+            eq(inlineProtocolRequests.protocolSessionId, identity.protocolSessionId),
+            eq(inlineProtocolRequests.messageId, identity.messageId),
+            eq(inlineProtocolRequests.resultFormat, 0),
+          )
+          const row = (await tx.select({ body: inlineProtocolRequests.resultBody }).from(inlineProtocolRequests).where(condition))[0]
+          if (!row?.body) throw new InlineProtocolReplayError({ operation: "encrypt_batch_lost_row" })
+          await tx.update(inlineProtocolRequests).set(this.encode(identity, row.body)).where(condition)
+        }
+        return rows.length
+      })
+    } catch {
+      throw new InlineProtocolReplayError({ operation: "encrypt_completed_batch" })
     }
   }
 
@@ -397,7 +460,7 @@ export class InlineProtocolReplayRepository {
       return deleted.length
     } catch (cause) {
       if (cause instanceof InlineProtocolReplayError) throw cause
-      throw new InlineProtocolReplayError({ operation: "cleanup_completed", cause })
+      throw new InlineProtocolReplayError({ operation: "cleanup_completed" })
     }
   }
 }

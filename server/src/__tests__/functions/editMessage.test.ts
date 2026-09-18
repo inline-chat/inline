@@ -479,6 +479,7 @@ describe("editMessage function", () => {
       fromMessageId: Number(messageId),
       count: 1,
       withBacklink: true,
+      revision: 1,
     })
     expect(beforeLinks[0]?.fromMessageRevision).toBe(1)
 
@@ -564,6 +565,7 @@ describe("editMessage function", () => {
       fromMessageId: Number(messageId),
       count: 1,
       withBacklink: true,
+      revision: 2,
     })
     expect(afterLinks[0]?.fromMessageRevision).toBe(2)
 
@@ -946,8 +948,12 @@ async function waitForThreadGraphLinks(input: {
   fromMessageId: number
   count: number
   withBacklink?: boolean
+  revision?: number
 }) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  // Materialization commits asynchronously; a handful of DB round trips can exceed
+  // 200 ms on CI. Wait for the required projection, including its revision.
+  const deadline = performance.now() + 5_000
+  while (performance.now() < deadline) {
     const links = await db
       .select()
       .from(threadGraphLinks)
@@ -960,7 +966,11 @@ async function waitForThreadGraphLinks(input: {
         ),
       )
 
-    if (links.length === input.count && (!input.withBacklink || links.every((link) => link.backlinkMessageGlobalId))) {
+    if (
+      links.length === input.count &&
+      (!input.withBacklink || links.every((link) => link.backlinkMessageGlobalId)) &&
+      (input.revision === undefined || links.every((link) => link.fromMessageRevision === input.revision))
+    ) {
       return links
     }
 

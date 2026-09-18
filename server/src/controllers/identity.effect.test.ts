@@ -259,6 +259,8 @@ describe("Effect identity routes", () => {
 
         expect(getResponse.status).toBe(200)
         expect(postResponse.status).toBe(200)
+        expect(getResponse.headers.get("cache-control")).toBe("no-store")
+        expect(postResponse.headers.get("cache-control")).toBe("no-store")
       }
 
       expect(calls.sort()).toEqual([
@@ -629,6 +631,7 @@ describe("Effect identity routes", () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ ok: true })
       expect(authenticatedToken).toBe("42:path-token")
+      expect(response.headers.get("cache-control")).toBe("no-store")
       expect(logoutContext).toEqual({
         currentUserId: 42,
         currentSessionId: 7,

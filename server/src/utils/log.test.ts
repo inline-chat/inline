@@ -26,6 +26,26 @@ describe("log levels", () => {
 })
 
 describe("log redaction", () => {
+  it("redacts opaque v1 path tokens and relative query values at both sinks", () => {
+    const previousDebug = process.env["DEBUG"]
+    process.env["DEBUG"] = "1"
+    const consoleSpy = spyOn(console, "warn").mockImplementation(() => {})
+    const sentrySpy = spyOn(Sentry.logger, "warn").mockImplementation(() => {})
+    try {
+      const path = "/v1/opaque-synthetic-credential/logout?code=synthetic-code&text=synthetic-content"
+      new Log("privacy", LogLevel.WARN).warn(path, { path })
+      for (const calls of [consoleSpy.mock.calls, sentrySpy.mock.calls]) {
+        expect(calls.length).toBeGreaterThan(0)
+        const text = JSON.stringify(calls)
+        for (const secret of ["opaque-synthetic-credential", "synthetic-code", "synthetic-content"]) expect(text).not.toContain(secret)
+        expect(text).toContain("logout")
+      }
+    } finally {
+      consoleSpy.mockRestore(); sentrySpy.mockRestore()
+      if (previousDebug === undefined) Reflect.deleteProperty(process.env, "DEBUG")
+      else process.env["DEBUG"] = previousDebug
+    }
+  })
   it("bounds deep, cyclic, binary and accessor metadata without exposing its contents", () => {
     const privateValue = "private-synthetic-payload"
     let nested: unknown = { payload: privateValue }

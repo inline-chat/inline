@@ -8,6 +8,8 @@ export type InlineProtocolEnabledConfiguration = {
   rsaPrivateKeysJson: string
   authKeyKekRing: InlineProtocolSecretKeyRing
   authCodePepperRing: InlineProtocolSecretKeyRing
+  replayResultKeyRing?: InlineProtocolSecretKeyRing
+  encryptReplayResults: boolean
 }
 export type InlineProtocolConfiguration =
   | InlineProtocolDisabledConfiguration
@@ -30,6 +32,15 @@ export const loadInlineProtocolConfiguration = (
     environment["INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON"] ||
     environment["INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON"],
   )
+  const replayRingJson = environment["INLINE_PROTOCOL_REPLAY_KEY_RING_JSON"]
+  const replayMode = environment["INLINE_PROTOCOL_ENCRYPT_REPLAY_RESULTS"] ?? "false"
+  if (replayMode !== "true" && replayMode !== "false") {
+    throw new InlineProtocolConfigurationError({ reason: "INLINE_PROTOCOL_ENCRYPT_REPLAY_RESULTS must be true or false" })
+  }
+  const replayResultKeyRing = replayRingJson ? decodeInlineProtocolSecretKeyRing(replayRingJson, "replay") : undefined
+  if (replayMode === "true" && !replayResultKeyRing) {
+    throw new InlineProtocolConfigurationError({ reason: "Replay encryption requires INLINE_PROTOCOL_REPLAY_KEY_RING_JSON" })
+  }
   if (environment["NODE_ENV"] !== "production" && !hasAnyCredential) return { enabled: false }
   if (!rsaPrivateKeysJson) {
     throw new InlineProtocolConfigurationError({
@@ -45,5 +56,7 @@ export const loadInlineProtocolConfiguration = (
     rsaPrivateKeysJson,
     authKeyKekRing: requiredRing(environment, "INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON"),
     authCodePepperRing: requiredRing(environment, "INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON"),
+    ...(replayResultKeyRing ? { replayResultKeyRing } : {}),
+    encryptReplayResults: replayMode === "true",
   }
 }

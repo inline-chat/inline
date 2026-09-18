@@ -47,6 +47,13 @@ import {
 } from "./realtimeV3Host"
 import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHealth"
 import { connectionManager } from "@in/server/ws/connections"
+import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
+import { makeCoreRealtimeTransport } from "./realtimeHost"
+import { Context, Effect } from "effect"
+import { ErrorReporter } from "../errors/errorReporter"
+import { RealtimeSessions } from "../../realtime/host.effect"
+import { ClientMessage } from "@inline-chat/protocol/core"
+import { createConnection } from "node:net"
 
 class MemoryKeys implements ServerAuthorizationKeyRepository {
   readonly values = new Map<string, LoadedServerAuthorizationKey>()
@@ -106,6 +113,151 @@ const fixture = (
 const paddingFor = (bodyLength: number): Uint8Array =>
   randomBytes(12 + ((16 - ((32 + bodyLength + 12) % 16)) % 16))
 
+const connectSocket = (url: string) => {
+  const socket = new WebSocket(url)
+  socket.binaryType = "arraybuffer"
+  const messages: Uint8Array[] = []
+  let pending: ((bytes: Uint8Array) => void) | undefined
+  socket.addEventListener("message", (event) => {
+    const bytes = new Uint8Array(event.data as ArrayBuffer)
+    if (pending) { const resolve = pending; pending = undefined; resolve(bytes) }
+    else messages.push(bytes)
+  })
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true })
+    socket.addEventListener("error", () => reject(new Error("Local socket failed")), { once: true })
+  })
+  return { socket, opened, next: () => {
+    const message = messages.shift()
+    return message ? Promise.resolve(message) : new Promise<Uint8Array>((resolve) => { pending = resolve })
+  } }
+}
+
+const combinedListener = () => {
+  const runtime = fixture()
+  const v3 = makeInlineProtocolRealtimeTransport(runtime)
+  const context = Context.make(ErrorReporter, { report: () => Effect.void }).pipe(Context.add(RealtimeSessions, {
+    open: (peer) => Effect.succeed({
+      connectionId: peer.id, close: Effect.void,
+      handle: (message) => Effect.sync(() => { peer.sendBinary(ClientMessage.toBinary(message), true) }),
+    }),
+  }))
+  const v2 = makeCoreRealtimeTransport(context)
+  const handler = makeCombinedWebsocket(v2.websocket, v3.websocket)
+  const server = Bun.serve<CoreWebSocketData>({
+    hostname: "127.0.0.1", port: 0,
+    fetch: (request, server) => {
+      if (v3.tryUpgrade(request, server as never)) return
+      const upgrade = v2.tryUpgrade(request, server as never)
+      if (upgrade === true) return
+      return upgrade instanceof Response ? upgrade : new Response("Not found", { status: 404 })
+    },
+    websocket: handler,
+  })
+  return { runtime, v2, v3, handler, server, close: async () => {
+    void server.stop(true)
+    await v3.shutdown()
+    await v2.shutdown()
+  } }
+}
+
+describe("assembled V2/V3 Bun listener", () => {
+  test("preserves V2 binary requests and V3 handshakes across reconnects on the same listener", async () => {
+    const listener = combinedListener()
+    const sockets: WebSocket[] = []
+    try {
+      const v2 = connectSocket(`ws://127.0.0.1:${listener.server.port}/realtime`)
+      sockets.push(v2.socket)
+      await v2.opened
+      const payload = ClientMessage.toBinary(ClientMessage.create({ id: 1n }))
+      v2.socket.send(Uint8Array.from(payload).buffer)
+      expect(await v2.next()).toEqual(payload)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const v3 = connectSocket(`ws://127.0.0.1:${listener.server.port}/realtime/v3`)
+        sockets.push(v3.socket)
+        await v3.opened
+        let header: Uint8Array
+        do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+        const carrier = createObfuscatedClientHeader(header, 1)
+        v3.socket.send(Uint8Array.from(carrier.wireHeader).buffer)
+        const client = new InlineHandshakeClient({ rsaKeys: [listener.runtime.clientKey], randomBytes: (length) => Uint8Array.from(randomBytes(length)) })
+        const ids = new MessageIdGenerator()
+        let request = client.begin(false)
+        let established = false
+        for (let step = 0; step < 3; step++) {
+          const record = encodeUnencryptedRecord(ids.next(Date.now(), step + 1, 0), request)
+          v3.socket.send(Uint8Array.from(carrier.outbound.process(encodeAbridgedPacket(record))).buffer)
+          const response = decodeAbridgedPacket(carrier.inbound.process(await v3.next()))
+          const result = client.receive(decodeUnencryptedRecord(response).body)
+          if ("request" in result) request = result.request
+          else established = true
+        }
+        expect(established).toBeTrue()
+        v3.socket.close()
+      }
+    } finally { for (const socket of sockets) socket.close(); await listener.close() }
+  }, 20_000)
+
+  test("does not negotiate deflate for either route even when the client offers it", async () => {
+    const listener = combinedListener()
+    try {
+      for (const path of ["/realtime", "/realtime/v3"]) {
+        const socket = createConnection({ host: "127.0.0.1", port: listener.server.port! })
+        try {
+          const headers = await new Promise<string>((resolve, reject) => {
+            let data = ""
+            socket.on("error", reject)
+            socket.on("data", (bytes) => {
+              data += bytes.toString("latin1")
+              if (data.includes("\r\n\r\n")) resolve(data.slice(0, data.indexOf("\r\n\r\n")))
+            })
+            socket.on("connect", () => socket.write(
+              `GET ${path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n`,
+            ))
+          })
+          expect(headers).toContain("101")
+          expect(headers.toLowerCase()).not.toContain("sec-websocket-extensions")
+        } finally { socket.destroy() }
+      }
+    } finally { await listener.close() }
+  })
+
+  test("bounds Bun's native output buffer and closes a slow reader at the shared limit", async () => {
+    let dropped = false
+    let queued = false
+    let maximumBuffered = 0
+    let finish!: () => void
+    const completed = new Promise<void>((resolve) => { finish = resolve })
+    const payload = new Uint8Array(1024 * 1024)
+    const handler = makeCombinedWebsocket({
+      message: () => {},
+      open: (socket) => {
+        // A client which never reads application frames must hit the native limit.
+        for (let i = 0; i < 128; i++) {
+          const result = socket.sendBinary(payload)
+          maximumBuffered = Math.max(maximumBuffered, socket.getBufferedAmount())
+          if (result === -1) queued = true
+          if (result === 0) { dropped = true; break }
+        }
+      },
+      close: () => finish(),
+    }, { message: () => {} })
+    const server = Bun.serve<CoreWebSocketData>({ hostname: "127.0.0.1", port: 0, websocket: handler,
+      fetch: (request, server) => server.upgrade(request, { data: { id: "slow-reader" as never, closed: false, connection: undefined } }) ? undefined : new Response("failed"),
+    })
+    const socket = createConnection({ host: "127.0.0.1", port: server.port! })
+    socket.pause()
+    try {
+      socket.on("connect", () => socket.write("GET /realtime HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"))
+      await completed
+      expect(queued).toBeTrue()
+      expect(dropped).toBeTrue()
+      // uWebSockets tests its threshold before the next write: allow one frame of overshoot.
+      expect(maximumBuffered).toBeLessThanOrEqual(17 * 1024 * 1024 + 16)
+    } finally { socket.destroy(); void server.stop(true) }
+  }, 10_000)
+})
+
 const deferred = () => {
   let resolve!: () => void
   const promise = new Promise<void>((continuation) => { resolve = continuation })
@@ -129,6 +281,53 @@ const upgrade = (
 }
 
 describe("Inline Protocol WebSocket carrier", () => {
+  for (const outcome of [0, -1, "closed-under-pressure", "throw"] as const) {
+    test(`handles carrier send outcome ${outcome} without replaying advanced bytes`, async () => {
+      const runtime = fixture()
+      const transport = makeInlineProtocolRealtimeTransport(runtime)
+      const data = upgrade(transport)
+      const sent: Uint8Array[] = []
+      const closed: number[] = []
+      const socket = { data, close: (code: number) => closed.push(code), sendBinary: (bytes: Uint8Array) => {
+        sent.push(bytes.slice())
+        if (outcome === "throw") throw new Error("synthetic write failure")
+        return outcome === "closed-under-pressure" ? -1 : outcome
+      } } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      transport.websocket.open?.(socket)
+      let header: Uint8Array
+      do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+      const carrier = createObfuscatedClientHeader(header, 1)
+      transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state!.queue
+      const client = new InlineHandshakeClient({ rsaKeys: [runtime.clientKey], randomBytes: (length) => Uint8Array.from(randomBytes(length)) })
+      const record = encodeUnencryptedRecord(new MessageIdGenerator().next(Date.now(), 1, 0), client.begin(false))
+      transport.websocket.message(socket, Buffer.from(carrier.outbound.process(encodeAbridgedPacket(record))))
+      await data.state!.queue
+      if (outcome === -1 || outcome === "closed-under-pressure") {
+        expect(closed).toEqual([])
+        expect(data.state!.outboundQueuedRecords).toBe(1)
+        expect(data.state!.outboundQueuedBytes).toBeGreaterThan(0)
+        expect(data.state!.resumeOutbound).toBeDefined()
+        if (outcome === "closed-under-pressure") transport.websocket.close?.(socket, 1001, "reader left")
+        else transport.websocket.drain?.(socket)
+      }
+      await data.state!.outboundQueue
+      expect(sent).toHaveLength(1)
+      expect(data.state!.outboundQueuedBytes).toBe(0)
+      expect(closed).toEqual(outcome === -1 || outcome === "closed-under-pressure" ? [] : [1002])
+      if (outcome !== -1) {
+        transport.websocket.message(socket, Buffer.from([1, 2, 3, 4]))
+        await data.state!.queue
+        expect(sent).toHaveLength(1)
+        expect(data.state!.overloaded).toBeTrue()
+      } else {
+        const response = decodeAbridgedPacket(carrier.inbound.process(sent[0]!))
+        expect(client.receive(decodeUnencryptedRecord(response).body)).toHaveProperty("request")
+      }
+      transport.websocket.close?.(socket, 1000, "done")
+      await transport.shutdown()
+    })
+  }
   test("publishes only the safe public verification contract", async () => {
     const runtime = fixture()
     const transport = makeInlineProtocolRealtimeTransport(runtime)

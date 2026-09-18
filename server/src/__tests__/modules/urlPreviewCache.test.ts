@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import { and, eq } from "drizzle-orm"
+import * as urlPreview from "@inline-chat/url-preview"
 
 import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
@@ -22,6 +23,8 @@ import {
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const originalFetch = globalThis.fetch
+const originalFetchUrlPreview = urlPreview.fetchUrlPreview
+const originalFetchBinary = urlPreview.fetchBinary
 
 describe("URL preview candidates", () => {
   it("previews literal HTTP URLs but not labeled TEXT_URL entity targets", () => {
@@ -105,7 +108,30 @@ describe("URL preview candidates", () => {
 describe("URL preview cache", () => {
   setupTestLifecycle()
 
+  // Exercise real parsing/cache behavior through the package's explicit transport seam.
+  // Replacing global fetch alone must not disable production DNS pinning.
+  const lookup: urlPreview.LookupFn = async () => [{ address: "93.184.216.34", family: 4 }]
+  const fetchImpl: urlPreview.FetchImpl = (input, init) => globalThis.fetch(input, init)
+  let previewSpy: ReturnType<typeof spyOn<typeof urlPreview, "fetchUrlPreview">>
+  let binarySpy: ReturnType<typeof spyOn<typeof urlPreview, "fetchBinary">>
+  beforeEach(() => {
+    globalThis.fetch = Object.assign(
+      async () => {
+        throw new Error("Unexpected preview network request in cache test")
+      },
+      { preconnect: originalFetch.preconnect },
+    )
+    previewSpy = spyOn(urlPreview, "fetchUrlPreview").mockImplementation((url, options) =>
+      originalFetchUrlPreview(url, { ...options, lookup, fetchImpl }),
+    )
+    binarySpy = spyOn(urlPreview, "fetchBinary").mockImplementation((url, options) =>
+      originalFetchBinary(url, { ...options, lookup, fetchImpl }),
+    )
+  })
+
   afterEach(() => {
+    previewSpy.mockRestore()
+    binarySpy.mockRestore()
     globalThis.fetch = originalFetch
   })
 
