@@ -10143,6 +10143,7 @@ mod tests {
                     proto::UpdateSpaceMemberDelete {
                         space_id: 5,
                         user_id: 3,
+                        ..Default::default()
                     },
                 )),
                 ..Default::default()
@@ -10156,8 +10157,7 @@ mod tests {
                                 silent: Some(true),
                                 ..Default::default()
                             }),
-                            privacy_settings: None,
-                            compose_settings: None,
+                            ..Default::default()
                         }),
                     },
                 )),

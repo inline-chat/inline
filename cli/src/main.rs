@@ -4280,8 +4280,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     };
                     let user_settings = proto::UserSettings {
                         notification_settings: Some(notification_settings),
-                        privacy_settings: None,
-                        compose_settings: None,
+                        ..Default::default()
                     };
                     let input = proto::UpdateUserSettingsInput {
                         user_settings: Some(user_settings),
