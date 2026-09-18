@@ -550,7 +550,7 @@ export class SyncEngine {
         Method.GET_CHAT,
         {
           oneofKind: "getChat",
-          getChat: { peerId },
+          getChat: { peerId, includeRecentMessages: false },
         },
         { timeoutMs: rpcTimeoutMs },
       ),

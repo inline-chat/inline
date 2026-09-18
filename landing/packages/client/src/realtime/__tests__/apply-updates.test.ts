@@ -274,6 +274,56 @@ describe("realtime update application", () => {
     ).toEqual(update)
   })
 
+  it("retains acknowledgement and translation updates until their projections exist", () => {
+    const db = new Db({ autoHydrate: false })
+    const acknowledgement = Update.create({
+      seq: 18,
+      date: 1_021n,
+      update: {
+        oneofKind: "acknowledgement",
+        acknowledgement: {
+          chatId: 801n,
+          userId: 7n,
+          maxId: 41n,
+          revision: 1n,
+          cleared: false,
+        },
+      },
+    })
+    const translation = Update.create({
+      seq: 19,
+      date: 1_022n,
+      update: {
+        oneofKind: "dialogTranslation",
+        dialogTranslation: {
+          peerId: chatPeer(801n),
+          enabled: true,
+        },
+      },
+    })
+
+    expect(applyUpdates(db, [acknowledgement, translation])).toEqual({
+      applied: 0,
+      ephemeral: 0,
+      syncHint: 0,
+      deferred: 2,
+      failed: 0,
+    })
+
+    const deferred = db.queryCollection(
+      DbQueryPlanType.Objects,
+      DbObjectKind.DeferredUpdate,
+    )
+    expect(deferred.map((item) => [item.bucketId, item.updateType])).toEqual([
+      ["chat:chat:801", "acknowledgement"],
+      ["user", "dialogTranslation"],
+    ])
+    expect(deferred.map((item) => Update.fromBinary(item.payload))).toEqual([
+      acknowledgement,
+      translation,
+    ])
+  })
+
   it("applies reaction inserts and deletes to a resident message aggregate", () => {
     const db = new Db({ autoHydrate: false })
     const key = messageKey(threadChatId, messageId(41))

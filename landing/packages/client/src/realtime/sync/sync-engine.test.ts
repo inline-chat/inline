@@ -492,6 +492,7 @@ describe("SyncEngine", () => {
           open: true,
         },
         pinnedMessageIds: [],
+        messages: [],
       },
     }
     context.client.chatHistory = {

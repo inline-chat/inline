@@ -44,6 +44,11 @@ const inferredUpdateBucketKey = (
         update.update.messageAttachment.peerId ??
           chatPeer(update.update.messageAttachment.chatId),
       )
+    case "acknowledgement":
+      return chatKey(
+        update.update.acknowledgement.peerId ??
+          chatPeer(update.update.acknowledgement.chatId),
+      )
     case "updateReaction":
       return chatKey(chatPeer(update.update.updateReaction.reaction?.chatId))
     case "deleteReaction":
@@ -132,6 +137,7 @@ const inferredUpdateBucketKey = (
     case "chatOpen":
     case "dialogFollowMode":
     case "dialogCollapsedMaxId":
+    case "dialogTranslation":
     case "messageActionAnswered":
       return { kind: "user" }
     case "messageActionInvoked":

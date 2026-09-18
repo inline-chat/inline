@@ -22,6 +22,7 @@ export class GetChatTransaction implements Transaction<GetChatContext> {
   input(context: GetChatContext) {
     const payload: GetChatInput = {
       peerId: context.peerId,
+      includeRecentMessages: false,
     }
 
     const input: RpcCall["input"] = { oneofKind: "getChat", getChat: payload }
