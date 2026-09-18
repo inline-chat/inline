@@ -9,6 +9,13 @@ use crate::output::{self, JsonFormat};
 
 const SKILL_FILES: &[(&str, &str)] = &[
     (
+        "LICENSE",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../skills/inline/LICENSE"
+        )),
+    ),
+    (
         "SKILL.md",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -272,6 +279,7 @@ mod tests {
 
         assert_eq!(install_to(&target, false).unwrap(), SKILL_FILES.len());
         assert_eq!(install_to(&target, false).unwrap(), 0);
+        assert!(target.join("LICENSE").is_file());
         assert!(target.join("SKILL.md").is_file());
         assert!(target.join("agents/openai.yaml").is_file());
         assert!(target.join("references/inline-cli.md").is_file());
@@ -290,9 +298,13 @@ mod tests {
         assert_eq!(cli_error.code, "skill_already_exists");
 
         assert_eq!(install_to(&target, true).unwrap(), SKILL_FILES.len());
+        let expected_skill = SKILL_FILES
+            .iter()
+            .find_map(|(path, contents)| (*path == "SKILL.md").then_some(*contents))
+            .unwrap();
         assert_eq!(
             fs::read_to_string(target.join("SKILL.md")).unwrap(),
-            SKILL_FILES[0].1
+            expected_skill
         );
         assert_eq!(
             fs::read_to_string(target.join("notes.md")).unwrap(),
