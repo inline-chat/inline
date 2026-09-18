@@ -25,6 +25,36 @@ describe("log levels", () => {
   })
 })
 
+describe("local content traces", () => {
+  it("requires explicit development trace mode and never exports to Sentry", () => {
+    const previousMode = process.env["NODE_ENV"]
+    const previousDebug = process.env["DEBUG"]
+    process.env["DEBUG"] = "1"
+    const consoleSpy = spyOn(console, "debug").mockImplementation(() => {})
+    const sentrySpy = spyOn(Sentry.logger, "trace").mockImplementation(() => {})
+    try {
+      for (const mode of ["production", "test"] as const) {
+        process.env["NODE_ENV"] = mode
+        new Log("privacy", LogLevel.TRACE).traceContent("private synthetic prompt")
+      }
+      expect(consoleSpy).not.toHaveBeenCalled()
+      process.env["NODE_ENV"] = "development"
+      new Log("privacy", LogLevel.DEBUG).traceContent("private synthetic prompt")
+      expect(consoleSpy).not.toHaveBeenCalled()
+      new Log("privacy", LogLevel.TRACE).traceContent("private synthetic prompt")
+      expect(consoleSpy).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(consoleSpy.mock.calls)).toContain("private synthetic prompt")
+      expect(sentrySpy).not.toHaveBeenCalled()
+    } finally {
+      consoleSpy.mockRestore(); sentrySpy.mockRestore()
+      for (const [name, value] of [["NODE_ENV", previousMode], ["DEBUG", previousDebug]]) {
+        if (value === undefined) Reflect.deleteProperty(process.env, name!)
+        else process.env[name!] = value
+      }
+    }
+  })
+})
+
 describe("log redaction", () => {
   it("redacts opaque v1 path tokens and relative query values at both sinks", () => {
     const previousDebug = process.env["DEBUG"]

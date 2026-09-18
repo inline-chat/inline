@@ -92,9 +92,11 @@ function parseConvertedEntitiesJson(input: { messageId: number; entities: string
       return MessageEntities.fromJson({ entities: parsed.entities })
     }
 
-    log.warn(`Invalid entities format for messageId ${input.messageId}:`, parsed)
+    log.traceContent("Invalid entities format", parsed)
+    log.warn("Invalid entities format", { messageId: input.messageId })
   } catch (error) {
-    log.warn(`Failed to parse entities for messageId ${input.messageId}:`, error)
+    log.traceContent("Entities parsing failure", error)
+    log.warn("Failed to parse entities", { messageId: input.messageId })
   }
 
   return null
@@ -154,8 +156,8 @@ ${input.messages
   )
   .join("\n")}`
 
-  log.debug("Entity conversion system prompt:", systemPrompt)
-  log.debug("Entity conversion user prompt:", userPrompt)
+  log.traceContent("Entity conversion system prompt:", systemPrompt)
+  log.traceContent("Entity conversion user prompt:", userPrompt)
 
   const response = await openaiClient.chat.completions.parse({
     model: "gpt-5.4-mini" as ChatModel,
@@ -168,6 +170,9 @@ ${input.messages
     response_format: zodResponseFormat(BatchEntityConversionResultSchema, "entity_conversion"),
     user: `User:${input.actorId}`,
     max_completion_tokens: 20000,
+  }).catch((error: unknown) => {
+    log.traceContent("Entity conversion provider failure", error)
+    throw new Error("Entity conversion provider request failed")
   })
 
   const finishReason = response.choices[0]?.finish_reason
@@ -177,7 +182,7 @@ ${input.messages
   }
 
   try {
-    log.debug(`Entity conversion result: ${response.choices[0]?.message.content}`)
+    log.traceContent(`Entity conversion result: ${response.choices[0]?.message.content}`)
     const result = response.choices[0]?.message.parsed
     if (!result) {
       throw new Error("Missing parsed entity conversion response")
@@ -193,7 +198,8 @@ ${input.messages
       }
     })
   } catch (error) {
-    log.error(`Entity conversion decoding failed: ${error}`)
-    throw new Error(`Entity conversion decoding failed: ${error}`)
+    log.traceContent("Entity conversion decoding failure", error)
+    log.error("Entity conversion decoding failed")
+    throw new Error("Entity conversion decoding failed")
   }
 }

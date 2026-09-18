@@ -71,7 +71,8 @@ async function translateMessages(
         actorId: input.actorId,
       })
     } catch (error) {
-      log.error(`Entity conversion failed:`, error)
+      log.traceContent("Entity conversion failure", error)
+      log.error("Entity conversion failed")
       // Continue without entities rather than failing the entire translation
       entityResults = messagesWithEntities.map(({ translation }) => ({
         messageId: translation.messageId,

@@ -157,8 +157,8 @@ export async function translateMarkdowns(input: MarkdownTranslationCallInput): P
     ),
   ].join("\n")
 
-  log.debug("Markdown translation system prompt:", systemPrompt)
-  log.debug("Markdown translation user prompt:", userPrompt)
+  log.traceContent("Markdown translation system prompt:", systemPrompt)
+  log.traceContent("Markdown translation user prompt:", userPrompt)
 
   const response = await openaiClient.chat.completions.parse({
     model: "gpt-5.4-mini" as ChatModel,
@@ -171,6 +171,9 @@ export async function translateMarkdowns(input: MarkdownTranslationCallInput): P
     response_format: zodResponseFormat(MarkdownTranslationResultSchema, "markdown_translation"),
     user: `User:${input.actorId}`,
     max_completion_tokens: 20000,
+  }).catch((error: unknown) => {
+    log.traceContent("Markdown translation provider failure", error)
+    throw new Error("Markdown translation provider request failed")
   })
 
   const finishReason = response.choices[0]?.finish_reason
@@ -180,7 +183,7 @@ export async function translateMarkdowns(input: MarkdownTranslationCallInput): P
   }
 
   try {
-    log.debug(`Markdown translation result: ${response.choices[0]?.message.content}`)
+    log.traceContent(`Markdown translation result: ${response.choices[0]?.message.content}`)
     const result = response.choices[0]?.message.parsed
     if (!result) {
       throw new Error("Missing parsed markdown translation response")
@@ -190,7 +193,8 @@ export async function translateMarkdowns(input: MarkdownTranslationCallInput): P
     if (error instanceof Error && error.message === "Invalid markdown translation output") {
       throw error
     }
-    log.error(`Markdown translation decoding failed: ${error}`)
-    throw new Error(`Markdown translation decoding failed: ${error}`)
+    log.traceContent("Markdown translation decoding failure", error)
+    log.error("Markdown translation decoding failed")
+    throw new Error("Markdown translation decoding failed")
   }
 }

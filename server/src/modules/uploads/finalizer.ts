@@ -153,7 +153,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     let outcome = "failed"
     const assemblyStartedAt = Date.now()
     try {
-      handle = await open(path, "wx")
+      handle = await open(path, "wx", 0o600)
       await input.assertOwnership()
       for await (const { part, bytes } of readParts(this.partStore, input.parts, input.signal)) {
         const partDigest = createHash("sha256").update(bytes).digest()
@@ -227,7 +227,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     const digest = createHash("sha256")
     let byteCount = 0n
     try {
-      handle = await open(path, "wx")
+      handle = await open(path, "wx", 0o600)
       await input.assertOwnership()
       while (true) {
         throwIfAborted(input.signal)

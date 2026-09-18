@@ -53,7 +53,7 @@ describe("sendToUser invalid APN tokens", () => {
 })
 
 describe("sendToUser Expo payloads", () => {
-  it("includes Android rich content and urgent channel metadata for message notifications", () => {
+  it("keeps Android content generic while preserving urgent delivery and navigation", () => {
     const message = buildExpoPushMessage({
       to: "ExponentPushToken[test]",
       silent: true,
@@ -75,18 +75,14 @@ describe("sendToUser Expo payloads", () => {
 
     expect(message).toMatchObject({
       to: "ExponentPushToken[test]",
-      title: "Inline Bot",
-      body: "Heads up",
-      subtitle: "General",
+      title: "New message",
+      body: "Open Inline to read it.",
       sound: "default",
       priority: "high",
       channelId: "urgent",
-      richContent: { image: "https://cdn.inline.chat/avatar.png" },
       data: {
         kind: "send_message",
         senderUserId: 42,
-        senderDisplayName: "Inline Bot",
-        senderProfilePhotoUrl: "https://cdn.inline.chat/avatar.png",
         threadId: "100",
         isThread: true,
         isReplyThread: true,
@@ -116,7 +112,7 @@ describe("sendToUser Expo payloads", () => {
     })
   })
 
-  it("uses the shared multiline body and single-line identity projection", () => {
+  it("omits content and identity details from experimental Expo notifications", () => {
     const message = buildExpoPushMessage({
       to: "ExponentPushToken[test]",
       silent: false,
@@ -133,10 +129,8 @@ describe("sendToUser Expo payloads", () => {
     })
 
     expect(message).toMatchObject({
-      title: "Inline Bot",
-      body: "First\nSecond\n\nThird",
-      subtitle: "Product Updates",
-      data: { senderDisplayName: "Inline Bot" },
+      title: "New message",
+      body: "Open Inline to read it.",
     })
   })
 
@@ -162,6 +156,27 @@ describe("sendToUser Expo payloads", () => {
     expect(message?.data?.["senderDisplayName"]).toBeUndefined()
     expect(message?.data?.["threadEmoji"]).toBeUndefined()
   })
+})
+
+describe("notification provider privacy", () => {
+  for (const kind of ["send_message", "alert"] as const) {
+    it(`omits all authored content from generic ${kind} payloads`, () => {
+      const secret = "synthetic-private-content"
+      const payload = { kind, senderUserId: 42, threadId: "100", messageId: "900",
+        title: secret, body: secret, subtitle: secret, threadEmoji: secret,
+        senderDisplayName: secret, senderProfilePhotoUrl: `https://example.com/${secret}` }
+      const outputs = [
+        buildExpoPushMessage({ to: "ExponentPushToken[test]", payload, silent: false }),
+        buildApnNotification({ session: unencryptedSession, payload, recipientUserId: 12,
+          silent: false, topic: "chat.inline.Inline", nowSeconds: 100 }),
+      ]
+      for (const output of outputs) {
+        expect(output).toBeDefined()
+        expect(JSON.stringify(output)).not.toContain(secret)
+        expect(JSON.stringify(output)).toContain("100")
+      }
+    })
+  }
 })
 
 describe("sendToUser APN payloads", () => {
@@ -258,7 +273,7 @@ describe("sendToUser APN payloads", () => {
     }
   })
 
-  it("preserves bounded body paragraphs while flattening alert identity fields", () => {
+  it("keeps unsupported alert content generic", () => {
     const notification = buildApnNotification({
       recipientUserId: 99,
       session: unencryptedSession,
@@ -277,9 +292,8 @@ describe("sendToUser APN payloads", () => {
 
     const compiled = JSON.parse(JSON.stringify(notification)) as { aps: { alert: unknown } }
     expect(compiled.aps.alert).toEqual({
-      title: "Inline Bot",
-      subtitle: "Product Updates",
-      body: "First\nSecond\n\nThird",
+      title: "Inline",
+      body: "Open Inline to see the update.",
     })
     expect(Buffer.byteLength(JSON.stringify(notification), "utf8")).toBeLessThanOrEqual(4_096)
   })
@@ -379,7 +393,7 @@ describe("sendToUser APN payloads", () => {
     expect(notification).toBeUndefined()
   })
 
-  it("preserves urgent plaintext message behavior", () => {
+  it("preserves urgent delivery with generic legacy message alerts", () => {
     const notification = buildApnNotification({
       recipientUserId: 99,
       session: unencryptedSession,

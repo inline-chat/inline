@@ -318,6 +318,12 @@ export class Log {
     console.trace(scopeColored, ...args.map((a) => redactValue(a)))
   }
 
+  /** Explicit local diagnostics only: never export authored content to telemetry. */
+  traceContent(...args: unknown[]): void {
+    if (process.env.NODE_ENV !== "development" || this.disableLogging || this.logLevel < LogLevel.TRACE) return
+    console.debug(styleText("magenta", this.scope), ...args.map((arg) => redactValue(arg)))
+  }
+
   private writeConsole(
     writer: (...args: unknown[]) => void,
     scopeColored: string,

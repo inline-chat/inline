@@ -176,7 +176,7 @@ export class InlineProtocolUploadOperations {
       await pipeline(
         Readable.fromWeb(request.body as never),
         meter,
-        createWriteStream(filePath, { flags: "wx" }),
+        createWriteStream(filePath, { flags: "wx", mode: 0o600 }),
       )
       if (received !== upload.byteCount || !digest.digest().equals(Buffer.from(upload.sha256))) {
         return genericResponse(400)

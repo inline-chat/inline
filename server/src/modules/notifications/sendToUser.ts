@@ -108,7 +108,7 @@ const configureSound = ({
   }
 }
 
-const configurePlaintextSendMessageNotification = ({
+const configureGenericSendMessageNotification = ({
   notification,
   payload,
   silent,
@@ -119,17 +119,12 @@ const configurePlaintextSendMessageNotification = ({
 }) => {
   const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
 
-  if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
-  if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
-  if (payload.senderHasProfilePhoto != null) senderPayload["hasProfilePhoto"] = payload.senderHasProfilePhoto
-
   const apsPayload: Record<string, unknown> = {
     userId: payload.senderUserId,
     threadId: payload.threadId,
     isThread: payload.isThread ?? false,
     isReplyThread: payload.isReplyThread ?? false,
     sender: senderPayload,
-    threadEmoji: payload.threadEmoji,
     messageId: payload.messageId,
   }
 
@@ -143,9 +138,8 @@ const configurePlaintextSendMessageNotification = ({
     configureTimeSensitive(notification)
   }
   notification.alert = {
-    title: payload.title,
-    body: payload.body,
-    subtitle: payload.subtitle,
+    title: genericEncryptedAlertTitle,
+    body: genericEncryptedAlertBody,
   }
 }
 
@@ -303,7 +297,7 @@ export const buildApnNotification = ({
         })
       }
     } else {
-      configurePlaintextSendMessageNotification({ notification, payload, silent })
+      configureGenericSendMessageNotification({ notification, payload, silent })
     }
     return finalize()
   }
@@ -315,16 +309,14 @@ export const buildApnNotification = ({
       threadId: payload.threadId,
       isThread: payload.isThread ?? false,
       isReplyThread: payload.isReplyThread ?? false,
-      threadEmoji: payload.threadEmoji,
     }
     notification.contentAvailable = true
     notification.mutableContent = false
     configureAlertNotification(notification)
     configureSound({ notification, silent })
     notification.alert = {
-      title: payload.title,
-      body: payload.body,
-      subtitle: payload.subtitle,
+      title: "Inline",
+      body: "Open Inline to see the update.",
     }
     return finalize()
   }
@@ -537,14 +529,12 @@ export function buildExpoPushMessage({
   if (payload.kind === "send_message") {
     const message: ExpoPushMessage = {
       to,
-      title: payload.title,
-      body: payload.body,
-      subtitle: payload.subtitle,
+      title: genericEncryptedAlertTitle,
+      body: genericEncryptedAlertBody,
       data: baseData,
       sound: shouldSound ? "default" : undefined,
       priority: payload.isUrgentNudge ? "high" : "default",
       channelId: payload.isUrgentNudge ? "urgent" : silent ? "messages_silent" : "messages",
-      richContent: payload.senderProfilePhotoUrl ? { image: payload.senderProfilePhotoUrl } : undefined,
     }
     return message
   }
@@ -552,9 +542,8 @@ export function buildExpoPushMessage({
   if (payload.kind === "alert") {
     return {
       to,
-      title: payload.title,
-      body: payload.body,
-      subtitle: payload.subtitle,
+      title: "Inline",
+      body: "Open Inline to see the update.",
       data: baseData,
       sound: shouldSound ? "default" : undefined,
       priority: "default",
@@ -579,14 +568,11 @@ function expoDataForPayload(payload: PushToUserPayload): Record<string, unknown>
       kind: "send_message",
       userId: payload.senderUserId,
       senderUserId: payload.senderUserId,
-      senderDisplayName: payload.senderDisplayName,
-      senderProfilePhotoUrl: payload.senderProfilePhotoUrl,
       threadId: payload.threadId,
       isThread: payload.isThread ?? false,
       isReplyThread: payload.isReplyThread ?? false,
       messageId: payload.messageId,
       isUrgentNudge: payload.isUrgentNudge ?? false,
-      threadEmoji: payload.threadEmoji,
     }
   }
 
@@ -597,7 +583,6 @@ function expoDataForPayload(payload: PushToUserPayload): Record<string, unknown>
       threadId: payload.threadId,
       isThread: payload.isThread ?? false,
       isReplyThread: payload.isReplyThread ?? false,
-      threadEmoji: payload.threadEmoji,
     }
   }
 

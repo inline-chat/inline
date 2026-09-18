@@ -155,10 +155,10 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput): P
   })
     .then(() => undefined)
     .catch((error) => {
+      log.traceContent("Thread title generation failure", error)
       log.warn("Thread title generation failed", {
         chatId: input.chat.id,
         messageId: input.message.messageId,
-        error,
       })
     })
   return generation
