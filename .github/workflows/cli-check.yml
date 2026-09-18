@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build CLI
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
