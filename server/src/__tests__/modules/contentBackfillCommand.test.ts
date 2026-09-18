@@ -22,7 +22,8 @@ describe("packaged content migration command", () => {
     const run = async (args: string[], environment: Record<string, string> = {}) => {
       const child = Bun.spawn([process.execPath, "scripts/encrypt-content.ts", ...args], {
         cwd: new URL("../../../", import.meta.url).pathname,
-        env: { ...process.env, NODE_ENV: "test", SENTRY_DSN: "", ...environment }, stdout: "pipe", stderr: "pipe",
+        env: { ...process.env, NODE_ENV: "test", SENTRY_DSN: "",
+          TEST_DATABASE_URL: process.env["DATABASE_URL"], ...environment }, stdout: "pipe", stderr: "pipe",
       })
       const [exit, stdout, stderr] = await Promise.all([child.exited,
         new Response(child.stdout).text(), new Response(child.stderr).text()])
