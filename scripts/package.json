@@ -12,6 +12,7 @@
     "release:macos": "bun run macos:release-app",
     "build:macos:local-app": "bun run macos:build-local-app",
     "ios:debug": "bash ios/open-debug-app.sh",
+    "ios:dev": "bash ios/open-debug-app.sh --dev",
     "macos:update-version": "bun run macos/update-version.ts",
     "macos:debug": "bash macos/open-debug-app.sh",
     "macos:grid-logs": "bash macos/stream-grid-logs.sh",

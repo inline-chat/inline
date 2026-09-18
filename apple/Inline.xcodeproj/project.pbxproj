@@ -1415,32 +1415,154 @@
 		};
 		CDD122E92F9029AF0081894E /* DevBuild */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
+				INLINE_USER_PROFILE = devbuild;
+				DISPLAY_NAME = "Inline-Dev";
+				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = InlineIOS/InlineIOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineIOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(DISPLAY_NAME)";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take and share photos in your conversations.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Inline needs access to documents to share files in your conversations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline needs access to your microphone to record audio messages and videos.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Inline needs access to your photo library to save photos";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Inline needs access to your photo library to share photos and videos in your conversations.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				INLINE_URL_SCHEME = "inline-dev";
 				INLINE_URL_SCHEME_ALIAS = "inline-dev";
-				PRODUCT_NAME = InlineIOS;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.devbuild;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = DevBuild;
 		};
 		CDD122EA2F9029AF0081894E /* DevBuild */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_NAME = iMessageUI;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.inline.iMessageUI;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
 			};
 			name = DevBuild;
 		};
 		CDD122EB2F9029AF0081894E /* DevBuild */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
-				PRODUCT_NAME = InlineShareExtension;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
+				INLINE_USER_PROFILE = devbuild;
+				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.devbuild.InlineShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = DevBuild;
 		};
 		CDD122EC2F9029AF0081894E /* DevBuild */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_NAME = InlineNotificationExtension;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
+				INLINE_USER_PROFILE = devbuild;
+				CODE_SIGN_ENTITLEMENTS = InlineNotificationExtension/InlineNotificationExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineNotificationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.devbuild.InlineNotificationExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = DevBuild;
 		};

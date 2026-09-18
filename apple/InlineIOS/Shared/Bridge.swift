@@ -1,4 +1,5 @@
 import Foundation
+import InlineConfig
 import InlineIntents
 import Logger
 
@@ -258,6 +259,9 @@ final class BridgeManager: Sendable {
   private let sharedContainerIdentifier = "group.chat.inline"
 
   var shareDataFileName: String {
+    if let profile = ProjectConfig.userProfile {
+      return "SharedData_\(profile).json"
+    }
     #if DEBUG
     return "SharedData_dev.json"
     #else
@@ -266,6 +270,9 @@ final class BridgeManager: Sendable {
   }
 
   var intentAvatarDirectoryName: String {
+    if let profile = ProjectConfig.userProfile {
+      return "IntentAvatars_\(profile)"
+    }
     #if DEBUG
     return "IntentAvatars_dev"
     #else

@@ -18,21 +18,24 @@ stream_logs=${STREAM_LOGS:-1}
 allow_simulator=${ALLOW_SIMULATOR:-0}
 live_log_filter=${LIVE_LOG_FILTER:-}
 requested_device_id=""
+dev_build=0
 
 usage() {
   cat <<'EOF'
 Usage: open-debug-app.sh [options]
 
 Builds and runs the regular Xcode Debug iOS app without launching Xcode.
+With --dev, builds the production-connected, isolated Inline-Dev app instead.
 The first run asks for a preferred physical iOS device. Later runs reuse it.
 Simulator fallback is opt-in so physical-device debug runs do not accidentally
 boot Simulator.
 
 Options:
+  --dev           Build Inline-Dev: current sources, production API, separate local profile
   --select        Re-prompt for preferred device and optional simulator fallback
   --list          List available devices and simulators, then exit
   --device <id>   Use this connected physical device without reading/changing preference
-  --no-build      Install/launch the most recent Debug build without rebuilding
+  --no-build      Install/launch the selected configuration's build without rebuilding
   --no-launch     Build and resolve the app path, but do not install or launch
   --logs          Stream app stdout/stderr after launch (default)
   --no-logs       Launch and exit without streaming app stdout/stderr
@@ -60,6 +63,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --dev)
+      dev_build=1
+      shift
+      ;;
     --select)
       select=1
       shift
@@ -127,6 +134,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${dev_build}" == "1" ]]; then
+  CONFIGURATION=DevBuild
+fi
 
 if [[ "${stream_logs}" != "1" ]]; then
   stream_logs=0
@@ -576,6 +587,15 @@ xcode_args=(
   -destination "platform=${platform},id=${target_id}"
 )
 
+if [[ "${dev_build}" == "1" ]]; then
+  # Match macOS DevBuild, including flags for local Swift package dependencies.
+  # A distinct iOS app and its extensions need development provisioning profiles.
+  xcode_args+=(
+    'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG_BUILD'
+    -allowProvisioningUpdates
+  )
+fi
+
 if [[ "${build}" == "1" ]]; then
   run_cmd "Build ${SCHEME} (${CONFIGURATION}) for ${target_name}" xcodebuild "${xcode_args[@]}" build
 fi
@@ -603,6 +623,16 @@ if [[ ! -d "${app_path}" ]]; then
   echo "iOS Debug app was not found at: ${app_path}" >&2
   echo "Run without --no-build to create it." >&2
   exit 1
+fi
+
+if [[ "${dev_build}" == "1" ]]; then
+  if [[ "${bundle_id}" != "chat.inline.InlineIOS.devbuild" ]] ||
+     [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app_path}/Info.plist")" != "chat.inline.InlineIOS.devbuild" ]] ||
+     [[ "$(/usr/libexec/PlistBuddy -c 'Print :USE_PRODUCTION_API' "${app_path}/Info.plist")" != "YES" ]] ||
+     [[ "$(/usr/libexec/PlistBuddy -c 'Print :INLINE_USER_PROFILE' "${app_path}/Info.plist")" != "devbuild" ]]; then
+    echo "Refusing to install: expected the isolated, production-connected iOS DevBuild." >&2
+    exit 1
+  fi
 fi
 
 log "Debug app: ${app_path}"
