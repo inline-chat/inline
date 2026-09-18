@@ -1544,6 +1544,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            seq: None,
         });
 
         assert_eq!(
