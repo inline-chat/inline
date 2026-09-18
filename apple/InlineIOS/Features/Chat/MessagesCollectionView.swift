@@ -1120,6 +1120,7 @@ private extension MessagesCollectionView {
     private var theme: IOSThemeSnapshot
     private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
+    private var pendingReactionPickerPresentation: (() -> Void)?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
@@ -1409,6 +1410,7 @@ private extension MessagesCollectionView {
       let completion = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
+        self?.presentPendingReactionPicker()
         collectionView.onContextMenuDidEnd?()
         // Focus restoration can synchronously deliver one more keyboard frame.
         updateInsets()
@@ -2591,6 +2593,9 @@ private extension MessagesCollectionView {
           )
         }
 
+        cell.onReactionsMenu = { [weak self] message in
+          self?.showReactionEmojiPicker(for: message)
+        }
         cell.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
           self?.presentPhotoGallery(
             for: message,
@@ -3912,6 +3917,62 @@ private extension MessagesCollectionView {
       return containerView
     }
 
+    private func showReactionEmojiPicker(for fullMessage: FullMessage) {
+      guard pendingReactionPickerPresentation == nil else { return }
+      pendingReactionPickerPresentation = { [weak self] in
+        self?.presentReactionEmojiPicker(for: fullMessage)
+      }
+      if (currentCollectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true {
+        dismissContextMenuIfNeeded()
+      } else {
+        presentPendingReactionPicker()
+      }
+    }
+
+    private func presentPendingReactionPicker() {
+      let presentation = pendingReactionPickerPresentation
+      pendingReactionPickerPresentation = nil
+      presentation?()
+    }
+
+    private func presentReactionEmojiPicker(for fullMessage: FullMessage) {
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            collectionView.window != nil,
+            let presenter = collectionView.findViewController(),
+            presenter.presentedViewController == nil,
+            !presenter.isBeingPresented,
+            !presenter.isBeingDismissed,
+            let currentMessage = currentFullMessage(
+              stableId: fullMessage.id,
+              messageId: fullMessage.message.messageId,
+              chatId: fullMessage.message.chatId,
+              randomId: fullMessage.message.randomId
+            )
+      else { return }
+
+      let selectedEmojis = Set(currentMessage.reactions
+        .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
+        .map { $0.reaction.emoji })
+      let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
+        self?.toggleReaction(
+          emoji,
+          messageStableId: fullMessage.id,
+          messageId: fullMessage.message.messageId,
+          chatId: fullMessage.message.chatId,
+          randomId: fullMessage.message.randomId
+        )
+      }
+      let controller = UIHostingController(rootView: picker)
+      controller.modalPresentationStyle = .pageSheet
+      controller.view.tintColor = theme.primary.uiColor
+      if let sheet = controller.sheetPresentationController {
+        sheet.detents = [.medium(), .large()]
+        sheet.prefersGrabberVisible = true
+        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+      }
+      presenter.present(controller, animated: true)
+    }
+
     private func createReactionButton(
       reaction: String,
       messageStableId: Int64,
@@ -4011,6 +4072,22 @@ private extension MessagesCollectionView {
     ) {
       buttonTouchUp(sender)
       dismissContextMenuIfNeeded()
+      toggleReaction(
+        emoji,
+        messageStableId: messageStableId,
+        messageId: messageId,
+        chatId: chatId,
+        randomId: randomId
+      )
+    }
+
+    private func toggleReaction(
+      _ emoji: String,
+      messageStableId: Int64,
+      messageId: Int64,
+      chatId: Int64,
+      randomId: Int64?
+    ) {
       guard let fullMessage = currentFullMessage(
         stableId: messageStableId,
         messageId: messageId,
@@ -4192,6 +4269,12 @@ private extension MessagesCollectionView {
             currentView = view.superview
           }
         }
+      }
+
+      let holdAction = INUserSettings.current.messageGestures.holdAction
+      if holdAction != .reactionsMenu {
+        cell.messageView?.performMessageGestureAction(holdAction)
+        return nil
       }
 
       if message.isServiceMessage {

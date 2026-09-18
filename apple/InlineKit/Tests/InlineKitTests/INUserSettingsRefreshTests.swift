@@ -6,6 +6,115 @@ import Testing
 @Suite("User settings refresh", .serialized)
 @MainActor
 struct INUserSettingsRefreshTests {
+  @Test("gesture edits sync while local overrides never publish")
+  func gestureSyncAndLocalOverride() async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+    let gestures = harness.settings.messageGestures
+    #expect(gestures.syncEnabled)
+    gestures.doubleTapAction = .reply
+    gestures.holdAction = .toggleHeart
+    gestures.swipeToReplyDirection = .leftToRight
+    await harness.saver.waitForCalls(1)
+    let saved = await harness.saver.savedValues.last?.messageGestures
+    #expect(saved?.doubleTapAction == .reply)
+    #expect(saved?.holdAction == .toggleHeart)
+    #expect(saved?.swipeToReplyDirection == .leftToRight)
+    await harness.saver.succeed()
+    for _ in 0..<20 { await Task.yield() }
+
+    gestures.syncEnabled = false
+    gestures.doubleTapAction = .none
+    harness.settings.compose.replacePastedLinksWithTitles = true
+    await harness.saver.waitForCalls(2)
+    let localSave = await harness.saver.savedValues.last
+    #expect(localSave?.messageGestures == nil)
+    await harness.saver.succeed()
+    for _ in 0..<20 { await Task.yield() }
+
+    var remote = MessageGestureValues()
+    remote.doubleTapAction = .toggleThumbsUp
+    harness.settings.updateFromServer(.with { $0.messageGestureSettings = remote.toProtocol() })
+    #expect(gestures.doubleTapAction == .none)
+    gestures.syncEnabled = true
+    #expect(gestures.doubleTapAction == .toggleThumbsUp)
+    #expect(await harness.saver.callCount == 2)
+  }
+
+  @Test("remote gestures are retained while an unrelated setting saves", arguments: [true, false])
+  func remoteGesturesDuringUnrelatedSave(syncEnabled: Bool) async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+    let gestures = harness.settings.messageGestures
+    gestures.syncEnabled = syncEnabled
+    if !syncEnabled { gestures.doubleTapAction = .none }
+    harness.settings.compose.replacePastedLinksWithTitles = true
+    await harness.saver.waitForCalls(1)
+    var remote = MessageGestureValues()
+    remote.doubleTapAction = .reply
+    harness.settings.updateFromServer(.with { $0.messageGestureSettings = remote.toProtocol() })
+    #expect(harness.settings.compose.replacePastedLinksWithTitles)
+    #expect(gestures.doubleTapAction == (syncEnabled ? .reply : .none))
+    gestures.syncEnabled = true
+    #expect(gestures.doubleTapAction == .reply)
+    #expect(await harness.saver.savedValues.last?.messageGestures == nil)
+    await harness.saver.succeed()
+
+    let relaunched = INUserSettings(
+      userDefaults: harness.userDefaults,
+      currentUserID: { 1 },
+      fetchNotificationSettings: { nil },
+      saveNotificationSettings: { _ in }
+    )
+    #expect(relaunched.messageGestures.doubleTapAction == .reply)
+  }
+
+  @Test("opting out keeps a queued shared edit separate from later local edits")
+  func optingOutDuringDebounce() async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+    let gestures = harness.settings.messageGestures
+    gestures.doubleTapAction = .reply
+    gestures.syncEnabled = false
+    gestures.doubleTapAction = .toggleHeart
+    await harness.saver.waitForCalls(1)
+    #expect(await harness.saver.savedValues.last?.messageGestures?.doubleTapAction == .reply)
+    #expect(gestures.doubleTapAction == .toggleHeart)
+    await harness.saver.succeed()
+    gestures.syncEnabled = true
+    #expect(gestures.doubleTapAction == .reply)
+  }
+
+  @Test("failed gesture edits survive relaunch and retry before refresh")
+  func pendingGestureSurvivesRelaunch() async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+    harness.settings.messageGestures.doubleTapAction = .reply
+    await harness.saver.waitForCalls(1)
+    await harness.saver.fail()
+    for _ in 0..<20 { await Task.yield() }
+
+    let fetcher = ControlledNotificationSettingsFetcher()
+    let saver = ControlledNotificationSettingsSaver(isControlled: true)
+    let relaunched = INUserSettings(
+      userDefaults: harness.userDefaults,
+      currentUserID: { 1 },
+      fetchNotificationSettings: { try await fetcher.fetch() },
+      saveNotificationSettings: { try await saver.save($0) }
+    )
+    #expect(relaunched.messageGestures.doubleTapAction == .reply)
+    let refresh = Task { await relaunched.refresh(reason: .authenticatedScene) }
+    await saver.waitForCalls(1)
+    let saved = try #require(await saver.savedValues.last)
+    #expect(saved.messageGestures?.doubleTapAction == .reply)
+    #expect(await fetcher.callCount == 0)
+    await saver.succeed()
+    await fetcher.waitForCalls(1)
+    await fetcher.succeed(saved)
+    await refresh.value
+    #expect(relaunched.messageGestures.doubleTapAction == .reply)
+  }
+
   @Test("link shortening stays opt-in for new and older settings, preserving saved choices")
   func linkShorteningRemainsOptIn() throws {
     #expect(!ComposeSettingsManager().replacePastedLinksWithTitles)

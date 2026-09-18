@@ -7668,6 +7668,29 @@ export interface UserSettings {
      * @generated from protobuf field: optional ComposeSettings compose_settings = 3;
      */
     composeSettings?: ComposeSettings;
+    /**
+     * @generated from protobuf field: optional MessageGestureSettings message_gesture_settings = 4;
+     */
+    messageGestureSettings?: MessageGestureSettings;
+}
+/**
+ * Shared actions; clients may opt out locally without changing other devices.
+ *
+ * @generated from protobuf message MessageGestureSettings
+ */
+export interface MessageGestureSettings {
+    /**
+     * @generated from protobuf field: optional string double_tap_action = 1;
+     */
+    doubleTapAction?: string;
+    /**
+     * @generated from protobuf field: optional string hold_action = 2;
+     */
+    holdAction?: string;
+    /**
+     * @generated from protobuf field: optional string swipe_to_reply_direction = 3;
+     */
+    swipeToReplyDirection?: string;
 }
 /**
  * @generated from protobuf message ComposeSettings
@@ -33906,7 +33929,8 @@ class UserSettings$Type extends MessageType<UserSettings> {
         super("UserSettings", [
             { no: 1, name: "notification_settings", kind: "message", T: () => NotificationSettings },
             { no: 2, name: "privacy_settings", kind: "message", T: () => PrivacySettings },
-            { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings }
+            { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings },
+            { no: 4, name: "message_gesture_settings", kind: "message", T: () => MessageGestureSettings }
         ]);
     }
     create(value?: PartialMessage<UserSettings>): UserSettings {
@@ -33929,6 +33953,9 @@ class UserSettings$Type extends MessageType<UserSettings> {
                 case /* optional ComposeSettings compose_settings */ 3:
                     message.composeSettings = ComposeSettings.internalBinaryRead(reader, reader.uint32(), options, message.composeSettings);
                     break;
+                case /* optional MessageGestureSettings message_gesture_settings */ 4:
+                    message.messageGestureSettings = MessageGestureSettings.internalBinaryRead(reader, reader.uint32(), options, message.messageGestureSettings);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33950,6 +33977,9 @@ class UserSettings$Type extends MessageType<UserSettings> {
         /* optional ComposeSettings compose_settings = 3; */
         if (message.composeSettings)
             ComposeSettings.internalBinaryWrite(message.composeSettings, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageGestureSettings message_gesture_settings = 4; */
+        if (message.messageGestureSettings)
+            MessageGestureSettings.internalBinaryWrite(message.messageGestureSettings, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33960,6 +33990,66 @@ class UserSettings$Type extends MessageType<UserSettings> {
  * @generated MessageType for protobuf message UserSettings
  */
 export const UserSettings = new UserSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageGestureSettings$Type extends MessageType<MessageGestureSettings> {
+    constructor() {
+        super("MessageGestureSettings", [
+            { no: 1, name: "double_tap_action", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "hold_action", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "swipe_to_reply_direction", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageGestureSettings>): MessageGestureSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageGestureSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageGestureSettings): MessageGestureSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string double_tap_action */ 1:
+                    message.doubleTapAction = reader.string();
+                    break;
+                case /* optional string hold_action */ 2:
+                    message.holdAction = reader.string();
+                    break;
+                case /* optional string swipe_to_reply_direction */ 3:
+                    message.swipeToReplyDirection = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageGestureSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string double_tap_action = 1; */
+        if (message.doubleTapAction !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.doubleTapAction);
+        /* optional string hold_action = 2; */
+        if (message.holdAction !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.holdAction);
+        /* optional string swipe_to_reply_direction = 3; */
+        if (message.swipeToReplyDirection !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.swipeToReplyDirection);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageGestureSettings
+ */
+export const MessageGestureSettings = new MessageGestureSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ComposeSettings$Type extends MessageType<ComposeSettings> {
     constructor() {

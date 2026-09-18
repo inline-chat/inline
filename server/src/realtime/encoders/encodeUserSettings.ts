@@ -24,6 +24,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
 
   return {
     notificationSettings,
+    messageGestureSettings: general?.messageGestures,
     privacySettings: {
       shareTimeZone: general?.privacy.shareTimeZone ?? defaultPrivacySettings.shareTimeZone,
       appearInGlobalSearch:

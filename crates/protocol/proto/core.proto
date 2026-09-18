@@ -2730,6 +2730,14 @@ message UserSettings {
   optional NotificationSettings notification_settings = 1;
   optional PrivacySettings privacy_settings = 2;
   optional ComposeSettings compose_settings = 3;
+  optional MessageGestureSettings message_gesture_settings = 4;
+}
+
+// Shared actions; clients may opt out locally without changing other devices.
+message MessageGestureSettings {
+  optional string double_tap_action = 1;
+  optional string hold_action = 2;
+  optional string swipe_to_reply_direction = 3;
 }
 
 message ComposeSettings {

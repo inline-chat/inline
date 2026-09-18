@@ -23,7 +23,18 @@ export const defaultComposeSettings = {
   replacePastedLinksWithTitles: false,
 } as const
 
+const messageGestureAction = z.enum([
+  "none", "toggleAck", "reply", "toggleHeart", "toggleThumbsUp", "reactionsMenu",
+])
+
+export const MessageGestureSettingsSchema = z.object({
+  doubleTapAction: messageGestureAction.optional(),
+  holdAction: messageGestureAction.optional(),
+  swipeToReplyDirection: z.enum(["leftToRight", "rightToLeft"]).optional(),
+})
+
 export const UserSettingsGeneralSchema = z.object({
+  messageGestures: MessageGestureSettingsSchema.optional(),
   /** Default notifications for all of your chats */
   notifications: z
     .object({

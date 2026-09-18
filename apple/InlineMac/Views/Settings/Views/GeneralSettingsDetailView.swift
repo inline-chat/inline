@@ -4,6 +4,7 @@ import SwiftUI
 
 struct GeneralSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
+  @ObservedObject private var gestureSettings = INUserSettings.current.messageGestures
   @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
@@ -63,8 +64,15 @@ struct GeneralSettingsDetailView: View {
       }
 
       Section {
+        Toggle(isOn: $gestureSettings.syncEnabled) {
+          SettingsRowLabel(
+            "Sync Message Gestures",
+            description: "Sync double-click, hold, and swipe direction across your devices. Turn off to customize this Mac. Turning it back on uses your synced choices."
+          )
+        }
+
         LabeledContent {
-          Picker("Double-click", selection: $appSettings.messageDoubleClickAction) {
+          Picker("Double-click", selection: $gestureSettings.doubleTapAction) {
             ForEach(MessageGestureAction.allCases) { action in
               Text(action.title).tag(action)
             }
@@ -76,7 +84,7 @@ struct GeneralSettingsDetailView: View {
         }
 
         LabeledContent {
-          Picker("Hold", selection: $appSettings.messageHoldAction) {
+          Picker("Hold", selection: $gestureSettings.holdAction) {
             ForEach(MessageGestureAction.allCases.filter { $0 != .none }) { action in
               Text(action.title).tag(action)
             }
@@ -88,7 +96,7 @@ struct GeneralSettingsDetailView: View {
         }
 
         LabeledContent {
-          Picker("Swipe to Reply", selection: $appSettings.messageSwipeToReplyDirection) {
+          Picker("Swipe to Reply", selection: $gestureSettings.swipeToReplyDirection) {
             ForEach(MessageSwipeToReplyDirection.allCases) { direction in
               Text(direction.title).tag(direction)
             }

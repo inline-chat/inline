@@ -22,10 +22,7 @@ struct SettingsNavigationRow<Destination: View>: View {
 struct GeneralSettingsView: View {
   @AppStorage(InAppLinkPreferences.openLinksInAppKey)
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
-  @AppStorage(MessageSwipeToReplyDirection.storageKey)
-  private var swipeToReplyDirection = MessageSwipeToReplyDirection.defaultValue
-  @AppStorage(MessageDoubleTapAction.storageKey)
-  private var doubleTapAction = MessageDoubleTapAction.defaultValue
+  @ObservedObject private var gestureSettings = INUserSettings.current.messageGestures
   @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
@@ -49,8 +46,30 @@ struct GeneralSettingsView: View {
       }
 
       Section {
+        SettingsItem(icon: "arrow.triangle.2.circlepath", iconColor: .blue, title: "Sync Message Gestures") {
+          Toggle("Sync Message Gestures", isOn: $gestureSettings.syncEnabled)
+            .labelsHidden()
+        }
+        SettingsItem(icon: "hand.tap", iconColor: .blue, title: "Double Tap") {
+          Picker("Double Tap", selection: $gestureSettings.doubleTapAction) {
+            ForEach(MessageGestureAction.allCases) { action in
+              Text(action.title).tag(action)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
+        SettingsItem(icon: "hand.point.up.left", iconColor: .orange, title: "Hold") {
+          Picker("Hold", selection: $gestureSettings.holdAction) {
+            ForEach(MessageGestureAction.allCases.filter { $0 != .none }) { action in
+              Text(action.title).tag(action)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
         SettingsItem(icon: "arrow.left.arrow.right", iconColor: .green, title: "Swipe to Reply") {
-          Picker("Swipe to Reply", selection: $swipeToReplyDirection) {
+          Picker("Swipe to Reply", selection: $gestureSettings.swipeToReplyDirection) {
             ForEach(MessageSwipeToReplyDirection.allCases) { direction in
               Text(direction.title).tag(direction)
             }
@@ -58,20 +77,10 @@ struct GeneralSettingsView: View {
           .labelsHidden()
           .pickerStyle(.menu)
         }
+      } header: {
+        Text("Message Gestures")
       } footer: {
-        Text("Choose which direction to swipe a message when replying.")
-      }
-
-      Section {
-        SettingsItem(icon: "hand.tap", iconColor: .blue, title: "Double Tap") {
-          Picker("Double Tap", selection: $doubleTapAction) {
-            ForEach(MessageDoubleTapAction.allCases) { action in
-              Text(action.title).tag(action)
-            }
-          }
-          .labelsHidden()
-          .pickerStyle(.menu)
-        }
+        Text("Sync double-tap, hold, and swipe direction across your devices. Turn off to customize this device. Turning it back on uses your synced choices.")
       }
 
       Section("Language & Translation") {

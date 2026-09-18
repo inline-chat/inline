@@ -97,6 +97,9 @@ async function updateGeneralWithPatchInTransaction(
   const current = stored ? decodeGeneral(stored, userId) : null
   const next = normalizeUserSettingsGeneral(
     UserSettingsGeneralSchema.parse({
+      messageGestures: current?.messageGestures || input.messageGestures
+        ? { ...current?.messageGestures, ...input.messageGestures }
+        : undefined,
       notifications: {
         ...current?.notifications,
         ...input.notifications,

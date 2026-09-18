@@ -13061,6 +13061,15 @@ public nonisolated struct UserSettings: Sendable {
   /// Clears the value of `composeSettings`. Subsequent reads from it will return its default value.
   public mutating func clearComposeSettings() {self._composeSettings = nil}
 
+  public var messageGestureSettings: MessageGestureSettings {
+    get {_messageGestureSettings ?? MessageGestureSettings()}
+    set {_messageGestureSettings = newValue}
+  }
+  /// Returns true if `messageGestureSettings` has been explicitly set.
+  public var hasMessageGestureSettings: Bool {self._messageGestureSettings != nil}
+  /// Clears the value of `messageGestureSettings`. Subsequent reads from it will return its default value.
+  public mutating func clearMessageGestureSettings() {self._messageGestureSettings = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -13068,6 +13077,49 @@ public nonisolated struct UserSettings: Sendable {
   fileprivate var _notificationSettings: NotificationSettings? = nil
   fileprivate var _privacySettings: PrivacySettings? = nil
   fileprivate var _composeSettings: ComposeSettings? = nil
+  fileprivate var _messageGestureSettings: MessageGestureSettings? = nil
+}
+
+/// Shared actions; clients may opt out locally without changing other devices.
+public nonisolated struct MessageGestureSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var doubleTapAction: String {
+    get {_doubleTapAction ?? String()}
+    set {_doubleTapAction = newValue}
+  }
+  /// Returns true if `doubleTapAction` has been explicitly set.
+  public var hasDoubleTapAction: Bool {self._doubleTapAction != nil}
+  /// Clears the value of `doubleTapAction`. Subsequent reads from it will return its default value.
+  public mutating func clearDoubleTapAction() {self._doubleTapAction = nil}
+
+  public var holdAction: String {
+    get {_holdAction ?? String()}
+    set {_holdAction = newValue}
+  }
+  /// Returns true if `holdAction` has been explicitly set.
+  public var hasHoldAction: Bool {self._holdAction != nil}
+  /// Clears the value of `holdAction`. Subsequent reads from it will return its default value.
+  public mutating func clearHoldAction() {self._holdAction = nil}
+
+  public var swipeToReplyDirection: String {
+    get {_swipeToReplyDirection ?? String()}
+    set {_swipeToReplyDirection = newValue}
+  }
+  /// Returns true if `swipeToReplyDirection` has been explicitly set.
+  public var hasSwipeToReplyDirection: Bool {self._swipeToReplyDirection != nil}
+  /// Clears the value of `swipeToReplyDirection`. Subsequent reads from it will return its default value.
+  public mutating func clearSwipeToReplyDirection() {self._swipeToReplyDirection = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _doubleTapAction: String? = nil
+  fileprivate var _holdAction: String? = nil
+  fileprivate var _swipeToReplyDirection: String? = nil
 }
 
 public nonisolated struct ComposeSettings: Sendable {
@@ -39448,7 +39500,7 @@ nonisolated extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserSettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}notification_settings\0\u{3}privacy_settings\0\u{3}compose_settings\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}notification_settings\0\u{3}privacy_settings\0\u{3}compose_settings\0\u{3}message_gesture_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -39459,6 +39511,7 @@ nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._Messag
       case 1: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._privacySettings) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._composeSettings) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._messageGestureSettings) }()
       default: break
       }
     }
@@ -39478,6 +39531,9 @@ nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try { if let v = self._composeSettings {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._messageGestureSettings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -39485,6 +39541,51 @@ nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._Messag
     if lhs._notificationSettings != rhs._notificationSettings {return false}
     if lhs._privacySettings != rhs._privacySettings {return false}
     if lhs._composeSettings != rhs._composeSettings {return false}
+    if lhs._messageGestureSettings != rhs._messageGestureSettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageGestureSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageGestureSettings"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}double_tap_action\0\u{3}hold_action\0\u{3}swipe_to_reply_direction\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._doubleTapAction) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._holdAction) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._swipeToReplyDirection) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._doubleTapAction {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._holdAction {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._swipeToReplyDirection {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageGestureSettings, rhs: MessageGestureSettings) -> Bool {
+    if lhs._doubleTapAction != rhs._doubleTapAction {return false}
+    if lhs._holdAction != rhs._holdAction {return false}
+    if lhs._swipeToReplyDirection != rhs._swipeToReplyDirection {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

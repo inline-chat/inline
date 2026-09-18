@@ -1,5 +1,5 @@
 import { type UserSettings } from "@inline-chat/protocol/core"
-import type { UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
+import { MessageGestureSettingsSchema, type UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
 import { decodeProtocolNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 
 export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGeneralInput | undefined => {
@@ -9,8 +9,9 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
 
   const notificationSettings = userSettings.notificationSettings
   const privacySettings = userSettings.privacySettings
+  const messageGestures = userSettings.messageGestureSettings
   const composeSettings = userSettings.composeSettings
-  if (!notificationSettings && !privacySettings && !composeSettings) {
+  if (!notificationSettings && !privacySettings && !composeSettings && !messageGestures) {
     return undefined
   }
 
@@ -27,6 +28,7 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
 
   return {
     notifications,
+    messageGestures: messageGestures ? MessageGestureSettingsSchema.parse(messageGestures) : undefined,
     privacy: privacySettings
       ? {
           shareTimeZone: privacySettings.shareTimeZone ?? true,

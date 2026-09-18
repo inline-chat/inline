@@ -13,6 +13,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
   var shareTimeZone: Bool
   var appearInGlobalSearch: Bool
   var replacePastedLinksWithTitles: Bool
+  var messageGestures: MessageGestureValues? = nil
 
   static let defaults = NotificationSettingsValues(
     mode: .all,
@@ -48,10 +49,12 @@ struct NotificationSettingsValues: Equatable, Sendable {
     replacePastedLinksWithTitles = false
   }
 
+  @MainActor
   init(
     _ notification: NotificationSettingsManager,
     _ privacy: PrivacySettingsManager,
-    _ compose: ComposeSettingsManager
+    _ compose: ComposeSettingsManager,
+    _ gestures: MessageGestureSettingsManager? = nil
   ) {
     mode = notification.mode
     silent = notification.silent
@@ -59,6 +62,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     shareTimeZone = privacy.shareTimeZone
     appearInGlobalSearch = privacy.appearInGlobalSearch
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
+    messageGestures = gestures?.accountValues
   }
 
   init(_ settings: InlineProtocol.NotificationSettings) {
@@ -76,7 +80,11 @@ struct NotificationSettingsValues: Equatable, Sendable {
     let compose = settings.hasComposeSettings
       ? ComposeSettingsManager(from: settings.composeSettings)
       : ComposeSettingsManager()
-    self.init(notification, privacy, compose)
+    self.init(notification)
+    shareTimeZone = privacy.shareTimeZone
+    appearInGlobalSearch = privacy.appearInGlobalSearch
+    replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
+    messageGestures = settings.hasMessageGestureSettings ? MessageGestureValues(settings.messageGestureSettings) : nil
   }
 
   func apply(to settings: NotificationSettingsManager) {
@@ -137,6 +145,7 @@ public class INUserSettings {
   public var notification = NotificationSettingsManager()
   public var privacy = PrivacySettingsManager()
   public var compose = ComposeSettingsManager()
+  public let messageGestures: MessageGestureSettingsManager
   public var autoDownload = AutoDownloadSettingsManager()
 
   // MARK: - Private properties
@@ -161,6 +170,7 @@ public class INUserSettings {
   private var activeUserID: Int64?
   private var pendingLocalRevision: UInt64?
   private var pendingLocalUserID: Int64?
+  private var hasPendingGestureEdit = false
   private var pendingLocalValues: NotificationSettingsValues?
   private var pendingServerUpdateTask: Task<Void, Never>?
   private var pendingServerUpdateTaskID: UUID?
@@ -185,6 +195,7 @@ public class INUserSettings {
   public convenience init() {
     self.init(
       userDefaults: .shared,
+      legacyGestureDefaults: .standard,
       currentUserID: { Auth.shared.getCurrentUserId() },
       fetchNotificationSettings: Self.fetchNotificationSettingsFromRealtime,
       saveNotificationSettings: Self.saveNotificationSettingsToRealtime
@@ -198,15 +209,21 @@ public class INUserSettings {
 
   init(
     userDefaults: UserDefaults,
+    legacyGestureDefaults: UserDefaults? = nil,
     currentUserID: @escaping CurrentUserIDProvider,
     fetchNotificationSettings: @escaping FetchNotificationSettings,
     saveNotificationSettings: @escaping SaveNotificationSettings
   ) {
     self.userDefaults = userDefaults
+    messageGestures = MessageGestureSettingsManager(
+      defaults: userDefaults,
+      legacyDefaults: legacyGestureDefaults ?? userDefaults
+    )
     currentUserIDProvider = currentUserID
     self.fetchNotificationSettings = fetchNotificationSettings
     self.saveNotificationSettings = saveNotificationSettings
     activeUserID = currentUserIDProvider()
+    messageGestures.configure(for: activeUserID)
 
     // Load data from UserDefaults first
     loadFromUserDefaults()
@@ -293,6 +310,15 @@ public class INUserSettings {
       }
       .store(in: &cancellables)
 
+    messageGestures.$accountValues
+      .dropFirst()
+      .sink { [weak self] _ in
+        guard let self else { return }
+        if !self.isApplyingServerUpdate { self.hasPendingGestureEdit = true }
+        self.notificationSettingsWillChange()
+      }
+      .store(in: &cancellables)
+
     autoDownload.objectWillChange
       .sink { [weak self] _ in
         self?.autoDownloadSettingsWillChange()
@@ -335,7 +361,7 @@ public class INUserSettings {
         return
       }
 
-      let values = NotificationSettingsValues(self.notification, self.privacy, self.compose)
+      let values = NotificationSettingsValues(self.notification, self.privacy, self.compose, self.messageGestures)
       self.pendingLocalValues = values
       self.savePendingNotificationSettingsToUserDefaults(values, for: userID)
       self.saveNotificationSettingsToUserDefaults(values, for: userID)
@@ -362,6 +388,7 @@ public class INUserSettings {
       values.apply(to: notification)
       values.apply(to: privacy)
       values.apply(to: compose)
+      messageGestures.accountValues = values.messageGestures
     }
 
     loadAutoDownloadSettingsFromUserDefaults()
@@ -390,7 +417,11 @@ public class INUserSettings {
       log.info("Loaded cached notification settings for current account")
       let privacy = loadPrivacySettingsFromUserDefaults(for: userID) ?? PrivacySettingsManager()
       let compose = loadComposeSettingsFromUserDefaults(for: userID) ?? ComposeSettingsManager()
-      return NotificationSettingsValues(cachedSettings, privacy, compose)
+      var values = NotificationSettingsValues(cachedSettings, privacy, compose)
+      if let data = userDefaults.data(forKey: "messageGestures.account.\(userID)") {
+        values.messageGestures = try? JSONDecoder().decode(MessageGestureValues.self, from: data)
+      }
+      return values
     } catch {
       log.error("Failed to decode cached notification settings: \(error)")
       return nil
@@ -462,7 +493,13 @@ public class INUserSettings {
       } else {
         compose = loadComposeSettingsFromUserDefaults(for: userID) ?? ComposeSettingsManager()
       }
-      let values = NotificationSettingsValues(manager, privacy, compose)
+      var values = NotificationSettingsValues(manager, privacy, compose)
+      if let data = userDefaults.data(forKey: "messageGestures.pending.account.\(userID)") {
+        values.messageGestures = try? JSONDecoder().decode(MessageGestureValues.self, from: data)
+        hasPendingGestureEdit = values.messageGestures != nil
+      } else if let data = userDefaults.data(forKey: "messageGestures.account.\(userID)") {
+        values.messageGestures = try? JSONDecoder().decode(MessageGestureValues.self, from: data)
+      }
       localNotificationRevision &+= 1
       pendingLocalRevision = localNotificationRevision
       pendingLocalUserID = userID
@@ -474,6 +511,7 @@ public class INUserSettings {
       userDefaults.removeObject(forKey: key)
       userDefaults.removeObject(forKey: pendingPrivacySettingsKey(for: userID))
       userDefaults.removeObject(forKey: pendingComposeSettingsKey(for: userID))
+      userDefaults.removeObject(forKey: "messageGestures.pending.account.\(userID)")
       return nil
     }
   }
@@ -507,6 +545,7 @@ public class INUserSettings {
       userDefaults.set(privacyData, forKey: privacySettingsKey(for: userID))
       let composeData = try JSONEncoder().encode(values.makeComposeManager())
       userDefaults.set(composeData, forKey: composeSettingsKey(for: userID))
+      saveGestureValues(values.messageGestures, key: "messageGestures.account.\(userID)")
       log.trace("Saved notification settings to UserDefaults")
     } catch {
       log.error("Failed to encode notification settings: \(error)")
@@ -524,9 +563,18 @@ public class INUserSettings {
       userDefaults.set(privacyData, forKey: pendingPrivacySettingsKey(for: userID))
       let composeData = try JSONEncoder().encode(values.makeComposeManager())
       userDefaults.set(composeData, forKey: pendingComposeSettingsKey(for: userID))
+      saveGestureValues(hasPendingGestureEdit ? values.messageGestures : nil, key: "messageGestures.pending.account.\(userID)")
       log.trace("Saved pending notification settings to UserDefaults")
     } catch {
       log.error("Failed to encode pending notification settings", error: error)
+    }
+  }
+
+  private func saveGestureValues(_ values: MessageGestureValues?, key: String) {
+    if let values, let data = try? JSONEncoder().encode(values) {
+      userDefaults.set(data, forKey: key)
+    } else {
+      userDefaults.removeObject(forKey: key)
     }
   }
 
@@ -590,7 +638,13 @@ public class INUserSettings {
   private func saveToRealtime(_ values: NotificationSettingsValues) async -> Bool {
     log.trace("Saving user settings to Realtime")
     do {
-      try await saveNotificationSettings(values)
+      var outgoing = values
+      // Only edits made while sync was enabled are published. An edit queued
+      // before opting out still completes; subsequent local overrides stay local.
+      if !hasPendingGestureEdit {
+        outgoing.messageGestures = nil
+      }
+      try await saveNotificationSettings(outgoing)
       return true
     } catch is CancellationError {
       return false
@@ -662,11 +716,12 @@ public class INUserSettings {
   ) {
     guard activeUserID == userID else { return }
 
-    if NotificationSettingsValues(notification, privacy, compose) != values {
+    if NotificationSettingsValues(notification, privacy, compose, messageGestures) != values {
       isApplyingServerUpdate = true
       values.apply(to: notification)
       values.apply(to: privacy)
       values.apply(to: compose)
+      messageGestures.accountValues = values.messageGestures
       isApplyingServerUpdate = false
     }
     saveNotificationSettingsToUserDefaults(values, for: userID)
@@ -683,6 +738,9 @@ public class INUserSettings {
     clearPendingLocalChange()
 
     activeUserID = userID
+    isApplyingServerUpdate = true
+    messageGestures.configure(for: userID)
+    isApplyingServerUpdate = false
     notificationRevision &+= 1
     localNotificationRevision &+= 1
 
@@ -698,6 +756,7 @@ public class INUserSettings {
     values.apply(to: notification)
     values.apply(to: privacy)
     values.apply(to: compose)
+    messageGestures.accountValues = values.messageGestures
     isApplyingServerUpdate = false
   }
 
@@ -706,10 +765,12 @@ public class INUserSettings {
       userDefaults.removeObject(forKey: pendingNotificationSettingsKey(for: userID))
       userDefaults.removeObject(forKey: pendingPrivacySettingsKey(for: userID))
       userDefaults.removeObject(forKey: pendingComposeSettingsKey(for: userID))
+      userDefaults.removeObject(forKey: "messageGestures.pending.account.\(userID)")
     }
     pendingLocalRevision = nil
     pendingLocalUserID = nil
     pendingLocalValues = nil
+    hasPendingGestureEdit = false
   }
 
   private static func fetchNotificationSettingsFromRealtime() async throws -> NotificationSettingsValues? {
@@ -725,7 +786,8 @@ public class INUserSettings {
     _ = try await Api.realtime.send(.updateUserSettings(
       notificationSettings: values.makeManager(),
       privacySettings: values.makePrivacyManager(),
-      composeSettings: values.makeComposeManager()
+      composeSettings: values.makeComposeManager(),
+      messageGestureSettings: values.messageGestures
     ))
   }
 
@@ -735,13 +797,24 @@ public class INUserSettings {
   }
 
   func updateFromServer(_ settings: InlineProtocol.UserSettings, receivingUserID: Int64) {
-    guard settings.hasNotificationSettings || settings.hasPrivacySettings || settings.hasComposeSettings else { return }
+    guard settings.hasNotificationSettings || settings.hasPrivacySettings || settings.hasComposeSettings || settings.hasMessageGestureSettings else { return }
     guard currentUserIDProvider() == receivingUserID else {
       log.debug("Ignored a user settings update received for a previous account")
       return
     }
     switchActiveUser(to: receivingUserID)
     guard pendingLocalRevision == nil else {
+      // A notification/privacy/compose save does not own the gesture settings.
+      // Keep remote gestures (including the value used when rejoining sync)
+      // current without overwriting a pending gesture edit or a local override.
+      if !hasPendingGestureEdit, settings.hasMessageGestureSettings {
+        let gestures = MessageGestureValues(settings.messageGestureSettings)
+        isApplyingServerUpdate = true
+        messageGestures.accountValues = gestures
+        isApplyingServerUpdate = false
+        pendingLocalValues?.messageGestures = gestures
+        saveGestureValues(gestures, key: "messageGestures.account.\(receivingUserID)")
+      }
       log.debug("Ignored a live user settings update while a local change is pending")
       return
     }

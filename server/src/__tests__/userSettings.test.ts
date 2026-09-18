@@ -43,6 +43,32 @@ describe("User Settings RPC", () => {
     expect(result.userSettings?.composeSettings?.replacePastedLinksWithTitles).toBe(false)
   })
 
+  test("gesture settings persist, merge with older clients, and reach other sessions", async () => {
+    const gestureUser = await testUtils.createUser("gesture-sync@example.com")
+    const context = {
+      userId: gestureUser.id, sessionId: 101, connectionId: "gestures-ios",
+      sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    const gestures = {
+      doubleTapAction: "reply", holdAction: "toggleHeart", swipeToReplyDirection: "leftToRight",
+    }
+    const mutation = await updateUserSettingsHandler(
+      { userSettings: { messageGestureSettings: gestures } }, context,
+    )
+    const projected = mutation.updates.find(update => update.update.oneofKind === "updateUserSettings")
+    if (projected?.update.oneofKind !== "updateUserSettings") throw new Error("Missing user settings update")
+    expect(projected.update.updateUserSettings.settings?.messageGestureSettings).toEqual(gestures)
+    await updateUserSettingsHandler(
+      { userSettings: { composeSettings: { replacePastedLinksWithTitles: true } } }, context,
+    )
+    await updateUserSettingsHandler(
+      { userSettings: { messageGestureSettings: { doubleTapAction: "none" } } }, context,
+    )
+    const otherDevice = await getUserSettingsHandler({}, { ...context, sessionId: 102, connectionId: "gestures-mac" })
+    expect(otherDevice.userSettings?.messageGestureSettings).toEqual({ ...gestures, doubleTapAction: "none" })
+    expect(otherDevice.userSettings?.composeSettings?.replacePastedLinksWithTitles).toBe(true)
+  })
+
   test("updates compose settings without changing other settings", async () => {
     const context = {
       userId,

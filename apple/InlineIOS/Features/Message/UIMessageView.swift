@@ -55,6 +55,7 @@ class UIMessageView: UIView {
   private weak var bubbleDoubleTapGesture: UITapGestureRecognizer?
   private weak var backgroundDoubleTapGesture: UITapGestureRecognizer?
 
+  var onReactionsMenu: ((FullMessage) -> Void)?
   var linkTapHandler: ((URL) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
     didSet {
@@ -2085,12 +2086,12 @@ class UIMessageView: UIView {
     }
 
     if gestureRecognizer === bubbleDoubleTapGesture {
-      guard MessageDoubleTapAction.stored() != .none else { return false }
+      guard INUserSettings.current.messageGestures.doubleTapAction != .none else { return false }
       return !isExclusiveMessageTapTarget(at: gestureRecognizer.location(in: self))
     }
 
     if gestureRecognizer === backgroundDoubleTapGesture {
-      guard MessageDoubleTapAction.stored() != .none else { return false }
+      guard INUserSettings.current.messageGestures.doubleTapAction != .none else { return false }
       let location = gestureRecognizer.location(in: self)
       guard !bubbleView.frame.contains(location) else { return false }
       return !isExclusiveMessageTapTarget(at: location)
@@ -2338,17 +2339,38 @@ class UIMessageView: UIView {
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-    guard MessageDoubleTapAction.stored() != .none else { return }
-    toggleAcknowledgement()
+    guard INUserSettings.current.messageGestures.doubleTapAction != .none else { return }
+    performMessageGestureAction(INUserSettings.current.messageGestures.doubleTapAction)
   }
 
   @objc private func handleBackgroundDoubleTap(_ gesture: UITapGestureRecognizer) {
-    guard MessageDoubleTapAction.stored() != .none else { return }
+    guard INUserSettings.current.messageGestures.doubleTapAction != .none else { return }
     let location = gesture.location(in: self)
     guard !bubbleView.frame.contains(location) else { return }
     guard bubbleView.frame.minY <= location.y, location.y <= bubbleView.frame.maxY else { return }
 
-    toggleAcknowledgement()
+    performMessageGestureAction(INUserSettings.current.messageGestures.doubleTapAction)
+  }
+
+  func performMessageGestureAction(_ action: MessageGestureAction) {
+    guard displayMode != .threadAnchor else { return }
+    switch action {
+    case .none:
+      return
+    case .toggleAck:
+      toggleAcknowledgement()
+    case .reply:
+      guard fullMessage.canReply else { return }
+      UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+      ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
+    case .reactionsMenu:
+      onReactionsMenu?(fullMessage)
+    case .toggleHeart, .toggleThumbsUp:
+      guard let baseEmoji = action.reactionEmoji else { return }
+      let emoji = EmojiSkinTonePreferenceStore.current().applying(to: baseEmoji)
+      UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+      reactionsFlowView.onReactionTap?(emoji)
+    }
   }
 
   private func toggleAcknowledgement() {

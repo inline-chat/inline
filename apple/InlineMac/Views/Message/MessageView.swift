@@ -2011,7 +2011,7 @@ class MessageViewAppKit: NSView {
       acknowledgeMessage()
     case .toggleHeart, .toggleThumbsUp:
       guard let emoji = action.reactionEmoji else { return }
-      toggleReaction(emoji, action: action, source: source)
+      toggleReaction(AppSettings.shared.preferredEmojiSkinTone.applying(to: emoji), action: action, source: source)
     }
   }
 

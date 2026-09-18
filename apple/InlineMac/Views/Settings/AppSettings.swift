@@ -124,52 +124,6 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   }
 }
 
-enum MessageGestureAction: String, CaseIterable, Identifiable {
-  case none
-  case toggleAck
-  case reply
-  case toggleHeart
-  case toggleThumbsUp
-  case reactionsMenu
-
-  static let defaultDoubleClick: Self = .toggleAck
-  static let defaultHold: Self = .reactionsMenu
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .none:
-      return "Nothing"
-    case .toggleAck:
-      return "Toggle Ack"
-    case .reply:
-      return "Reply"
-    case .toggleHeart:
-      return "Toggle heart"
-    case .toggleThumbsUp:
-      return "Toggle thumbs up"
-    case .reactionsMenu:
-      return "Reactions menu"
-    }
-  }
-
-  var reactionEmoji: String? {
-    let emoji: String? = switch self {
-    case .toggleAck:
-      nil
-    case .toggleHeart:
-      "❤️"
-    case .toggleThumbsUp:
-      "👍"
-    case .none, .reply, .reactionsMenu:
-      nil
-    }
-
-    return emoji.map { AppSettings.shared.preferredEmojiSkinTone.applying(to: $0) }
-  }
-}
-
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
@@ -338,25 +292,16 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var messageDoubleClickAction: MessageGestureAction {
-    didSet {
-      UserDefaults.standard.set(messageDoubleClickAction.rawValue, forKey: Self.messageDoubleClickActionKey)
-    }
+  @MainActor var messageDoubleClickAction: MessageGestureAction {
+    INUserSettings.current.messageGestures.doubleTapAction
   }
 
-  @Published var messageHoldAction: MessageGestureAction {
-    didSet {
-      UserDefaults.standard.set(messageHoldAction.rawValue, forKey: Self.messageHoldActionKey)
-    }
+  @MainActor var messageHoldAction: MessageGestureAction {
+    INUserSettings.current.messageGestures.holdAction
   }
 
-  @Published var messageSwipeToReplyDirection: MessageSwipeToReplyDirection {
-    didSet {
-      UserDefaults.standard.set(
-        messageSwipeToReplyDirection.rawValue,
-        forKey: MessageSwipeToReplyDirection.storageKey
-      )
-    }
+  @MainActor var messageSwipeToReplyDirection: MessageSwipeToReplyDirection {
+    INUserSettings.current.messageGestures.swipeToReplyDirection
   }
 
   @Published var openReplyThreadsInSidePane: Bool {
@@ -526,20 +471,6 @@ final class AppSettings: ObservableObject {
 
     preferredEmojiSkinTone = EmojiSkinTonePreferenceStore.current()
 
-    if let storedDoubleClickAction = UserDefaults.standard.string(forKey: Self.messageDoubleClickActionKey),
-       let action = MessageGestureAction(rawValue: storedDoubleClickAction) {
-      messageDoubleClickAction = action
-    } else {
-      messageDoubleClickAction = .defaultDoubleClick
-    }
-
-    if let storedHoldAction = UserDefaults.standard.string(forKey: Self.messageHoldActionKey),
-       let action = MessageGestureAction(rawValue: storedHoldAction) {
-      messageHoldAction = action
-    } else {
-      messageHoldAction = .defaultHold
-    }
-    messageSwipeToReplyDirection = MessageSwipeToReplyDirection.stored()
     openReplyThreadsInSidePane =
       UserDefaults.standard.object(forKey: Self.openReplyThreadsInSidePaneKey) as? Bool ?? false
 

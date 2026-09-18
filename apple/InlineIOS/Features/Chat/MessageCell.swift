@@ -38,6 +38,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   weak var delegate: MessageCellDelegate?
   var onUserTap: ((Int64) -> Void)?
+  var onReactionsMenu: ((FullMessage) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
   var grabOverlappingAvatar: ((UIView) -> UIView?)?
   var onV2GeometryChange: ((
@@ -649,6 +650,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Reset delegate
     delegate = nil
     onPhotoTap = nil
+    onReactionsMenu = nil
     grabOverlappingAvatar = nil
     onV2GeometryChange = nil
   }
@@ -825,7 +827,7 @@ extension MessageCollectionViewCell {
 
     guard abs(velocity.x) > abs(velocity.y), isHorizontalEnough else { return false }
 
-    let direction = MessageSwipeToReplyDirection.stored()
+    let direction = INUserSettings.current.messageGestures.swipeToReplyDirection
     guard direction.accepts(velocity.x) else { return false }
 
     return true
@@ -861,7 +863,7 @@ extension MessageCollectionViewCell {
 
     switch gesture.state {
       case .began:
-        swipeDirection = MessageSwipeToReplyDirection.stored()
+        swipeDirection = INUserSettings.current.messageGestures.swipeToReplyDirection
         swipedAvatarOverlayView?.transform = .identity
         swipedAvatarOverlayView = grabOverlappingAvatar?(contentView)
         initialTranslation = translation.x
@@ -1285,6 +1287,9 @@ extension MessageCollectionViewCell {
         newMessageRootView = nextView
     }
     newMessageRootView.translatesAutoresizingMaskIntoConstraints = false
+    newMessageView.onReactionsMenu = { [weak self] message in
+      self?.onReactionsMenu?(message)
+    }
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)
     }
