@@ -1895,7 +1895,7 @@ class MinimalMessageViewAppKit: NSView {
       AppSettings.shared.messageDoubleClickAction,
       at: location,
       source: "doubleClick.\(source)",
-      blocksText: AppSettings.shared.messageDoubleClickAction != .toggleAck
+      blocksText: true
     )
   }
 
@@ -4793,9 +4793,8 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
         return false
       }
 
-      if AppSettings.shared.messageDoubleClickAction != .toggleAck,
-         isTextPoint(locationInSelf)
-      {
+      // Preserve native word selection for every configured action, including Ack.
+      if isTextPoint(locationInSelf) {
         MessageGestureTrace.debug(
           "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textPoint"
         )
@@ -4803,12 +4802,7 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if let result = interactiveHitTestResult(locationInSelf),
-       !(gestureRecognizer === doubleClickGesture
-         && AppSettings.shared.messageDoubleClickAction == .toggleAck
-         && result.view is NSTextView
-         && (result.view as? MessageTextView)?.onPlainSingleClick == nil)
-    {
+    if let result = interactiveHitTestResult(locationInSelf) {
       MessageGestureTrace.debug(
         "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=interactive target=\(result.name)"
       )
