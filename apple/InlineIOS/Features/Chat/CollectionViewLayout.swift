@@ -2,6 +2,51 @@ import InlineKit
 import UIKit
 
 final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
+  private struct HistoryAnchor {
+    let item: MessageListItem
+    let minY: CGFloat
+  }
+
+  private var historyAnchor: HistoryAnchor?
+
+  /// Retain a visible message, not the content height: older pages are appended
+  /// at the physical bottom of this inverted, self-sizing collection view.
+  func preserveVisibleMessageForHistoryUpdate() {
+    guard let collectionView,
+          let dataSource = collectionView.dataSource
+            as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>
+    else { return }
+    let visibleBounds = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+    let candidates = collectionView.indexPathsForVisibleItems.compactMap { indexPath -> HistoryAnchor? in
+      guard let item = dataSource.itemIdentifier(for: indexPath), case .message = item,
+            let attributes = layoutAttributesForItem(at: indexPath),
+            attributes.frame.intersects(visibleBounds)
+      else { return nil }
+      return HistoryAnchor(item: item, minY: attributes.frame.minY)
+    }
+    historyAnchor = candidates.min { abs($0.minY - visibleBounds.midY) < abs($1.minY - visibleBounds.midY) }
+  }
+
+  override func targetContentOffset(forProposedContentOffset proposedContentOffset: CGPoint) -> CGPoint {
+    guard let anchor = historyAnchor, let collectionView,
+          let dataSource = collectionView.dataSource
+            as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>,
+          let indexPath = dataSource.indexPath(for: anchor.item),
+          let attributes = layoutAttributesForItem(at: indexPath)
+    else { return super.targetContentOffset(forProposedContentOffset: proposedContentOffset) }
+    // Correct inside the layout transaction, before it is displayed. Doing this
+    // in snapshot completion shows a frame at the wrong offset and then jumps.
+    historyAnchor = nil
+    return CGPoint(
+      x: collectionView.contentOffset.x,
+      y: collectionView.contentOffset.y + attributes.frame.minY - anchor.minY
+    )
+  }
+
+  func finishHistoryUpdate() {
+    historyAnchor = nil
+  }
+
   private var sendAnimationSuppressedIndexPaths: Set<IndexPath> = []
   private var sendAnimationSuppressedAppearingItems: Set<MessageListItem> = []
 

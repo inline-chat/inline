@@ -1102,14 +1102,12 @@ private extension MessagesCollectionView {
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
-    private var remoteOlderTask: Task<Void, Never>?
+    private var olderHistoryPagination = OlderHistoryPagination()
+    private var olderHistoryCheckScheduled = false
     private var newerLoadTask: Task<Void, Never>?
     private var lastNewerAttempt: (messageID: Int64, date: Date)?
     private var threadAnchorFetchTask: Task<Void, Never>?
     private var didExhaustThreadAnchorFetch = false
-    private var loadingRemoteOlderBatch = false
-    private var noRemoteOlderBeforeMessageId: Int64?
-    private var lastRemoteOlderCursor: Int64?
     private var isPresentingImageViewer = false
     private let groupCalendar = Calendar.current
     private let avatarOverlayController = MessageAvatarOverlayViewController()
@@ -1579,6 +1577,8 @@ private extension MessagesCollectionView {
 
     func loadLocalWindowAroundMessage(_ messageID: Int64) -> Bool {
       olderLoadTask?.cancel()
+      olderLoadTask = nil
+      olderHistoryPagination.reset()
       newerLoadTask?.cancel()
       return viewModel.loadLocalWindowAroundMessage(messageId: messageID)
     }
@@ -2298,8 +2298,7 @@ private extension MessagesCollectionView {
       v2GeometryTransitions.removeAll()
       olderLoadTask?.cancel()
       olderLoadTask = nil
-      remoteOlderTask?.cancel()
-      remoteOlderTask = nil
+      olderHistoryPagination.reset()
       newerLoadTask?.cancel()
       newerLoadTask = nil
       threadAnchorFetchTask?.cancel()
@@ -2996,11 +2995,32 @@ private extension MessagesCollectionView {
         CATransaction.setAnimationTimingFunction(SendMessageAnimationTiming.verticalMediaTimingFunction)
       }
 
+      let layout = currentCollectionView?.collectionViewLayout as? AnimatedCompositionalLayout
+      let appendsOlderHistory: Bool = {
+        guard !animatingDifferences else { return false }
+        let previousItems = dataSource.snapshot().itemIdentifiers.filter {
+          if case .message = $0 { return true }
+          return false
+        }
+        let nextItems = snapshot.itemIdentifiers.filter {
+          if case .message = $0 { return true }
+          return false
+        }
+        return OlderHistoryPagination.appendsOlderItems(previous: previousItems, next: nextItems)
+      }()
+      if appendsOlderHistory {
+        layout?.preserveVisibleMessageForHistoryUpdate()
+      }
+
       pendingSnapshotApplies += 1
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
+        if appendsOlderHistory {
+          layout?.finishHistoryUpdate()
+        }
         defer {
           self.pendingSnapshotApplies -= 1
           self.scheduleV2GeometryFlush()
+          self.scheduleOlderHistoryCheck()
         }
         let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
         span.end(
@@ -3360,7 +3380,14 @@ private extension MessagesCollectionView {
     }
 
     func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
-      rebuildListSections()
+      // Full snapshots rebuild their projection in setInitialData. Only the
+      // incremental paths need it here; history pages used to do this work twice.
+      switch update {
+        case .messagesAdded, .messagesDeleted, .messagesUpdated:
+          rebuildListSections()
+        default:
+          break
+      }
 
       switch update {
         case let .reload(animated):
@@ -4711,6 +4738,7 @@ private extension MessagesCollectionView {
     private var hasUnreadSinceScroll = false
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+      olderHistoryPagination.beginGesture()
       isUserDragging = true
       isUserScrollInEffect = true
       // Show date badge immediately when user starts interacting
@@ -4721,6 +4749,8 @@ private extension MessagesCollectionView {
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
       isUserDragging = false
       if !decelerate {
+        isUserScrollInEffect = false
+        scheduleOlderHistoryCheck()
         scheduleHideDateSeparators()
         scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_drag_end")
         updateUnreadIfNeeded()
@@ -4729,6 +4759,7 @@ private extension MessagesCollectionView {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
       isUserScrollInEffect = false
+      scheduleOlderHistoryCheck()
       scheduleHideDateSeparators()
       scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_deceleration_end")
       updateUnreadIfNeeded()
@@ -4765,18 +4796,11 @@ private extension MessagesCollectionView {
       }
 
       if isUserScrollInEffect {
-        // For inverted collection view, we need to detect when user scrolls to the "top" (oldest messages)
-        // which is actually at the maximum content offset position
-        let maxOffset = scrollView.contentSize.height - scrollView.bounds.size.height
-        let threshold: CGFloat = 100 // Load when within 100 points of the top
-
-        // Ensure we're within valid content bounds (not overscrolling)
-        let isWithinBounds = scrollView.contentOffset.y <= maxOffset
-        let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
-
-        if isNearTop, isWithinBounds, maxOffset > 0 {
-          loadOlderMessagesIfNeeded()
+        if isNearOldestHistoryEdge(scrollView) {
+          olderHistoryPagination.requestOlder()
         }
+        loadOlderMessagesIfNeeded()
+        let threshold: CGFloat = 100
         if scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + threshold {
           loadNewerMessagesIfNeeded()
         }
@@ -4812,77 +4836,90 @@ private extension MessagesCollectionView {
     }
 
     private func loadOlderMessagesIfNeeded() {
-      guard olderLoadTask == nil else { return }
+      guard !isPreview, pendingSnapshotApplies == 0,
+            let collectionView = currentCollectionView, collectionView.window != nil,
+            let request = olderHistoryPagination.beginRequest(
+              oldestMessageID: viewModel.oldestLoadedMessageId ?? messages.last?.message.messageId,
+              isNearEdge: isNearOldestHistoryEdge(collectionView)
+            )
+      else { return }
 
-      let oldestMessageIdBeforeLoad = viewModel.oldestLoadedMessageId ?? messages.last?.message.messageId
-      guard viewModel.canLoadOlderFromLocal else {
-        if let oldestMessageIdBeforeLoad {
-          requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
-        }
-        return
-      }
-
+      // One task owns both cache paging and remote repair. A scroll during either
+      // operation retains demand instead of canceling or overlapping requests.
+      #if DEBUG || DEBUG_BUILD
+      Log.shared.debug("history-pagination start local=\(viewModel.canLoadOlderFromLocal)")
+      #endif
       olderLoadTask = Task { @MainActor [weak self] in
         guard let self else { return }
-        defer { self.olderLoadTask = nil }
-        guard !Task.isCancelled else { return }
-
-        let didLoad = await viewModel.loadBatchAsync(at: .older)
-        guard !Task.isCancelled else { return }
-        guard !didLoad, let oldestMessageIdBeforeLoad, !self.viewModel.canLoadOlderFromLocal else { return }
-
-        requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
-      }
-    }
-
-    private func shouldRequestRemoteOlder(beforeMessageId: Int64) -> Bool {
-      guard beforeMessageId > 0 else { return false }
-
-      if let noRemoteOlderBeforeMessageId, beforeMessageId <= noRemoteOlderBeforeMessageId {
-        return false
-      }
-
-      if loadingRemoteOlderBatch, lastRemoteOlderCursor == beforeMessageId {
-        return false
-      }
-
-      return true
-    }
-
-    private func requestRemoteOlderBatch(beforeMessageId: Int64) {
-      guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
-
-      loadingRemoteOlderBatch = true
-      lastRemoteOlderCursor = beforeMessageId
-
-      remoteOlderTask?.cancel()
-      remoteOlderTask = Task { @MainActor [weak self] in
-        guard let self else { return }
-        defer { self.loadingRemoteOlderBatch = false }
+        var succeeded = false
+        defer {
+          if self.olderHistoryPagination.finishRequest(
+            request, oldestMessageID: self.viewModel.oldestLoadedMessageId, succeeded: succeeded
+          ) {
+            self.olderLoadTask = nil
+            #if DEBUG || DEBUG_BUILD
+            Log.shared.debug(
+              "history-pagination finish succeeded=\(succeeded) demand=\(self.olderHistoryPagination.hasDemand)"
+            )
+            #endif
+            self.scheduleOlderHistoryCheck()
+          }
+        }
 
         do {
-          guard !Task.isCancelled else { return }
-          let outcome = try await MessageHistoryRepairCoordinator.shared.loadOlder(
-            peer: peerId,
-            beforeID: beforeMessageId
-          )
-          guard !Task.isCancelled else { return }
-
-          if outcome == .empty || outcome == .notNeeded {
-            if let boundary = noRemoteOlderBeforeMessageId {
-              noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
-            } else {
-              noRemoteOlderBeforeMessageId = beforeMessageId
+          try Task.checkCancellation()
+          if viewModel.canLoadOlderFromLocal {
+            _ = await viewModel.loadBatchAsync(at: .older)
+            try Task.checkCancellation()
+            if let oldestID = viewModel.oldestLoadedMessageId, oldestID < request.beforeMessageID {
+              succeeded = true
+              return
             }
-            return
+            // A local read that failed must not become an automatic network retry loop.
+            guard !viewModel.canLoadOlderFromLocal else { return }
           }
 
+          let outcome = try await MessageHistoryRepairCoordinator.shared.loadOlder(
+            peer: peerId, beforeID: request.beforeMessageID
+          )
+          try Task.checkCancellation()
+          if outcome == .empty {
+            succeeded = true
+            return
+          }
+          // Even .notNeeded can mean another request already populated the local cache.
           _ = await viewModel.loadBatchAsync(at: .older, allowUnavailableLocal: true)
+          try Task.checkCancellation()
+          succeeded = true
         } catch is CancellationError {
           return
         } catch {
           Log.shared.error("Failed to load older messages from remote", error: error)
         }
+      }
+    }
+
+    private func isNearOldestHistoryEdge(_ scrollView: UIScrollView) -> Bool {
+      OlderHistoryPagination.isNearOldestEdge(
+        offsetY: scrollView.contentOffset.y,
+        contentHeight: scrollView.contentSize.height,
+        viewportHeight: scrollView.bounds.height,
+        topInset: scrollView.adjustedContentInset.top,
+        bottomInset: scrollView.adjustedContentInset.bottom
+      )
+    }
+
+    private func scheduleOlderHistoryCheck() {
+      guard olderHistoryPagination.hasDemand, !olderHistoryCheckScheduled else { return }
+      olderHistoryCheckScheduled = true
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.olderHistoryCheckScheduled = false
+        guard self.olderHistoryPagination.hasDemand, self.pendingSnapshotApplies == 0 else { return }
+        // A page can finish after the gesture or before its snapshot finishes.
+        // Recheck the final geometry from both completions, never from a stale content size.
+        self.currentCollectionView?.layoutIfNeeded()
+        self.loadOlderMessagesIfNeeded()
       }
     }
 
