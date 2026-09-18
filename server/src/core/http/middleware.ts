@@ -142,9 +142,14 @@ export const clientIpHeaderForMode = (
 const responseHeaders = (
   context: HttpRequestContextShape,
   isProduction: boolean,
+  cacheControl: string | undefined,
 ): Record<string, string> => ({
   ...commonSecurityHeaders,
-  ...(requiresPrivateResponse(context.path) ? { "cache-control": "no-store" } : {}),
+  // Keep route-specific privacy directives when storage is already forbidden.
+  ...(requiresPrivateResponse(context.path) &&
+      !cacheControl?.split(",").some((directive) => directive.trim().toLowerCase() === "no-store")
+    ? { "cache-control": "no-store" }
+    : {}),
   ...(isProduction
     ? { "strict-transport-security": "max-age=31536000; includeSubDomains" }
     : {}),
@@ -190,7 +195,7 @@ const makeKernelMiddleware = ({
           Effect.succeed(
             HttpServerResponse.setHeaders(
               response,
-              responseHeaders(context, isProduction),
+              responseHeaders(context, isProduction, response.headers["cache-control"]),
             ),
           ),
       )
