@@ -111,6 +111,13 @@ final class MessagesCollectionView: UICollectionView {
     coordinator.highestPositiveMessageId
   }
 
+  #if DEBUG
+  /// Exercises the production picker with in-memory fixtures in device tests.
+  func reactionPickerForTesting(for message: FullMessage) -> UIView {
+    coordinator.createReactionPickerView(for: message)
+  }
+  #endif
+
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     coordinator.setCollapsedMaxId(collapsedMaxId)
   }
@@ -3809,10 +3816,14 @@ private extension MessagesCollectionView {
     func createReactionPickerView(for fullMessage: FullMessage) -> UIView {
       let preferredSkinTone = EmojiSkinTonePreferenceStore.current()
       var seenReactions = Set<String>()
-      let reactions = ReactionPickerEmojiUsageStore.suggestedEmojis().compactMap { emoji -> String? in
+      let usualReactions = ReactionPickerEmojiUsageStore.suggestedEmojis().compactMap { emoji -> String? in
         let preferredEmoji = preferredSkinTone.applying(to: emoji)
         return seenReactions.insert(preferredEmoji).inserted ? preferredEmoji : nil
       }
+      let reactions = ReactionPickerEmojis.prioritizingMessageEmojis(
+        in: fullMessage.message.text,
+        among: usualReactions
+      )
 
       let containerWidth = currentCollectionView?.window?.bounds.width
         ?? currentCollectionView?.bounds.width

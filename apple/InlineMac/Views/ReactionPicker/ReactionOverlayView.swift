@@ -20,6 +20,7 @@ struct ReactionOverlayView: View {
   @State private var suggestedReactions = ReactionPickerEmojiUsageStore.suggestedEmojis()
   @State private var suggestionCounts = ReactionPickerEmojiUsageStore.usageCounts()
   @State private var suggestionSources: [String: String] = [:]
+  @State private var messageReactions: Set<String> = []
   @State private var appearScale: CGFloat = 0.5
   @State private var appearOpacity: Double = 0
   @State private var isEmojiPickerPresented = false
@@ -30,8 +31,9 @@ struct ReactionOverlayView: View {
   private static let moreReactionsKey = "__more_reactions"
 
   private func handleReactionSelected(_ emoji: String) {
-    let preferredEmoji = AppSettings.shared.preferredEmojiSkinTone.applying(to: emoji)
-    guard let emoji = EmojiPickerValue.normalizedEmoji(from: preferredEmoji) else { return }
+    // Message suggestions are already validated and must be sent exactly as displayed.
+    let selectedEmoji = messageReactions.contains(emoji) ? emoji : EmojiPickerValue.normalizedEmoji(from: emoji)
+    guard let emoji = selectedEmoji else { return }
 
     // Check if user already reacted with this emoji
     guard let currentUserId = Auth.shared.getCurrentUserId() else {
@@ -77,7 +79,7 @@ struct ReactionOverlayView: View {
   private func handleCustomEmojiSelected(_ value: String) {
     isSelectingCustomEmoji = true
     isEmojiPickerPresented = false
-    handleReactionSelected(value)
+    handleReactionSelected(AppSettings.shared.preferredEmojiSkinTone.applying(to: value))
   }
 
   private func removeSuggestion(_ emoji: String) {
@@ -89,6 +91,7 @@ struct ReactionOverlayView: View {
   }
 
   private func reloadSuggestedReactions() {
+    let messageText = fullMessage.message.text
     let counts = ReactionPickerEmojiUsageStore.usageCounts()
     let sourceReactions = ReactionPickerEmojis.suggestions(from: counts)
     var displayedReactions: [String] = []
@@ -103,7 +106,11 @@ struct ReactionOverlayView: View {
 
     suggestionCounts = counts
     suggestionSources = sources
-    suggestedReactions = displayedReactions
+    messageReactions = Set(ReactionPickerEmojis.prioritizingMessageEmojis(in: messageText, among: []))
+    suggestedReactions = ReactionPickerEmojis.prioritizingMessageEmojis(
+      in: messageText,
+      among: displayedReactions
+    )
   }
 
   var body: some View {
@@ -172,7 +179,8 @@ struct ReactionOverlayView: View {
       isHovered[emoji] = hovering
     }
     .contextMenu {
-      if suggestionCounts[suggestionSources[emoji] ?? emoji, default: 0] > 0 {
+      if !messageReactions.contains(emoji),
+         suggestionCounts[suggestionSources[emoji] ?? emoji, default: 0] > 0 {
         Button("Remove from suggestions", role: .destructive) {
           removeSuggestion(emoji)
         }

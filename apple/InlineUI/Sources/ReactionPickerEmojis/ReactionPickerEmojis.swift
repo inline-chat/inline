@@ -23,6 +23,44 @@ public enum ReactionPickerEmojis {
     defaultEmojis.count
   }
 
+  /// Message emojis retain their original grapheme (including skin tone).
+  /// Pass the usual suggestions after applying the user's skin tone preference.
+  public static func prioritizingMessageEmojis(
+    in messageText: String?,
+    among suggestions: [String],
+    limit: Int = defaultLimit
+  ) -> [String] {
+    guard limit > 0 else { return [] }
+    var result: [String] = []
+
+    for character in messageText ?? "" where isMessageEmoji(character) {
+      append(String(character), to: &result, limit: limit)
+      if result.count == limit { return result }
+    }
+
+    for emoji in suggestions {
+      append(emoji, to: &result, limit: limit)
+      if result.count == limit { break }
+    }
+    return result
+  }
+
+  private static func isMessageEmoji(_ character: Character) -> Bool {
+    let scalars = character.unicodeScalars
+    guard let first = scalars.first,
+          first.properties.isEmoji,
+          !first.properties.isEmojiModifier,
+          !scalars.contains(where: { $0.value == 0xFE0E }) else { return false }
+
+    // Digits, # and * have the Unicode emoji property, but are only emojis
+    // when combined with the enclosing keycap. Keep joined sequences intact.
+    if first.value < 0x80 {
+      return scalars.contains { $0.value == 0x20E3 }
+    }
+    return first.properties.isEmojiPresentation || first.value > 0x238C
+      || scalars.contains { $0.value == 0xFE0F }
+  }
+
   public static func normalizedEmoji(from value: String?) -> String? {
     guard let value else { return nil }
 
