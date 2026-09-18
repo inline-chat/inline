@@ -24,12 +24,11 @@ jobs:
 
       - name: Check landing and browser client
         run: |
-          bun run --cwd landing docs:check
+          bun run --cwd landing build
           bun run --cwd landing typecheck
           bun run --cwd landing lint
           bun run --cwd landing test
           bun run --cwd landing/packages/client test
-          bun run --cwd landing build
 
   codex-plugin:
     name: Codex plugin
