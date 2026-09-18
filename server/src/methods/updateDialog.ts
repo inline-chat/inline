@@ -27,6 +27,7 @@ export const Input = Type.Object({
   peerId: Optional(TInputId),
   peerUserId: Optional(TInputId),
   peerThreadId: Optional(TInputId),
+  /** @deprecated Current clients keep compose drafts locally. */
   draft: Optional(Type.String()),
   archived: Optional(Type.Boolean()),
   order: Optional(TDialogOrder),

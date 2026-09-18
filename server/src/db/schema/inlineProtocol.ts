@@ -1,3 +1,4 @@
+import { encryptedText, encryptedBytes } from "./encrypted"
 import { sql } from "drizzle-orm"
 import {
   bigint,
@@ -147,7 +148,7 @@ export const inlineProtocolUploads = pgTable(
     accountSessionId: integer("account_session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
-    fileName: text("file_name").notNull(),
+    fileName: encryptedText("file_name", "uploads.fileName").notNull(),
     mimeType: varchar("mime_type", { length: 255 }).notNull(),
     byteCount: bigint("byte_count", { mode: "bigint" }).notNull(),
     sha256: bytea("sha256").notNull(),
@@ -200,7 +201,7 @@ export const inlineUploads = pgTable(
     accountSessionId: integer("account_session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
-    fileName: text("file_name").notNull(),
+    fileName: encryptedText("file_name", "uploads.fileName").notNull(),
     mimeType: varchar("mime_type", { length: 255 }).notNull(),
     byteCount: bigint("byte_count", { mode: "bigint" }).notNull(),
     sha256: bytea("sha256").notNull(),
@@ -211,7 +212,7 @@ export const inlineUploads = pgTable(
     duration: integer("duration"),
     isAnimated: boolean("is_animated"),
     hasAudio: boolean("has_audio"),
-    waveform: bytea("waveform"),
+    waveform: encryptedBytes("waveform", "voice.waveform"),
     partSize: integer("part_size").notNull(),
     partCount: integer("part_count").notNull(),
     status: varchar("status", { length: 16 }).default("uploading").notNull(),

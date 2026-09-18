@@ -1,3 +1,4 @@
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, type DbChat } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -8,7 +9,7 @@ import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { invalidateChatInfoCache } from "@in/server/modules/cache/chatInfo"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { and, eq, sql } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import type { AgentThreadContext, Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -214,7 +215,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
     }
 
     if (shouldUpdateTitle) {
-      updateFields.title = nextTitle
+      Object.assign(updateFields, chatTitleFields(nextTitle ?? null, chat))
       updateFields.isUntitled = input.isUntitled === true ? true : null
       if (input.autoTitleGenerated === true) updateFields.autoTitleGenerated = true
     }
@@ -226,9 +227,8 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       updateFields.agentContext = encodedAgentContext
     }
 
-    const where = input.titleGuard?.kind === "empty"
-      ? and(eq(chats.id, chat.id), sql`(trim(coalesce(${chats.title}, '')) = '')`)
-      : eq(chats.id, chat.id)
+    // The row is locked above; the decrypted title guard remains valid until commit.
+    const where = eq(chats.id, chat.id)
 
     const [updatedChat] = await tx
       .update(chats)

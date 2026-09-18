@@ -1,4 +1,5 @@
-import { pgTable, varchar, boolean, pgEnum, unique, uniqueIndex, check, timestamp, index } from "drizzle-orm/pg-core"
+import { encryptedText } from "./encrypted"
+import { pgTable, boolean, pgEnum, unique, uniqueIndex, check, timestamp, index } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
@@ -7,7 +8,6 @@ import { creationDate } from "@in/server/db/schema/common"
 import { integer, type AnyPgColumn } from "drizzle-orm/pg-core"
 import { messages } from "@in/server/db/schema/messages"
 import { foreignKey } from "drizzle-orm/pg-core"
-import { text } from "drizzle-orm/pg-core"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { bytea } from "@in/server/db/schema/common"
 
@@ -18,10 +18,11 @@ export const chats = pgTable(
   {
     id: integer().primaryKey().generatedByDefaultAsIdentity(),
     type: chatTypeEnum().notNull(),
-    title: varchar({ length: 150 }),
+    title: encryptedText("title", "chats.title", 150),
+    titleHash: bytea("title_hash"),
     /** null is legacy/unknown; false stays retryable until generation succeeds. */
     autoTitleGenerated: boolean("auto_title_generated").default(false),
-    description: text(),
+    description: encryptedText("description", "chats.description"),
 
     /** Most recent message id */
     lastMsgId: integer("last_msg_id"),
@@ -57,7 +58,7 @@ export const chats = pgTable(
 
     date: creationDate,
 
-    emoji: varchar({ length: 20 }),
+    emoji: encryptedText("emoji", "chats.emoji", 20),
 
     /** Encoded AgentThreadContext. Visible chat metadata, not provider session state. */
     agentContext: bytea("agent_context"),
@@ -72,6 +73,7 @@ export const chats = pgTable(
     }),
   },
   (table) => ({
+    titleLookupIndex: index("chats_title_hash_idx").on(table.titleHash, table.spaceId, table.createdBy),
     /** Ensure correctness */
     userIdsCheckConstraint: check("user_ids_check", sql`${table.minUserId} <= ${table.maxUserId}`),
     /** Ensure single private chat exists for each user pair */

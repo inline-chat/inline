@@ -6,6 +6,7 @@ const chat: DbChat = {
   id: 10,
   type: "thread",
   autoTitleGenerated: false,
+  titleHash: null,
   title: "Roadmap",
   description: null,
   lastMsgId: 7,

@@ -1,3 +1,4 @@
+import { encryptedText } from "./encrypted"
 import { pgTable, boolean, unique, integer, text, bytea, index, timestamp, foreignKey } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
@@ -43,8 +44,8 @@ export const dialogs = pgTable(
     /** Is it pinned? */
     pinned: boolean("pinned"),
 
-    /** draft message */
-    draft: text("draft"),
+    /** @deprecated Server drafts are retained for legacy API compatibility. Current clients use local drafts. */
+    draft: encryptedText("draft", "dialogs.draft"),
 
     /** archived */
     archived: boolean("archived").default(false),

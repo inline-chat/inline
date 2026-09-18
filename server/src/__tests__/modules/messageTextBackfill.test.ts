@@ -45,6 +45,29 @@ describe("legacy message text backfill", () => {
     expect((await db.select().from(messages).where(eq(messages.messageId, 3)))[0]!.text).toBe("partial")
   })
 
+  it("handles empty strings and messages above the old 20 KB ceiling", async () => {
+    const owner = await fixture()
+    const values = ["", "a".repeat(30_000)]
+    await db.insert(messages).values(values.map((text, index) => ({ ...owner, messageId: index + 1, text })))
+    expect(await backfillMessageTextBatch({ apply: true })).toMatchObject({ migrated: 2, conflicts: 0 })
+    const rows = await db.select().from(messages)
+    for (const row of rows) {
+      expect(row.text).toBeNull()
+      expect(decrypt({ encrypted: row.textEncrypted!, iv: row.textIv!, authTag: row.textTag! })).toBe(values[row.messageId - 1]!)
+    }
+  })
+
+  it("leaves an oversized legacy message untouched", async () => {
+    const owner = await fixture()
+    const text = "a".repeat(500_000)
+    await db.insert(messages).values({ ...owner, messageId: 1, text })
+    expect(await backfillMessageTextBatch({ apply: false })).toMatchObject({ conflicts: 1 })
+    await expect(backfillMessageTextBatch({ apply: true })).rejects.toThrow()
+    const [row] = await db.select().from(messages)
+    expect(row!.text).toBe(text)
+    expect(row!.textEncrypted).toBeNull()
+  })
+
   it("does not overwrite an edit committed by a concurrent writer", async () => {
     const owner = await fixture()
     const [row] = await db.insert(messages).values({ ...owner, messageId: 1, text: "old" }).returning()

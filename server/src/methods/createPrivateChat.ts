@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { chats, dialogs, type DbChat, type DbDialog, type DbUserWithProfile } from "@in/server/db/schema"
 import {
   encodeChatInfo,
@@ -64,7 +65,7 @@ export const handler = async (
   const [insertedChat] = await db
     .insert(chats)
     .values({
-      title,
+      ...chatTitleFields(title, { spaceId: null }),
       type: "private",
       date: new Date(),
       minUserId,
@@ -78,7 +79,7 @@ export const handler = async (
     ? [insertedChat]
     : await db
         .update(chats)
-        .set({ title })
+        .set(chatTitleFields(title, { spaceId: null }))
         .where(and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)))
         .returning()
 

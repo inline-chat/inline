@@ -1,3 +1,4 @@
+import { chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { createChat } from "@in/server/functions/messages.createChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
@@ -5,7 +6,7 @@ import { chats } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { MessageEntity_Type, type MessageEntities, type MessageEntity } from "@inline-chat/protocol/core"
-import { and, asc, eq, isNull, sql } from "drizzle-orm"
+import { and, asc, eq, isNull } from "drizzle-orm"
 
 const MAX_THREAD_TITLE_LENGTH = 150
 
@@ -107,7 +108,7 @@ async function findThreadByTitle(spaceId: number, title: string) {
       and(
         eq(chats.type, "thread"),
         eq(chats.spaceId, spaceId),
-        sql`lower(trim(${chats.title})) = ${titleLower}`,
+        chatTitleMatches(titleLower, { spaceId }),
       ),
     )
     .orderBy(asc(chats.id))
@@ -126,7 +127,7 @@ async function findHomeThreadByTitle(ownerUserId: number, title: string) {
         eq(chats.type, "thread"),
         isNull(chats.spaceId),
         eq(chats.createdBy, ownerUserId),
-        sql`lower(trim(${chats.title})) = ${titleLower}`,
+        chatTitleMatches(titleLower, { spaceId: null, createdBy: ownerUserId }),
       ),
     )
     .orderBy(asc(chats.id))

@@ -1,3 +1,4 @@
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats } from "@in/server/db/schema"
 import { encodeChatInfo, TChatInfo } from "@in/server/api-types"
@@ -52,7 +53,7 @@ export const handler = async (
         .values({
           type: "thread",
           spaceId: spaceId,
-          title: input.title,
+          ...chatTitleFields(input.title, { spaceId, createdBy: context.currentUserId }),
           publicThread: true,
           date: new Date(),
           threadNumber: threadNumber,

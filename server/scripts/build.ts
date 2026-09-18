@@ -12,7 +12,8 @@ const commitHash = sourceCommit === "N/A" ? "N/A" : sourceCommit.slice(0, 7)
 console.info("🚧 Building...")
 
 const result = await Bun.build({
-  entrypoints: [resolve(__dirname, "../src/index.ts")],
+  entrypoints: [resolve(__dirname, "../src/index.ts"), resolve(__dirname, "./encrypt-content.ts")],
+  naming: "[name].[ext]",
   outdir: resolve(__dirname, "../dist"),
   target: "bun",
   external: ["@aws-sdk/*", "sharp"],

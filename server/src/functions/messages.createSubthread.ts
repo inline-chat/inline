@@ -1,3 +1,4 @@
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants, userNotDeleted, users, type DbChat, type DbDialog } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -293,7 +294,7 @@ async function createSubthreadChat(input: {
         .values({
           type: "thread",
           spaceId,
-          title: input.title ?? null,
+          ...chatTitleFields(input.title ?? null, { spaceId, createdBy: input.createdBy }),
           isUntitled: input.isUntitled ? true : null,
           description: input.description ?? null,
           emoji: input.emoji ?? null,

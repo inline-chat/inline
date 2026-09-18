@@ -1,3 +1,4 @@
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { db } from "@in/server/db"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -111,7 +112,7 @@ export const handler = async (
         .values({
           spaceId: space.id,
           type: "thread",
-          title: space.name,
+          ...chatTitleFields(space.name, { spaceId: space.id }),
           publicThread: true,
           description: "Main chat for everyone in the space",
           threadNumber,

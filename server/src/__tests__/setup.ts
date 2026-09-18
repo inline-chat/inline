@@ -6,6 +6,7 @@ import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export {
@@ -85,7 +86,7 @@ export const testUtils = {
       .insert(schema.chats)
       .values({
         type,
-        title,
+        ...chatTitleFields(title, { spaceId, createdBy }),
         spaceId,
         publicThread,
         createdBy: createdBy ?? null,

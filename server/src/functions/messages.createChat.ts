@@ -1,7 +1,8 @@
+import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { Chat, Dialog, type AgentThreadContext, type ChatParticipant } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -172,7 +173,7 @@ export async function createChat(
         and(
           eq(chats.type, "thread"),
           eq(chats.spaceId, resolvedSpaceId),
-          sql`lower(trim(${chats.title})) = ${titleLower}`,
+          chatTitleMatches(titleLower, { spaceId: resolvedSpaceId }),
         ),
       )
       .limit(1)
@@ -222,7 +223,7 @@ export async function createChat(
           id: reservedChatId,
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          title: storedTitle ?? null,
+          ...chatTitleFields(storedTitle ?? null, { spaceId: hasSpaceId ? resolvedSpaceId : null, createdBy: context.currentUserId }),
           isUntitled: explicitTitle ? null : true,
           publicThread: isPublic,
           date: new Date(),
@@ -317,7 +318,7 @@ export async function createChat(
         .values({
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          title: storedTitle ?? null,
+          ...chatTitleFields(storedTitle ?? null, { spaceId: hasSpaceId ? resolvedSpaceId : null, createdBy: context.currentUserId }),
           isUntitled: explicitTitle ? null : true,
           publicThread: isPublic,
           date: new Date(),

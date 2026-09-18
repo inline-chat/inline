@@ -5,13 +5,19 @@ import { db } from "@in/server/db"
 import { urlPreviewCache, type DbUrlPreviewCache, type DbNewUrlPreviewCache } from "@in/server/db/schema"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import type { EncryptedData } from "@in/server/modules/encryption/encryption"
-import { and, desc, eq, gt, isNotNull } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm"
+
+import { contentEncryptionWritesEnabled, contentLookup } from "../encryption/contentEncryption"
 
 const cacheTtlMs = 7 * 24 * 60 * 60 * 1000
 
 export function hashPreviewUrl(url: string): Buffer {
-  return createHash("sha256").update(url).digest()
+  return hashUrl(url, contentEncryptionWritesEnabled() ? 1 : 0)
 }
+
+const legacyUrlHash = (url: string) => createHash("sha256").update(url).digest()
+const hashUrl = (url: string, version: 0 | 1) => version === 1 ? contentLookup("preview-url", [], url) : legacyUrlHash(url)
+const previewLookupHashes = (url: string) => [legacyUrlHash(url), contentLookup("preview-url", [], url)]
 
 export async function getFreshPreviewCache(url: string, now = new Date()): Promise<DbUrlPreviewCache | null> {
   const normalized = normalizePreviewUrl(url)
@@ -22,7 +28,7 @@ export async function getFreshPreviewCache(url: string, now = new Date()): Promi
   const [cache] = await db
     .select()
     .from(urlPreviewCache)
-    .where(and(eq(urlPreviewCache.urlHash, hashPreviewUrl(normalized)), gt(urlPreviewCache.expiresAt, now)))
+    .where(and(inArray(urlPreviewCache.urlHash, previewLookupHashes(normalized)), gt(urlPreviewCache.expiresAt, now)))
     .limit(1)
 
   return cache ?? null
@@ -59,7 +65,7 @@ async function getCachedMainPhotoId(normalized: string): Promise<number | null> 
       photoId: urlPreviewCache.photoId,
     })
     .from(urlPreviewCache)
-    .where(and(eq(urlPreviewCache.imageUrlHash, hashPreviewUrl(normalized)), isNotNull(urlPreviewCache.photoId)))
+    .where(and(inArray(urlPreviewCache.imageUrlHash, previewLookupHashes(normalized)), isNotNull(urlPreviewCache.photoId)))
     .orderBy(desc(urlPreviewCache.lastUsedAt))
     .limit(1)
 
@@ -78,7 +84,7 @@ async function getCachedAuthorPhotoId(normalized: string): Promise<number | null
     })
     .from(urlPreviewCache)
     .where(
-      and(eq(urlPreviewCache.authorImageUrlHash, hashPreviewUrl(normalized)), isNotNull(urlPreviewCache.authorPhotoId)),
+      and(inArray(urlPreviewCache.authorImageUrlHash, previewLookupHashes(normalized)), isNotNull(urlPreviewCache.authorPhotoId)),
     )
     .orderBy(desc(urlPreviewCache.lastUsedAt))
     .limit(1)
@@ -97,75 +103,31 @@ export async function upsertPreviewCache(input: {
   now?: Date
 }): Promise<DbUrlPreviewCache> {
   const now = input.now ?? new Date()
-  const values = buildCacheValues(input.metadata, input.photoId, input.authorPhotoId ?? null, now)
+  const url = normalizePreviewUrl(input.metadata.url)
+  if (!url) throw new Error("Cannot cache invalid URL preview URL")
+  const requestedVersion = contentEncryptionWritesEnabled() ? 1 : 0
 
-  const [cache] = await db
-    .insert(urlPreviewCache)
-    .values(values)
-    .onConflictDoUpdate({
-      target: urlPreviewCache.urlHash,
-      set: {
-        url: values.url,
-        urlIv: values.urlIv,
-        urlTag: values.urlTag,
-        finalUrl: values.finalUrl,
-        finalUrlIv: values.finalUrlIv,
-        finalUrlTag: values.finalUrlTag,
-        provider: values.provider,
-        siteName: values.siteName,
-        mediaType: values.mediaType,
-        title: values.title,
-        titleIv: values.titleIv,
-        titleTag: values.titleTag,
-        description: values.description,
-        descriptionIv: values.descriptionIv,
-        descriptionTag: values.descriptionTag,
-        author: values.author,
-        authorIv: values.authorIv,
-        authorTag: values.authorTag,
-        imageUrlHash: values.imageUrlHash,
-        imageUrl: values.imageUrl,
-        imageUrlIv: values.imageUrlIv,
-        imageUrlTag: values.imageUrlTag,
-        authorImageUrlHash: values.authorImageUrlHash,
-        authorImageUrl: values.authorImageUrl,
-        authorImageUrlIv: values.authorImageUrlIv,
-        authorImageUrlTag: values.authorImageUrlTag,
-        mediaKind: values.mediaKind,
-        photoId: values.photoId,
-        authorPhotoId: values.authorPhotoId,
-        videoId: values.videoId,
-        documentId: values.documentId,
-        externalUrl: values.externalUrl,
-        externalUrlIv: values.externalUrlIv,
-        externalUrlTag: values.externalUrlTag,
-        externalMimeType: values.externalMimeType,
-        externalWidth: values.externalWidth,
-        externalHeight: values.externalHeight,
-        externalDuration: values.externalDuration,
-        embedUrl: values.embedUrl,
-        embedUrlIv: values.embedUrlIv,
-        embedUrlTag: values.embedUrlTag,
-        embedType: values.embedType,
-        embedWidth: values.embedWidth,
-        embedHeight: values.embedHeight,
-        embedDuration: values.embedDuration,
-        hasLargeMedia: values.hasLargeMedia,
-        showLargeMedia: values.showLargeMedia,
-        duration: values.duration,
-        fetchedAt: values.fetchedAt,
-        lastUsedAt: values.lastUsedAt,
-        expiresAt: values.expiresAt,
-        updatedAt: values.updatedAt,
-      },
-    })
-    .returning()
-
-  if (!cache) {
-    throw new Error("URL preview cache upsert returned no row")
-  }
-
-  return cache
+  return db.transaction(async (tx) => {
+    // Serialize upgraded writers across both settings during the rolling enablement.
+    // The lock identity is keyed, so query diagnostics never contain the authored URL.
+    const lockKey = contentLookup("preview-url", [], url).readBigInt64BE(0)
+    await tx.execute(sql`select pg_advisory_xact_lock(${lockKey})`)
+    const existing = await tx.select().from(urlPreviewCache)
+      .where(inArray(urlPreviewCache.urlHash, previewLookupHashes(url))).for("update")
+    if (existing.length > 1) throw new Error("Conflicting URL preview cache identities")
+    const previous = existing[0]
+    // A writer still using the old setting must not recreate a legacy hash next to
+    // an upgraded row. Preserve its ID, creation time and keyed lookup format.
+    const version = requestedVersion === 1 || previous?.hashVersion === 1 ? 1 : 0
+    const values = buildCacheValues(input.metadata, input.photoId, input.authorPhotoId ?? null, now, version)
+    const { createdAt: _createdAt, ...updatedValues } = values
+    const [cache] = previous
+      ? await tx.update(urlPreviewCache).set(updatedValues).where(eq(urlPreviewCache.id, previous.id)).returning()
+      : await tx.insert(urlPreviewCache).values(values)
+        .onConflictDoUpdate({ target: urlPreviewCache.urlHash, set: updatedValues }).returning()
+    if (!cache) throw new Error("URL preview cache upsert returned no row")
+    return cache
+  })
 }
 
 function buildCacheValues(
@@ -173,6 +135,7 @@ function buildCacheValues(
   photoId: number | null,
   authorPhotoId: number | null,
   now: Date,
+  hashVersion: 0 | 1,
 ): DbNewUrlPreviewCache {
   const url = normalizePreviewUrl(metadata.url)
   if (!url) {
@@ -196,7 +159,8 @@ function buildCacheValues(
   const mediaKind = cacheMediaKind(metadata, { photoId, externalUrl, embedUrl })
 
   return {
-    urlHash: hashPreviewUrl(url),
+    hashVersion,
+    urlHash: hashUrl(url, hashVersion),
     url: encryptedUrl.encrypted,
     urlIv: encryptedUrl.iv,
     urlTag: encryptedUrl.authTag,
@@ -215,11 +179,11 @@ function buildCacheValues(
     author: encryptedAuthor?.encrypted ?? null,
     authorIv: encryptedAuthor?.iv ?? null,
     authorTag: encryptedAuthor?.authTag ?? null,
-    imageUrlHash: imageUrl ? hashPreviewUrl(imageUrl) : null,
+    imageUrlHash: imageUrl ? hashUrl(imageUrl, hashVersion) : null,
     imageUrl: encryptedImageUrl?.encrypted ?? null,
     imageUrlIv: encryptedImageUrl?.iv ?? null,
     imageUrlTag: encryptedImageUrl?.authTag ?? null,
-    authorImageUrlHash: authorImageUrl ? hashPreviewUrl(authorImageUrl) : null,
+    authorImageUrlHash: authorImageUrl ? hashUrl(authorImageUrl, hashVersion) : null,
     authorImageUrl: encryptedAuthorImageUrl?.encrypted ?? null,
     authorImageUrlIv: encryptedAuthorImageUrl?.iv ?? null,
     authorImageUrlTag: encryptedAuthorImageUrl?.authTag ?? null,

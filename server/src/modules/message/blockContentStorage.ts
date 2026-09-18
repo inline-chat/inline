@@ -1,8 +1,9 @@
 import type { BlockContent, BlockImage, MessageEntities } from "@inline-chat/protocol/core"
 import { blockContentImageJobs, blockContents, messages } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
-import { encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
+import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { createHash } from "node:crypto"
+import { contentEncryptionWritesEnabled, contentLookup } from "../encryption/contentEncryption"
 import { and, eq, inArray, isNotNull, not, notInArray, sql } from "drizzle-orm"
 import {
   getBlockImageAtPath,
@@ -25,6 +26,7 @@ export type PreparedBlockContent = {
 type PreparedBlockImageJob = {
   path: number[]
   sourceHash: Buffer
+  hashVersion: number
   source: EncryptedData
 }
 
@@ -98,6 +100,9 @@ export async function replacePreparedBlockContent(input: {
 
   const activeJobs = currentJobs
     .filter((job) => job.state !== "canceled" && job.expectedRevision === input.currentRevision)
+    .map((job) => ({ ...job, sourceHash: hashBlockImageSource(decrypt({
+      encrypted: job.sourceEncrypted, iv: job.sourceIv, authTag: job.sourceTag,
+    })) }))
   const exactJobs = new Map<string, (typeof activeJobs)[number][]>()
   for (const job of activeJobs) {
     const key = imageJobKey(job.blockPath, job.sourceHash)
@@ -264,6 +269,7 @@ async function insertImageJobs(
       expectedRevision,
       blockPath: job.path,
       sourceHash: job.sourceHash,
+      hashVersion: job.hashVersion,
       sourceEncrypted: job.source.encrypted,
       sourceIv: job.source.iv,
       sourceTag: job.source.authTag,
@@ -271,10 +277,14 @@ async function insertImageJobs(
   )
 }
 
+const hashBlockImageSource = (url: string): Buffer => contentEncryptionWritesEnabled()
+  ? contentLookup("block-image-url", [], url) : createHash("sha256").update(url).digest()
+
 function prepareImageJob(source: BlockImageSource): PreparedBlockImageJob {
   return {
     path: source.path,
-    sourceHash: createHash("sha256").update(source.url).digest(),
+    sourceHash: hashBlockImageSource(source.url),
+    hashVersion: contentEncryptionWritesEnabled() ? 1 : 0,
     source: encrypt(source.url),
   }
 }

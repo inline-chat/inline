@@ -1,3 +1,4 @@
+import { encryptedBytes } from "./encrypted"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { relations } from "drizzle-orm/_relations"
@@ -133,7 +134,7 @@ export const voices = pgTable("voices", {
   fileId: integer("file_id").references(() => files.id),
   date: creationDate,
   duration: integer("duration"),
-  waveform: bytea("waveform"),
+  waveform: encryptedBytes("waveform", "voice.waveform"),
 })
 
 export type DbVoice = typeof voices.$inferSelect

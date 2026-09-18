@@ -23,6 +23,7 @@
     "typecheck": "tsc --build",
     "typecheck:effect": "tsc --build tsconfig.effect.json",
     "db:migrate": "bun scripts/migrate.ts",
+    "db:encrypt-content": "bun scripts/encrypt-content.ts",
     "db:dangerously-reset-db": "bun scripts/reset-db.ts",
     "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
     "db:push": "drizzle-kit push --schema src/db/schema/index.ts --dialect postgresql",

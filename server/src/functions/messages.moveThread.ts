@@ -1,3 +1,4 @@
+import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants, dialogs, members, type DbChat } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -152,7 +153,7 @@ export async function moveThread(
                 eq(chats.spaceId, targetSpaceId),
                 // exclude self
                 sql`${chats.id} <> ${chat.id}`,
-                sql`lower(trim(${chats.title})) = ${titleLower}`,
+                chatTitleMatches(titleLower, { spaceId: targetSpaceId }),
               ),
             )
             .limit(1)
@@ -194,6 +195,7 @@ export async function moveThread(
       const [chatRecord] = await tx
         .update(chats)
         .set({
+          ...chatTitleFields(chat.title, { spaceId: targetSpaceId, createdBy: chat.createdBy }),
           spaceId: targetSpaceId,
           threadNumber: nextThreadNumber,
           updateSeq: update.seq,

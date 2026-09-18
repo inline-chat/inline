@@ -1,3 +1,4 @@
+/** @deprecated Current clients keep compose drafts locally. Retained for legacy API compatibility. */
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
 import { dialogs } from "@in/server/db/schema"

@@ -1,6 +1,7 @@
+import { bytea } from "./common"
+import { encryptedText } from "./encrypted"
 import { foreignKey, pgTable, unique, type AnyPgColumn } from "drizzle-orm/pg-core"
 import { users } from "./users"
-import { text } from "drizzle-orm/pg-core"
 import { chats } from "./chats"
 import { integer } from "drizzle-orm/pg-core"
 import { messages } from "./messages"
@@ -23,10 +24,14 @@ export const reactions = pgTable(
       .references((): AnyPgColumn => users.id, {
         onDelete: "cascade",
       }),
-    emoji: text("emoji").notNull(),
+    emoji: encryptedText("emoji", "reactions.emoji").notNull(),
+    emojiHash: bytea("emoji_hash"),
     date: creationDate,
   },
   (table) => ({
+    uniqueEncryptedReaction: unique("reactions_identity_emoji_hash_unique").on(
+      table.chatId, table.messageId, table.userId, table.emojiHash,
+    ),
     uniqueReactionPerEmoji: unique("unique_reaction_per_emoji").on(
       table.chatId,
       table.messageId,

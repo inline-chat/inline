@@ -1,7 +1,8 @@
-import { and, asc, eq, gt, isNotNull, ne } from "drizzle-orm"
+import { and, asc, eq, gt, isNotNull } from "drizzle-orm"
 import { db } from "../../src/db"
 import { messages } from "../../src/db/schema/messages"
-import { decrypt, encrypt } from "../../src/modules/encryption/encryption"
+import { decrypt, encryptBinaryWithLimit } from "../../src/modules/encryption/encryption"
+import { MAX_MESSAGE_TEXT_UTF8_BYTES } from "../../src/modules/encryption/limits"
 
 export type BackfillSummary = {
   scanned: number; migrated: number; verified: number; conflicts: number; lastId: string; done: boolean
@@ -20,7 +21,7 @@ export async function backfillMessageTextBatch(options: {
     const rows = await tx.select({
       id: messages.globalId, text: messages.text,
       encrypted: messages.textEncrypted, iv: messages.textIv, authTag: messages.textTag,
-    }).from(messages).where(and(gt(messages.globalId, afterId), isNotNull(messages.text), ne(messages.text, "")))
+    }).from(messages).where(and(gt(messages.globalId, afterId), isNotNull(messages.text)))
       .orderBy(asc(messages.globalId)).limit(size).for(options.apply ? "update" : "share")
     const result: BackfillSummary = { scanned: rows.length, migrated: 0, verified: 0, conflicts: 0,
       lastId: (rows.at(-1)?.id ?? afterId).toString(), done: rows.length < size }
@@ -35,7 +36,7 @@ export async function backfillMessageTextBatch(options: {
           sealed = { encrypted: row.encrypted, iv: row.iv, authTag: row.authTag }
           if (decrypt(sealed) !== row.text) { result.conflicts++; continue }
         } else {
-          sealed = encrypt(row.text)
+          sealed = encryptBinaryWithLimit(Buffer.from(row.text, "utf8"), MAX_MESSAGE_TEXT_UTF8_BYTES)
           if (decrypt(sealed) !== row.text) { result.conflicts++; continue }
         }
         if (!options.apply) { result.verified++; continue }

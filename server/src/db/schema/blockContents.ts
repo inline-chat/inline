@@ -39,6 +39,7 @@ export const blockContentImageJobs = pgTable(
     expectedRevision: integer("expected_revision").notNull(),
     blockPath: integer("block_path").array().notNull(),
     sourceHash: bytea("source_hash").notNull(),
+    hashVersion: smallint("hash_version").notNull().default(0),
     sourceEncrypted: bytea("source_encrypted").notNull(),
     sourceIv: bytea("source_iv").notNull(),
     sourceTag: bytea("source_tag").notNull(),

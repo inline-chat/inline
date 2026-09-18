@@ -1,3 +1,4 @@
+import { encryptedText } from "./encrypted"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
@@ -12,6 +13,7 @@ export const urlPreviewCache = pgTable(
     id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
 
     urlHash: bytea("url_hash").notNull(),
+    hashVersion: integer("hash_version").notNull().default(0),
     url: bytea("url").notNull(),
     urlIv: bytea("url_iv").notNull(),
     urlTag: bytea("url_tag").notNull(),
@@ -21,7 +23,7 @@ export const urlPreviewCache = pgTable(
     finalUrlTag: bytea("final_url_tag"),
 
     provider: text("provider").notNull().default("generic"),
-    siteName: text("site_name"),
+    siteName: encryptedText("site_name", "preview.siteName"),
     mediaType: text("media_type", { enum: ["article", "image", "video", "document", "embed"] }),
 
     title: bytea("title"),
@@ -94,7 +96,7 @@ export const urlPreview = pgTable("url_preview", {
   urlIv: bytea("url_iv"),
   urlTag: bytea("url_tag"),
 
-  siteName: text("site_name"),
+  siteName: encryptedText("site_name", "preview.siteName"),
   provider: text("provider").notNull().default("generic"),
   mediaType: text("media_type", { enum: ["article", "image", "video", "document", "embed"] }),
 
@@ -156,7 +158,7 @@ export const externalTasks = pgTable(
       { onDelete: "set null" },
     ),
     number: text("number"),
-    url: text("url"),
+    url: encryptedText("url", "externalTasks.url"),
 
     /** title of the task (encrypted) */
     title: bytea("title"),

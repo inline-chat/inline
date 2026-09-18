@@ -40,6 +40,7 @@ import {
   EventEmitter,
 } from "node:events"
 import { assertProviderAuthStartupConfiguration } from "@in/server/modules/auth/provider/startup"
+import { assertContentEncryptionConfigured } from "@in/server/modules/encryption/contentEncryption"
 import type { InlineProtocolConfiguration } from "@in/server/modules/inlineProtocol/config"
 
 const sentryRelease =
@@ -109,6 +110,7 @@ const startServerWithProcessOwnership = (
   options: StartServerOptions = {},
   startBackgroundProcesses: boolean,
 ): Promise<CoreProductionServerHandle> => {
+  assertContentEncryptionConfigured()
   assertProviderAuthStartupConfiguration({
     isProduction: NODE_ENV === "production",
   })

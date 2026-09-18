@@ -1044,6 +1044,13 @@
       "when": 1789689600000,
       "tag": "0148_replay-result-encryption",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1789693200000,
+      "tag": "0149_content-storage-encryption",
+      "breakpoints": true
     }
   ]
 }
