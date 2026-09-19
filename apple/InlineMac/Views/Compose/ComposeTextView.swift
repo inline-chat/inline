@@ -451,14 +451,18 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
-    // Note(@Mo) Important: Temporarily disable rich-text paste entirely. We still rely on AppKit's native
-    // plain-text paste pipeline for correct undo/redo, IME behavior, and selection handling, but we do not
-    // allow any clipboard-provided styling to enter the compose view while we stabilize edge cases.
+    // Keep formatting editable as Markdown source in compose. AppKit still
+    // handles insertion and undo, with only our own typing attributes applied.
     let beforeRange = clampedRange(selectedRange())
     let beforeLength = (string as NSString).length
 
     resetTypingAttributesToDefault()
-    super.pasteAsPlainText(sender)
+    if let markdown = MessageTextPasteboard.markdown() {
+      let text = NSAttributedString(string: markdown, attributes: defaultTypingAttributes)
+      insertText(text, replacementRange: beforeRange)
+    } else {
+      super.pasteAsPlainText(sender)
+    }
     resetTypingAttributesToDefault()
     finishPastedText(replacedRange: beforeRange, previousLength: beforeLength)
     DispatchQueue.main.async { [weak self] in

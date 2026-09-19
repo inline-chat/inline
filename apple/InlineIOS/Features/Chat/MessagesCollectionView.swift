@@ -4408,9 +4408,12 @@ private extension MessagesCollectionView {
 
       var actions: [UIAction] = []
 
-      if message.hasText {
+      if message.hasText, let text = fullMessage.displayText {
         let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
-          UIPasteboard.general.string = message.text
+          MessageTextPasteboard.copy(
+            text: text,
+            entities: fullMessage.translationEntities ?? message.entities
+          )
         }
         actions.append(copyAction)
       }

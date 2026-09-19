@@ -147,6 +147,20 @@ class MessageTextView: NSTextView {
     cancelTextHold(reason: "deinit")
   }
 
+  override func copy(_ sender: Any?) {
+    guard let storage = textStorage else { return }
+    let source = NSMutableAttributedString(string: "")
+    for value in selectedRanges where value.rangeValue.length > 0 {
+      let range = value.rangeValue
+      guard range.location >= 0, range.location <= storage.length,
+            range.length <= storage.length - range.location else { return }
+      if source.length > 0 { source.append(NSAttributedString(string: "\n")) }
+      source.append(storage.attributedSubstring(from: range))
+    }
+    guard source.length > 0 else { return }
+    MessageTextPasteboard.copy(source)
+  }
+
   override func writeSelection(to pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
     guard let storage = textStorage,
           selectedRanges.contains(where: { RichTextMath.containsRenderedMath(storage, range: $0.rangeValue) })

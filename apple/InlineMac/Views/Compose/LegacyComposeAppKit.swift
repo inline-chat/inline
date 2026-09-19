@@ -1534,10 +1534,15 @@ class LegacyComposeAppKit: NSView {
         addReplyEscHandler()
 
         if kind == .editing {
-          // set string to the message
-          let attributedString = toAttributedString(
+          let attributedString = MessageMarkdown.editableText(
             text: message.message.text ?? "",
-            entities: message.message.entities
+            entities: message.message.entities,
+            configuration: .init(
+              font: ComposeTextEditor.font,
+              primaryColor: ComposeTextEditor.textColor,
+              linkColor: ComposeTextEditor.linkColor,
+              convertMentionsToLink: false
+            )
           )
 
           // TODO: Extract these to a function

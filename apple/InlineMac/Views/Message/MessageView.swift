@@ -3321,14 +3321,10 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func copyMessage() {
-    NSPasteboard.general.clearContents()
-
-    // Old
-    // NSPasteboard.general.setString(message.text ?? "", forType: .string)
-
-    // Copy Translation
-    NSPasteboard.general
-      .setString(fullMessage.displayText ?? "", forType: .string)
+    MessageTextPasteboard.copy(
+      text: fullMessage.displayText ?? "",
+      entities: fullMessage.translationEntities ?? message.entities
+    )
   }
 
   @objc private func copyMessageWithEntities() {

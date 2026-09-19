@@ -116,32 +116,7 @@ final class RichBlockMultiSurfaceSelectionCoordinator {
   @discardableResult
   func writeSelection(to pasteboard: NSPasteboard) -> Bool {
     guard let selectedText, selectedText.length > 0 else { return false }
-    // Keep standard attributed-string presentation, not app-only entity or
-    // renderer objects, at the system RTF/HTML serialization boundary.
-    let export = NSMutableAttributedString(attributedString: selectedText)
-    let allowed: Set<NSAttributedString.Key> = [
-      .font, .foregroundColor, .backgroundColor, .paragraphStyle, .link,
-      .underlineStyle, .underlineColor, .strikethroughStyle, .strikethroughColor,
-      .kern, .baselineOffset, .ligature, .obliqueness, .expansion,
-      .strokeColor, .strokeWidth, .writingDirection, .superscript, .shadow, .attachment,
-    ]
-    selectedText.enumerateAttributes(in: NSRange(location: 0, length: selectedText.length)) { attributes, range, _ in
-      export.setAttributes(attributes.filter { allowed.contains($0.key) }, range: range)
-    }
-    pasteboard.clearContents()
-    var wrote = pasteboard.setString(selectedText.string, forType: .string)
-    for (pasteboardType, documentType) in [
-      (NSPasteboard.PasteboardType.rtf, NSAttributedString.DocumentType.rtf),
-      (.rtfd, .rtfd),
-      (.html, .html),
-    ] {
-      guard let data = try? export.data(
-        from: NSRange(location: 0, length: export.length),
-        documentAttributes: [.documentType: documentType]
-      ) else { continue }
-      wrote = pasteboard.setData(data, forType: pasteboardType) || wrote
-    }
-    return wrote
+    return MessageTextPasteboard.copy(selectedText, to: pasteboard)
   }
 
   private var selectedText: NSAttributedString? {

@@ -1,4 +1,5 @@
 import Logger
+import TextProcessing
 import UIKit
 import UniformTypeIdentifiers
 
@@ -98,14 +99,20 @@ class StandaloneComposeTextView: UITextView {
 
   // MARK: - Paste Handling
 
+  override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(paste(_:)), isEditable, MessageTextPasteboard.containsFormattedText() {
+      return true
+    }
+    return super.canPerformAction(action, withSender: sender)
+  }
+
   override func paste(_ sender: Any?) {
     if let image = UIPasteboard.general.image {
       composeDelegate?.composeTextView(self, didReceiveImage: image)
-    } else if let string = UIPasteboard.general.string {
-      // Insert plain text only
-      let range = selectedRange
-      let newText = (text as NSString).replacingCharacters(in: range, with: string)
-      text = newText
+    } else if let string = MessageTextPasteboard.markdown() ?? UIPasteboard.general.string {
+      // Keep Markdown markers visible while preserving the surrounding draft and native undo.
+      typingAttributes = [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
+      insertText(string)
       fixFontSizeAfterStickerInsertion()
       showPlaceholder(text.isEmpty)
       composeDelegate?.composeTextViewDidChange(self)

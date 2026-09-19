@@ -1530,7 +1530,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
-        // Set attributed text with entities to preserve mentions and formatting
+        // Show editable Markdown while retaining mention and thread identities.
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
@@ -1540,7 +1540,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             renderPhoneNumbers: false
           )
 
-          let attributedText = ProcessEntities.toAttributedString(
+          let attributedText = MessageMarkdown.editableText(
             text: text,
             entities: message.message.entities,
             configuration: configuration

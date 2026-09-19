@@ -465,23 +465,21 @@ public class ProcessEntities {
           )
 
         case .bold:
-          // Apply bold formatting
-          let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
-
-          let boldFont = createBoldFont(
-            from: existingAttributes[.font] as? PlatformFont ?? configuration.font,
-            preferredWeight: configuration.boldWeight
-          )
-
-          attributedString.addAttribute(.font, value: boldFont, range: range)
+          // Preserve nested emphasis instead of stretching the first font across the entire entity.
+          attributedString.enumerateAttribute(.font, in: range) { value, fontRange, _ in
+            let boldFont = createBoldFont(
+              from: value as? PlatformFont ?? configuration.font,
+              preferredWeight: configuration.boldWeight
+            )
+            attributedString.addAttribute(.font, value: boldFont, range: fontRange)
+          }
 
         case .italic:
-          let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
-          let italicFont = createItalicFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
-          attributedString.addAttributes([
-            .font: italicFont,
-            .italic: true,
-          ], range: range)
+          attributedString.enumerateAttribute(.font, in: range) { value, fontRange, _ in
+            let italicFont = createItalicFont(from: value as? PlatformFont ?? configuration.font)
+            attributedString.addAttribute(.font, value: italicFont, range: fontRange)
+          }
+          attributedString.addAttribute(.italic, value: true, range: range)
 
         case .underline, .strikethrough, .highlight:
           if let style = InlineTextStyle.allCases.first(where: { $0.entityType == entity.type }) {
@@ -722,7 +720,9 @@ public class ProcessEntities {
       else { return }
 
       let commandText = (attributedString.string as NSString).substring(with: range)
-      guard isBotCommandText(commandText) else { return }
+      // Editable Markdown can temporarily sit inside an otherwise valid command label.
+      // Validate its visible spelling after removing those markers so routing metadata survives.
+      guard parseMarkdown || isBotCommandText(commandText) else { return }
 
       var entity = MessageEntity()
       entity.type = .botCommand
@@ -762,7 +762,12 @@ public class ProcessEntities {
     ) { value, range, _ in
       guard value != nil, range.length > 0 else { return }
 
-      let phoneText = (attributedString.string as NSString).substring(with: range)
+      var phoneText = (attributedString.string as NSString).substring(with: range)
+      if parseMarkdown, !isValidPhoneNumberCandidate(phoneText) {
+        // Validate only explicit phone metadata after stripping editable syntax. A plain
+        // attributed string avoids re-entering this attribute path; tel: link labels may be arbitrary.
+        phoneText = fromAttributedString(NSAttributedString(string: phoneText)).text
+      }
       guard isValidPhoneNumberCandidate(phoneText) else { return }
 
       var entity = MessageEntity()
@@ -1039,6 +1044,15 @@ public class ProcessEntities {
       }
     }
 
+    if parseMarkdown {
+      let visibleText = text as NSString
+      entities.removeAll { entity in
+        guard entity.type == .botCommand else { return false }
+        guard let range = validatedRange(of: entity, in: visibleText) else { return true }
+        return !isBotCommandText(visibleText.substring(with: range))
+      }
+    }
+
     // Detect whole URLs before email/phone substrings inside their paths or queries.
     entities = extractMissingURLEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
     entities = extractBotCommandEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
@@ -1310,11 +1324,11 @@ public class ProcessEntities {
   /// Regex pattern for pre code blocks with optional language specification
   /// Matches: ```[language]\n[content]``` or ```[content]```
   /// Examples: "```swift\nlet x = 1```", "```hello world```"
-  private static let preBlockPattern = "```(?:([a-zA-Z0-9+#-]+)\\n)?([\\s\\S]*?)```"
+  private static let preBlockPattern = "(?<!`)(`{3}|`{4,}(?=(?:[a-zA-Z0-9+#-]+)?\\n))(?!`)(?:([a-zA-Z0-9+#-]+)\\n)?([\\s\\S]*?)(?<!`)\\1(?!`)"
 
   /// Regex pattern for inline code blocks
   /// Matches: `[content]`
-  private static let inlineCodePattern = "`(.*?)`"
+  private static let inlineCodePattern = "(?<!`)(`+)(?!`)([\\s\\S]*?)(?<!`)\\1(?!`)"
 
   /// Regex pattern for bold text
   /// Matches: **[content]**
@@ -1748,7 +1762,7 @@ public class ProcessEntities {
       return converted
     }
     // Fallback: try to create italic using font descriptor
-    let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
+    let descriptor = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(.italic))
     if let italicFont = NSFont(descriptor: descriptor, size: font.pointSize) {
       return italicFont
     }
@@ -1756,6 +1770,10 @@ public class ProcessEntities {
     let safeSize = max(font.pointSize, 12.0)
     return NSFont.systemFont(ofSize: safeSize)
     #else
+    let traits = font.fontDescriptor.symbolicTraits.union(.traitItalic)
+    if let descriptor = font.fontDescriptor.withSymbolicTraits(traits) {
+      return UIFont(descriptor: descriptor, size: font.pointSize)
+    }
     let safeSize = max(font.pointSize, 12.0)
     return UIFont.italicSystemFont(ofSize: safeSize)
     #endif
@@ -1941,8 +1959,15 @@ public class ProcessEntities {
         }
 
         // Get the content range (excluding `)
-        if match.numberOfRanges > 1 {
-          let contentRange = match.range(at: 1)
+        if match.numberOfRanges > 2 {
+          var contentRange = match.range(at: 2)
+          let rawContent = nsText.substring(with: contentRange)
+          // Padding separates a backtick at either edge from its longer delimiter.
+          if rawContent.hasPrefix(" "), rawContent.hasSuffix(" "),
+             rawContent.contains(where: { $0 != " " }) {
+            contentRange.location += 1
+            contentRange.length -= 2
+          }
 
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
             // Convert NSRange to Range<String.Index> safely
@@ -1958,8 +1983,8 @@ public class ProcessEntities {
             // Replace the full match with just the content
             text.replaceSubrange(swiftFullRange, with: contentText)
 
-            let openMarkerLength = 1
-            let closeMarkerLength = 1
+            let openMarkerLength = contentRange.location - fullRange.location
+            let closeMarkerLength = NSMaxRange(fullRange) - NSMaxRange(contentRange)
             let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
             removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
             removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
@@ -2017,7 +2042,15 @@ public class ProcessEntities {
       }
 
       var textEnd = cursor + 1
-      while textEnd < nsText.length, nsText.character(at: textEnd) != 93 {
+      var bracketDepth = 1
+      while textEnd < nsText.length {
+        let character = nsText.character(at: textEnd)
+        if character == 91 {
+          bracketDepth += 1
+        } else if character == 93 {
+          bracketDepth -= 1
+          if bracketDepth == 0 { break }
+        }
         textEnd += 1
       }
 
@@ -2302,10 +2335,10 @@ public class ProcessEntities {
           continue
         }
 
-        // Get the content range - always in group 2 with new regex
+        // Group 1 is the fence, group 2 is the optional language, group 3 is the content.
         let contentRange: NSRange
-        if match.numberOfRanges >= 3, match.range(at: 2).location != NSNotFound {
-          contentRange = match.range(at: 2)
+        if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
+          contentRange = match.range(at: 3)
         } else {
           continue // Skip if no valid content group found
         }

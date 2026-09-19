@@ -176,6 +176,13 @@ class ComposeTextView: UITextView {
     placeholderLabel?.alpha = show ? 1 : 0
   }
 
+  override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(paste(_:)), isEditable, MessageTextPasteboard.containsFormattedText() {
+      return true
+    }
+    return super.canPerformAction(action, withSender: sender)
+  }
+
   override func paste(_ sender: Any?) {
     if UIPasteboard.general.image != nil {
       composeView?.handlePastedImage()
@@ -197,14 +204,16 @@ class ComposeTextView: UITextView {
       resetTypingAttributesToDefault()
       textDidChange()
       delegate?.textViewDidChange?(self)
-    } else if let string = UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString {
+    } else if let string = MessageTextPasteboard.markdown()
+      ?? UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString
+    {
       let replacedRange = selectedRange
       willChangePastedLinks(in: replacedRange, replacement: string)
       let pasteResult = ComposeThreadLinkEditing.insertPlainText(
         string,
         into: attributedText ?? NSAttributedString(),
         selectedRange: selectedRange,
-        typingAttributes: typingAttributes,
+        typingAttributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label],
         textColor: UIColor.label
       )
       registerFormattingUndo(actionName: "Paste")

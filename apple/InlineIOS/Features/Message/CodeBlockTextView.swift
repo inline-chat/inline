@@ -24,15 +24,12 @@ final class CodeBlockTextView: UITextView {
   }
 
   override func copy(_ sender: Any?) {
-    guard let text = attributedText, RichTextMath.containsRenderedMath(text, range: selectedRange),
-          let source = RichTextMath.sourceAttributedText(text, range: selectedRange)
+    let range = selectedRange
+    guard let text = attributedText,
+          range.location != NSNotFound, range.location >= 0, range.length > 0,
+          range.location <= text.length, range.length <= text.length - range.location
     else { super.copy(sender); return }
-    var item: [String: Any] = ["public.utf8-plain-text": source.string]
-    if let rtf = try? source.data(from: NSRange(location: 0, length: source.length),
-                                  documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
-      item["public.rtf"] = rtf
-    }
-    UIPasteboard.general.items = [item]
+    MessageTextPasteboard.copy(text.attributedSubstring(from: range))
   }
 
   override func draw(_ rect: CGRect) {
