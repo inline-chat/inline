@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { UploadKind, type UploadComplete } from "@inline-chat/protocol/core"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
@@ -29,6 +29,22 @@ import type { UploadPartStore } from "./partStore"
 import { NativeUploadWorker, storagePartGeometry } from "./worker"
 
 setDefaultTimeout(120_000)
+
+// Always stop test-owned workers, including when an assertion or wait fails.
+// Otherwise their background DB work races the next test's TRUNCATE.
+const activeWorkers = new Set<NativeUploadWorker>()
+const createWorker = (...args: ConstructorParameters<typeof NativeUploadWorker>) => {
+  const worker = new NativeUploadWorker(...args)
+  activeWorkers.add(worker)
+  return worker
+}
+afterEach(async () => {
+  const stopped = await Promise.allSettled([...activeWorkers].map((worker) => worker.stop()))
+  activeWorkers.clear()
+  const failures = stopped.filter((result) => result.status === "rejected")
+  if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Test upload workers failed to stop")
+})
+
 
 const context = (userId: number, sessionId: number): HandlerContext => ({
   userId,
@@ -307,7 +323,7 @@ describe("native upload multipart worker", () => {
     multipart.uploadDelayMs = 500
     const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 20).fill(19)
     const finalizer = makeFinalizer(body)
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 4,
       pollIntervalMs: 5_000,
     })
@@ -347,11 +363,11 @@ describe("native upload multipart worker", () => {
     const upload = await repository.get(created.uploadId, owner)
     if (!upload) throw new Error("Expected an upload row")
 
-    const first = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const first = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 2,
       pollIntervalMs: 20,
     })
-    const second = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const second = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 2,
       pollIntervalMs: 20,
     })
@@ -369,7 +385,7 @@ describe("native upload multipart worker", () => {
   })
 
   test("does not start a new worker generation while the prior stop is draining", async () => {
-    const worker = new NativeUploadWorker(
+    const worker = createWorker(
       new InlineUploadRepository(),
       new MemoryPartStore(),
       new MemoryMultipartStore(),
@@ -387,7 +403,7 @@ describe("native upload multipart worker", () => {
 
   test("bounds shutdown when expiry discovery is stalled and blocks a new generation", async () => {
     const repository = new HangingCleanupRepository()
-    const worker = new NativeUploadWorker(
+    const worker = createWorker(
       repository,
       new MemoryPartStore(),
       new MemoryMultipartStore(),
@@ -424,7 +440,7 @@ describe("native upload multipart worker", () => {
       .toBe("processing")
     expect(performance.now() - finishStartedAt).toBeLessThan(250)
 
-    const firstWorker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const firstWorker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 2, pollIntervalMs: 5_000, random: () => 1,
     })
     firstWorker.start()
@@ -436,7 +452,7 @@ describe("native upload multipart worker", () => {
     })
     await firstWorker.stop()
 
-    const secondWorker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const secondWorker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 2, pollIntervalMs: 20, random: () => 0,
     })
     secondWorker.start()
@@ -469,10 +485,10 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 72)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const first = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const first = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
-    const second = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const second = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     first.start()
@@ -502,7 +518,7 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 76)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     worker.start()
@@ -528,7 +544,7 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 77)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     worker.start()
@@ -564,7 +580,7 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 73)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const first = new NativeUploadWorker(repository, staging, multipart, blockedFinalizer, {
+    const first = createWorker(repository, staging, multipart, blockedFinalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     first.start()
@@ -575,7 +591,7 @@ describe("native upload multipart worker", () => {
     expect(released?.lockToken).toBeNull()
     expect(released?.lockedAt).toBeNull()
 
-    const second = new NativeUploadWorker(repository, staging, multipart, makeFinalizer(body), {
+    const second = createWorker(repository, staging, multipart, makeFinalizer(body), {
       concurrency: 1, pollIntervalMs: 20,
     })
     second.start()
@@ -598,7 +614,7 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 80)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1,
       leaseRenewTimeoutMs: 10,
       pollIntervalMs: 20,
@@ -638,7 +654,7 @@ describe("native upload multipart worker", () => {
       .where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId)))
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, legacyFinalizer, {
+    const worker = createWorker(repository, staging, multipart, legacyFinalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     worker.start()
@@ -666,7 +682,7 @@ describe("native upload multipart worker", () => {
     const created = await saveBody(operations, requestContext, body, 75)
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, invalidFinalizer, {
+    const worker = createWorker(repository, staging, multipart, invalidFinalizer, {
       concurrency: 1, pollIntervalMs: 20,
     })
     worker.start()
@@ -697,7 +713,7 @@ describe("native upload multipart worker", () => {
     }
     await operations.finish({ uploadId: created.uploadId }, requestContext)
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1,
       pollIntervalMs: 20,
     })
@@ -728,7 +744,7 @@ describe("native upload multipart worker", () => {
       hardExpiresAt: new Date(0),
     }).where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId)))
 
-    const worker = new NativeUploadWorker(repository, staging, multipart, finalizer, {
+    const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1,
       expiryCleanupIntervalMs: 20,
       pollIntervalMs: 20,

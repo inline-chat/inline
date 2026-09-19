@@ -4,6 +4,10 @@
     {
       "name": "inline-effect",
       "specifier": "./server/scripts/lint/oxlint-plugin-inline-effect.js"
+    },
+    {
+      "name": "inline-tests",
+      "specifier": "./server/scripts/lint/oxlint-plugin-inline-tests.js"
     }
   ],
   "categories": {
@@ -41,6 +45,16 @@
       "rules": {
         "inline-effect/no-effect-escape-hatch": "error",
         "inline-effect/require-suppression-reason": "error"
+      }
+    },
+    {
+      "files": [
+        "server/**/*.{test,spec}.{ts,tsx}",
+        "server/scripts/lint/fixtures/*focused-tests.ts",
+        "server/scripts/lint/fixtures/valid-test-focus-text.ts"
+      ],
+      "rules": {
+        "inline-tests/no-focused-tests": "error"
       }
     }
   ]

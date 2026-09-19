@@ -31,8 +31,10 @@ bun run --cwd server lint
 bun run --cwd server test
 ```
 
-The full suite is relatively expensive. CI configuration and its disposable
-PostgreSQL service are in [server-test.yml](../.github/workflows/server-test.yml).
-Do not point tests at a development database containing data you need to keep.
+See [TESTING.md](TESTING.md) for fast no-database checks, focused runs,
+isolated PostgreSQL tests, coverage priorities, and test-writing conventions.
+The canonical runner creates disposable databases and never resets the database
+named in `TEST_DATABASE_URL`. CI uses a disposable PostgreSQL service in
+[server-test.yml](../.github/workflows/server-test.yml).
 
 Security reports: [SECURITY.md](../SECURITY.md).

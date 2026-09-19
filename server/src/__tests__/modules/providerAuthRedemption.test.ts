@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
 import { db, schema } from "@in/server/db"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -13,6 +13,22 @@ import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const verifier = "provider-redemption-verifier-000000000000000000"
+
+const invalidRedemptions: {
+  name: string
+  patch?: Partial<schema.DbNewProviderAuthAttempt>
+  presentedTicket?: string
+  presentedVerifier?: string
+}[] = [
+  { name: "wrong proof key", presentedVerifier: "x".repeat(43) },
+  { name: "malformed proof key", presentedVerifier: "short" },
+  { name: "unknown ticket", presentedTicket: "unknown-ticket" },
+  { name: "expired ticket", patch: { expiresAt: new Date(0) } },
+  { name: "incomplete sign-in", patch: { status: "pending_invite" } },
+  { name: "already consumed ticket", patch: { usedAt: new Date(0) } },
+  { name: "wrong authentication flow", patch: { purpose: "mcp_oauth" } },
+  { name: "missing account", patch: { inlineUserId: null } },
+]
 
 async function createCompletedAttempt(input: {
   userId: number
@@ -44,6 +60,51 @@ async function createCompletedAttempt(input: {
 
 describe("provider app ticket redemption", () => {
   setupTestLifecycle()
+
+  test.each(invalidRedemptions)("$name cannot consume a ticket or change existing sessions", async (scenario) => {
+    const user = await testUtils.createUser("provider-invalid@test.com")
+    await testUtils.createSessionForUser(user.id, { clientType: "ios", deviceId: "same-device" })
+    const ticket = "valid-ticket"
+    const attemptId = await createCompletedAttempt({ userId: user.id, ticket, deviceId: "same-device" })
+    if (scenario.patch) await db.update(schema.providerAuthAttempts).set(scenario.patch)
+      .where(eq(schema.providerAuthAttempts.id, attemptId))
+    const snapshot = async () => ({
+      attempts: await db.select().from(schema.providerAuthAttempts).where(eq(schema.providerAuthAttempts.id, attemptId)),
+      sessions: await db.select().from(schema.sessions).where(eq(schema.sessions.userId, user.id)),
+    })
+    const before = await snapshot()
+    expect(await redeemProviderTicket(scenario.presentedTicket ?? ticket, scenario.presentedVerifier ?? verifier)).toBeUndefined()
+    expect(await snapshot()).toEqual(before)
+  })
+
+  test("a late redemption failure rolls back ticket consumption and device-session replacement together", async () => {
+    const user = await testUtils.createUser("provider-rollback@test.com")
+    const previous = await testUtils.createSessionForUser(user.id, { clientType: "ios", deviceId: "same-device" })
+    const ticket = "rollback-ticket"
+    const attemptId = await createCompletedAttempt({ userId: user.id, ticket, deviceId: "same-device" })
+    const snapshot = async () => ({
+      attempts: await db.select().from(schema.providerAuthAttempts).where(eq(schema.providerAuthAttempts.id, attemptId)),
+      sessions: await db.select().from(schema.sessions).where(eq(schema.sessions.userId, user.id)),
+    })
+    const before = await snapshot()
+    await db.execute(sql`CREATE FUNCTION test_reject_ticket_consumption() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'test injected ticket failure'; END $$;
+      CREATE TRIGGER test_reject_ticket_consumption BEFORE UPDATE ON provider_auth_attempts
+      FOR EACH ROW EXECUTE FUNCTION test_reject_ticket_consumption();`)
+    try {
+      await expect(redeemProviderTicket(ticket, verifier)).rejects.toThrow("test injected ticket failure")
+      expect(await snapshot()).toEqual(before)
+    } finally {
+      await db.execute(sql`DROP TRIGGER test_reject_ticket_consumption ON provider_auth_attempts;
+        DROP FUNCTION test_reject_ticket_consumption();`)
+    }
+    expect((await redeemProviderTicket(ticket, verifier))?.userId).toBe(user.id)
+    const after = await snapshot()
+    expect(after.attempts[0]).toMatchObject({ status: "used", usedAt: expect.any(Date) })
+    expect(after.sessions).toHaveLength(2)
+    expect(after.sessions.find((row) => row.id === previous.session.id)?.revoked).toBeInstanceOf(Date)
+    expect(after.sessions.filter((row) => row.revoked === null)).toHaveLength(1)
+  })
 
   test("creates the app session only when the ticket is redeemed and rejects replay", async () => {
     const user = await testUtils.createUser("provider-redeem@test.com")

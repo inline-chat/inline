@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
@@ -18,6 +18,39 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { DialogFollowMode, MessageSubthread_Kind, MessageEntity_Type } from "@inline-chat/protocol/core"
+import * as threadTitles from "@in/server/modules/threadTitles"
+import * as threadLinks from "@in/server/modules/threadGraph/links"
+import * as parentMaterialization from "@in/server/modules/subthreadParentMaterialization"
+import * as subthreads from "@in/server/modules/subthreads"
+import { trackBackgroundWork } from "../background"
+
+// Exercise the real title fallback and subthread persistence without a provider
+// request. Generated-title responses have their own threadTitles contract tests.
+mock.module("@in/server/libs/openAI", () => ({
+  openaiClient: {
+    chat: { completions: { parse: async () => ({
+      choices: [{ finish_reason: "stop", message: { parsed: { title: null, emoji: null } } }],
+    }) } },
+  },
+}))
+
+// A visible parent card can commit before its fanout, graph and title work ends.
+// Observe the real jobs so no previous test can still write during the next reset.
+const background = trackBackgroundWork()
+const trackedTitle = background.wrap(threadTitles.maybeScheduleThreadTitleGeneration)
+const trackedReplyLink = background.wrap(threadLinks.materializeReplyThreadLink)
+const trackedMessageLinks = background.wrap(threadLinks.replaceMessageThreadLinks)
+const trackedParentCard = background.wrap(parentMaterialization.materializeFirstMessageExperience)
+const trackedParentUpdate = background.wrap(subthreads.emitMessageSubthreadUpdateIfNeeded)
+const backgroundSpies = [
+  spyOn(threadTitles, "maybeScheduleThreadTitleGeneration").mockImplementation(trackedTitle),
+  spyOn(threadLinks, "materializeReplyThreadLink").mockImplementation(trackedReplyLink),
+  spyOn(threadLinks, "replaceMessageThreadLinks").mockImplementation(trackedMessageLinks),
+  spyOn(parentMaterialization, "materializeFirstMessageExperience").mockImplementation(trackedParentCard),
+  spyOn(subthreads, "emitMessageSubthreadUpdateIfNeeded").mockImplementation(trackedParentUpdate),
+]
+afterEach(() => background.drain())
+afterAll(() => { for (const spy of backgroundSpies) spy.mockRestore() })
 
 describe("messages.createSubthread", () => {
   setupTestLifecycle()

@@ -126,8 +126,7 @@ describe("connectors", () => {
   })
 
   test("keeps the default connection time as an absolute instant outside UTC", async () => {
-    const beforeInsert = Date.now()
-    await db.transaction(async (tx) => {
+    const expectedEpoch = await db.transaction(async (tx) => {
       await tx.execute(sql`set local time zone 'Asia/Tehran'`)
       await tx.insert(integrations).values({
         userId: currentUserId,
@@ -136,8 +135,12 @@ describe("connectors", () => {
         accessTokenIv: Buffer.from("iv"),
         accessTokenTag: Buffer.from("tag"),
       })
+      const [clock] = await tx.execute<{ epoch: number }>(sql`
+        select extract(epoch from current_timestamp(3))::double precision as epoch
+      `)
+      if (!clock) throw new Error("transaction clock not found")
+      return clock.epoch
     })
-    const afterInsert = Date.now()
 
     const result = await listConnectors(context)
     const connectedAt = result.connections.find(
@@ -145,8 +148,7 @@ describe("connectors", () => {
     )?.connectedAt
 
     expect(connectedAt).toBeDefined()
-    expect(Number(connectedAt) * 1_000).toBeGreaterThanOrEqual(beforeInsert - 1_000)
-    expect(Number(connectedAt) * 1_000).toBeLessThanOrEqual(afterInsert + 1_000)
+    expect(Math.abs(Number(connectedAt) - expectedEpoch)).toBeLessThan(1)
   })
 
   test("preserves legacy wall-clock instants when converting outside UTC", async () => {
@@ -158,7 +160,12 @@ describe("connectors", () => {
             date timestamp(3) without time zone default now()
           ) on commit drop
         `)
-        const beforeInsert = Date.now()
+        // now() is the transaction start, not the later wall-clock INSERT time.
+        // Comparing that same database clock removes load-dependent tolerance.
+        const [clock] = await tx.execute<{ epoch: number }>(sql`
+          select extract(epoch from current_timestamp(3))::double precision as epoch
+        `)
+        if (!clock) throw new Error("transaction clock not found")
         await tx.execute(sql`insert into connector_time_migration_check default values`)
         await tx.execute(sql`
           alter table connector_time_migration_check
@@ -169,11 +176,9 @@ describe("connectors", () => {
           select extract(epoch from date)::double precision as epoch
           from connector_time_migration_check
         `)
-        const afterInsert = Date.now()
         if (!stored) throw new Error("migrated timestamp not found")
 
-        expect(stored.epoch * 1_000).toBeGreaterThanOrEqual(beforeInsert - 1_000)
-        expect(stored.epoch * 1_000).toBeLessThanOrEqual(afterInsert + 1_000)
+        expect(stored.epoch).toBe(clock.epoch)
       })
     }
   })

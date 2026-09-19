@@ -112,7 +112,10 @@ export const testUtils = {
   },
 
   // Create a space and add members
-  async createSpaceWithMembers(spaceName: string, userEmails: string[]): Promise<{ space: any; users: any[] }> {
+  async createSpaceWithMembers<const Emails extends readonly string[]>(
+    spaceName: string,
+    userEmails: Emails,
+  ): Promise<{ space: schema.DbSpace; users: { [K in keyof Emails]: schema.DbUser } }> {
     const space = await testUtils.createSpace(spaceName)
     if (!space) throw new Error("Failed to create space")
     const users = await Promise.all(userEmails.map((email) => testUtils.createUser(email)))
@@ -122,7 +125,7 @@ export const testUtils = {
       .insert(schema.members)
       .values(validUsers.map((u) => ({ userId: u!.id, spaceId: space.id, role: "member" as const })))
       .execute()
-    return { space, users: validUsers }
+    return { space, users: validUsers as { [K in keyof Emails]: schema.DbUser } }
   },
 
   // Create a thread chat (public or private) with dialog and message for a user
@@ -136,13 +139,13 @@ export const testUtils = {
     messageFromUser = null,
   }: {
     spaceId: number
-    user: any
-    otherUsers?: any[]
+    user: schema.DbUser
+    otherUsers?: schema.DbUser[]
     title?: string
     isPublic?: boolean
     messageText?: string
-    messageFromUser?: any | null
-  }): Promise<{ chat: any; msg: any }> {
+    messageFromUser?: schema.DbUser | null
+  }): Promise<{ chat: DbChat; msg: DbMessage }> {
     const chat = await testUtils.createChat(spaceId, title, "thread", isPublic)
     if (!chat) throw new Error("Failed to create chat")
 
@@ -182,11 +185,11 @@ export const testUtils = {
     messageFromUser = null,
   }: {
     spaceId: number
-    userA: any
-    userB: any
+    userA: schema.DbUser
+    userB: schema.DbUser
     messageText?: string
-    messageFromUser?: any | null
-  }): Promise<{ chat: any; msg: any }> {
+    messageFromUser?: schema.DbUser | null
+  }): Promise<{ chat: DbChat; msg: DbMessage }> {
     const chat = await db
       .insert(schema.chats)
       .values({
@@ -228,11 +231,11 @@ export const testUtils = {
     createDialogForUserA = true,
     createDialogForUserB = false,
   }: {
-    userA: any
-    userB: any
+    userA: schema.DbUser
+    userB: schema.DbUser
     createDialogForUserA?: boolean
     createDialogForUserB?: boolean
-  }): Promise<{ chat: any; dialogA?: any; dialogB?: any }> {
+  }): Promise<{ chat: DbChat; dialogA?: schema.DbDialog; dialogB?: schema.DbDialog }> {
     const chat = await db
       .insert(schema.chats)
       .values({

@@ -92,8 +92,10 @@ export async function dialogOrderForPlacement(
   // The user row is the database-owned serialization point for all derived
   // order allocations. Lock it before reading the edge so UPDATE_DIALOG_OPEN,
   // UPDATE_DIALOG_ORDER, and other dialog-opening paths cannot derive the same
-  // fractional key on separate connections.
-  await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
+  // fractional key on separate connections. No user key changes here: allow
+  // message INSERTs to hold FK KEY SHARE while they own the chat row. FOR UPDATE
+  // would deadlock with a dialog INSERT waiting for that same chat's FK lock.
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
 
   const column = lane === "pinned" ? dialogs.pinnedOrder : dialogs.order
   const laneFilter =
@@ -261,7 +263,7 @@ async function setDialogOpenForUsersInTransaction(
     // writers use the same users -> dialogs order, so overlapping batches do
     // not deadlock or derive a stale fractional order.
     for (const userId of userIds) {
-      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
     }
 
     const existingDialogs = await tx

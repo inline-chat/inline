@@ -78,8 +78,11 @@ jobs:
       - name: Audit server runtime dependencies
         run: bun server/scripts/security-audit.ts
 
+      - name: Check test discovery and focused tests
+        run: cd server && bun run test:check
+
       - name: Test preview network boundaries
-        run: cd server/packages/url-preview && bun test
+        run: cd server && bun run test:preview
 
       - name: Generate protos (drift check)
         env:
@@ -131,5 +134,15 @@ jobs:
       - name: Smoke test the full core shadow
         run: cd server && bun run core:smoke
 
-      - name: Run tests
+      - name: Run isolated server tests
         run: cd server && bun run test:bun
+
+      - name: Upload test reports and timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-results
+          path: server/.test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
