@@ -3,6 +3,11 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repo_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
+build_jobs="${SWIFT_BUILD_JOBS:-2}"
+if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: SWIFT_BUILD_JOBS must be a positive integer" >&2
+  exit 2
+fi
 
 echo "Apple CI toolchain:"
 sw_vers
@@ -35,19 +40,15 @@ for package in "$@"; do
   echo "Building $package tests"
   (
     cd "$package_dir"
-    xcrun swift build --build-tests --disable-automatic-resolution
+    xcrun swift build --build-tests --disable-automatic-resolution --jobs "$build_jobs"
   )
 
   echo "Testing $package"
-  if [[ "$package" == "InlineKit" ]]; then
-    (
-      cd "$package_dir"
-      xcrun swift test --skip-build --disable-automatic-resolution --no-parallel
-    )
-  else
-    (
-      cd "$package_dir"
-      xcrun swift test --skip-build --disable-automatic-resolution
-    )
-  fi
+  # Pass explicitly: Swift Testing otherwise enables suite-level parallelism,
+  # even though `swift test --help` describes --no-parallel as the default.
+  # UI tests share platform services; GRDB fixtures also compete for setup time.
+  (
+    cd "$package_dir"
+    xcrun swift test --skip-build --disable-automatic-resolution --no-parallel
+  )
 done

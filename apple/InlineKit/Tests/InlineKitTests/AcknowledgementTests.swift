@@ -50,7 +50,7 @@ struct AcknowledgementTests {
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 4)) == [10, 12])
 
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 5, cleared: true)) == [12])
-      var rows = try FullMessage.queryRequest()
+      var rows = try FullMessage.queryRequest(currentUserId: 1)
         .filter(InlineKit.Message.Columns.chatId == 100)
         .fetchAll(db)
       let clearedMessage = try #require(rows.first { $0.message.messageId == 12 })
@@ -67,7 +67,7 @@ struct AcknowledgementTests {
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 5, cleared: true)).isEmpty)
 
       try Acknowledgement.save(db, cursor: cursor(2, 10, revision: 7))
-      rows = try FullMessage.queryRequest()
+      rows = try FullMessage.queryRequest(currentUserId: 1)
         .filter(InlineKit.Message.Columns.chatId == 100)
         .fetchAll(db)
       #expect(rows.first { $0.message.messageId == 10 }?.acknowledgementActors.map(\.acknowledgement.userId) == [2])
@@ -194,7 +194,7 @@ struct AcknowledgementTests {
         chatId: 100
       )
       try own.saveMessage(db)
-      let fullOwn = try #require(try FullMessage.queryRequest().fetchOne(db))
+      let fullOwn = try #require(try FullMessage.queryRequest(currentUserId: 1).fetchOne(db))
       #expect(fullOwn.acknowledgementAction(currentUserId: 1) == nil)
 
       func fullMessage(_ message: InlineKit.Message) -> FullMessage {
@@ -238,7 +238,7 @@ struct AcknowledgementTests {
         context: GetChatHistoryTransaction(peer: .thread(id: 100)).context,
         db: db
       )
-      let firstFrame = try #require(try FullMessage.queryRequest().fetchOne(db))
+      let firstFrame = try #require(try FullMessage.queryRequest(currentUserId: 1).fetchOne(db))
       #expect(firstFrame.acknowledgementActors.map(\.acknowledgement.userId) == [1])
       #expect(firstFrame.acknowledgementActors.first?.userInfo?.user.firstName == "Actor")
     }

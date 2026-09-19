@@ -1,6 +1,7 @@
 import Foundation
 import InlineConfig
 import Security
+import Synchronization
 
 enum KeychainReadOutcome<Value> {
   case success(Value, usedFallback: Bool)
@@ -19,6 +20,9 @@ enum KeychainReadOutcome<Value> {
 }
 
 enum AuthKeychainConfig {
+  // Mock credentials never belong in persistent preferences. Namespaces allow
+  // independent fixtures to exercise reopen/recovery against the same store.
+  private static let mockValues = Mutex<[String: Data]>([:])
   private static func mockStorageKey(_ key: String, namespace: String?) -> String {
     let namespace = namespace?.isEmpty == false ? namespace! : "default"
     return "mock_secure_\(namespace)_\(key)"
@@ -103,7 +107,7 @@ enum AuthKeychainConfig {
   }
 
   static func mockGetData(_ key: String, namespace: String?) -> Data? {
-    UserDefaults.standard.data(forKey: mockStorageKey(key, namespace: namespace))
+    mockValues.withLock { $0[mockStorageKey(key, namespace: namespace)] }
   }
 
   static func mockGetString(_ key: String, namespace: String?) -> String? {
@@ -112,7 +116,7 @@ enum AuthKeychainConfig {
   }
 
   static func mockSet(_ data: Data, forKey key: String, namespace: String?) {
-    UserDefaults.standard.set(data, forKey: mockStorageKey(key, namespace: namespace))
+    mockValues.withLock { $0[mockStorageKey(key, namespace: namespace)] = data }
   }
 
   static func mockSet(_ string: String, forKey key: String, namespace: String?) {
@@ -120,7 +124,7 @@ enum AuthKeychainConfig {
   }
 
   static func mockDelete(_ key: String, namespace: String?) {
-    UserDefaults.standard.removeObject(forKey: mockStorageKey(key, namespace: namespace))
+    mockValues.withLock { $0[mockStorageKey(key, namespace: namespace)] = nil }
   }
 
   static func readData(

@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 import InlineKit
 import InlineProtocol
@@ -57,7 +58,8 @@ struct TranslationReliabilityTests {
   }
 
   @Test("full message translation accessors do not fall back to original content when disabled")
-  func fullMessageTranslationAccessorsDoNotFallbackWhenDisabled() {
+  @MainActor
+  func fullMessageTranslationAccessorsDoNotFallbackWhenDisabled() throws {
     let peerId = Int64(91_001)
     let message = makeFullMessage(
       messageId: 91,
@@ -67,8 +69,13 @@ struct TranslationReliabilityTests {
       translationEntities: nil
     )
 
-    TranslationState.shared.setTranslationEnabled(false, for: .user(id: peerId))
-    defer { TranslationState.shared.setTranslationEnabled(false, for: .user(id: peerId)) }
+    // Exercise the real local projection without starting an authenticated RPC.
+    try seedTranslationDialog(peerId: peerId)
+    defer { removeTranslationDialog(peerId: peerId) }
+    let preferences = AppDatabase.shared.translationPreferences
+    let intent = UUID()
+    preferences.begin(false, for: .user(id: peerId), intent: intent)
+    defer { preferences.finish(for: .user(id: peerId), intent: intent) }
 
     #expect(message.translationText == nil)
     #expect(message.translationEntities == nil)
@@ -77,7 +84,8 @@ struct TranslationReliabilityTests {
   }
 
   @Test("full message translation entities are empty when translated text has no entities")
-  func fullMessageTranslationEntitiesAreEmptyForEntitylessTranslations() {
+  @MainActor
+  func fullMessageTranslationEntitiesAreEmptyForEntitylessTranslations() throws {
     let peerId = Int64(91_002)
     let message = makeFullMessage(
       messageId: 92,
@@ -87,8 +95,13 @@ struct TranslationReliabilityTests {
       translationEntities: nil
     )
 
-    TranslationState.shared.setTranslationEnabled(true, for: .user(id: peerId))
-    defer { TranslationState.shared.setTranslationEnabled(false, for: .user(id: peerId)) }
+    // Exercise the real local projection without starting an authenticated RPC.
+    try seedTranslationDialog(peerId: peerId)
+    defer { removeTranslationDialog(peerId: peerId) }
+    let preferences = AppDatabase.shared.translationPreferences
+    let intent = UUID()
+    preferences.begin(true, for: .user(id: peerId), intent: intent)
+    defer { preferences.finish(for: .user(id: peerId), intent: intent) }
 
     #expect(message.translationText == "plain translated")
     #expect(message.translationEntities?.entities.isEmpty == true)
@@ -141,6 +154,25 @@ struct TranslationReliabilityTests {
 
     state.subject.send((peer, true))
     #expect(received == [true])
+  }
+}
+
+private func seedTranslationDialog(peerId: Int64) throws {
+  try AppDatabase.shared.dbWriter.write { db in
+    try User(id: peerId, email: nil, firstName: "Translation fixture").insert(db)
+    let dialog = Dialog(optimisticForUserId: peerId)
+    try dialog.insert(db)
+  }
+}
+
+private func removeTranslationDialog(peerId: Int64) {
+  do {
+    try AppDatabase.shared.dbWriter.write { db in
+      try Dialog.filter(Dialog.Columns.peerUserId == peerId).deleteAll(db)
+      try User.deleteOne(db, id: peerId)
+    }
+  } catch {
+    Issue.record(error)
   }
 }
 

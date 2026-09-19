@@ -1,4 +1,5 @@
 import Foundation
+import InlineConfig
 import Security
 
 enum KeychainAccess {
@@ -48,6 +49,7 @@ final class KeychainStore: KeychainClient, @unchecked Sendable {
 
   @discardableResult
   func set(_ value: Data, forKey key: String, withAccess access: KeychainAccess? = nil) -> Bool {
+    precondition(!TestProcess.isRunning, "Tests must inject authentication; system Keychain access is forbidden")
     lock.lock()
     defer { lock.unlock() }
 
@@ -66,6 +68,7 @@ final class KeychainStore: KeychainClient, @unchecked Sendable {
   }
 
   func getData(_ key: String) -> Data? {
+    precondition(!TestProcess.isRunning, "Tests must inject authentication; system Keychain access is forbidden")
     lock.lock()
     defer { lock.unlock() }
 
@@ -89,6 +92,7 @@ final class KeychainStore: KeychainClient, @unchecked Sendable {
 
   @discardableResult
   func delete(_ key: String) -> Bool {
+    precondition(!TestProcess.isRunning, "Tests must inject authentication; system Keychain access is forbidden")
     lock.lock()
     defer { lock.unlock() }
 

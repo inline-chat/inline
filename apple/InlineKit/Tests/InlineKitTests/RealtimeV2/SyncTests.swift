@@ -4763,9 +4763,16 @@ final class SyncTests {
     await sync.setSyncActivityListener { await activity.record($0) }
     // Current Sync ingress treats userAddedToChat as fetch-only. Exercise the
     // lower-level bucket authority invariant directly, without changing ingress.
+    let retryGate = AsyncStream<Void>.makeStream()
+    defer { retryGate.continuation.finish() }
     let actor = BucketActor(
       key: .user, seq: 0, date: 0, client: client, sync: sync,
-      fetchLimiter: FetchLimiter(limit: 1), accountMutationToken: nil
+      fetchLimiter: FetchLimiter(limit: 1), accountMutationToken: nil,
+      sleepBeforeRetry: { _ in
+        // This scenario explicitly wakes retry; wall time must not race its gates.
+        for await _ in retryGate.stream {}
+        try Task.checkCancellation()
+      }
     )
     _ = await actor.noteHasNewUpdates(upToSeq: 1)
     let firstFetch = Task { await actor.fetchNewUpdates() }
@@ -4783,10 +4790,7 @@ final class SyncTests {
       await actor.processRealtimeUpdates([update2])
       #expect(await apply.appliedUpdates.isEmpty)
       #expect(await storage.getBucketState(for: .user).seq == 0)
-      let immediateRefetch = await waitForCondition(timeout: .milliseconds(250)) {
-        await client.getCallCount() > 1
-      }
-      #expect(immediateRefetch == false)
+      #expect(await client.getCallCount() == 1)
       #expect(await actor.wakeRetryIfNeeded())
       // Canceling the sleep does not release authority before the next fetch
       // owner has started; reconnect and live delivery can interleave here.

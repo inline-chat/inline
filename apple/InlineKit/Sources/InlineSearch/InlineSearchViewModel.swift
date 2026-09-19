@@ -27,9 +27,11 @@ public final class InlineSearchViewModel {
   @ObservationIgnored private let limits: InlineSearchLimits
   @ObservationIgnored private var scope: InlineSearchScope
   @ObservationIgnored private var searchToken: UInt64 = 0
-  @ObservationIgnored private var localTask: Task<Void, Never>?
-  @ObservationIgnored private var globalTask: Task<Void, Never>?
-  @ObservationIgnored private var moreMessagesTask: Task<Void, Never>?
+  // Internal read access lets integration tests await actual completion,
+  // including stale requests, without adding sleeps or replacing the engine.
+  @ObservationIgnored private(set) var localTask: Task<Void, Never>?
+  @ObservationIgnored private(set) var globalTask: Task<Void, Never>?
+  @ObservationIgnored private(set) var moreMessagesTask: Task<Void, Never>?
   @ObservationIgnored private var localErrorText: String?
   @ObservationIgnored private var globalErrorText: String?
 

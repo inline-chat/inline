@@ -1945,6 +1945,16 @@ public extension AppDatabase {
   }
 
   private static func makeShared() -> AppDatabase {
+    // Legacy singleton consumers in package tests must never open the user's
+    // application database or request its encryption key. Individual tests
+    // should still inject their own real GRDB writer for state isolation.
+    if TestProcess.isRunning {
+      do {
+        return try AppDatabase(DatabaseQueue(configuration: makeConfiguration(passphrase: "test-only")))
+      } catch {
+        fatalError("Unable to initialize test database: \(error)")
+      }
+    }
     let startedAt = Date()
     let sharedSpan = PerformanceTrace.begin("DatabaseMakeShared", category: .launch)
     defer { sharedSpan.end() }

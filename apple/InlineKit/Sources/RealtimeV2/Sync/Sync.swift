@@ -2951,6 +2951,7 @@ actor BucketActor {
   private var client: ProtocolClientType?
   private weak var sync: Sync?
   private let fetchLimiter: FetchLimiter
+  private let sleepBeforeRetry: @Sendable (Duration) async throws -> Void
   private let accountMutationToken: AuthAccountMutationToken?
 
   var key: BucketKey
@@ -3005,7 +3006,8 @@ actor BucketActor {
     client: ProtocolClientType?,
     sync: Sync?,
     fetchLimiter: FetchLimiter,
-    accountMutationToken: AuthAccountMutationToken?
+    accountMutationToken: AuthAccountMutationToken?,
+    sleepBeforeRetry: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
   ) {
     self.key = key
     self.seq = seq
@@ -3013,6 +3015,7 @@ actor BucketActor {
     self.client = client
     self.sync = sync
     self.fetchLimiter = fetchLimiter
+    self.sleepBeforeRetry = sleepBeforeRetry
     self.accountMutationToken = accountMutationToken
   }
 
@@ -4135,7 +4138,7 @@ actor BucketActor {
     log.warning("scheduling retry for bucket \(key) in \(delay)")
     retryTask = Task {
       do {
-        try await Task.sleep(for: delay)
+        try await sleepBeforeRetry(delay)
       } catch {
         return
       }

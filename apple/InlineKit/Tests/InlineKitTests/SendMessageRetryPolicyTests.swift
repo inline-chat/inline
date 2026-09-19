@@ -8,16 +8,7 @@ import Testing
 struct SendMessageRetryPolicyTests {
   @Test("optimistic send skips local message when current user id is missing")
   func optimisticSkipsMissingCurrentUserId() {
-    let userDefaultsKey = "\(AuthKeychainConfig.userDefaultsPrefix(mocked: false))userId"
-    let previous = UserDefaults.standard.object(forKey: userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-    defer {
-      if let previous {
-        UserDefaults.standard.set(previous, forKey: userDefaultsKey)
-      } else {
-        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-      }
-    }
+    #expect(Auth.getCurrentUserId() == nil)
 
     let transaction = TransactionSendMessage(
       text: "caption",

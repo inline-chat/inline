@@ -1,9 +1,10 @@
 import Combine
 import Foundation
+import InlineConfig
 import Logger
 
 public final class Auth: ObservableObject, @unchecked Sendable {
-  public static let shared = Auth()
+  public static let shared = TestProcess.isRunning ? Auth(mockAuthenticated: false) : Auth()
 
   private let log = Log.scoped("Auth")
   private let cache: AuthSnapshotCache
@@ -223,6 +224,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   public nonisolated static func getCurrentUserId() -> Int64? {
+    if TestProcess.isRunning { return shared.getCurrentUserId() }
     let key = "\(AuthKeychainConfig.userDefaultsPrefix(mocked: false))userId"
     guard let number = UserDefaults.standard.object(forKey: key) as? NSNumber else { return nil }
     return number.int64Value

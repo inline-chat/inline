@@ -10,7 +10,7 @@ import Testing
 // send; settled connection presentation is covered separately by the sync presentation suites.
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
-  @Test("onboarding profile submission waits for the authenticated V3 connection")
+  @Test("onboarding profile submission waits for the authenticated V3 connection", .timeLimit(.minutes(1)))
   func testOnboardingWaitsForConnection() async throws {
     let auth = Auth.mocked(authenticated: true)
     let account = try auth.handle.beginAccountMutation()
@@ -22,7 +22,8 @@ final class RealtimeSendTests {
         try await realtime.updateProfile(firstName: "Test", lastName: "Person", bio: nil)
       }
     }
-    #expect(await waitForCondition(timeout: .seconds(1)) { await transport.started })
+    for await _ in transport.didStart { break }
+    #expect(await transport.started)
     #expect(await transport.profileCalls == 0)
     await transport.allowConnection()
     let result = try await save.value
@@ -3819,6 +3820,8 @@ private func waitForCondition(
 }
 
 private actor DelayedOnboardingTransport: Transport {
+  private nonisolated let startSignal = AsyncStream<Void>.makeStream()
+  nonisolated var didStart: AsyncStream<Void> { startSignal.stream }
   nonisolated let events = AsyncChannel<TransportEvent>()
   private(set) var started = false
   private(set) var profileCalls = 0
@@ -3829,6 +3832,8 @@ private actor DelayedOnboardingTransport: Transport {
     guard !started else { return }
     started = true
     await events.send(.connecting)
+    startSignal.continuation.yield(())
+    startSignal.continuation.finish()
   }
   func allowConnection() async {
     connected = true

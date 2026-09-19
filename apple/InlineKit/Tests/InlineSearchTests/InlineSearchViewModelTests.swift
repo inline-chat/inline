@@ -6,7 +6,7 @@ import Testing
 @testable import InlineKit
 @testable import InlineSearch
 
-@Suite("Inline search view model")
+@Suite("Inline search view model", .timeLimit(.minutes(1)))
 @MainActor
 struct InlineSearchViewModelTests {
   private let userId: Int64 = 1
@@ -36,7 +36,9 @@ struct InlineSearchViewModelTests {
     )
 
     model.search("deploy")
-    try await waitUntil { model.isSearching == false }
+    await model.localTask?.value
+    await model.globalTask?.value
+    #expect(model.isSearching == false)
 
     #expect(model.chats.map(\.title) == ["Deploy Room"])
     #expect(model.messages.map(\.messageId) == [2, 1])
@@ -65,7 +67,9 @@ struct InlineSearchViewModelTests {
     )
 
     model.search("jane")
-    try await waitUntil { model.isSearching == false }
+    await model.localTask?.value
+    await model.globalTask?.value
+    #expect(model.isSearching == false)
 
     #expect(model.chats.map(\.peer) == [.user(id: userId)])
     #expect(model.globalUsers.map(\.id) == [42])
@@ -92,7 +96,9 @@ struct InlineSearchViewModelTests {
       ])
     )
     model.search("before")
-    try await waitUntil { model.isSearching == false }
+    await model.localTask?.value
+    await model.globalTask?.value
+    #expect(model.isSearching == false)
     #expect(model.chats.map(\.peer) == [.user(id: 1)])
 
     // Hold only the test database queue so the global response arrives first.
@@ -106,12 +112,14 @@ struct InlineSearchViewModelTests {
     defer { releaseLocalRead.signal() }
 
     model.search("after")
-    try await waitUntil { model.isSearchingGlobal == false }
+    await model.globalTask?.value
+    #expect(model.isSearchingGlobal == false)
     #expect(model.isSearchingLocal)
     #expect(Set(model.globalUsers.map(\.id)) == [1, 2])
 
     releaseLocalRead.signal()
-    try await waitUntil { model.isSearchingLocal == false }
+    await model.localTask?.value
+    #expect(model.isSearchingLocal == false)
     #expect(model.chats.map(\.peer) == [.user(id: 2)])
     #expect(model.globalUsers.map(\.id) == [1])
   }
@@ -211,7 +219,9 @@ struct InlineSearchViewModelTests {
     )
 
     model.search("bug")
-    try await waitUntil { model.isSearching == false }
+    await model.localTask?.value
+    await model.globalTask?.value
+    #expect(model.isSearching == false)
 
     #expect(model.chats.map(\.peer) == [.thread(id: parentThreadId)])
   }
@@ -243,17 +253,22 @@ struct InlineSearchViewModelTests {
     )
 
     model.search("keyword")
-    try await waitUntil { model.isSearchingLocal == false }
+    await model.localTask?.value
+    #expect(model.isSearchingLocal == false)
 
     #expect(model.messages.count == 10)
     #expect(model.hasMoreMessages)
 
     model.loadMoreMessages()
-    try await waitUntil { model.isLoadingMoreMessages == false && model.messages.count == 20 }
+    await model.moreMessagesTask?.value
+    #expect(model.isLoadingMoreMessages == false)
+    #expect(model.messages.count == 20)
     #expect(model.hasMoreMessages)
 
     model.loadMoreMessages()
-    try await waitUntil { model.isLoadingMoreMessages == false && model.messages.count == 25 }
+    await model.moreMessagesTask?.value
+    #expect(model.isLoadingMoreMessages == false)
+    #expect(model.messages.count == 25)
     #expect(model.hasMoreMessages == false)
   }
 
@@ -282,7 +297,8 @@ struct InlineSearchViewModelTests {
       globalClient: StaticGlobalClient()
     )
     model.search("before")
-    try await waitUntil { model.isSearchingLocal == false }
+    await model.localTask?.value
+    #expect(model.isSearchingLocal == false)
     #expect(model.messages.map(\.messageId) == [3, 2])
     #expect(model.hasMoreMessages)
 
@@ -290,11 +306,13 @@ struct InlineSearchViewModelTests {
     model.loadMoreMessages()
     #expect(model.isSearchingLocal)
     #expect(model.isLoadingMoreMessages == false)
-    try await waitUntil { model.isSearchingLocal == false }
+    await model.localTask?.value
+    #expect(model.isSearchingLocal == false)
     #expect(model.messages.map(\.messageId) == [6, 5])
 
     model.loadMoreMessages()
-    try await waitUntil { model.isLoadingMoreMessages == false }
+    await model.moreMessagesTask?.value
+    #expect(model.isLoadingMoreMessages == false)
     #expect(model.messages.map(\.messageId) == [6, 5, 4])
     #expect(model.hasMoreMessages == false)
   }
@@ -311,15 +329,18 @@ struct InlineSearchViewModelTests {
 
     model.search("first")
     await client.waitForQuery("first")
+    let firstTask = model.globalTask
 
     model.search("second")
     await client.waitForQuery("second")
 
     await client.resume(query: "second", users: [apiUser(id: 2, firstName: "Second", username: "second")])
-    try await waitUntil { model.isSearchingGlobal == false && model.globalUsers.map(\.id) == [2] }
+    await model.globalTask?.value
+    #expect(model.isSearchingGlobal == false)
+    #expect(model.globalUsers.map(\.id) == [2])
 
     await client.resume(query: "first", users: [apiUser(id: 1, firstName: "First", username: "first")])
-    try await Task.sleep(nanoseconds: 20_000_000)
+    await firstTask?.value
 
     #expect(model.globalUsers.map(\.id) == [2])
   }
@@ -336,13 +357,14 @@ struct InlineSearchViewModelTests {
 
     model.search("first")
     await client.waitForQuery("first")
+    let firstTask = model.globalTask
 
     model.clear()
     await client.resume(
       query: "first",
       users: [apiUser(id: 1, firstName: "First", username: "first")]
     )
-    try await Task.sleep(nanoseconds: 20_000_000)
+    await firstTask?.value
 
     #expect(model.query.isEmpty)
     #expect(model.globalUsers.isEmpty)
@@ -652,19 +674,6 @@ struct InlineSearchViewModelTests {
     chat.lastMsgId = messageId
     try chat.update(db)
   }
-
-  private func waitUntil(
-    timeout: TimeInterval = 2,
-    _ predicate: @MainActor @escaping () -> Bool
-  ) async throws {
-    let deadline = Date().addingTimeInterval(timeout)
-    while predicate() == false {
-      if Date() > deadline {
-        throw WaitError.timedOut
-      }
-      try await Task.sleep(nanoseconds: 10_000_000)
-    }
-  }
 }
 
 private struct StaticGlobalClient: InlineGlobalUserSearching {
@@ -713,8 +722,4 @@ private func apiUser(id: Int64, firstName: String, username: String) -> ApiUser 
     date: 1,
     username: username
   )
-}
-
-private enum WaitError: Error {
-  case timedOut
 }

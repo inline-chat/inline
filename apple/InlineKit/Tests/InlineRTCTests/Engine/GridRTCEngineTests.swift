@@ -100,7 +100,9 @@ struct GridRTCEngineTests {
 
   @Test("RTC room creation is fenced until audio bootstrap succeeds")
   func audioBootstrapFailureFencesRoomCreation() async throws {
-    let audioDriver = RTCFakeAudioDriver(configureFailures: 1)
+    // Setup can reconcile more than once. Keep the fault active until the test
+    // explicitly recovers, rather than racing a transient one-call failure.
+    let audioDriver = RTCFakeAudioDriver(configureFailures: .max)
     let audio = GridAudioEngine(
       driver: audioDriver,
       permissionDriver: TestGridMicrophonePermissionDriver()
@@ -118,6 +120,7 @@ struct GridRTCEngineTests {
     }
     #expect(await driver.operations().contains("make") == false)
 
+    await audioDriver.allowConfiguration()
     await audio.retry()
     await rtc.audioAvailabilityChanged()
     try await eventuallyRTC {
@@ -2327,6 +2330,10 @@ private actor RTCFakeAudioDriver: GridAudioDriver {
       configureFailuresRemaining -= 1
       throw FakeGridRTCDriverError.audioConfigureFailed
     }
+  }
+
+  func allowConfiguration() {
+    configureFailuresRemaining = 0
   }
 
   func setPrepared(_ prepared: Bool) async throws {

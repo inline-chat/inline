@@ -172,6 +172,7 @@ public class INUserSettings {
   private var pendingLocalUserID: Int64?
   private var hasPendingGestureEdit = false
   private var pendingLocalValues: NotificationSettingsValues?
+  private var pendingLocalCaptureTask: Task<Void, Never>?
   private var pendingServerUpdateTask: Task<Void, Never>?
   private var pendingServerUpdateTaskID: UUID?
   private var refreshRequest: RefreshRequest?
@@ -233,6 +234,7 @@ public class INUserSettings {
   }
 
   deinit {
+    pendingLocalCaptureTask?.cancel()
     pendingServerUpdateTask?.cancel()
     refreshRequest?.task.cancel()
   }
@@ -348,9 +350,13 @@ public class INUserSettings {
     pendingLocalUserID = userID
     pendingLocalValues = nil
 
-    Task { @MainActor [weak self] in
+    pendingLocalCaptureTask?.cancel()
+    pendingLocalCaptureTask = Task { @MainActor [weak self] in
       await Task.yield()
-      guard let self, revision == self.localNotificationRevision else { return }
+      guard let self, !Task.isCancelled, revision == self.localNotificationRevision else { return }
+      defer {
+        if revision == self.localNotificationRevision { self.pendingLocalCaptureTask = nil }
+      }
       guard let userID,
             self.activeUserID == userID,
             self.currentUserIDProvider() == userID
@@ -661,10 +667,10 @@ public class INUserSettings {
       return true
     }
 
-    // A setting mutation is observed before its @Published value changes. Give
-    // the capture task one turn to record the new value and start its save.
-    if pendingLocalValues == nil {
-      await Task.yield()
+    // @Published notifies before storing the new value. Await its actual
+    // capture; yielding once does not guarantee that another task has run.
+    while pendingLocalValues == nil, let captureTask = pendingLocalCaptureTask {
+      await captureTask.value
     }
 
     if let pendingServerUpdateTask {
@@ -761,6 +767,8 @@ public class INUserSettings {
   }
 
   private func clearPendingLocalChange(persistedFor userID: Int64? = nil) {
+    pendingLocalCaptureTask?.cancel()
+    pendingLocalCaptureTask = nil
     if let userID {
       userDefaults.removeObject(forKey: pendingNotificationSettingsKey(for: userID))
       userDefaults.removeObject(forKey: pendingPrivacySettingsKey(for: userID))

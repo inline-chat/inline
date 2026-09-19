@@ -3,7 +3,7 @@ import GRDB
 import Testing
 @testable import InlineKit
 
-@Suite("Photo transfer source lifetime")
+@Suite("Photo transfer source lifetime", .timeLimit(.minutes(1)))
 struct FileCachePhotoSourceTests {
   @Test("two same-source callers complete from one cancelled transport")
   func sameSourceWaitersShareCancelledTransfer() async throws {
@@ -16,7 +16,7 @@ struct FileCachePhotoSourceTests {
         await probe.markWaiterComplete()
         return result
       }
-      try await waitUntil { await probe.started.count == 1 }
+      try await probe.waitForStarts(1)
       let second = Task { [otherMessage] in
         let result = await cache.downloadAndWait(photo: sharedPhoto, reloadMessageOnFinish: otherMessage)
         await probe.markWaiterComplete()
@@ -26,7 +26,7 @@ struct FileCachePhotoSourceTests {
       // for both subscribers avoids a negative scheduler-timing assertion.
       try await waitUntil { await cache.retainedReloadMessageCount(photoId: 71) == 2 }
       await probe.finish("https://example.com/shared.jpg")
-      try await waitUntil { await probe.completedWaiterCount == 2 }
+      try await probe.waitForCompletions(2)
       #expect(await first.value == nil)
       #expect(await second.value == nil)
       #expect(await probe.started == ["https://example.com/shared.jpg"])
@@ -39,14 +39,14 @@ struct FileCachePhotoSourceTests {
       let first = photo("https://example.com/first.jpg")
       let second = photo("https://example.com/second.jpg")
       await cache.download(photo: first, reloadMessageOnFinish: .preview)
-      try await waitUntil { await probe.started.count == 1 }
+      try await probe.waitForStarts(1)
       await cache.download(photo: first)
       #expect(await probe.started == ["https://example.com/first.jpg"])
 
       await cache.download(photo: second, reloadMessageOnFinish: .preview)
       #expect(await probe.started == ["https://example.com/first.jpg"])
       await probe.finish("https://example.com/first.jpg")
-      try await waitUntil { await probe.started.count == 2 }
+      try await probe.waitForStarts(2)
       #expect(await cache.retainedReloadMessageCount(photoId: 71) == 1)
 
       await probe.finish("https://example.com/second.jpg")
@@ -65,12 +65,12 @@ struct FileCachePhotoSourceTests {
         await probe.markWaiterComplete()
         return result
       }
-      try await waitUntil { await probe.started.count == 1 }
+      try await probe.waitForStarts(1)
       await cache.download(photo: second)
       await probe.finish("https://example.com/first.jpg")
-      try await waitUntil { await probe.completedWaiterCount == 1 }
+      try await probe.waitForCompletions(1)
       #expect(await waiter.value == nil)
-      try await waitUntil { await probe.started.count == 2 }
+      try await probe.waitForStarts(2)
       #expect(await probe.isPending("https://example.com/second.jpg"))
       await cache.cancelDownload(photoId: 71)
       await probe.finish("https://example.com/second.jpg")
@@ -118,16 +118,38 @@ struct FileCachePhotoSourceTests {
     private(set) var completedWaiterCount = 0
     private var pending: [String: [CheckedContinuation<(Data, URLResponse), Error>]] = [:]
     private var finished = false
+    private let starts = AsyncStream<Void>.makeStream()
+    private let completions = AsyncStream<Void>.makeStream()
+
+    func waitForStarts(_ count: Int) async throws {
+      if started.count >= count { return }
+      for await _ in starts.stream {
+        if started.count >= count { return }
+      }
+      throw CancellationError()
+    }
+
+    func waitForCompletions(_ count: Int) async throws {
+      if completedWaiterCount >= count { return }
+      for await _ in completions.stream {
+        if completedWaiterCount >= count { return }
+      }
+      throw CancellationError()
+    }
 
     func load(_ url: URL) async throws -> (Data, URLResponse) {
       guard !finished else { throw CancellationError() }
       started.append(url.absoluteString)
+      starts.continuation.yield(())
       return try await withCheckedThrowingContinuation { pending[url.absoluteString, default: []].append($0) }
     }
 
     func isPending(_ url: String) -> Bool { pending[url] != nil }
 
-    func markWaiterComplete() { completedWaiterCount += 1 }
+    func markWaiterComplete() {
+      completedWaiterCount += 1
+      completions.continuation.yield(())
+    }
 
     func finish(_ url: String) {
       for continuation in pending.removeValue(forKey: url) ?? [] {
@@ -137,6 +159,8 @@ struct FileCachePhotoSourceTests {
 
     func finishAll() {
       finished = true
+      starts.continuation.finish()
+      completions.continuation.finish()
       let continuations = pending.values.flatMap { $0 }
       pending.removeAll()
       for continuation in continuations { continuation.resume(throwing: CancellationError()) }
