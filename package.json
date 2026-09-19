@@ -66,7 +66,8 @@
     "@inline-chat/protocol": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/oauth-core": "workspace:*",
-    "@inline-chat/bot-api-types": "workspace:*"
+    "@inline-chat/bot-api-types": "workspace:*",
+    "express-rate-limit>ip-address": "10.3.1"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

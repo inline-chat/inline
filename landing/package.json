@@ -17,9 +17,7 @@
     "@base-ui/react": "^1.6.0",
     "@inline/client": "workspace:*",
     "@inline/ids": "workspace:*",
-    "@stylexjs/babel-plugin": "^0.16.0",
-    "@stylexjs/postcss-plugin": "^0.16.0",
-    "@stylexjs/stylex": "^0.16.0",
+    "@stylexjs/stylex": "0.19.1",
     "@tailwindcss/postcss": "^4.1.13",
     "@tailwindcss/vite": "^4.1.13",
     "@tanstack/react-router": "^1.132.27",
@@ -37,6 +35,7 @@
     "@inline/config": "workspace:*"
   },
   "devDependencies": {
+    "@stylexjs/unplugin": "0.19.1",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -45,8 +44,8 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.13",
     "typescript": "catalog:",
+    "unplugin": "2.3.11",
     "vite": "^7.1.7",
-    "vite-plugin-stylex": "^0.13.0",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "catalog:"
   },

@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 import stylesheet from "../styles/tailwind.css?url"
-import stylesheet2 from "../styles/stylex.css?url"
 import fontsStylesheet from "../styles/fonts.css?url"
 import { type ReactNode, useState } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
@@ -46,8 +45,11 @@ export const Route = createRootRoute({
       },
       { rel: "stylesheet", href: fontsStylesheet },
       { rel: "stylesheet", href: stylesheet, nonce: "1" },
-      { rel: "stylesheet", href: stylesheet2, nonce: "2" },
+      ...(import.meta.env.DEV ? [{ rel: "stylesheet", href: "/virtual:stylex.css", nonce: "2" }] : []),
     ],
+    scripts: import.meta.env.DEV
+      ? [{ type: "module", src: "/@id/virtual:stylex:runtime" }]
+      : [],
   }),
   component: RootComponent,
 })

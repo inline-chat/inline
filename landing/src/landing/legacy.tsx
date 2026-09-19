@@ -2,7 +2,7 @@
 // Preserved first-generation landing page. The active redesign is exported from index.tsx.
 
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { motion } from "motion/react"
 import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
@@ -26,7 +26,6 @@ const COPY = {
       before: "Work chat that ",
       highlight: "isn't from the 2010s",
       after: "",
-      hasSound: true,
     },
     { text: "Work chat built for collective thinking" },
     // { text: "Where work happens" },
@@ -95,7 +94,6 @@ export function LegacyLanding() {
     })
   }, [])
 
-  const lastPlayedAtRef = useRef(0)
   const [message, setMessage] = useState(0)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
 
@@ -249,19 +247,7 @@ export function LegacyLanding() {
                 ) : (
                   <>
                     {COPY.headlines[message].before}
-                    <span
-                      {...stylex.props(styles.dated)}
-                      onPointerEnter={() => {
-                        if (COPY.headlines[message].hasSound) {
-                          // limit it to once per 2s
-                          if (Date.now() - lastPlayedAtRef.current < 1500) return
-                          const audio = new Audio("/sounds/slack-notification.mp3")
-                          audio.volume = 0.2
-                          audio.play()
-                          lastPlayedAtRef.current = Date.now()
-                        }
-                      }}
-                    >
+                    <span {...stylex.props(styles.dated)}>
                       {COPY.headlines[message].highlight}
                     </span>
                     {COPY.headlines[message].after}

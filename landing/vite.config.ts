@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { defineConfig, type Plugin, type PluginOption } from "vite"
+import stylex from "@stylexjs/unplugin"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tsconfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
-import stylex from "vite-plugin-stylex"
 import { nitro } from "nitro/vite"
 import { parseDocsFrontMatter, serializeDocsFrontMatter } from "./src/docs/frontMatter"
 import { listDocsMarkdownFiles } from "./src/docs/sourceFiles"
@@ -107,9 +107,11 @@ const plugins = [
   tailwindcss(),
   // Enables Vite to resolve imports using path aliases.
   tsconfigPaths({ projects: ["./tsconfig.json"] }),
-  // @ts-ignore
-  stylex({
+  stylex.vite({
     useCSSLayers: true,
+    // Every route includes this root stylesheet, so StyleX output must land
+    // here instead of whichever route-specific CSS asset Vite emits first.
+    cssInjectionTarget: (fileName) => /(?:^|\/)tailwind-[^/]+\.css$/.test(fileName),
   }),
   tanstackStart({
     srcDirectory: "src", // This is the default
