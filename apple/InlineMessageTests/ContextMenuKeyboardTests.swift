@@ -7,6 +7,166 @@ import UIKit
 @Suite("Message context-menu keyboard lifecycle", .serialized)
 @MainActor
 struct ContextMenuKeyboardTests {
+  @Test("Menu captures visible pixels before UIKit hides the source", arguments: [false, true])
+  func capturesBeforeHighlight(usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    cell.updateMessageHoldAction(.reactionsMenu)
+    let source = try #require(cell.messageView?.bubbleView)
+    let point = cell.convert(CGPoint(x: cell.bounds.midX, y: cell.bounds.midY), to: list)
+    let configuration = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfigurationForItemsAt: [indexPath], point: point
+    ))
+    // UIKit may suppress the source while preparing the lifted presentation.
+    // Capture must already exist; producing PNG data alone does not prove pixels.
+    let wasHidden = source.isHidden
+    source.isHidden = true
+    defer { source.isHidden = wasHidden }
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    let image = try #require((preview.view as? UIImageView)?.image)
+    let sample = try #require(image.sendAnimationVisibleAlphaSample())
+    #expect(sample.coverage > 0.1)
+    #expect(preview.view !== source)
+    list.delegate?.collectionView?(list, willDisplayContextMenu: configuration, animator: nil)
+    fixture.endMenu(configuration, animator: nil)
+  }
+
+  @Test("Arrivals remain visible while the menu snapshot stays intact", arguments: [false, true], [false, true])
+  func arrivalsWhileHoldingMenu(animated: Bool, usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    let renderer = try #require(cell.messageView)
+    let messageID = try #require(cell.message?.id)
+    let originalCount = fixture.displayedMessageCount
+    let configuration = fixture.beginMenu()
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    #expect(preview.view !== renderer.bubbleView)
+    let imageView = try #require(preview.view as? UIImageView)
+    let originalImage = try #require(imageView.image?.pngData())
+    let pixels = try #require(imageView.image?.sendAnimationVisibleAlphaSample())
+    #expect(pixels.visible > 0)
+
+    let first = try fixture.addMessage(id: 31)
+    try await fixture.settleUpdates()
+    #expect(fixture.model.messagesByID[first.id] != nil)
+    #expect(fixture.displayedMessageCount == originalCount + 1)
+    #expect(list.visibleCells.contains { ($0 as? MessageCollectionViewCell)?.message?.id == first.id })
+    #expect(imageView.image?.pngData() == originalImage)
+    let repeatedPreview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    #expect(repeatedPreview.view === preview.view)
+
+    let currentCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == messageID })
+    let currentBubble = try #require(currentCell.messageView?.bubbleView)
+    let dismissal = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
+    ))
+    #expect(dismissal.view === preview.view)
+    #expect(dismissal.target.center == currentBubble.convert(
+      CGPoint(x: currentBubble.bounds.midX, y: currentBubble.bounds.midY), to: fixture.window
+    ))
+
+    let animator = animated ? MenuAnimator() : nil
+    fixture.endMenu(configuration, animator: animator)
+    animator?.animate()
+    if animated {
+      // A new day exercises section changes during dismissal too.
+      _ = try fixture.addMessage(id: 32, nextDay: true)
+      try await fixture.settleUpdates()
+      #expect(fixture.displayedMessageCount == originalCount + 2)
+      #expect(imageView.image?.pngData() == originalImage)
+    }
+    animator?.complete()
+    try await fixture.settleUpdates()
+    #expect(fixture.displayedMessageCount == originalCount + (animated ? 2 : 1))
+    #expect(!list.isContextMenuInteractionActive)
+  }
+
+  @Test("A stale dismissal cannot discard the reopened menu snapshot")
+  func liveUpdatesAcrossReopen() async throws {
+    let fixture = try await Fixture()
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    var edited = try #require(cell.message)
+    let originalCount = fixture.displayedMessageCount
+    let old = fixture.beginMenu()
+    _ = list.delegate?.collectionView?(
+      list, contextMenuConfiguration: old, highlightPreviewForItemAt: indexPath
+    )
+    let animator = MenuAnimator()
+    fixture.endMenu(old, animator: animator)
+    let current = fixture.beginMenu()
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: current, highlightPreviewForItemAt: indexPath
+    ))
+    let imageView = try #require(preview.view as? UIImageView)
+    let originalImage = try #require(imageView.image?.pngData())
+    let pixels = try #require(imageView.image?.sendAnimationVisibleAlphaSample())
+    #expect(pixels.visible > 0)
+    let inserted = try fixture.addMessage(id: 31)
+    edited.message.text = "Updated while the menu is open."
+    fixture.publisher.publisher.send(.update(.init(message: edited, animated: true, peer: fixture.peer)))
+    try await fixture.settleUpdates()
+    fixture.publisher.publisher.send(.delete(.init(messageIds: [inserted.message.messageId], peer: fixture.peer)))
+    try await fixture.settleUpdates()
+    animator.animate()
+    animator.complete()
+    #expect(list.isContextMenuInteractionActive)
+    #expect(fixture.displayedMessageCount == originalCount)
+    #expect(fixture.model.messagesByID[inserted.id] == nil)
+    let updatedCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == edited.id })
+    #expect(updatedCell.messageView?.fullMessage.displayText == edited.displayText)
+    #expect(imageView.image?.pngData() == originalImage)
+    let dismissal = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: current, dismissalPreviewForItemAt: indexPath
+    ))
+    #expect(dismissal.view === preview.view)
+    fixture.endMenu(current, animator: nil)
+  }
+
+  @Test("Deleting the menu message keeps its snapshot and does not target a different row")
+  func deletingPreviewedMessage() async throws {
+    let fixture = try await Fixture()
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    let message = try #require(cell.message)
+    let originalCount = fixture.displayedMessageCount
+    let configuration = fixture.beginMenu()
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    let imageView = try #require(preview.view as? UIImageView)
+    let originalImage = try #require(imageView.image?.pngData())
+    let pixels = try #require(imageView.image?.sendAnimationVisibleAlphaSample())
+    #expect(pixels.visible > 0)
+    fixture.publisher.publisher.send(.delete(.init(messageIds: [message.message.messageId], peer: fixture.peer)))
+    try await fixture.settleUpdates()
+    #expect(fixture.displayedMessageCount == originalCount - 1)
+    #expect(imageView.image?.pngData() == originalImage)
+    let dismissal = list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
+    )
+    #expect(dismissal == nil)
+    fixture.endMenu(configuration, animator: nil)
+  }
+
   @Test("Dismissal replays a hidden keyboard before completion", arguments: [false, true])
   func replaysDeferredInsets(animated: Bool) async throws {
     let fixture = try await Fixture()
@@ -103,15 +263,17 @@ struct ContextMenuKeyboardTests {
     let window: UIWindow
     let list: MessagesCollectionView
     let model: MessagesSectionedViewModel
+    let publisher: MessagesPublisher
+    let peer = Peer.user(id: 9_017)
 
-    init() async throws {
+    init(usesV2: Bool = true) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
       window = UIWindow(windowScene: scene)
       let controller = UIViewController()
       window.rootViewController = controller
       window.isHidden = false
       let database = AppDatabase.empty()
-      let peer = Peer.user(id: 9_017)
+      publisher = MessagesPublisher(database: database)
       let template = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
       let rows = (1 ... 30).reversed().map { index -> FullMessage in
         var value = template
@@ -129,18 +291,38 @@ struct ContextMenuKeyboardTests {
           messages: rows,
           loadedWindowMetadata: MessagesProgressiveViewModel.unknownLoadedWindowMetadata(for: rows)
         ),
-        database: database, publisher: MessagesPublisher(database: database)
+        database: database, publisher: publisher
       )
       list = MessagesCollectionView(
         peerId: peer, chatId: 9_017, spaceId: nil, isPreview: true,
         theme: ThemeManager.shared.snapshot(variant: .light),
-        viewModel: model, messageViewImplementation: .v2
+        viewModel: model, messageViewImplementation: usesV2 ? .v2 : .legacy
       )
       controller.view.addSubview(list)
       list.frame = controller.view.bounds
       try await Task.sleep(for: .milliseconds(100))
       list.layoutIfNeeded()
       list.updateContentInsets()
+    }
+
+    var displayedMessageCount: Int {
+      (0 ..< list.numberOfSections).reduce(0) { $0 + list.numberOfItems(inSection: $1) }
+    }
+
+    @discardableResult
+    func addMessage(id: Int64, nextDay: Bool = false) throws -> FullMessage {
+      var value = try #require(model.messages.first)
+      value.message.globalId = 91_000 + id
+      value.message.messageId = id
+      value.message.date = value.message.date.addingTimeInterval(nextDay ? 86_400 : 1)
+      value.message.text = "New message while holding the menu: \(id)"
+      publisher.publisher.send(.add(.init(messages: [value], peer: peer)))
+      return value
+    }
+
+    func settleUpdates() async throws {
+      try await Task.sleep(for: .milliseconds(250))
+      list.layoutIfNeeded()
     }
 
     func close() {

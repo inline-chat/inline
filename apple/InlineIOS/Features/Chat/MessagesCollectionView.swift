@@ -1178,8 +1178,11 @@ private extension MessagesCollectionView {
         view?.finishGeometryTransition(generation: generation)
       }
     }
-    private var deferredContextMenuUpdatedMessageIDs = Set<Int64>()
-    private var deferredContextMenuUpdateAnimated = false
+    private var contextMenuPreview: (
+      configuration: UIContextMenuConfiguration,
+      item: MessageListItem,
+      preview: UITargetedPreview
+    )?
     private var lastVisibleReadCandidateID: Int64?
     private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
 
@@ -1402,8 +1405,8 @@ private extension MessagesCollectionView {
 
       guard let collectionView = collectionView as? MessagesCollectionView,
             collectionView.contextMenuConfiguration === configuration else { return }
-      // Release geometry before replay, but keep cell updates and background
-      // taps suspended until UIKit has returned the lifted preview.
+      // Release geometry before replay, but keep background taps suspended
+      // until UIKit has returned the independent preview.
       collectionView.contextMenuPhase = .dismissing
       let updateInsets = { [weak collectionView] in
         guard let collectionView,
@@ -1428,7 +1431,9 @@ private extension MessagesCollectionView {
         collectionView.setContentOffset(
           CGPoint(x: offset.x, y: min(maxY, max(minY, offset.y))), animated: false
         )
-        self?.flushDeferredContextMenuMessageUpdates()
+        if self?.contextMenuPreview?.configuration === configuration {
+          self?.contextMenuPreview = nil
+        }
       }
       if let animator {
         animator.addAnimations(updateInsets)
@@ -3638,17 +3643,7 @@ private extension MessagesCollectionView {
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
         case let .messagesUpdated(_, messageIds, animated):
-          if messageViewImplementation == .v2,
-             (currentCollectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true
-          {
-            // UIKit animates a detached preview back to the source bubble. Reconfiguring the live
-            // cell during that dismissal gives the preview and source different destination
-            // geometry, producing the duplicated/ghosted bubble seen in device recordings.
-            deferredContextMenuUpdatedMessageIDs.formUnion(messageIds)
-            deferredContextMenuUpdateAnimated = deferredContextMenuUpdateAnimated || (animated ?? false)
-          } else {
-            applyUpdatedMessages(messageIds, animated: animated)
-          }
+          applyUpdatedMessages(messageIds, animated: animated)
 
         case .multiSectionUpdate:
           // Multiple sections affected - do a full data reload for simplicity
@@ -3677,15 +3672,6 @@ private extension MessagesCollectionView {
         && (animated ?? false)
         && !UIAccessibility.isReduceMotionEnabled
       safeApplySnapshot(snapshot, animatingDifferences: animatesDiffableReconfigure)
-    }
-
-    private func flushDeferredContextMenuMessageUpdates() {
-      guard !deferredContextMenuUpdatedMessageIDs.isEmpty else { return }
-      let messageIDs = deferredContextMenuUpdatedMessageIDs.sorted()
-      let animated = deferredContextMenuUpdateAnimated
-      deferredContextMenuUpdatedMessageIDs.removeAll(keepingCapacity: true)
-      deferredContextMenuUpdateAnimated = false
-      applyUpdatedMessages(messageIDs, animated: animated)
     }
 
     func resetVisibleReadCandidate() {
@@ -4348,24 +4334,23 @@ private extension MessagesCollectionView {
       }
 
       if message.isServiceMessage {
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-          guard let self else { return UIMenu(children: []) }
-          let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-            ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-          }
-          let deleteAction = UIAction(
-            title: "Delete",
-            image: UIImage(systemName: "trash"),
-            attributes: .destructive
-          ) { _ in
-            self.showDeleteConfirmation(
-              messageId: message.messageId,
-              peerId: message.peerId,
-              chatId: message.chatId
-            )
-          }
-          return UIMenu(children: [replyAction, deleteAction])
+        let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
+          ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
         }
+        let deleteAction = UIAction(
+          title: "Delete",
+          image: UIImage(systemName: "trash"),
+          attributes: .destructive
+        ) { [weak self] _ in
+          self?.showDeleteConfirmation(
+            messageId: message.messageId,
+            peerId: message.peerId,
+            chatId: message.chatId
+          )
+        }
+        return makeContextMenuConfiguration(
+          at: indexPath, identifier: nil, menu: UIMenu(children: [replyAction, deleteAction])
+        )
       }
 
       let reactionPickerView = createReactionPickerView(for: fullMessage)
@@ -4390,10 +4375,41 @@ private extension MessagesCollectionView {
 
       collectionView.addSubview(identifierView)
 
-      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: nil) { [weak self, weak cell] _ in
-        guard let self, let cell else { return UIMenu(children: []) }
-        return makeMessageActionsMenu(for: fullMessage, cell: cell, mathSource: mathSource)
+      return makeContextMenuConfiguration(
+        at: indexPath,
+        identifier: identifierView,
+        menu: makeMessageActionsMenu(for: fullMessage, cell: cell, mathSource: mathSource)
+      )
+    }
+
+    private func makeContextMenuConfiguration(
+      at indexPath: IndexPath,
+      identifier: NSCopying?,
+      menu: UIMenu
+    ) -> UIContextMenuConfiguration {
+      // Capture before UIKit starts highlighting/hiding the source cell. A late
+      // drawHierarchy capture can produce a valid but completely transparent image.
+      let preview = targetedPreview(for: indexPath)
+      let image = (preview?.view as? UIImageView)?.image
+      let configuration = UIContextMenuConfiguration(identifier: identifier, previewProvider: {
+        guard let image else { return nil }
+        // Supply the presented content too, not just a detached animation target.
+        // UIKit owns this controller's view throughout the menu's lifetime.
+        let controller = UIViewController()
+        let imageView = UIImageView(image: image)
+        imageView.backgroundColor = .clear
+        imageView.isOpaque = false
+        controller.view = imageView
+        controller.preferredContentSize = image.size
+        return controller
+      }, actionProvider: { _ in
+        // Keep actions independent of the originating cell's reuse/deallocation.
+        menu
+      })
+      if let preview, let item = dataSource.itemIdentifier(for: indexPath) {
+        contextMenuPreview = (configuration, item, preview)
       }
+      return configuration
     }
 
     private func makeMessageActionsMenu(
@@ -4910,7 +4926,13 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      if let state = contextMenuPreview, state.configuration === configuration {
+        return state.preview
+      }
+      guard let item = dataSource.itemIdentifier(for: indexPath),
+            let preview = targetedPreview(for: indexPath) else { return nil }
+      contextMenuPreview = (configuration, item, preview)
+      return preview
     }
 
     func collectionView(
@@ -4918,7 +4940,26 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      // The original index path may now identify a different message. Resolve
+      // the menu's message again; never target a different row if it was removed.
+      guard let state = contextMenuPreview, state.configuration === configuration,
+            let currentIndexPath = dataSource.indexPath(for: state.item),
+            let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
+            let messageView = cell.messageView,
+            let window = messageView.window else { return nil }
+      let sourceView = messageView.fullMessage.message.isServiceMessage
+        ? messageView.serviceContainerView : messageView.bubbleView
+      let size = state.preview.size
+      guard size.width > 0, size.height > 0 else { return nil }
+      let target = UIPreviewTarget(
+        container: window,
+        center: sourceView.convert(CGPoint(x: sourceView.bounds.midX, y: sourceView.bounds.midY), to: window),
+        transform: CGAffineTransform(
+          scaleX: sourceView.bounds.width / size.width,
+          y: sourceView.bounds.height / size.height
+        )
+      )
+      return state.preview.retargetedPreview(with: target)
     }
 
     // MARK: - Private
@@ -4928,22 +4969,34 @@ private extension MessagesCollectionView {
             let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
             let messageView = cell.messageView else { return nil }
 
+      let sourceView: UIView
       let parameters = UIPreviewParameters()
       parameters.backgroundColor = .clear
 
       if messageView.fullMessage.message.isServiceMessage {
-        let serviceView = messageView.serviceContainerView
+        sourceView = messageView.serviceContainerView
         parameters.visiblePath = UIBezierPath(
-          roundedRect: serviceView.bounds,
-          cornerRadius: serviceView.layer.cornerRadius
+          roundedRect: sourceView.bounds,
+          cornerRadius: sourceView.layer.cornerRadius
         )
-        return UITargetedPreview(view: serviceView, parameters: parameters)
+      } else {
+        sourceView = messageView.bubbleView
+        parameters.visiblePath = messageView.bubbleView.visiblePath()
       }
 
-      let bubbleView = messageView.bubbleView
-      parameters.visiblePath = bubbleView.visiblePath()
-
-      return UITargetedPreview(view: bubbleView, parameters: parameters)
+      // UITargetedPreview displays its view live. A cell rebuild or reuse can
+      // dismantle that hierarchy while the menu is open, leaving an empty bubble.
+      // Render the layer tree directly: drawHierarchy depends on screen-update
+      // timing and can return a transparent image during menu presentation.
+      guard let window = sourceView.window,
+            let snapshot = sourceView.sendAnimationLayerSnapshotView(),
+            let image = (snapshot as? UIImageView)?.image,
+            let sample = image.sendAnimationVisibleAlphaSample(), sample.visible > 0 else { return nil }
+      let target = UIPreviewTarget(
+        container: window,
+        center: sourceView.convert(CGPoint(x: sourceView.bounds.midX, y: sourceView.bounds.midY), to: window)
+      )
+      return UITargetedPreview(view: snapshot, parameters: parameters, target: target)
     }
 
     private var isUserDragging = false
