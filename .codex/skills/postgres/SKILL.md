@@ -9,6 +9,10 @@ metadata:
 
 # PlanetScale Postgres
 
+This bundled skill is adapted from
+[PlanetScale's `database-skills`](https://github.com/planetscale/database-skills)
+and is distributed under the included [MIT license](LICENSE).
+
 ## Generic Postgres
 
 | Topic                  | Reference                                                        | Use for                                                   |

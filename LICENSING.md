@@ -22,6 +22,6 @@ See [LICENSE-APACHE](LICENSE-APACHE) and component-local license files. Rust wor
 
 ## Third-party material
 
-Third-party code, fonts, assets and bundled adapters are covered by their respective licenses and copyright notices. For example, `vendor/agent-client-protocol/` is licensed under Apache-2.0; the bundled Amp adapter and Apple vendored components have their own notices. A component's more specific license or notice takes precedence over the repository default.
+Third-party code, fonts, assets and bundled adapters are covered by their respective licenses and copyright notices. For example, `vendor/agent-client-protocol/` is licensed under Apache-2.0; `.codex/skills/postgres/` carries PlanetScale's MIT license; and the bundled Amp adapter and Apple vendored components have their own notices. A component's more specific license or notice takes precedence over the repository default.
 
 Preserve the applicable license and copyright notices when redistributing individual components.
