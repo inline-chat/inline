@@ -24142,7 +24142,8 @@ class UserSettings$Type extends import_runtime4.MessageType {
     super("UserSettings", [
       { no: 1, name: "notification_settings", kind: "message", T: () => NotificationSettings },
       { no: 2, name: "privacy_settings", kind: "message", T: () => PrivacySettings },
-      { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings }
+      { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings },
+      { no: 4, name: "message_gesture_settings", kind: "message", T: () => MessageGestureSettings }
     ]);
   }
   create(value) {
@@ -24165,6 +24166,9 @@ class UserSettings$Type extends import_runtime4.MessageType {
         case 3:
           message.composeSettings = ComposeSettings.internalBinaryRead(reader, reader.uint32(), options, message.composeSettings);
           break;
+        case 4:
+          message.messageGestureSettings = MessageGestureSettings.internalBinaryRead(reader, reader.uint32(), options, message.messageGestureSettings);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -24183,6 +24187,8 @@ class UserSettings$Type extends import_runtime4.MessageType {
       PrivacySettings.internalBinaryWrite(message.privacySettings, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.composeSettings)
       ComposeSettings.internalBinaryWrite(message.composeSettings, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.messageGestureSettings)
+      MessageGestureSettings.internalBinaryWrite(message.messageGestureSettings, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24190,6 +24196,60 @@ class UserSettings$Type extends import_runtime4.MessageType {
   }
 }
 var UserSettings = new UserSettings$Type;
+
+class MessageGestureSettings$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageGestureSettings", [
+      { no: 1, name: "double_tap_action", kind: "scalar", opt: true, T: 9 },
+      { no: 2, name: "hold_action", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "swipe_to_reply_direction", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.doubleTapAction = reader.string();
+          break;
+        case 2:
+          message.holdAction = reader.string();
+          break;
+        case 3:
+          message.swipeToReplyDirection = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.doubleTapAction !== undefined)
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.doubleTapAction);
+    if (message.holdAction !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.holdAction);
+    if (message.swipeToReplyDirection !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.swipeToReplyDirection);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageGestureSettings = new MessageGestureSettings$Type;
 
 class ComposeSettings$Type extends import_runtime4.MessageType {
   constructor() {
@@ -29691,7 +29751,8 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetSpaceMembersResult", [
       { no: 1, name: "members", kind: "message", repeat: 1, T: () => Member },
-      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User },
+      { no: 3, name: "seq", kind: "scalar", opt: true, T: 5 }
     ]);
   }
   create(value) {
@@ -29713,6 +29774,9 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
         case 2:
           message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 3:
+          message.seq = reader.int32();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -29729,6 +29793,8 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
       Member.internalBinaryWrite(message.members[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
     for (let i = 0;i < message.users.length; i++)
       User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.seq !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.seq);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31329,7 +31395,8 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
   constructor() {
     super("UpdateSpaceMemberDelete", [
       { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "member_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -31351,6 +31418,9 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
         case 2:
           message.userId = reader.int64().toBigInt();
           break;
+        case 3:
+          message.memberId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -31367,6 +31437,8 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
     if (message.userId !== 0n)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.memberId !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.memberId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
