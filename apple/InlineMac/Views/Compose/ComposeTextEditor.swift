@@ -627,6 +627,11 @@ extension NSTextView {
     if preserveSelection {
       self.selectedRanges = selectedRanges
     }
+
+    // Direct storage replacements bypass NSTextView's normal editing lifecycle.
+    // Update the scrollable document now, including when loading a message to edit.
+    needsLayout = true
+    layoutSubtreeIfNeeded()
   }
 }
 
