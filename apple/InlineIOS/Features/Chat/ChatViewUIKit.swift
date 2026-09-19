@@ -896,6 +896,10 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
       if view is DateSeparatorView {
         return false
       }
+      if let cell = view as? MessageCollectionViewCell,
+         cell.isMessageActionsButton(at: touch.location(in: cell)) {
+        return false
+      }
       if view === messagesCollectionView {
         break
       }

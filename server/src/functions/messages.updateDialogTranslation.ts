@@ -29,23 +29,26 @@ export async function updateDialogTranslation(
     // come from an explicit user action in a synced client, which must survive
     // late upgrades, retries, and delayed imports from other devices.
     const enabled = input.importLegacyEnabled && existing?.translationEnabled === false ? false : input.enabled
-    if (existing?.translationEnabled === enabled) return { enabled, queued: undefined }
     const payload = { peerId, enabled }
 
-    await tx.insert(dialogs).values({
-      chatId: chat.id,
-      userId: context.currentUserId,
-      peerUserId: chat.type === "private"
-        ? (chat.minUserId === context.currentUserId ? chat.maxUserId : chat.minUserId)
-        : null,
-      spaceId: chat.spaceId,
-      ...dialogOpenDefaultsForChat(chat),
-      translationEnabled: enabled,
-    }).onConflictDoUpdate({
-      target: [dialogs.chatId, dialogs.userId],
-      set: { translationEnabled: enabled },
-    })
+    if (existing?.translationEnabled !== enabled) {
+      await tx.insert(dialogs).values({
+        chatId: chat.id,
+        userId: context.currentUserId,
+        peerUserId: chat.type === "private"
+          ? (chat.minUserId === context.currentUserId ? chat.maxUserId : chat.minUserId)
+          : null,
+        spaceId: chat.spaceId,
+        ...dialogOpenDefaultsForChat(chat),
+        translationEnabled: enabled,
+      }).onConflictDoUpdate({
+        target: [dialogs.chatId, dialogs.userId],
+        set: { translationEnabled: enabled },
+      })
+    }
 
+    // Even a no-op needs an ordered result: replay persistence can delay this
+    // response until after a newer preference has reached the requesting device.
     const queued = await UserBucketUpdates.enqueue({
       userId: context.currentUserId,
       update: { oneofKind: "userDialogTranslation", userDialogTranslation: payload },
@@ -55,13 +58,11 @@ export async function updateDialogTranslation(
   const { queued } = mutation
 
   const update: Update = {
-    seq: queued?.seq,
-    date: queued ? encodeDateStrict(queued.date) : undefined,
+    seq: queued.seq,
+    date: encodeDateStrict(queued.date),
     update: { oneofKind: "dialogTranslation", dialogTranslation: { peerId, enabled: mutation.enabled } },
   }
-  if (queued) {
-    RealtimeUpdates.pushToUser(context.currentUserId, [update], { skipSessionId: context.currentSessionId })
-  }
+  RealtimeUpdates.pushToUser(context.currentUserId, [update], { skipSessionId: context.currentSessionId })
   // Return the authoritative value even for an idempotent retry.
   return { updates: [update] }
 }

@@ -31,6 +31,7 @@ public struct MacVoiceRecording: Sendable {
 public struct MacVoiceRecordingUpdate: Equatable, Sendable {
   public let duration: TimeInterval
   public let samples: [UInt8]
+  public var reachedDurationLimit = false
 }
 
 public enum MacVoiceRecorderError: LocalizedError, Equatable {
@@ -147,6 +148,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     let requestedAt: UInt64
     let acceptedAt: UInt64
     let signpostID: OSSignpostID
+    let maximumDuration: TimeInterval?
     var meterTimer: DispatchSourceTimer?
     var samples: [UInt8] = []
     var lastMeterSample: UInt8?
@@ -202,7 +204,10 @@ public final class MacVoiceRecorder: @unchecked Sendable {
   }
 
   /// Opens the microphone only after this user-initiated method is called.
-  public func start() async throws -> MacVoiceRecordingSession {
+  public func start(maximumDuration: TimeInterval? = nil) async throws -> MacVoiceRecordingSession {
+    if let maximumDuration, !maximumDuration.isFinite || maximumDuration <= 0 {
+      throw MacVoiceRecorderError.startFailed
+    }
     let requestedAt = DispatchTime.now().uptimeNanoseconds
     let signpostID = OSSignpostID(log: Self.performanceLog)
     os_signpost(
@@ -215,7 +220,9 @@ public final class MacVoiceRecorder: @unchecked Sendable {
       captureQueue.async { [self] in
         do {
           continuation.resume(
-            returning: try startOnQueue(requestedAt: requestedAt, signpostID: signpostID)
+            returning: try startOnQueue(
+              requestedAt: requestedAt, signpostID: signpostID, maximumDuration: maximumDuration
+            )
           )
         } catch {
           continuation.resume(throwing: error)
@@ -312,7 +319,8 @@ public final class MacVoiceRecorder: @unchecked Sendable {
 
   private func startOnQueue(
     requestedAt: UInt64,
-    signpostID: OSSignpostID
+    signpostID: OSSignpostID,
+    maximumDuration: TimeInterval?
   ) throws -> MacVoiceRecordingSession {
     dispatchPrecondition(condition: .onQueue(captureQueue))
     guard active == nil else {
@@ -332,7 +340,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
         self?.scheduleBackendTermination(id: id, termination: termination)
       }
       recorder.isMeteringEnabled = true
-      guard recorder.prepareToRecord(), recorder.record() else {
+      guard recorder.prepareToRecord(), recorder.record(forDuration: maximumDuration) else {
         throw MacVoiceRecorderError.startFailed
       }
       let acceptedAt = DispatchTime.now().uptimeNanoseconds
@@ -349,7 +357,8 @@ public final class MacVoiceRecorder: @unchecked Sendable {
         continuation: stream.continuation,
         requestedAt: requestedAt,
         acceptedAt: acceptedAt,
-        signpostID: signpostID
+        signpostID: signpostID,
+        maximumDuration: maximumDuration
       )
       startMeteringOnQueue()
 
@@ -363,14 +372,23 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     }
   }
 
-  private func finishCaptureOnQueue(id: UUID) throws -> ProcessingRecording {
+  private func finishCaptureOnQueue(id: UUID, reachedDurationLimit: Bool = false) throws -> ProcessingRecording {
     dispatchPrecondition(condition: .onQueue(captureQueue))
+    // A bounded recording may have stopped before its owner consumes the final update.
+    if let recording = processing[id] { return recording }
     guard let recording = takeActiveOnQueue(id: id) else {
       throw MacVoiceRecorderError.sessionEnded
     }
 
     let recorderDuration = recording.recorder.currentTime
     recording.recorder.stop()
+    if reachedDurationLimit, let maximumDuration = recording.maximumDuration {
+      recording.continuation.yield(MacVoiceRecordingUpdate(
+        duration: maximumDuration,
+        samples: Self.liveSamples(from: recording.samples),
+        reachedDurationLimit: true
+      ))
+    }
     recording.continuation.finish()
 
     let output = MacVoiceCaptureOutput(
@@ -380,7 +398,8 @@ public final class MacVoiceRecorder: @unchecked Sendable {
         recorderDuration,
         TimeInterval(Self.elapsedNanoseconds(since: recording.acceptedAt)) / 1_000_000_000
       ),
-      samples: recording.samples
+      samples: recording.samples,
+      maximumDuration: recording.maximumDuration
     )
     let processing = ProcessingRecording(
       id: id,
@@ -430,7 +449,21 @@ public final class MacVoiceRecorder: @unchecked Sendable {
   private func publishMeterOnQueue() {
     dispatchPrecondition(condition: .onQueue(captureQueue))
     guard var recording = active else { return }
+    if let maximumDuration = recording.maximumDuration,
+       max(recording.recorder.currentTime,
+           TimeInterval(Self.elapsedNanoseconds(since: recording.acceptedAt)) / 1_000_000_000) >= maximumDuration {
+      _ = try? finishCaptureOnQueue(id: recording.id, reachedDurationLimit: true)
+      return
+    }
     guard recording.recorder.isRecording else {
+      // Native completion can beat its delegate callback, and record() can take
+      // time to return. A full native recording has necessarily outlived the
+      // start request even when it has not outlived our acceptedAt timestamp.
+      if let maximumDuration = recording.maximumDuration,
+         TimeInterval(Self.elapsedNanoseconds(since: recording.requestedAt)) / 1_000_000_000 >= maximumDuration {
+        _ = try? finishCaptureOnQueue(id: recording.id, reachedDurationLimit: true)
+        return
+      }
       terminateRecordingOnQueue(id: recording.id, termination: .stoppedUnexpectedly)
       return
     }
@@ -478,6 +511,10 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     termination: MacVoiceRecordingBackendTermination
   ) {
     dispatchPrecondition(condition: .onQueue(captureQueue))
+    if termination == .finishedSuccessfully, active?.id == id, active?.maximumDuration != nil {
+      _ = try? finishCaptureOnQueue(id: id, reachedDurationLimit: true)
+      return
+    }
     guard let recording = takeActiveOnQueue(id: id) else { return }
     recording.recorder.stop()
     recording.continuation.finish(throwing: termination.error)
@@ -589,13 +626,14 @@ final class MacVoiceProcessingCancellation: @unchecked Sendable {
   }
 }
 
-enum MacVoiceRecordingBackendTermination: Sendable {
+enum MacVoiceRecordingBackendTermination: Equatable, Sendable {
+  case finishedSuccessfully
   case stoppedUnexpectedly
   case encodingFailed
 
   var error: MacVoiceRecorderError {
     switch self {
-    case .stoppedUnexpectedly:
+    case .finishedSuccessfully, .stoppedUnexpectedly:
       .recordingInterrupted
     case .encodingFailed:
       .encodingFailed
@@ -610,7 +648,7 @@ protocol MacVoiceRecordingBackend: AnyObject {
   var terminationHandler: (@Sendable (MacVoiceRecordingBackendTermination) -> Void)? { get set }
 
   func prepareToRecord() -> Bool
-  func record() -> Bool
+  func record(forDuration duration: TimeInterval?) -> Bool
   func stop()
   func updateMeters()
   func averagePower(forChannel channelNumber: Int) -> Float
@@ -653,8 +691,12 @@ private final class AVAudioRecorderBackend: NSObject, MacVoiceRecordingBackend,
     recorder.prepareToRecord()
   }
 
-  func record() -> Bool {
-    recorder.record()
+  func record(forDuration duration: TimeInterval?) -> Bool {
+    if let duration {
+      recorder.record(forDuration: duration)
+    } else {
+      recorder.record()
+    }
   }
 
   func stop() {
@@ -669,8 +711,8 @@ private final class AVAudioRecorderBackend: NSObject, MacVoiceRecordingBackend,
     recorder.averagePower(forChannel: channelNumber)
   }
 
-  func audioRecorderDidFinishRecording(_: AVAudioRecorder, successfully _: Bool) {
-    terminationHandler?(.stoppedUnexpectedly)
+  func audioRecorderDidFinishRecording(_: AVAudioRecorder, successfully flag: Bool) {
+    terminationHandler?(flag ? .finishedSuccessfully : .stoppedUnexpectedly)
   }
 
   func audioRecorderEncodeErrorDidOccur(_: AVAudioRecorder, error _: (any Error)?) {

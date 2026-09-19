@@ -40,7 +40,8 @@ struct ComposeVoiceInputView: View {
 
   private var dictationBody: some View {
     ZStack {
-      if viewModel.phase == .transcribing || viewModel.phase == .finishing || viewModel.phase == .review {
+      if viewModel.phase == .transcribing || viewModel.phase == .finishing ||
+        (viewModel.phase == .review && !viewModel.reachedDictationLimit) {
         Text("Transcribing")
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -51,8 +52,20 @@ struct ComposeVoiceInputView: View {
         iconButton("xmark", title: "Cancel dictation", action: onCancel)
         if viewModel.phase == .recording {
           waveform(progress: 0)
+          Text("\(Self.format(duration: viewModel.duration)) / \(Self.format(duration: DraftVoiceTranscription.maximumDuration))")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .accessibilityLabel("Recorded \(Self.format(duration: viewModel.duration)), limit 10 minutes")
           iconButton("stop.fill", title: "Stop dictation", action: onPause)
           iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
+        } else if viewModel.phase == .review, viewModel.reachedDictationLimit {
+          Text("10-minute limit reached")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+          iconButton("text.bubble", title: "Transcribe dictation", action: onPause)
+          iconButton("arrow.up", title: "Transcribe and send", isPrimary: true, action: onSend)
         } else if viewModel.phase == .transcriptionFailed {
           Text(viewModel.transcriptionError ?? "Could not transcribe this recording.")
             .font(.caption)

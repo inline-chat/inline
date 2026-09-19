@@ -6,6 +6,7 @@ struct MacVoiceCaptureOutput {
   let finalURL: URL
   let duration: TimeInterval
   let samples: [UInt8]
+  var maximumDuration: TimeInterval?
 }
 
 enum MacVoiceRecordingProcessor {
@@ -15,9 +16,10 @@ enum MacVoiceRecordingProcessor {
   ) throws -> MacVoiceRecording {
     do {
       try cancellation.checkCancellation()
-      try renderVoiceMessage(
+      let duration = try renderVoiceMessage(
         from: capture.rawURL,
         to: capture.finalURL,
+        maximumDuration: capture.maximumDuration,
         cancellation: cancellation
       )
       try cancellation.checkCancellation()
@@ -34,7 +36,7 @@ enum MacVoiceRecordingProcessor {
       return MacVoiceRecording(
         fileURL: capture.finalURL,
         data: data,
-        duration: capture.duration,
+        duration: capture.maximumDuration == nil ? capture.duration : duration,
         waveform: waveformData(from: capture.samples),
         mimeType: "audio/mp4",
         fileExtension: "m4a"
@@ -61,8 +63,9 @@ enum MacVoiceRecordingProcessor {
   private static func renderVoiceMessage(
     from rawURL: URL,
     to finalURL: URL,
+    maximumDuration: TimeInterval?,
     cancellation: MacVoiceProcessingCancellation
-  ) throws {
+  ) throws -> TimeInterval {
     try cancellation.checkCancellation()
     let analysis = try analyze(rawURL: rawURL, cancellation: cancellation)
     guard analysis.frameCount > 0 else { throw MacVoiceRecorderError.emptyRecording }
@@ -70,6 +73,11 @@ enum MacVoiceRecordingProcessor {
     try cancellation.checkCancellation()
     let source = try AVAudioFile(forReading: rawURL)
     let sourceFormat = source.processingFormat
+    // Bound actual audio frames, including any native recorder overrun. Limiting
+    // only the displayed duration would still upload an oversized recording.
+    let frameLimit = maximumDuration.map {
+      min(source.length, AVAudioFramePosition(($0 * sourceFormat.sampleRate).rounded(.down)))
+    } ?? source.length
     guard let monoFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: sourceFormat.sampleRate,
@@ -93,9 +101,9 @@ enum MacVoiceRecordingProcessor {
       throw MacVoiceRecorderError.processingFailed
     }
 
-    while source.framePosition < source.length {
+    while source.framePosition < frameLimit {
       try cancellation.checkCancellation()
-      let remaining = AVAudioFrameCount(source.length - source.framePosition)
+      let remaining = AVAudioFrameCount(frameLimit - source.framePosition)
       try source.read(into: inputBuffer, frameCount: min(capacity, remaining))
       guard inputBuffer.frameLength > 0 else { break }
       try fillMonoBuffer(outputBuffer, from: inputBuffer, channel: analysis.channel, gain: gain)
@@ -103,6 +111,7 @@ enum MacVoiceRecordingProcessor {
       try output.write(from: outputBuffer)
     }
     try cancellation.checkCancellation()
+    return Double(frameLimit) / sourceFormat.sampleRate
   }
 
   private static func analyze(

@@ -1218,6 +1218,9 @@ private extension MessagesCollectionView {
       willDisplay cell: UICollectionViewCell,
       forItemAt indexPath: IndexPath
     ) {
+      if let cell = cell as? MessageCollectionViewCell {
+        cell.updateMessageHoldAction(INUserSettings.current.messageGestures.holdAction)
+      }
       defer {
         if let messagesCollectionView = collectionView as? MessagesCollectionView,
            let cell = cell as? MessageCollectionViewCell
@@ -2302,6 +2305,17 @@ private extension MessagesCollectionView {
       }
 
       if !isPreview {
+        INUserSettings.current.messageGestures.objectWillChange
+          .receive(on: DispatchQueue.main)
+          .sink { [weak self] in
+            guard let self else { return }
+            let action = INUserSettings.current.messageGestures.holdAction
+            for case let cell as MessageCollectionViewCell in currentCollectionView?.visibleCells ?? [] {
+              cell.updateMessageHoldAction(action)
+            }
+          }
+          .store(in: &cancellables)
+
         // Subscribe to translation state changes
         TranslationState.shared.subject
           .sink { [weak self] peer, _ in
@@ -2596,6 +2610,19 @@ private extension MessagesCollectionView {
         cell.onReactionsMenu = { [weak self] message in
           self?.showReactionEmojiPicker(for: message)
         }
+        cell.allowsMessageActions = !isPreview
+        cell.messageActionsMenuProvider = { [weak self] cell in
+          guard let self, let message = cell.message,
+                let currentMessage = currentFullMessage(
+                  stableId: message.id,
+                  messageId: message.message.messageId,
+                  chatId: message.message.chatId,
+                  randomId: message.message.randomId
+                )
+          else { return UIMenu(children: []) }
+          return makeMessageActionsMenu(for: currentMessage, cell: cell, includeReactionsAction: true)
+        }
+        cell.updateMessageHoldAction(INUserSettings.current.messageGestures.holdAction)
         cell.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
           self?.presentPhotoGallery(
             for: message,
@@ -4310,9 +4337,13 @@ private extension MessagesCollectionView {
         }
       }
 
-      let holdAction = INUserSettings.current.messageGestures.holdAction
-      if holdAction != .reactionsMenu {
-        cell.messageView?.performMessageGestureAction(holdAction)
+      // The explicit actions button owns its native UIButton menu. Holding it
+      // must never trigger the configured quick action on the message as well.
+      if cell.isMessageActionsButton(at: collectionView.convert(point, to: cell)) {
+        return nil
+      }
+      if cell.usesCustomHoldAction {
+        cell.messageView?.performMessageGestureAction(cell.messageHoldAction)
         return nil
       }
 
@@ -4359,111 +4390,41 @@ private extension MessagesCollectionView {
 
       collectionView.addSubview(identifierView)
 
-      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: nil) { [weak self] _ in
-        guard let self else { return UIMenu(children: []) }
+      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: nil) { [weak self, weak cell] _ in
+        guard let self, let cell else { return UIMenu(children: []) }
+        return makeMessageActionsMenu(for: fullMessage, cell: cell, mathSource: mathSource)
+      }
+    }
 
-        let isMessageSending = message.status == .sending
-        let isMessageFailed = message.status == .failed
+    private func makeMessageActionsMenu(
+      for fullMessage: FullMessage,
+      cell: MessageCollectionViewCell,
+      mathSource: String? = nil,
+      includeReactionsAction: Bool = false
+    ) -> UIMenu {
+      let message = fullMessage.message
+      let isMessageSending = message.status == .sending
+      let isMessageFailed = message.status == .failed
 
-        var actions: [UIAction] = []
+      var actions: [UIAction] = []
 
-        if message.hasText {
-          let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
-            UIPasteboard.general.string = message.text
-          }
-          actions.append(copyAction)
+      if message.hasText {
+        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
+          UIPasteboard.general.string = message.text
         }
+        actions.append(copyAction)
+      }
 
-        if let mathSource {
-          actions.append(UIAction(title: "Copy LaTeX", image: UIImage(systemName: "function")) { _ in
-            UIPasteboard.general.string = mathSource
-          })
-        }
+      if let mathSource {
+        actions.append(UIAction(title: "Copy LaTeX", image: UIImage(systemName: "function")) { _ in
+          UIPasteboard.general.string = mathSource
+        })
+      }
 
-        if isMessageSending {
-          if fullMessage.photoInfo != nil {
-            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-              [weak self] _ in
-              guard let self else { return }
-              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-                UIPasteboard.general.image = image
-                ToastManager.shared.showToast(
-                  "Photo copied to clipboard",
-                  type: .success,
-                  systemImage: "doc.on.clipboard"
-                )
-              }
-            }
-            actions.append(copyPhotoAction)
-          }
-
-          let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { _ in
-            if let transactionId = message.transactionId, !transactionId.isEmpty {
-              Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
-
-              Transactions.shared.cancel(transactionId: transactionId)
-              Task {
-                let _ = try? await AppDatabase.shared.dbWriter.write { db in
-                  try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
-                }
-
-                MessagesPublisher.shared
-                  .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
-              }
-            } else {
-              let randomId = message.randomId
-              Task {
-                Api.realtime.cancelTransaction(where: {
-                  guard $0.transaction.method == .sendMessage else { return false }
-                  guard case let .sendMessage(input) = $0.transaction.input else { return false }
-                  return input.randomID == randomId
-                })
-              }
-            }
-          }
-          actions.append(cancelAction)
-
-          return UIMenu(children: actions)
-        }
-
-        if isMessageFailed {
-          if fullMessage.photoInfo != nil {
-            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-              [weak self] _ in
-              guard let self else { return }
-              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-                UIPasteboard.general.image = image
-                ToastManager.shared.showToast(
-                  "Photo copied to clipboard",
-                  type: .success,
-                  systemImage: "doc.on.clipboard"
-                )
-              }
-            }
-            actions.append(copyPhotoAction)
-          }
-
-          let resendAction = UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
-            self?.resendMessage(fullMessage)
-          }
-          actions.append(resendAction)
-
-          let deleteAction = UIAction(title: "Delete", attributes: .destructive) { [weak self] _ in
-            self?.showDeleteConfirmationForFailed(
-              messageId: message.messageId,
-              peerId: message.peerId,
-              chatId: message.chatId
-            )
-          }
-          actions.append(deleteAction)
-
-          return UIMenu(children: actions)
-        }
-
+      if isMessageSending {
         if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-            [weak self] _ in
-            guard let self else { return }
+          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+            guard let cell, cell.message?.id == fullMessage.id else { return }
             if let image = cell.messageView?.newPhotoView.getCurrentImage() {
               UIPasteboard.general.image = image
               ToastManager.shared.showToast(
@@ -4474,148 +4435,229 @@ private extension MessagesCollectionView {
             }
           }
           actions.append(copyPhotoAction)
-
-          let savePhotoAction = UIAction(
-            title: "Save Photo",
-            image: UIImage(systemName: "square.and.arrow.down")
-          ) { [weak self] _ in
-            guard let self else { return }
-            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-              UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-              ToastManager.shared.showToast(
-                "Photo saved to Photos Library",
-                type: .success,
-                systemImage: "photo"
-              )
-            } else {
-              ToastManager.shared.showToast(
-                "Failed to save photo",
-                type: .error,
-                systemImage: "exclamationmark.triangle"
-              )
-            }
-          }
-          actions.append(savePhotoAction)
         }
 
-        let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-          ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-        }
-        actions.append(replyAction)
+        let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { _ in
+          if let transactionId = message.transactionId, !transactionId.isEmpty {
+            Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
 
-        let replyThreadAction = UIAction(
-          title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",
-          image: UIImage(systemName: "arrowshape.turn.up.left.circle")
-        ) { _ in
-          ReplyThreadNavigator.open(message: message, source: .menu)
-        }
-        actions.append(replyThreadAction)
-
-        if !message.isSubthreadPlacement {
-          let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
-            [weak self] _ in
-            guard let self else { return }
-            presentForwardSheet(fullMessage)
-          }
-          actions.append(forwardAction)
-        }
-
-        if let acknowledgementAction = fullMessage.acknowledgementAction(
-          currentUserId: Auth.shared.getCurrentUserId()
-        ) {
-          actions.append(UIAction(
-            title: acknowledgementAction.clear ? "Remove Ack" : "Ack",
-            image: UIImage(systemName: acknowledgementAction.clear ? "xmark" : "checkmark")
-          ) { _ in
+            Transactions.shared.cancel(transactionId: transactionId)
             Task {
-              do {
-                try await Api.realtime.send(.acknowledgeMessages(
-                  message: fullMessage,
-                  action: acknowledgementAction
-                ))
-              } catch {
-                Log.scoped("Acknowledgement").error("Failed to update Ack", error: error)
-                ToastManager.shared.showToast(
-                  "Could not update Ack",
-                  type: .error,
-                  systemImage: "exclamationmark.triangle.fill"
-                )
+              _ = try? await AppDatabase.shared.dbWriter.write { db in
+                try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
               }
+
+              MessagesPublisher.shared
+                .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
             }
-          })
-        }
-
-        let pinned = isMessagePinned(message)
-        let pinAction = UIAction(
-          title: pinned ? "Unpin" : "Pin",
-          image: UIImage(systemName: pinned ? "pin.slash" : "pin")
-        ) { [weak self] _ in
-          self?.togglePinMessage(message, unpin: pinned)
-        }
-
-        var editAction: UIAction?
-        if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
-          editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
-            ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
+          } else {
+            let randomId = message.randomId
+            Task {
+              Api.realtime.cancelTransaction(where: {
+                guard $0.transaction.method == .sendMessage else { return false }
+                guard case let .sendMessage(input) = $0.transaction.input else { return false }
+                return input.randomID == randomId
+              })
+            }
           }
         }
+        actions.append(cancelAction)
 
-        let willDoAction = createWillDoMenu(for: message)
-        let linearIssueAction = createLinearIssueMenu(for: message)
+        return UIMenu(children: actions)
+      }
 
-        let deleteAction = UIAction(
-          title: "Delete",
-          image: UIImage(systemName: "trash"),
-          attributes: .destructive
-        ) { _ in
-          self.showDeleteConfirmation(
+      if isMessageFailed {
+        if fullMessage.photoInfo != nil {
+          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+            guard let cell, cell.message?.id == fullMessage.id else { return }
+            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+              UIPasteboard.general.image = image
+              ToastManager.shared.showToast(
+                "Photo copied to clipboard",
+                type: .success,
+                systemImage: "doc.on.clipboard"
+              )
+            }
+          }
+          actions.append(copyPhotoAction)
+        }
+
+        let resendAction = UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
+          self?.resendMessage(fullMessage)
+        }
+        actions.append(resendAction)
+
+        let deleteAction = UIAction(title: "Delete", attributes: .destructive) { [weak self] _ in
+          self?.showDeleteConfirmationForFailed(
             messageId: message.messageId,
             peerId: message.peerId,
             chatId: message.chatId
           )
         }
+        actions.append(deleteAction)
 
-        var menuChildren: [UIMenuElement] = []
-
-        var basicActions = actions
-        if let editAction {
-          basicActions.append(editAction)
-        }
-        basicActions.append(pinAction)
-
-        if !basicActions.isEmpty {
-          let basicMenu = UIMenu(title: "", options: .displayInline, children: basicActions)
-          menuChildren.append(basicMenu)
-        }
-
-        let integrationActions = [willDoAction, linearIssueAction].compactMap(\.self)
-        if !integrationActions.isEmpty {
-          let integrationsMenu = UIMenu(
-            title: "Actions",
-            image: UIImage(systemName: "ellipsis.circle"),
-            children: integrationActions
-          )
-          menuChildren.append(integrationsMenu)
-        }
-
-        let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
-        menuChildren.append(deleteMenu)
-
-        if let attribution = fullMessage.acknowledgementAttributionLabel {
-          let attributionAction = UIAction(
-            title: attribution,
-            image: UIImage(systemName: "person.2"),
-            attributes: .disabled
-          ) { _ in }
-          menuChildren.append(UIMenu(
-            title: "",
-            options: .displayInline,
-            children: [attributionAction]
-          ))
-        }
-
-        return UIMenu(children: menuChildren)
+        return UIMenu(children: actions)
       }
+
+      if fullMessage.photoInfo != nil {
+        let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+          guard let cell, cell.message?.id == fullMessage.id else { return }
+          if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+            UIPasteboard.general.image = image
+            ToastManager.shared.showToast(
+              "Photo copied to clipboard",
+              type: .success,
+              systemImage: "doc.on.clipboard"
+            )
+          }
+        }
+        actions.append(copyPhotoAction)
+
+        let savePhotoAction = UIAction(
+          title: "Save Photo",
+          image: UIImage(systemName: "square.and.arrow.down")
+        ) { [weak cell] _ in
+          guard let cell, cell.message?.id == fullMessage.id else { return }
+          if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            ToastManager.shared.showToast(
+              "Photo saved to Photos Library",
+              type: .success,
+              systemImage: "photo"
+            )
+          } else {
+            ToastManager.shared.showToast(
+              "Failed to save photo",
+              type: .error,
+              systemImage: "exclamationmark.triangle"
+            )
+          }
+        }
+        actions.append(savePhotoAction)
+      }
+
+      if includeReactionsAction {
+        actions.append(UIAction(title: "Reactions", image: UIImage(systemName: "face.smiling")) { [weak self] _ in
+          self?.showReactionEmojiPicker(for: fullMessage)
+        })
+      }
+
+      let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
+        ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
+      }
+      actions.append(replyAction)
+
+      let replyThreadAction = UIAction(
+        title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",
+        image: UIImage(systemName: "arrowshape.turn.up.left.circle")
+      ) { _ in
+        ReplyThreadNavigator.open(message: message, source: .menu)
+      }
+      actions.append(replyThreadAction)
+
+      if !message.isSubthreadPlacement {
+        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) { [weak self] _ in
+          guard let self else { return }
+          presentForwardSheet(fullMessage)
+        }
+        actions.append(forwardAction)
+      }
+
+      if let acknowledgementAction = fullMessage.acknowledgementAction(
+        currentUserId: Auth.shared.getCurrentUserId()
+      ) {
+        actions.append(UIAction(
+          title: acknowledgementAction.clear ? "Remove Ack" : "Ack",
+          image: UIImage(systemName: acknowledgementAction.clear ? "xmark" : "checkmark")
+        ) { _ in
+          Task {
+            do {
+              try await Api.realtime.send(.acknowledgeMessages(
+                message: fullMessage,
+                action: acknowledgementAction
+              ))
+            } catch {
+              Log.scoped("Acknowledgement").error("Failed to update Ack", error: error)
+              ToastManager.shared.showToast(
+                "Could not update Ack",
+                type: .error,
+                systemImage: "exclamationmark.triangle.fill"
+              )
+            }
+          }
+        })
+      }
+
+      let pinned = isMessagePinned(message)
+      let pinAction = UIAction(
+        title: pinned ? "Unpin" : "Pin",
+        image: UIImage(systemName: pinned ? "pin.slash" : "pin")
+      ) { [weak self] _ in
+        self?.togglePinMessage(message, unpin: pinned)
+      }
+
+      var editAction: UIAction?
+      if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
+        editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
+          ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
+        }
+      }
+
+      let willDoAction = createWillDoMenu(for: message)
+      let linearIssueAction = createLinearIssueMenu(for: message)
+
+      let deleteAction = UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { _ in
+        self.showDeleteConfirmation(
+          messageId: message.messageId,
+          peerId: message.peerId,
+          chatId: message.chatId
+        )
+      }
+
+      var menuChildren: [UIMenuElement] = []
+
+      var basicActions = actions
+      if let editAction {
+        basicActions.append(editAction)
+      }
+      basicActions.append(pinAction)
+
+      if !basicActions.isEmpty {
+        let basicMenu = UIMenu(title: "", options: .displayInline, children: basicActions)
+        menuChildren.append(basicMenu)
+      }
+
+      let integrationActions = [willDoAction, linearIssueAction].compactMap(\.self)
+      if !integrationActions.isEmpty {
+        let integrationsMenu = UIMenu(
+          title: "Actions",
+          image: UIImage(systemName: "ellipsis.circle"),
+          children: integrationActions
+        )
+        menuChildren.append(integrationsMenu)
+      }
+
+      let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
+      menuChildren.append(deleteMenu)
+
+      if let attribution = fullMessage.acknowledgementAttributionLabel {
+        let attributionAction = UIAction(
+          title: attribution,
+          image: UIImage(systemName: "person.2"),
+          attributes: .disabled
+        ) { _ in }
+        menuChildren.append(UIMenu(
+          title: "",
+          options: .displayInline,
+          children: [attributionAction]
+        ))
+      }
+
+      return UIMenu(children: menuChildren)
     }
 
     func showDeleteConfirmation(messageId: Int64, peerId: Peer, chatId: Int64) {

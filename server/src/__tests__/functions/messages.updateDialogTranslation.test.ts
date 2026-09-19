@@ -39,8 +39,38 @@ describe("messages.updateDialogTranslation", () => {
       .sort((a, b) => a.seq - b.seq)
     expect(Sync.inflateUserUpdates(rows)).toEqual([...enabled.updates, ...disabled.updates])
     const retry = await updateDialogTranslation({ peerId, enabled: false }, context)
-    expect(retry.updates[0]?.seq).toBeUndefined()
+    expect(retry.updates[0]?.seq).toBe(disabled.updates[0]!.seq! + 1)
     expect(retry.updates[0]?.update).toEqual(disabled.updates[0]?.update)
+  })
+
+  test("a delayed no-op reply retains its durable order before a newer device edit", async () => {
+    const owner = await testUtils.createUser("translation-noop-order@example.com")
+    const chat = await testUtils.createChat(null, "Translation order", "thread", false, owner.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+    const peerId = { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chat.id) } } }
+    const context = testUtils.functionContext({ userId: owner.id, sessionId: 1 })
+
+    await updateDialogTranslation({ peerId, enabled: true }, context)
+    // Hold this response while the other session changes the preference. A
+    // transport replay must carry an older sequence, not an unversioned value.
+    const delayed = await updateDialogTranslation({ peerId, enabled: true }, context)
+    const newer = await updateDialogTranslation(
+      { peerId, enabled: false },
+      testUtils.functionContext({ userId: owner.id, sessionId: 2 }),
+    )
+    expect(delayed.updates[0]?.seq).toBeGreaterThan(0)
+    expect(delayed.updates[0]?.date).toBeGreaterThan(0n)
+    expect(newer.updates[0]?.seq).toBe(delayed.updates[0]!.seq! + 1)
+
+    const sequences = [delayed.updates[0]!.seq, newer.updates[0]!.seq]
+    const rows = (await db.select().from(updates).where(eq(updates.entityId, owner.id)))
+      .filter((row) => row.bucket === UpdateBucket.User && sequences.includes(row.seq))
+      .sort((a, b) => a.seq - b.seq)
+    expect(Sync.inflateUserUpdates(rows)).toEqual([...delayed.updates, ...newer.updates])
+    const [dialog] = await db.select().from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+    expect(dialog?.translationEnabled).toBe(false)
   })
 
   test("concurrent sessions serialize the final preference and durable updates", async () => {
@@ -74,12 +104,12 @@ describe("messages.updateDialogTranslation", () => {
       oneofKind: "dialogTranslation", dialogTranslation: { peerId, enabled: true },
     })
     const retry = await updateDialogTranslation(legacy, context)
-    expect(retry.updates[0]?.seq).toBeUndefined()
+    expect(retry.updates[0]?.seq).toBe(imported.updates[0]!.seq! + 1)
     expect(retry.updates[0]?.update).toEqual(imported.updates[0]?.update)
 
     const disabled = await updateDialogTranslation({ peerId, enabled: false }, context)
     const lateDevice = await updateDialogTranslation(legacy, context)
-    expect(lateDevice.updates[0]?.seq).toBeUndefined()
+    expect(lateDevice.updates[0]?.seq).toBe(disabled.updates[0]!.seq! + 1)
     expect(lateDevice.updates[0]?.update).toEqual(disabled.updates[0]?.update)
     const [dialog] = await db.select().from(dialogs)
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))

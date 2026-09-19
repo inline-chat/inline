@@ -22,6 +22,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   @Published private(set) var phase: ComposeVoiceRecordingPhase = .idle
   @Published private(set) var inputMode: ComposeVoiceInputMode = .voiceMessage
   @Published private(set) var transcriptionError: String?
+  @Published private(set) var reachedDictationLimit = false
   private(set) var transcriptionSendsText = false
   private var transcriptionTask: Task<Void, Never>?
   private var transcriptionAccount: AuthAccountMutationToken?
@@ -101,6 +102,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
     inputMode = mode
     transcriptionError = nil
+    reachedDictationLimit = false
 
     let operationId = UUID()
     self.operationId = operationId
@@ -126,7 +128,9 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard self.operationId == operationId, phase == .starting else { return }
 
     do {
-      let session = try await recorder.start()
+      let session = try await recorder.start(
+        maximumDuration: inputMode == .transcribe ? DraftVoiceTranscription.maximumDuration : nil
+      )
 
       guard self.operationId == operationId, phase == .starting else {
         await session.cancel()
@@ -326,6 +330,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
           else { return }
           duration = update.duration
           samples = update.samples
+          if update.reachedDurationLimit, inputMode == .transcribe {
+            reachedDictationLimit = true
+            pauseRecording()
+            return
+          }
         }
       } catch is CancellationError {
         return

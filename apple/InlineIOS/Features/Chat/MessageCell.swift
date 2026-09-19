@@ -39,6 +39,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   weak var delegate: MessageCellDelegate?
   var onUserTap: ((Int64) -> Void)?
   var onReactionsMenu: ((FullMessage) -> Void)?
+  var messageActionsMenuProvider: ((MessageCollectionViewCell) -> UIMenu)? {
+    didSet { setNeedsLayout() }
+  }
+  var allowsMessageActions = false {
+    didSet { setNeedsLayout() }
+  }
+  private(set) var messageHoldAction = MessageGestureAction.defaultHold
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
   var grabOverlappingAvatar: ((UIView) -> UIView?)?
   var onV2GeometryChange: ((
@@ -120,6 +127,71 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
+
+  private var messageActionsButton: UIButton?
+
+  private func makeMessageActionsButton() -> UIButton {
+    let button = UIButton(type: .system)
+    button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(
+      pointSize: 17, weight: .medium
+    )), for: .normal)
+    button.tintColor = .secondaryLabel
+    button.accessibilityLabel = "Message actions"
+    button.accessibilityIdentifier = "messageActions"
+    button.showsMenuAsPrimaryAction = true
+    // Resolve both the cell's current identity and the menu state on each open;
+    // reused cells and updates while the menu is closed must not keep old actions.
+    button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+      guard let self, let provider = messageActionsMenuProvider else {
+        completion([])
+        return
+      }
+      completion(provider(self).children)
+    }])
+    button.isHidden = true
+    contentView.addSubview(button)
+    return button
+  }
+
+  var usesCustomHoldAction: Bool {
+    messageHoldAction != .reactionsMenu && messageHoldAction != .none
+      && displayMode != .threadAnchor && message?.canReply == true
+  }
+
+  func updateMessageHoldAction(_ action: MessageGestureAction) {
+    messageHoldAction = action
+    setNeedsLayout()
+  }
+
+  func isMessageActionsButton(at point: CGPoint) -> Bool {
+    guard let button = messageActionsButton, !button.isHidden else { return false }
+    return button.bounds.contains(button.convert(point, from: self))
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard allowsMessageActions, usesCustomHoldAction, messageActionsMenuProvider != nil, let messageView else {
+      messageActionsButton?.isHidden = true
+      return
+    }
+    let button = messageActionsButton ?? makeMessageActionsButton()
+    messageActionsButton = button
+
+    // Use the empty side of the row so both renderers and media bubbles retain
+    // their existing geometry. Keep a 44pt target wherever the gutter permits.
+    let bubble = messageView.bubbleView.convert(messageView.bubbleView.bounds, to: contentView)
+    let gutterWidth = outgoing ? bubble.minX : contentView.bounds.width - bubble.maxX
+    let width = min(44, max(0, gutterWidth))
+    let height = min(44, contentView.bounds.height)
+    button.frame = CGRect(
+      x: outgoing ? bubble.minX - width : bubble.maxX,
+      y: min(max(0, bubble.maxY - height), max(0, contentView.bounds.height - height)),
+      width: width,
+      height: height
+    )
+    button.isHidden = false
+    contentView.bringSubviewToFront(button)
+  }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -651,6 +723,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     delegate = nil
     onPhotoTap = nil
     onReactionsMenu = nil
+    messageActionsMenuProvider = nil
+    allowsMessageActions = false
+    messageActionsButton?.isHidden = true
     grabOverlappingAvatar = nil
     onV2GeometryChange = nil
   }
@@ -805,6 +880,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 extension MessageCollectionViewCell {
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     guard gestureRecognizer == panGesture else { return true }
+
+    guard !isMessageActionsButton(at: gestureRecognizer.location(in: self)) else { return false }
 
     // Do not begin swipe-to-reply if replying is not allowed
     if !canReply { return false }
