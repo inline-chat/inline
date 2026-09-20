@@ -2,6 +2,9 @@
 
 Build from the repository root with `landing/Dockerfile`, `server/Dockerfile`,
 or `packages/mcp/Dockerfile`. All use the Bun version pinned in `package.json`.
+The website build stage also includes Node 26.8.2, matching CI: StyleX 0.19.1
+media-query compilation fails when Vite runs under Bun. Bun still installs
+dependencies and serves the release image; Node is only in the build stage.
 
 `prune-workspace.ts` retains every workspace manifest, `bunfig.toml`, and the
 committed `bun.lock`. Dependency stages use a frozen, filtered install. Only

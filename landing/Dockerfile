@@ -1,3 +1,5 @@
+FROM node:26.8.2-bookworm-slim AS build-node
+
 FROM oven/bun:1.4.0 AS base
 WORKDIR /usr/src/app
 
@@ -20,6 +22,8 @@ COPY --from=pruner /usr/src/app/out/json/ ./
 RUN bun install --frozen-lockfile --filter @inline-chat/landing --production
 
 FROM base AS build
+# StyleX compilation currently fails under Bun; match the Node-backed CI compiler.
+COPY --from=build-node /usr/local/bin/node /usr/local/bin/node
 COPY --from=development-dependencies /usr/src/app/ ./
 COPY --from=pruner /usr/src/app/out/full/ ./
 RUN cd packages/protocol && bun run build && cd /usr/src/app/landing && bun run build

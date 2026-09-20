@@ -17,6 +17,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup website compiler runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.8.2"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
