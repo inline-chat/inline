@@ -421,6 +421,7 @@ class ChatViewAppKit: NSViewController {
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
+    messageListVC_.setMaximumContentWidth(ChatLayoutMetrics.maximumWidth)
 
     messageListVC = messageListVC_
 
@@ -460,10 +461,10 @@ class ChatViewAppKit: NSViewController {
         messageListVC!.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         messageListVC!.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-        // compose
+        // Share the message viewport, including space reserved for persistent scrollbars.
         compose.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-        compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        compose.leadingAnchor.constraint(equalTo: messageListVC_.messageColumnGuide.leadingAnchor),
+        compose.trailingAnchor.constraint(equalTo: messageListVC_.messageColumnGuide.trailingAnchor),
       ])
     }
 

@@ -7,6 +7,8 @@ protocol ChatMessageListController: NSViewController {
   var viewModel: MessagesProgressiveViewModel { get }
   var highestPositiveMessageId: Int64? { get }
   var preservesHistoryOnSend: Bool { get }
+  var messageColumnGuide: NSLayoutGuide { get }
+  func setMaximumContentWidth(_ width: CGFloat?)
   func updateInsetForCompose(_ height: CGFloat, animate: Bool)
   func collapseHistory(maxID: Int64?) async throws
   func setCollapsedMaxId(_ collapsedMaxId: Int64?)

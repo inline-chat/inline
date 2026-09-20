@@ -829,8 +829,8 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
     NSLayoutConstraint.activate([
       pinnedHeaderTopConstraint!,
-      pinnedHeaderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      pinnedHeaderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      pinnedHeaderView.leadingAnchor.constraint(equalTo: scrollView.messageColumnGuide.leadingAnchor),
+      pinnedHeaderView.trailingAnchor.constraint(equalTo: scrollView.messageColumnGuide.trailingAnchor),
       pinnedHeaderHeightConstraint!,
     ])
 
@@ -847,7 +847,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
     NSLayoutConstraint.activate([
       scrollToBottomButton.trailingAnchor.constraint(
-        equalTo: view.trailingAnchor,
+        equalTo: scrollView.messageColumnGuide.trailingAnchor,
         constant: -14
       ),
       scrollToBottomBottomConstraint,
@@ -1233,7 +1233,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
         let size = CGSize(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize)
         return (
           origin: CGPoint(
-            x: Theme.messageSidePadding,
+            x: MessageSizeCalculator.bubbleAvatarLeadingInset,
             y: rowFrame.maxY - Theme.messageOuterVerticalPadding - size.height
           ),
           size: size
@@ -1264,8 +1264,18 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   private var lastColumnWidthUpdate: CGFloat = 0
 
+  var messageColumnGuide: NSLayoutGuide { scrollView.messageColumnGuide }
+
+  func setMaximumContentWidth(_ width: CGFloat?) {
+    guard scrollView.maximumContentWidth != width else { return }
+    lastKnownWidth = 0
+    chatRows.invalidateMeasurements()
+    scrollView.maximumContentWidth = width
+    view.needsLayout = true
+  }
+
   private func updateColumnWidth(commit: Bool = false) {
-    let newWidth = scrollView.contentSize.width
+    let newWidth = scrollView.messageContentWidth
     #if DEBUG
     log.trace("Updating column width \(newWidth)")
     #endif
@@ -1315,6 +1325,10 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
   }
 
   private func rawMeasurementWidth(using tableView: NSTableView) -> CGFloat {
+    if let scroll = tableView.enclosingScrollView as? MessageListScrollView,
+       scroll.maximumContentWidth != nil {
+      return ceil(scroll.messageContentWidth)
+    }
     let viewWidth = isViewLoaded ? view.bounds.width : 0
     let widths: [CGFloat] = [
       // Do not touch `self.scrollView` here: AppKit can ask row heights while `scrollView` is still being built.

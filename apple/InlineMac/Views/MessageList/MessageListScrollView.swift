@@ -1,6 +1,56 @@
 import AppKit
 
+/// Shared horizontal geometry for the conversation and its composer.
+enum ChatLayoutMetrics {
+  static let maximumWidth: CGFloat = 750
+  static let leadingControlCenterX: CGFloat = 32
+
+  static func avatarLeadingInset(size: CGFloat) -> CGFloat {
+    leadingControlCenterX - size / 2
+  }
+}
+
 class MessageListScrollView: NSScrollView {
+  static let centeredChatWidth = ChatLayoutMetrics.maximumWidth
+  let messageColumnGuide = NSLayoutGuide()
+  private var columnWidth: NSLayoutConstraint?
+
+  var messageContentWidth: CGFloat {
+    min(contentSize.width, maximumContentWidth ?? contentSize.width)
+  }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    contentView = CenteredMessageClipView()
+    addLayoutGuide(messageColumnGuide)
+    columnWidth = messageColumnGuide.widthAnchor.constraint(equalToConstant: messageContentWidth)
+    NSLayoutConstraint.activate([
+      messageColumnGuide.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+      messageColumnGuide.topAnchor.constraint(equalTo: contentView.topAnchor),
+      messageColumnGuide.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+      columnWidth!,
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  var maximumContentWidth: CGFloat? {
+    didSet {
+      guard maximumContentWidth != oldValue else { return }
+      (contentView as? CenteredMessageClipView)?.maximumDocumentWidth = maximumContentWidth
+      tile()
+    }
+  }
+
+  override func tile() {
+    super.tile()
+    columnWidth?.constant = messageContentWidth
+    (contentView as? CenteredMessageClipView)?.recenterDocument()
+  }
+
   override func hitTest(_ point: NSPoint) -> NSView? {
     let hit = super.hitTest(point)
     MessageGestureTrace.trace("MessageListScrollView.hitTest parentPoint=\(MessageGestureTrace.point(point)) hit=\(MessageGestureTrace.view(hit))")
@@ -9,6 +59,50 @@ class MessageListScrollView: NSScrollView {
 
   override func flashScrollers() {
     // Do nothing to prevent flashing
+  }
+}
+
+/// Keep the native viewport and scroller full-width. Center the narrower table
+/// in document coordinates, including programmatic scrolls that request x = 0.
+private final class CenteredMessageClipView: NSClipView {
+  var maximumDocumentWidth: CGFloat? {
+    didSet { recenterDocument() }
+  }
+
+  private func horizontalOrigin(for width: CGFloat) -> CGFloat {
+    guard let maximumDocumentWidth else { return 0 }
+    return -max(0, (width - maximumDocumentWidth) / 2)
+  }
+
+  func recenterDocument() {
+    let x = horizontalOrigin(for: bounds.width)
+    if bounds.origin.x != x {
+      super.setBoundsOrigin(NSPoint(x: x, y: bounds.origin.y))
+    }
+  }
+
+  override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+    var constrained = super.constrainBoundsRect(proposedBounds)
+    if maximumDocumentWidth != nil {
+      constrained.origin.x = horizontalOrigin(for: proposedBounds.width)
+    }
+    return constrained
+  }
+
+  override func setBoundsOrigin(_ newOrigin: NSPoint) {
+    var origin = newOrigin
+    if maximumDocumentWidth != nil {
+      origin.x = horizontalOrigin(for: bounds.width)
+    }
+    super.setBoundsOrigin(origin)
+  }
+
+  override func scroll(to newOrigin: NSPoint) {
+    var origin = newOrigin
+    if maximumDocumentWidth != nil {
+      origin.x = horizontalOrigin(for: bounds.width)
+    }
+    super.scroll(to: origin)
   }
 }
 

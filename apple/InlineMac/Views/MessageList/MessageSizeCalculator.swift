@@ -39,6 +39,7 @@ class MessageSizeCalculator {
 
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
   static let minimalMaxMessageWidth: CGFloat = 600
+  static let bubbleAvatarLeadingInset = ChatLayoutMetrics.avatarLeadingInset(size: Theme.messageAvatarSize)
   static let minimalAvatarSize: CGFloat = 30
   static let minimalMediaMaxWidth: CGFloat = 350
   static let minimalMediaMaxHeight: CGFloat = 300
@@ -48,9 +49,8 @@ class MessageSizeCalculator {
   static let minimalAttachmentsMaxWidth: CGFloat = 350
   static let minimalGroupSpacing: CGFloat = 8
   static let minimalAfterDaySeparatorGroupSpacing: CGFloat = 2
-  static let minimalHoverSideInset: CGFloat = 18
+  static let minimalHoverSideInset: CGFloat = minimalContentLeadingInset - minimalHoverContentInset
   static let minimalHoverContentInset: CGFloat = 6
-  static let minimalContentExtraLeadingInset: CGFloat = 8
   static let minimalInlineTimeSpacing: CGFloat = 6
   static let minimalFollowUpTimeTopOffset: CGFloat = 1
   static let minimalInlineTimeVerticalOffset: CGFloat = 1
@@ -67,7 +67,7 @@ class MessageSizeCalculator {
   static let acknowledgementTrailingInset: CGFloat = 6
   static let acknowledgementStandaloneFooterHeight: CGFloat = 20
   static var minimalContentLeadingInset: CGFloat {
-    minimalHoverSideInset + minimalHoverContentInset + minimalContentExtraLeadingInset
+    ChatLayoutMetrics.avatarLeadingInset(size: minimalAvatarSize)
   }
   static var minimalNameHeight: CGFloat {
     max(15, Theme.messageNameLabelHeight - 2)
@@ -229,35 +229,20 @@ class MessageSizeCalculator {
     }
     let leadingSafeWidth: CGFloat = switch style {
     case .bubble:
-      Theme.messageSidePadding + Theme.messageHorizontalStackSpacing + avatarWidth
+      Self.bubbleAvatarLeadingInset + Theme.messageHorizontalStackSpacing + avatarWidth
     case .minimal:
       Self.minimalContentLeadingInset + Theme.messageHorizontalStackSpacing + avatarWidth
     }
     let trailingSafeWidth: CGFloat = switch style {
     case .bubble:
-      Theme.messageSidePadding + Self.safeAreaWidth
+      Theme.messageSidePadding
     case .minimal:
       Self.minimalHoverSideInset + Self.minimalHoverContentInset
     }
-    let maxWidth: CGFloat = switch style {
-    case .bubble:
-      Self.maxMessageWidth
-    case .minimal:
-      Self.minimalMaxMessageWidth
-    }
-
+    // The conversation column supplies the outer limit; reserve avatar and padding
+    // space, then let text use the remaining width in either message style.
     let reservedWidth = leadingSafeWidth + trailingSafeWidth + Self.extraSafeWidth
-    let availableWidth: CGFloat
-    if ceiledWidth > reservedWidth {
-      availableWidth = ceiledWidth - reservedWidth
-    } else if style == .minimal {
-      availableWidth = maxWidth
-    } else {
-      availableWidth = ceiledWidth - reservedWidth
-    }
-
-    // Ensure we don't return negative width
-    return min(max(0.0, availableWidth), maxWidth)
+    return max(0, ceiledWidth - reservedWidth)
   }
 
   func getTextWidthIfSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> CGFloat? {
@@ -652,7 +637,7 @@ class MessageSizeCalculator {
     }
 
     var nameAndBubbleLeading: CGFloat {
-      Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + Theme.messageSidePadding
+      Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + MessageSizeCalculator.bubbleAvatarLeadingInset
     }
   }
 
@@ -982,6 +967,9 @@ class MessageSizeCalculator {
     } else if hasDocument {
       // Documents don't restrict text width like photos - text can use full parent width
       availableWidth = parentAvailableWidth - (bubbleContentHorizontalInset * 2)
+    } else if hasBubbleColor {
+      // The available width is the whole bubble, including its internal padding.
+      availableWidth = max(1, parentAvailableWidth - (bubbleContentHorizontalInset * 2))
     }
 
     #if DEBUG
@@ -1166,7 +1154,7 @@ class MessageSizeCalculator {
         size: .init(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize),
         spacing: .init(
           top: 0,
-          left: Theme.messageSidePadding,
+          left: Self.bubbleAvatarLeadingInset,
           bottom: 0,
           right: Theme.messageHorizontalStackSpacing
         )

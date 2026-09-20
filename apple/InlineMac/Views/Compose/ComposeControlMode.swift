@@ -11,7 +11,7 @@ enum GlassComposeLayout {
 
   var viewportHorizontalInset: CGFloat {
     switch self {
-      case .sideControls: 14
+      case .sideControls: ChatLayoutMetrics.leadingControlCenterX - ComposeControlMode.glass.sideButtonSize / 2
       case .accessoryBar: 0
     }
   }
@@ -84,7 +84,7 @@ enum ComposeControlMode {
       case .legacy:
         Theme.composeOuterSpacing
       case .glass:
-        14
+        GlassComposeLayout.sideControls.viewportHorizontalInset
     }
   }
 

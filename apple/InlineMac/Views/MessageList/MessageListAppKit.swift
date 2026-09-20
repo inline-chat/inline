@@ -712,7 +712,7 @@ class MessageListAppKit: NSViewController {
     return table
   }()
 
-  private lazy var scrollView: NSScrollView = {
+  private lazy var scrollView: MessageListScrollView = {
     let scroll = MessageListScrollView()
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
@@ -1036,8 +1036,8 @@ class MessageListAppKit: NSViewController {
 
     NSLayoutConstraint.activate([
       pinnedHeaderTopConstraint!,
-      pinnedHeaderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      pinnedHeaderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      pinnedHeaderView.leadingAnchor.constraint(equalTo: scrollView.messageColumnGuide.leadingAnchor),
+      pinnedHeaderView.trailingAnchor.constraint(equalTo: scrollView.messageColumnGuide.trailingAnchor),
       pinnedHeaderHeightConstraint!,
     ])
 
@@ -1054,7 +1054,7 @@ class MessageListAppKit: NSViewController {
 
     NSLayoutConstraint.activate([
       scrollToBottomButton.trailingAnchor.constraint(
-        equalTo: view.trailingAnchor,
+        equalTo: scrollView.messageColumnGuide.trailingAnchor,
         constant: -14
       ),
       scrollToBottomBottomConstraint,
@@ -1440,7 +1440,7 @@ class MessageListAppKit: NSViewController {
       let size = CGSize(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize)
       return (
         origin: CGPoint(
-          x: Theme.messageSidePadding,
+          x: MessageSizeCalculator.bubbleAvatarLeadingInset,
           y: rowFrame.maxY - Theme.messageOuterVerticalPadding - size.height
         ),
         size: size
@@ -1471,8 +1471,18 @@ class MessageListAppKit: NSViewController {
 
   private var lastColumnWidthUpdate: CGFloat = 0
 
+  var messageColumnGuide: NSLayoutGuide { scrollView.messageColumnGuide }
+
+  func setMaximumContentWidth(_ width: CGFloat?) {
+    guard scrollView.maximumContentWidth != width else { return }
+    // The message width cap also changes when toggling in a narrow window.
+    lastKnownWidth = 0
+    scrollView.maximumContentWidth = width
+    view.needsLayout = true
+  }
+
   private func updateColumnWidth(commit: Bool = false) {
-    let newWidth = scrollView.contentSize.width
+    let newWidth = scrollView.messageContentWidth
     #if DEBUG
     log.trace("Updating column width \(newWidth)")
     #endif
@@ -1522,6 +1532,11 @@ class MessageListAppKit: NSViewController {
   }
 
   private func rawMeasurementWidth(using tableView: NSTableView) -> CGFloat {
+    if let scroll = tableView.enclosingScrollView as? MessageListScrollView,
+       scroll.maximumContentWidth != nil {
+      let selectionInset = showsForwardSelection ? MessageTableCell.forwardSelectionInset : 0
+      return ceil(scroll.messageContentWidth) - selectionInset
+    }
     let viewWidth = isViewLoaded ? view.bounds.width : 0
     let widths: [CGFloat] = [
       tableView.bounds.width,
