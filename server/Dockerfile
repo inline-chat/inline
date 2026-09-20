@@ -2,23 +2,22 @@ FROM oven/bun:1.4.0 AS base
 WORKDIR /usr/src/app
 
 FROM base AS pruner
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY package.json bunfig.toml ./
+COPY package.json bun.lock bunfig.toml ./
+COPY cli/package.json ./cli/package.json
 COPY server ./server
 COPY landing ./landing
 COPY packages ./packages
+COPY plugins ./plugins
 COPY scripts ./scripts
 RUN bun scripts/docker/prune-workspace.ts @inline-chat/server out
 
 FROM base AS development-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
-COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile --linker hoisted
+RUN bun install --frozen-lockfile --filter @inline-chat/server --linker hoisted
 
 FROM base AS production-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
-COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile --production --linker hoisted
+RUN bun install --frozen-lockfile --filter @inline-chat/server --production --linker hoisted
 
 FROM base AS build
 COPY --from=development-dependencies /usr/src/app/ ./
@@ -48,7 +47,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm
 RUN install -m 0755 server/scripts/helpers/healthcheck-wget.sh /usr/local/bin/wget
 
 ENV NODE_ENV=production
+COPY --from=pruner /usr/src/app/out/full/scripts/docker/smoke-artifact.ts ./scripts/docker/smoke-artifact.ts
 USER bun
+RUN bun scripts/docker/smoke-artifact.ts server
 EXPOSE 8000/tcp
 
 ENTRYPOINT [ "bun", "run", "server/scripts/start-production.ts" ]

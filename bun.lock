@@ -162,6 +162,7 @@
         "zod": "^4.3.6",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
         "@types/node": "^20.11.30",
         "@vitest/coverage-v8": "4.1.10",
         "typescript": "^5.8.3",

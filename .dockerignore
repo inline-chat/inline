@@ -6,10 +6,14 @@
 .vscode
 apple
 build
-cli
+cli/*
+!cli/package.json
 desktop
 **/.DS_Store
 **/.env*
 **/node_modules
 **/dist
 **/.turbo
+
+**/.output
+**/*.tsbuildinfo

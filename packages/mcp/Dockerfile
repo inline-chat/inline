@@ -2,15 +2,18 @@ FROM oven/bun:1.4.0 AS base
 WORKDIR /app
 
 FROM base AS pruner
-COPY package.json bunfig.toml ./
+COPY package.json bun.lock bunfig.toml ./
+COPY cli/package.json ./cli/package.json
+COPY server ./server
+COPY landing ./landing
 COPY packages ./packages
+COPY plugins ./plugins
 COPY scripts ./scripts
 RUN bun scripts/docker/prune-workspace.ts @inline-chat/mcp out
 
 FROM base AS deps
 COPY --from=pruner /app/out/json/ ./
-COPY --from=pruner /app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --filter @inline-chat/mcp
 
 FROM deps AS build
 COPY --from=pruner /app/out/full/ ./
@@ -21,8 +24,7 @@ RUN bun run --cwd packages/mcp build
 
 FROM base AS release
 COPY --from=pruner /app/out/json/ ./
-COPY --from=pruner /app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --filter @inline-chat/mcp --production
 COPY --from=build /app/packages/protocol/dist ./packages/protocol/dist
 COPY --from=build /app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /app/packages/sdk/dist ./packages/sdk/dist
@@ -31,7 +33,9 @@ COPY --from=build /app/packages/mcp/dist ./packages/mcp/dist
 ENV NODE_ENV=production
 ENV PORT=8791
 
+COPY --from=pruner /app/out/full/scripts/docker/smoke-artifact.ts ./scripts/docker/smoke-artifact.ts
 USER bun
+RUN bun scripts/docker/smoke-artifact.ts mcp
 WORKDIR /app/packages/mcp
 EXPOSE 8791
 
