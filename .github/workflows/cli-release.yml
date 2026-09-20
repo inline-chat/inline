@@ -242,7 +242,22 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
+          ref: main
+
+      - name: Verify release commit remains current main
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release commit must be a full 40-character lowercase SHA." >&2
+            exit 1
+          fi
+          checkout_commit="$(git rev-parse HEAD)"
+          if [[ "${checkout_commit}" != "${RELEASE_COMMIT}" ]]; then
+            echo "Current main ${checkout_commit} no longer matches requested release ${RELEASE_COMMIT}." >&2
+            exit 1
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2

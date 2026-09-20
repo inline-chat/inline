@@ -20,6 +20,9 @@ on:
       - ".github/workflows/cli-check.yml"
       - ".github/workflows/cli-release.yml"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

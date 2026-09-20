@@ -1,8 +1,9 @@
 import { setupTestLifecycle } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { thereUsers, waitlist as waitlistTable } from "@in/server/db/schema"
+import { Log } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { app } from "../legacyServer"
 
 setupTestLifecycle()
@@ -98,16 +99,25 @@ describe("extra and integration routes", () => {
   })
 
   it("redirects linear callback to state_mismatch when state cookie does not match", async () => {
-    const response = await app.handle(
-      new Request("http://localhost/integrations/linear/callback?code=test-code&state=query-state", {
-        headers: {
-          cookie: "token=1%3AINfake;state=cookie-state;spaceId=1",
-        },
-      }),
-    )
+    const warn = spyOn(Log.shared, "warn")
+    const trace = spyOn(Log.shared, "trace")
+    try {
+      const response = await app.handle(
+        new Request("http://localhost/integrations/linear/callback?code=test-code&state=query-state", {
+          headers: {
+            cookie: "token=1%3AINfake;state=cookie-state;spaceId=1",
+          },
+        }),
+      )
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get("location")).toBe("in://integrations/linear?success=false&error=state_mismatch")
+      expect(response.status).toBe(302)
+      expect(response.headers.get("location")).toBe("in://integrations/linear?success=false&error=state_mismatch")
+      expect(warn).not.toHaveBeenCalled()
+      expect(trace).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      trace.mockRestore()
+    }
   })
 
   it("redirects notion callback to missing_cookie when oauth cookies are absent", async () => {
@@ -120,15 +130,24 @@ describe("extra and integration routes", () => {
   })
 
   it("redirects notion callback to state_mismatch when state cookie does not match", async () => {
-    const response = await app.handle(
-      new Request("http://localhost/integrations/notion/callback?code=test-code&state=query-state", {
-        headers: {
-          cookie: "token=1%3AINfake;state=cookie-state;spaceId=1",
-        },
-      }),
-    )
+    const warn = spyOn(Log.shared, "warn")
+    const trace = spyOn(Log.shared, "trace")
+    try {
+      const response = await app.handle(
+        new Request("http://localhost/integrations/notion/callback?code=test-code&state=query-state", {
+          headers: {
+            cookie: "token=1%3AINfake;state=cookie-state;spaceId=1",
+          },
+        }),
+      )
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get("location")).toBe("in://integrations/notion?success=false&error=state_mismatch")
+      expect(response.status).toBe(302)
+      expect(response.headers.get("location")).toBe("in://integrations/notion?success=false&error=state_mismatch")
+      expect(warn).not.toHaveBeenCalled()
+      expect(trace).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      trace.mockRestore()
+    }
   })
 })

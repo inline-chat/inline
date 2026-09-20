@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia"
 import * as arctic from "arctic"
 import { getUserIdFromToken } from "../plugins"
 import { Log } from "@in/server/utils/log"
-import { isProd } from "@in/server/env"
+import { isDev, isProd } from "@in/server/env"
 import { getLinearAuthUrl } from "@in/server/libs/linear"
 import { handleLinearCallback } from "./handleLinearCallback"
 import { getNotionAuthUrl, handleNotionCallback } from "@in/server/libs/notion"
@@ -93,7 +93,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       }
 
       if (query.state !== cookieState.value) {
-        Log.shared.warn("Linear OAuth callback state mismatch", { expected: cookieState.value, got: query.state })
+        if (isDev) Log.shared.trace("Linear OAuth callback state mismatch")
         clearCookies()
         return Response.redirect(connectorCallbackUrl("linear", "success=false&error=state_mismatch"))
       }
@@ -234,7 +234,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       }
 
       if (query.state !== cookieState.value) {
-        Log.shared.warn("Notion OAuth callback state mismatch", { expected: cookieState.value, got: query.state })
+        if (isDev) Log.shared.trace("Notion OAuth callback state mismatch")
         clearCookies()
         return Response.redirect(connectorCallbackUrl("notion", "success=false&error=state_mismatch"))
       }
