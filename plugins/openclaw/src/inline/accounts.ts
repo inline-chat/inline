@@ -54,6 +54,8 @@ type SelectedInlineCredentials = {
   tokenFile: string
 }
 
+type SecretDefaults = NonNullable<Parameters<typeof resolveSecretInputString>[0]["defaults"]>
+
 export function resolveInlineEnvToken(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const key of INLINE_ENV_TOKEN_KEYS) {
     const token = env[key]?.trim()
@@ -68,6 +70,22 @@ function normalizeString(value: unknown): string {
 
 function normalizeInlineAccountId(raw: string | null | undefined): string {
   return normalizeAccountId(raw ?? DEFAULT_ACCOUNT_ID)
+}
+
+function resolveSecretDefaults(
+  cfg: Pick<OpenClawConfig, "secrets">,
+): SecretDefaults | undefined {
+  const configured = cfg.secrets?.defaults
+  if (!configured) return undefined
+
+  const defaults: SecretDefaults = {}
+  for (const key of ["env", "file", "exec", "store"] as const) {
+    const value = configured[key]
+    if (typeof value === "string") {
+      defaults[key] = value
+    }
+  }
+  return defaults
 }
 
 function readInlineConfig(cfg: OpenClawConfig): InlineRuntimeConfig {
@@ -86,7 +104,11 @@ function canResolveEnvSecretRef(params: {
 }): boolean {
   const provider = params.cfg.secrets?.providers?.[params.provider]
   if (!provider) {
-    return params.provider === resolveDefaultSecretProviderAlias(params.cfg, "env")
+    const defaults = resolveSecretDefaults(params.cfg)
+    return (
+      params.provider ===
+      resolveDefaultSecretProviderAlias(defaults ? { secrets: { defaults } } : {}, "env")
+    )
   }
   if (provider.source !== "env") {
     return false
@@ -100,11 +122,12 @@ function resolveInlineTokenInput(params: {
   path: string
   env?: NodeJS.ProcessEnv
 }): ResolvedInlineTokenInput {
+  const defaults = resolveSecretDefaults(params.cfg)
   const resolved = resolveSecretInputString({
     value: params.value,
     path: params.path,
     mode: "inspect",
-    ...(params.cfg.secrets?.defaults ? { defaults: params.cfg.secrets.defaults } : {}),
+    ...(defaults ? { defaults } : {}),
   })
   if (resolved.status === "available") {
     return {

@@ -51,11 +51,13 @@ export function isAllowedRedirectUri(uri: string): boolean {
 }
 
 export function base64UrlEncode(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "")
+  const encoded = Buffer.from(bytes).toString("base64")
+  const unpadded = encoded.endsWith("==")
+    ? encoded.slice(0, -2)
+    : encoded.endsWith("=")
+      ? encoded.slice(0, -1)
+      : encoded
+  return unpadded.replaceAll("+", "-").replaceAll("/", "_")
 }
 
 export function base64UrlDecode(input: string): Uint8Array {

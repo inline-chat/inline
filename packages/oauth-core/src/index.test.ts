@@ -59,6 +59,9 @@ describe("oauth-core", () => {
     const original = new Uint8Array([1, 2, 3, 254, 255])
     const encoded = base64UrlEncode(original)
     expect(base64UrlDecode(encoded)).toEqual(original)
+    expect(base64UrlEncode(new Uint8Array([0]))).toBe("AA")
+    expect(base64UrlEncode(new Uint8Array([0, 0]))).toBe("AAA")
+    expect(base64UrlEncode(new Uint8Array([0, 0, 0]))).toBe("AAAA")
   })
 
   it("hashes strings", async () => {

@@ -274,6 +274,31 @@ describe("inline/accounts", () => {
     expect(account.tokenSource).toBe("env")
   })
 
+  it("resolves the configured env provider when other secret defaults are undefined", () => {
+    const cfg = {
+      secrets: {
+        defaults: {
+          env: "inline-env",
+          file: undefined,
+        },
+      },
+      channels: {
+        inline: {
+          token: { source: "env", provider: "inline-env", id: "INLINE_TOKEN" },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const account = resolveInlineAccount({
+      cfg,
+      accountId: "default",
+      env: { INLINE_TOKEN: "from-default-secret-ref" },
+    })
+
+    expect(account.token).toBe("from-default-secret-ref")
+    expect(account.tokenSource).toBe("env")
+  })
+
   it("keeps unresolved SecretRef token config unavailable for runtime use", async () => {
     const cfg = {
       channels: {

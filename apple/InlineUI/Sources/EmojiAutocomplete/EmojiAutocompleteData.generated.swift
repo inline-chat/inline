@@ -1,5 +1,5 @@
 // Generated from Unicode Emoji 15.1 emoji-test.txt and CLDR 44 English annotations.
-// Unicode data is used under the Unicode License: https://www.unicode.org/license.txt
+// Unicode data is used under the Unicode License v3; see LICENSE-UNICODE at the repository root.
 // Do not edit by hand.
 
 extension EmojiAutocompleteData {
