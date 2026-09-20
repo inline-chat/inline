@@ -1,0 +1,471 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		092DBD291F51C16584AD04B7 /* SessionKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00ABF72B58A445FD9C18E62 /* SessionKeychain.swift */; };
+		2D40AF635538F29B8BDB2610 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E05D12951FE11CAE040C2066 /* DashboardView.swift */; };
+		4CE2D71D30A6382C506FE3BD /* MetricsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6601630C1A0958AD3AA2559 /* MetricsCard.swift */; };
+		731B58289CCE2583514DFDF9 /* InlineMetricsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441D6BC1BFA8B2D935E592C /* InlineMetricsWidget.swift */; };
+		773796FF7EEAFEE8D8688A84 /* InlineMetricsWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 97BCB9B27FB56549F1616CD3 /* InlineMetricsWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		86B1DB2C1A6A8F62A2F490E0 /* AdminClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3A6B4BEC6A1A6B442ADEFA /* AdminClient.swift */; };
+		958FCE5E0947CD755E7C40B3 /* AdminClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3A6B4BEC6A1A6B442ADEFA /* AdminClient.swift */; };
+		97C48692A0AD7EB60B20835C /* InlineMetricsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E734DACB0CE6551FEAED798 /* InlineMetricsApp.swift */; };
+		98AE44311FC61E2484B3B6EC /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1171D871919A8A56C49769CB /* SnapshotStore.swift */; };
+		98B068361B6EE21AA2DDA884 /* MetricsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 306D904C0937CBFFE891A4F9 /* MetricsSnapshot.swift */; };
+		A2959898913449FE3C2495AB /* MetricsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6601630C1A0958AD3AA2559 /* MetricsCard.swift */; };
+		A5F6F99738C465F103F0A8C0 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1171D871919A8A56C49769CB /* SnapshotStore.swift */; };
+		AC158D10116C99CD894F1082 /* MetricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABE64FA418FD2FD986EA1C0 /* MetricsStore.swift */; };
+		E8C98EF489AD06279B3AF6E5 /* MetricsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 306D904C0937CBFFE891A4F9 /* MetricsSnapshot.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		17EC76035602F32E01F91918 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4DEC7D7DF0939F66C97D4BD7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 941608495967F3F58CD3ED2B;
+			remoteInfo = InlineMetricsWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		FF8EC0ED9520D2CDDA030F41 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				773796FF7EEAFEE8D8688A84 /* InlineMetricsWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1171D871919A8A56C49769CB /* SnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStore.swift; sourceTree = "<group>"; };
+		1E3A6B4BEC6A1A6B442ADEFA /* AdminClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminClient.swift; sourceTree = "<group>"; };
+		1F6D10BF8B8545D311AFFDFE /* InlineMetrics.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineMetrics.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		306D904C0937CBFFE891A4F9 /* MetricsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricsSnapshot.swift; sourceTree = "<group>"; };
+		3E734DACB0CE6551FEAED798 /* InlineMetricsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineMetricsApp.swift; sourceTree = "<group>"; };
+		97BCB9B27FB56549F1616CD3 /* InlineMetricsWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineMetricsWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C441D6BC1BFA8B2D935E592C /* InlineMetricsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineMetricsWidget.swift; sourceTree = "<group>"; };
+		CABE64FA418FD2FD986EA1C0 /* MetricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricsStore.swift; sourceTree = "<group>"; };
+		D00ABF72B58A445FD9C18E62 /* SessionKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionKeychain.swift; sourceTree = "<group>"; };
+		D6601630C1A0958AD3AA2559 /* MetricsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricsCard.swift; sourceTree = "<group>"; };
+		E05D12951FE11CAE040C2066 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1934C7C331BEECF47CDC4F41 /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				C441D6BC1BFA8B2D935E592C /* InlineMetricsWidget.swift */,
+			);
+			path = Widget;
+			sourceTree = "<group>";
+		};
+		4891AD80F3E0F28A0378CF2C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				E05D12951FE11CAE040C2066 /* DashboardView.swift */,
+				3E734DACB0CE6551FEAED798 /* InlineMetricsApp.swift */,
+				CABE64FA418FD2FD986EA1C0 /* MetricsStore.swift */,
+				D00ABF72B58A445FD9C18E62 /* SessionKeychain.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		4B81D143667D1E039A762B2E /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D6601630C1A0958AD3AA2559 /* MetricsCard.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		9385A21661C7892A77F44B96 = {
+			isa = PBXGroup;
+			children = (
+				4891AD80F3E0F28A0378CF2C /* App */,
+				A20641B3565D463C4C44D574 /* Shared */,
+				4B81D143667D1E039A762B2E /* Views */,
+				1934C7C331BEECF47CDC4F41 /* Widget */,
+				E09565CCBA5167E0376C0A8B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A20641B3565D463C4C44D574 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				1E3A6B4BEC6A1A6B442ADEFA /* AdminClient.swift */,
+				306D904C0937CBFFE891A4F9 /* MetricsSnapshot.swift */,
+				1171D871919A8A56C49769CB /* SnapshotStore.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		E09565CCBA5167E0376C0A8B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1F6D10BF8B8545D311AFFDFE /* InlineMetrics.app */,
+				97BCB9B27FB56549F1616CD3 /* InlineMetricsWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2A1B804A830B262BE6C3345F /* InlineMetrics */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5DB48F65B30BA6DE22ACA869 /* Build configuration list for PBXNativeTarget "InlineMetrics" */;
+			buildPhases = (
+				3FA16C8717113FA3A63A1D7A /* Sources */,
+				FF8EC0ED9520D2CDDA030F41 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				95B67809B338DA6A72232281 /* PBXTargetDependency */,
+			);
+			name = InlineMetrics;
+			packageProductDependencies = (
+			);
+			productName = InlineMetrics;
+			productReference = 1F6D10BF8B8545D311AFFDFE /* InlineMetrics.app */;
+			productType = "com.apple.product-type.application";
+		};
+		941608495967F3F58CD3ED2B /* InlineMetricsWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7D0CC75D36705675EFDFA678 /* Build configuration list for PBXNativeTarget "InlineMetricsWidget" */;
+			buildPhases = (
+				FA04CDA7579A0D8D8FD71275 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = InlineMetricsWidget;
+			packageProductDependencies = (
+			);
+			productName = InlineMetricsWidget;
+			productReference = 97BCB9B27FB56549F1616CD3 /* InlineMetricsWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4DEC7D7DF0939F66C97D4BD7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2A1B804A830B262BE6C3345F = {
+						ProvisioningStyle = Manual;
+					};
+					941608495967F3F58CD3ED2B = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 5CC5E22585F2492E3B72AC34 /* Build configuration list for PBXProject "InlineMetrics" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9385A21661C7892A77F44B96;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E09565CCBA5167E0376C0A8B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2A1B804A830B262BE6C3345F /* InlineMetrics */,
+				941608495967F3F58CD3ED2B /* InlineMetricsWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3FA16C8717113FA3A63A1D7A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				958FCE5E0947CD755E7C40B3 /* AdminClient.swift in Sources */,
+				2D40AF635538F29B8BDB2610 /* DashboardView.swift in Sources */,
+				97C48692A0AD7EB60B20835C /* InlineMetricsApp.swift in Sources */,
+				4CE2D71D30A6382C506FE3BD /* MetricsCard.swift in Sources */,
+				98B068361B6EE21AA2DDA884 /* MetricsSnapshot.swift in Sources */,
+				AC158D10116C99CD894F1082 /* MetricsStore.swift in Sources */,
+				092DBD291F51C16584AD04B7 /* SessionKeychain.swift in Sources */,
+				A5F6F99738C465F103F0A8C0 /* SnapshotStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FA04CDA7579A0D8D8FD71275 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				86B1DB2C1A6A8F62A2F490E0 /* AdminClient.swift in Sources */,
+				731B58289CCE2583514DFDF9 /* InlineMetricsWidget.swift in Sources */,
+				A2959898913449FE3C2495AB /* MetricsCard.swift in Sources */,
+				E8C98EF489AD06279B3AF6E5 /* MetricsSnapshot.swift in Sources */,
+				98AE44311FC61E2484B3B6EC /* SnapshotStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		95B67809B338DA6A72232281 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 941608495967F3F58CD3ED2B /* InlineMetricsWidget */;
+			targetProxy = 17EC76035602F32E01F91918 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		26812D6D819BC056EB2E5C42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		3F6EE77DE638ED32796AB84B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/App.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Resources/App-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.tools.metrics;
+				PRODUCT_NAME = "Inline Metrics";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		AA02253EBFBAFC63A2A69302 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Widget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Resources/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.tools.metrics.widget;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		B338F96DBE04F546A70AD3F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C74908EB888CE113F3F7FDFD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/App.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Resources/App-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.tools.metrics;
+				PRODUCT_NAME = "Inline Metrics";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		E649B6A669C0A3584D769B6E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Widget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "Resources/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.tools.metrics.widget;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5CC5E22585F2492E3B72AC34 /* Build configuration list for PBXProject "InlineMetrics" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B338F96DBE04F546A70AD3F9 /* Debug */,
+				26812D6D819BC056EB2E5C42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5DB48F65B30BA6DE22ACA869 /* Build configuration list for PBXNativeTarget "InlineMetrics" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C74908EB888CE113F3F7FDFD /* Debug */,
+				3F6EE77DE638ED32796AB84B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7D0CC75D36705675EFDFA678 /* Build configuration list for PBXNativeTarget "InlineMetricsWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E649B6A669C0A3584D769B6E /* Debug */,
+				AA02253EBFBAFC63A2A69302 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4DEC7D7DF0939F66C97D4BD7 /* Project object */;
+}
