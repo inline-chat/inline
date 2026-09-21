@@ -1000,7 +1000,12 @@ final class RichBlockLayoutPlanner {
         maximumWidth: max(1, renderedTextWidth - inset * 2)
       ) else { return false }
       let measuredWidth = max(1, renderedTextWidth - inset * 2)
-      let measurement = measureText(attributed, width: measuredWidth)
+      let singleLine = if case .disclosureSummary = role {
+        true
+      } else {
+        false
+      }
+      let measurement = measureText(attributed, width: measuredWidth, singleLine: singleLine)
       let measuredHeight = measurement.height
       let accessoryWidth: CGFloat = if case .disclosureSummary = role {
         RichBlockDisclosureMetrics.preferredChevronSide
@@ -1076,7 +1081,8 @@ final class RichBlockLayoutPlanner {
 
     private func measureText(
       _ text: NSAttributedString,
-      width: CGFloat
+      width: CGFloat,
+      singleLine: Bool = false
     ) -> TextMeasurement {
       let bounds = text.boundingRect(
         with: CGSize(width: max(1, width), height: .greatestFiniteMagnitude),
@@ -1088,7 +1094,8 @@ final class RichBlockLayoutPlanner {
         containerSize: CGSize(width: max(1, width), height: .greatestFiniteMagnitude)
       )
       container.lineFragmentPadding = 0
-      container.lineBreakMode = .byWordWrapping
+      container.maximumNumberOfLines = singleLine ? 1 : 0
+      container.lineBreakMode = singleLine ? .byTruncatingTail : .byWordWrapping
       layoutManager.addTextContainer(container)
       storage.addLayoutManager(layoutManager)
       layoutManager.ensureLayout(for: container)
@@ -1100,7 +1107,7 @@ final class RichBlockLayoutPlanner {
         maxLineUsedWidth = max(maxLineUsedWidth, usedRect.width)
       }
       return TextMeasurement(
-        height: max(ceil(bounds.height), ceil(baseFontSize * 1.25)),
+        height: max(ceil(singleLine ? layoutManager.usedRect(for: container).height : bounds.height), ceil(baseFontSize * 1.25)),
         maxLineUsedWidth: ceil(maxLineUsedWidth),
         lastLineUsedWidth: ceil(lastUsedRect.width),
         lastLineHeight: ceil(lastUsedRect.height)

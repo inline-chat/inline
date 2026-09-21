@@ -78,6 +78,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     surface.apply(
       text: attributed,
       linkColor: context.palette.link,
+      singleLine: true,
       onEntityClick: context.interactions.onTextEntityClick
     )
     surface.configurePlainSingleClick { [weak self] in

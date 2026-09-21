@@ -152,8 +152,11 @@ final class RichBlockTextSurface: NSView {
   func apply(
     text: NSAttributedString,
     linkColor: NSColor,
+    singleLine: Bool = false,
     onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
   ) {
+    label.textContainer?.maximumNumberOfLines = singleLine ? 1 : 0
+    label.textContainer?.lineBreakMode = singleLine ? .byTruncatingTail : .byWordWrapping
     let textChanged = !self.text.isEqual(to: text)
     let preservedSelections = textChanged ? preservedSelections(in: text) : []
     if textChanged {
