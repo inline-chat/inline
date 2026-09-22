@@ -4711,7 +4711,7 @@ extension MinimalMessageViewAppKit {
   private func updateHoverChrome() {
     hoverBackgroundView.backgroundColor = isMouseInside ? hoverBackgroundColor : nil
     hoverBackgroundView.isHidden = !isMouseInside
-    timeAndStateView.isHidden = !(isMouseInside || shouldAlwaysShowTimeAndState)
+    timeAndStateView.isHidden = !(showsAvatar || shouldAlwaysShowTimeAndState)
   }
 
   private func updateHoverState(_ isHovered: Bool) {

@@ -72,8 +72,17 @@ struct SidebarThreadIcon: View, Equatable {
       ),
       size: threadIconSize,
       shape: shape.threadIconShape,
+      contentScaleMultiplier: usesCircleSymbol ? 0.5 : 1,
       fallbackSymbolName: isReplyThread ? nil : chatSymbol.symbolName
     )
+    // Keep the icon centered in its original column so titles stay aligned.
+    .frame(width: size, height: size, alignment: .center)
+  }
+
+  private var usesCircleSymbol: Bool {
+    ThreadIconDescriptor.normalizedEmoji(emoji) == nil &&
+      !isReplyThread &&
+      (chatSymbol == .circle || chatSymbol == .circleFill)
   }
 
   private var threadIconSize: ThreadIconSize {
