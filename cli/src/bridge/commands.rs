@@ -483,7 +483,7 @@ fn failed(
     }
 }
 
-fn usage_status_text(windows: &[inline_agent_bridge::DriverUsageWindow]) -> String {
+pub(super) fn usage_status_text(windows: &[inline_agent_bridge::DriverUsageWindow]) -> String {
     if windows.is_empty() {
         return "Provider usage is unavailable.".to_string();
     }

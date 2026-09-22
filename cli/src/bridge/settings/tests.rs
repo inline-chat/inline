@@ -248,6 +248,8 @@ fn bound_agent_context_owns_project_model_and_reasoning_settings() {
 #[derive(Clone, Copy, Debug)]
 enum CatalogBehavior {
     Ready,
+    ReadyWithUsage,
+    PendingUsage,
     Pending,
     ProcessExited,
 }
@@ -264,6 +266,10 @@ impl AgentDriver for FakeDriver {
             resume_session: true,
             compact_session: self.compact_session,
             settings_catalog: true,
+            usage_limits: matches!(
+                self.catalog,
+                CatalogBehavior::ReadyWithUsage | CatalogBehavior::PendingUsage
+            ),
             ..DriverCapabilities::default()
         }
     }
@@ -271,7 +277,9 @@ impl AgentDriver for FakeDriver {
     fn settings_catalog<'a>(&'a self, _cwd: &'a Path) -> DriverFuture<'a, DriverSettingsCatalog> {
         Box::pin(async move {
             match self.catalog {
-                CatalogBehavior::Ready => Ok(DriverSettingsCatalog {
+                CatalogBehavior::Ready
+                | CatalogBehavior::ReadyWithUsage
+                | CatalogBehavior::PendingUsage => Ok(DriverSettingsCatalog {
                     models: vec![DriverModelOption {
                         value: "gpt-test".to_string(),
                         label: "GPT Test".to_string(),
@@ -297,6 +305,23 @@ impl AgentDriver for FakeDriver {
                 CatalogBehavior::ProcessExited => Err(DriverError::ProcessExited(
                     "test provider epoch ended".to_string(),
                 )),
+            }
+        })
+    }
+
+    fn usage_limits(&self) -> DriverFuture<'_, Vec<inline_agent_bridge::DriverUsageWindow>> {
+        Box::pin(async move {
+            match self.catalog {
+                CatalogBehavior::ReadyWithUsage => {
+                    Ok(vec![inline_agent_bridge::DriverUsageWindow {
+                        label: "Codex".to_string(),
+                        used_percent: 26,
+                        window_minutes: Some(300),
+                        resets_at: None,
+                    }])
+                }
+                CatalogBehavior::PendingUsage => std::future::pending().await,
+                _ => panic!("unsupported usage query must not run"),
             }
         })
     }
@@ -1282,4 +1307,121 @@ fn reconnect_settings_response_is_owner_scoped_and_actionable() {
         BridgeNotice::MissingWorkspace.message(),
     ));
     assert!(!outsider.message.contains("project folder"));
+}
+
+#[test]
+fn usage_settings_summarize_limiting_window_and_include_resets() {
+    let section = usage_settings_section(&[
+        inline_agent_bridge::DriverUsageWindow {
+            label: "Codex".to_string(),
+            used_percent: 26,
+            window_minutes: Some(300),
+            resets_at: Some(1_800_000_000),
+        },
+        inline_agent_bridge::DriverUsageWindow {
+            label: "Codex".to_string(),
+            used_percent: 10,
+            window_minutes: Some(10_080),
+            resets_at: None,
+        },
+    ]);
+    let item = &section.items[0];
+    assert_eq!(item.id, "account.usage");
+    assert!(item.disabled);
+    assert!(
+        matches!(&item.control, BotChatSettingsControl::Info { text, tone: BotChatSettingsInfoTone::Neutral } if text == "74% left")
+    );
+    let details = item.description.as_deref().unwrap();
+    assert!(details.contains("5-hour: 74% remaining"));
+    assert!(details.contains("weekly: 90% remaining"));
+    assert!(details.contains("UTC"));
+    assert!(details.contains("reset time unavailable"));
+}
+
+#[test]
+fn usage_settings_distinguish_missing_exhausted_and_unused_allowance() {
+    let missing = usage_settings_section(&[]);
+    assert!(
+        matches!(&missing.items[0].control, BotChatSettingsControl::Info { text, .. } if text == "Unavailable")
+    );
+    for (used, expected, tone) in [
+        (0, "100% left", BotChatSettingsInfoTone::Neutral),
+        (100, "0% left", BotChatSettingsInfoTone::Warning),
+        (255, "0% left", BotChatSettingsInfoTone::Warning),
+    ] {
+        let section = usage_settings_section(&[inline_agent_bridge::DriverUsageWindow {
+            label: "Codex".to_string(),
+            used_percent: used,
+            window_minutes: None,
+            resets_at: None,
+        }]);
+        assert_eq!(
+            section.items[0].control,
+            BotChatSettingsControl::Info {
+                text: expected.to_string(),
+                tone
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn usage_settings_query_is_bounded_and_does_not_change_revision() {
+    for (behavior, expected) in [
+        (CatalogBehavior::ReadyWithUsage, Some("74% left")),
+        (CatalogBehavior::PendingUsage, Some("Unavailable")),
+        (CatalogBehavior::Ready, None),
+    ] {
+        let fixture = Fixture::new(behavior, false);
+        let request = BotInteractionEvent::ChatSettingsRequested {
+            request_id: 1,
+            chat_id: InlineId::new(fixture.snapshot.binding.chat_id),
+            actor_user_id: InlineId::new(fixture.identity.owner_user_id),
+            version: SETTINGS_VERSION,
+        };
+        let revision = fixture.revision();
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            resolve_settings_interaction(&request, &fixture.runtime(), fixture.snapshot.clone()),
+        )
+        .await
+        .expect("usage must not block the settings menu");
+        assert!(!response.provider_epoch_ended);
+        let BotChatSettingsResponse::Document(document) = response.response else {
+            panic!("usage failure must preserve the settings document");
+        };
+        assert_eq!(document.revision, revision);
+        let usage = document
+            .sections
+            .iter()
+            .find(|section| section.id == "account.usage");
+        match expected {
+            Some(expected) => assert!(matches!(&usage.expect("usage row").items[0].control,
+                BotChatSettingsControl::Info { text, .. } if text == expected)),
+            None => assert!(usage.is_none()),
+        }
+        assert!(
+            document
+                .sections
+                .iter()
+                .any(|section| section.id == "agent")
+        );
+    }
+}
+
+#[tokio::test]
+async fn project_browser_does_not_query_or_display_account_usage() {
+    let fixture = Fixture::new(CatalogBehavior::PendingUsage, false);
+    let request = fixture.invocation(ITEM_PROJECTS, None, fixture.revision());
+    let response = tokio::time::timeout(
+        Duration::from_millis(500),
+        resolve_settings_interaction(&request, &fixture.runtime(), fixture.snapshot.clone()),
+    )
+    .await
+    .expect("project browser must not wait for usage");
+    let BotChatSettingsResponse::Document(document) = response.response else {
+        panic!("expected project browser");
+    };
+    assert_eq!(document.sections.len(), 1);
+    assert_eq!(document.sections[0].id, "projects");
 }

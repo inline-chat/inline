@@ -2716,8 +2716,71 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
         catalog.as_ref(),
     )
     .await;
+    // Usage is account-wide, read-only and owner-authorized by the settings
+    // entry point. Keep it out of the configuration revision and mutations.
+    if runtime.sessions.driver().capabilities().usage_limits
+        && let BotChatSettingsResponse::Document(document) = &mut resolution.response
+        && document
+            .sections
+            .iter()
+            .any(|section| section.id == "agent")
+    {
+        let usage = tokio::time::timeout(
+            Duration::from_secs(1),
+            runtime.sessions.driver().usage_limits(),
+        )
+        .await;
+        let windows = match usage {
+            Ok(Ok(windows)) => windows,
+            _ => Vec::new(),
+        };
+        document
+            .sections
+            .insert(0, usage_settings_section(&windows));
+    }
     resolution.catalog = catalog;
     resolution
+}
+
+fn usage_settings_section(
+    windows: &[inline_agent_bridge::DriverUsageWindow],
+) -> BotChatSettingsSection {
+    // Match the adapter/status bounds and summarize the most constrained meter.
+    let windows = &windows[..windows.len().min(16)];
+    let remaining = windows
+        .iter()
+        .map(|window| 100_u8.saturating_sub(window.used_percent))
+        .min();
+    BotChatSettingsSection {
+        id: "account.usage".to_string(),
+        title: None,
+        description: None,
+        items: vec![BotChatSettingsItem {
+            id: "account.usage".to_string(),
+            label: Some("Usage".to_string()),
+            description: Some(if windows.is_empty() {
+                "Usage is temporarily unavailable. Reopen settings to retry.".to_string()
+            } else {
+                format!(
+                    "Account limits · lowest remaining allowance\n{}",
+                    commands::usage_status_text(windows)
+                )
+            }),
+            disabled: true,
+            disabled_reason: None,
+            control: BotChatSettingsControl::Info {
+                text: remaining.map_or_else(
+                    || "Unavailable".to_string(),
+                    |value| format!("{value}% left"),
+                ),
+                tone: if remaining == Some(0) {
+                    BotChatSettingsInfoTone::Warning
+                } else {
+                    BotChatSettingsInfoTone::Neutral
+                },
+            },
+        }],
+    }
 }
 
 async fn resolve_loaded_settings_interaction<D: AgentDriver + 'static>(

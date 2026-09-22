@@ -77,6 +77,17 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
     .frame(width: 420, height: 300)
     .task(id: coordinator.selectedBotID) {
       coordinator.refreshSelectedIfStale()
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(for: .seconds(30))
+        } catch {
+          return
+        }
+        // Keep usage fresh without interrupting the provider's project browser.
+        if coordinator.selectedState.document?.sections.contains(where: { $0.id == "account.usage" }) == true {
+          coordinator.refreshSelectedIfStale()
+        }
+      }
     }
   }
 }
@@ -412,6 +423,7 @@ private struct BotChatSettingsItemView: View {
     }
   }
   private var showsDescriptionBelowControl: Bool {
+    if case .info = item.control, item.id == "account.usage" { return false }
     if case .button = item.control { return false }
     return !usesAlignedDescription
   }
@@ -488,21 +500,25 @@ private struct BotChatSettingsItemView: View {
         }
       }
     case let .info(text, tone):
-      HStack(alignment: .firstTextBaseline, spacing: 7) {
-        Image(systemName: infoSymbol(for: tone))
-          .foregroundStyle(infoColor(for: tone))
-        VStack(alignment: .leading, spacing: 2) {
-          if let itemLabel = item.label {
-            Text(itemLabel).font(.caption.weight(.semibold))
+      if item.id == "account.usage" {
+        BotChatSettingsUsageRow(summary: text, details: item.description, tone: tone)
+      } else {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+          Image(systemName: infoSymbol(for: tone))
+            .foregroundStyle(infoColor(for: tone))
+          VStack(alignment: .leading, spacing: 2) {
+            if let itemLabel = item.label {
+              Text(itemLabel).font(.caption.weight(.semibold))
+            }
+            Text(text)
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+              .fixedSize(horizontal: false, vertical: true)
+              .textSelection(.enabled)
           }
-          Text(text)
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
         }
+        .accessibilityElement(children: .combine)
       }
-      .accessibilityElement(children: .combine)
     case .button:
       HStack(spacing: 7) {
         if let description = item.description {
@@ -788,5 +804,52 @@ struct BotChatSettingsLocalPickerProbeState: Equatable {
   mutating func complete(_ id: String, isReachable: Bool) {
     guard activeID == id else { return }
     self.isReachable = isReachable
+  }
+}
+
+/// A read-only account meter; expanding it never invokes a provider command.
+struct BotChatSettingsUsageRow: View {
+  let summary: String
+  let details: String?
+  let tone: BotChatSettingsModel.InfoTone
+
+  @State private var isExpanded = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Button {
+        isExpanded.toggle()
+      } label: {
+        HStack(spacing: 7) {
+          Image(systemName: "gauge.with.dots.needle.33percent")
+          Text("Usage")
+          Spacer()
+          Text(summary)
+            .monospacedDigit()
+            .foregroundStyle(tone == .warning ? Color.orange : Color.secondary)
+          Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+      .accessibilityLabel("Account usage")
+      .accessibilityValue("\(summary), \(isExpanded ? "expanded" : "collapsed")")
+      .accessibilityHint(isExpanded ? "Hide usage limits and reset times" : "Show usage limits and reset times")
+
+      if isExpanded, let details {
+        Text(details)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+          .padding(.horizontal, 9)
+      }
+    }
   }
 }
