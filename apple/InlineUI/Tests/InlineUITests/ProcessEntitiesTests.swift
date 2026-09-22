@@ -1541,6 +1541,30 @@ struct ProcessEntitiesTests {
     #expect(entity.thread.chatID == 42)
   }
 
+  @Test("Copied internal thread links preserve identity with either scheme")
+  func copiedThreadLinksUseThreadEntities() {
+    for url in ["in://chat/42", "in://thread?id=42", "inline://chat/42"] {
+      for text in ["😀 [Planning](\(url))", "😀 \(url)"] {
+        let result = ProcessEntities.fromAttributedString(NSAttributedString(string: text))
+        #expect(result.entities.entities.count == 1)
+        #expect(result.entities.entities.first?.type == .thread)
+        #expect(result.entities.entities.first?.thread.chatID == 42)
+        #expect(result.entities.entities.first?.offset == 3)
+      }
+    }
+  }
+
+  @Test("Internal message links keep their message destination")
+  func messageLinksRemainURLs() {
+    for url in ["in://chat/42/message/9", "inline://thread/42/message/9",
+                "inline://chat?id=42&message_id=9", "in://chat/42?messageId=9"] {
+      let result = ProcessEntities.fromAttributedString(NSAttributedString(string: "[Message](\(url))"))
+      #expect(result.entities.entities.count == 1)
+      #expect(result.entities.entities.first?.type == .textURL)
+      #expect(result.entities.entities.first?.textURL.url == url)
+    }
+  }
+
   @Test("Extract markdown thread title link syntax")
   func testExtractMarkdownThreadTitleLinkSyntax() {
     let text = "Open [Planning](inline://thread?space_id=7) now"

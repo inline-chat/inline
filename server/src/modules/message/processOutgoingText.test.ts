@@ -214,6 +214,38 @@ describe("processOutgoingText", () => {
     expect(thread.entity.thread.chatId).toBe(42n)
   })
 
+  test("converts copied thread links consistently across schemes and entity forms", async () => {
+    for (const url of ["in://chat/42", "in://thread?id=42", "inline://chat/42"]) {
+      const markdown = await processOutgoingText({ text: `😀 [Planning](${url})`, entities: undefined, parseMarkdown: true })
+      const bare = await processOutgoingText({
+        text: `😀 ${url}`,
+        entities: { entities: [{ type: MessageEntity_Type.URL, offset: 3n, length: BigInt(url.length), entity: { oneofKind: undefined } }] },
+      })
+      for (const result of [markdown, bare]) {
+        expect(result.entities?.entities).toHaveLength(1)
+        const thread = result.entities!.entities[0]!
+        expect(thread.type).toBe(MessageEntity_Type.THREAD)
+        expect(thread.offset).toBe(3n)
+        expect(thread.entity).toEqual({ oneofKind: "thread", thread: { chatId: 42n } })
+      }
+    }
+  })
+
+  test("preserves message destinations instead of reducing them to thread links", async () => {
+    for (const url of ["in://chat/42/message/9", "inline://thread/42/message/9", "inline://chat?id=42&message_id=9", "in://chat/42?messageId=9"]) {
+      const result = await processOutgoingText({ text: `[Message](${url})`, entities: undefined, parseMarkdown: true })
+      expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.TEXT_URL)
+      expect(result.entities?.entities[0]?.entity).toEqual({ oneofKind: "textUrl", textUrl: { url } })
+    }
+  })
+
+  test("a bare thread route does not create a thread named after its URL", async () => {
+    const text = "in://thread?space_id=7"
+    const entities = { entities: [{ type: MessageEntity_Type.URL, offset: 0n, length: BigInt(text.length), entity: { oneofKind: undefined } }] }
+    const result = await processOutgoingText({ text, entities })
+    expect(result.entities).toEqual(entities)
+  })
+
   test("converts markdown inline thread title links to thread title entities", async () => {
     const result = await processOutgoingText({
       text: "cc [Planning](inline://thread?space_id=7) please",

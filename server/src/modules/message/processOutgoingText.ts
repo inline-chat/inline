@@ -312,7 +312,7 @@ const parseInlineThreadLink = (rawUrl: string, visibleText: string): InlineThrea
     return null
   }
 
-  if (url.protocol.toLowerCase() !== "inline:") {
+  if (!["inline:", "in:"].includes(url.protocol.toLowerCase())) {
     return null
   }
 
@@ -320,6 +320,11 @@ const parseInlineThreadLink = (rawUrl: string, visibleText: string): InlineThrea
   if (host !== "chat" && host !== "thread") {
     return null
   }
+
+  // A thread entity cannot retain a message destination. Keep those links intact.
+  if (url.searchParams.has("message_id") || url.searchParams.has("messageId") || url.hash) return null
+  const path = url.pathname.replace(/^\/+|\/+$/g, "")
+  if (path && !/^\d+$/.test(path)) return null
 
   const queryChatId = parsePositiveSafeInt(url.searchParams.get("id") ?? url.searchParams.get("chat_id"))
   const pathChatId = parsePositiveSafeInt(url.pathname.replace(/^\/+/, ""))
@@ -597,15 +602,13 @@ const resolveInlineThreadLinks = (
 
   let changed = false
   const resolvedEntities = entities.entities.map((entity) => {
-    if (
-      entity?.type !== MessageEntity_Type.TEXT_URL ||
-      entity.entity.oneofKind !== "textUrl" ||
-      !entity.entity.textUrl.url
-    ) {
-      return entity
-    }
+    const visibleText = entityText(text, entity)
+    const url = entity.type === MessageEntity_Type.URL ? visibleText
+      : entity.type === MessageEntity_Type.TEXT_URL && entity.entity.oneofKind === "textUrl"
+        ? entity.entity.textUrl.url : undefined
+    if (!url) return entity
 
-    const target = parseInlineThreadLink(entity.entity.textUrl.url, entityText(text, entity))
+    const target = parseInlineThreadLink(url, entity.type === MessageEntity_Type.URL ? "" : visibleText)
     if (!target) {
       return entity
     }

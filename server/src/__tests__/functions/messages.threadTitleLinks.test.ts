@@ -9,6 +9,27 @@ import { and, eq, isNull } from "drizzle-orm"
 setupTestLifecycle()
 
 describe("messages thread title links", () => {
+  test("copied in links materialize a backlink through the normal send pipeline", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Copied thread links", ["copied-link@example.com"])
+    const user = users[0]!
+    const source = await testUtils.createChat(space.id, "Source", "thread", true, user.id)
+    const target = await testUtils.createChat(space.id, "Planning", "thread", true, user.id)
+    if (!source || !target) throw new Error("Failed to create copied-link test threads")
+    const sent = await sendMessage({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(source.id) } } },
+      message: `see [Planning](in://chat/${target.id})`,
+      parseMarkdown: true,
+    }, testUtils.functionContext({ userId: user.id, sessionId: 1 }))
+    const message = extractNewMessage(sent)
+    expect(messageThreadTarget(message)).toBe(BigInt(target.id))
+    await expectGraphLink({ fromChatId: source.id, fromMessageId: Number(message?.id), toChatId: target.id, scopeId: space.id })
+    const history = await getChatHistory(
+      { peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(target.id) } } }, limit: 1 },
+      testUtils.functionContext({ userId: user.id, sessionId: 2 }),
+    )
+    expect(history.messages[0]?.serviceMessage?.event.oneofKind).toBe("threadBacklink")
+  })
+
   test("resolves thread-title entities to an existing thread before graph materialization", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Graph Title Existing", [
       "graph-title-existing@example.com",

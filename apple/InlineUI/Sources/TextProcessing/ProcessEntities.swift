@@ -1086,6 +1086,10 @@ public class ProcessEntities {
       guard !protected.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) }),
             !opaqueRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 })
       else { return nil }
+      if let target = inlineThreadLink(from: match.url.absoluteString),
+         let entity = threadEntity(target: target, offset: Int64(match.range.location), length: Int64(match.range.length)) {
+        return entity
+      }
       return MessageEntity.with {
         $0.type = .url
         $0.offset = Int64(match.range.location)
@@ -1151,10 +1155,17 @@ public class ProcessEntities {
 
   private static func inlineThreadLink(from urlString: String, visibleText: String? = nil) -> ThreadLinkTarget? {
     guard let components = URLComponents(string: urlString),
-          components.scheme?.lowercased() == "inline",
+          let scheme = components.scheme?.lowercased(), ["inline", "in"].contains(scheme),
           let host = components.host?.lowercased(),
           host == "chat" || host == "thread"
     else { return nil }
+
+    // A thread entity has no message ID; preserve specific message links as URLs.
+    guard components.fragment == nil,
+          !(components.queryItems ?? []).contains(where: { ["message_id", "messageid"].contains($0.name.lowercased()) })
+    else { return nil }
+    let path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard path.isEmpty || positiveInt64(path) != nil else { return nil }
 
     let queryChatId = positiveInt64(queryValue(in: components, names: ["id", "chat_id"]))
     let pathChatId = positiveInt64(components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
