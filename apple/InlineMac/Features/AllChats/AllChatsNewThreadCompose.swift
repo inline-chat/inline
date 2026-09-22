@@ -21,6 +21,14 @@ struct AllChatsAgentChoice: Identifiable, Equatable {
   var id: String {
     "\(bot.id):\(agent?.id ?? 0)"
   }
+
+  var title: String {
+    agent?.name ?? InlineKit.User(from: bot).displayName
+  }
+
+  var providerTitle: String? {
+    agent == nil ? nil : InlineKit.User(from: bot).displayName
+  }
 }
 
 private struct AllChatsAgentMentionTarget: Equatable {
@@ -59,6 +67,7 @@ private struct AllChatsComposePreferences {
   private let visibilityKey: String
   private let sendSilentlyKey: String
   private let agentConfigurationPrefix: String
+  private let agentChoiceKey: String
 
   init(userID: Int64?, defaults: UserDefaults = .standard) {
     self.defaults = defaults
@@ -67,6 +76,15 @@ private struct AllChatsComposePreferences {
     visibilityKey = "macos.allChats.newThread.public.\(account)"
     sendSilentlyKey = "macos.allChats.newThread.sendSilently.\(account)"
     agentConfigurationPrefix = "macos.allChats.newThread.agentConfiguration.\(account)"
+    agentChoiceKey = "macos.allChats.newThread.agentChoice.\(account)"
+  }
+
+  var agentChoiceID: String? {
+    defaults.string(forKey: agentChoiceKey)
+  }
+
+  func saveAgentChoice(_ id: String?) {
+    save(id, forKey: agentChoiceKey)
   }
 
   var destinationSpaceID: Int64? {
@@ -187,6 +205,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   @Published private(set) var isSubmitting = false
   private(set) var sendSilently: Bool
   @Published private(set) var agentChoices: [AllChatsAgentChoice] = []
+  @Published private(set) var agentPickerEnabled = ExperimentalFeatureFlags.newThreadAgentPickerEnabled
+  @Published private(set) var isLoadingAgentChoices = false
+  @Published private(set) var agentChoicesLoadFailed = false
   @Published private(set) var selectedAgentChoiceID: String?
   @Published private(set) var agentCatalog: AgentConfigurationCatalogSnapshot?
   @Published private(set) var selectedProjectID: String?
@@ -203,6 +224,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private var lastSpaceVisibility: NewThreadComposeDestination.SpaceVisibility
   private var accessMentions = AllChatsComposeAccessMentions()
   private var mentionedAgentTargets: [AllChatsAgentMentionTarget] = []
+  private var lastMentionedAgentChoiceID: String?
+  private var observedAgentChoiceID: String?
   private var agentCatalogTask: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
 
@@ -216,6 +239,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     lockedSpaceID = initialSpaceID
     let preferences = AllChatsComposePreferences(userID: dependencies.auth.currentUserId)
     self.preferences = preferences
+    observedAgentChoiceID = preferences.agentChoiceID
     sendSilently = preferences.sendSilently
     lastSpaceVisibility = preferences.visibility
     let persistedSpaceID = preferences.isHome ? nil : preferences.destinationSpaceID
@@ -242,6 +266,20 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         Task { @MainActor [weak self] in
           await self?.loadAgentChoices()
         }
+      }
+      .store(in: &cancellables)
+
+    NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        let enabled = ExperimentalFeatureFlags.newThreadAgentPickerEnabled
+        let choiceID = preferences.agentChoiceID
+        guard enabled != agentPickerEnabled || choiceID != observedAgentChoiceID else { return }
+        observedAgentChoiceID = choiceID
+        agentPickerEnabled = enabled
+        applyFirstAgentMentionIfNeeded()
+        updateVisibilityTooltip()
       }
       .store(in: &cancellables)
   }
@@ -275,6 +313,16 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   var selectedAgentChoice: AllChatsAgentChoice? {
     agentChoices.first { $0.id == selectedAgentChoiceID }
+  }
+
+  var rememberedAgentChoiceID: String? {
+    preferences.agentChoiceID
+  }
+
+  var agentPickerTitle: String {
+    if let choice = selectedAgentChoice { return choice.title }
+    guard rememberedAgentChoiceID != nil else { return "None" }
+    return isLoadingAgentChoices ? "Loading…" : "Unavailable agent"
   }
 
   var effectiveProjectID: String? {
@@ -393,6 +441,10 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   func loadAgentChoices() async {
+    guard !isLoadingAgentChoices else { return }
+    isLoadingAgentChoices = true
+    agentChoicesLoadFailed = false
+    defer { isLoadingAgentChoices = false }
     do {
       let result = try await dependencies.realtimeV2.send(.listBots())
       guard case let .listBots(response) = result else { return }
@@ -415,9 +467,19 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         return MentionableBotAgent(agent: agent, botUserInfo: userInfo)
       })
       applyFirstAgentMentionIfNeeded()
+      updateVisibilityTooltip()
     } catch {
+      agentChoicesLoadFailed = true
       log.error("Could not load Agent choices", error: error)
     }
+  }
+
+  func selectAgent(_ id: String?) {
+    guard agentPickerEnabled, !isSubmitting,
+          id == nil || agentChoices.contains(where: { $0.id == id }) else { return }
+    preferences.saveAgentChoice(id)
+    applyFirstAgentMentionIfNeeded()
+    updateVisibilityTooltip()
   }
 
   func selectProject(_ id: String?) {
@@ -517,14 +579,23 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   private func applyFirstAgentMentionIfNeeded() {
-    let choice = firstMentionedAgentChoice
-    guard selectedAgentChoiceID != choice?.id || agentCatalog == nil else { return }
+    let mentionedChoice = firstMentionedAgentChoice
+    // A newly added mention also becomes the next thread's default. Removing
+    // draft text (including after send) must not discard that remembered choice.
+    if agentPickerEnabled, let mentionedChoice, mentionedChoice.id != lastMentionedAgentChoiceID {
+      preferences.saveAgentChoice(mentionedChoice.id)
+    }
+    lastMentionedAgentChoiceID = mentionedChoice?.id
+    let choice = agentPickerEnabled
+      ? agentChoices.first { $0.id == preferences.agentChoiceID }
+      : mentionedChoice
+    guard selectedAgentChoiceID != choice?.id else { return }
 
     agentCatalogTask?.cancel()
     clearAgentSelection()
     guard let choice else { return }
 
-    // The mention establishes the Chat's Agent target immediately. A catalog
+    // The selection establishes the Chat's Agent target immediately. A catalog
     // is optional and only controls whether configuration pickers appear.
     selectedAgentChoiceID = choice.id
     let saved = preferences.agentConfiguration(for: choice)
@@ -536,18 +607,18 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       guard let self else { return }
       if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: choice.bot.id),
          !Task.isCancelled,
-         isCurrentMention(choice) {
+         isCurrentAgentSelection(choice) {
         applyAgentSelection(choice, catalog: cached)
       }
 
       do {
         let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(botUserID: choice.bot.id)
-        guard !Task.isCancelled, isCurrentMention(choice) else { return }
+        guard !Task.isCancelled, isCurrentAgentSelection(choice) else { return }
         if let refreshed {
           applyAgentSelection(choice, catalog: refreshed)
         }
       } catch {
-        guard !Task.isCancelled, isCurrentMention(choice) else { return }
+        guard !Task.isCancelled, isCurrentAgentSelection(choice) else { return }
         log.error("Could not refresh Agent configuration catalog", error: error)
       }
     }
@@ -561,8 +632,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     }.first
   }
 
-  private func isCurrentMention(_ choice: AllChatsAgentChoice) -> Bool {
-    firstMentionedAgentChoice?.id == choice.id
+  private func isCurrentAgentSelection(_ choice: AllChatsAgentChoice) -> Bool {
+    selectedAgentChoiceID == choice.id
   }
 
   private func applyAgentSelection(
@@ -656,6 +727,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         names.append(name)
       }
     }
+    if let choice = selectedAgentChoice, !accessMentions.userIDs.contains(choice.bot.id) {
+      names.append(InlineKit.User(from: choice.bot).displayName)
+    }
     visibilityTooltipDescription = if names.count == 1 {
       String(localized: "Only you can access this thread. Mention people or groups to add them.")
     } else {
@@ -673,6 +747,13 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     guard !isSubmitting else {
       return .failure(NewThreadComposeSubmissionFailure(
         message: "This thread is already being created.",
+        createdPeer: nil
+      ))
+    }
+
+    if agentPickerEnabled, rememberedAgentChoiceID != nil, selectedAgentChoice == nil {
+      return .failure(NewThreadComposeSubmissionFailure(
+        message: "Your selected agent isn't available yet. Retry loading agents, choose another agent, or select None.",
         createdPeer: nil
       ))
     }
@@ -1382,6 +1463,10 @@ private struct AllChatsComposeAccessoryView: View {
         .transition(.opacity)
       }
 
+      if model.agentPickerEnabled {
+        agentPicker
+      }
+
       if let projects = model.agentCatalog?.projects, let title = model.projectTitle {
         AgentConfigurationMenu(
           title: title,
@@ -1431,6 +1516,57 @@ private struct AllChatsComposeAccessoryView: View {
     }
     .frame(height: 24)
     .animation(.easeOut(duration: 0.16), value: model.showsVisibility)
+  }
+
+  private var agentPicker: some View {
+    Menu {
+      Button {
+        model.selectAgent(nil)
+      } label: {
+        AgentConfigurationOptionMenuLabel(
+          title: "None", description: nil, isSelected: model.rememberedAgentChoiceID == nil
+        )
+      }
+      Divider()
+      ForEach(model.agentChoices) { choice in
+        Button {
+          model.selectAgent(choice.id)
+        } label: {
+          AgentConfigurationOptionMenuLabel(
+            title: choice.title,
+            description: choice.providerTitle,
+            isSelected: model.selectedAgentChoiceID == choice.id
+          )
+        }
+      }
+      if model.isLoadingAgentChoices {
+        Text("Loading agents…")
+      } else if model.agentChoicesLoadFailed {
+        Button("Couldn't load agents. Retry") {
+          Task { await model.loadAgentChoices() }
+        }
+      } else if model.rememberedAgentChoiceID != nil, model.selectedAgentChoice == nil {
+        Button("Reload agents") {
+          Task { await model.loadAgentChoices() }
+        }
+      } else if model.agentChoices.isEmpty {
+        Text("No agents available")
+      }
+    } label: {
+      AllChatsComposePillLabel(title: model.agentPickerTitle, showsRobot: true)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
+    .fixedSize(horizontal: true, vertical: true)
+    .disabled(model.isSubmitting)
+    .accessibilityLabel("New thread agent")
+    .accessibilityValue(model.agentPickerTitle)
+    .inlineTooltip(
+      verbatim: "New thread agent",
+      description: "Remember this agent for future threads. Choose None to stop adding an agent automatically.",
+      placement: tooltipPlacement
+    )
   }
 }
 
@@ -1571,10 +1707,17 @@ private struct AgentConfigurationOptionMenuLabel: View {
 @available(macOS 26.0, *)
 private struct AllChatsComposePillLabel: View {
   let title: String
+  var showsRobot = false
   @State private var isHovering = false
 
   var body: some View {
-    Text(title)
+    HStack(spacing: 4) {
+      if showsRobot {
+        Text("🤖")
+          .accessibilityHidden(true)
+      }
+      Text(title)
+    }
       .font(.system(size: 11.5, weight: .medium))
       .foregroundStyle(.secondary)
       .lineLimit(1)
