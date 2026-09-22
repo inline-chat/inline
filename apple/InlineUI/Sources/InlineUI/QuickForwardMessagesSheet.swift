@@ -120,13 +120,13 @@ public struct QuickForwardMessagesSheet: View {
           selectedRecipients
         }
 
-        TextField("Message…", text: $comment, axis: .vertical)
+        TextField("Add a comment…", text: $comment, axis: .vertical)
           .lineLimit(2 ... 4)
           .font(.system(size: 13))
           .textFieldStyle(.plain)
           .padding(.vertical, 8)
           .disabled(delivery.hasStarted)
-          .accessibilityLabel("Message")
+          .accessibilityLabel("Optional comment")
           .accessibilityHint("Optional message sent before the forwarded messages")
 
         if let errorMessage = delivery.errorMessage {
@@ -156,7 +156,13 @@ public struct QuickForwardMessagesSheet: View {
     .modifier(QuickForwardSurface())
     .presentationBackground(.clear)
     .interactiveDismissDisabled(delivery.isSending)
-    .onExitCommand { if !delivery.isSending { dismiss() } }
+    .onExitCommand {
+      guard !delivery.isSending else { return }
+      if !model.searchText.isEmpty, !delivery.hasStarted { model.searchText = "" } else { dismiss() }
+    }
+    .onChange(of: model.filteredDestinations.map(\.id)) {
+      model.syncHighlightedDestination()
+    }
     .onDisappear { sendTask?.cancel() }
     .task {
       model.start()
@@ -207,7 +213,7 @@ public struct QuickForwardMessagesSheet: View {
   }
 
   private var sendTitle: String {
-    model.selectedCount == 0 ? "Send" : "Send to \(model.selectedCount)"
+    model.selectedCount == 0 ? "Send" : "Send to \(model.selectedCount) \(model.selectedCount == 1 ? "Chat" : "Chats")"
   }
 
   private func moveHighlight(_ offset: Int) -> KeyPress.Result {

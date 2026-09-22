@@ -109,4 +109,19 @@ struct MessageSelectionStateTests {
 
     #expect(state.orderedSelection(in: [1, 2, 3, 4]) == [1, 2, 3])
   }
+
+  @Test("Live arrivals do not join selection and deletions only prune missing messages")
+  func liveHistoryChangesPreserveSelection() {
+    var state = MessageSelectionState()
+    state.begin(with: 20)
+    state.selectRange(to: 40, orderedIds: [10, 20, 30, 40])
+    // Older history and a new arrival can load while selection remains active.
+    #expect(state.prune(validIds: [5, 10, 20, 30, 40, 50], orderedIds: [5, 10, 20, 30, 40, 50]).isEmpty)
+    #expect(state.orderedSelection(in: [5, 10, 20, 30, 40, 50]) == [20, 30, 40])
+    #expect(state.prune(validIds: [5, 10, 30, 40, 50], orderedIds: [5, 10, 30, 40, 50]) == [20])
+    #expect(state.isActive)
+    #expect(state.anchorStableId == 30)
+    #expect(state.orderedSelection(in: [5, 10, 30, 40, 50]) == [30, 40])
+  }
+
 }

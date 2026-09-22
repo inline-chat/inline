@@ -3645,7 +3645,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   @objc private func selectMessagesForForwarding() {
-    MessageListAppKit.beginForwardSelection(from: self)
+    MessageSelectionCoordinator.beginSelection(from: self)
   }
 
   @objc private func forwardMessage() {
@@ -4944,7 +4944,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
           forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
-        if ExperimentalFeatureFlags.quickForwardEnabled, message.messageId > 0,
+        if ExperimentalFeatureFlags.macMessageSelectionEnabled, message.messageId > 0,
            message.status == nil || message.status == .sent
         {
           let selectItem = NSMenuItem(

@@ -26,6 +26,7 @@ public class KeyMonitor: Sendable {
   // Cmd+1...9: return true only when the handler actually acted.
   private var commandNumberHandlers: OrderedDictionary<String, (NSEvent) -> Bool> = [:]
 
+  private var eventInterceptors: OrderedDictionary<String, (NSEvent) -> Bool> = [:]
   private var localEventMonitor: Any?
   private weak var window: NSWindow?
 
@@ -131,6 +132,12 @@ public class KeyMonitor: Sendable {
     }
   }
 
+  /// Modal interaction inside a chat (such as message selection) takes precedence over composer shortcuts.
+  func addEventInterceptor(key: String, handler: @escaping (NSEvent) -> Bool) -> (() -> Void) {
+    eventInterceptors[key] = handler
+    return { [weak self] in self?.eventInterceptors.removeValue(forKey: key) }
+  }
+
   // MARK: - Cmd+1...9
 
   /// Add a Cmd+1...9 handler. Return true only if the handler consumed the shortcut.
@@ -164,6 +171,10 @@ public class KeyMonitor: Sendable {
           "Ignoring key event for different window; keyCode=\(event.keyCode) eventWindow=\(describe(event.window)) monitorWindow=\(describe(window))"
         )
         return event
+      }
+
+      for interceptor in eventInterceptors.values.reversed() where interceptor(event) {
+        return nil
       }
 
       // Cmd+1...9 (space/tab switching).

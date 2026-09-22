@@ -55,9 +55,9 @@ final class ForwardMessagesPresenter {
     }
   }
 
-  func present(messages: [FullMessage], onComplete: (() -> Void)? = nil) {
+  func present(messages: [FullMessage], reviewBeforeSending: Bool = false, onComplete: (() -> Void)? = nil) {
     guard !messages.isEmpty else { return }
-    request = ForwardMessagesRequest(messages: messages, onComplete: onComplete)
+    request = ForwardMessagesRequest(messages: messages, reviewBeforeSending: reviewBeforeSending, onComplete: onComplete)
   }
 
   func dismiss() {
@@ -68,6 +68,7 @@ final class ForwardMessagesPresenter {
 struct ForwardMessagesRequest: Identifiable {
   let id = UUID()
   let messages: [FullMessage]
+  let reviewBeforeSending: Bool
   let onComplete: (() -> Void)?
 }
 
@@ -80,7 +81,7 @@ struct ForwardMessagesPresentation: ViewModifier {
         get: { presenter.request },
         set: { presenter.request = $0 }
       )) { request in
-        if ExperimentalFeatureFlags.quickForwardEnabled {
+        if request.reviewBeforeSending || ExperimentalFeatureFlags.quickForwardEnabled {
           QuickForwardMessagesSheet(
             messages: request.messages,
             database: dependencies.database,

@@ -759,6 +759,17 @@ class GlassComposeAppKit: NSView {
     ])
   }
 
+  func prepareForMessageSelection() -> Bool {
+    guard !currentVoiceActive else {
+      ToastCenter.shared.showError("Finish your voice message before selecting messages.")
+      return false
+    }
+    hideMentionCompletion()
+    hideCommandCompletion()
+    hideAutocomplete()
+    return true
+  }
+
   /// This method is called from ChatViewAppKit's viewDidLayout.
   /// Draft hydration happens on window attachment so layout stays measurement-only.
   func didLayout() {
@@ -1911,6 +1922,7 @@ class GlassComposeAppKit: NSView {
   }
 
   func focusEditor() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !currentVoiceActive else { return }
     textEditor.focus()
   }
@@ -2414,6 +2426,7 @@ class GlassComposeAppKit: NSView {
 
   /// Send the message
   func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     textEditor.textView.resetPastedLinks()
     if case let .newThread(context) = usage {
       sendNewThread(using: context, intent: .openThread)
@@ -2895,6 +2908,7 @@ class GlassComposeAppKit: NSView {
   }
 
   func focus() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !currentVoiceActive else { return }
     textEditor.focus()
   }
@@ -2961,6 +2975,8 @@ class GlassComposeAppKit: NSView {
         guard let self else { return }
         guard !currentVoiceActive else { return }
 
+        guard messageList?.isMessageSelectionActive != true else { return }
+
         // Only allow valid printable characters, not control/navigation keys
         guard let characters = event.characters,
               characters != " ", // Ignore space as it prevents our image preview from working
@@ -2999,6 +3015,7 @@ class GlassComposeAppKit: NSView {
   }
 
   private func handleGlobalPaste() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !currentVoiceActive, canMutateDraft else { return }
 
     let pasteboard = NSPasteboard.general

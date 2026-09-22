@@ -14,6 +14,8 @@ public struct DeleteMessageTransaction: Transaction2 {
     public var messageIds: [Int64]
     public var peerId: Peer
     public var chatId: Int64
+    /// Optional so transactions persisted before this option continue to decode.
+    public var deferLocalDeletion: Bool?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -22,8 +24,11 @@ public struct DeleteMessageTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/DeleteMessage")
 
-  public init(messageIds: [Int64], peerId: Peer, chatId: Int64) {
-    context = Context(messageIds: messageIds, peerId: peerId, chatId: chatId)
+  public init(messageIds: [Int64], peerId: Peer, chatId: Int64, deferLocalDeletion: Bool = false) {
+    context = Context(
+      messageIds: messageIds, peerId: peerId, chatId: chatId,
+      deferLocalDeletion: deferLocalDeletion ? true : nil
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -44,6 +49,7 @@ public struct DeleteMessageTransaction: Transaction2 {
 
   // Methods
   public func optimistic() async {
+    guard context.deferLocalDeletion != true else { return }
     log.debug("Optimistic delete message \(messageIds) \(peerId) \(chatId)")
     do {
       try await AppDatabase.shared.dbWriter.write { db in

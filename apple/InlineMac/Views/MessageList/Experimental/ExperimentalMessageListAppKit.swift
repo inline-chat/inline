@@ -53,6 +53,14 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
   private let messageRenderStyle: MessageRenderStyle
   private let usesAvatarOverlay: Bool
   private var messageSelection = MessageSelectionState()
+  private var showsForwardSelection = false
+  var messageSelectionInset: CGFloat?
+  var messageSelectionTableView: NSTableView { tableView }
+
+  func canSelectMessage(atRow row: Int) -> Bool {
+    selectableStableId(forRow: row) != nil
+  }
+
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)?
 
   var isMessageSelectionActive: Bool {
@@ -396,11 +404,18 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
   }
 
   private var selectableMessageStableIds: [Int64] {
-    messages.map(\.id)
+    messages.filter { isForwardSelectable($0) }.map(\.id)
+  }
+
+  private func isForwardSelectable(_ fullMessage: FullMessage) -> Bool {
+    let message = fullMessage.message
+    return message.messageId > 0 && !message.isServiceMessage && !message.isSubthreadPlacement
+      && (message.status == nil || message.status == .sent)
   }
 
   private func selectableStableId(forRow row: Int) -> Int64? {
-    guard chatRows.canSelect(row: row) else { return nil }
+    guard chatRows.canSelect(row: row), let message = message(forRow: row),
+          isForwardSelectable(message) else { return nil }
     return messageStableId(forRow: row)
   }
 
@@ -419,6 +434,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   @discardableResult
   func beginMessageSelection(atRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.begin(with: stableId)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -427,6 +443,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   @discardableResult
   func toggleMessageSelection(atRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.toggle(stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -435,6 +452,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   @discardableResult
   func extendMessageSelection(toRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.selectRange(to: stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -443,6 +461,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   @discardableResult
   func selectAllMessages() -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     let stableIds = selectableMessageStableIds
     let changed = messageSelection.selectAll(stableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -466,6 +485,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
   }
 
   private func emitMessageSelectionChange(changedStableIds: Set<Int64>) {
+    refreshForwardSelection()
     guard !changedStableIds.isEmpty else { return }
     hideMessageQuickActions()
     scheduleMessageHoverRefresh()
@@ -478,6 +498,61 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
         changedStableIds: changedStableIds
       )
     )
+  }
+
+  private func configureForwardSelection(_ cell: MessageTableCell, row: Int) {
+    let stableId = selectableStableId(forRow: row)
+    cell.setForwardSelection(
+      active: messageSelection.isActive,
+      selectable: stableId != nil,
+      selected: stableId.map { messageSelection.isSelected($0) } ?? false
+    ) { [weak self] in
+      guard let self, let stableId, let currentRow = self.chatRows.rowIndex(forMessageStableId: stableId) else { return }
+      self.toggleMessageSelection(atRow: currentRow)
+    }
+  }
+
+  private func refreshForwardSelection() {
+    guard isViewLoaded else { return }
+    let modeChanged = showsForwardSelection != messageSelection.isActive
+    let anchor = modeChanged ? captureVisibleMessageAnchor() : nil
+    let wasAtBottom = isAtAbsoluteBottom
+    let wasCommittingGeometry = isCommittingGeometry
+    if modeChanged { isCommittingGeometry = true }
+    defer { isCommittingGeometry = wasCommittingGeometry }
+    showsForwardSelection = messageSelection.isActive
+    tableView.deselectAll(nil)
+    let visible = tableView.rows(in: tableView.visibleRect)
+    if visible.location != NSNotFound {
+      for row in visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows) {
+        if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
+          configureForwardSelection(cell, row: row)
+        }
+      }
+    }
+    if modeChanged {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      NSAnimationContext.beginGrouping()
+      NSAnimationContext.current.duration = 0
+      NSAnimationContext.current.allowsImplicitAnimation = false
+      if let width = measurementWidth() { lastKnownWidth = width }
+      tableView.beginUpdates()
+      if visible.location != NSNotFound {
+        updateHeightsForRows(at: IndexSet(integersIn: visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows)))
+      }
+      tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0 ..< tableView.numberOfRows))
+      tableView.endUpdates()
+      view.layoutSubtreeIfNeeded()
+      if wasAtBottom {
+        scrollToBottom(animated: false)
+      } else if let anchor {
+        restoreVisibleMessageAnchor(anchor)
+      }
+      syncAvatarOverlayAfterTableLayout()
+      NSAnimationContext.endGrouping()
+      CATransaction.commit()
+    }
   }
 
   private var threadAnchor: FullMessage? {
@@ -659,6 +734,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
 
   private var insetForCompose: CGFloat = Theme.composeMinHeight
   func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
+    let inset = messageSelectionInset ?? inset
     guard inset.isFinite, abs(insetForCompose - max(0, inset)) > 0.5 else { return }
     let anchor = !needsInitialScroll ? captureVisibleMessageAnchor() : nil
     let wasCommittingGeometry = isCommittingGeometry
@@ -724,7 +800,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
     scrollView.scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: -Theme.messageListBottomInset, right: 0)
     if ownsGeometry {
       if isAtAbsoluteBottom { scrollToBottom(animated: false) }
-      else if let anchor { restoreVisibleMessageAnchor(anchor) }
+        else if let anchor { restoreVisibleMessageAnchor(anchor) }
       isCommittingGeometry = false
     }
   }
@@ -1327,7 +1403,8 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
   private func rawMeasurementWidth(using tableView: NSTableView) -> CGFloat {
     if let scroll = tableView.enclosingScrollView as? MessageListScrollView,
        scroll.maximumContentWidth != nil {
-      return ceil(scroll.messageContentWidth)
+      let selectionInset = showsForwardSelection ? MessageTableCell.forwardSelectionInset : 0
+      return ceil(scroll.messageContentWidth) - selectionInset
     }
     let viewWidth = isViewLoaded ? view.bounds.width : 0
     let widths: [CGFloat] = [
@@ -1337,7 +1414,8 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
       tableView.tableColumns.first?.width ?? 0.0,
       viewWidth,
     ]
-    return ceil(widths.first(where: { $0 > 0 }) ?? 0)
+    let selectionInset = showsForwardSelection ? MessageTableCell.forwardSelectionInset : 0
+    return ceil(widths.first(where: { $0 > 0 }) ?? 0) - selectionInset
   }
 
   private func isValidMeasurementWidth(_ width: CGFloat, renderStyle: MessageRenderStyle) -> Bool {
@@ -1519,7 +1597,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
     tableView.noteHeightOfRows(withIndexesChanged: rows)
     tableView.layoutSubtreeIfNeeded()
     if followsLatest { scrollToBottom(animated: false) }
-    else if let anchor { restoreVisibleMessageAnchor(anchor) }
+        else if let anchor { restoreVisibleMessageAnchor(anchor) }
     NSAnimationContext.endGrouping()
     isCommittingGeometry = false
     scheduleAvatarOverlaySync()
@@ -3101,6 +3179,7 @@ extension ExperimentalMessageListAppKit: NSTableViewDelegate {
     let cell = reusedView as? MessageTableCell ?? MessageTableCell()
     cell.identifier = identifier
     cell.setDependencies(dependencies)
+    configureForwardSelection(cell, row: row)
     cell.setAvatarSwipeProvider { [weak self] sourceView in
       if self?.messageQuickActionsView?.isHidden == false {
         self?.clearHoveredMessage()

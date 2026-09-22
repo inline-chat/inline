@@ -475,6 +475,17 @@ class LegacyComposeAppKit: NSView {
     setupTextEditor()
   }
 
+  func prepareForMessageSelection() -> Bool {
+    guard !currentVoiceActive else {
+      ToastCenter.shared.showError("Finish your voice message before selecting messages.")
+      return false
+    }
+    hideMentionCompletion()
+    hideCommandCompletion()
+    hideAutocomplete()
+    return true
+  }
+
   /// This method is called from ChatViewAppKit's viewDidLayout.
   /// Draft hydration happens on window attachment so layout stays measurement-only.
   func didLayout() {
@@ -1351,6 +1362,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   func focusEditor() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !voiceViewModel.isActive else { return }
     textEditor.focus()
   }
@@ -1731,6 +1743,7 @@ class LegacyComposeAppKit: NSView {
 
   // Send the message
   func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     textEditor.textView.resetPastedLinks()
     if voiceViewModel.phase == .review {
       sendVoiceRecording()
@@ -2120,6 +2133,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   func focus() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !voiceViewModel.isActive else { return }
     textEditor.focus()
   }
@@ -2186,6 +2200,8 @@ class LegacyComposeAppKit: NSView {
         guard let self else { return }
         guard !voiceViewModel.isActive else { return }
 
+        guard messageList?.isMessageSelectionActive != true else { return }
+
         // Only allow valid printable characters, not control/navigation keys
         guard let characters = event.characters,
               characters != " ", // Ignore space as it prevents our image preview from working
@@ -2224,6 +2240,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func handleGlobalPaste() {
+    guard messageList?.isMessageSelectionActive != true else { return }
     guard !voiceViewModel.isActive else { return }
 
     let pasteboard = NSPasteboard.general

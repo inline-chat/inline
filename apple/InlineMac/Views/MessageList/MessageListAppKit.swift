@@ -35,9 +35,14 @@ class MessageListAppKit: NSViewController {
   private let messageRenderStyle: MessageRenderStyle
   private let usesAvatarOverlay: Bool
   private var messageSelection = MessageSelectionState()
-  private var forwardSelectionMonitor: Any?
-  private var forwardSelectionBar: ForwardMessageSelectionBar?
   private var showsForwardSelection = false
+  var messageSelectionInset: CGFloat?
+  var messageSelectionTableView: NSTableView { tableView }
+
+  func canSelectMessage(atRow row: Int) -> Bool {
+    selectableStableId(forRow: row) != nil
+  }
+
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)?
 
   var isMessageSelectionActive: Bool {
@@ -371,6 +376,7 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func beginMessageSelection(atRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.begin(with: stableId)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -379,6 +385,7 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func toggleMessageSelection(atRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.toggle(stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -387,6 +394,7 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func extendMessageSelection(toRow row: Int) -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.selectRange(to: stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -395,6 +403,7 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func selectAllMessages() -> Bool {
+    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     let stableIds = selectableMessageStableIds
     let changed = messageSelection.selectAll(stableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -437,21 +446,6 @@ class MessageListAppKit: NSViewController {
     let message = fullMessage.message
     return message.messageId > 0 && !message.isServiceMessage && !message.isSubthreadPlacement
       && (message.status == nil || message.status == .sent)
-  }
-
-  static func beginForwardSelection(from source: NSView) {
-    guard ExperimentalFeatureFlags.quickForwardEnabled else { return }
-    var ancestor: NSView? = source
-    while let current = ancestor {
-      if let table = current as? NSTableView, let list = table.delegate as? MessageListAppKit {
-        let row = table.row(for: source)
-        if list.beginMessageSelection(atRow: row) {
-          table.window?.makeFirstResponder(table)
-        }
-        return
-      }
-      ancestor = current.superview
-    }
   }
 
   private func refreshForwardSelection() {
@@ -498,27 +492,6 @@ class MessageListAppKit: NSViewController {
         }
       }
     }
-    if active {
-      if forwardSelectionBar == nil {
-        let bar = ForwardMessageSelectionBar(
-          target: self,
-          forwardAction: #selector(forwardSelectedMessages),
-          cancelAction: #selector(cancelForwardSelection)
-        )
-        view.addSubview(bar)
-        NSLayoutConstraint.activate([
-          bar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-          bar.bottomAnchor.constraint(equalTo: scrollToBottomButton.bottomAnchor),
-        ])
-        forwardSelectionBar = bar
-      }
-      forwardSelectionBar?.isHidden = false
-      forwardSelectionBar?.update(count: messageSelection.count)
-      installForwardSelectionMonitor()
-    } else {
-      forwardSelectionBar?.isHidden = true
-      removeForwardSelectionMonitor()
-    }
 
     if modeChanged {
       tableView.beginUpdates()
@@ -547,92 +520,6 @@ class MessageListAppKit: NSViewController {
       guard let self, let stableId, let currentRow = self.chatRows.rowIndex(forMessageStableId: stableId) else { return }
       self.toggleMessageSelection(atRow: currentRow)
     }
-  }
-
-  @objc private func cancelForwardSelection() {
-    clearMessageSelection()
-  }
-
-  @objc private func forwardSelectedMessages() {
-    guard ExperimentalFeatureFlags.quickForwardEnabled, let presenter = dependencies.forwardMessages else { return }
-    let selected = selectedMessagesInLoadedOrder
-    guard !selected.isEmpty else { return }
-    presenter.present(messages: selected, onComplete: { [weak self] in
-      self?.clearMessageSelection()
-    })
-  }
-
-  private func installForwardSelectionMonitor() {
-    guard forwardSelectionMonitor == nil else { return }
-    forwardSelectionMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .rightMouseUp, .keyDown]) { [weak self] event in
-      guard let self, !self.isDisposed, self.messageSelection.isActive,
-            let window = self.view.window, event.window === window,
-            window.attachedSheet == nil, !self.view.isHiddenOrHasHiddenAncestor
-      else { return event }
-      if !ExperimentalFeatureFlags.quickForwardEnabled {
-        self.clearMessageSelection()
-        return event
-      }
-      if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .rightMouseUp {
-        let point = self.scrollView.convert(event.locationInWindow, from: nil)
-        guard self.scrollView.bounds.contains(point),
-              let hit = self.view.hitTest(self.view.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
-              hit === self.tableView || hit.isDescendant(of: self.tableView)
-        else { return event }
-        // Telegram keeps ordinary message menus out of selection mode.
-        guard event.type == .leftMouseDown else { return nil }
-        let row = self.tableView.row(at: self.tableView.convert(event.locationInWindow, from: nil))
-        guard self.selectableStableId(forRow: row) != nil else { return nil }
-        if event.modifierFlags.contains(.shift) {
-          self.extendMessageSelection(toRow: row)
-        } else {
-          self.toggleMessageSelection(atRow: row)
-        }
-        window.makeFirstResponder(self.tableView)
-        return nil
-      }
-      guard let responder = window.firstResponder as? NSView,
-            responder === self.tableView || responder.isDescendant(of: self.tableView)
-      else { return event }
-      if event.keyCode == 125 || event.keyCode == 126 {
-        let ids = self.selectableMessageStableIds
-        let movingDown = event.keyCode == 125
-        let selected = self.selectedStableIdsInLoadedOrder()
-        let edge = movingDown ? selected.last : selected.first
-        if let edge, let index = ids.firstIndex(of: edge), !ids.isEmpty {
-          let next = min(max(index + (movingDown ? 1 : -1), 0), ids.count - 1)
-          if let row = self.chatRows.rowIndex(forMessageStableId: ids[next]) {
-            if event.modifierFlags.contains(.shift) {
-              self.extendMessageSelection(toRow: row)
-            } else {
-              self.beginMessageSelection(atRow: row)
-            }
-            self.tableView.scrollRowToVisible(row)
-          }
-        }
-        return nil
-      }
-      if event.keyCode == 53 {
-        self.clearMessageSelection()
-        return nil
-      }
-      if event.modifierFlags.intersection([.command, .control, .option]) == .command,
-         event.charactersIgnoringModifiers?.lowercased() == "a"
-      {
-        self.selectAllMessages()
-        return nil
-      }
-      if event.keyCode == 36 {
-        self.forwardSelectedMessages()
-        return nil
-      }
-      return event
-    }
-  }
-
-  private func removeForwardSelectionMonitor() {
-    if let forwardSelectionMonitor { NSEvent.removeMonitor(forwardSelectionMonitor) }
-    forwardSelectionMonitor = nil
   }
 
   private var threadAnchor: FullMessage? {
@@ -805,6 +692,7 @@ class MessageListAppKit: NSViewController {
 
   private var insetForCompose: CGFloat = Theme.composeMinHeight
   func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
+    let inset = messageSelectionInset ?? inset
     insetForCompose = inset
 
     scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
@@ -2309,7 +2197,6 @@ class MessageListAppKit: NSViewController {
     super.viewDidAppear()
     log.trace("viewDidAppear() called")
     setupLiveResizeObserver()
-    if messageSelection.isActive { installForwardSelectionMonitor() }
     observeToolbarDisplayModeIfNeeded()
     updateScrollViewInsets()
     updateToolbar()
@@ -2329,7 +2216,6 @@ class MessageListAppKit: NSViewController {
     super.viewDidDisappear()
     log.trace("viewDidDisappear() called")
     removeLiveResizeObserver()
-    removeForwardSelectionMonitor()
     clearHoveredMessage()
   }
 
@@ -4308,7 +4194,6 @@ extension MessageListAppKit {
 extension MessageListAppKit {
   func dispose() {
     isDisposed = true
-    removeForwardSelectionMonitor()
     cancellables.removeAll()
 
     // Cancel any tasks

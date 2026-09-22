@@ -81,6 +81,7 @@ class ChatViewAppKit: NSViewController {
   // Child controllers
   private var messageListVC: (any ChatMessageListController)?
   private var compose: ComposeAppKit?
+  private var messageSelectionCoordinator: MessageSelectionCoordinator?
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ChatLoadErrorView>?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
@@ -447,6 +448,9 @@ class ChatViewAppKit: NSViewController {
     view.addSubview(compose)
     compose.translatesAutoresizingMaskIntoConstraints = false
     self.compose = compose
+    messageSelectionCoordinator = MessageSelectionCoordinator(
+      list: messageListVC_, compose: compose, host: view, dependencies: dependencies
+    )
 
     // Layout
     do {
@@ -552,6 +556,8 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func clearCurrentViews() {
+    messageSelectionCoordinator?.dispose()
+    messageSelectionCoordinator = nil
     // Remove any non-controller views
     if let messageListVC {
       messageListVC.dispose()

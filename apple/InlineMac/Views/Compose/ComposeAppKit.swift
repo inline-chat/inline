@@ -7,6 +7,7 @@ protocol ComposeImplementation: AnyObject {
 
   func hostWillMove(toSuperview newSuperview: NSView?)
   func didLayout()
+  func prepareForMessageSelection() -> Bool
   func setPeerUser(_ user: InlineKit.User?)
   func handleAttachments(from pasteboard: NSPasteboard) -> Bool
   func handleFileDrop(_ urls: [URL])
@@ -28,7 +29,7 @@ final class ComposeAppKit: NSView {
   // exists; broad layout-mode conditionals already proved too fragile here.
   private let implementation: any ComposeImplementation
   private let usesGlassCompose: Bool
-  private let surfaceStyle: ChatViewAppearance.SurfaceStyle
+  let surfaceStyle: ChatViewAppearance.SurfaceStyle
 
   weak var messageList: (any ChatMessageListController)? {
     get { implementation.messageList }
@@ -87,6 +88,10 @@ final class ComposeAppKit: NSView {
     super.viewWillMove(toSuperview: newSuperview)
   }
 
+  func prepareForMessageSelection() -> Bool {
+    implementation.prepareForMessageSelection()
+  }
+
   func didLayout() {
     implementation.didLayout()
   }
@@ -96,26 +101,32 @@ final class ComposeAppKit: NSView {
   }
 
   func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
-    implementation.handleAttachments(from: pasteboard)
+    guard messageList?.isMessageSelectionActive != true else { return false }
+    return implementation.handleAttachments(from: pasteboard)
   }
 
   func handleFileDrop(_ urls: [URL]) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     implementation.handleFileDrop(urls)
   }
 
   func handleTextDropOrPaste(_ text: String) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     implementation.handleTextDropOrPaste(text)
   }
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     implementation.handleImageDropOrPaste(image, url)
   }
 
   func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage? = nil) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     implementation.handleVideoDropOrPaste(url, thumbnail: thumbnail)
   }
 
   func handleAnimatedImageDropOrPaste(_ url: URL) {
+    guard messageList?.isMessageSelectionActive != true else { return }
     implementation.handleAnimatedImageDropOrPaste(url)
   }
 
@@ -152,7 +163,7 @@ final class ComposeAppKit: NSView {
   }
 }
 
-private final class GlassComposeBackgroundUnderlayView: NSView {
+final class GlassComposeBackgroundUnderlayView: NSView {
   private static let fadeHeight: CGFloat = 30
   private static let maxOpacity: CGFloat = 0.7
   private static let fadeStops: [CGFloat] = [0, 0.35, 0.72, 1]
