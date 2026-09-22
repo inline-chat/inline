@@ -177,7 +177,8 @@ class ComposeTextView: UITextView {
   }
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-    if action == #selector(paste(_:)), isEditable, MessageTextPasteboard.containsFormattedText() {
+    if action == #selector(paste(_:)), isEditable,
+       ExperimentalFeatureFlags.richMessageCopyEditingEnabled, MessageTextPasteboard.containsFormattedText() {
       return true
     }
     return super.canPerformAction(action, withSender: sender)
@@ -204,7 +205,7 @@ class ComposeTextView: UITextView {
       resetTypingAttributesToDefault()
       textDidChange()
       delegate?.textViewDidChange?(self)
-    } else if let string = MessageTextPasteboard.markdown()
+    } else if let string = (ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageTextPasteboard.markdown() : nil)
       ?? UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString
     {
       let replacedRange = selectedRange
@@ -213,7 +214,8 @@ class ComposeTextView: UITextView {
         string,
         into: attributedText ?? NSAttributedString(),
         selectedRange: selectedRange,
-        typingAttributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label],
+        typingAttributes: ExperimentalFeatureFlags.richMessageCopyEditingEnabled
+          ? [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label] : typingAttributes,
         textColor: UIColor.label
       )
       registerFormattingUndo(actionName: "Paste")

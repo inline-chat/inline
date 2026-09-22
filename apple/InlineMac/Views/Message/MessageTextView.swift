@@ -148,6 +148,7 @@ class MessageTextView: NSTextView {
   }
 
   override func copy(_ sender: Any?) {
+    guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled else { super.copy(sender); return }
     guard let storage = textStorage else { return }
     let source = NSMutableAttributedString(string: "")
     for value in selectedRanges where value.rangeValue.length > 0 {

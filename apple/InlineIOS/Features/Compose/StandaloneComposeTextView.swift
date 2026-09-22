@@ -1,3 +1,4 @@
+import InlineKit
 import Logger
 import TextProcessing
 import UIKit
@@ -100,7 +101,8 @@ class StandaloneComposeTextView: UITextView {
   // MARK: - Paste Handling
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-    if action == #selector(paste(_:)), isEditable, MessageTextPasteboard.containsFormattedText() {
+    if action == #selector(paste(_:)), isEditable,
+       ExperimentalFeatureFlags.richMessageCopyEditingEnabled, MessageTextPasteboard.containsFormattedText() {
       return true
     }
     return super.canPerformAction(action, withSender: sender)
@@ -109,10 +111,15 @@ class StandaloneComposeTextView: UITextView {
   override func paste(_ sender: Any?) {
     if let image = UIPasteboard.general.image {
       composeDelegate?.composeTextView(self, didReceiveImage: image)
-    } else if let string = MessageTextPasteboard.markdown() ?? UIPasteboard.general.string {
-      // Keep Markdown markers visible while preserving the surrounding draft and native undo.
-      typingAttributes = [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
-      insertText(string)
+    } else if let string = (ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageTextPasteboard.markdown() : nil)
+      ?? UIPasteboard.general.string {
+      if ExperimentalFeatureFlags.richMessageCopyEditingEnabled {
+        // Keep Markdown markers visible while preserving the surrounding draft and native undo.
+        typingAttributes = [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
+        insertText(string)
+      } else {
+        text = (text as NSString).replacingCharacters(in: selectedRange, with: string)
+      }
       fixFontSizeAfterStickerInsertion()
       showPlaceholder(text.isEmpty)
       composeDelegate?.composeTextViewDidChange(self)

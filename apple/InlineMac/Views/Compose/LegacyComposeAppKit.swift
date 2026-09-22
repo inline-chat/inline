@@ -1534,7 +1534,7 @@ class LegacyComposeAppKit: NSView {
         addReplyEscHandler()
 
         if kind == .editing {
-          let attributedString = MessageMarkdown.editableText(
+          let attributedString = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
             text: message.message.text ?? "",
             entities: message.message.entities,
             configuration: .init(
@@ -1543,6 +1543,9 @@ class LegacyComposeAppKit: NSView {
               linkColor: ComposeTextEditor.linkColor,
               convertMentionsToLink: false
             )
+          ) : toAttributedString(
+            text: message.message.text ?? "",
+            entities: message.message.entities
           )
 
           // TODO: Extract these to a function

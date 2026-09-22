@@ -1530,7 +1530,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
-        // Show editable Markdown while retaining mention and thread identities.
+        // The experiment exposes Markdown syntax; otherwise keep rendered formatting.
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
@@ -1540,7 +1540,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             renderPhoneNumbers: false
           )
 
-          let attributedText = MessageMarkdown.editableText(
+          let attributedText = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
+            text: text,
+            entities: message.message.entities,
+            configuration: configuration
+          ) : ProcessEntities.toAttributedString(
             text: text,
             entities: message.message.entities,
             configuration: configuration

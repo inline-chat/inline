@@ -4420,8 +4420,12 @@ private extension MessagesCollectionView {
 
       var actions: [UIAction] = []
 
-      if message.hasText, let text = fullMessage.displayText {
+      if message.hasText {
         let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
+          guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled, let text = fullMessage.displayText else {
+            UIPasteboard.general.string = message.text
+            return
+          }
           MessageTextPasteboard.copy(
             text: text,
             entities: fullMessage.translationEntities ?? message.entities
