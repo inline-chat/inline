@@ -40,6 +40,56 @@ struct DatabaseMigrationOrderTests {
     }
   }
 
+  @Test("upgrading repairs removal evidence deleted by older account cleanup")
+  func repairsLegacyAccountCleanup() throws {
+    let writer = try DatabaseQueue()
+    let migrator = makeMigrator()
+    try migrator.migrate(writer, upTo: "sequenced member projection")
+    try writer.write { db in
+      try db.execute(sql: "DELETE FROM sync_removal_revision")
+      try DbBucketState(bucketType: 2, entityId: 0, date: 100, seq: 7).insert(db)
+    }
+    try migrator.migrate(writer)
+    try writer.write { db in
+      #expect(try SyncRemovalRevision.read(db) == 0)
+      #expect(try DbBucketState.fetchOne(db)?.seq == 7)
+      try SyncRemovalRevision.advance(db)
+      #expect(try SyncRemovalRevision.read(db) == 1)
+    }
+  }
+
+  @Test("account cleanup clears account data and reseeds usable sync metadata")
+  func accountCleanupReseedsRemovalEvidence() throws {
+    let writer = try DatabaseQueue()
+    try makeMigrator().migrate(writer)
+    try writer.write { db in
+      try User(id: 1, email: nil, firstName: "Previous account").insert(db)
+      try DbBucketState(bucketType: 2, entityId: 0, date: 100, seq: 7).insert(db)
+      try SyncRemovalRevision.advance(db)
+      try AppDatabase.clearTables(db)
+      #expect(try User.fetchCount(db) == 0)
+      #expect(try DbBucketState.fetchCount(db) == 0)
+      #expect(try SyncRemovalRevision.read(db) == 0)
+      try SyncRemovalRevision.advance(db)
+      #expect(try SyncRemovalRevision.read(db) == 1)
+      try AppDatabase.clearTables(db)
+      #expect(try SyncRemovalRevision.read(db) == 0)
+    }
+  }
+
+  @Test("repair migration preserves existing removal evidence")
+  func repairPreservesExistingRemovalEvidence() throws {
+    let writer = try DatabaseQueue()
+    let migrator = makeMigrator()
+    try migrator.migrate(writer, upTo: "sequenced member projection")
+    try writer.write { db in
+      try SyncRemovalRevision.advance(db)
+      try SyncRemovalRevision.advance(db)
+    }
+    try migrator.migrate(writer)
+    #expect(try writer.read { try SyncRemovalRevision.read($0) } == 2)
+  }
+
   @Test("message payload follows the earlier dialog folders migration")
   func messagePayloadFollowsDialogFolders() {
     let migrations = makeMigrator().migrations

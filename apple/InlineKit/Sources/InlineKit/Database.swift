@@ -1349,6 +1349,12 @@ public extension AppDatabase {
       }
     }
 
+    // Older logout/login cleanup deleted this singleton without rerunning its
+    // original migration. Repair it before sync starts, preserving valid evidence.
+    migrator.registerMigration("restore sync removal revision after account cleanup") { db in
+      try db.execute(sql: "INSERT OR IGNORE INTO sync_removal_revision (id, revision) VALUES (1, 0)")
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
@@ -1598,6 +1604,16 @@ public extension AppDatabase {
         throw error
       } catch {
         throw logoutCleanupError(phase: .verifyEmpty, table: table, error: error)
+      }
+    }
+
+    // Account admission fences old work across this reset. Recreate schema
+    // metadata only after every account table has been verified empty.
+    if tables.contains("sync_removal_revision") {
+      do {
+        try db.execute(sql: "INSERT INTO sync_removal_revision (id, revision) VALUES (1, 0)")
+      } catch {
+        throw logoutCleanupError(phase: .deleteRows, table: "sync_removal_revision", error: error)
       }
     }
   }
