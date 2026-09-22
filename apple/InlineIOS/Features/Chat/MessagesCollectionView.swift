@@ -4391,15 +4391,11 @@ private extension MessagesCollectionView {
       // drawHierarchy capture can produce a valid but completely transparent image.
       let preview = targetedPreview(for: indexPath)
       let image = (preview?.view as? UIImageView)?.image
+      let visiblePath = preview?.parameters.visiblePath
       let configuration = UIContextMenuConfiguration(identifier: identifier, previewProvider: {
-        guard let image else { return nil }
-        // Supply the presented content too, not just a detached animation target.
-        // UIKit owns this controller's view throughout the menu's lifetime.
+        guard let image, let visiblePath else { return nil }
         let controller = UIViewController()
-        let imageView = UIImageView(image: image)
-        imageView.backgroundColor = .clear
-        imageView.isOpaque = false
-        controller.view = imageView
+        controller.view = MessageContextMenuPreviewView(image: image, visiblePath: visiblePath)
         controller.preferredContentSize = image.size
         return controller
       }, actionProvider: { _ in
@@ -4947,56 +4943,77 @@ private extension MessagesCollectionView {
             let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
             let messageView = cell.messageView,
             let window = messageView.window else { return nil }
-      let sourceView = messageView.fullMessage.message.isServiceMessage
-        ? messageView.serviceContainerView : messageView.bubbleView
+      let geometry = contextMenuPreviewGeometry(for: messageView)
       let size = state.preview.size
       guard size.width > 0, size.height > 0 else { return nil }
       let target = UIPreviewTarget(
         container: window,
-        center: sourceView.convert(CGPoint(x: sourceView.bounds.midX, y: sourceView.bounds.midY), to: window),
+        center: geometry.view.convert(CGPoint(x: geometry.rect.midX, y: geometry.rect.midY), to: window),
         transform: CGAffineTransform(
-          scaleX: sourceView.bounds.width / size.width,
-          y: sourceView.bounds.height / size.height
+          scaleX: geometry.rect.width / size.width,
+          y: geometry.rect.height / size.height
         )
       )
-      return state.preview.retargetedPreview(with: target)
+      return preserveBubbleShape(in: state.preview.retargetedPreview(with: target))
     }
 
     // MARK: - Private
+
+    private func contextMenuPreviewGeometry(for messageView: UIMessageView) -> (
+      view: UIView, rect: CGRect, path: UIBezierPath
+    ) {
+      let sourceView: UIView
+      let path: UIBezierPath
+      if messageView.fullMessage.message.isServiceMessage {
+        sourceView = messageView.serviceContainerView
+        path = UIBezierPath(roundedRect: sourceView.bounds, cornerRadius: sourceView.layer.cornerRadius)
+      } else {
+        sourceView = messageView.bubbleView
+        path = messageView.bubbleView.visiblePath()
+      }
+      // The tail can extend a fraction of a point outside the bubble's bounds.
+      // Round outward in pixels so the bitmap and its mask contain its full tip.
+      let extent = sourceView.bounds.union(path.bounds)
+      let scale = sourceView.window?.screen.scale ?? sourceView.traitCollection.displayScale
+      let rect = CGRect(
+        x: floor(extent.minX * scale) / scale,
+        y: floor(extent.minY * scale) / scale,
+        width: (ceil(extent.maxX * scale) - floor(extent.minX * scale)) / scale,
+        height: (ceil(extent.maxY * scale) - floor(extent.minY * scale)) / scale
+      )
+      path.apply(CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
+      return (sourceView, rect, path)
+    }
+
+    private func preserveBubbleShape(in preview: UITargetedPreview) -> UITargetedPreview {
+      // Match the unmasked platter style used for irregular chat-bubble previews.
+      // UIKit exposes an underscored setter; use its established KVC key.
+      preview.setValue(true, forKey: "prefersUnmaskedPlatterStyle")
+      return preview
+    }
 
     private func targetedPreview(for indexPath: IndexPath) -> UITargetedPreview? {
       guard let collectionView = currentCollectionView,
             let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
             let messageView = cell.messageView else { return nil }
 
-      let sourceView: UIView
+      let geometry = contextMenuPreviewGeometry(for: messageView)
       let parameters = UIPreviewParameters()
       parameters.backgroundColor = .clear
+      parameters.visiblePath = geometry.path
+      parameters.shadowPath = geometry.path
 
-      if messageView.fullMessage.message.isServiceMessage {
-        sourceView = messageView.serviceContainerView
-        parameters.visiblePath = UIBezierPath(
-          roundedRect: sourceView.bounds,
-          cornerRadius: sourceView.layer.cornerRadius
-        )
-      } else {
-        sourceView = messageView.bubbleView
-        parameters.visiblePath = messageView.bubbleView.visiblePath()
-      }
-
-      // UITargetedPreview displays its view live. A cell rebuild or reuse can
-      // dismantle that hierarchy while the menu is open, leaving an empty bubble.
-      // Render the layer tree directly: drawHierarchy depends on screen-update
-      // timing and can return a transparent image during menu presentation.
-      guard let window = sourceView.window,
-            let snapshot = sourceView.sendAnimationLayerSnapshotView(),
+      // Capture the layer tree before UIKit hides the source. Keep the bitmap
+      // independent of cell reuse while retaining the complete bubble silhouette.
+      guard let window = geometry.view.window,
+            let snapshot = geometry.view.sendAnimationLayerSnapshotView(in: geometry.rect),
             let image = (snapshot as? UIImageView)?.image,
             let sample = image.sendAnimationVisibleAlphaSample(), sample.visible > 0 else { return nil }
       let target = UIPreviewTarget(
         container: window,
-        center: sourceView.convert(CGPoint(x: sourceView.bounds.midX, y: sourceView.bounds.midY), to: window)
+        center: geometry.view.convert(CGPoint(x: geometry.rect.midX, y: geometry.rect.midY), to: window)
       )
-      return UITargetedPreview(view: snapshot, parameters: parameters, target: target)
+      return preserveBubbleShape(in: UITargetedPreview(view: snapshot, parameters: parameters, target: target))
     }
 
     private var isUserDragging = false

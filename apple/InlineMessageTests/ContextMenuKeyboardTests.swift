@@ -3,10 +3,240 @@
 import InlineTheme
 import Testing
 import UIKit
+import Vision
 
 @Suite("Message context-menu keyboard lifecycle", .serialized)
 @MainActor
 struct ContextMenuKeyboardTests {
+  @Test("Native menu displays the bubble before and after arrivals", arguments: [false, true], [false, true])
+  func nativePresentation(outgoing: Bool, usesV2: Bool) async throws {
+    try await checkNativePresentation(outgoing: outgoing, usesV2: usesV2)
+  }
+
+  @Test("Long messages retain the full image in the shaped native preview", arguments: [false, true])
+  func longNativePresentation(usesV2: Bool) async throws {
+    try await checkNativePresentation(outgoing: true, usesV2: usesV2, repetitions: 60)
+  }
+
+  private func checkNativePresentation(outgoing: Bool, usesV2: Bool, repetitions: Int = 3) async throws {
+    let fixture = try await Fixture(usesV2: usesV2, outgoing: outgoing, repetitions: repetitions)
+    defer { fixture.close() }
+    fixture.window.makeKeyAndVisible()
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    cell.updateMessageHoldAction(.reactionsMenu)
+    let source = try #require(cell.messageView?.bubbleView)
+    cell.messageView?.updateBubbleTail(side: outgoing ? .trailing : .leading, animated: false)
+    let expectedBubblePath = source.visiblePath().cgPath
+    let visibleRect = source.convert(source.bounds, to: list).intersection(list.bounds)
+    let point = CGPoint(x: visibleRect.midX, y: visibleRect.midY)
+    let interaction = try #require(list.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+    let selector = NSSelectorFromString("_presentMenuAtLocation:")
+    let method = try #require(class_getInstanceMethod(type(of: interaction), selector))
+    typealias PresentMenu = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    let present = unsafeBitCast(method_getImplementation(method), to: PresentMenu.self)
+    let opening = OpeningPreviewObserver(window: fixture.window)
+    let displayLink = CADisplayLink(target: opening, selector: #selector(OpeningPreviewObserver.tick))
+    displayLink.add(to: .main, forMode: .common)
+    defer { displayLink.invalidate() }
+    present(interaction, selector, point)
+    try await Task.sleep(for: .seconds(1))
+    displayLink.invalidate()
+    #expect(!opening.frames.isEmpty)
+    for frame in opening.frames {
+      #expect(frame.unmasked)
+      let visiblePath = try #require(frame.visiblePath)
+      let displayedPath = try #require(frame.displayedPath)
+      // A rounded rectangle has no tail subpath. Inspect every opening frame,
+      // including the presentation layer while UIKit's animation is running.
+      let expected = normalizedElements(expectedBubblePath)
+      for path in [visiblePath, displayedPath] {
+        let displayed = normalizedElements(path)
+        #expect(displayed.count == expected.count)
+        for (actual, target) in zip(displayed, expected) {
+          #expect(actual.0 == target.0)
+          for (point, expectedPoint) in zip(actual.1, target.1) {
+            #expect(abs(point.x - expectedPoint.x) < 0.001)
+            #expect(abs(point.y - expectedPoint.y) < 0.001)
+          }
+        }
+      }
+    }
+    #expect(list.isContextMenuInteractionActive)
+    func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+    let platter = try #require(descendants(fixture.window).first {
+      String(describing: type(of: $0)) == "_UIContentPlatterView"
+    })
+    let expanded = try #require(platter.value(forKey: "expandedPreview") as? UITargetedPreview)
+    #expect(expanded.value(forKey: "prefersUnmaskedPlatterStyle") as? Bool == true)
+    let mask = try #require(expanded.parameters.visiblePath)
+    #expect(mask.bounds.width > 0)
+    if repetitions > 3 {
+      let image = try #require((expanded.view as? UIImageView)?.image)
+      #expect(image.size.height > fixture.window.bounds.height)
+    }
+    #expect(expanded.view.bounds.contains(mask.bounds))
+    // Check UIKit's rendered mask before any snapshot or gesture can refresh it.
+    let shapeLayer = try #require(platter.value(forKey: "shapeLayer") as? CAShapeLayer)
+    let renderedPath = try #require(shapeLayer.path)
+    // UIKit fits the outline into pixel-rounded platter bounds. Compare the
+    // normalized segments so that rounding cannot hide a missing tail or mask.
+    func normalizedElements(_ path: CGPath) -> [(CGPathElementType, [CGPoint])] {
+      let bounds = path.boundingBoxOfPath
+      var elements: [(CGPathElementType, [CGPoint])] = []
+      path.applyWithBlock { pointer in
+        let element = pointer.pointee
+        let count: Int
+        switch element.type {
+        case .moveToPoint, .addLineToPoint: count = 1
+        case .addQuadCurveToPoint: count = 2
+        case .addCurveToPoint: count = 3
+        case .closeSubpath: count = 0
+        @unknown default: count = 0
+        }
+        let points = (0 ..< count).map { index in
+          CGPoint(
+            x: (element.points[index].x - bounds.minX) / bounds.width,
+            y: (element.points[index].y - bounds.minY) / bounds.height
+          )
+        }
+        elements.append((element.type, points))
+      }
+      return elements
+    }
+    let renderedElements = normalizedElements(renderedPath)
+    let expectedElements = normalizedElements(mask.cgPath)
+    #expect(renderedElements.count == expectedElements.count)
+    for (rendered, expected) in zip(renderedElements, expectedElements) {
+      #expect(rendered.0 == expected.0)
+      for (actual, target) in zip(rendered.1, expected.1) {
+        #expect(abs(actual.x - target.x) < 0.000_001)
+        #expect(abs(actual.y - target.y) < 0.000_001)
+      }
+    }
+    func capture(_ label: String) async throws {
+      // The native preview uses a render-server replica. Capture the window,
+      // then crop it; drawing the platter by itself cannot render that replica.
+      // Hide list pixels so OCR cannot mistake the original cell for the preview.
+      let opacity = list.layer.opacity
+      list.layer.opacity = 0
+      defer { list.layer.opacity = opacity }
+      // Let the render server hide the list before capturing its pixels. The
+      // opening-frame assertions above run before this extra render transaction.
+      try await Task.sleep(for: .milliseconds(50))
+      let screen = UIGraphicsImageRenderer(size: fixture.window.bounds.size).image { _ in
+        fixture.window.drawHierarchy(in: fixture.window.bounds, afterScreenUpdates: false)
+      }
+      let rect = platter.convert(platter.bounds, to: fixture.window)
+        .applying(CGAffineTransform(scaleX: screen.scale, y: screen.scale))
+      let pixels = try #require(screen.cgImage?.cropping(to: rect))
+      let image = UIImage(cgImage: pixels, scale: screen.scale, orientation: .up)
+      Attachment.record(Array(try #require(image.pngData())), named: "platter-\(outgoing)-\(usesV2)-\(label).png")
+      let recognition = VNRecognizeTextRequest()
+      recognition.recognitionLevel = .accurate
+      try VNImageRequestHandler(cgImage: pixels).perform([recognition])
+      let text = recognition.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
+      #expect(text.contains("Keyboard lifecycle regression"))
+      Attachment.record(Array(try #require(screen.pngData())), named: "menu-\(outgoing)-\(usesV2)-\(label).png")
+    }
+    try await capture("before")
+    let count = fixture.displayedMessageCount
+    _ = try fixture.addMessage(id: 31)
+    try await fixture.settleUpdates()
+    #expect(fixture.displayedMessageCount == count + 1)
+    #expect(list.isContextMenuInteractionActive)
+    try await capture("after")
+    interaction.dismissMenu()
+    try await Task.sleep(for: .milliseconds(600))
+  }
+
+  @Test("Expanded preview shaping leaves ordinary previews unchanged")
+  func leavesOrdinaryPreviewsUnchanged() async throws {
+    let fixture = try await Fixture()
+    defer { fixture.close() }
+    let bounds = CGRect(x: 0, y: 0, width: 100, height: 60)
+    let image = UIGraphicsImageRenderer(size: bounds.size).image { context in
+      UIColor.systemBlue.setFill()
+      context.fill(bounds)
+    }
+    _ = MessageContextMenuPreviewView(image: image, visiblePath: UIBezierPath(rect: bounds))
+    let platterType = try #require(NSClassFromString("_UIContentPlatterView") as? UIView.Type)
+    let platter = platterType.init()
+    let preview = UITargetedPreview(
+      view: UIImageView(image: image),
+      parameters: UIPreviewParameters(),
+      target: UIPreviewTarget(container: fixture.window, center: fixture.window.center)
+    )
+    platter.setValue(preview, forKey: "expandedPreview")
+    #expect((platter.value(forKey: "expandedPreview") as? UITargetedPreview) === preview)
+    platter.setValue(nil, forKey: "expandedPreview")
+    #expect(platter.value(forKey: "expandedPreview") == nil)
+  }
+
+  @MainActor
+  private final class OpeningPreviewObserver: NSObject {
+    struct Frame {
+      let unmasked: Bool
+      let visiblePath: CGPath?
+      let displayedPath: CGPath?
+    }
+
+    weak var window: UIWindow?
+    var frames: [Frame] = []
+
+    init(window: UIWindow) {
+      self.window = window
+    }
+
+    @objc func tick() {
+      guard let window else { return }
+      func findPlatter(_ view: UIView) -> UIView? {
+        if String(describing: type(of: view)) == "_UIContentPlatterView" { return view }
+        return view.subviews.lazy.compactMap(findPlatter).first
+      }
+      guard let platter = findPlatter(window),
+            let expanded = platter.value(forKey: "expandedPreview") as? UITargetedPreview,
+            let layer = platter.value(forKey: "shapeLayer") as? CAShapeLayer,
+            !layer.bounds.isEmpty else { return }
+      frames.append(Frame(
+        unmasked: expanded.value(forKey: "prefersUnmaskedPlatterStyle") as? Bool == true,
+        visiblePath: expanded.parameters.visiblePath?.cgPath,
+        displayedPath: (layer.presentation() ?? layer).path
+      ))
+    }
+  }
+
+  @Test("The preview preserves both tails without a rounded rectangular mask", arguments: [false, true])
+  func preservesTailExtent(outgoing: Bool) async throws {
+    let fixture = try await Fixture(outgoing: outgoing)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    let source = try #require(cell.messageView?.bubbleView)
+    let side: MessageBubbleTailSide = outgoing ? .trailing : .leading
+    cell.messageView?.updateBubbleTail(side: side, animated: false)
+    source.layoutIfNeeded()
+    let path = source.visiblePath()
+    let extent = source.bounds.union(path.bounds)
+    let configuration = fixture.beginMenu()
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    let bitmap = try #require((preview.view as? UIImageView)?.image)
+    let visiblePath = try #require(preview.parameters.visiblePath)
+    #expect(preview.view.bounds.width >= extent.width)
+    #expect(preview.view.bounds.height >= extent.height)
+    #expect(preview.view.bounds.width - extent.width < 1 / fixture.window.screen.scale + 0.001)
+    #expect(preview.view.bounds.height - extent.height < 1 / fixture.window.screen.scale + 0.001)
+    #expect(preview.view.bounds.contains(visiblePath.bounds))
+    #expect(bitmap.size == preview.view.bounds.size)
+    #expect(preview.value(forKey: "prefersUnmaskedPlatterStyle") as? Bool == true)
+    Attachment.record(Array(try #require(bitmap.pngData())), named: outgoing ? "trailing-tail.png" : "leading-tail.png")
+    fixture.endMenu(configuration, animator: nil)
+  }
+
   @Test("Menu captures visible pixels before UIKit hides the source", arguments: [false, true])
   func capturesBeforeHighlight(usesV2: Bool) async throws {
     let fixture = try await Fixture(usesV2: usesV2)
@@ -74,9 +304,11 @@ struct ContextMenuKeyboardTests {
       list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
     ))
     #expect(dismissal.view === preview.view)
-    #expect(dismissal.target.center == currentBubble.convert(
+    let expectedCenter = currentBubble.convert(
       CGPoint(x: currentBubble.bounds.midX, y: currentBubble.bounds.midY), to: fixture.window
-    ))
+    )
+    #expect(abs(dismissal.target.center.x - expectedCenter.x) <= 1 / fixture.window.screen.scale)
+    #expect(abs(dismissal.target.center.y - expectedCenter.y) <= 1 / fixture.window.screen.scale)
 
     let animator = animated ? MenuAnimator() : nil
     fixture.endMenu(configuration, animator: animator)
@@ -266,7 +498,7 @@ struct ContextMenuKeyboardTests {
     let publisher: MessagesPublisher
     let peer = Peer.user(id: 9_017)
 
-    init(usesV2: Bool = true) async throws {
+    init(usesV2: Bool = true, outgoing: Bool? = nil, repetitions: Int = 3) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
       window = UIWindow(windowScene: scene)
       let controller = UIViewController()
@@ -282,7 +514,8 @@ struct ContextMenuKeyboardTests {
         value.message.chatId = 9_017
         value.message.peerThreadId = nil
         value.message.peerUserId = 9_017
-        value.message.text = String(repeating: "Keyboard lifecycle regression. ", count: 3)
+        value.message.text = String(repeating: "Keyboard lifecycle regression. ", count: repetitions)
+        if let outgoing { value.message.out = outgoing }
         return value
       }
       model = MessagesSectionedViewModel(
