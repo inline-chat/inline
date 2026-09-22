@@ -2,6 +2,8 @@ import AppKit
 
 final class ComposeVoiceButton: NSView {
   private let mode: ComposeControlMode
+  private let presentation: ComposeControlPresentation
+  private let fixedInputMode: ComposeVoiceInputMode?
   private var size: CGFloat { mode.voiceButtonSize }
   private let contentView: NSView
   private let glassButton: NSButton?
@@ -16,6 +18,8 @@ final class ComposeVoiceButton: NSView {
 
   override init(frame frameRect: NSRect) {
     mode = .legacy
+    presentation = .standard
+    fixedInputMode = nil
     let content = Self.makeContent(mode: mode)
     contentView = content.view
     glassButton = content.button
@@ -24,9 +28,15 @@ final class ComposeVoiceButton: NSView {
     setupView()
   }
 
-  init(mode: ComposeControlMode) {
+  init(
+    mode: ComposeControlMode,
+    presentation: ComposeControlPresentation = .standard,
+    fixedInputMode: ComposeVoiceInputMode? = nil
+  ) {
     self.mode = mode
-    let content = Self.makeContent(mode: mode)
+    self.presentation = presentation
+    self.fixedInputMode = fixedInputMode
+    let content = Self.makeContent(mode: mode, presentation: presentation)
     contentView = content.view
     glassButton = content.button
 
@@ -45,6 +55,10 @@ final class ComposeVoiceButton: NSView {
 
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
+    if presentation == .accessoryBar {
+      wantsLayer = true
+      layer?.cornerRadius = mode.silentButtonSize / 2
+    }
 
     addSubview(contentView)
     NotificationCenter.default.addObserver(
@@ -79,9 +93,23 @@ final class ComposeVoiceButton: NSView {
     refreshInputMode()
   }
 
-  private static func makeContent(mode: ComposeControlMode) -> (view: NSView, button: NSButton?) {
+  private static func makeContent(
+    mode: ComposeControlMode,
+    presentation: ComposeControlPresentation = .standard
+  ) -> (view: NSView, button: NSButton?) {
     let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
       .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
+
+    if presentation == .accessoryBar {
+      let button = NSButton(frame: .zero)
+      button.translatesAutoresizingMaskIntoConstraints = false
+      button.imagePosition = .imageOnly
+      button.imageScaling = .scaleNone
+      button.bezelStyle = .regularSquare
+      button.isBordered = false
+      button.contentTintColor = .secondaryLabelColor
+      return (button, button)
+    }
 
     if case .glass = mode {
       if #available(macOS 26.0, *) {
@@ -122,16 +150,17 @@ final class ComposeVoiceButton: NSView {
   }
 
   private func refreshInputMode() {
-    let selected = ComposeVoiceInputMode.selected
+    let selected = fixedInputMode ?? ComposeVoiceInputMode.selected
+    let iconSize = presentation == .accessoryBar ? mode.silentIconPointSize : mode.voiceButtonIconPointSize
     let image = NSImage(systemSymbolName: selected.symbol, accessibilityDescription: selected.actionTitle)?
-      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
+      .withSymbolConfiguration(.init(pointSize: iconSize, weight: .medium))
     glassButton?.image = image
     (contentView as? NSImageView)?.image = image
     toolTip = selected.actionTitle
     glassButton?.toolTip = selected.actionTitle
     setAccessibilityLabel(selected.actionTitle)
     glassButton?.setAccessibilityLabel(selected.actionTitle)
-    let menu = makeInputMenu()
+    let menu = fixedInputMode == nil ? makeInputMenu() : nil
     self.menu = menu
     glassButton?.menu = menu
     onModeChanged?()
@@ -168,7 +197,7 @@ final class ComposeVoiceButton: NSView {
       self.trackingArea = nil
     }
 
-    guard mode.usesCustomHoverFill else { return }
+    guard mode.usesCustomHoverFill || presentation == .accessoryBar else { return }
 
     let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways]
     trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
@@ -189,7 +218,7 @@ final class ComposeVoiceButton: NSView {
   }
 
   private func updateBackgroundColor() {
-    guard mode.usesCustomHoverFill else {
+    guard isEnabled, mode.usesCustomHoverFill || presentation == .accessoryBar else {
       layer?.backgroundColor = NSColor.clear.cgColor
       return
     }

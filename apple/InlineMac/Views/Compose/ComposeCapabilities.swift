@@ -19,18 +19,23 @@ struct ComposeCapabilities {
   let showsEmojiButton: Bool
   let showsSilentModeToggle: Bool
   let supportsVoiceMessages: Bool
+  let supportsDictation: Bool
+
+  var supportsVoiceInput: Bool { supportsVoiceMessages || supportsDictation }
 
   static let chatDefault = Self(
     menu: .chatDefault,
     showsEmojiButton: true,
     showsSilentModeToggle: false,
-    supportsVoiceMessages: true
+    supportsVoiceMessages: true,
+    supportsDictation: true
   )
 
   static let allChatsNewThread = Self(
     menu: .newThread,
     showsEmojiButton: false,
     showsSilentModeToggle: true,
-    supportsVoiceMessages: false
+    supportsVoiceMessages: false,
+    supportsDictation: true
   )
 }

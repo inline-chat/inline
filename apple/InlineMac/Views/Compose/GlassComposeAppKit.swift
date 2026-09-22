@@ -117,16 +117,12 @@ class GlassComposeAppKit: NSView {
   }
 
   private var canStartVoiceRecording: Bool {
-    guard capabilities.supportsVoiceMessages, case .chat = usage else { return false }
+    guard capabilities.supportsVoiceInput else { return false }
     return isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
   }
 
   private var currentVoiceActive: Bool {
-    guard capabilities.supportsVoiceMessages else { return false }
-    return switch usage {
-      case .chat: voiceViewModel.isActive
-      case .newThread: false
-    }
+    capabilities.supportsVoiceInput && voiceViewModel.isActive
   }
 
   private var placeholderText: String {
@@ -160,6 +156,10 @@ class GlassComposeAppKit: NSView {
   }
 
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
+    if case let .newThread(context) = usage {
+      return capabilities.supportsDictation && !isVoiceActive && !isSubmittingNewThread &&
+        !context.attachmentStore.hasPendingAttachments
+    }
     guard capabilities.supportsVoiceMessages, case .chat = usage else { return false }
     return !isVoiceActive &&
       !drafts2.hasPendingAttachments(peer: peerId) &&
@@ -168,7 +168,7 @@ class GlassComposeAppKit: NSView {
       state.forwardContext == nil
   }
 
-  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
+  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: chatPeerID)
   private var voiceEscapeKeyUnsubscribe: (() -> Void)?
   private var voiceReturnKeyUnsubscribe: (() -> Void)?
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
@@ -376,7 +376,11 @@ class GlassComposeAppKit: NSView {
   }()
 
   private lazy var voiceButton: ComposeVoiceButton = {
-    let view = ComposeVoiceButton(mode: controlMode)
+    let view = ComposeVoiceButton(
+      mode: controlMode,
+      presentation: layout == .accessoryBar ? .accessoryBar : .standard,
+      fixedInputMode: chatPeerID == nil ? .transcribe : nil
+    )
     view.onClick = { [weak self] in
       self?.startVoiceRecording()
     }
@@ -478,6 +482,8 @@ class GlassComposeAppKit: NSView {
   private var glassAccessoryHeightConstraint: NSLayoutConstraint?
   private var glassSupplementaryToControlsConstraint: NSLayoutConstraint?
   private var glassSupplementaryToEdgeConstraint: NSLayoutConstraint?
+  private var voiceToSendConstraint: NSLayoutConstraint?
+  private var voiceToEdgeConstraint: NSLayoutConstraint?
   private var isAccessoryBarExpanded = false
   private var newThreadEscapeKeyUnsubscribe: (() -> Void)?
 
@@ -502,6 +508,8 @@ class GlassComposeAppKit: NSView {
         self?.focus()
       }
     } else {
+      updateVoiceAvailability(phase: voiceViewModel.phase)
+      updateVoiceKeyHandlers(phase: voiceViewModel.phase)
       updateHeight(animate: false)
       textEditor.showPlaceholder(isEmpty)
     }
@@ -518,9 +526,11 @@ class GlassComposeAppKit: NSView {
   }
 
   override func viewWillMove(toSuperview newSuperview: NSView?) {
+    if newSuperview == nil {
+      cancelTranscriptionForRemoval()
+    }
     if case .chat = usage {
       if newSuperview == nil {
-        cancelTranscriptionForRemoval()
         requestImmediateDraftPersistenceIfNeeded()
       } else {
         didRequestFinalDraftPersistence = false
@@ -709,6 +719,10 @@ class GlassComposeAppKit: NSView {
           accessoryBarView.addSubview(silentModeButton)
         }
         accessoryBarView.addSubview(sendButton)
+        if capabilities.supportsDictation {
+          accessoryBarView.addSubview(voiceButton)
+          editorRowView.addSubview(voiceInputView)
+        }
         glassAccessoryBarView = accessoryBarView
     }
 
@@ -968,9 +982,36 @@ class GlassComposeAppKit: NSView {
           ])
         }
 
+        if capabilities.supportsDictation {
+          voiceToSendConstraint = voiceButton.trailingAnchor.constraint(
+            equalTo: sendButton.leadingAnchor, constant: -rightButtonSpacing
+          )
+          voiceToEdgeConstraint = voiceButton.trailingAnchor.constraint(
+            equalTo: glassAccessoryBarView.trailingAnchor, constant: -6
+          )
+          // Bell, dictation, Send. A hidden Send occupies no space.
+          if capabilities.showsSilentModeToggle, let silentModeToSendConstraint {
+            constraints.removeAll { $0 === silentModeToSendConstraint }
+            constraints.append(silentModeButton.trailingAnchor.constraint(
+              equalTo: voiceButton.leadingAnchor, constant: -rightButtonSpacing
+            ))
+          }
+          constraints.append(contentsOf: [
+            voiceButton.centerYAnchor.constraint(equalTo: glassAccessoryBarView.centerYAnchor),
+            voiceButton.widthAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
+            voiceButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
+            voiceToEdgeConstraint!,
+            voiceInputView.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
+            voiceInputView.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor),
+            voiceInputView.topAnchor.constraint(equalTo: glassEditorRowView.topAnchor),
+            voiceInputView.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor),
+          ])
+        }
+
         if case let .newThread(context) = usage {
           let supplementaryView = context.supplementaryAccessoryView
-          let trailingControl = capabilities.showsSilentModeToggle ? silentModeButton.leadingAnchor : sendButton.leadingAnchor
+          let trailingControl = capabilities.showsSilentModeToggle ? silentModeButton.leadingAnchor :
+            (capabilities.supportsDictation ? voiceButton.leadingAnchor : sendButton.leadingAnchor)
           glassSupplementaryToControlsConstraint = supplementaryView.trailingAnchor.constraint(
             equalTo: trailingControl,
             constant: -6
@@ -997,6 +1038,9 @@ class GlassComposeAppKit: NSView {
   }
 
   func setupObservers() {
+    if capabilities.supportsVoiceInput {
+      setupVoiceObserver()
+    }
     if case .chat = usage {
       setupChatObservers()
     }
@@ -1071,18 +1115,19 @@ class GlassComposeAppKit: NSView {
         )
       }.store(in: &cancellables)
 
-    if capabilities.supportsVoiceMessages {
-      voiceViewModel.$phase
-        .sink { [weak self] phase in
-          guard let self else { return }
-          // Keyboard handlers must be removed even when presentation is suppressed.
-          updateVoiceKeyHandlers(phase: phase)
-          guard !isCancellingTranscriptionForRemoval else { return }
-          updateVoiceAvailability(phase: phase)
-          updateHeight(animate: true, voicePhase: phase)
-        }
-        .store(in: &cancellables)
-    }
+  }
+
+  private func setupVoiceObserver() {
+    voiceViewModel.$phase
+      .sink { [weak self] phase in
+        guard let self else { return }
+        // Keyboard handlers must be removed even when presentation is suppressed.
+        updateVoiceKeyHandlers(phase: phase)
+        guard !isCancellingTranscriptionForRemoval else { return }
+        updateVoiceAvailability(phase: phase)
+        updateHeight(animate: true, voicePhase: phase)
+      }
+      .store(in: &cancellables)
   }
 
   private func updateSilentModeUI(
@@ -1169,9 +1214,26 @@ class GlassComposeAppKit: NSView {
 
   private func updateVoiceAvailability(phase: ComposeVoiceRecordingPhase? = nil) {
     if layout == .accessoryBar {
-      let showsSend = canSend
+      let isVoiceActive = phase.map { $0 != .idle } ?? currentVoiceActive
+      let showsSend = canSend && !isVoiceActive
       sendButton.isHidden = !showsSend
-      if capabilities.showsSilentModeToggle {
+      if capabilities.supportsDictation {
+        voiceInputView.isHidden = !isVoiceActive
+        textEditor.isHidden = isVoiceActive
+        menuButton.isEnabled = !isVoiceActive && canMutateDraft
+        silentModeButton.isEnabled = !isVoiceActive && canMutateDraft
+        voiceButton.isEnabled = isVoiceRecordingAvailable(isVoiceActive: isVoiceActive)
+        voiceButton.isHidden = isVoiceActive
+        attachments.isHidden = isVoiceActive
+        attachments.setExternallyCollapsed(isVoiceActive)
+        if showsSend {
+          voiceToEdgeConstraint?.isActive = false
+          voiceToSendConstraint?.isActive = true
+        } else {
+          voiceToSendConstraint?.isActive = false
+          voiceToEdgeConstraint?.isActive = true
+        }
+      } else if capabilities.showsSilentModeToggle {
         if showsSend {
           silentModeToEdgeConstraint?.isActive = false
           silentModeToSendConstraint?.isActive = true
@@ -1230,7 +1292,10 @@ class GlassComposeAppKit: NSView {
   private func startVoiceRecording() {
     guard canStartVoiceRecording else { return }
     focusWindowIfNeeded()
-    voiceViewModel.requestStart(mode: ComposeVoiceInputMode.selected)
+    hideMentionCompletion()
+    hideCommandCompletion()
+    hideAutocomplete()
+    voiceViewModel.requestStart(mode: chatPeerID == nil ? .transcribe : ComposeVoiceInputMode.selected)
   }
 
   private func pauseVoiceRecording() {
@@ -1341,14 +1406,29 @@ class GlassComposeAppKit: NSView {
   }
 
   private func transcribeVoiceRecording(sendText: Bool) {
-    guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
+    switch usage {
+    case .chat:
+      guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
+    case let .newThread(context):
+      guard !isSubmittingNewThread, !context.attachmentStore.hasPendingAttachments else { return }
+    }
     voiceViewModel.transcribe(sendText: sendText) { [weak self] transcript, shouldSend in
       guard let self, self.window != nil, self.superview != nil else { return }
       let draft = NSMutableAttributedString(attributedString: self.textEditor.attributedString)
       let separator = draft.string.isEmpty || draft.string.last?.isWhitespace == true ? "" : "\n"
       draft.append(self.textEditor.createAttributedString(separator + transcript))
-      self.setAttributedString(draft)
-      self.saveDraft()
+      if case .newThread = self.usage {
+        let insertion = self.textEditor.createAttributedString(separator + transcript)
+        self.textEditor.textView.breakUndoCoalescing()
+        self.textEditor.textView.insertText(
+          insertion,
+          replacementRange: NSRange(location: self.textEditor.attributedString.length, length: 0)
+        )
+        self.textEditor.textView.breakUndoCoalescing()
+      } else {
+        self.setAttributedString(draft)
+      }
+      self.persistDraftAfterProgrammaticChange()
       self.focus()
       if shouldSend { self.send(interpretInlineCommands: false) }
     }
@@ -1975,6 +2055,7 @@ class GlassComposeAppKit: NSView {
 
   private func collapseNewThreadComposeAndResignFocus() {
     guard case .newThread = usage else { return }
+    if currentVoiceActive { cancelVoiceRecording() }
     hideMentionCompletion()
     hideCommandCompletion()
     hideAutocomplete()
@@ -2398,9 +2479,9 @@ class GlassComposeAppKit: NSView {
 
   /// Clear, reset height
   func clear() {
+    voiceViewModel.cancel()
     switch usage {
       case .chat:
-        voiceViewModel.cancel()
         attachmentItems.removeAll()
         state.clearReplyingToMsgId()
         state.clearEditingMsgId()
@@ -2652,7 +2733,7 @@ class GlassComposeAppKit: NSView {
     using context: NewThreadComposeContext,
     intent: NewThreadComposeSubmissionIntent
   ) {
-    guard canSend, !isSubmittingNewThread else { return }
+    guard canSend, !isSubmittingNewThread, !currentVoiceActive else { return }
     guard let authorUserID = dependencies.auth.currentUserId else {
       ToastCenter.shared.showError("You're signed out. Please log in again.")
       return

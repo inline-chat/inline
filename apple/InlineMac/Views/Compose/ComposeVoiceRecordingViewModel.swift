@@ -32,7 +32,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   @Published private(set) var isPlaying = false
   @Published private(set) var playbackProgress: Double = 0
 
-  private let peerId: InlineKit.Peer
+  private let peerId: InlineKit.Peer?
   private let log = Log.scoped("ComposeVoiceRecordingViewModel")
 
   private let recorder: MacVoiceRecorder
@@ -57,7 +57,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return FileMediaItem.voice(draftVoice).getItemUniqueId()
   }
 
-  init(peerId: InlineKit.Peer, recorder: MacVoiceRecorder = .shared) {
+  init(peerId: InlineKit.Peer? = nil, recorder: MacVoiceRecorder = .shared) {
     self.peerId = peerId
     self.recorder = recorder
   }
@@ -92,6 +92,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   func requestStart(mode: ComposeVoiceInputMode = .voiceMessage) {
     guard phase == .idle else { return }
+    guard mode == .transcribe || peerId != nil else { return }
     if mode == .transcribe {
       do {
         transcriptionAccount = try Auth.shared.handle.beginAccountMutation()
@@ -146,7 +147,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       playbackProgress = 0
       isPlaying = false
       phase = .recording
-      if inputMode == .voiceMessage {
+      if inputMode == .voiceMessage, let peerId {
         stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
       }
     } catch {

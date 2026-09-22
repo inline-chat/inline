@@ -52,11 +52,6 @@ struct ComposeVoiceInputView: View {
         iconButton("xmark", title: "Cancel dictation", action: onCancel)
         if viewModel.phase == .recording {
           waveform(progress: 0)
-          Text("\(Self.format(duration: viewModel.duration)) / \(Self.format(duration: DraftVoiceTranscription.maximumDuration))")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .fixedSize()
-            .accessibilityLabel("Recorded \(Self.format(duration: viewModel.duration)), limit 10 minutes")
           iconButton("stop.fill", title: "Stop dictation", action: onPause)
           iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
         } else if viewModel.phase == .review, viewModel.reachedDictationLimit {
@@ -184,23 +179,26 @@ struct ComposeVoiceInputView: View {
 
   private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
     let isRecording = viewModel.phase == .recording
+    let isDictation = viewModel.inputMode == .transcribe
     let activeColor = Color(nsColor: .labelColor).opacity(0.88)
     let inactiveColor = isRecording
       ? activeColor
       : Color(nsColor: .secondaryLabelColor).opacity(0.72)
 
     return AudioWaveformView(
-      samples: viewModel.samples,
+      samples: isDictation ? Array(viewModel.samples.suffix(48)) : viewModel.samples,
       progress: progress,
       foreground: activeColor,
       background: inactiveColor,
-      targetBarCount: mode.voiceInputTargetBarCount,
-      barWidth: mode.voiceInputBarWidth,
-      barSpacing: mode.voiceInputBarSpacing,
+      // Resample the recent dictation window across the available width so wide
+      // composers stay responsive without permanently quiet leading bars.
+      targetBarCount: isDictation ? 1_000 : mode.voiceInputTargetBarCount,
+      barWidth: isDictation ? 2 : mode.voiceInputBarWidth,
+      barSpacing: isDictation ? 2 : mode.voiceInputBarSpacing,
       minBarHeight: 2,
-      horizontalAlignment: isGlass ? .center : .leading,
-      verticalAlignment: isGlass ? .center : .bottom,
-      shortSamplesMode: isRecording ? .padLeadingQuiet : .stretch,
+      horizontalAlignment: isDictation || isGlass ? .center : .leading,
+      verticalAlignment: isDictation || isGlass ? .center : .bottom,
+      shortSamplesMode: isRecording && !isDictation ? .padLeadingQuiet : .stretch,
       motion: isRecording ? .recordingReel : .fixed,
       amplitudeScale: .fixed,
       onSeek: onSeek
