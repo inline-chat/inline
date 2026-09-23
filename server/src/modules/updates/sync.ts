@@ -1,3 +1,4 @@
+import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
 import type {
   Chat as ProtocolChat,
   Message,
@@ -768,6 +769,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "spaceMemberUpdate":
       case "spaceMemberAdd":
       case "spaceClearHistory":
+      case "spaceProfile":
       case "spaceSettings":
       case "userSpaceMemberDelete":
       case "userChatParticipantDelete":
@@ -1693,6 +1695,13 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
           },
         },
       }
+    case "spaceProfile": {
+      const profile = payload.spaceProfile
+      return { seq, date, update: { oneofKind: "spaceProfile", spaceProfile: {
+        ...profile,
+        photoUrl: profile.photoFileUniqueId ? getSignedMediaFileProxyUrl(profile.photoFileUniqueId) ?? undefined : undefined,
+      } } }
+    }
     case "spaceSettings":
       return {
         seq,
@@ -1904,7 +1913,12 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         update: {
           oneofKind: "joinSpace",
           joinSpace: {
-            space: payload.userJoinSpace.space,
+            space: payload.userJoinSpace.space ? {
+              ...payload.userJoinSpace.space,
+              photoUrl: payload.userJoinSpace.space.photoFileUniqueId
+                ? getSignedMediaFileProxyUrl(payload.userJoinSpace.space.photoFileUniqueId) ?? undefined
+                : undefined,
+            } : undefined,
             member: payload.userJoinSpace.member,
           },
         },
@@ -2085,6 +2099,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
     case "spaceMemberUpdate":
     case "spaceMemberAdd":
     case "spaceClearHistory":
+    case "spaceProfile":
     case "spaceSettings":
     case "clearChatHistory":
     case "messageAttachment":

@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import RealtimeV2
 import SwiftUI
 
@@ -283,45 +284,6 @@ private struct SpacePickerMonochromeAvatar: View {
   let size: CGFloat
 
   var body: some View {
-    let displayText = leadingEmoji ?? fallbackText
-
-    RoundedRectangle(cornerRadius: size / 3, style: .continuous)
-      .fill(Color.gray.opacity(0.15))
-      .frame(width: size, height: size)
-      .overlay {
-        Text(displayText)
-          .font(.system(size: size * (displayText.spacePickerIsAllEmoji ? 0.6 : 0.55), weight: .semibold))
-          .foregroundStyle(.secondary)
-      }
-  }
-
-  private var leadingEmoji: String? {
-    let rawName = space.name
-    let nameWithoutEmoji = space.nameWithoutEmoji
-    guard rawName != nameWithoutEmoji else { return nil }
-
-    let emojiPart = nameWithoutEmoji.isEmpty
-      ? rawName
-      : String(rawName.dropLast(nameWithoutEmoji.count))
-    let trimmed = emojiPart.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
-  }
-
-  private var fallbackText: String {
-    let trimmed = space.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.first.map { String($0).uppercased() } ?? "·"
-  }
-}
-
-private extension String {
-  var spacePickerIsAllEmoji: Bool {
-    !isEmpty && allSatisfy(\.spacePickerIsEmoji)
-  }
-}
-
-private extension Character {
-  var spacePickerIsEmoji: Bool {
-    guard let scalar = unicodeScalars.first else { return false }
-    return scalar.properties.isEmoji && (scalar.value > 0x238C || unicodeScalars.count > 1)
+    SpaceAvatar(space: space, size: size)
   }
 }

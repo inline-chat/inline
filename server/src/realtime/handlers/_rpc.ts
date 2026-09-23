@@ -102,6 +102,7 @@ import {
   getSpaceUrlPreviewExclusionsHandler,
   removeSpaceUrlPreviewExclusionHandler,
 } from "@in/server/realtime/handlers/space.urlPreviewExclusions"
+import { setSpacePhotoHandler } from "@in/server/realtime/handlers/space.profile"
 import { getSpaceSettingsHandler, toggleSpaceGridHandler } from "@in/server/realtime/handlers/space.settings"
 import {
   createGridRoomHandler,
@@ -1113,6 +1114,10 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateProfileHandler(call.input.updateProfile, handlerContext)
       return { oneofKind: "updateProfile", updateProfile: result }
+    }
+    case Method.SET_SPACE_PHOTO: {
+      if (call.input.oneofKind !== "setSpacePhoto") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "setSpacePhoto", setSpacePhoto: await setSpacePhotoHandler(call.input.setSpacePhoto, handlerContext) }
     }
     case Method.SET_PROFILE_PHOTO: {
       if (call.input.oneofKind !== "setProfilePhoto") {

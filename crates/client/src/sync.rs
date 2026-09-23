@@ -1098,6 +1098,7 @@ fn bucket_key_for_update(update: &proto::Update) -> Option<SyncBucketKey> {
         Update::ChatInfo(value) => Some(chat_key(value.chat_id)),
         Update::PinnedMessages(value) => value.peer_id.as_ref().and_then(chat_bucket),
         Update::ChatSkipPts(value) => Some(chat_key(value.chat_id)),
+        Update::SpaceProfile(value) => Some(space_key(value.space_id)),
         Update::SpaceSettings(value) => Some(space_key(value.space_id)),
         _ => None,
     }

@@ -1,4 +1,5 @@
 import { creationDate, date } from "@in/server/db/schema/common"
+import { files } from "@in/server/db/schema/files"
 import { members } from "@in/server/db/schema/members"
 import { lower, users } from "@in/server/db/schema/users"
 import { sql } from "drizzle-orm"
@@ -10,6 +11,9 @@ export const spaces = pgTable(
   {
     id: serial().primaryKey(),
     name: varchar({ length: 256 }).notNull(),
+    photoFileUniqueId: varchar("photo_file_unique_id", { length: 128 }).references(() => files.fileUniqueId, { onDelete: "set null" }),
+    // Server-controlled entitlement; clients cannot set this through space profile APIs.
+    isPro: boolean("is_pro").default(false).notNull(),
     handle: varchar({ length: 256 }),
     creatorId: integer().references(() => users.id),
     isPublic: boolean("is_public").default(false).notNull(),

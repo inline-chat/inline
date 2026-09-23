@@ -26,6 +26,10 @@ Sendable {
   // Are we creator of the space?
   public var creator: Bool?
 
+  public var photoFileUniqueId: String?
+  public var photoURL: String?
+  public var isPro: Bool = false
+
   public var handle: String?
   public var isPublic: Bool?
   /// Last authoritative sequence included in a Space snapshot.
@@ -38,6 +42,9 @@ Sendable {
     public static let name = Column(CodingKeys.name)
     public static let date = Column(CodingKeys.date)
     public static let creator = Column(CodingKeys.creator)
+    public static let photoFileUniqueId = Column(CodingKeys.photoFileUniqueId)
+    public static let photoURL = Column(CodingKeys.photoURL)
+    public static let isPro = Column(CodingKeys.isPro)
     public static let handle = Column(CodingKeys.handle)
     public static let isPublic = Column(CodingKeys.isPublic)
     public static let seq = Column(CodingKeys.seq)
@@ -70,6 +77,9 @@ Sendable {
     name: String,
     date: Date,
     creator: Bool? = nil,
+    photoFileUniqueId: String? = nil,
+    photoURL: String? = nil,
+    isPro: Bool = false,
     handle: String? = nil,
     isPublic: Bool? = nil,
     seq: Int? = nil,
@@ -79,6 +89,9 @@ Sendable {
     self.name = name
     self.date = date
     self.creator = creator
+    self.photoFileUniqueId = photoFileUniqueId
+    self.photoURL = photoURL
+    self.isPro = isPro
     self.handle = handle
     self.isPublic = isPublic
     self.seq = seq
@@ -108,6 +121,9 @@ public extension Space {
     id = from.id
     name = from.name
     creator = from.creator
+    photoFileUniqueId = from.hasPhotoFileUniqueID ? from.photoFileUniqueID : nil
+    photoURL = from.hasPhotoURL ? from.photoURL : nil
+    isPro = from.isPro
     handle = from.hasHandle ? from.handle : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     seq = from.hasSeq ? Int(from.seq) : nil

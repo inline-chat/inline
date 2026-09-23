@@ -256,6 +256,16 @@ public actor UpdatesEngine: Sendable {
             deferredEffects.append(.messageActionAnswered(messageActionAnswered))
           }
 
+      case let .spaceProfile(profile):
+        if var space = try Space.fetchOne(db, key: profile.spaceID),
+           Int64(space.seq ?? 0) <= Int64(update.seq) {
+          space.photoFileUniqueId = profile.hasPhotoFileUniqueID ? profile.photoFileUniqueID : nil
+          space.photoURL = profile.hasPhotoURL ? profile.photoURL : nil
+          space.isPro = profile.isPro
+          space.seq = Int(update.seq)
+          try space.save(db)
+        }
+
         case .messageActionInvoked, .spaceSettings:
           // These records are durable so Sync must account for their sequence.
           // Inline's Apple app has no local projection for bot-side action
@@ -1693,6 +1703,7 @@ enum RealtimeUpdateDiagnostics {
     case .participantGroupDelete: return "participantGroupDelete"
     case .userAddedToChat: return "userAddedToChat"
     case .userRemovedFromChat: return "userRemovedFromChat"
+    case .spaceProfile: return "spaceProfile"
     case .spaceSettings: return "spaceSettings"
     case .chatPermissions: return "chatPermissions"
     case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"

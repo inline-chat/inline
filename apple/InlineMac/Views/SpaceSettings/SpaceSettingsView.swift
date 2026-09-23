@@ -144,7 +144,8 @@ struct SpaceSettingsView: View {
           space: viewModel.space,
           title: spaceName,
           subtitle: spaceSubtitle,
-          role: roleSummary
+          role: roleSummary,
+          canEditPhoto: isAdminOrOwner
         )
       }
 
@@ -444,15 +445,20 @@ private struct SpaceSettingsHeader: View {
   let title: String
   let subtitle: String
   let role: String
+  let canEditPhoto: Bool
 
   var body: some View {
     HStack(alignment: .center, spacing: 14) {
       if let space {
-        SpaceAvatar(space: space, size: 48)
+        if canEditPhoto {
+          MacSpacePhotoPicker(space: space, size: 64, savesImmediately: true)
+        } else {
+          SpaceAvatar(space: space, size: 64)
+        }
       } else {
         Circle()
           .fill(.quaternary)
-          .frame(width: 48, height: 48)
+          .frame(width: 64, height: 64)
       }
 
       VStack(alignment: .leading, spacing: 3) {

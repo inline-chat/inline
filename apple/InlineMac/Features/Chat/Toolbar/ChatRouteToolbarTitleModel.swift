@@ -81,6 +81,7 @@ final class ChatRouteToolbarTitleModel {
   var breadcrumb: Breadcrumb?
   var reference: ThreadReference?
   var status: Status = .none
+  var badgeSpaceID: Int64?
   var showsInlineTeamBadge = false
   var canRename = false
   var isEditingTitle = false
@@ -262,6 +263,7 @@ final class ChatRouteToolbarTitleModel {
     }
     iconPeer = resolvedIconPeer()
     showsInlineTeamBadge = resolvedInlineTeamBadgeVisibility()
+    badgeSpaceID = contextSpaceId ?? resolvedChat()?.spaceId
     updateParentChatSubscription()
     updateSpaceSubscription()
     breadcrumb = resolvedBreadcrumb()

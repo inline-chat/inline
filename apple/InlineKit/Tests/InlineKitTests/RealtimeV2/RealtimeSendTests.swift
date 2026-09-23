@@ -37,10 +37,11 @@ final class RealtimeSendTests {
     let auth = Auth.mocked(authenticated: true)
     let current = try auth.handle.beginAccountMutation()
     let transport = MockTransport()
+    let apply = ImmediateUpdateApplyRecorder()
     let realtime = RealtimeV2(
       transport: transport,
       auth: auth.handle,
-      applyUpdates: SendTestApplyUpdates(),
+      applyUpdates: apply,
       syncStorage: SendTestSyncStorage()
     )
     let staleTokens = [
@@ -53,17 +54,29 @@ final class RealtimeSendTests {
           Issue.record("Stale account work must not begin")
         }
       }
-      await #expect(throws: AuthStorageError.self) {
-        try await realtime.callRpcDirect(method: .sendMessage, input: .sendMessage(.init()), accountToken: token)
+      let calls: [(InlineProtocol.Method, RpcCall.OneOf_Input)] = [
+        (.sendMessage, .sendMessage(.init())),
+        (.createSpace, .createSpace(.with { $0.name = "Space" })),
+        (.setSpacePhoto, .setSpacePhoto(.with { $0.spaceID = 42; $0.fileUniqueID = "photo-a" })),
+      ]
+      for (method, input) in calls {
+        await #expect(throws: AuthStorageError.self) {
+          try await realtime.callRpcDirect(method: method, input: input, accountToken: token)
+        }
+      }
+      let photoUpdate = InlineProtocol.Update.with {
+        $0.seq = 1
+        $0.update = .spaceProfile(.with { $0.spaceID = 42; $0.isPro = true })
       }
       await #expect(throws: AuthStorageError.self) {
-        try await realtime.applyUpdatesAndWait([], accountToken: token)
+        try await realtime.applyUpdatesAndWait([photoUpdate], accountToken: token)
       }
     }
     #expect(await transport.sentMessages.contains { message in
       if case .rpcCall = message.body { return true }
       return false
     } == false)
+    #expect(await apply.count == 0)
     await realtime.loggedOut()
   }
 

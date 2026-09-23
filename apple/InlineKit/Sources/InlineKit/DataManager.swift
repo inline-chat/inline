@@ -60,11 +60,24 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createSpace(name: String) async throws -> Int64? {
+  public func createSpace(name: String, photoData: Data? = nil) async throws -> Int64? {
     log.trace("createSpace")
     let mutationToken = try beginAccountMutation()
     do {
-      let result = try await InlineRPCClient.shared.createSpace(name: name)
+      let photoID: String?
+      if let photoData {
+        let upload = try await ApiClient.shared.uploadFile(
+          type: .photo, data: photoData, filename: "space-photo.png", mimeType: .init(text: "image/png"), progress: { _ in }
+        )
+        photoID = upload.fileUniqueId
+      } else {
+        photoID = nil
+      }
+      try auth.validateAccountMutation(mutationToken)
+      try Task.checkCancellation()
+      let result = try await InlineRPCClient.shared.createSpace(
+        name: name, photoFileUniqueID: photoID, accountToken: mutationToken
+      )
       let space = Space(from: result.space)
       let log = self.log
       try await writeAccountProjection(token: mutationToken) { db in

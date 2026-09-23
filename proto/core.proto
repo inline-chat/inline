@@ -845,6 +845,9 @@ message Space {
 
   // Current sequence of this space's update bucket.
   optional int32 seq = 7;
+  optional string photo_file_unique_id = 8;
+  optional string photo_url = 9;
+  optional bool is_pro = 10;
 }
 
 message GetSpaceInput { int64 space_id = 1; }
@@ -1593,6 +1596,7 @@ enum Method {
   TRANSCRIBE_VOICE_DRAFT = 142;
   REQUEST_BOT_FILESYSTEM = 143;
   ANSWER_BOT_FILESYSTEM = 144;
+  SET_SPACE_PHOTO = 145;
 }
 
 message RpcCall {
@@ -1742,6 +1746,7 @@ message RpcCall {
     TranscribeVoiceDraftInput transcribeVoiceDraft = 143;
     RequestBotFilesystemInput requestBotFilesystem = 144;
     AnswerBotFilesystemInput answerBotFilesystem = 145;
+    SetSpacePhotoInput setSpacePhoto = 146;
   }
 }
 
@@ -1893,6 +1898,7 @@ message RpcResult {
     TranscribeVoiceDraftResult transcribeVoiceDraft = 143;
     RequestBotFilesystemResult requestBotFilesystem = 144;
     AnswerBotFilesystemResult answerBotFilesystem = 145;
+    SetSpacePhotoResult setSpacePhoto = 146;
   }
 }
 
@@ -3495,7 +3501,26 @@ message CreateExternalTaskResult {
   MessageAttachment attachment = 2;
 }
 
-message CreateSpaceInput { string name = 1; }
+message CreateSpaceInput {
+  string name = 1;
+  optional string photo_file_unique_id = 2;
+}
+
+message SetSpacePhotoInput {
+  int64 space_id = 1;
+  // Empty removes the current picture.
+  string file_unique_id = 2;
+}
+message SetSpacePhotoResult {
+  Space space = 1;
+  repeated Update updates = 2;
+}
+message UpdateSpaceProfile {
+  int64 space_id = 1;
+  optional string photo_file_unique_id = 2;
+  optional string photo_url = 3;
+  bool is_pro = 4;
+}
 
 message CreateSpaceResult {
   Space space = 1;
@@ -3693,6 +3718,7 @@ message Update {
     UpdateUserRemovedFromChat user_removed_from_chat = 48;
     ChatAcknowledgement acknowledgement = 49;
     UpdateDialogTranslation dialog_translation = 50;
+    UpdateSpaceProfile space_profile = 51;
   }
 }
 

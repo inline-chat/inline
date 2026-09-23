@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CircularCropView: View {
   let image: UIImage
+  let cornerRadiusRatio: CGFloat
   var onCrop: (UIImage) -> Void
   @Environment(\.presentationMode) var presentationMode
 
@@ -18,7 +19,8 @@ struct CircularCropView: View {
   private let baseCircleRatio: CGFloat = 0.82
   private let maxScaleMultiplier: CGFloat = 4.0
 
-  init(image: UIImage, onCrop: @escaping (UIImage) -> Void) {
+  init(image: UIImage, cornerRadiusRatio: CGFloat = 0.5, onCrop: @escaping (UIImage) -> Void) {
+    self.cornerRadiusRatio = cornerRadiusRatio
     self.image = image
     self.onCrop = onCrop
     let normalized = image.imageOrientation == .up ? image : Self.normalizedImage(image)
@@ -57,7 +59,7 @@ struct CircularCropView: View {
 
           ZStack {
             Color.black.opacity(0.5)
-            Circle()
+            cropShape(diameter: diameter)
               .frame(width: diameter, height: diameter)
               .position(center)
               .blendMode(.destinationOut)
@@ -65,7 +67,7 @@ struct CircularCropView: View {
           .compositingGroup()
           .allowsHitTesting(false)
 
-          Circle()
+          cropShape(diameter: diameter)
             .stroke(
               LinearGradient(
                 colors: [Color.accentColor.opacity(0.7), .white.opacity(0.7)],
@@ -188,6 +190,14 @@ struct CircularCropView: View {
     }
     .onAppear {
       appear = true
+    }
+  }
+
+  private func cropShape(diameter: CGFloat) -> AnyShape {
+    if cornerRadiusRatio == 0.5 {
+      AnyShape(Circle())
+    } else {
+      AnyShape(RoundedRectangle(cornerRadius: diameter * cornerRadiusRatio, style: .continuous))
     }
   }
 

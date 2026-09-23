@@ -165,6 +165,11 @@ struct ChatRouteTitleBar: View {
         .lineLimit(1)
         .truncationMode(.tail)
 
+      if let userID = model.peer.asUserId(), let spaceID = model.badgeSpaceID {
+        SpaceMemberBadge(userID: userID, spaceID: spaceID, size: 14)
+          .id("\(userID):\(spaceID)")
+      }
+
       if model.showsInlineTeamBadge {
         InlineTeamToolbarBadge(size: 14, baselineOffset: 3)
           .inlineTooltip("Inline Team", placement: .below)

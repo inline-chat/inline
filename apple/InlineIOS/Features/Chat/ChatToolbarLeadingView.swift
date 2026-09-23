@@ -158,6 +158,7 @@ struct ChatToolbarLeadingView: View {
       ChatToolbarTitleStack(
         title: title,
         showsInlineTeamBadge: showsInlineTeamBadge,
+        badgeSpaceID: activeContextSpaceId,
         minimumHeight: toolbarAvatarSize,
         peerId: peerId,
         fallback: subtitleFallback,
@@ -271,6 +272,7 @@ enum ChatSubtitle: Equatable {
 private struct ChatToolbarTitleStack: View {
   let title: String
   let showsInlineTeamBadge: Bool
+  let badgeSpaceID: Int64?
   let minimumHeight: CGFloat
   let peerId: Peer
   let fallback: ChatSubtitle
@@ -285,6 +287,7 @@ private struct ChatToolbarTitleStack: View {
   init(
     title: String,
     showsInlineTeamBadge: Bool,
+    badgeSpaceID: Int64?,
     minimumHeight: CGFloat,
     peerId: Peer,
     fallback: ChatSubtitle,
@@ -295,6 +298,7 @@ private struct ChatToolbarTitleStack: View {
   ) {
     self.title = title
     self.showsInlineTeamBadge = showsInlineTeamBadge
+    self.badgeSpaceID = badgeSpaceID
     self.minimumHeight = minimumHeight
     self.peerId = peerId
     self.fallback = fallback
@@ -351,6 +355,11 @@ private struct ChatToolbarTitleStack: View {
         .accessibilityLabel(
           title.isEmpty ? Text("Open chat info") : Text("Open chat info for \(title)")
         )
+
+        if let userID = peerId.asUserId(), let spaceID = badgeSpaceID {
+          SpaceMemberBadge(userID: userID, spaceID: spaceID, size: 17)
+            .id("\(userID):\(spaceID)")
+        }
 
         if showsInlineTeamBadge {
           InlineTeamToolbarBadge(size: 17, baselineOffset: 3.5)

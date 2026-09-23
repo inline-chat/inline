@@ -2247,6 +2247,18 @@ export interface Space {
      * @generated from protobuf field: optional int32 seq = 7;
      */
     seq?: number;
+    /**
+     * @generated from protobuf field: optional string photo_file_unique_id = 8;
+     */
+    photoFileUniqueId?: string;
+    /**
+     * @generated from protobuf field: optional string photo_url = 9;
+     */
+    photoUrl?: string;
+    /**
+     * @generated from protobuf field: optional bool is_pro = 10;
+     */
+    isPro?: boolean;
 }
 /**
  * @generated from protobuf message GetSpaceInput
@@ -4544,6 +4556,12 @@ export interface RpcCall {
          */
         answerBotFilesystem: AnswerBotFilesystemInput;
     } | {
+        oneofKind: "setSpacePhoto";
+        /**
+         * @generated from protobuf field: SetSpacePhotoInput setSpacePhoto = 146;
+         */
+        setSpacePhoto: SetSpacePhotoInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5416,6 +5434,12 @@ export interface RpcResult {
          * @generated from protobuf field: AnswerBotFilesystemResult answerBotFilesystem = 145;
          */
         answerBotFilesystem: AnswerBotFilesystemResult;
+    } | {
+        oneofKind: "setSpacePhoto";
+        /**
+         * @generated from protobuf field: SetSpacePhotoResult setSpacePhoto = 146;
+         */
+        setSpacePhoto: SetSpacePhotoResult;
     } | {
         oneofKind: undefined;
     };
@@ -9490,6 +9514,59 @@ export interface CreateSpaceInput {
      * @generated from protobuf field: string name = 1;
      */
     name: string;
+    /**
+     * @generated from protobuf field: optional string photo_file_unique_id = 2;
+     */
+    photoFileUniqueId?: string;
+}
+/**
+ * @generated from protobuf message SetSpacePhotoInput
+ */
+export interface SetSpacePhotoInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * Empty removes the current picture.
+     *
+     * @generated from protobuf field: string file_unique_id = 2;
+     */
+    fileUniqueId: string;
+}
+/**
+ * @generated from protobuf message SetSpacePhotoResult
+ */
+export interface SetSpacePhotoResult {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateSpaceProfile
+ */
+export interface UpdateSpaceProfile {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: optional string photo_file_unique_id = 2;
+     */
+    photoFileUniqueId?: string;
+    /**
+     * @generated from protobuf field: optional string photo_url = 3;
+     */
+    photoUrl?: string;
+    /**
+     * @generated from protobuf field: bool is_pro = 4;
+     */
+    isPro: boolean;
 }
 /**
  * @generated from protobuf message CreateSpaceResult
@@ -10155,6 +10232,12 @@ export interface Update {
          * @generated from protobuf field: UpdateDialogTranslation dialog_translation = 50;
          */
         dialogTranslation: UpdateDialogTranslation;
+    } | {
+        oneofKind: "spaceProfile";
+        /**
+         * @generated from protobuf field: UpdateSpaceProfile space_profile = 51;
+         */
+        spaceProfile: UpdateSpaceProfile;
     } | {
         oneofKind: undefined;
     };
@@ -14184,7 +14267,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: ANSWER_BOT_FILESYSTEM = 144;
      */
-    ANSWER_BOT_FILESYSTEM = 144
+    ANSWER_BOT_FILESYSTEM = 144,
+    /**
+     * @generated from protobuf enum value: SET_SPACE_PHOTO = 145;
+     */
+    SET_SPACE_PHOTO = 145
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -19733,7 +19820,10 @@ class Space$Type extends MessageType<Space> {
             { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "photo_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "is_pro", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Space>): Space {
@@ -19772,6 +19862,15 @@ class Space$Type extends MessageType<Space> {
                 case /* optional int32 seq */ 7:
                     message.seq = reader.int32();
                     break;
+                case /* optional string photo_file_unique_id */ 8:
+                    message.photoFileUniqueId = reader.string();
+                    break;
+                case /* optional string photo_url */ 9:
+                    message.photoUrl = reader.string();
+                    break;
+                case /* optional bool is_pro */ 10:
+                    message.isPro = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19805,6 +19904,15 @@ class Space$Type extends MessageType<Space> {
         /* optional int32 seq = 7; */
         if (message.seq !== undefined)
             writer.tag(7, WireType.Varint).int32(message.seq);
+        /* optional string photo_file_unique_id = 8; */
+        if (message.photoFileUniqueId !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.photoFileUniqueId);
+        /* optional string photo_url = 9; */
+        if (message.photoUrl !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.photoUrl);
+        /* optional bool is_pro = 10; */
+        if (message.isPro !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.isPro);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23187,7 +23295,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput },
             { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "input", T: () => TranscribeVoiceDraftInput },
             { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
-            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput }
+            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput },
+            { no: 146, name: "setSpacePhoto", kind: "message", oneof: "input", T: () => SetSpacePhotoInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -24064,6 +24173,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         answerBotFilesystem: AnswerBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).answerBotFilesystem)
                     };
                     break;
+                case /* SetSpacePhotoInput setSpacePhoto */ 146:
+                    message.input = {
+                        oneofKind: "setSpacePhoto",
+                        setSpacePhoto: SetSpacePhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setSpacePhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24508,6 +24623,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* AnswerBotFilesystemInput answerBotFilesystem = 145; */
         if (message.input.oneofKind === "answerBotFilesystem")
             AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(145, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpacePhotoInput setSpacePhoto = 146; */
+        if (message.input.oneofKind === "setSpacePhoto")
+            SetSpacePhotoInput.internalBinaryWrite(message.input.setSpacePhoto, writer.tag(146, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24665,7 +24783,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult },
             { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "result", T: () => TranscribeVoiceDraftResult },
             { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
-            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult }
+            { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult },
+            { no: 146, name: "setSpacePhoto", kind: "message", oneof: "result", T: () => SetSpacePhotoResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -25542,6 +25661,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         answerBotFilesystem: AnswerBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).answerBotFilesystem)
                     };
                     break;
+                case /* SetSpacePhotoResult setSpacePhoto */ 146:
+                    message.result = {
+                        oneofKind: "setSpacePhoto",
+                        setSpacePhoto: SetSpacePhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setSpacePhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25986,6 +26111,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* AnswerBotFilesystemResult answerBotFilesystem = 145; */
         if (message.result.oneofKind === "answerBotFilesystem")
             AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(145, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpacePhotoResult setSpacePhoto = 146; */
+        if (message.result.oneofKind === "setSpacePhoto")
+            SetSpacePhotoResult.internalBinaryWrite(message.result.setSpacePhoto, writer.tag(146, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39327,7 +39455,8 @@ export const CreateExternalTaskResult = new CreateExternalTaskResult$Type();
 class CreateSpaceInput$Type extends MessageType<CreateSpaceInput> {
     constructor() {
         super("CreateSpaceInput", [
-            { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateSpaceInput>): CreateSpaceInput {
@@ -39345,6 +39474,9 @@ class CreateSpaceInput$Type extends MessageType<CreateSpaceInput> {
                 case /* string name */ 1:
                     message.name = reader.string();
                     break;
+                case /* optional string photo_file_unique_id */ 2:
+                    message.photoFileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -39360,6 +39492,9 @@ class CreateSpaceInput$Type extends MessageType<CreateSpaceInput> {
         /* string name = 1; */
         if (message.name !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.name);
+        /* optional string photo_file_unique_id = 2; */
+        if (message.photoFileUniqueId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.photoFileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39370,6 +39505,184 @@ class CreateSpaceInput$Type extends MessageType<CreateSpaceInput> {
  * @generated MessageType for protobuf message CreateSpaceInput
  */
 export const CreateSpaceInput = new CreateSpaceInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpacePhotoInput$Type extends MessageType<SetSpacePhotoInput> {
+    constructor() {
+        super("SetSpacePhotoInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpacePhotoInput>): SetSpacePhotoInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.fileUniqueId = "";
+        if (value !== undefined)
+            reflectionMergePartial<SetSpacePhotoInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpacePhotoInput): SetSpacePhotoInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string file_unique_id */ 2:
+                    message.fileUniqueId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpacePhotoInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* string file_unique_id = 2; */
+        if (message.fileUniqueId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.fileUniqueId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpacePhotoInput
+ */
+export const SetSpacePhotoInput = new SetSpacePhotoInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpacePhotoResult$Type extends MessageType<SetSpacePhotoResult> {
+    constructor() {
+        super("SetSpacePhotoResult", [
+            { no: 1, name: "space", kind: "message", T: () => Space },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpacePhotoResult>): SetSpacePhotoResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<SetSpacePhotoResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpacePhotoResult): SetSpacePhotoResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpacePhotoResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpacePhotoResult
+ */
+export const SetSpacePhotoResult = new SetSpacePhotoResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateSpaceProfile$Type extends MessageType<UpdateSpaceProfile> {
+    constructor() {
+        super("UpdateSpaceProfile", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "photo_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "is_pro", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateSpaceProfile>): UpdateSpaceProfile {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.isPro = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateSpaceProfile>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateSpaceProfile): UpdateSpaceProfile {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional string photo_file_unique_id */ 2:
+                    message.photoFileUniqueId = reader.string();
+                    break;
+                case /* optional string photo_url */ 3:
+                    message.photoUrl = reader.string();
+                    break;
+                case /* bool is_pro */ 4:
+                    message.isPro = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateSpaceProfile, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* optional string photo_file_unique_id = 2; */
+        if (message.photoFileUniqueId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.photoFileUniqueId);
+        /* optional string photo_url = 3; */
+        if (message.photoUrl !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.photoUrl);
+        /* bool is_pro = 4; */
+        if (message.isPro !== false)
+            writer.tag(4, WireType.Varint).bool(message.isPro);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateSpaceProfile
+ */
+export const UpdateSpaceProfile = new UpdateSpaceProfile$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateSpaceResult$Type extends MessageType<CreateSpaceResult> {
     constructor() {
@@ -40689,7 +41002,8 @@ class Update$Type extends MessageType<Update> {
             { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
             { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
             { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
-            { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation }
+            { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
+            { no: 51, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -40992,6 +41306,12 @@ class Update$Type extends MessageType<Update> {
                         dialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogTranslation)
                     };
                     break;
+                case /* UpdateSpaceProfile space_profile */ 51:
+                    message.update = {
+                        oneofKind: "spaceProfile",
+                        spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceProfile)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -41151,6 +41471,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateDialogTranslation dialog_translation = 50; */
         if (message.update.oneofKind === "dialogTranslation")
             UpdateDialogTranslation.internalBinaryWrite(message.update.dialogTranslation, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateSpaceProfile space_profile = 51; */
+        if (message.update.oneofKind === "spaceProfile")
+            UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

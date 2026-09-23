@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import InlineProtocol
 
@@ -10,13 +11,36 @@ public enum InlineRPCClientError: Error {
 public actor InlineRPCClient {
   public static let shared = InlineRPCClient()
 
-  public func createSpace(name: String) async throws -> InlineProtocol.CreateSpaceResult {
+  public func createSpace(
+    name: String,
+    photoFileUniqueID: String? = nil,
+    accountToken: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocol.CreateSpaceResult {
     let response = try await Api.realtime.callRpcDirect(
       method: .createSpace,
-      input: .createSpace(.with { $0.name = name })
+      input: .createSpace(.with {
+        $0.name = name
+        if let photoFileUniqueID { $0.photoFileUniqueID = photoFileUniqueID }
+      }),
+      accountToken: accountToken
     )
     guard case let .createSpace(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
     return result
+  }
+
+  public func setSpacePhoto(
+    spaceID: Int64, fileUniqueID: String?, accountToken: AuthAccountMutationToken
+  ) async throws {
+    let response = try await Api.realtime.callRpcDirect(
+      method: .setSpacePhoto,
+      input: .setSpacePhoto(.with {
+        $0.spaceID = spaceID
+        $0.fileUniqueID = fileUniqueID ?? ""
+      }),
+      accountToken: accountToken
+    )
+    guard case let .setSpacePhoto(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
+    try await Api.realtime.applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
   public func getMe() async throws -> InlineProtocol.GetMeResult {

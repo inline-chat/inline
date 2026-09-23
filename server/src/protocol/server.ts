@@ -30,6 +30,7 @@ import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateSpaceProfile } from "@inline-chat/protocol/core";
 import { UpdateDialogTranslation } from "@inline-chat/protocol/core";
 import { ChatAcknowledgement } from "@inline-chat/protocol/core";
 /**
@@ -321,6 +322,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: UpdateDialogTranslation user_dialog_translation = 48;
          */
         userDialogTranslation: UpdateDialogTranslation;
+    } | {
+        oneofKind: "spaceProfile";
+        /**
+         * @generated from protobuf field: UpdateSpaceProfile space_profile = 49;
+         */
+        spaceProfile: UpdateSpaceProfile;
     } | {
         oneofKind: undefined;
     };
@@ -1212,7 +1219,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 45, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateAddedToChat },
             { no: 46, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateRemovedFromChat },
             { no: 47, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
-            { no: 48, name: "user_dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation }
+            { no: 48, name: "user_dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
+            { no: 49, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1505,6 +1513,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userDialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogTranslation)
                     };
                     break;
+                case /* UpdateSpaceProfile space_profile */ 49:
+                    message.update = {
+                        oneofKind: "spaceProfile",
+                        spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceProfile)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1658,6 +1672,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateDialogTranslation user_dialog_translation = 48; */
         if (message.update.oneofKind === "userDialogTranslation")
             UpdateDialogTranslation.internalBinaryWrite(message.update.userDialogTranslation, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateSpaceProfile space_profile = 49; */
+        if (message.update.oneofKind === "spaceProfile")
+            UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

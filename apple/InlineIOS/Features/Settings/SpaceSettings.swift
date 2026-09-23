@@ -41,8 +41,14 @@ struct SpaceSettingsView: View {
       Section {
         HStack {
           if let space = viewModel.space {
-            SpaceAvatar(space: space, size: 42)
-              .padding(.trailing, 6)
+            Group {
+              if isAdminOrOwner {
+                IOSSpacePhotoPicker(space: space, size: 64, savesImmediately: true)
+              } else {
+                SpaceAvatar(space: space, size: 64)
+              }
+            }
+            .padding(.trailing, 6)
 
           } else {
             Circle()

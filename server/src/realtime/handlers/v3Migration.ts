@@ -69,7 +69,7 @@ export async function createSpaceV3(
   input: CreateSpaceInput,
   context: HandlerContext,
 ): Promise<CreateSpaceResult> {
-  const created = await createSpace({ name: input.name }, legacyContext(context))
+  const created = await createSpace({ name: input.name, photoFileUniqueId: input.photoFileUniqueId }, legacyContext(context))
   const spaceId = created.space.id
   const chatId = created.chats[0]?.id
   if (!chatId) throw RealtimeRpcError.InternalError()

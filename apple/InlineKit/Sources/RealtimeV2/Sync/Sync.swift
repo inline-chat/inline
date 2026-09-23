@@ -2827,6 +2827,8 @@ actor Sync {
         .user
       case .messageActionInvoked, .messageActionAnswered, .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         .user
+    case let .spaceProfile(payload):
+      .space(id: payload.spaceID)
       case let .spaceSettings(payload):
         .space(id: payload.spaceID)
       case let .pinnedMessages(payload):
@@ -3119,8 +3121,8 @@ actor BucketActor {
         true
       case .updatedUser:
         true
-      case .spaceSettings:
-        true
+    case .spaceProfile, .spaceSettings:
+      true
       case .newMessage, .editMessage, .messageAttachment:
         true
       case .updateReaction, .deleteReaction:

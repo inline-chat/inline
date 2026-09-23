@@ -1355,6 +1355,14 @@ public extension AppDatabase {
       try db.execute(sql: "INSERT OR IGNORE INTO sync_removal_revision (id, revision) VALUES (1, 0)")
     }
 
+    migrator.registerMigration("space profile pictures") { db in
+      try db.alter(table: "space") { table in
+        table.add(column: "photoFileUniqueId", .text)
+        table.add(column: "photoURL", .text)
+        table.add(column: "isPro", .boolean).notNull().defaults(to: false)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

@@ -243,7 +243,7 @@ struct OnboardingProfilePhotoPicker<Avatar: View>: View {
   }
 }
 
-private struct OnboardingXPhotoPicker: View {
+struct OnboardingXPhotoPicker: View {
   private enum LookupState {
     case idle
     case loading
@@ -270,17 +270,20 @@ private struct OnboardingXPhotoPicker: View {
   @State private var uploadError: String?
   @State private var uploadTask: Task<Void, Never>?
 
+  let cropToSquare: Bool
   let lookupPhoto: @MainActor (String) async throws -> Data
   let onUse: @MainActor (OnboardingProfilePhoto) async throws -> Void
 
   init(
     initialPhoto: OnboardingProfilePhoto?,
+    cropToSquare: Bool = true,
     lookupPhoto: @escaping @MainActor (String) async throws -> Data,
     onUse: @escaping @MainActor (OnboardingProfilePhoto) async throws -> Void
   ) {
     let previous = initialPhoto.flatMap { $0.xHandle == nil ? nil : $0 }
     _handle = State(initialValue: previous?.xHandle ?? "")
     _state = State(initialValue: previous.map(LookupState.found) ?? .idle)
+    self.cropToSquare = cropToSquare
     self.lookupPhoto = lookupPhoto
     self.onUse = onUse
   }
@@ -374,7 +377,7 @@ private struct OnboardingXPhotoPicker: View {
       guard let request = requestID, let username = normalizedHandle else { return }
       do {
         let data = try await lookupPhoto(username)
-        let prepared = try await OnboardingProfilePhotoProcessor.prepare(data)
+        let prepared = try await OnboardingProfilePhotoProcessor.prepare(data, cropToSquare: cropToSquare)
         try Task.checkCancellation()
         guard requestID == request, normalizedHandle == username else { return }
         state = .found(try OnboardingProfilePhoto(data: prepared, xHandle: username))

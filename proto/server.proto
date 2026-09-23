@@ -61,6 +61,7 @@ message ServerUpdate {
     ServerUserUpdateRemovedFromChat user_removed_from_chat = 46;
     ChatAcknowledgement acknowledgement = 47;
     UpdateDialogTranslation user_dialog_translation = 48;
+    UpdateSpaceProfile space_profile = 49;
   }
 }
 

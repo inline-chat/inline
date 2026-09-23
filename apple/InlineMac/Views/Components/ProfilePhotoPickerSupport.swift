@@ -24,6 +24,10 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
   @State private var xProfileHandle = ""
   @State private var xProfileImageData: Data?
 
+  var cornerRadius: CGFloat?
+  var photoLabel = "Profile photo"
+  var photoErrorMessage: String?
+  var onPhotoSourcePresentationChanged: (Bool) -> Void = { _ in }
   let size: CGFloat
   let hasPhoto: Bool
   let showsMemoji: Bool
@@ -39,6 +43,7 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
     ZStack {
       ProfileAvatarSurface(
         size: size,
+        cornerRadius: cornerRadius,
         isBusy: isBusy,
         isDropTargeted: isDropTargeted,
         isHovering: isHovering,
@@ -47,6 +52,7 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
 
       ProfileAvatarMenuControl(
         isHovering: $isHovering,
+        photoLabel: photoLabel,
         hasPhoto: hasPhoto,
         showsMemoji: showsMemoji,
         isBusy: isBusy,
@@ -60,9 +66,9 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
     .frame(width: size, height: size)
     .fixedSize()
     .disabled(isBusy)
-    .help("Change Profile Photo")
+    .help("Change \(photoLabel)")
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Profile photo")
+    .accessibilityLabel(photoLabel)
     .accessibilityHint("Opens photo options")
     .fileImporter(
       isPresented: $showsFileImporter,
@@ -70,13 +76,14 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
       allowsMultipleSelection: false,
       onCompletion: handleFileSelection
     )
-    .sheet(item: $presentedSheet) { sheet in
+    .sheet(item: $presentedSheet, onDismiss: { onPhotoSourcePresentationChanged(false) }, content: { sheet in
       switch sheet {
       case .x:
         XProfilePhotoPicker(
           initialHandle: xProfileHandle,
           initialImageData: xProfileImageData,
           isUploading: isBusy,
+          uploadErrorMessage: photoErrorMessage,
           onUse: useXProfilePhoto
         )
       case .memoji:
@@ -85,7 +92,7 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
           onFailure: onMemojiFailure
         )
       }
-    }
+    })
     .onChange(of: selectedMemojiPhoto) { _, photo in
       guard let photo else { return }
       selectedMemojiPhoto = nil
@@ -112,6 +119,7 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
   private func present(_ sheet: PresentedSheet) {
     Task { @MainActor in
       await Task.yield()
+      onPhotoSourcePresentationChanged(true)
       presentedSheet = sheet
     }
   }
@@ -136,6 +144,7 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
 
 private struct ProfileAvatarSurface<AvatarContent: View>: View {
   let size: CGFloat
+  let cornerRadius: CGFloat?
   let isBusy: Bool
   let isDropTargeted: Bool
   let isHovering: Bool
@@ -173,10 +182,10 @@ private struct ProfileAvatarSurface<AvatarContent: View>: View {
       }
     }
     .frame(width: size, height: size)
-    .clipShape(Circle())
-    .contentShape(Circle())
+    .clipShape(avatarShape)
+    .contentShape(avatarShape)
     .overlay {
-      Circle().stroke(
+      avatarShape.stroke(
         isDropTargeted ? Color.accentColor : .clear,
         lineWidth: 2
       )
@@ -184,11 +193,20 @@ private struct ProfileAvatarSurface<AvatarContent: View>: View {
     .animation(.easeOut(duration: 0.12), value: isHovering)
     .animation(.easeOut(duration: 0.12), value: isDropTargeted)
   }
+
+  private var avatarShape: AnyShape {
+    if let cornerRadius {
+      AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    } else {
+      AnyShape(Circle())
+    }
+  }
 }
 
 private struct ProfileAvatarMenuControl: NSViewRepresentable {
   @Binding var isHovering: Bool
 
+  let photoLabel: String
   let hasPhoto: Bool
   let showsMemoji: Bool
   let isBusy: Bool
@@ -204,7 +222,7 @@ private struct ProfileAvatarMenuControl: NSViewRepresentable {
   func makeNSView(context: Context) -> CircularAvatarMenuButton {
     let button = CircularAvatarMenuButton()
     button.focusRingType = .none
-    button.setAccessibilityLabel("Profile photo")
+    button.setAccessibilityLabel(photoLabel)
     button.setAccessibilityHelp("Opens photo options")
     button.onHover = { [weak coordinator = context.coordinator] isHovering in
       coordinator?.parent.isHovering = isHovering
@@ -397,15 +415,18 @@ struct XProfilePhotoPicker: View {
   @State private var lastAttemptedHandle: String?
 
   let isUploading: Bool
+  let uploadErrorMessage: String?
   let onUse: (String, Data) async -> Bool
 
   init(
     initialHandle: String = "",
     initialImageData: Data? = nil,
     isUploading: Bool,
+    uploadErrorMessage: String? = nil,
     onUse: @escaping (String, Data) async -> Bool
   ) {
     self.isUploading = isUploading
+    self.uploadErrorMessage = uploadErrorMessage
     self.onUse = onUse
     _handle = State(initialValue: initialHandle)
     _lookupState = State(initialValue: initialImageData.map(XAvatarLookupState.found) ?? .idle)
@@ -431,7 +452,7 @@ struct XProfilePhotoPicker: View {
         .frame(maxWidth: .infinity)
         .onSubmit(loadPhotoManually)
 
-      if let message = lookupState.errorMessage {
+      if let message = uploadErrorMessage ?? lookupState.errorMessage {
         Text(message)
           .font(.caption)
           .foregroundStyle(.red)

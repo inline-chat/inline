@@ -6,6 +6,8 @@ import SwiftUI
 struct CreateSpace: View {
   let onCreated: (Int64) -> Void
 
+  @State private var photoData: Data?
+  @State private var isProcessingPhoto = false
   @State private var name = ""
   @State private var emoji = ""
   @FocusState private var focusedField: Field?
@@ -17,6 +19,16 @@ struct CreateSpace: View {
   var body: some View {
     NavigationStack {
       Form {
+        Section {
+          IOSSpacePhotoPicker(
+            photoData: $photoData,
+            space: Space(id: 0, name: name, date: .now),
+            isBusy: formState.isLoading,
+            isProcessing: $isProcessingPhoto
+          )
+          .frame(maxWidth: .infinity)
+        }
+
         Section {
           HStack(spacing: 12) {
             emojiField
@@ -40,6 +52,7 @@ struct CreateSpace: View {
           }
         }
       }
+      .disabled(formState.isLoading || isProcessingPhoto)
       .navigationTitle("Create Space")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -47,7 +60,7 @@ struct CreateSpace: View {
           Button("Cancel") {
             dismiss()
           }
-          .disabled(formState.isLoading)
+          .disabled(formState.isLoading || isProcessingPhoto)
         }
 
         ToolbarItem(placement: .confirmationAction) {
@@ -62,7 +75,7 @@ struct CreateSpace: View {
               Text("Create")
             }
           }
-          .disabled(trimmedName.isEmpty || formState.isLoading)
+          .disabled(trimmedName.isEmpty || formState.isLoading || isProcessingPhoto)
         }
       }
       .onAppear {
@@ -113,13 +126,13 @@ struct CreateSpace: View {
 
   private func submit() {
     let spaceName = trimmedName
-    guard !spaceName.isEmpty, !formState.isLoading else { return }
+    guard !spaceName.isEmpty, !formState.isLoading, !isProcessingPhoto else { return }
 
     Task {
       do {
         formState.startLoading()
         let displayName = emoji.isEmpty ? spaceName : "\(emoji) \(spaceName)"
-        let id = try await dataManager.createSpace(name: displayName)
+        let id = try await dataManager.createSpace(name: displayName, photoData: photoData)
 
         formState.succeeded()
         if let id {

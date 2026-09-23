@@ -8,6 +8,8 @@ struct CreateSpaceView: View {
 
   let theme = ThemeManager.shared.selected
 
+  @State private var photoData: Data?
+  @State private var isProcessingPhoto = false
   @State private var name = ""
   @State private var emoji = ""
   @FocusState private var isFocused: Bool
@@ -19,6 +21,16 @@ struct CreateSpaceView: View {
 
   var body: some View {
     Form {
+      Section {
+        IOSSpacePhotoPicker(
+          photoData: $photoData,
+          space: Space(id: 0, name: name, date: .now),
+          isBusy: formState.isLoading,
+          isProcessing: $isProcessingPhoto
+        )
+        .frame(maxWidth: .infinity)
+      }
+
       Section {
         HStack(spacing: 12) {
           Circle().fill(Color(theme.accent).opacity(0.1))
@@ -68,6 +80,12 @@ struct CreateSpaceView: View {
         }
       }
     }
+    .disabled(formState.isLoading || isProcessingPhoto)
+    .safeAreaInset(edge: .bottom) {
+      if let error = formState.error, !error.isEmpty {
+        Text(error).font(.caption).foregroundStyle(.red).padding()
+      }
+    }
     .navigationTitle("Create New Space")
     .hideTabBarIfNeeded()
     .toolbar {
@@ -85,7 +103,7 @@ struct CreateSpaceView: View {
               }
             }
             .buttonStyle(.glassProminent)
-            .disabled(formState.isLoading)
+            .disabled(formState.isLoading || isProcessingPhoto)
           } else {
             Button(action: {
               submit()
@@ -93,7 +111,7 @@ struct CreateSpaceView: View {
               Text(formState.isLoading ? "Creating..." : "Create")
             }
             .tint(Color(theme.accent))
-            .disabled(formState.isLoading)
+            .disabled(formState.isLoading || isProcessingPhoto)
           }
         }
       }
@@ -101,11 +119,12 @@ struct CreateSpaceView: View {
   }
 
   private func submit() {
+    guard !formState.isLoading, !isProcessingPhoto, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     Task {
       do {
         formState.startLoading()
         let spaceName = emoji.isEmpty ? name : "\(emoji) \(name)"
-        let id = try await dataManager.createSpace(name: spaceName)
+        let id = try await dataManager.createSpace(name: spaceName, photoData: photoData)
 
         formState.succeeded()
 

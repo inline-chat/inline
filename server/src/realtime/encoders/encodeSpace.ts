@@ -1,3 +1,4 @@
+import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
 import { Space } from "@inline-chat/protocol/core"
 import type { DbSpace } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -12,5 +13,8 @@ export function encodeSpace(space: DbSpace, { encodingForUserId }: { encodingFor
     isPublic: space.isPublic,
     handle: space.handle ?? undefined,
     seq: space.updateSeq ?? undefined,
+    photoFileUniqueId: space.photoFileUniqueId ?? undefined,
+    photoUrl: space.photoFileUniqueId ? getSignedMediaFileProxyUrl(space.photoFileUniqueId) ?? undefined : undefined,
+    isPro: space.isPro ?? false,
   }
 }

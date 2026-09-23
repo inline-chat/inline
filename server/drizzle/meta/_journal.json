@@ -1051,6 +1051,13 @@
       "when": 1789693200000,
       "tag": "0149_content-storage-encryption",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1790121600000,
+      "tag": "0150_space-profiles",
+      "breakpoints": true
     }
   ]
 }

@@ -37,16 +37,7 @@ public struct MonochromeSpaceAvatar: View {
   }
 
   public var body: some View {
-    let displayText = SpaceAvatarContent.text(for: space)
-
-    RoundedRectangle(cornerRadius: size / 3, style: .continuous)
-      .fill(Color.gray.opacity(0.15))
-      .frame(width: size, height: size)
-      .overlay {
-        Text(displayText)
-          .font(.system(size: size * SpaceAvatarContent.fontScale(for: displayText), weight: .semibold))
-          .foregroundStyle(.secondary)
-      }
+    SpaceAvatar(space: space, size: size)
   }
 }
 

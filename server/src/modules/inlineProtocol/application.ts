@@ -147,6 +147,7 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
     case "createSubthread": return `chat:${rpc.input.createSubthread.parentChatId}`
     case "deleteMember": return `space:${rpc.input.deleteMember.spaceId}`
     case "updateMemberAccess": return `space:${rpc.input.updateMemberAccess.spaceId}`
+    case "setSpacePhoto": return `space:${rpc.input.setSpacePhoto.spaceId}`
     case "toggleSpaceGrid": return `space:${rpc.input.toggleSpaceGrid.spaceId}`
     case "updateUserSettings": return "account:settings"
     default: return undefined

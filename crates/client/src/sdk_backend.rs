@@ -4163,6 +4163,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::UpdatedUser(_) => "updated_user",
         Update::ParticipantGroupAdd(_) => "participant_group_add",
         Update::ParticipantGroupDelete(_) => "participant_group_delete",
+        Update::SpaceProfile(_) => "space_profile",
         Update::SpaceSettings(_) => "space_settings",
         Update::ChatPermissions(_) => "chat_permissions",
         Update::DialogCollapsedMaxId(_) => "dialog_collapsed_max_id",
@@ -10120,6 +10121,7 @@ mod tests {
                         is_public: Some(false),
                         handle: None,
                         seq: None,
+                        ..Default::default()
                     }),
                     member: Some(member(2)),
                 })),

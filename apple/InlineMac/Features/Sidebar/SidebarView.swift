@@ -3727,18 +3727,7 @@ private struct SpaceAvatar: View, Equatable {
   var size: CGFloat = 18
 
   var body: some View {
-    let text = SpaceAvatarContent.text(for: space)
-
-    RoundedRectangle(cornerRadius: size * 0.4, style: .continuous)
-      .fill(.quinary)
-      .frame(width: size, height: size)
-      .overlay {
-        Text(text)
-          .font(.system(size: size * SpaceAvatarContent.fontScale(for: text), weight: .semibold))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .minimumScaleFactor(0.75)
-      }
+    InlineUI.SpaceAvatar(space: space, size: size)
       .fixedSize()
   }
 }

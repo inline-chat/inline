@@ -37,9 +37,11 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { Update } from "@inline-chat/protocol/core"
 import { eq } from "drizzle-orm"
+import { requireOwnedSpacePhoto } from "@in/server/modules/spaces/spacePhoto"
 
 export const Input = Type.Object({
   name: Type.String(),
+  photoFileUniqueId: Type.Optional(Type.String()),
   handle: Type.Optional(Type.String()),
 })
 
@@ -54,6 +56,7 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
+  const photoFileUniqueId = await requireOwnedSpacePhoto(input.photoFileUniqueId, context.currentUserId)
   const handle = input.handle === undefined ? null : normalizeSpaceHandle(input.handle)
   if (input.handle !== undefined && !handle) {
     throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
@@ -83,6 +86,7 @@ export const handler = async (
         .insert(spaces)
         .values({
           name: input.name,
+          photoFileUniqueId,
           handle,
           creatorId: context.currentUserId,
         })

@@ -1,12 +1,15 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct CreateSpaceSwiftUI: View {
-  @Environment(\.appDatabase) var db
   @EnvironmentObject var nav: Nav
+  @EnvironmentObject var dataManager: DataManager
 
   private let onComplete: ((Int64) -> Void)?
 
+  @State private var photoData: Data?
+  @State private var isProcessingPhoto = false
   @State private var spaceName: String = ""
   @FormState var formState
   @FocusState private var focusedField: Field?
@@ -22,10 +25,16 @@ struct CreateSpaceSwiftUI: View {
   var body: some View {
     VStack(spacing: 12) {
       Text("Create Space").font(.title2)
+      MacSpacePhotoPicker(
+        photoData: $photoData,
+        space: Space(id: 0, name: spaceName, date: .now),
+        isBusy: formState.isLoading,
+        isProcessing: $isProcessingPhoto
+      )
 
       GrayTextField("eg. AGI Fellows", text: $spaceName, size: .medium)
         .frame(maxWidth: 200)
-        .disabled(formState.isLoading)
+        .disabled(formState.isLoading || isProcessingPhoto)
         .focused($focusedField, equals: .name)
         .onSubmit {
           submit()
@@ -65,7 +74,7 @@ struct CreateSpaceSwiftUI: View {
   }
 
   private var canSubmit: Bool {
-    formState.isLoading == false && trimmedSpaceName.isEmpty == false
+    formState.isLoading == false && !isProcessingPhoto && trimmedSpaceName.isEmpty == false
   }
 
   private func submit() {
@@ -75,18 +84,13 @@ struct CreateSpaceSwiftUI: View {
     Task { @MainActor in
       do {
         formState.startLoading()
-        let result = try await InlineRPCClient.shared.createSpace(name: name)
-        try await db.dbWriter.write { db in
-          try Space(from: result.space).save(db)
-          try Member(from: result.member).save(db)
-          _ = try Chat(from: result.chat).saveFull(db)
-          try Dialog(from: result.dialog).save(db, onConflict: .replace)
-          // ... save more stuff
+        guard let spaceID = try await dataManager.createSpace(name: name, photoData: photoData) else {
+          throw InlineRPCClientError.unexpectedResponse
         }
         formState.succeeded()
 
         if let onComplete {
-          onComplete(result.space.id)
+          onComplete(spaceID)
           return
         }
 
