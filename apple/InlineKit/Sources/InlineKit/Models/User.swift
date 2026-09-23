@@ -475,6 +475,9 @@ public extension User {
 // MARK: - Photo helpers
 
 public extension User {
+  /// Files written from an unprocessed, identity-checked remote photo request.
+  static let remoteProfilePhotoCacheFilePrefix = "RemoteUserAvatar-v1-"
+
   private static func getProfileCacheDirectory() -> URL {
     FileHelpers.getLocalCacheDirectory(for: .photos)
   }
@@ -495,26 +498,35 @@ public extension User {
     return URL(string: profileCdnUrl)
   }
 
-  static func cacheImageData(userId: Int64, data: Data) async throws {
+  static func cacheImageData(
+    userId: Int64,
+    data: Data,
+    expectedSourceURL: URL? = nil,
+    expectedAvatarIdentity: String? = nil,
+    accountToken: AuthAccountMutationToken? = nil
+  ) async throws {
     Log.shared.debug("Trying to cache image data")
 
     let directory = User.getProfileCacheDirectory()
     let format = imageFormat(for: data)
-    let localPath = "User\(UUID().uuidString).\(format.fileExtension)"
+    let prefix = expectedSourceURL == nil ? "User" : Self.remoteProfilePhotoCacheFilePrefix
+    let localPath = "\(prefix)\(UUID().uuidString).\(format.fileExtension)"
     let localUrl = directory.appendingPathComponent(localPath)
 
     do {
       try data.write(to: localUrl, options: .atomic)
 
       let oldLocalUrl = try await AppDatabase.shared.dbWriter.write { db -> URL? in
-        let oldLocalPath = try User.fetchOne(db, id: userId)?.profileLocalPath
-        let updateCount = try User.filter(id: userId).updateAll(db, [
-          Column("profileLocalPath").set(to: localPath),
-        ])
-
-        guard updateCount > 0 else {
-          throw UserAvatarCacheError.userNotFound(userId)
+        if let accountToken {
+          try Auth.shared.handle.validateAccountMutation(accountToken)
         }
+        let oldLocalPath = try storeCachedProfilePhoto(
+          db,
+          userId: userId,
+          localPath: localPath,
+          expectedSourceURL: expectedSourceURL,
+          expectedAvatarIdentity: expectedAvatarIdentity
+        )
 
         guard let oldLocalPath, oldLocalPath != localPath else { return nil }
         return directory.appendingPathComponent(oldLocalPath)
@@ -527,6 +539,30 @@ public extension User {
       try? FileManager.default.removeItem(at: localUrl)
       throw error
     }
+  }
+
+  /// Validate and attach in the same transaction so an old download cannot overwrite a newer photo.
+  internal static func storeCachedProfilePhoto(
+    _ db: Database,
+    userId: Int64,
+    localPath: String,
+    expectedSourceURL: URL?,
+    expectedAvatarIdentity: String?
+  ) throws -> String? {
+    guard let user = try User.fetchOne(db, id: userId) else {
+      throw UserAvatarCacheError.userNotFound(userId)
+    }
+    if let expectedSourceURL {
+      guard user.getRemoteURL() == expectedSourceURL,
+            user.stableAvatarIdentity == expectedAvatarIdentity
+      else {
+        throw UserAvatarCacheError.stalePhoto
+      }
+    }
+    try User.filter(id: userId).updateAll(db, [
+      Column("profileLocalPath").set(to: localPath),
+    ])
+    return user.profileLocalPath
   }
 
   private static func imageFormat(for data: Data) -> ImageFormat {
@@ -638,4 +674,5 @@ private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
 
 private enum UserAvatarCacheError: Error {
   case userNotFound(Int64)
+  case stalePhoto
 }

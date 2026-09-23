@@ -23,8 +23,10 @@ struct ChatIcon: View {
           && lhsChat.parentMessageId == rhsChat.parentMessageId
 
       case let (.user(lhsUserInfo), .user(rhsUserInfo)):
-        return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
+        return lhsUserInfo.user.id == rhsUserInfo.user.id
+          && userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
           && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
+          && lhsUserInfo.user.profileLocalPath == rhsUserInfo.user.profileLocalPath
 
       default:
         return false

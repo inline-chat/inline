@@ -1,9 +1,62 @@
+import Foundation
+import GRDB
 import Testing
 @testable import InlineKit
 import InlineProtocol
 
 @Suite("User profile cache")
 struct UserProfileCacheTests {
+  @Test("late avatar downloads cannot replace a changed or removed profile photo", arguments: [0, 1, 2])
+  func rejectsStaleDownload(change: Int) async throws {
+    let database = AppDatabase.empty()
+    try await database.dbWriter.write { db in
+      var current = User(id: 1, email: nil, firstName: "User")
+      current.profileFileUniqueId = change == 0 ? "new-photo" : "old-photo"
+      current.profileCdnUrl = change == 1 ? "https://example.com/new.jpg" : "https://example.com/old.jpg"
+      current.profileLocalPath = "new-cache.jpg"
+      if change == 2 {
+        current.profileFileUniqueId = nil
+        current.profileCdnUrl = nil
+        current.profileLocalPath = nil
+      }
+      try current.save(db)
+      let stored = try #require(try User.fetchOne(db, id: 1))
+
+      #expect(throws: (any Error).self) {
+        try User.storeCachedProfilePhoto(
+          db,
+          userId: 1,
+          localPath: "late-old-download.jpg",
+          expectedSourceURL: URL(string: "https://example.com/old.jpg"),
+          expectedAvatarIdentity: "unique:old-photo"
+        )
+      }
+      #expect(try User.fetchOne(db, id: 1) == stored)
+    }
+  }
+
+  @Test("matching avatar download updates the cache and returns the superseded path")
+  func acceptsCurrentDownload() async throws {
+    let database = AppDatabase.empty()
+    try await database.dbWriter.write { db in
+      var current = User(id: 1, email: nil, firstName: "User")
+      current.profileFileUniqueId = "current-photo"
+      current.profileCdnUrl = "https://example.com/current.jpg"
+      current.profileLocalPath = "previous-cache.jpg"
+      try current.save(db)
+
+      let previousPath = try User.storeCachedProfilePhoto(
+        db,
+        userId: 1,
+        localPath: "current-cache.jpg",
+        expectedSourceURL: current.getRemoteURL(),
+        expectedAvatarIdentity: current.stableAvatarIdentity
+      )
+      #expect(previousPath == "previous-cache.jpg")
+      #expect(try User.fetchOne(db, id: 1)?.profileLocalPath == "current-cache.jpg")
+    }
+  }
+
   @Test("full user without a profile photo clears cached photo fields")
   func clearsPhotoForFullUser() async throws {
     let database = AppDatabase.empty()

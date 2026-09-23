@@ -3,7 +3,6 @@ import AppKit
 import InlineKit
 import InlineUI
 import Logger
-import Nuke
 import Quartz
 import RealtimeV2
 import SwiftUI
@@ -32,6 +31,7 @@ private enum ChatVisibilitySelection: String, CaseIterable, Hashable {
 }
 
 struct ChatInfo: View {
+  @Environment(\.displayScale) private var displayScale
   @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
   @Environment(\.realtimeV2) private var realtimeV2
@@ -219,6 +219,11 @@ struct ChatInfo: View {
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
     }
+    .task(id: peerId) {
+      if peerId.asUserId() != nil {
+        _ = try? await realtimeV2.send(.getChat(peer: peerId))
+      }
+    }
     .onChange(of: chatId) { _, _ in
       updateViewModels()
       syncIconDraft()
@@ -241,7 +246,7 @@ struct ChatInfo: View {
   var icon: some View {
     if let userInfo = fullChat.chatItem?.userInfo {
       Button {
-        avatarPreview.show(userInfo: userInfo)
+        avatarPreview.show(userInfo: userInfo, scale: displayScale)
       } label: {
         ChatIcon(peer: .user(userInfo), size: 100)
       }
@@ -879,25 +884,20 @@ private final class ChatInfoAvatarQuickLookPresenter: NSObject, ObservableObject
   private var tempURL: URL?
   private var isLoading = false
 
-  func show(userInfo: UserInfo) {
+  func show(userInfo: UserInfo, scale: CGFloat) {
     Task { @MainActor in
-      await open(userInfo: userInfo)
+      await open(userInfo: userInfo, scale: scale)
     }
   }
 
   @MainActor
-  private func open(userInfo: UserInfo) async {
+  private func open(userInfo: UserInfo, scale: CGFloat) async {
     guard !isLoading else { return }
 
     let user = userInfo.user
     let title = user.displayName.isEmpty ? "Avatar" : user.displayName
 
-    if let localURL = user.getLocalURL(), FileManager.default.fileExists(atPath: localURL.path) {
-      present(url: localURL, title: title, ownsTempURL: false)
-      return
-    }
-
-    guard let remoteURL = user.getRemoteURL() else {
+    guard let source = UserAvatarImageSource(user: user, scale: scale) else {
       ToastCenter.shared.showError("Avatar isn't available")
       return
     }
@@ -906,20 +906,17 @@ private final class ChatInfoAvatarQuickLookPresenter: NSObject, ObservableObject
     defer { isLoading = false }
 
     do {
-      let image = try await ImagePipeline.shared.image(for: ImageRequest(url: remoteURL))
+      let data = try await source.originalImageData()
+      guard let image = NSImage(data: data) else { throw ChatInfoAvatarPreviewError.imageEncodingFailed }
       let previewURL = try makeTempURL(for: image)
-      present(url: previewURL, title: title, ownsTempURL: true)
+      present(url: previewURL, title: title)
     } catch {
       ToastCenter.shared.showError("Failed to open avatar")
     }
   }
 
   @MainActor
-  private func present(url: URL, title: String, ownsTempURL: Bool) {
-    if !ownsTempURL {
-      cleanupTempURL()
-    }
-
+  private func present(url: URL, title: String) {
     item = ChatInfoAvatarPreviewItem(url: url, title: title)
 
     guard let panel = QLPreviewPanel.shared() else {

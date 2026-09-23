@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import InlineAvatarCore
 import InlineKit
@@ -14,6 +15,8 @@ public struct UserAvatar: View, Equatable {
       && lhs.backgroundOpacity == rhs.backgroundOpacity
       && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
       && lhs.hasConfiguredPhoto == rhs.hasConfiguredPhoto
+      && lhs.localUrl == rhs.localUrl
+      && lhs.prefersExplicitLocalSource == rhs.prefersExplicitLocalSource
       && Self.avatarIdentity(
         stableAvatarIdentity: lhs.stableAvatarIdentity,
         remoteUrl: lhs.remoteUrl,
@@ -41,11 +44,10 @@ public struct UserAvatar: View, Equatable {
   var stableAvatarIdentity: String?
   var remoteUrl: URL?
   var localUrl: URL?
+  private var prefersExplicitLocalSource = false
 
   let nameForInitials: String
   let showsPersonSymbol: Bool
-
-  private static let profilePhotoSizeKind = "f"
 
   @Environment(\.displayScale) private var displayScale
   @State private var startedRemoteCacheUrl: URL?
@@ -76,6 +78,7 @@ public struct UserAvatar: View, Equatable {
     self.size = size
     remoteUrl = user.getRemoteURL()
     localUrl = Self.existingFileUrl(localAvatarURL) ?? Self.existingFileUrl(user.getLocalURL())
+    prefersExplicitLocalSource = Self.existingFileUrl(localAvatarURL) != nil
     stableAvatarIdentity = user.stableAvatarIdentity
     hasConfiguredPhoto = stableAvatarIdentity != nil || remoteUrl != nil || localUrl != nil
     self.ignoresSafeArea = ignoresSafeArea
@@ -240,23 +243,18 @@ public struct UserAvatar: View, Equatable {
     ))
   }
 
-  private var avatarUrl: URL? {
-    localUrl ?? remoteUrl
-  }
-
-  private var avatarCacheKey: String {
-    let scaleKey = Int((renderScale * 100).rounded())
-    return "user-avatar:\(Self.profilePhotoSizeKind):scale\(scaleKey):\(avatarIdentity)"
-  }
-
-  private var avatarIdentity: String {
-    Self.avatarIdentity(
-      stableAvatarIdentity: stableAvatarIdentity,
-      remoteUrl: remoteUrl,
-      localUrl: localUrl,
-      userId: userId
+  var imageSource: UserAvatarImageSource? {
+    UserAvatarImageSource(
+      userID: userId,
+      identity: stableAvatarIdentity,
+      remoteURL: remoteUrl,
+      localURL: localUrl,
+      scale: renderScale,
+      prefersExplicitLocalSource: prefersExplicitLocalSource
     )
   }
+
+  var avatarCacheKey: String? { imageSource?.cacheKey }
 
   private nonisolated static func avatarIdentity(
     stableAvatarIdentity: String?,
@@ -285,8 +283,8 @@ public struct UserAvatar: View, Equatable {
 
   @ViewBuilder
   public var avatar: some View {
-    if let avatarUrl {
-      KFImage.url(avatarUrl, cacheKey: avatarCacheKey)
+    if let imageSource {
+      KFImage.url(imageSource.url, cacheKey: imageSource.cacheKey)
         .setProcessor(DownsamplingImageProcessor(size: targetSize))
         .scaleFactor(renderScale)
         .cacheOriginalImage()
@@ -295,9 +293,8 @@ public struct UserAvatar: View, Equatable {
         .placeholder {
           placeholder
         }
-        .onSuccess { result in
-          let downloadedData = result.cacheType == .none ? result.data() : nil
-          cacheRemoteAvatarIfNeeded(sourceUrl: avatarUrl, downloadedData: downloadedData)
+        .onSuccess { _ in
+          cacheRemoteAvatarIfNeeded(source: imageSource)
         }
         .resizable()
         // For non-square profile photos.
@@ -323,31 +320,28 @@ public struct UserAvatar: View, Equatable {
     }
   }
 
-  private func cacheRemoteAvatarIfNeeded(sourceUrl: URL, downloadedData: Data?) {
+  private func cacheRemoteAvatarIfNeeded(source: UserAvatarImageSource) {
     guard cacheRemoteAvatar else { return }
+    let sourceUrl = source.url
     guard sourceUrl.isFileURL == false else { return }
-    guard localUrl == nil else { return }
+    guard localUrl?.lastPathComponent.hasPrefix(User.remoteProfilePhotoCacheFilePrefix) != true else { return }
     guard startedRemoteCacheUrl != sourceUrl else { return }
 
     startedRemoteCacheUrl = sourceUrl
 
-    Task.detached(priority: .utility) { [userId, sourceUrl, downloadedData] in
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+
+    Task { [userId, stableAvatarIdentity] in
       do {
-        let data: Data
-
-        if let downloadedData, downloadedData.isEmpty == false {
-          data = downloadedData
-        } else {
-          let (remoteData, response) = try await URLSession.shared.data(from: sourceUrl)
-          if let httpResponse = response as? HTTPURLResponse,
-             (200 ... 299).contains(httpResponse.statusCode) == false {
-            return
-          }
-          data = remoteData
-        }
-
-        guard data.isEmpty == false else { return }
-        try await User.cacheImageData(userId: userId, data: data)
+        let data = try await source.originalImageData()
+        try Auth.shared.handle.validateAccountMutation(account)
+        try await User.cacheImageData(
+          userId: userId,
+          data: data,
+          expectedSourceURL: sourceUrl,
+          expectedAvatarIdentity: stableAvatarIdentity,
+          accountToken: account
+        )
       } catch {
         Log.shared.error("Failed to cache image", error: error)
       }
