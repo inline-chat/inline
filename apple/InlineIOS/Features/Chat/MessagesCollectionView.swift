@@ -3729,13 +3729,15 @@ private extension MessagesCollectionView {
     }
 
     private func handleIncomingMessages() {
-      guard let latestId = latestMessageId() else { return }
       if isAtBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
         markMessagesSeen()
         return
       }
 
-      if latestId > lastSeenMessageId, !hasUnreadSinceScroll {
+      // A newer outgoing message must neither create a badge nor hide an unseen incoming message.
+      if !hasUnreadSinceScroll, messages.contains(where: {
+        $0.message.messageId > lastSeenMessageId && $0.message.out != true
+      }) {
         hasUnreadSinceScroll = true
         notifyUnreadChanged()
       }
