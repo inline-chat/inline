@@ -31,10 +31,28 @@ import {
 import {
   NativeUploadProcess,
 } from "../../modules/uploads/worker.effect"
+import { GridProviderEffectsProcess } from "../../modules/grid/providerEffects.effect"
+import { DatabaseHealthMonitorProcess } from "../../modules/monitoring/databaseHealthMonitor.effect"
+import { UserSettingsCleanupProcess } from "../../modules/cache/userSettings.effect"
 import {
   markServerShuttingDown,
   type ShutdownSignal,
 } from "../../lifecycle/shutdownState"
+import { applicationBackgroundWork } from "../../lifecycle/backgroundWork"
+import { botUpdateWaiters } from "../../db/models/botUpdateWaiters"
+import { waitForPostCommitHooks } from "../../db/commitHooks"
+import { internalMessaging } from "../../modules/internalMessaging/service"
+import { outboundPublications } from "../../modules/internalMessaging/outbound"
+import { connectionDirectory } from "../../modules/internalMessaging/directory"
+import { connectedUserRepair } from "../../modules/internalMessaging/repair"
+import { subscribeBotPresenceHints } from "../../modules/botPresence/cluster"
+import { subscribeGridCredentialHints } from "../../functions/grid"
+import { subscribeGridChangeHints } from "../../modules/grid/realtime"
+import { subscribePrivateBotRequests } from "../../modules/internalMessaging/privateBot"
+import { subscribeClusterCaches } from "../../modules/cache/cluster"
+import { subscribeTransientRealtime } from "../../modules/internalMessaging/transient"
+import { connectionManager } from "../../ws/connections"
+import { sessionAuthority } from "../../modules/auth/sessionAuthority"
 import {
   makeRuntimeBridge,
 } from "../effect/runtimeBridge"
@@ -51,6 +69,10 @@ import {
 import type {
   TrustedClientIpHeader,
 } from "./middleware"
+import type { IngressPolicy } from "./ingress"
+import {
+  DEFAULT_CORE_GRACEFUL_SHUTDOWN_MILLIS,
+} from "./shutdownTimeout"
 import {
   makeCoreRealtimeTransport,
 } from "./realtimeHost"
@@ -66,9 +88,6 @@ import {
 
 import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
 export type { CoreWebSocketData } from "./combinedWebsocket"
-
-const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS =
-  20_000
 
 export interface CoreHttpDrain {
   readonly begin: () => void
@@ -188,6 +207,7 @@ export interface StartCoreProductionServerOptions<
     ApplicationError,
     ApplicationRequirements
   >
+  readonly ingressPolicy?: IngressPolicy | undefined
   readonly bindRealtimeServer?:
     | ((
       server: Server<
@@ -217,6 +237,7 @@ export interface StartCoreProductionServerOptions<
   readonly startBackgroundProcesses?:
     | boolean
     | undefined
+  readonly startClusterServices?: boolean | undefined
 }
 
 export interface CoreProductionServerHandle {
@@ -251,21 +272,25 @@ const startupCause = (
     : Cause.die(cause)
 
 export const shutdownWithDeadline = async (
-  operation: () => Promise<void>,
+  operation: (
+    signal: AbortSignal,
+  ) => Promise<void>,
   timeoutMillis: number,
   onTimeout: () => void,
   currentStage: () => string,
 ): Promise<void> => {
+  const controller = new AbortController()
   let timeout:
     | ReturnType<typeof setTimeout>
     | undefined
 
   try {
     await Promise.race([
-      operation(),
+      operation(controller.signal),
       new Promise<never>(
         (_resolve, reject) => {
           timeout = setTimeout(() => {
+            controller.abort()
             onTimeout()
             reject(
               new Error(
@@ -280,6 +305,54 @@ export const shutdownWithDeadline = async (
     if (timeout !== undefined) {
       clearTimeout(timeout)
     }
+  }
+}
+
+const NETWORK_DRAIN_POLL_MILLIS = 5
+
+export const isBotLongPollRequest = (request: Request): boolean => {
+  if (request.method !== "GET") return false
+  const path = new URL(request.url).pathname
+  return path === "/bot/getUpdates" || /^\/bot[^/]+\/getUpdates$/.test(path)
+}
+
+export interface CoreHttpNetworkDrainServer {
+  readonly pendingRequests: number
+}
+
+const waitForAbortOrTimeout = (
+  signal: AbortSignal,
+  timeoutMillis: number,
+): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    const timeout = setTimeout(complete, timeoutMillis)
+    const abort = () => complete()
+    function complete(): void {
+      clearTimeout(timeout)
+      signal.removeEventListener("abort", abort)
+      resolve()
+    }
+    signal.addEventListener("abort", abort, { once: true })
+  })
+
+/**
+ * Bun's `pendingRequests` can remain nonzero briefly after the request
+ * handler/fiber has completed while the final response is still flushing to
+ * the client. Keep that final flush inside the existing shutdown deadline.
+ */
+export const waitForCoreHttpNetworkDrain = async (
+  server: CoreHttpNetworkDrainServer,
+  signal: AbortSignal,
+): Promise<void> => {
+  while (!signal.aborted && server.pendingRequests > 0) {
+    await waitForAbortOrTimeout(
+      signal,
+      NETWORK_DRAIN_POLL_MILLIS,
+    )
   }
 }
 
@@ -299,8 +372,9 @@ export const startCoreProductionServer = async <
   bindRealtimeServer =
     bindCurrentRealtimeServer,
   clientIpHeader,
+  ingressPolicy,
   gracefulShutdownMillis =
-    DEFAULT_GRACEFUL_SHUTDOWN_MILLIS,
+    DEFAULT_CORE_GRACEFUL_SHUTDOWN_MILLIS,
   hostname = "0.0.0.0",
   inlineProtocolConfiguration:
     providedInlineProtocolConfiguration,
@@ -309,6 +383,7 @@ export const startCoreProductionServer = async <
     markServerShuttingDown,
   port = 0,
   startBackgroundProcesses = false,
+  startClusterServices = false,
 }: StartCoreProductionServerOptions<
   ApplicationError,
   ApplicationRequirements
@@ -360,6 +435,25 @@ export const startCoreProductionServer = async <
   }
 
   const context = contextExit.value
+  let producerStopPromise: Promise<void> | undefined
+  const producerStopFailures: unknown[] = []
+  const stopBackgroundProducers = (): Promise<void> => producerStopPromise ??= (async () => {
+    if (!startBackgroundProcesses) return
+    // Stop all six producers before any application/hint drain. Disposing the
+    // runtime first would also close the database those drains still require.
+    const result = await bridge.runPromiseExit(Effect.all([
+      BotWebhookDeliveryProcess.use((process) => process.stop).pipe(Effect.exit),
+      BlockContentImageProcess.use((process) => process.stop).pipe(Effect.exit),
+      NativeUploadProcess.use((process) => process.stop).pipe(Effect.exit),
+      GridProviderEffectsProcess.use((process) => process.stop).pipe(Effect.exit),
+      DatabaseHealthMonitorProcess.use((process) => process.stop).pipe(Effect.exit),
+      UserSettingsCleanupProcess.use((process) => process.stop).pipe(Effect.exit),
+    ], { concurrency: 6 }))
+    if (Exit.isFailure(result)) producerStopFailures.push(result.cause)
+    else for (const stopped of result.value) {
+      if (Exit.isFailure(stopped)) producerStopFailures.push(stopped.cause)
+    }
+  })()
   const httpHandler =
     makeCoreHttpRequestHandler(context)
   const realtime =
@@ -376,8 +470,22 @@ export const startCoreProductionServer = async <
   let realtimeV3:
     | InlineProtocolRealtimeTransport
     | undefined
+  let unsubscribeRevocations = (): void => {}
+  let unsubscribeDurable = (): void => {}
+  let unsubscribeBotPresence = async (): Promise<void> => {}
+  let unsubscribeGridCredentials = (): void => {}
+  let unsubscribeGridChanges = (): void => {}
+  let unsubscribePrivateBot = (): void => {}
+  let unsubscribeCaches = (): void => {}
+  let unsubscribeDirectoryReady = (): void => {}
+  let unsubscribeRepairContinuity = (): void => {}
+  let unsubscribeTransient = (): void => {}
+  let sessionAuthorityStarted = false
+  let admitting = false
 
   try {
+    outboundPublications.start()
+    internalMessaging.setBrokerRequiredForReadiness(startClusterServices)
     const inlineProtocolConfiguration =
       providedInlineProtocolConfiguration ??
         loadInlineProtocolConfiguration()
@@ -396,7 +504,17 @@ export const startCoreProductionServer = async <
       hostname,
       port,
       fetch: (request, bunServer) => {
-        if (httpDrain.isDraining()) {
+        const ingressRejection = ingressPolicy?.(request)
+        if (ingressRejection) return ingressRejection
+        // Before the broker subscription completes, surface only its actual
+        // readiness state. No application route or WebSocket can become a
+        // one-node writer while the reconnect loop is still running.
+        const isReadinessRequest =
+          new URL(request.url).pathname === "/readyz"
+        if (
+          (!admitting && !isReadinessRequest) ||
+          httpDrain.isDraining()
+        ) {
           return new Response(
             "Server shutting down.",
             { status: 503 },
@@ -429,6 +547,8 @@ export const startCoreProductionServer = async <
         if (realtimeUpgrade instanceof Response) return realtimeUpgrade
         if (realtimeUpgrade) return undefined
 
+        if (isBotLongPollRequest(request)) bunServer.timeout(request, 65)
+
         const completeRequest =
           httpDrain.enter()
         return httpHandler(
@@ -453,6 +573,51 @@ export const startCoreProductionServer = async <
         "The Effect production listener did not bind a TCP address.",
       )
     }
+    // The broker is an at-most-once hint. Local session authority starts as
+    // soon as the listener is bound so invalidation races and missed broker
+    // events remain bounded even while Redis is reconnecting.
+    sessionAuthority.start({
+      connectedSessions: () =>
+        connectionManager.getAuthenticatedSessionIdentities(),
+      closeSession: ({ userId, sessionId }) => {
+        connectionManager.closeConnectionForSession(
+          userId,
+          sessionId,
+          { authenticationInvalidated: true },
+        )
+      },
+    })
+    sessionAuthorityStarted = true
+
+    if (startClusterServices) {
+      connectionDirectory.resume()
+      unsubscribeDurable = internalMessaging.on("DurableUpdatesAvailable", ({ event }) =>
+        connectedUserRepair.observeBucket(event))
+      unsubscribeRevocations = internalMessaging.on("SessionRevoked", ({ event }) => {
+        sessionAuthority.invalidate({
+          userId: event.userId,
+          sessionId: event.sessionId,
+        })
+        connectionManager.closeConnectionForSession(event.userId, event.sessionId, { authenticationInvalidated: true })
+      })
+      unsubscribeBotPresence = subscribeBotPresenceHints()
+      unsubscribeGridCredentials = subscribeGridCredentialHints()
+      unsubscribeGridChanges = subscribeGridChangeHints()
+      unsubscribePrivateBot = subscribePrivateBotRequests()
+      unsubscribeTransient = subscribeTransientRealtime()
+      unsubscribeCaches = subscribeClusterCaches()
+      unsubscribeDirectoryReady = internalMessaging.onReady(() => {
+        void connectionDirectory.recoverFromBrokerRestart()
+      })
+      unsubscribeRepairContinuity = internalMessaging.onContinuityLost(() => {
+        // Pub/Sub is only a wake-up path. Promptly rescan local users after a
+        // gap; the durable repair loop owns the source of truth and does not
+        // make a healthy listener unavailable merely because Redis restarted.
+        connectedUserRepair.observeConnectedUsers()
+      })
+      await internalMessaging.start()
+      await connectedUserRepair.start()
+    }
 
     if (startBackgroundProcesses) {
       // Preserve the pre-Effect production contract: the listener and
@@ -470,6 +635,15 @@ export const startCoreProductionServer = async <
               NativeUploadProcess.use(
                 (process) => process.start,
               ),
+              GridProviderEffectsProcess.use(
+                (process) => process.start,
+              ),
+              DatabaseHealthMonitorProcess.use(
+                (process) => process.start,
+              ),
+              UserSettingsCleanupProcess.use(
+                (process) => process.start,
+              ),
             ],
             { concurrency: 1 },
           ),
@@ -480,7 +654,36 @@ export const startCoreProductionServer = async <
         })
       }
     }
+    admitting = true
   } catch (cause) {
+    const botPresenceStopped = unsubscribeBotPresence()
+    await stopBackgroundProducers()
+    if (startClusterServices) await internalMessaging.stopIncoming()
+    await botPresenceStopped
+    unsubscribeDurable()
+    unsubscribeRevocations()
+    unsubscribeGridCredentials()
+    unsubscribeGridChanges()
+    unsubscribePrivateBot()
+    unsubscribeCaches()
+    unsubscribeDirectoryReady()
+    unsubscribeRepairContinuity()
+    unsubscribeTransient()
+    if (sessionAuthorityStarted) {
+      await sessionAuthority.stop()
+    }
+    await realtimeV3?.shutdown()
+    await realtime.shutdown()
+    await connectionManager.shutdown()
+    await applicationBackgroundWork.waitForIdle()
+    await waitForPostCommitHooks()
+    await outboundPublications.stop()
+    if (startClusterServices) {
+      await connectedUserRepair.stop()
+      await connectionDirectory.shutdown()
+      await internalMessaging.close()
+      internalMessaging.setBrokerRequiredForReadiness(false)
+    }
     // Bun stops the listener synchronously, but its bookkeeping Promise may
     // remain pending after WebSocket callbacks. Startup rollback must still
     // release the Effect runtime and surface the original failure.
@@ -507,7 +710,12 @@ export const startCoreProductionServer = async <
 
     removeSignalHandlers()
     markShuttingDown(signal)
+    admitting = false
     httpDrain.begin()
+    realtime.beginDrain()
+    realtimeV3?.beginDrain()
+    // Empty Bot polls should not hold a one-Machine deployment drain open.
+    botUpdateWaiters.wakeAll()
     // Bun stops accepting new connections synchronously. Its graceful-stop
     // Promise is deliberately not awaited because async WebSocket close
     // callbacks can keep that bookkeeping Promise pending on Bun 1.3.1.
@@ -520,16 +728,63 @@ export const startCoreProductionServer = async <
       "listener drain"
     shutdownPromise =
       shutdownWithDeadline(
-        async () => {
-          shutdownStage =
-            "realtime transport"
-          await realtimeV3?.shutdown()
-          await realtime.shutdown()
+        async (signal) => {
           shutdownStage =
             "in-flight HTTP drain"
           await httpDrain.wait()
           shutdownStage =
+            "HTTP network response flush"
+          await waitForCoreHttpNetworkDrain(
+            server,
+            signal,
+          )
+          // A deadline forces the listener closed but cannot cancel arbitrary
+          // DB/provider promises. Manual callers observe the timeout while
+          // this owner continues joining work before disposing dependencies.
+          shutdownStage =
             "active connection closure"
+          const authorityStopped = sessionAuthority.stop()
+          await realtimeV3?.shutdown()
+          await realtime.shutdown()
+          unsubscribeDirectoryReady()
+          unsubscribeRepairContinuity()
+          const incomingStopped = startClusterServices ? internalMessaging.stopIncoming() : Promise.resolve()
+          const repairStopped = startClusterServices ? connectedUserRepair.stop() : Promise.resolve()
+          const botPresenceStopped = unsubscribeBotPresence()
+          shutdownStage = "background producer stop"
+          await stopBackgroundProducers()
+          await Promise.all([authorityStopped, incomingStopped, repairStopped, botPresenceStopped])
+          // V3 admission deliberately starts membership and client-type reads
+          // outside its protocol callback. Bun may deliver a socket's close
+          // callback after the transport has finished draining, so close the
+          // shared registry and await those reads before its runtime can go
+          // away.
+          shutdownStage = "connection background work drain"
+          await connectionManager.shutdown()
+          // Detached application work may still hold database resources or
+          // commit user updates. Keep the broker available until it settles.
+          shutdownStage = "application background work drain"
+          await applicationBackgroundWork.waitForIdle()
+          // Transactions have drained; finish their best-effort publications
+          // while the broker is still available. The host deadline bounds this.
+          shutdownStage = "post-commit notification drain"
+          await waitForPostCommitHooks()
+          shutdownStage = "outbound publication drain"
+          await outboundPublications.stop()
+          if (startClusterServices) await connectionDirectory.shutdown()
+          unsubscribeDurable()
+          unsubscribeRevocations()
+          unsubscribeGridCredentials()
+          unsubscribeGridChanges()
+          unsubscribePrivateBot()
+          unsubscribeCaches()
+          unsubscribeDirectoryReady()
+          unsubscribeRepairContinuity()
+          unsubscribeTransient()
+          if (startClusterServices) {
+            await internalMessaging.close()
+            internalMessaging.setBrokerRequiredForReadiness(false)
+          }
           // TODO(effect-cutover): retry Bun's graceful stop(false) once its
           // Promise no longer retains a server after any async WebSocket close
           // callback. On Bun 1.3.1 even stop(true) can leave its Promise
@@ -545,10 +800,14 @@ export const startCoreProductionServer = async <
           shutdownStage =
             "Effect runtime disposal"
           await disposeRuntime()
+          if (producerStopFailures.length > 0) {
+            throw new AggregateError(producerStopFailures, "Background producers failed to stop cleanly")
+          }
         },
         gracefulShutdownMillis,
         () => {
           markShuttingDown("timeout")
+          sessionAuthority.stop()
           try {
             void Promise.resolve(server.stop(true)).catch(() => {
               process.exitCode = 1
@@ -557,11 +816,9 @@ export const startCoreProductionServer = async <
             process.exitCode = 1
           }
           server.unref()
-          void disposeRuntime().catch(
-            () => {
-              process.exitCode = 1
-            },
-          )
+          // Do not dispose the runtime concurrently with the still-running
+          // teardown. Signal handlers force process exit on this failure;
+          // manual shutdown retains dependencies until the join completes.
           if (signal !== "manual") {
             process.exitCode = 1
           }

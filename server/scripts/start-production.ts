@@ -1,5 +1,3 @@
-import { migrateDb } from "./helpers/migrate-db"
-
 const artifactSmokeRequested =
   process.argv.includes(
     "--artifact-smoke",
@@ -11,20 +9,6 @@ if (
   throw new Error(
     "--artifact-smoke requires INLINE_SERVER_SMOKE=1.",
   )
-}
-
-if (process.env["SKIP_DB_MIGRATIONS"] === "1") {
-  console.info("Skipping database migrations")
-} else {
-  console.info("Running database migrations")
-
-  try {
-    await migrateDb()
-    console.info("Database migrations applied successfully")
-  } catch (error) {
-    console.error("Error applying database migrations", error)
-    process.exit(1)
-  }
 }
 
 const { runServer } =
@@ -44,6 +28,10 @@ await runServer(
       inlineProtocolConfiguration: {
         enabled: false,
       },
+      // The smoke harness supplies an isolated database but no Redis broker.
+      // Keep this bypass local to the guarded artifact-only entrypoint; normal
+      // production startup must establish the cluster before it serves traffic.
+      startClusterServices: false,
     }
     : undefined,
 )

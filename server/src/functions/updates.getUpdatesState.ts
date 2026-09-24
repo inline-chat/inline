@@ -40,6 +40,13 @@ const MAX_CHAT_ACCESS_QUERY_BATCH = 512
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   context: FunctionContext,
+  options: {
+    shouldEmitHints?: () => boolean
+    /** Internal repair sweeps share a fence captured before any account scan. */
+    discoveryWatermark?: Date
+    /** A frontier loaded after that fence by the internal batched repair reader. */
+    userFrontier?: number
+  } = {},
 ): Promise<GetUpdatesStateResult> => {
   const startedAt = performance.now()
   // CLI 0.7.8 encoded its brand-new local cursor sentinel as date=0. Keep
@@ -54,26 +61,13 @@ export const getUpdatesState = async (
   // shared side, then commits immediately. Resource and access scans happen
   // after it is released. If the lock or DB clock read fails, this RPC rejects
   // and therefore cannot advance the client's checkpoint.
-  const scanStartedAt = await captureUpdateDiscoveryWatermark()
+  const scanStartedAt = options.discoveryWatermark ?? await captureUpdateDiscoveryWatermark()
   const scanStartDate = floorWireDate(scanStartedAt)
 
-  const user = await UsersModel.getUserById(context.currentUserId)
-  if (!user) {
-    throw RealtimeRpcError.InternalError()
-  }
-  const latestUserUpdate = await db.query.updates.findFirst({
-    columns: {
-      seq: true,
-    },
-    where: {
-      bucket: UpdateBucket.User,
-      entityId: context.currentUserId,
-    },
-    orderBy: {
-      seq: "desc",
-    },
-  })
-  const userSeq = Math.max(user.updateSeq ?? 0, latestUserUpdate?.seq ?? 0)
+  const userSeq = options.discoveryWatermark !== undefined && options.userFrontier !== undefined
+    ? options.userFrontier
+    : await readUserFrontier(context.currentUserId)
+  if (!Number.isSafeInteger(userSeq) || userSeq < 0) throw RealtimeRpcError.InternalError()
 
   if (requestedDate !== undefined && requestedDate > scanStartDate) {
     // A future cursor cannot be clamped and scanned from "now": that would
@@ -209,7 +203,7 @@ export const getUpdatesState = async (
   }
 
   if (updatesToPush.length > 0) {
-    await pushBoundedUpdateHints(context.currentUserId, updatesToPush)
+    await pushBoundedUpdateHints(context.currentUserId, updatesToPush, options.shouldEmitHints)
   }
 
   logGetUpdatesStateTiming({
@@ -231,6 +225,17 @@ export const getUpdatesState = async (
     updatesFound: true,
     seq: userSeq,
   }
+}
+
+const readUserFrontier = async (userId: number): Promise<number> => {
+  const user = await UsersModel.getUserById(userId)
+  if (!user) throw RealtimeRpcError.InternalError()
+  const latestUserUpdate = await db.query.updates.findFirst({
+    columns: { seq: true },
+    where: { bucket: UpdateBucket.User, entityId: userId },
+    orderBy: { seq: "desc" },
+  })
+  return Math.max(user.updateSeq ?? 0, latestUserUpdate?.seq ?? 0)
 }
 
 const floorWireDate = (date: Date): bigint => BigInt(Math.floor(date.getTime() / 1000))
@@ -290,9 +295,13 @@ const getDurableSeqsByTarget = async (
 const pushBoundedUpdateHints = async (
   userId: number,
   updates: Parameters<typeof RealtimeUpdates.pushToUser>[1],
+  shouldEmitHints: (() => boolean) | undefined,
 ): Promise<void> => {
   let offset = 0
   while (offset < updates.length) {
+    // Internal repair can be stopped while discovery is reading the database.
+    // Never begin a new side-effecting batch after its lifecycle is inactive.
+    if (shouldEmitHints && !shouldEmitHints()) return
     let batch = updates.slice(offset, offset + MAX_UPDATE_HINTS_PER_BATCH)
     let encodedBytes = UpdatesPayload.toBinary({ updates: batch }).length
     while (encodedBytes > MAX_UPDATE_HINT_BATCH_BYTES && batch.length > 1) {

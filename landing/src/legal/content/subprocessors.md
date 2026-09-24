@@ -1,14 +1,16 @@
 # Subprocessors
 
-Last updated: August 20, 2026.
+Last updated: September 23, 2026.
 
-Inline uses the following third-party providers to operate the Services. Some providers process customer data only when a specific feature is enabled or requested.
+Inline uses the following third-party providers to operate the Services. Which providers process customer data may vary by deployment and by the features a customer uses.
 
 ## Infrastructure and Storage
 
 | Provider | Purpose |
 | --- | --- |
-| Hetzner Cloud | Application and database hosting and self-hosted realtime media infrastructure. |
+| Fly.io | Cloud hosting and infrastructure services. |
+| Hetzner Cloud | Cloud hosting and infrastructure services. |
+| PlanetScale | Managed database services. |
 | Cloudflare R2 | File and media object storage. |
 
 ## Authentication and Communications

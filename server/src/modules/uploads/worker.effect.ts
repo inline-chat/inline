@@ -2,11 +2,13 @@ import { Context, Effect, Layer } from "effect"
 import { ErrorReporter } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
+  ProcessServiceStopFailure,
   acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 import type { NativeUploadWorker } from "./worker"
 
 export interface NativeUploadProcessShape {
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
   readonly start: Effect.Effect<NativeUploadWorker, ProcessServiceStartFailure>
 }
 

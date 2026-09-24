@@ -30,6 +30,16 @@ export function createTestEnvironment(
   }
   environment["DATABASE_URL"] = databaseUrl
   environment["TEST_DATABASE_URL"] = databaseUrl
+  const redisUrl = inherited["INLINE_TEST_REDIS_URL"]
+  if (redisUrl) {
+    const parsed = new URL(redisUrl)
+    if (parsed.protocol !== "redis:" || !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) ||
+        !parsed.port || parsed.username || parsed.password || !["", "/"].includes(parsed.pathname)) {
+      throw new Error("INLINE_TEST_REDIS_URL must be an unauthenticated local Redis endpoint with an explicit port.")
+    }
+    environment["INLINE_TEST_REDIS_URL"] = redisUrl
+    environment["REDIS_URL"] = redisUrl
+  }
   return environment
 }
 

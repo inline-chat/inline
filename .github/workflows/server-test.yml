@@ -37,10 +37,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  container:
+    name: Server Linux image and migration commands
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: container_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Check server container and Fly configuration contracts
+        run: bun test scripts/docker/server-context.test.ts scripts/docker/prune-workspace.test.ts
+      - name: Export committed server build context
+        run: bun --no-env-file scripts/docker/server-context.ts "$GITHUB_SHA" "$RUNNER_TEMP/server-context"
+      - name: Build runtime and Coolify targets (never push)
+        run: |
+          docker build --platform linux/amd64 --target runtime --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f "$RUNNER_TEMP/server-context/server/Dockerfile" -t inline-server:ci "$RUNNER_TEMP/server-context"
+          docker build --platform linux/amd64 --target coolify --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f "$RUNNER_TEMP/server-context/server/Dockerfile" -t inline-server:ci-coolify "$RUNNER_TEMP/server-context"
+      - name: Exercise packaged migration and verification commands
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/container_test
+        run: |
+          if docker run --rm --network host -e DATABASE_URL inline-server:ci bun server/dist/verify-migrations.js; then
+            echo "Verification incorrectly accepted an empty database"
+            exit 1
+          fi
+          docker run --rm --network host -e DATABASE_URL inline-server:ci bun server/dist/migrate.js
+          docker run --rm --network host -e DATABASE_URL inline-server:ci bun server/dist/verify-migrations.js
+          docker run --rm --network host -e DATABASE_URL inline-server:ci bun server/scripts/migrate.ts
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/migrate.js
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/scripts/verify-migrations.ts
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/scripts/migrate.ts
+          docker run --rm inline-server:ci-coolify wget --version
+
+      - name: Run HTTP, WebSocket, and drain smoke in the final image
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/container_test
+        run: |
+          docker run --rm --network host -e DATABASE_URL \
+            inline-server:ci bun server/dist/core-production-smoke.js --artifact
+
   test:
     name: Server Typecheck, Lint, and Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
 
     services:
       postgres:
@@ -56,6 +112,16 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v6

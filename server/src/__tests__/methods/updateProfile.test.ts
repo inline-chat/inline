@@ -107,18 +107,20 @@ describe("updateProfile", () => {
 
   test("alerts once with the finalized profile when pending setup completes", async () => {
     const user = await testUtils.createUser("pending-profile@example.com")
+    const { session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
     await db.update(users).set({ pendingSetup: true }).where(eq(users.id, user.id))
-    const alertSpy = spyOn(BotAlerts, "signupCompleted")
+    const alertSpy = spyOn(BotAlerts, "signupCompleted").mockImplementation(() => {})
 
     const result = await handler(
       { firstName: "Ada", lastName: "Lovelace", username: "pendingprofile" },
-      makeContext(user.id),
+      { ...makeContext(user.id), currentSessionId: session.id },
     )
 
     expect(result.user.pendingSetup).toBe(false)
     const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
     expect(storedUser?.pendingSetup).toBe(false)
     expect(alertSpy).toHaveBeenCalledTimes(1)
+    expect(alertSpy.mock.calls[0]?.[0].sessionId).toBe(session.id)
     expect(alertSpy.mock.calls[0]?.[0].user).toMatchObject({
       id: user.id,
       firstName: "Ada",

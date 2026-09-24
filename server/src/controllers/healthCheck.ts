@@ -22,6 +22,8 @@ export interface HealthDeps {
   readonly checkDatabase: () =>
     CancellableHealthCheck
   readonly clock?: Pick<InlineProtocolClock, "sample">
+  readonly brokerRequired?: boolean
+  readonly checkBroker?: () => boolean
   readonly timeoutMs?: number
 }
 
@@ -40,6 +42,10 @@ export interface HealthResponse {
       readonly error?: "database_unavailable"
     }
     readonly clock: InlineProtocolClockHealth
+    readonly broker?: {
+      readonly ok: boolean
+      readonly error?: "broker_unavailable"
+    }
   }
 }
 
@@ -148,11 +154,14 @@ const checkDatabase = async (
 }
 
 const resolveHealthDeps = (
-  deps?: HealthDeps,
-): HealthDeps => deps ?? defaultHealthDeps
+  deps?: Partial<HealthDeps>,
+): HealthDeps => ({
+  ...defaultHealthDeps,
+  ...deps,
+})
 
 export const runHealthChecks = async (
-  deps?: HealthDeps,
+  deps?: Partial<HealthDeps>,
 ): Promise<HealthResponse> => {
   const resolved = resolveHealthDeps(deps)
   const databaseResult = await checkDatabase(resolved)
@@ -160,7 +169,15 @@ export const runHealthChecks = async (
   const clock = (resolved.clock ?? inlineProtocolClock).sample(
     databaseResult.referenceTimeMillis,
   )
-  const ok = database.ok && clock.ok
+  const broker = resolved.brokerRequired
+    ? (() => {
+      const ok = resolved.checkBroker?.() === true
+      return ok
+        ? { ok }
+        : { ok, error: "broker_unavailable" as const }
+    })()
+    : undefined
+  const ok = database.ok && clock.ok && (broker?.ok ?? true)
 
   return {
     ok,
@@ -169,6 +186,7 @@ export const runHealthChecks = async (
     checks: {
       database,
       clock,
+      ...(broker === undefined ? {} : { broker }),
     },
   }
 }

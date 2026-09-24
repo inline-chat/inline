@@ -6,6 +6,7 @@ import {
   Layer,
   Schema,
 } from "effect"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
 
 export const DEFAULT_HTTP_RATE_LIMIT_MAX = 180
 export const DEFAULT_HTTP_RATE_LIMIT_WINDOW_MILLIS = 60_000
@@ -204,6 +205,24 @@ export const makeHttpRateLimiterLayer = (
           limiter.clear()
         }),
     ).pipe(
-      Effect.map((limiter) => limiter.service),
+      Effect.map((limiter): HttpRateLimiterShape => {
+        const max = positiveInteger(options.max, DEFAULT_HTTP_RATE_LIMIT_MAX)
+        const windowMillis = positiveInteger(options.windowMillis, DEFAULT_HTTP_RATE_LIMIT_WINDOW_MILLIS)
+        return {
+          consume: (key) => Effect.flatMap(limiter.service.consume(key), (localPermit) =>
+            Effect.flatMap(Effect.promise(() => internalMessaging.consumeSharedBudget("http", key, windowMillis)), (shared) => {
+              if (!shared) return Effect.succeed(localPermit)
+              const permit = {
+                limit: max,
+                remaining: Math.max(max - shared.count, 0),
+                resetSeconds: Math.max(0, Math.ceil(shared.remainingMs / 1_000)),
+              }
+              return shared.count > max ? Effect.fail(new HttpRateLimitExceeded(permit)) : Effect.succeed(permit)
+            }),
+          ),
+          refund: (key) => Effect.flatMap(limiter.service.refund(key), () =>
+            Effect.promise(() => internalMessaging.refundSharedBudget("http", key))),
+        }
+      }),
     ),
   )

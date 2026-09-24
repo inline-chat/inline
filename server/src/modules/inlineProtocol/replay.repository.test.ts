@@ -94,6 +94,42 @@ describe("durable encrypted replay results", () => {
     expect((await rows()).length).toBe(2)
   })
 
+  test("reports an orphaned claim as unknown without redispatching, then accepts a late completion", async () => {
+    const writer = repository()
+    expect(await writer.claim(claim())).toEqual({ kind: "claimed" })
+    await db.update(schema.inlineProtocolRequests)
+      .set({ claimedAt: new Date(Date.now() - 61_000) })
+      .where(eq(schema.inlineProtocolRequests.messageId, 1n))
+    expect(await repository().claim(claim())).toEqual({ kind: "unknown_outcome" })
+    expect(await repository().claim({ ...claim(), authenticatedBody: Uint8Array.of(8) })).toEqual({ kind: "digest_mismatch" })
+    expect(await writer.complete({ ...identity(), resultBody: body })).toBeTrue()
+    expect(await repository().claim(claim())).toEqual({ kind: "completed", resultBody: body })
+  })
+
+  test("retains a late completion for a full replay TTL instead of its expired claim TTL", async () => {
+    const writer = repository()
+    const claimedAt = new Date("2030-01-01T00:00:00.000Z")
+    const completedAt = new Date("2030-01-01T00:11:00.000Z")
+    expect(await writer.claim({ ...claim(), now: claimedAt, ttlMs: 1 })).toEqual({ kind: "claimed" })
+    await db.update(schema.inlineProtocolRequests)
+      .set({ claimedAt })
+      .where(eq(schema.inlineProtocolRequests.messageId, 1n))
+
+    expect(await writer.complete({ ...identity(), resultBody: body, now: completedAt })).toBeTrue()
+    const [row] = await rows()
+    expect(row?.expiresAt).toEqual(new Date("2030-01-01T00:21:00.000Z"))
+    expect(await writer.cleanupExpiredCompleted(new Date("2030-01-01T00:20:59.999Z"))).toBe(0)
+    expect(await writer.cleanupExpiredCompleted(new Date("2030-01-01T00:21:00.000Z"))).toBe(1)
+  })
+
+  test("claims a request once across independent repository instances", async () => {
+    const first = repository()
+    const second = repository()
+    const outcomes = await Promise.all([first.claim(claim()), second.claim(claim())])
+    expect(outcomes.filter((outcome) => outcome.kind === "claimed")).toHaveLength(1)
+    expect(outcomes.filter((outcome) => outcome.kind === "in_flight")).toHaveLength(1)
+  })
+
   test("rolls back an interrupted batch and safely resumes", async () => {
     const legacy = repository(false)
     for (const id of [1n, 2n]) {

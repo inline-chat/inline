@@ -748,6 +748,7 @@ const applyUpdate = (
     case "participantGroupAdd":
     case "participantGroupDelete":
     case "spaceSettings":
+    case "spaceProfile":
       deferUpdate(db, update)
       return "deferred"
 
@@ -762,6 +763,7 @@ const applyUpdate = (
     case "chatSkipPts":
     case "chatHasNewUpdates":
     case "spaceHasNewUpdates":
+    case "userHasNewUpdates":
       return "syncHint"
 
     case undefined:

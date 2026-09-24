@@ -156,6 +156,13 @@ export class SyncEngine {
     const ambiguousBuckets = new Map<string, SyncBucketKey>()
 
     for (const update of updates) {
+      if (update.update.oneofKind === "userHasNewUpdates") {
+        const targetSeq = update.update.userHasNewUpdates.updateSeq
+        if (Number.isSafeInteger(targetSeq) && targetSeq > 0) {
+          this.requestBucket({ kind: "user" }, targetSeq, false)
+        }
+        continue
+      }
       if (update.update.oneofKind === "chatHasNewUpdates") {
         const key = hintedChatKey(update.update.chatHasNewUpdates)
         if (key) {

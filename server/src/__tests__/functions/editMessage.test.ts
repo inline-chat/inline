@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import {
   InputPeer,
   BlockTable_Alignment,
@@ -31,6 +31,9 @@ import { publishClaimedBlockImageJobForTests } from "@in/server/modules/message/
 import { decryptStoredBlockContent, encryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
 import { deleteUnreferencedBlockContents } from "@in/server/modules/message/blockContentStorage"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -127,6 +130,48 @@ describe("editMessage function", () => {
     const message = extractEditedMessage(result)
     expect(message?.message?.length).toBeGreaterThan(90_000)
     expect(message?.blockContent?.blocks).toHaveLength(1)
+  })
+
+  test("returns only after local edit delivery and without waiting for a stalled durable broker hint", async () => {
+    const sent = await sendMessage({ peerId: privateChatPeerId, message: "before stalled edit hint" }, context)
+    const messageId = extractSentMessageId(sent)
+    if (!messageId) throw new Error("message was not created")
+    await outboundPublications.drain()
+    outboundPublications.start()
+    const releasePublication = Promise.withResolvers<void>()
+    const publicationStarted = Promise.withResolvers<void>()
+    let localDeliveryCompleted = false
+    let localDeliveryAtPublication = false
+    const localDelivery = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {
+      await Promise.resolve()
+      localDeliveryCompleted = true
+    })
+    const publish = spyOn(internalMessaging, "publish").mockImplementation(async () => {
+      localDeliveryAtPublication = localDeliveryCompleted
+      publicationStarted.resolve()
+      await releasePublication.promise
+      return { status: "published", subscribers: 1 }
+    })
+
+    try {
+      const result = editMessage({ peer: privateChatPeerId, messageId, text: "after stalled edit hint" }, context)
+      await publicationStarted.promise
+
+      let settled = false
+      void result.then(() => { settled = true })
+      for (let attempt = 0; attempt < 8 && !settled; attempt += 1) await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(localDeliveryAtPublication).toBe(true)
+
+      releasePublication.resolve()
+      await outboundPublications.drain()
+      await result
+    } finally {
+      releasePublication.resolve()
+      await outboundPublications.drain()
+      publish.mockRestore()
+      localDelivery.mockRestore()
+    }
   })
 
   test("former space members cannot edit their own message through a retained chat grant", async () => {

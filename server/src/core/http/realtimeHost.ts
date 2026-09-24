@@ -54,6 +54,7 @@ export interface RealtimeWebSocketData {
 }
 
 export interface CoreRealtimeTransport {
+  readonly beginDrain: () => void
   readonly shutdown: () => Promise<void>
   readonly tryUpgrade: (
     request: Request,
@@ -255,6 +256,7 @@ export const makeCoreRealtimeTransport = <
       },
       message: async (socket, message) => {
         if (socket.data.closed) return
+        if (!accepting) { socket.close(1001, "Server draining"); return }
         const length = typeof message === "string" ? Buffer.byteLength(message) : message.byteLength
         if (length > (socket.data.isAuthenticated?.() ? REALTIME_FRAME_BYTES : PREAUTH_FRAME_BYTES)) {
           socket.close(1009, "Realtime frame too large")
@@ -313,6 +315,7 @@ export const makeCoreRealtimeTransport = <
     }
 
   return {
+    beginDrain: () => { accepting = false; admission.shutdown() },
     tryUpgrade: (
       request,
       server,

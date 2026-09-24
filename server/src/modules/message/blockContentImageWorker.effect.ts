@@ -8,6 +8,7 @@ import {
 } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
+  ProcessServiceStopFailure,
   acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 import type {
@@ -15,6 +16,7 @@ import type {
 } from "./blockContentImageWorker"
 
 export interface BlockContentImageProcessShape {
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
   readonly start: Effect.Effect<
     BlockContentImageWorker | null,
     ProcessServiceStartFailure

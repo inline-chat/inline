@@ -7,20 +7,74 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { acquireUpdateDiscoveryWriterFence } from "@in/server/modules/updates/updateDiscoveryBarrier"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
+import { registerPostCommitHook, type PostCommitHook } from "@in/server/db/commitHooks"
 
 type EnqueueUserUpdateInput = {
   userId: number
   update: ServerUpdate["update"]
 }
 
+type EnqueueUserUpdateOptions = {
+  tx?: Transaction
+  senderUserId?: number
+  excludeSessionId?: number
+}
+
+class UserFrontierPublication implements PostCommitHook {
+  constructor(
+    private readonly userId: number,
+    private frontier: number,
+    private senderUserId?: number,
+    private excludeSessionId?: number,
+  ) {}
+
+  async run() {
+    publishDurableReference({
+      bucket: { kind: "user", userId: this.userId },
+      frontier: this.frontier,
+      ...(this.senderUserId === undefined ? {} : { senderUserId: this.senderUserId }),
+      ...(this.excludeSessionId === undefined ? {} : { excludeSessionId: this.excludeSessionId }),
+    })
+  }
+
+  merge(next: PostCommitHook) {
+    if (!(next instanceof UserFrontierPublication) || next.userId !== this.userId) {
+      throw new Error("User frontier publication merged with an incompatible post-commit hook")
+    }
+    this.frontier = Math.max(this.frontier, next.frontier)
+    // A frontier covers every earlier update in its coalesced group. Excluding
+    // session B for the latest update would make B miss an earlier update from
+    // session A, so preserve the skip only when every update had the same
+    // exact sender/session pair.
+    if (this.senderUserId !== next.senderUserId || this.excludeSessionId !== next.excludeSessionId) {
+      this.senderUserId = undefined
+      this.excludeSessionId = undefined
+    }
+  }
+}
+
+const registerUserFrontierPublication = (
+  tx: Transaction,
+  userId: number,
+  frontier: number,
+  options?: EnqueueUserUpdateOptions,
+) => {
+  registerPostCommitHook(
+    tx,
+    `user-frontier:${userId}`,
+    new UserFrontierPublication(userId, frontier, options?.senderUserId, options?.excludeSessionId),
+  )
+}
+
 export const UserBucketUpdates = {
-  async enqueue(input: EnqueueUserUpdateInput, options?: { tx?: Transaction }): Promise<UpdateSeqAndDate> {
+  async enqueue(input: EnqueueUserUpdateInput, options?: EnqueueUserUpdateOptions): Promise<UpdateSeqAndDate> {
     if (options?.tx) {
-      return await insertUserUpdate(options.tx, input)
+      return await insertUserUpdate(options.tx, input, options)
     }
 
     return await db.transaction(async (tx) => {
-      return await insertUserUpdate(tx, input)
+      return await insertUserUpdate(tx, input, options)
     })
   },
 
@@ -30,16 +84,16 @@ export const UserBucketUpdates = {
    */
   async enqueueMany(
     inputs: EnqueueUserUpdateInput[],
-    options?: { tx?: Transaction },
+    options?: EnqueueUserUpdateOptions,
   ): Promise<UpdateSeqAndDate[]> {
     if (inputs.length === 0) return []
 
     if (options?.tx) {
-      return await insertUserUpdates(options.tx, inputs)
+      return await insertUserUpdates(options.tx, inputs, options)
     }
 
     return await db.transaction(async (tx) => {
-      return await insertUserUpdates(tx, inputs)
+      return await insertUserUpdates(tx, inputs, options)
     })
   },
 }
@@ -94,7 +148,11 @@ const allocateNextSeq = async (tx: Transaction, userId: number): Promise<UpdateS
   return { seq: result.seq, date: result.date }
 }
 
-const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput): Promise<UpdateSeqAndDate> => {
+const insertUserUpdate = async (
+  tx: Transaction,
+  input: EnqueueUserUpdateInput,
+  options?: EnqueueUserUpdateOptions,
+): Promise<UpdateSeqAndDate> => {
   const { seq: nextSeq, date } = await allocateNextSeq(tx, input.userId)
 
   const serverUpdate: ServerUpdate = {
@@ -112,11 +170,16 @@ const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput):
     payload: updateRecord.encrypted,
     date,
   })
+  registerUserFrontierPublication(tx, input.userId, nextSeq, options)
 
   return { seq: nextSeq, date }
 }
 
-const insertUserUpdates = async (tx: Transaction, inputs: EnqueueUserUpdateInput[]): Promise<UpdateSeqAndDate[]> => {
+const insertUserUpdates = async (
+  tx: Transaction,
+  inputs: EnqueueUserUpdateInput[],
+  options?: EnqueueUserUpdateOptions,
+): Promise<UpdateSeqAndDate[]> => {
   const indexed = inputs.map((input, index) => ({ input, index }))
   // Deterministic ordering:
   // - Sort by userId to avoid deadlocks when multiple users are updated in one tx
@@ -126,7 +189,7 @@ const insertUserUpdates = async (tx: Transaction, inputs: EnqueueUserUpdateInput
   const results: UpdateSeqAndDate[] = new Array(inputs.length)
 
   for (const { input, index } of indexed) {
-    results[index] = await insertUserUpdate(tx, input)
+    results[index] = await insertUserUpdate(tx, input, options)
   }
 
   return results

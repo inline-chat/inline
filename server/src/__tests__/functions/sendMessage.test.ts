@@ -1,4 +1,4 @@
-import { afterAll, describe, test, expect, beforeAll, mock } from "bun:test"
+import { afterAll, describe, test, expect, beforeAll, mock, spyOn } from "bun:test"
 import {
   DialogNotificationSettings,
   DialogNotificationSettings_Mode,
@@ -23,6 +23,9 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getReplyThreadAnchorSenderId } from "@in/server/modules/subthreads"
 import { createUserGroup } from "@in/server/modules/userGroups"
 import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 // Test state
 let currentUser: DbUser
@@ -100,6 +103,45 @@ describe("sendMessage", () => {
     const message = extractMessage(result)
     expect(message?.message).toBe(text)
     expect(message?.entities).toBeUndefined()
+  })
+
+  test("returns only after local delivery and without waiting for a stalled durable broker hint", async () => {
+    await outboundPublications.drain()
+    outboundPublications.start()
+    const releasePublication = Promise.withResolvers<void>()
+    const publicationStarted = Promise.withResolvers<void>()
+    let localDeliveryCompleted = false
+    let localDeliveryAtPublication = false
+    const localDelivery = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {
+      await Promise.resolve()
+      localDeliveryCompleted = true
+    })
+    const publish = spyOn(internalMessaging, "publish").mockImplementation(async () => {
+      localDeliveryAtPublication = localDeliveryCompleted
+      publicationStarted.resolve()
+      await releasePublication.promise
+      return { status: "published", subscribers: 1 }
+    })
+
+    try {
+      const result = sendMessage({ peerId: privateChatPeerId, message: "broker-free response" }, context)
+      await publicationStarted.promise
+
+      let settled = false
+      void result.then(() => { settled = true })
+      for (let attempt = 0; attempt < 8 && !settled; attempt += 1) await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(localDeliveryAtPublication).toBe(true)
+
+      releasePublication.resolve()
+      await outboundPublications.drain()
+      await result
+    } finally {
+      releasePublication.resolve()
+      await outboundPublications.drain()
+      publish.mockRestore()
+      localDelivery.mockRestore()
+    }
   })
 
   test("sends one 90k rich progress message through the realtime function", async () => {

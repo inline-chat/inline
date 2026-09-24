@@ -51,7 +51,7 @@ jobs:
           bun-version: 1.4.0
 
       - name: Check Docker workspace packaging (no image builds)
-        run: bun test scripts/docker/prune-workspace.test.ts
+        run: bun --no-env-file test scripts/docker
 
       - name: Check plugin bundle
         run: bun run check:codex-plugin

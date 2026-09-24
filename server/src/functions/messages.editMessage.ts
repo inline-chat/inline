@@ -1,6 +1,7 @@
 import { MessageEntity_Type, type InputPeer, type MessageActions, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
-import { MessageModel } from "@in/server/db/models/messages"
+import { MessageModel, MessageRevisionConflict } from "@in/server/db/models/messages"
+import { ModelError } from "@in/server/db/models/_errors"
 import { UsersModel } from "@in/server/db/models/users"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -20,6 +21,7 @@ import { validateGroupMentions } from "@in/server/modules/message/resolveGroupMe
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import {
   getMessageThreadProjectionsMap,
   isSubthreadParentMessage,
@@ -34,6 +36,8 @@ type Input = {
   entities?: MessageEntities
   actions?: MessageActions
   parseMarkdown?: boolean
+  expectedRevision?: number
+  expectedVoiceId?: number
 }
 
 type Output = {
@@ -45,7 +49,18 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = chat.id
   const currentUserId = context.currentUserId
   await AccessGuards.ensureChatAccess(chat, currentUserId)
-  const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  let fullMessage
+  try {
+    fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  } catch (error) {
+    // An asynchronous compare-and-swap operation treats disappearance as a
+    // stale result. Ordinary edits retain their existing invalid-message path.
+    if ((input.expectedRevision !== undefined || input.expectedVoiceId !== undefined) &&
+        error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) {
+      throw new MessageRevisionConflict()
+    }
+    throw error
+  }
   if (fullMessage && await isSubthreadParentMessage(fullMessage.globalId)) {
     throw RealtimeRpcError.BadRequest()
   }
@@ -121,6 +136,8 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     actions: normalizedActions,
     blockContent: preparedBlockContent,
     suppressEditDate: context.isBot === true,
+    expectedRevision: input.expectedRevision,
+    expectedVoiceId: input.expectedVoiceId,
   })
 
   if (!message) {
@@ -168,6 +185,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     actionsOverride: normalizedActions,
     threadProjection,
   })
+  publishDurableReference({ bucket: { kind: "chat", chatId }, frontier: update.seq, senderUserId: currentUserId })
 
   BotUpdateProjector.messageEdited({
     chat,
@@ -220,6 +238,7 @@ const pushUpdates = async ({
   }
 
   let selfUpdates: Update[] = []
+  const sends: Promise<void>[] = []
 
   if (updateGroup.type === "dmUsers") {
     for (const userId of updateGroup.userIds) {
@@ -252,17 +271,17 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(userId, [
+        sends.push(RealtimeUpdates.pushToUser(userId, [
           // order matters here
           newMessageUpdate,
-        ])
+        ]))
         selfUpdates = [
           // order matters here
           newMessageUpdate,
         ]
       } else {
         // other users get the message only
-        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+        sends.push(RealtimeUpdates.pushToUser(userId, [newMessageUpdate]))
       }
     }
   } else if (updateGroup.type === "threadUsers") {
@@ -294,20 +313,21 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(userId, [
+        sends.push(RealtimeUpdates.pushToUser(userId, [
           // order matters here
           editMessageUpdate,
-        ])
+        ]))
         selfUpdates = [
           // order matters here
           editMessageUpdate,
         ]
       } else {
         // other users get the message only
-        RealtimeUpdates.pushToUser(userId, [editMessageUpdate])
+        sends.push(RealtimeUpdates.pushToUser(userId, [editMessageUpdate]))
       }
     }
   }
 
+  await Promise.all(sends)
   return { selfUpdates, updateGroup }
 }

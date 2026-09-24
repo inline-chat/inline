@@ -87,6 +87,24 @@ const upgrade = (
 }
 
 describe("raw Bun realtime transport", () => {
+  it("rejects new frames on existing sockets once drain begins", async () => {
+    let handled = 0
+    const transport = makeCoreRealtimeTransport(makeContext({ open: (peer) => Effect.succeed({
+      connectionId: peer.id, isAuthenticated: () => true, close: Effect.void,
+      handle: () => Effect.sync(() => { handled++ }),
+    }) }))
+    const data = upgrade(transport, new Request("http://inline.test/realtime"))
+    const closes: number[] = []
+    const socket = { data, close: (code: number) => { closes.push(code) }, sendBinary: () => 1 } as unknown as ServerWebSocket<RealtimeWebSocketData>
+    await transport.websocket.open?.(socket)
+    await data.connection
+    transport.beginDrain()
+    await transport.websocket.message(socket, Buffer.alloc(1))
+    expect(handled).toBe(0)
+    expect(closes).toEqual([1001])
+    await transport.shutdown()
+  })
+
   it("rejects excess upgrades before allocating a protocol session", async () => {
     let upgrades = 0
     const transport = makeCoreRealtimeTransport(makeContext({ open: () => Effect.die("not exercised") }))

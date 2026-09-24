@@ -39,7 +39,7 @@ INLINE_HOMEBREW_TAP_PATH=/path/to/homebrew-inline bun run scripts/release-cli.ts
 node scripts/check-agent-release-group.mjs
 ```
 
-Push the reviewed candidate, then pass its exact commit SHA as `ref` below.
+Push the reviewed candidate, then pass its exact commit SHA as `commit` below.
 The workflow definition comes from `main`. An empty `targets` input builds all
 five supported targets in CI, including signed and notarized Apple-silicon
 macOS. Do not skip notarization for a normal stable release.
@@ -47,11 +47,11 @@ macOS. Do not skip notarization for a normal stable release.
 ```sh
 # Credentials only; no build or publication.
 gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f ref=PUBLIC_CANDIDATE_SHA -f preflight_only=true
+  -f commit=PUBLIC_CANDIDATE_SHA -f preflight_only=true
 
 # After the candidate is approved for publication:
 gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f ref=PUBLIC_CANDIDATE_SHA
+  -f commit=PUBLIC_CANDIDATE_SHA
 ```
 
 The full workflow validates the CLI and integration packages before building,
@@ -87,7 +87,7 @@ To check credentials without building or publishing:
 
 ```sh
 gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f ref=main -f preflight_only=true
+  -f commit=PUBLIC_CANDIDATE_SHA -f preflight_only=true
 ```
 
 Wait for the preflight job to succeed. Validation, build, and publication jobs

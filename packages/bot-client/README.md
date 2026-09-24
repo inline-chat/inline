@@ -47,15 +47,21 @@ Use `editMessageActions` to replace actions without changing text (`actions: []`
 Polling uses the same ordered backlog and is mutually exclusive with an enabled webhook:
 
 ```ts
-const updates = await bot.getUpdates({ timeout: 30 })
+const updates = await bot.getUpdates(
+  { timeout: 25 },
+  { signal: AbortSignal.timeout(35_000) },
+)
 if (updates.ok && updates.result.length > 0) {
   const last = updates.result.at(-1)!
   // Process idempotently, then acknowledge on the next request.
-  await bot.getUpdates({ offset: last.update_id + 1, timeout: 30 })
+  await bot.getUpdates(
+    { offset: last.update_id + 1, timeout: 25 },
+    { signal: AbortSignal.timeout(35_000) },
+  )
 }
 ```
 
-The client intentionally does not retry requests. A retry of `sendMessage`, `editMessageText`, or another mutation can duplicate work because the Bot API has no idempotency key. Retry reads when appropriate, and make polling/webhook processing idempotent around `update_id`.
+The HTTP deadline must exceed the requested long-poll timeout, including network and server-processing margin. The client intentionally does not retry requests. A retry of `sendMessage`, `editMessageText`, or another mutation can duplicate work because the Bot API has no idempotency key. Retry reads when appropriate, and make polling/webhook processing idempotent around `update_id`.
 
 Bots never receive their own messages. Under `mentions`, human DMs, mentions, replies, and targeted commands activate the bot. Messages from another bot require an explicit identity-resolved mention, including when the trigger is `all`.
 

@@ -57,6 +57,26 @@ describe("getUpdatesState", () => {
     }
   })
 
+  test("does not begin a hint batch after an internal repair lifecycle stops", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Stopped repair hints", ["stopped-repair-hints@example.com"])
+    const user = users[0]
+    const chat = await testUtils.createChat(space.id, "Changed chat", "thread", true)
+    if (!user || !chat) throw new Error("Fixture creation failed")
+    await db.update(chats).set({ lastUpdateDate: new Date(), updateSeq: 1 }).where(eq(chats.id, chat.id))
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    try {
+      const result = await getUpdatesState(
+        { date: 1n },
+        testUtils.functionContext({ userId: user.id }),
+        { shouldEmitHints: () => false },
+      )
+      expect(result.updatesFound).toBe(true)
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      push.mockRestore()
+    }
+  })
+
   for (const revocation of ["membership", "space deletion"] as const) {
     test(`retained linked-child rows do not expose hints after ${revocation}`, async () => {
       const { users, space } = await testUtils.createSpaceWithMembers("Child hint authority", [

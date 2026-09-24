@@ -7,6 +7,10 @@
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
+import { connectionDirectory } from "@in/server/modules/internalMessaging/directory"
+import { connectedUserRepair } from "@in/server/modules/internalMessaging/repair"
+import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
+import { connectionBackgroundWork } from "./backgroundWork"
 import { WebSocketTopic } from "@in/server/ws/topics"
 import type { Server } from "bun"
 import type { ElysiaWS } from "elysia/ws"
@@ -18,10 +22,55 @@ const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
 export const REALTIME_CLOSE_SESSION_REVOKED = 4401
 export const REALTIME_CLOSE_SESSION_REVOKED_REASON = "session_revoked"
+export const REALTIME_CLOSE_DURABLE_REPAIR = 4402
+export const REALTIME_CLOSE_DURABLE_REPAIR_REASON = "durable_repair"
+
+/** A reconnect fallback is only for a confirmed durable-repair delivery gap. */
+export type DurableRepairCloseReason = "no_replayable_record" | "transport_not_accepted"
+
+const DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS = 30_000
+const MAX_DURABLE_REPAIR_CLOSE_GUARDS = 4_096
+
+const pairKey = (firstId: number, secondId: number): string => `${firstId}:${secondId}`
 
 type ConnectionCloseContext = {
   loggedOut?: boolean
   authenticationInvalidated?: boolean
+  durableRepair?: DurableRepairCloseReason
+}
+
+export type SessionClientTypeHydrator = (
+  input: { userId: number; sessionId: number },
+) => Promise<string | undefined>
+
+export type SpaceMembershipHydrator = (
+  input: { userId: number; spaceId: number },
+) => Promise<boolean>
+
+const loadSessionClientType: SessionClientTypeHydrator = async ({
+  userId,
+  sessionId,
+}) => {
+  const [{ db }, { sessions }, orm] = await Promise.all([
+    import("@in/server/db"),
+    import("@in/server/db/schema"),
+    import("drizzle-orm"),
+  ])
+  const rows = await db
+    .select({ clientType: sessions.clientType })
+    .from(sessions)
+    .where(orm.and(
+      orm.eq(sessions.id, sessionId),
+      orm.eq(sessions.userId, userId),
+      orm.isNull(sessions.revoked),
+    ))
+    .limit(1)
+  return rows[0]?.clientType ?? undefined
+}
+
+const loadCurrentSpaceMembership: SpaceMembershipHydrator = async ({ userId, spaceId }) => {
+  const { getCurrentSpaceMembership } = await import("@in/server/modules/authorization/spaceMembershipLifecycle")
+  return Boolean(await getCurrentSpaceMembership(spaceId, userId))
 }
 
 export enum ConnVersion {
@@ -45,21 +94,43 @@ interface Connection {
   userId?: number
   sessionId?: number
   isBot?: boolean
+  clientType?: string
+  presenceGeneration?: number
 
   /** Realtime API layer */
   layer?: number
+}
+
+type AuthenticatedSessionConnections = {
+  userId: number
+  sessionId: number
+  connectionIds: Set<string>
 }
 
 class ConnectionManager {
   private server: Server<unknown> | undefined
   private connections: Map<string, Connection> = new Map()
   private authenticatedUsers: Map<number, Set<string>> = new Map()
+  /** Narrows session-scoped operations without scanning every live socket. */
+  private authenticatedSessions = new Map<string, AuthenticatedSessionConnections>()
   private usersBySpaceId: Map<number, Set<number>> = new Map()
   private userSpaceIds: Map<number, number[]> = new Map()
   private userSpaceMembershipRevision: Map<number, number> = new Map()
+  /** Changes on every authenticated socket membership change; prevents stale repair work from closing a fresh reconnect. */
+  private userConnectionEpochs: Map<number, number> = new Map()
+  private nextUserConnectionEpoch = 0
+  /** Rate guard for protocol-compatible reconnect repair, bounded to prevent untrusted user-id churn from retaining memory. */
+  private durableRepairCloseGuards: Map<number, number> = new Map()
+  /** One live lookup per session; removed when its client type resolves or fails. */
+  private readonly clientTypeHydrations = new Map<string, Promise<void>>()
+  /** One live database refresh per affected user and space. */
+  private readonly membershipRefreshes = new Map<string, Promise<void>>()
+  /** Listener-owned generation rejects late presence callbacks after a restart. */
+  private presenceGeneration: number | undefined
 
   setServer(server: Server<unknown>) {
     this.server = server
+    this.presenceGeneration = presenceManager.start?.() ?? this.presenceGeneration
   }
 
   getConnection(id: string): Connection | undefined {
@@ -83,6 +154,8 @@ class ConnectionManager {
   getAuthenticatedUserCount(): number {
     return this.authenticatedUsers.size
   }
+
+  getAuthenticatedUserIds(): number[] { return [...this.authenticatedUsers.keys()] }
 
   getUserConnectionSummary(userId: number): { totalConnections: number; sessions: { sessionId: number; count: number }[] } {
     const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
@@ -123,31 +196,122 @@ class ConnectionManager {
     return id
   }
 
-  authenticateConnection(id: string, userId: number, sessionId: number, layer: number = 1, isBot: boolean = false) {
+  authenticateConnection(id: string, userId: number, sessionId: number, layer: number = 1, isBot: boolean = false, clientType: string = "unknown"): boolean {
     log.debug(`Authenticating connection ${id} for user ${userId}`)
     const connection = this.connections.get(id)
-    if (connection) {
-      clearTimeout(connection.unauthenticatedCloseTimeoutId)
-      connection.unauthenticatedCloseTimeoutId = undefined
+    if (!connection) return false
+    // A socket's identity is immutable after admission. Re-admitting the same
+    // identity is harmless; accepting a different one would leave stale
+    // session and presence ownership behind.
+    if (connection.userId !== undefined &&
+      (connection.userId !== userId || connection.sessionId !== sessionId)) {
+      log.warn("Rejected websocket identity change after authentication", {
+        connectionId: id,
+        previousUserId: connection.userId,
+        previousSessionId: connection.sessionId,
+        userId,
+        sessionId,
+      })
+      this.closeConnection(id, { authenticationInvalidated: true })
+      return false
+    }
+    // Connection init already queried the session row. This synchronous gate
+    // prevents a revocation event that arrived just before registration from
+    // being lost between that query and the local connection map update.
+    if (!sessionAuthority.admit({ userId, sessionId })) {
+      this.closeConnection(id, { authenticationInvalidated: true })
+      return false
+    }
 
-      connection.userId = userId
-      connection.sessionId = sessionId
-      connection.isBot = isBot
-      connection.layer = layer
+    clearTimeout(connection.unauthenticatedCloseTimeoutId)
+    connection.unauthenticatedCloseTimeoutId = undefined
 
-      void presenceManager.handleConnectionOpen({ userId, sessionId }).catch((e) => {
-        log.error("presenceManager.handleConnectionOpen failed", { userId, sessionId, error: e })
+    connection.userId = userId
+    connection.sessionId = sessionId
+    connection.isBot = isBot
+    connection.clientType = clientType
+    connection.layer = layer
+    connection.presenceGeneration = this.presenceGeneration ?? presenceManager.start?.()
+    connectionDirectory.register({ connectionId: id, userId, sessionId, clientType, isBot })
+
+    void presenceManager.handleConnectionOpen({ userId, sessionId }, connection.presenceGeneration).catch((e) => {
+      log.error("presenceManager.handleConnectionOpen failed", { userId, sessionId, error: e })
+    })
+
+    if (!this.authenticatedUsers.has(userId)) {
+      // User is connecting for the first time, populate the cache
+      this.authenticatedUsers.set(userId, new Set())
+      this.startMembershipHydration(userId)
+    }
+    this.authenticatedUsers.get(userId)?.add(id)
+    this.addAuthenticatedSessionConnection(id, userId, sessionId)
+    this.bumpUserConnectionEpoch(userId)
+    const repairTimer = setTimeout(() => {
+      if (this.connections.get(id)?.userId === userId) connectedUserRepair.observeConnection(userId)
+    }, 0)
+    repairTimer.unref?.()
+    return true
+  }
+
+  updateAuthenticatedClientType(id: string, userId: number, sessionId: number, clientType: string): void {
+    const connection = this.connections.get(id)
+    if (connection?.userId !== userId || connection.sessionId !== sessionId) return
+    connection.clientType = clientType
+    connectionDirectory.register({ connectionId: id, userId, sessionId, clientType, isBot: connection.isBot ?? false })
+  }
+
+  /** Marks activity locally; persistence is batched by PresenceManager. */
+  markConnectionActivity(id: string): void {
+    const connection = this.connections.get(id)
+    if (connection?.userId === undefined || connection.sessionId === undefined) return
+    presenceManager.markSessionActivity?.(
+      { userId: connection.userId, sessionId: connection.sessionId },
+      connection.presenceGeneration,
+    )
+  }
+
+  /**
+   * Hydrate the client type only when V3 authentication did not carry it.
+   * Concurrent sockets for one session share the lookup; a known sibling makes
+   * this a purely local update. The promise is tracked for teardown because
+   * the database read intentionally outlives the authorization callback.
+   */
+  hydrateAuthenticatedClientType(
+    userId: number,
+    sessionId: number,
+    load: SessionClientTypeHydrator = loadSessionClientType,
+  ): void {
+    const known = this.getKnownSessionClientType(userId, sessionId)
+    if (known !== undefined) {
+      this.updateSessionClientType(userId, sessionId, known)
+      return
+    }
+
+    const key = pairKey(userId, sessionId)
+    if (this.clientTypeHydrations.has(key)) return
+
+    const hydration = Promise.resolve()
+      .then(() => load({ userId, sessionId }))
+      .then((clientType) => {
+        if (clientType !== undefined) {
+          this.updateSessionClientType(userId, sessionId, clientType)
+        }
+      })
+      .catch((error) => {
+        log.warn("Failed to hydrate authenticated client type", {
+          userId,
+          sessionId,
+          error,
+        })
       })
 
-      if (!this.authenticatedUsers.has(userId)) {
-        // User is connecting for the first time, populate the cache
-        this.authenticatedUsers.set(userId, new Set())
-        void this.subscribeUserToSpaceIds(userId).catch((e) => {
-          log.error("Failed to subscribe user to spaces", { userId, error: e })
-        })
+    this.clientTypeHydrations.set(key, hydration)
+    connectionBackgroundWork.track(hydration)
+    void hydration.finally(() => {
+      if (this.clientTypeHydrations.get(key) === hydration) {
+        this.clientTypeHydrations.delete(key)
       }
-      this.authenticatedUsers.get(userId)?.add(id)
-    }
+    })
   }
 
   closeConnection(id: string, context: ConnectionCloseContext = {}) {
@@ -157,6 +321,8 @@ class ConnectionManager {
       try {
         if (context.authenticationInvalidated) {
           connection.ws.close(REALTIME_CLOSE_SESSION_REVOKED, REALTIME_CLOSE_SESSION_REVOKED_REASON)
+        } else if (context.durableRepair) {
+          connection.ws.close(REALTIME_CLOSE_DURABLE_REPAIR, REALTIME_CLOSE_DURABLE_REPAIR_REASON)
         } else {
           connection.ws.close()
         }
@@ -177,18 +343,46 @@ class ConnectionManager {
     context: ConnectionCloseContext = {},
     exceptConnectionId?: string,
   ) {
-    const connectionIdsForUser = this.authenticatedUsers.get(userId)
-    if (!connectionIdsForUser) {
-      return
-    }
+    const connectionIds = this.getSessionConnectionIds(userId, sessionId)
+    if (connectionIds.length === 0) return
 
-    connectionIdsForUser.forEach((id) => {
-      if (id === exceptConnectionId) return
-      const connection = this.connections.get(id)
-      if (connection?.sessionId === sessionId) {
-        this.closeConnection(id, context)
-      }
-    })
+    for (const id of connectionIds) {
+      if (id === exceptConnectionId) continue
+      this.closeConnection(id, context)
+    }
+  }
+
+  /**
+   * Reconnect fallback for a completed repair scan only. It is intentionally
+   * distinct from revocation: callers may use it only after a durable record
+   * exists but no current socket accepted the replay (or no compatible record
+   * can carry that frontier). `expectedConnectionEpoch` prevents an old scan
+   * from disconnecting sockets that reconnected while it was awaiting data.
+   */
+  closeUserConnectionsForDurableRepair(
+    userId: number,
+    reason: DurableRepairCloseReason,
+    expectedConnectionEpoch?: number,
+  ): number {
+    const currentEpoch = this.getUserConnectionEpoch(userId)
+    if (expectedConnectionEpoch !== undefined && expectedConnectionEpoch !== currentEpoch) return 0
+    const connectionIds = [...(this.authenticatedUsers.get(userId) ?? [])]
+    if (connectionIds.length === 0) return 0
+
+    const now = performance.now()
+    this.pruneDurableRepairCloseGuards(now)
+    if (this.durableRepairCloseGuards.has(userId)) return 0
+    this.durableRepairCloseGuards.set(userId, now)
+    this.trimDurableRepairCloseGuards()
+    log.warn("Closing user connections for durable repair", { userId, reason, connectionEpoch: currentEpoch })
+
+    let closed = 0
+    for (const id of connectionIds) {
+      if (!this.connections.has(id)) continue
+      this.closeConnection(id, { durableRepair: reason })
+      closed += 1
+    }
+    return closed
   }
 
   removeConnection(id: string, context: ConnectionCloseContext = {}) {
@@ -199,36 +393,35 @@ class ConnectionManager {
       connection.unauthenticatedCloseTimeoutId = undefined
 
       this.connections.delete(id)
+      connectionDirectory.unregister(id)
       if (connection.userId && connection.sessionId) {
+        this.bumpUserConnectionEpoch(connection.userId)
         const userConnections = this.authenticatedUsers.get(connection.userId)
         userConnections?.delete(id)
+        const hasOtherConnectionsForSession = this.removeAuthenticatedSessionConnection(
+          id,
+          connection.userId,
+          connection.sessionId,
+          userConnections,
+        )
 
-        const hasOtherConnectionsForSession = (() => {
-          if (userConnections) {
-            for (const otherId of userConnections) {
-              const other = this.connections.get(otherId)
-              if (other?.sessionId === connection.sessionId) return true
-            }
-            return false
-          }
-
-          // Fallback scan: shouldn't happen, but keeps presence state correct.
-          for (const other of this.connections.values()) {
-            if (other.userId === connection.userId && other.sessionId === connection.sessionId) return true
-          }
-          return false
-        })()
-
-        // Only mark a session inactive when the last connection for that session closes.
-        // If logged out there is no point in calling presenceManager.handleConnectionClose.
-        if (!context.loggedOut && !hasOtherConnectionsForSession) {
-          void presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId }).catch((e) => {
+        // Schedule offline evaluation only after the last local socket closes.
+        // A logged-out socket does not schedule presence work.
+        if (!hasOtherConnectionsForSession) {
+          void presenceManager.handleConnectionClose(
+            { userId: connection.userId, sessionId: connection.sessionId },
+            connection.presenceGeneration,
+            context.loggedOut === true,
+          ).catch((e) => {
             log.error("presenceManager.handleConnectionClose failed", {
               userId: connection.userId,
               sessionId: connection.sessionId,
               error: e,
             })
           })
+        }
+        if (!hasOtherConnectionsForSession) {
+          sessionAuthority.forget({ userId: connection.userId, sessionId: connection.sessionId })
         }
 
         if (userConnections && userConnections.size === 0) {
@@ -238,24 +431,36 @@ class ConnectionManager {
           this.authenticatedUsers.delete(connection.userId)
           this.userSpaceIds.delete(connection.userId)
           this.userSpaceMembershipRevision.delete(connection.userId)
+          this.userConnectionEpochs.delete(connection.userId)
         }
       }
     }
   }
 
   async shutdown(): Promise<void> {
+    // Stop the session-activity producer before draining connection or
+    // application work. Its shutdown joins one bounded lastActive write.
+    await presenceManager.shutdown?.()
+    this.presenceGeneration = undefined
     const totalConnections = this.connections.size
     if (totalConnections === 0) {
       this.authenticatedUsers.clear()
+      this.authenticatedSessions.clear()
       this.usersBySpaceId.clear()
       this.userSpaceIds.clear()
       this.userSpaceMembershipRevision.clear()
+      this.userConnectionEpochs.clear()
+      this.durableRepairCloseGuards.clear()
+      this.clientTypeHydrations.clear()
+      this.membershipRefreshes.clear()
+      await this.waitForBackgroundWork()
       return
     }
 
     log.info("Shutting down websocket connections", { totalConnections })
 
     for (const connection of this.connections.values()) {
+      connectionDirectory.unregister(connection.connectionId)
       clearTimeout(connection.unauthenticatedCloseTimeoutId)
       connection.unauthenticatedCloseTimeoutId = undefined
 
@@ -268,9 +473,24 @@ class ConnectionManager {
 
     this.connections.clear()
     this.authenticatedUsers.clear()
+    this.authenticatedSessions.clear()
     this.usersBySpaceId.clear()
     this.userSpaceIds.clear()
     this.userSpaceMembershipRevision.clear()
+    this.userConnectionEpochs.clear()
+    this.durableRepairCloseGuards.clear()
+    this.clientTypeHydrations.clear()
+    this.membershipRefreshes.clear()
+    await this.waitForBackgroundWork()
+  }
+
+  /**
+   * Wait for work started during connection admission that can still hold a
+   * database read lock. This is for controlled shutdown and test teardown;
+   * individual request paths stay asynchronous.
+   */
+  async waitForBackgroundWork(): Promise<void> {
+    await connectionBackgroundWork.waitForIdle()
   }
 
   getUserConnections(userId: number): Connection[] {
@@ -278,14 +498,19 @@ class ConnectionManager {
     return [...userConnections].map((conId) => this.connections.get(conId)).filter(filterFalsy)
   }
 
-  getConnectionBySession(userId: number, sessionId: number): Connection | undefined {
-    const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
+  /** Snapshot immediately before asynchronous durable repair work begins. */
+  getUserConnectionEpoch(userId: number): number {
+    return this.userConnectionEpochs.get(userId) ?? 0
+  }
 
-    for (const connectionId of userConnections) {
+  getAuthenticatedSessionIdentities(): { userId: number; sessionId: number }[] {
+    return [...this.authenticatedSessions.values()].map(({ userId, sessionId }) => ({ userId, sessionId }))
+  }
+
+  getConnectionBySession(userId: number, sessionId: number): Connection | undefined {
+    for (const connectionId of this.getSessionConnectionIds(userId, sessionId)) {
       const connection = this.connections.get(connectionId)
-      if (connection?.sessionId === sessionId) {
-        return connection
-      }
+      if (connection) return connection
     }
 
     return undefined
@@ -332,6 +557,38 @@ class ConnectionManager {
     this.subscribeToSpace(userId, spaceId)
   }
 
+  refreshSpaceMembership(
+    userId: number,
+    spaceId: number,
+    load: SpaceMembershipHydrator = loadCurrentSpaceMembership,
+  ): Promise<void> {
+    if (!this.authenticatedUsers.has(userId)) return Promise.resolve()
+    const key = pairKey(userId, spaceId)
+    const existing = this.membershipRefreshes.get(key)
+    if (existing) return existing
+    const refresh = this.doRefreshSpaceMembership(userId, spaceId, load)
+    this.membershipRefreshes.set(key, refresh)
+    connectionBackgroundWork.track(refresh)
+    void refresh.then(
+      () => this.clearMembershipRefresh(key, refresh),
+      () => this.clearMembershipRefresh(key, refresh),
+    )
+    return refresh
+  }
+
+  private async doRefreshSpaceMembership(
+    userId: number,
+    spaceId: number,
+    load: SpaceMembershipHydrator,
+  ): Promise<void> {
+    const revision = this.userSpaceMembershipRevision.get(userId) ?? 0
+    const member = await load({ userId, spaceId })
+    if (!this.authenticatedUsers.has(userId)) return
+    if ((this.userSpaceMembershipRevision.get(userId) ?? 0) !== revision) return
+    if (member) this.activateSpaceMembership(userId, spaceId)
+    else this.unsubscribeUserFromSpace(userId, spaceId)
+  }
+
   /** Immediately removes a former member from process-local Space fanout. */
   unsubscribeUserFromSpace(userId: number, spaceId: number): void {
     log.debug(`Unsubscribing from space ${spaceId} for user ${userId}`)
@@ -364,6 +621,95 @@ class ConnectionManager {
     return await getSpaceIdsForUser(userId)
   }
 
+  private bumpUserConnectionEpoch(userId: number): void {
+    this.nextUserConnectionEpoch += 1
+    this.userConnectionEpochs.set(userId, this.nextUserConnectionEpoch)
+  }
+
+  private getKnownSessionClientType(userId: number, sessionId: number): string | undefined {
+    for (const connectionId of this.getSessionConnectionIds(userId, sessionId)) {
+      const connection = this.connections.get(connectionId)
+      if (connection?.clientType !== undefined && connection.clientType !== "unknown") {
+        return connection.clientType
+      }
+    }
+    return undefined
+  }
+
+  private updateSessionClientType(userId: number, sessionId: number, clientType: string): void {
+    for (const connectionId of this.getSessionConnectionIds(userId, sessionId)) {
+      this.updateAuthenticatedClientType(connectionId, userId, sessionId, clientType)
+    }
+  }
+
+  private addAuthenticatedSessionConnection(connectionId: string, userId: number, sessionId: number): void {
+    const key = pairKey(userId, sessionId)
+    let session = this.authenticatedSessions.get(key)
+    if (!session) {
+      session = { userId, sessionId, connectionIds: new Set() }
+      this.authenticatedSessions.set(key, session)
+    }
+    session.connectionIds.add(connectionId)
+  }
+
+  private removeAuthenticatedSessionConnection(
+    connectionId: string,
+    userId: number,
+    sessionId: number,
+    userConnections: Set<string> | undefined,
+  ): boolean {
+    const key = pairKey(userId, sessionId)
+    const session = this.authenticatedSessions.get(key)
+    if (session) {
+      session.connectionIds.delete(connectionId)
+      if (session.connectionIds.size === 0) this.authenticatedSessions.delete(key)
+      return session.connectionIds.size > 0
+    }
+
+    // Defensive fallback for legacy callers/tests that populated connection
+    // fields directly instead of going through authenticateConnection.
+    for (const otherId of userConnections ?? []) {
+      if (this.connections.get(otherId)?.sessionId === sessionId) return true
+    }
+    if (!userConnections) {
+      for (const other of this.connections.values()) {
+        if (other.userId === userId && other.sessionId === sessionId) return true
+      }
+    }
+    return false
+  }
+
+  private getSessionConnectionIds(userId: number, sessionId: number): string[] {
+    const indexed = this.authenticatedSessions.get(pairKey(userId, sessionId))
+    if (indexed) return [...indexed.connectionIds]
+
+    const fallback: string[] = []
+    for (const connectionId of this.authenticatedUsers.get(userId) ?? []) {
+      if (this.connections.get(connectionId)?.sessionId === sessionId) fallback.push(connectionId)
+    }
+    return fallback
+  }
+
+  private clearMembershipRefresh(key: string, refresh: Promise<void>): void {
+    if (this.membershipRefreshes.get(key) === refresh) this.membershipRefreshes.delete(key)
+  }
+
+  private pruneDurableRepairCloseGuards(now: number): void {
+    for (const [userId, closedAt] of this.durableRepairCloseGuards) {
+      if (now - closedAt >= DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS) {
+        this.durableRepairCloseGuards.delete(userId)
+      }
+    }
+  }
+
+  private trimDurableRepairCloseGuards(): void {
+    while (this.durableRepairCloseGuards.size > MAX_DURABLE_REPAIR_CLOSE_GUARDS) {
+      const oldestUserId = this.durableRepairCloseGuards.keys().next().value
+      if (oldestUserId === undefined) return
+      this.durableRepairCloseGuards.delete(oldestUserId)
+    }
+  }
+
   private async subscribeUserToSpaceIds(userId: number): Promise<void> {
     const userConnections = this.authenticatedUsers.get(userId)
     if (!userConnections) return
@@ -382,6 +728,13 @@ class ConnectionManager {
       spaceIds.forEach((spaceId) => this.subscribeToSpace(userId, spaceId))
       return
     }
+  }
+
+  private startMembershipHydration(userId: number): void {
+    const hydration = this.subscribeUserToSpaceIds(userId).catch((error) => {
+      log.error("Failed to subscribe user to spaces", { userId, error })
+    })
+    connectionBackgroundWork.track(hydration)
   }
 }
 

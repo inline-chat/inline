@@ -11,14 +11,13 @@ import type {
 } from "./databaseHealthMonitor"
 import {
   ProcessServiceStartFailure,
-  acquireOwnedProcess,
+  ProcessServiceStopFailure,
+  acquireDeferredOwnedProcess,
 } from "./ownedProcess.effect"
 
 export interface DatabaseHealthMonitorProcessShape {
-  readonly enabled: boolean
-  readonly monitor:
-    | DatabaseHealthMonitor
-    | null
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
+  readonly start: Effect.Effect<DatabaseHealthMonitor | null, ProcessServiceStartFailure>
 }
 
 export class DatabaseHealthMonitorProcess extends Context.Service<
@@ -82,16 +81,11 @@ export const makeDatabaseHealthMonitorProcessLayer = (
 > =>
   Layer.effect(
     DatabaseHealthMonitorProcess,
-    acquireOwnedProcess({
+    acquireDeferredOwnedProcess({
       name: "database-health-monitor",
       start: adapter.start,
       stop: adapter.stop,
-    }).pipe(
-      Effect.map((monitor) => ({
-        enabled: monitor !== null,
-        monitor,
-      })),
-    ),
+    }),
   )
 
 /**

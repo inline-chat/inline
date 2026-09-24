@@ -26,6 +26,8 @@ import {
   type GridPresenceRemovalState,
 } from "@in/server/modules/grid/roomLifecycle"
 import { deactivateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
+import { publishAccessChanged } from "@in/server/modules/cache/cluster"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { notifyGridChanged } from "@in/server/modules/grid/realtime"
 import type { Transaction } from "@in/server/db/types"
 import {
@@ -76,6 +78,10 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
           : error instanceof Error
             ? error
             : new Error("removeMemberAndGridPresence failed"),
+    })
+    yield* Effect.sync(() => {
+      publishAccessChanged({ kind: "space", spaceId }, userId)
+      publishDurableReference({ bucket: { kind: "space", spaceId }, frontier: persisted.seq })
     })
     yield* Effect.promise(() =>
       deactivateCommittedSpaceMembership({ spaceId, userId, memberId: removedMemberId }, () => {

@@ -274,6 +274,7 @@ export class InlineSdkClient {
   private catchUpInFlightBySpaceId = new Map<bigint, Promise<void>>()
   private catchUpRequestedBySpaceId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private userCatchUpInFlight: Promise<void> | null = null
+  private userCatchUpRequested: { endSeq?: number; toLatest: boolean } | null = null
   private peerResolutionInFlightByChatId = new Map<bigint, Promise<void>>()
   private peerResolutionRequestedByChatId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private recoveryReconnectInFlight: Promise<void> | null = null
@@ -1412,7 +1413,7 @@ export class InlineSdkClient {
         if (options?.source === "live" && seq > 0) {
           this.fenceLiveCursor({ kind: "user" })
           this.registerDiscoveryHint({ kind: "user" }, seq)
-          this.requestCatchUpUser(true)
+          this.requestCatchUpUser(true, seq)
           return Promise.resolve(true)
         }
         const payload = update.update.userAddedToChat
@@ -1509,6 +1510,18 @@ export class InlineSdkClient {
           ...(payload.updateSeq > 0 ? { updateSeq: payload.updateSeq } : {}),
         })
         return delivery
+      }
+
+      case "userHasNewUpdates": {
+        const payload = update.update.userHasNewUpdates
+        if (!Number.isSafeInteger(payload.updateSeq) || payload.updateSeq <= 0) {
+          return Promise.resolve(true)
+        }
+        this.registerDiscoveryHint({ kind: "user" }, payload.updateSeq)
+        // This is a discovery hint, not a durable user-bucket record. The
+        // matching GET_UPDATES page owns both host delivery and cursor advance.
+        this.requestCatchUpUser(true, payload.updateSeq > 0 ? payload.updateSeq : undefined)
+        return Promise.resolve(true)
       }
 
       default:
@@ -1728,7 +1741,7 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...(updateSeq != null ? { updateSeq } : {}) })
         return
       case "user":
-        this.requestCatchUpUser(true)
+        this.requestCatchUpUser(true, updateSeq)
         return
     }
   }
@@ -1787,7 +1800,8 @@ export class InlineSdkClient {
         return
       }
       case "user":
-        this.requestCatchUpUser(true)
+        const request = this.userCatchUpRequested
+        this.requestCatchUpUser(true, request && !request.toLatest ? request.endSeq : undefined)
         return
     }
   }
@@ -1809,7 +1823,7 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...(updateSeq != null ? { updateSeq } : {}) })
         return
       case "user":
-        this.requestCatchUpUser(true)
+        this.requestCatchUpUser(true, updateSeq)
         return
     }
   }
@@ -1825,6 +1839,7 @@ export class InlineSdkClient {
       case "newMessageNotification":
       case "chatHasNewUpdates":
       case "spaceHasNewUpdates":
+      case "userHasNewUpdates":
       case "botPresence":
         return true
       case undefined:
@@ -1910,6 +1925,8 @@ export class InlineSdkClient {
       }
       case "spaceSettings":
         return [{ kind: "space", spaceId: update.update.spaceSettings.spaceId }]
+      case "spaceProfile":
+        return [{ kind: "space", spaceId: update.update.spaceProfile.spaceId }]
 
       case "dialogArchived":
       case "joinSpace":
@@ -2032,36 +2049,91 @@ export class InlineSdkClient {
     this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq)
   }
 
-  private requestCatchUpUser(forceFromStart = false): Promise<void> | null {
+  private requestCatchUpUser(forceFromStart = false, updateSeq?: number): Promise<void> | null {
     const lastUserSeq = this.state.lastUserSeq
     if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
       return null
     }
+
+    const cursor = lastUserSeq ?? 0
+    if (updateSeq != null && updateSeq <= cursor) return this.userCatchUpInFlight
+
+    const previous = this.userCatchUpRequested
+    const demandAlreadyCoversHint = updateSeq != null && (previous?.endSeq ?? 0) >= updateSeq
+    if (!demandAlreadyCoversHint) {
+      this.userCatchUpRequested = {
+        ...(updateSeq != null || previous?.endSeq != null
+          ? { endSeq: Math.max(previous?.endSeq ?? 0, updateSeq ?? 0) }
+          : {}),
+        // An unbounded request remains unbounded. The target records the
+        // newest frontier observed after its in-flight read began, so its
+        // completion cannot retire a newer hint.
+        toLatest: previous?.toLatest === true || updateSeq == null,
+      }
+    }
+
     if (this.userCatchUpInFlight) {
       return this.userCatchUpInFlight
     }
 
     if (this.recoveryRetries.get("user")?.timer) return null
     this.fenceLiveCursor({ kind: "user" })
-    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0)
+    return this.startUserCatchUp()
+  }
+
+  private startUserCatchUp(): Promise<void> {
+    const initialDemand = this.userCatchUpRequested
+    const task = this.drainCatchUpUser()
       .catch((error) => {
-        this.recordCatchUpFailure({ kind: "user" }, error)
+        this.recordCatchUpFailure({ kind: "user" }, error, this.userCatchUpRequested !== initialDemand)
         this.log.warn?.("GET_UPDATES user catch-up failed; bucket remains degraded", {
           error: extractErrorMessage(error),
         })
       })
       .finally(() => {
         this.userCatchUpInFlight = null
+        // A hint may arrive after drainCatchUpUser completes but before this
+        // task settles. Start that recorded request rather than losing it.
+        if (this.userCatchUpRequested && !this.degradedUpdateBuckets.has("user")) {
+          void this.startUserCatchUp()
+          return
+        }
         this.scheduleRecoveryRetry({ kind: "user" })
       })
-    return this.userCatchUpInFlight
+    this.userCatchUpInFlight = task
+    return task
   }
 
-  private async doCatchUpUser(startSeq: number) {
+  private async drainCatchUpUser() {
+    while (true) {
+      const request = this.userCatchUpRequested
+      if (!request) return
+
+      const startSeq = this.state.lastUserSeq ?? 0
+      const endSeq = request.toLatest ? undefined : request.endSeq
+      if (endSeq != null && endSeq <= startSeq) {
+        this.satisfyDiscoveryThroughCursor({ kind: "user" }, startSeq)
+        this.clearUpdateBucketDegraded({ kind: "user" })
+        this.userCatchUpRequested = null
+        return
+      }
+
+      const stop = await this.doCatchUpUser(startSeq, endSeq)
+      if (stop) {
+        if (this.userCatchUpRequested !== request) continue
+        // Failure is not completion: retain the target for its retry owner.
+        if (this.degradedUpdateBuckets.has("user")) return
+        this.userCatchUpRequested = null
+        return
+      }
+    }
+  }
+
+  private async doCatchUpUser(startSeq: number, endSeq?: number): Promise<boolean> {
     let cursor = startSeq
 
-    while (true) {
-      const requestEndSeq = this.catchUpRequestEndSeq(cursor)
+    while (endSeq == null || cursor < endSeq) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor, endSeq)
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -2083,11 +2155,19 @@ export class InlineSdkClient {
       if (!Number.isSafeInteger(deliveredSeq)) {
         this.markUpdateBucketDegraded({ kind: "user" })
         this.log.warn?.("GET_UPDATES user catch-up returned non-integer seq; aborting", { deliveredSeq })
-        return
+        return true
       }
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq)
+        if (endSeq != null && requestEndSeq != null && deliveredSeq !== requestEndSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" })
+          this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested user target", {
+            requestedEndSeq: requestEndSeq,
+            deliveredSeq,
+          })
+          return true
+        }
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)
         const repaired = await this.repairUpdateBucketAuthoritatively(
           { kind: "user" },
           deliveredSeq,
@@ -2098,14 +2178,14 @@ export class InlineSdkClient {
           cursor = deliveredSeq
           continue
         }
-        return
+        return true
       }
       const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "user" })
-      if (requiresSnapshotRepair == null) return
+      if (requiresSnapshotRepair == null) return true
       if (requiresSnapshotRepair) {
         if (this.options.repairUpdatesBucket) {
           await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date)
-          return
+          return true
         }
         this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
           bucket: "user",
@@ -2118,25 +2198,35 @@ export class InlineSdkClient {
           cursor,
           deliveredSeq,
         })
-        return
+        return true
       }
 
-      if (!await this.acceptCatchUpUpdates(payload.updates, "user", { kind: "user" })) return
+      if (!await this.acceptCatchUpUpdates(payload.updates, "user", { kind: "user" })) return true
 
       this.bumpUserSeq(deliveredSeq)
       this.scheduleStateSave()
 
       if (payload.final) {
-        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq)) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)) {
           cursor = deliveredSeq
           continue
         }
+        if (endSeq != null && deliveredSeq < endSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" }, "target_not_reached")
+          this.log.warn?.("GET_UPDATES final user page remained behind the requested target", {
+            requestedEndSeq: endSeq,
+            deliveredSeq,
+          })
+          return true
+        }
         this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq)
         this.clearUpdateBucketDegraded({ kind: "user" })
-        return
+        return true
       }
       cursor = deliveredSeq
     }
+
+    return false
   }
 
   private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq?: number }): Promise<void> {

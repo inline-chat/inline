@@ -17,10 +17,53 @@ import {
 } from "../../core/testing/errorReporter"
 import {
   ProcessServiceStartFailure,
+  acquireDeferredOwnedProcess,
   acquireOwnedProcess,
 } from "./ownedProcess.effect"
 
 describe("owned process lifetime", () => {
+  it.effect("can quiesce a producer before consumer drains and stops it only once", () =>
+    Effect.gen(function* () {
+      const events: string[] = []
+      yield* Effect.scoped(Effect.gen(function* () {
+        const owner = yield* acquireDeferredOwnedProcess({
+          name: "bot-webhook-delivery",
+          start: () => { events.push("start"); return {} },
+          stop: () => { events.push("stop") },
+        })
+        yield* owner.start
+        yield* owner.stop
+        events.push("consumer drain")
+        yield* owner.stop
+        expect(yield* Effect.flip(owner.start)).toBeInstanceOf(ProcessServiceStartFailure)
+      }).pipe(Effect.provide(ErrorReporter.Noop)))
+      expect(events).toEqual(["start", "stop", "consumer drain"])
+    }),
+  )
+
+  it.effect("explicit stop joins a pending producer before scoped disposal", () =>
+    Effect.gen(function* () {
+      const entered = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      let stops = 0
+      yield* Effect.scoped(Effect.gen(function* () {
+        const owner = yield* acquireDeferredOwnedProcess({
+          name: "native-upload",
+          start: () => ({}),
+          stop: async () => { entered.resolve(); await release.promise; stops++ },
+        })
+        yield* owner.start
+        const stopping = yield* owner.stop.pipe(Effect.forkChild)
+        yield* Effect.promise(() => entered.promise)
+        expect(stops).toBe(0)
+        release.resolve()
+        yield* Fiber.join(stopping)
+        expect(stops).toBe(1)
+      }).pipe(Effect.provide(ErrorReporter.Noop), Effect.ensuring(Effect.sync(() => release.resolve()))))
+      expect(stops).toBe(1)
+    }),
+  )
+
   it.effect(
     "keeps startup failure typed",
     () =>

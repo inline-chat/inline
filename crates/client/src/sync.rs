@@ -279,6 +279,15 @@ impl SyncManager {
                         .and_modify(|existing| *existing = existing.merge(target))
                         .or_insert(target);
                 }
+                Some(proto::update::Update::UserHasNewUpdates(hint)) => {
+                    // User-bucket hints are delivered only to their authenticated
+                    // recipient, so the payload needs only its target frontier.
+                    let target = discovery_target(i64::from(hint.update_seq));
+                    targets
+                        .entry(SyncBucketKey::User)
+                        .and_modify(|existing| *existing = existing.merge(target))
+                        .or_insert(target);
+                }
                 Some(proto::update::Update::UserAddedToChat(_)) if update_seq(&update) > 0 => {
                     let key = SyncBucketKey::User;
                     let target = discovery_target(update_seq(&update));
@@ -1333,7 +1342,8 @@ fn validate_journal_updates(updates: &[proto::Update]) -> BackendResult<()> {
         }
         match update.update.as_ref() {
             Some(proto::update::Update::ChatHasNewUpdates(_))
-            | Some(proto::update::Update::SpaceHasNewUpdates(_)) => {
+            | Some(proto::update::Update::SpaceHasNewUpdates(_))
+            | Some(proto::update::Update::UserHasNewUpdates(_)) => {
                 return Err(BackendError::new(
                     ClientErrorCategory::ProtocolMismatch,
                     "lossless sync journal contained a realtime hint",
@@ -1726,6 +1736,39 @@ mod tests {
         assert_eq!(requests[0].seq_end, 3);
         assert_eq!(requests[1].start_seq, 2);
         assert_eq!(requests[1].seq_end, 3);
+    }
+
+    #[tokio::test]
+    async fn user_hint_only_recovery_pages_the_authenticated_user_bucket() {
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_bucket_state(SyncBucketKey::User, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![skipped_result(1, 3, 30)]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        let deliveries = sync
+            .process_realtime(&host, vec![user_hint(3)])
+            .await
+            .unwrap();
+
+        assert!(deliveries.is_empty());
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 3, date: 30 }
+        );
+        let requests = host.requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].start_seq, 1);
+        assert_eq!(requests[0].seq_end, 3);
+        assert!(matches!(
+            requests[0]
+                .bucket
+                .as_ref()
+                .and_then(|bucket| bucket.r#type.as_ref()),
+            Some(proto::update_bucket::Type::User(_))
+        ));
     }
 
     #[tokio::test]
@@ -2803,6 +2846,16 @@ mod tests {
                     space_id,
                     update_seq: seq,
                 },
+            )),
+        }
+    }
+
+    fn user_hint(seq: i32) -> proto::Update {
+        proto::Update {
+            seq: None,
+            date: None,
+            update: Some(proto::update::Update::UserHasNewUpdates(
+                proto::UpdateUserHasNewUpdates { update_seq: seq },
             )),
         }
     }

@@ -1878,14 +1878,14 @@ const uploadFile = async (
   return getFile({ file_id: uploaded.fileUniqueId }, context)
 }
 
-const getUpdates = (input: GetUpdatesParams, context: BotOperationContext) => {
+const getUpdates = (input: GetUpdatesParams, context: BotOperationContext, signal?: AbortSignal) => {
   if (
     (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)) ||
     (input.timeout !== undefined && (!Number.isInteger(input.timeout) || input.timeout < 0 || input.timeout > 50))
   ) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  return BotUpdatesModel.getUpdates(context.currentUserId, input)
+  return BotUpdatesModel.getUpdates(context.currentUserId, input, signal)
 }
 
 const setWebhook = async (input: SetWebhookParams, context: BotOperationContext) => {

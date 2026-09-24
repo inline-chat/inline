@@ -4147,6 +4147,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::ChatSkipPts(_) => "chat_skip_pts",
         Update::ChatHasNewUpdates(_) => "chat_has_new_updates",
         Update::SpaceHasNewUpdates(_) => "space_has_new_updates",
+        Update::UserHasNewUpdates(_) => "user_has_new_updates",
         Update::SpaceMemberUpdate(_) => "space_member_update",
         Update::ChatVisibility(_) => "chat_visibility",
         Update::DialogArchived(_) => "dialog_archived",
@@ -9974,6 +9975,9 @@ mod tests {
             None,
             Some(proto::update::Update::ChatHasNewUpdates(
                 proto::UpdateChatHasNewUpdates::default(),
+            )),
+            Some(proto::update::Update::UserHasNewUpdates(
+                proto::UpdateUserHasNewUpdates::default(),
             )),
             Some(proto::update::Update::UpdatedUser(
                 proto::UpdateUpdatedUser {

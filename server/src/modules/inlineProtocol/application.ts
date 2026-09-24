@@ -198,7 +198,12 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
   authorizationKeys: Pick<ServerAuthorizationKeyRepository, "load">
   connectionId: string
   metadata?: RealtimeRequestMetadata
-  onAuthorized?: (authorization: ServerApplicationAuthorization) => void
+  /**
+   * Registers the authenticated connection with the realtime authority fence.
+   * Returning false means a revocation won the auth-to-execution race, so this
+   * request must not cross the application execution boundary.
+   */
+  onAuthorized?: (authorization: ServerApplicationAuthorization) => boolean
 }): ServerApplicationDispatcher => {
   const lanes = new InlineProtocolApplicationLanes()
   return {
@@ -277,7 +282,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
                 !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId)) {
               throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
             }
-            input.onAuthorized?.(authorization)
+            if (input.onAuthorized && !input.onAuthorized(authorization)) {
+              throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+            }
             markExecutionStarted()
             return await handleRpcCall(rpc, {
               userId: authorization.userId!,

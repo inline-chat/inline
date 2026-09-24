@@ -920,6 +920,52 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(bufferedUpdateBytes).toBe(0)
   })
 
+  test("orphaned replay reports unknown outcome without dispatching the mutation", async () => {
+    const rsa = rsaFixture()
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const replay = new MemoryReplay()
+    replay.claim = async () => ({ kind: "unknown_outcome" })
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x5566_7799n
+    authorizationKeys.values.set(bytesToHex(keyId), {
+      key, keyId, temporary: true,
+      expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId, nonce: 1n,
+        expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+        userId: 42, accountSessionId: 84,
+      },
+    })
+    let dispatches = 0
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsa.server], authorizationKeys, replay,
+      application: { dispatch: async () => { dispatches += 1; return { kind: "result", payload: Uint8Array.of(7) } } },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const messageId = new MessageIdGenerator().next(nowMilliseconds, 1, 0)
+    const body = encodeInlineInvoke(Uint8Array.of(7))
+    const record = encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId, sequenceNumber: 1, body,
+    }, randomBytes(paddingFor(body.length)))
+    const result = await server.receiveConcurrent(record)
+    expect(result.applicationTasks).toHaveLength(0)
+    expect(dispatches).toBe(0)
+    const rpcBody = result.responses.map((response) => decryptRecord(response, key, {
+      direction: "server-to-client", sessionId,
+      validServerSalts: new Set([serverSalt]), nowSeconds: nowMilliseconds / 1_000,
+    }).body).find((response) => serviceConstructor(response) === ServiceConstructor.rpcResult)
+    expect(rpcBody).toBeDefined()
+    expect(decodeRpcError(decodeRpcResult(rpcBody!).result)).toEqual({
+      code: 504, message: "Realtime application outcome is unknown; reconcile before retrying",
+    })
+  })
+
   test("deadline before application execution is a replayable rejection, not commit-unknown", async () => {
     const rsa = rsaFixture()
     const authorizationKeys = new MemoryAuthorizationKeys()

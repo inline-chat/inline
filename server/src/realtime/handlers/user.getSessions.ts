@@ -1,6 +1,7 @@
 import { Method, type AccountSession, type GetSessionsInput, type GetSessionsResult } from "@inline-chat/protocol/core"
 import { SessionsModel, type SessionWithDecryptedData } from "@in/server/db/models/sessions"
 import type { HandlerContext } from "@in/server/realtime/types"
+import { connectionPresenceForUser } from "@in/server/modules/internalMessaging/presenceView"
 
 export const method = Method.GET_SESSIONS
 
@@ -10,13 +11,14 @@ export const getSessionsHandler = async (
 ): Promise<GetSessionsResult> => {
   const sessions = await SessionsModel.getValidSessionsByUserId(handlerContext.userId)
   sessions.sort(compareSessions)
+  const presence = await connectionPresenceForUser(handlerContext.userId)
 
   return {
-    sessions: sessions.map((session) => encodeSession(session, handlerContext.sessionId)),
+    sessions: sessions.map((session) => encodeSession(session, handlerContext.sessionId, presence.activeSessionIds.has(session.id))),
   }
 }
 
-export function encodeSession(session: SessionWithDecryptedData, currentSessionId: number): AccountSession {
+export function encodeSession(session: SessionWithDecryptedData, currentSessionId: number, active = false): AccountSession {
   return {
     id: BigInt(session.id),
     clientType: session.clientType ?? "unknown",
@@ -28,7 +30,7 @@ export function encodeSession(session: SessionWithDecryptedData, currentSessionI
     timezone: session.personalData.timezone ?? undefined,
     createdAt: dateSeconds(session.date),
     lastActiveAt: dateSeconds(session.lastActive),
-    active: session.active,
+    active,
     current: session.id === currentSessionId,
   }
 }

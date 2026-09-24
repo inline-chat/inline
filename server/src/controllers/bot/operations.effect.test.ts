@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
 import { InlineError } from "@in/server/types/errors"
 import {
   BotOperationFailure,
@@ -60,6 +60,27 @@ const handlers = (
 })
 
 describe("Bot operation error classification", () => {
+  it.effect("passes request interruption to the long-poll handler", () =>
+    Effect.gen(function* () {
+      let receivedSignal!: (signal: AbortSignal) => void
+      const signalReady = new Promise<AbortSignal>((resolve) => { receivedSignal = resolve })
+      const operations = makeBotOperations({
+        ...handlers(unused),
+        getUpdates: (_input, _context, signal) => {
+          receivedSignal(signal!)
+          return new Promise(() => {})
+        },
+      })
+      const fiber = yield* Effect.forkChild(operations.getUpdates(
+        { timeout: 25 },
+        { currentUserId: 1, currentSessionId: 2, ip: undefined },
+      ))
+      const signal = yield* Effect.promise(() => signalReady)
+      yield* Fiber.interrupt(fiber)
+      expect(signal.aborted).toBe(true)
+    }),
+  )
+
   it.effect("keeps expected Inline errors public", () =>
     Effect.gen(function* () {
       const operations = makeBotOperations(

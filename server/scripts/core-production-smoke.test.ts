@@ -72,9 +72,9 @@ test("artifact smoke supplies isolated placeholders for production startup", () 
   )
   expect(childEnvironment["NODE_ENV"])
     .toBe("production")
-  expect(
-    childEnvironment["SKIP_DB_MIGRATIONS"],
-  ).toBe("1")
+  expect(childEnvironment["INLINE_PROCESS_ROLE"])
+    .toBe("api")
+  expect(childEnvironment["SKIP_DB_MIGRATIONS"]).toBeUndefined()
 
   expect(parentEnvironment).toEqual({
     DATABASE_URL:

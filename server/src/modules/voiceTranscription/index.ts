@@ -1,9 +1,11 @@
 import type { InputPeer } from "@inline-chat/protocol/core"
 import type { DbFullVoice } from "@in/server/db/models/files"
-import { MessageModel } from "@in/server/db/models/messages"
+import { MessageModel, MessageRevisionConflict } from "@in/server/db/models/messages"
+import { ModelError } from "@in/server/db/models/_errors"
 import type { DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { editMessage } from "@in/server/functions/messages.editMessage"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { Log } from "@in/server/utils/log"
 import { transcribeVoiceWithOpenAI, type VoiceTranscriber } from "./openAITranscriber"
 import {
@@ -27,16 +29,28 @@ export type VoiceMessageTranscriptionDeps = {
   buildContext?: typeof buildVoiceTranscriptionContext
 }
 
+type VoiceTranscriptionRun = (input: VoiceMessageTranscriptionInput) => Promise<{ didEdit: boolean; text?: string }>
+
+export const scheduleVoiceTranscription = (
+  input: VoiceMessageTranscriptionInput,
+  run: VoiceTranscriptionRun = transcribeAndEditVoiceMessage,
+): void => {
+  const work = run(input).catch((error) => {
+    log.error("Voice transcription failed", error, {
+      chatId: input.message.chatId,
+      messageId: input.message.messageId,
+      voiceId: input.voice.id,
+      fileId: input.voice.fileId,
+    })
+  })
+  // Register synchronously: the next test cleanup or process shutdown must
+  // not race the worker's first database read.
+  applicationBackgroundWork.track(work)
+}
+
 export const VoiceTranscriptionModule = {
   schedule(input: VoiceMessageTranscriptionInput) {
-    void transcribeAndEditVoiceMessage(input).catch((error) => {
-      log.error("Voice transcription failed", error, {
-        chatId: input.message.chatId,
-        messageId: input.message.messageId,
-        voiceId: input.voice.id,
-        fileId: input.voice.fileId,
-      })
-    })
+    scheduleVoiceTranscription(input)
   },
 
   transcribeAndEditVoiceMessage,
@@ -53,7 +67,7 @@ export async function transcribeAndEditVoiceMessage(
     return { didEdit: false }
   }
 
-  const latestBeforeTranscription = await MessageModel.getMessage(input.message.messageId, input.message.chatId)
+  const latestBeforeTranscription = await currentVoiceMessage(input)
   if (!shouldApplyTranscript(latestBeforeTranscription, input.message, input.voice)) {
     return { didEdit: false }
   }
@@ -90,7 +104,7 @@ export async function transcribeAndEditVoiceMessage(
     return { didEdit: false }
   }
 
-  const latestMessage = await MessageModel.getMessage(input.message.messageId, input.message.chatId)
+  const latestMessage = await currentVoiceMessage(input)
   if (!shouldApplyTranscript(latestMessage, input.message, input.voice)) {
     log.info("Skipping voice transcription edit: message changed before transcription completed", {
       chatId: input.message.chatId,
@@ -101,15 +115,22 @@ export async function transcribeAndEditVoiceMessage(
     return { didEdit: false, text }
   }
 
-  await deps.editText(
-    {
-      messageId: BigInt(input.message.messageId),
-      peer: input.inputPeer,
-      text,
-      parseMarkdown: false,
-    },
-    input.context,
-  )
+  try {
+    await deps.editText(
+      {
+        messageId: BigInt(input.message.messageId),
+        peer: input.inputPeer,
+        text,
+        parseMarkdown: false,
+        expectedRevision: input.message.rev ?? 0,
+        expectedVoiceId: input.voice.id,
+      },
+      input.context,
+    )
+  } catch (error) {
+    if (error instanceof MessageRevisionConflict) return { didEdit: false, text }
+    throw error
+  }
 
   log.info("Applied voice transcription edit", {
     chatId: input.message.chatId,
@@ -149,10 +170,11 @@ function shouldStartTranscription(message: DbMessage, voice: DbFullVoice): boole
 }
 
 function shouldApplyTranscript(
-  latestMessage: Awaited<ReturnType<typeof MessageModel.getMessage>>,
+  latestMessage: Awaited<ReturnType<typeof MessageModel.getMessage>> | undefined,
   originalMessage: DbMessage,
   voice: DbFullVoice,
 ): boolean {
+  if (!latestMessage) return false
   if (latestMessage.mediaType !== "voice" || latestMessage.voiceId !== voice.id) {
     return false
   }
@@ -162,6 +184,17 @@ function shouldApplyTranscript(
   }
 
   return isBlank(latestMessage.text)
+}
+
+async function currentVoiceMessage(
+  input: VoiceMessageTranscriptionInput,
+): Promise<Awaited<ReturnType<typeof MessageModel.getMessage>> | undefined> {
+  try {
+    return await MessageModel.getMessage(input.message.messageId, input.message.chatId)
+  } catch (error) {
+    if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) return undefined
+    throw error
+  }
 }
 
 function isBlank(text: string | null | undefined): boolean {

@@ -2376,6 +2376,51 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("reconciles a live space profile through its space bucket before advancing the cursor", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport,
+      state: new MemoryStateStore({ version: 1, lastSeqBySpaceId: { "20": 1 } }),
+    })
+    try {
+      await connectAndOpen(client, transport)
+      const profile = Update.create({
+        seq: 2, date: 20n,
+        update: { oneofKind: "spaceProfile", spaceProfile: { spaceId: 20n, isPro: true } },
+      })
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: 55n, body: { oneofKind: "message", message: {
+          payload: { oneofKind: "update", update: { updates: [profile] } },
+        } },
+      }))
+      await waitFor(() => transport.sent.some(message =>
+        message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES,
+      ))
+      const request = transport.sent.find(message =>
+        message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES,
+      )!
+      if (request.body.oneofKind !== "rpcCall") throw new Error("missing space catch-up")
+      expect(request.body.rpcCall.input).toMatchObject({
+        oneofKind: "getUpdates", getUpdates: {
+          bucket: { type: { oneofKind: "space", space: { spaceId: 20n } } },
+          startSeq: 1n, seqEnd: 2n,
+        },
+      })
+      expect(client.exportState().lastSeqBySpaceId?.["20"]).toBe(1)
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: 56n, body: { oneofKind: "rpcResult", rpcResult: {
+          reqMsgId: request.id, result: { oneofKind: "getUpdates", getUpdates: {
+            seq: 2n, date: 20n, final: true, updates: [profile],
+            resultType: GetUpdatesResult_ResultType.SLICE,
+          } },
+        } },
+      }))
+      await waitFor(() => client.exportState().lastSeqBySpaceId?.["20"] === 2)
+    } finally {
+      await client.close()
+    }
+  })
+
   it("accounts for an unprojected durable update without stranding the chat bucket", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
@@ -6250,6 +6295,303 @@ describe("InlineSdkClient", () => {
     expect(client.exportState().lastUserSeq).toBe(55)
     await client.close()
     await next
+  })
+
+  it("catches up a hinted user frontier before advancing its durable cursor", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastUserSeq: 1 }),
+    })
+    const iter = client.events()[Symbol.asyncIterator]()
+    const userGetUpdates = () => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.GET_UPDATES &&
+      message.body.rpcCall.input.oneofKind === "getUpdates" &&
+      message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+
+    await connectAndOpen(client, transport)
+    await waitFor(() => userGetUpdates().length === 1)
+    const initial = userGetUpdates()[0]
+    if (!initial || initial.body.oneofKind !== "rpcCall" || initial.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing initial user getUpdates request")
+    }
+    expect(initial.body.rpcCall.input.getUpdates.startSeq).toBe(1n)
+
+    // The hint arrives after the first unbounded read was sent. Its target
+    // must survive that older response, while the next request keeps the
+    // original unbounded demand.
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 610n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+        update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 3 } },
+      })] } } } },
+    }))
+    expect((client as any).userCatchUpRequested).toMatchObject({ endSeq: 3, toLatest: true })
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 611n,
+      body: { oneofKind: "rpcResult", rpcResult: {
+        reqMsgId: initial.id,
+        result: { oneofKind: "getUpdates", getUpdates: {
+          updates: [], seq: 2n, date: 710n, resultType: GetUpdatesResult_ResultType.EMPTY, final: true,
+          skippedSequences: irrelevantSkippedSequences(1, 2),
+        } },
+      } },
+    }))
+
+    await waitFor(() => userGetUpdates().length === 2)
+    const targeted = userGetUpdates()[1]
+    if (!targeted || targeted.body.oneofKind !== "rpcCall" || targeted.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing hinted user getUpdates request")
+    }
+    expect(targeted.body.rpcCall.input.getUpdates.startSeq).toBe(2n)
+    expect(targeted.body.rpcCall.input.getUpdates.seqEnd).toBe(10_002n)
+
+    // Repeated or stale copies of the same hint while this read is in flight
+    // are already covered by its recorded frontier and must not schedule a
+    // third read after it completes.
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 613n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 3 } } }),
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 2 } } }),
+      ] } } } },
+    }))
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 612n,
+      body: { oneofKind: "rpcResult", rpcResult: {
+        reqMsgId: targeted.id,
+        result: { oneofKind: "getUpdates", getUpdates: {
+          updates: [Update.create({
+            seq: 3,
+            date: 711n,
+            update: {
+              oneofKind: "participantAdd",
+              participantAdd: { chatId: 20n, participant: { userId: 42n, date: 711n } },
+            },
+          })],
+          seq: 3n,
+          date: 711n,
+          resultType: GetUpdatesResult_ResultType.SLICE,
+          final: true,
+        } },
+      } },
+    }))
+
+    // The hint itself does not create an SDK event or move the cursor. The
+    // durable page reaches the cursor only after the host consumes its event.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(userGetUpdates()).toHaveLength(2)
+    expect(client.exportState().lastUserSeq).toBe(2)
+    const event = await iter.next()
+    expect(event.done).toBe(false)
+    if (!event.done) expect(event.value.kind).toBe("chat.participant.add")
+    const next = iter.next()
+    await waitFor(() => client.exportState().lastUserSeq === 3)
+    await client.close()
+    await next
+  })
+
+  it("does not issue another user read for stale or duplicate discovery hints", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastUserSeq: 3 }),
+    })
+    const userGetUpdates = () => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.GET_UPDATES &&
+      message.body.rpcCall.input.oneofKind === "getUpdates" &&
+      message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+
+    await connectAndOpen(client, transport)
+    await waitFor(() => userGetUpdates().length === 1)
+    const initial = userGetUpdates()[0]
+    if (!initial || initial.body.oneofKind !== "rpcCall") throw new Error("missing initial user getUpdates request")
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 620n,
+      body: { oneofKind: "rpcResult", rpcResult: {
+        reqMsgId: initial.id,
+        result: { oneofKind: "getUpdates", getUpdates: {
+          updates: [], seq: 3n, date: 720n, resultType: GetUpdatesResult_ResultType.EMPTY, final: true,
+          skippedSequences: irrelevantSkippedSequences(3, 3),
+        } },
+      } },
+    }))
+    await waitFor(() => client.getSyncStatus().state === "live")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 621n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 3 } } }),
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 2 } } }),
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 0 } } }),
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: -1 } } }),
+      ] } } } },
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(userGetUpdates()).toHaveLength(1)
+    expect(client.exportState().lastUserSeq).toBe(3)
+    await client.close()
+  })
+
+  it("keeps draining an unbounded user catch-up for a newer in-flight frontier", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastUserSeq: 1 }),
+    })
+    const userGetUpdates = () => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.GET_UPDATES &&
+      message.body.rpcCall.input.oneofKind === "getUpdates" &&
+      message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+    const reply = async (request: ServerProtocolMessage, id: bigint, startSeq: number, endSeq: number) => {
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id,
+        body: { oneofKind: "rpcResult", rpcResult: {
+          reqMsgId: request.id,
+          result: { oneofKind: "getUpdates", getUpdates: {
+            updates: [], seq: BigInt(endSeq), date: id, resultType: GetUpdatesResult_ResultType.EMPTY, final: true,
+            skippedSequences: irrelevantSkippedSequences(startSeq, endSeq),
+          } },
+        } },
+      }))
+    }
+
+    await connectAndOpen(client, transport)
+    await waitFor(() => userGetUpdates().length === 1)
+    const first = userGetUpdates()[0]
+    if (!first || first.body.oneofKind !== "rpcCall") throw new Error("missing first user catch-up request")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 640n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+        update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 3 } },
+      })] } } } },
+    }))
+    await reply(first, 641n, 1, 2)
+
+    await waitFor(() => userGetUpdates().length === 2)
+    const second = userGetUpdates()[1]
+    if (!second || second.body.oneofKind !== "rpcCall") throw new Error("missing second user catch-up request")
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 642n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+        update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 4 } },
+      })] } } } },
+    }))
+    await reply(second, 643n, 2, 3)
+
+    await waitFor(() => userGetUpdates().length === 3)
+    const third = userGetUpdates()[2]
+    if (!third || third.body.oneofKind !== "rpcCall" || third.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing third user catch-up request")
+    }
+    expect(third.body.rpcCall.input.getUpdates.startSeq).toBe(3n)
+    expect(third.body.rpcCall.input.getUpdates.seqEnd).toBe(10_003n)
+    await reply(third, 644n, 3, 4)
+
+    await waitFor(() => client.getSyncStatus().state === "live")
+    expect(client.exportState().lastUserSeq).toBe(4)
+    expect(userGetUpdates()).toHaveLength(3)
+    await client.close()
+  })
+
+  it("retains a user hint target when a bounded TOO_LONG pointer falls short", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1 }),
+    })
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 630n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+        update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 3 } },
+      })] } } } },
+    }))
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.GET_UPDATES &&
+      message.body.rpcCall.input.oneofKind === "getUpdates" &&
+      message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    ))
+    const request = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.GET_UPDATES &&
+      message.body.rpcCall.input.oneofKind === "getUpdates" &&
+      message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+    if (!request || request.body.oneofKind !== "rpcCall" || request.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing hinted user getUpdates request")
+    }
+    expect(request.body.rpcCall.input.getUpdates.seqEnd).toBe(3n)
+
+    vi.useFakeTimers()
+    try {
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: 631n,
+        body: { oneofKind: "rpcResult", rpcResult: {
+          reqMsgId: request.id,
+          result: { oneofKind: "getUpdates", getUpdates: {
+            updates: [], seq: 2n, date: 730n, resultType: GetUpdatesResult_ResultType.TOO_LONG, final: false,
+          } },
+        } },
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(client.getSyncStatus().state).toBe("degraded")
+      expect(client.exportState().lastUserSeq).toBeUndefined()
+      expect((client as any).userCatchUpRequested).toMatchObject({ endSeq: 3, toLatest: false })
+
+      // The retained bounded target must start from the actual retry timer.
+      // An earlier version returned early for an already-recorded target after
+      // the first task stopped, leaving this bucket degraded forever.
+      await vi.advanceTimersByTimeAsync(1_000)
+      const retries = transport.sent.filter((message) =>
+        message.body.oneofKind === "rpcCall" &&
+        message.body.rpcCall.method === Method.GET_UPDATES &&
+        message.body.rpcCall.input.oneofKind === "getUpdates" &&
+        message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+      )
+      expect(retries).toHaveLength(2)
+      const retry = retries[1]
+      if (!retry || retry.body.oneofKind !== "rpcCall" || retry.body.rpcCall.input.oneofKind !== "getUpdates") {
+        throw new Error("missing user catch-up retry")
+      }
+      expect(retry.body.rpcCall.input.getUpdates.seqEnd).toBe(3n)
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: 632n,
+        body: { oneofKind: "rpcResult", rpcResult: {
+          reqMsgId: retry.id,
+          result: { oneofKind: "getUpdates", getUpdates: {
+            updates: [], seq: 3n, date: 731n, resultType: GetUpdatesResult_ResultType.EMPTY, final: true,
+            skippedSequences: irrelevantSkippedSequences(0, 3),
+          } },
+        } },
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(client.getSyncStatus().state).toBe("live")
+      expect(client.exportState().lastUserSeq).toBe(3)
+    } finally {
+      vi.useRealTimers()
+      await client.close()
+    }
   })
 
   it("replays user-bucket participant adds when existing state has no lastUserSeq", async () => {

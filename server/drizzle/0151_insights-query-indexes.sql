@@ -1,0 +1,2 @@
+CREATE INDEX "messages_activity_date_from_id_idx" ON "messages" USING btree ("date","from_id") WHERE "messages"."system_message_encrypted" is null;--> statement-breakpoint
+CREATE INDEX "sessions_token_hash_idx" ON "sessions" USING btree ("token_hash");

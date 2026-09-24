@@ -1,6 +1,6 @@
 import { bytea } from "@in/server/db/schema/common"
 import { users } from "@in/server/db/schema/users"
-import { integer, pgEnum, pgTable, serial, varchar, boolean, timestamp, text, unique } from "drizzle-orm/pg-core"
+import { integer, pgEnum, pgTable, serial, varchar, boolean, timestamp, text, unique, index } from "drizzle-orm/pg-core"
 
 export const clientTypeEnum = pgEnum("client_type", [
   "ios",
@@ -53,6 +53,7 @@ export const sessions = pgTable(
   },
   (table) => ({
     deviceIdUserUnique: unique("device_id_user_unique").on(table.deviceId, table.userId),
+    tokenHashIndex: index("sessions_token_hash_idx").on(table.tokenHash),
   }),
 )
 

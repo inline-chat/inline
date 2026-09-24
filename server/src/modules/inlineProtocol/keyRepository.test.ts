@@ -168,11 +168,15 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
     expect(await replay.result(identity)).toEqual(Uint8Array.of(9, 10, 11, 12))
   })
 
-  test("never reclaims an expired execution and cleans only completed results in bounded batches", async () => {
+  test("never reclaims an expired execution and retains completed results from completion", async () => {
     await repository("old").create({ key, keyId, serverSalt: 456n, temporary: false })
     const replay = new InlineProtocolReplayRepository()
     const claimedAt = new Date("2026-08-19T00:00:00.000Z")
-    const afterExpiry = new Date(claimedAt.getTime() + 1_000)
+    const afterClaimExpiry = new Date(claimedAt.getTime() + 1_000)
+    const completedAt = afterClaimExpiry
+    const completedExpiry = new Date(completedAt.getTime() + 10 * 60 * 1_000)
+    const laterCompletedAt = new Date(completedAt.getTime() + 1)
+    const laterCompletedExpiry = new Date(laterCompletedAt.getTime() + 10 * 60 * 1_000)
     const expiredCompleted = { authKeyId: keyId, protocolSessionId: 21n, messageId: 31n }
     const expiredInFlight = { authKeyId: keyId, protocolSessionId: 21n, messageId: 32n }
     const liveCompleted = { authKeyId: keyId, protocolSessionId: 21n, messageId: 33n }
@@ -183,7 +187,7 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
       now: claimedAt,
       ttlMs: 1,
     })).toEqual({ kind: "claimed" })
-    expect(await replay.complete({ ...expiredCompleted, resultBody: Uint8Array.of(11) })).toBeTrue()
+    expect(await replay.complete({ ...expiredCompleted, resultBody: Uint8Array.of(11), now: completedAt })).toBeTrue()
     expect(await replay.claim({
       ...expiredInFlight,
       authenticatedBody: Uint8Array.of(2),
@@ -196,25 +200,30 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
       now: claimedAt,
       ttlMs: 60_000,
     })).toEqual({ kind: "claimed" })
-    expect(await replay.complete({ ...liveCompleted, resultBody: Uint8Array.of(13) })).toBeTrue()
+    expect(await replay.complete({ ...liveCompleted, resultBody: Uint8Array.of(13), now: laterCompletedAt })).toBeTrue()
 
     expect(await replay.claim({
       ...expiredInFlight,
       authenticatedBody: Uint8Array.of(2),
-      now: afterExpiry,
+      now: afterClaimExpiry,
       ttlMs: 1,
     })).toEqual({ kind: "in_flight" })
     expect(await replay.claim({
       ...expiredInFlight,
       authenticatedBody: Uint8Array.of(9),
-      now: afterExpiry,
+      now: afterClaimExpiry,
       ttlMs: 1,
     })).toEqual({ kind: "digest_mismatch" })
 
-    expect(await replay.cleanupExpiredCompleted(afterExpiry, 1)).toBe(1)
+    // Its one-millisecond claim TTL elapsed before completion, but the final
+    // result must survive a full replay TTL from `completedAt`.
+    expect(await replay.cleanupExpiredCompleted(new Date(completedExpiry.getTime() - 1), 1)).toBe(0)
+    expect(await replay.result(expiredCompleted)).toEqual(Uint8Array.of(11))
+    expect(await replay.cleanupExpiredCompleted(completedExpiry, 1)).toBe(1)
     expect(await replay.result(expiredCompleted)).toBeUndefined()
     expect(await replay.isInFlight(expiredInFlight)).toBeTrue()
     expect(await replay.result(liveCompleted)).toEqual(Uint8Array.of(13))
-    expect(await replay.cleanupExpiredCompleted(afterExpiry, 1)).toBe(0)
+    expect(await replay.cleanupExpiredCompleted(completedExpiry, 1)).toBe(0)
+    expect(await replay.cleanupExpiredCompleted(laterCompletedExpiry, 1)).toBe(1)
   })
 })

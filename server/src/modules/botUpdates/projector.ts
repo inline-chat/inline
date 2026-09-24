@@ -20,6 +20,7 @@ import type { DbChat, DbUser } from "@in/server/db/schema"
 import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/entityCodec"
 import { encodeBotRichMessageFromStored } from "@in/server/controllers/bot/richContent"
 import type { UpdateGroup } from "@in/server/modules/updates"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { Log } from "@in/server/utils/log"
 import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
 
@@ -515,7 +516,8 @@ async function participationChanged(input: {
 
 const safely = <T extends unknown[]>(name: string, fn: (...args: T) => Promise<void>) =>
   (...args: T): void => {
-    void fn(...args).catch((error) => log.error(`Failed to project ${name}`, { error }))
+    const work = fn(...args).catch((error) => log.error(`Failed to project ${name}`, { error }))
+    applicationBackgroundWork.track(work)
   }
 
 export const BotUpdateProjector = {

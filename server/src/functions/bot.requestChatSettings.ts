@@ -1,9 +1,10 @@
 import type { FunctionContext } from "./_types"
 import { resolveCapableBotForPeer } from "./bot.chatSettingsShared"
 import { botChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
-import { unreachableBotChatSettingsResponse } from "@in/server/modules/botChatSettings/validation"
-import { sendMessageToRealtimeBot } from "@in/server/realtime/message"
-import type { RequestBotChatSettingsInput, RequestBotChatSettingsResult } from "@inline-chat/protocol/core"
+import { normalizeBotChatSettingsResponse, unreachableBotChatSettingsResponse } from "@in/server/modules/botChatSettings/validation"
+import { getRealtimeBotConnection, sendMessageToRealtimeBotConnection } from "@in/server/realtime/message"
+import { BotChatSettingsResponse, ServerMessage, type RequestBotChatSettingsInput, type RequestBotChatSettingsResult } from "@inline-chat/protocol/core"
+import { requestRemoteBot } from "@in/server/modules/internalMessaging/privateBot"
 
 export async function requestBotChatSettings(
   input: RequestBotChatSettingsInput,
@@ -21,22 +22,29 @@ export async function requestBotChatSettings(
     chatId: target.chatId,
     operation: "request",
   })
-  let recipientCount: number
+  const payload: ServerMessage["payload"] = {
+    oneofKind: "bot",
+    bot: { event: { oneofKind: "chatSettingsRequested", chatSettingsRequested: {
+      requestId: pending.requestId, chatId: BigInt(target.chatId), actorUserId: BigInt(context.currentUserId), version: input.version,
+    } } },
+  }
+  let recipientCount = 0
   try {
-    recipientCount = await sendMessageToRealtimeBot(target.botUserId, {
-      oneofKind: "bot",
-      bot: {
-        event: {
-          oneofKind: "chatSettingsRequested",
-          chatSettingsRequested: {
-            requestId: pending.requestId,
-            chatId: BigInt(target.chatId),
-            actorUserId: BigInt(context.currentUserId),
-            version: input.version,
-          },
-        },
-      },
-    })
+    const local = getRealtimeBotConnection(target.botUserId)
+    if (local) {
+      recipientCount = await sendMessageToRealtimeBotConnection(target.botUserId, local.connectionId, payload) ? 1 : 0
+    } else {
+      const remote = await requestRemoteBot({
+        botUserId: target.botUserId, actorUserId: context.currentUserId,
+        actorSessionId: context.currentSessionId, actorConnectionId: context.currentConnectionId,
+        requestId: pending.requestId, kind: "botSettings", payload,
+      })
+      if (remote.status === "replied") {
+        const response = normalizeBotChatSettingsResponse(BotChatSettingsResponse.fromBinary(Buffer.from(remote.response, "base64")))
+        botChatSettingsBroker.answer(pending.requestId, target.botUserId, response)
+        recipientCount = 1
+      }
+    }
   } catch (error) {
     botChatSettingsBroker.resolveSystem(
       pending.requestId,
@@ -49,5 +57,13 @@ export async function requestBotChatSettings(
   if (recipientCount === 0) {
     botChatSettingsBroker.resolveSystem(pending.requestId, unreachableBotChatSettingsResponse(), "no_recipient")
   }
-  return { response: await pending.response }
+  const response = await pending.response
+  // A bot may answer after access or capabilities changed while we waited.
+  await resolveCapableBotForPeer({
+    peerId: input.peerId,
+    botUserId: input.botUserId,
+    version: input.version,
+    actorUserId: context.currentUserId,
+  })
+  return { response }
 }

@@ -2,7 +2,7 @@ import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { botAvatarAssets, chatParticipants, files, userNotDeleted, users } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { getBotPresenceState } from "@in/server/modules/botPresence/state"
+import { getSharedBotPresence } from "@in/server/modules/botPresence/shared"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -51,7 +51,7 @@ export const getBotPresence = async (
   return {
     botUserId: BigInt(row.botUserId),
     ...(avatar ? { avatar } : {}),
-    state: getBotPresenceState(row.botUserId, chat.id),
+    state: (await getSharedBotPresence(row.botUserId, chat.id)).state,
     peerId,
   }
 }

@@ -10239,6 +10239,12 @@ export interface Update {
          */
         spaceProfile: UpdateSpaceProfile;
     } | {
+        oneofKind: "userHasNewUpdates";
+        /**
+         * @generated from protobuf field: UpdateUserHasNewUpdates user_has_new_updates = 52;
+         */
+        userHasNewUpdates: UpdateUserHasNewUpdates;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -10285,6 +10291,21 @@ export interface UpdateSpaceHasNewUpdates {
      * Current sequence of the space
      *
      * @generated from protobuf field: int32 update_seq = 2;
+     */
+    updateSeq: number;
+}
+/**
+ * Update when the authenticated user's durable bucket has new updates and
+ * client should fetch them. The recipient identifies the user, so this payload
+ * intentionally contains only the target user-bucket sequence.
+ *
+ * @generated from protobuf message UpdateUserHasNewUpdates
+ */
+export interface UpdateUserHasNewUpdates {
+    /**
+     * Current sequence of the authenticated user's update bucket.
+     *
+     * @generated from protobuf field: int32 update_seq = 1;
      */
     updateSeq: number;
 }
@@ -41003,7 +41024,8 @@ class Update$Type extends MessageType<Update> {
             { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
             { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
             { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
-            { no: 51, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile }
+            { no: 51, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile },
+            { no: 52, name: "user_has_new_updates", kind: "message", oneof: "update", T: () => UpdateUserHasNewUpdates }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -41312,6 +41334,12 @@ class Update$Type extends MessageType<Update> {
                         spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceProfile)
                     };
                     break;
+                case /* UpdateUserHasNewUpdates user_has_new_updates */ 52:
+                    message.update = {
+                        oneofKind: "userHasNewUpdates",
+                        userHasNewUpdates: UpdateUserHasNewUpdates.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userHasNewUpdates)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -41474,6 +41502,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateSpaceProfile space_profile = 51; */
         if (message.update.oneofKind === "spaceProfile")
             UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUserHasNewUpdates user_has_new_updates = 52; */
+        if (message.update.oneofKind === "userHasNewUpdates")
+            UpdateUserHasNewUpdates.internalBinaryWrite(message.update.userHasNewUpdates, writer.tag(52, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -41607,6 +41638,53 @@ class UpdateSpaceHasNewUpdates$Type extends MessageType<UpdateSpaceHasNewUpdates
  * @generated MessageType for protobuf message UpdateSpaceHasNewUpdates
  */
 export const UpdateSpaceHasNewUpdates = new UpdateSpaceHasNewUpdates$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUserHasNewUpdates$Type extends MessageType<UpdateUserHasNewUpdates> {
+    constructor() {
+        super("UpdateUserHasNewUpdates", [
+            { no: 1, name: "update_seq", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUserHasNewUpdates>): UpdateUserHasNewUpdates {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updateSeq = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUserHasNewUpdates>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUserHasNewUpdates): UpdateUserHasNewUpdates {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 update_seq */ 1:
+                    message.updateSeq = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUserHasNewUpdates, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 update_seq = 1; */
+        if (message.updateSeq !== 0)
+            writer.tag(1, WireType.Varint).int32(message.updateSeq);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUserHasNewUpdates
+ */
+export const UpdateUserHasNewUpdates = new UpdateUserHasNewUpdates$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateChatHasNewUpdates$Type extends MessageType<UpdateChatHasNewUpdates> {
     constructor() {

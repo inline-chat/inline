@@ -14,8 +14,10 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
+import * as transientRealtime from "@in/server/modules/internalMessaging/transient"
 
 const log = new Log("Updates.sendUpdate", LogLevel.INFO)
+const MAX_CONCURRENT_TRANSIENT_RECIPIENTS = 32
 
 export type SendUpdateTransientReason =
   | {
@@ -32,10 +34,13 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
     // 90/10 solution to get all users with private dialogs with the current user then send updates via connection manager to those users
     const userIds = await DialogsModel.getUserIdsWeHavePrivateDialogsWith({ userId })
     log.debug(`Sending user presence update to ${userIds.length} users`)
-    for (const targetUserId of userIds) {
-      // New Updates
-      const newUpdates = getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline)
-      RealtimeUpdates.pushToUser(targetUserId, [newUpdates])
+    const newUpdates = getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline)
+    for (let offset = 0; offset < userIds.length; offset += MAX_CONCURRENT_TRANSIENT_RECIPIENTS) {
+      const recipients = userIds.slice(offset, offset + MAX_CONCURRENT_TRANSIENT_RECIPIENTS)
+      await Promise.all(recipients.map(async (targetUserId) => {
+        await RealtimeUpdates.pushToUser(targetUserId, [newUpdates])
+        transientRealtime.publishUserPresence(targetUserId, userId, online, lastOnline)
+      }))
     }
     return
   }

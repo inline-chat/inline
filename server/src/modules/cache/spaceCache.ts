@@ -1,5 +1,6 @@
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
+import { LocalCache } from "./localCache"
 
 export type CachedSpaceInfo = {
   id: number
@@ -9,22 +10,15 @@ export type CachedSpaceInfo = {
   cacheDate: number
 }
 
-const cachedSpaceInfo = new Map<number, CachedSpaceInfo>()
-const cacheValidTime = 10 * 60 * 1000 // 10 minutes
-const maxCacheSize = 10000 // 10k chats
+const cachedSpaceInfo = new LocalCache<number, CachedSpaceInfo | undefined>({
+  ttlMs: 15_000, negativeTtlMs: 5_000, maxEntries: 10_000,
+  isNegative: (value) => value === undefined,
+})
+
+export const invalidateSpaceCache = (spaceId: number): void => cachedSpaceInfo.invalidate(spaceId)
 
 export async function getCachedSpaceInfo(spaceId: number): Promise<CachedSpaceInfo | undefined> {
-  let cached = cachedSpaceInfo.get(spaceId)
-  if (cached) {
-    if (cached.cacheDate + cacheValidTime > Date.now()) {
-      return cached
-    }
-  }
-
-  if (cachedSpaceInfo.size >= maxCacheSize) {
-    cachedSpaceInfo.clear()
-  }
-
+  return cachedSpaceInfo.get(spaceId, async () => {
   const space = await db.query.spaces.findFirst({
     where: {
       id: spaceId,
@@ -51,9 +45,8 @@ export async function getCachedSpaceInfo(spaceId: number): Promise<CachedSpaceIn
     cacheDate: Date.now(),
   }
 
-  cachedSpaceInfo.set(spaceId, spaceInfo)
-
   return spaceInfo
+  })
 }
 
 export const clearSpaceCache = () => {

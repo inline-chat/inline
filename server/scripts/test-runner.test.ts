@@ -30,5 +30,6 @@ test.each(["--no-isolate", "--concurrent", "--retry=3", "--pass-with-no-tests"])
 test("a unit selection executes successfully with no running database", async () => {
   const result = await run("--unit", "scripts/test-environment.test.ts", "--jobs", "1")
   expect(result.code).toBe(0)
-  expect(result.output).toContain("6 pass")
+  expect(result.output).toMatch(/\b[1-9]\d* pass\b/)
+  expect(result.output).toContain("0 fail")
 })

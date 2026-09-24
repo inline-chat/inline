@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm"
+import type { SignupAttribution } from "@in/server/modules/auth/signupAttribution"
 import {
   check,
   index,
@@ -15,6 +16,7 @@ import { oauthAuthRequests } from "./oauth"
 import { users } from "./users"
 
 export type HostedAuthClient = {
+  signupAttribution?: SignupAttribution
   clientType?: string
   deviceId?: string
   clientVersion?: string

@@ -8,7 +8,8 @@ import {
 } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
-  acquireOwnedProcess,
+  ProcessServiceStopFailure,
+  acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 
 export interface UserSettingsCleanupHandle {
@@ -16,7 +17,8 @@ export interface UserSettingsCleanupHandle {
 }
 
 export interface UserSettingsCleanupProcessShape {
-  readonly running: true
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
+  readonly start: Effect.Effect<UserSettingsCleanupHandle, ProcessServiceStartFailure>
 }
 
 export class UserSettingsCleanupProcess extends Context.Service<
@@ -73,25 +75,16 @@ export const makeUserSettingsCleanupProcessLayer = (
 > =>
   Layer.effect(
     UserSettingsCleanupProcess,
-    acquireOwnedProcess({
+    acquireDeferredOwnedProcess({
       name: "user-settings-cache-cleanup",
       start: adapter.start,
       stop: (handle) => handle.stop(),
-    }).pipe(
-      Effect.as({
-        running: true as const,
-      }),
-    ),
+    }),
   )
 
 /**
- * Compatibility owner for the legacy cleanup singleton. The user-settings
- * module still starts cleanup on its first import, which may happen before this
- * Layer acquires it through another production consumer.
- *
- * TODO(effect-cutover): remove the module-level auto-start only after the
- * replacement process graph is production-owned; then this Layer becomes the
- * sole startup and shutdown owner.
+ * Scoped owner for the cleanup loop. The process host starts it after admission
+ * dependencies are ready; ordinary module imports do not start a timer.
  */
 export const UserSettingsCleanupProcessLive =
   makeUserSettingsCleanupProcessLayer()

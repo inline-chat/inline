@@ -6,4 +6,4 @@ export const invokeBotChatSettingsItemHandler = (
   input: InvokeBotChatSettingsItemInput,
   context: HandlerContext,
 ): Promise<InvokeBotChatSettingsItemResult> =>
-  invokeBotChatSettingsItem(input, { currentSessionId: context.sessionId, currentUserId: context.userId })
+  invokeBotChatSettingsItem(input, { currentSessionId: context.sessionId, currentUserId: context.userId, currentConnectionId: context.connectionId })

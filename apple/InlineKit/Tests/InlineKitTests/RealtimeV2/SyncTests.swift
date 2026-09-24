@@ -4179,6 +4179,110 @@ final class SyncTests {
     #expect(applied.count == 1)
   }
 
+  @Test("a replayed current user record repairs a user gap through the existing catch-up RPC")
+  func testReplayedCurrentUserRecordTriggersUserGapRepair() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let first = makeUpdateReadMaxIdUpdate(
+      seq: 1,
+      date: 100,
+      peer: makeChatPeer(chatId: 1),
+      readMaxId: 1,
+      unreadCount: 0
+    )
+    let current = makeUpdateReadMaxIdUpdate(
+      seq: 2,
+      date: 110,
+      peer: makeChatPeer(chatId: 1),
+      readMaxId: 2,
+      unreadCount: 0
+    )
+    var sidecars = InlineProtocol.UpdateSidecars()
+    sidecars.chats = [.with {
+      $0.id = 1
+      $0.peerID = makeChatPeer(chatId: 1)
+    }]
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 2,
+      date: 110,
+      updates: [first, current],
+      final: true,
+      resultType: .slice,
+      sidecars: sidecars
+    )])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    // The server repair emits only the newest real durable record. It has no
+    // RPC sidecars on the websocket, so the receiver must buffer it and get
+    // the complete authenticated page before advancing the user cursor.
+    await sync.process(updates: [current])
+    let repaired = await waitForCondition {
+      let state = await storage.getBucketState(for: .user)
+      return state.seq == 2 && state.date == 110
+    }
+
+    #expect(repaired)
+    #expect(await client.getUpdatesStartSequences() == [0])
+    #expect(await client.getUpdatesEndSequences() == [2])
+    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect((await apply.appliedSources) == [.syncCatchup, .syncCatchup])
+    let appliedSidecars = await apply.appliedSidecars
+    #expect(appliedSidecars.count == 1)
+    #expect(appliedSidecars[0].chats.map(\.id) == [1])
+    await sync.prepareForTermination()
+  }
+
+  @Test("a user durable hint fetches a bounded authoritative user page")
+  func testUserHasNewUpdatesHintTriggersUserGapRepair() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let first = makeUpdateReadMaxIdUpdate(
+      seq: 1,
+      date: 100,
+      peer: makeChatPeer(chatId: 1),
+      readMaxId: 1,
+      unreadCount: 0
+    )
+    let current = makeUpdateReadMaxIdUpdate(
+      seq: 2,
+      date: 110,
+      peer: makeChatPeer(chatId: 1),
+      readMaxId: 2,
+      unreadCount: 0
+    )
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 2,
+      date: 110,
+      updates: [first, current],
+      final: true,
+      resultType: .slice
+    )])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeUserHasNewUpdatesSignal(updateSeq: 2)])
+    let repaired = await waitForCondition {
+      let state = await storage.getBucketState(for: .user)
+      return state.seq == 2 && state.date == 110
+    }
+
+    #expect(repaired)
+    #expect(await client.getUpdatesStartSequences() == [0])
+    #expect(await client.getUpdatesEndSequences() == [2])
+    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect((await apply.appliedSources) == [.syncCatchup, .syncCatchup])
+    await sync.prepareForTermination()
+  }
+
   @Test("buffers out-of-order realtime updates and repairs gap via fetch")
   func testRealtimeOutOfOrderIsBufferedUntilGapRepair() async throws {
     let storage = InMemorySyncStorage()
@@ -5724,6 +5828,15 @@ private func makeSpaceHasNewUpdatesSignal(spaceId: Int64, updateSeq: Int32) -> I
 
   var update = InlineProtocol.Update()
   update.update = .spaceHasNewUpdates(payload)
+  return update
+}
+
+private func makeUserHasNewUpdatesSignal(updateSeq: Int32) -> InlineProtocol.Update {
+  var payload = InlineProtocol.UpdateUserHasNewUpdates()
+  payload.updateSeq = updateSeq
+
+  var update = InlineProtocol.Update()
+  update.update = .userHasNewUpdates(payload)
   return update
 }
 

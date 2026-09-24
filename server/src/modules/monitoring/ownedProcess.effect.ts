@@ -42,6 +42,7 @@ export interface DeferredOwnedProcess<Resource> {
     Resource,
     ProcessServiceStartFailure
   >
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
 }
 
 /**
@@ -98,9 +99,12 @@ export const acquireDeferredOwnedProcess = <Resource>(
       let starting:
         | Promise<Resource>
         | undefined
+      let stopped = false
+      let stopping: Promise<void> | undefined
 
       const start = Effect.tryPromise({
         try: () => {
+          if (stopped) return Promise.reject(new Error("Process ownership has stopped"))
           starting ??=
             Promise.resolve().then(
               () => adapter.start(),
@@ -116,18 +120,15 @@ export const acquireDeferredOwnedProcess = <Resource>(
 
       return {
         start,
-        stop: async () => {
-          if (starting === undefined) {
-            return
-          }
-
-          let resource: Resource
-          try {
-            resource = await starting
-          } catch {
-            return
-          }
-          await adapter.stop(resource)
+        stop: (): Promise<void> => {
+          stopped = true
+          stopping ??= (async () => {
+            if (starting === undefined) return
+            let resource: Resource
+            try { resource = await starting } catch { return }
+            await adapter.stop(resource)
+          })()
+          return stopping
         },
       }
     }),
@@ -151,5 +152,13 @@ export const acquireDeferredOwnedProcess = <Resource>(
         ),
       ),
   ).pipe(
-    Effect.map(({ start }) => ({ start })),
+    Effect.map(({ start, stop }): DeferredOwnedProcess<Resource> => ({
+      start,
+      // The host quiesces producers before draining consumers. The scoped
+      // finalizer calls the same idempotent stop if startup or shutdown fails.
+      stop: Effect.tryPromise({
+        try: stop,
+        catch: (cause) => new ProcessServiceStopFailure({ cause, service: adapter.name }),
+      }),
+    })),
   )

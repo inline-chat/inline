@@ -3,14 +3,17 @@ import { members, spaces } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { requireOwnedSpacePhoto } from "@in/server/modules/spaces/spacePhoto"
-import { getUpdateGroupForSpace } from "@in/server/modules/updates"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { encodeSpace } from "@in/server/realtime/encoders/encodeSpace"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Log } from "@in/server/utils/log"
 import type { HandlerContext } from "@in/server/realtime/types"
 import type { SetSpacePhotoInput, SetSpacePhotoResult, Update, UpdateSpaceProfile } from "@inline-chat/protocol/core"
 import { and, eq } from "drizzle-orm"
+
+const log = new Log("space.profile")
 
 export async function setSpacePhotoHandler(input: SetSpacePhotoInput, context: HandlerContext): Promise<SetSpacePhotoResult> {
   const spaceId = Number(input.spaceId)
@@ -41,7 +44,15 @@ export async function setSpacePhotoHandler(input: SetSpacePhotoInput, context: H
       photoUrl: encoded.photoUrl, isPro: encoded.isPro ?? false,
     } },
   }
-  const group = await getUpdateGroupForSpace(spaceId, { currentUserId: context.userId })
-  for (const userId of group.userIds) void RealtimeUpdates.pushToUser(userId, [live])
+  // Publish only after commit. Remote peers fetch the durable space bucket;
+  // local delivery rechecks membership and joins its bounded fanout.
+  publishDurableReference({ bucket: { kind: "space", spaceId }, frontier: update.seq })
+  try {
+    await RealtimeUpdates.pushToSpace(spaceId, [live])
+  } catch (error) {
+    // The mutation is already durable. A local transport failure must not
+    // report the edit as failed; bucket replay remains its recovery path.
+    log.warn("Space profile delivery failed after commit", { spaceId, error })
+  }
   return { space: encoded, updates: [live] }
 }

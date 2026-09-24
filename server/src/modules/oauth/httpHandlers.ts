@@ -78,6 +78,7 @@ import { normalizeMcpResourceIndicator } from "./resourceIndicator"
 import { isGrantSessionActive } from "./grantSession"
 import { needsOAuthProfile, parseOAuthProfile, type OAuthProfile } from "./profile"
 import { oauthClientKind } from "./clientKind"
+import { captureSignupReferral } from "@in/server/modules/auth/signupAttribution"
 import { handler as updateProfile } from "@in/server/methods/updateProfile"
 
 const config = oauthConfig()
@@ -730,7 +731,7 @@ export async function handleRegister(
   )
 }
 
-export async function handleAuthorizeGet(url: URL): Promise<Response> {
+export async function handleAuthorizeGet(url: URL, referrer?: string | null): Promise<Response> {
   const responseType = url.searchParams.get("response_type")
   const clientId = url.searchParams.get("client_id")
   const redirectUri = url.searchParams.get("redirect_uri")
@@ -773,7 +774,10 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
 
   const login = await beginOAuthHostedLogin({
     oauthAuthRequestId: authRequestId,
-    client: { clientType: "web", deviceId, deviceName: client.clientName ?? "OAuth" },
+    client: {
+      clientType: "web", deviceId, deviceName: client.clientName ?? "OAuth",
+      signupAttribution: captureSignupReferral(url, referrer),
+    },
   })
   return new Response(null, {
     status: 303,
@@ -2181,5 +2185,5 @@ export function prepareAuthorizeRequest(request: Request): Promise<Response> {
       cause,
     )
   })
-  return handleAuthorizeGet(new URL(request.url))
+  return handleAuthorizeGet(new URL(request.url), request.headers.get("referer"))
 }

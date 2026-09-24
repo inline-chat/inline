@@ -6506,6 +6506,7 @@ var Method;
   Method2[Method2["TRANSCRIBE_VOICE_DRAFT"] = 142] = "TRANSCRIBE_VOICE_DRAFT";
   Method2[Method2["REQUEST_BOT_FILESYSTEM"] = 143] = "REQUEST_BOT_FILESYSTEM";
   Method2[Method2["ANSWER_BOT_FILESYSTEM"] = 144] = "ANSWER_BOT_FILESYSTEM";
+  Method2[Method2["SET_SPACE_PHOTO"] = 145] = "SET_SPACE_PHOTO";
 })(Method || (Method = {}));
 var GridConnectionUnavailableReason;
 (function(GridConnectionUnavailableReason2) {
@@ -11315,7 +11316,10 @@ class Space$Type extends import_runtime4.MessageType {
       { no: 4, name: "date", kind: "scalar", T: 3, L: 0 },
       { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 },
       { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 },
-      { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 }
+      { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 },
+      { no: 8, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 },
+      { no: 9, name: "photo_url", kind: "scalar", opt: true, T: 9 },
+      { no: 10, name: "is_pro", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -11354,6 +11358,15 @@ class Space$Type extends import_runtime4.MessageType {
         case 7:
           message.seq = reader.int32();
           break;
+        case 8:
+          message.photoFileUniqueId = reader.string();
+          break;
+        case 9:
+          message.photoUrl = reader.string();
+          break;
+        case 10:
+          message.isPro = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11380,6 +11393,12 @@ class Space$Type extends import_runtime4.MessageType {
       writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.handle);
     if (message.seq !== undefined)
       writer.tag(7, import_runtime.WireType.Varint).int32(message.seq);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
+    if (message.photoUrl !== undefined)
+      writer.tag(9, import_runtime.WireType.LengthDelimited).string(message.photoUrl);
+    if (message.isPro !== undefined)
+      writer.tag(10, import_runtime.WireType.Varint).bool(message.isPro);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14440,7 +14459,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput },
       { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "input", T: () => TranscribeVoiceDraftInput },
       { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
-      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput }
+      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput },
+      { no: 146, name: "setSpacePhoto", kind: "message", oneof: "input", T: () => SetSpacePhotoInput }
     ]);
   }
   create(value) {
@@ -15317,6 +15337,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
             answerBotFilesystem: AnswerBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, message.input.answerBotFilesystem)
           };
           break;
+        case 146:
+          message.input = {
+            oneofKind: "setSpacePhoto",
+            setSpacePhoto: SetSpacePhotoInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setSpacePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -15617,6 +15643,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       RequestBotFilesystemInput.internalBinaryWrite(message.input.requestBotFilesystem, writer.tag(144, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "answerBotFilesystem")
       AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(145, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setSpacePhoto")
+      SetSpacePhotoInput.internalBinaryWrite(message.input.setSpacePhoto, writer.tag(146, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15771,7 +15799,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult },
       { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "result", T: () => TranscribeVoiceDraftResult },
       { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
-      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult }
+      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult },
+      { no: 146, name: "setSpacePhoto", kind: "message", oneof: "result", T: () => SetSpacePhotoResult }
     ]);
   }
   create(value) {
@@ -16648,6 +16677,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
             answerBotFilesystem: AnswerBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, message.result.answerBotFilesystem)
           };
           break;
+        case 146:
+          message.result = {
+            oneofKind: "setSpacePhoto",
+            setSpacePhoto: SetSpacePhotoResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setSpacePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -16948,6 +16983,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       RequestBotFilesystemResult.internalBinaryWrite(message.result.requestBotFilesystem, writer.tag(144, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "answerBotFilesystem")
       AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(145, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setSpacePhoto")
+      SetSpacePhotoResult.internalBinaryWrite(message.result.setSpacePhoto, writer.tag(146, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29016,7 +29053,8 @@ var CreateExternalTaskResult = new CreateExternalTaskResult$Type;
 class CreateSpaceInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CreateSpaceInput", [
-      { no: 1, name: "name", kind: "scalar", T: 9 }
+      { no: 1, name: "name", kind: "scalar", T: 9 },
+      { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -29034,6 +29072,9 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
         case 1:
           message.name = reader.string();
           break;
+        case 2:
+          message.photoFileUniqueId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -29048,6 +29089,8 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.name !== "")
       writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29055,6 +29098,167 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
   }
 }
 var CreateSpaceInput = new CreateSpaceInput$Type;
+
+class SetSpacePhotoInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpacePhotoInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "file_unique_id", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.fileUniqueId = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.fileUniqueId = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.fileUniqueId !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpacePhotoInput = new SetSpacePhotoInput$Type;
+
+class SetSpacePhotoResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpacePhotoResult", [
+      { no: 1, name: "space", kind: "message", T: () => Space },
+      { no: 2, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+          break;
+        case 2:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.space)
+      Space.internalBinaryWrite(message.space, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpacePhotoResult = new SetSpacePhotoResult$Type;
+
+class UpdateSpaceProfile$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateSpaceProfile", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "photo_url", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "is_pro", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.isPro = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.photoFileUniqueId = reader.string();
+          break;
+        case 3:
+          message.photoUrl = reader.string();
+          break;
+        case 4:
+          message.isPro = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
+    if (message.photoUrl !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.photoUrl);
+    if (message.isPro !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.isPro);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateSpaceProfile = new UpdateSpaceProfile$Type;
 
 class CreateSpaceResult$Type extends import_runtime4.MessageType {
   constructor() {
@@ -30252,7 +30456,9 @@ class Update$Type extends import_runtime4.MessageType {
       { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
       { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
       { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
-      { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation }
+      { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
+      { no: 51, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile },
+      { no: 52, name: "user_has_new_updates", kind: "message", oneof: "update", T: () => UpdateUserHasNewUpdates }
     ]);
   }
   create(value) {
@@ -30555,6 +30761,18 @@ class Update$Type extends import_runtime4.MessageType {
             dialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, message.update.dialogTranslation)
           };
           break;
+        case 51:
+          message.update = {
+            oneofKind: "spaceProfile",
+            spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, message.update.spaceProfile)
+          };
+          break;
+        case 52:
+          message.update = {
+            oneofKind: "userHasNewUpdates",
+            userHasNewUpdates: UpdateUserHasNewUpdates.internalBinaryRead(reader, reader.uint32(), options, message.update.userHasNewUpdates)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -30665,6 +30883,10 @@ class Update$Type extends import_runtime4.MessageType {
       ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.update.oneofKind === "dialogTranslation")
       UpdateDialogTranslation.internalBinaryWrite(message.update.dialogTranslation, writer.tag(50, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "spaceProfile")
+      UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(51, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "userHasNewUpdates")
+      UpdateUserHasNewUpdates.internalBinaryWrite(message.update.userHasNewUpdates, writer.tag(52, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30784,6 +31006,49 @@ class UpdateSpaceHasNewUpdates$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateSpaceHasNewUpdates = new UpdateSpaceHasNewUpdates$Type;
+
+class UpdateUserHasNewUpdates$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateUserHasNewUpdates", [
+      { no: 1, name: "update_seq", kind: "scalar", T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updateSeq = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.updateSeq = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.updateSeq !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.updateSeq);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateUserHasNewUpdates = new UpdateUserHasNewUpdates$Type;
 
 class UpdateChatHasNewUpdates$Type extends import_runtime4.MessageType {
   constructor() {
@@ -44771,6 +45036,7 @@ class InlineSdkClient {
   catchUpInFlightBySpaceId = new Map;
   catchUpRequestedBySpaceId = new Map;
   userCatchUpInFlight = null;
+  userCatchUpRequested = null;
   peerResolutionInFlightByChatId = new Map;
   peerResolutionRequestedByChatId = new Map;
   recoveryReconnectInFlight = null;
@@ -45743,7 +46009,7 @@ class InlineSdkClient {
         if (options?.source === "live" && seq > 0) {
           this.fenceLiveCursor({ kind: "user" });
           this.registerDiscoveryHint({ kind: "user" }, seq);
-          this.requestCatchUpUser(true);
+          this.requestCatchUpUser(true, seq);
           return Promise.resolve(true);
         }
         const payload = update.update.userAddedToChat;
@@ -45831,6 +46097,15 @@ class InlineSdkClient {
           ...payload.updateSeq > 0 ? { updateSeq: payload.updateSeq } : {}
         });
         return delivery;
+      }
+      case "userHasNewUpdates": {
+        const payload = update.update.userHasNewUpdates;
+        if (!Number.isSafeInteger(payload.updateSeq) || payload.updateSeq <= 0) {
+          return Promise.resolve(true);
+        }
+        this.registerDiscoveryHint({ kind: "user" }, payload.updateSeq);
+        this.requestCatchUpUser(true, payload.updateSeq > 0 ? payload.updateSeq : undefined);
+        return Promise.resolve(true);
       }
       default:
         return null;
@@ -46019,7 +46294,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...updateSeq != null ? { updateSeq } : {} });
         return;
       case "user":
-        this.requestCatchUpUser(true);
+        this.requestCatchUpUser(true, updateSeq);
         return;
     }
   }
@@ -46056,8 +46331,8 @@ class InlineSdkClient {
   requestCatchUpForDegradedBucket(bucket) {
     switch (bucket.kind) {
       case "chat": {
-        const request = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
-        const updateSeq = request && !request.toLatest ? request.endSeq : undefined;
+        const request2 = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
+        const updateSeq = request2 && !request2.toLatest ? request2.endSeq : undefined;
         const peer = bucket.peer ?? this.persistedChatPeer(bucket.chatId);
         if (peer && this.isReliableChatPeer(peer)) {
           this.requestCatchUpChat({ chatId: bucket.chatId, peer, updateSeq });
@@ -46067,15 +46342,16 @@ class InlineSdkClient {
         return;
       }
       case "space": {
-        const request = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
+        const request2 = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
         this.requestCatchUpSpace({
           spaceId: bucket.spaceId,
-          updateSeq: request && !request.toLatest ? request.endSeq : undefined
+          updateSeq: request2 && !request2.toLatest ? request2.endSeq : undefined
         });
         return;
       }
       case "user":
-        this.requestCatchUpUser(true);
+        const request = this.userCatchUpRequested;
+        this.requestCatchUpUser(true, request && !request.toLatest ? request.endSeq : undefined);
         return;
     }
   }
@@ -46096,7 +46372,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...updateSeq != null ? { updateSeq } : {} });
         return;
       case "user":
-        this.requestCatchUpUser(true);
+        this.requestCatchUpUser(true, updateSeq);
         return;
     }
   }
@@ -46111,6 +46387,7 @@ class InlineSdkClient {
       case "newMessageNotification":
       case "chatHasNewUpdates":
       case "spaceHasNewUpdates":
+      case "userHasNewUpdates":
       case "botPresence":
         return true;
       case undefined:
@@ -46192,6 +46469,8 @@ class InlineSdkClient {
       }
       case "spaceSettings":
         return [{ kind: "space", spaceId: update.update.spaceSettings.spaceId }];
+      case "spaceProfile":
+        return [{ kind: "space", spaceId: update.update.spaceProfile.spaceId }];
       case "dialogArchived":
       case "joinSpace":
       case "updateReadMaxId":
@@ -46312,10 +46591,21 @@ class InlineSdkClient {
     }
     this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq);
   }
-  requestCatchUpUser(forceFromStart = false) {
+  requestCatchUpUser(forceFromStart = false, updateSeq) {
     const lastUserSeq = this.state.lastUserSeq;
     if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
       return null;
+    }
+    const cursor = lastUserSeq ?? 0;
+    if (updateSeq != null && updateSeq <= cursor)
+      return this.userCatchUpInFlight;
+    const previous = this.userCatchUpRequested;
+    const demandAlreadyCoversHint = updateSeq != null && (previous?.endSeq ?? 0) >= updateSeq;
+    if (!demandAlreadyCoversHint) {
+      this.userCatchUpRequested = {
+        ...updateSeq != null || previous?.endSeq != null ? { endSeq: Math.max(previous?.endSeq ?? 0, updateSeq ?? 0) } : {},
+        toLatest: previous?.toLatest === true || updateSeq == null
+      };
     }
     if (this.userCatchUpInFlight) {
       return this.userCatchUpInFlight;
@@ -46323,21 +46613,54 @@ class InlineSdkClient {
     if (this.recoveryRetries.get("user")?.timer)
       return null;
     this.fenceLiveCursor({ kind: "user" });
-    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0).catch((error) => {
-      this.recordCatchUpFailure({ kind: "user" }, error);
+    return this.startUserCatchUp();
+  }
+  startUserCatchUp() {
+    const initialDemand = this.userCatchUpRequested;
+    const task = this.drainCatchUpUser().catch((error) => {
+      this.recordCatchUpFailure({ kind: "user" }, error, this.userCatchUpRequested !== initialDemand);
       this.log.warn?.("GET_UPDATES user catch-up failed; bucket remains degraded", {
         error: extractErrorMessage(error)
       });
     }).finally(() => {
       this.userCatchUpInFlight = null;
+      if (this.userCatchUpRequested && !this.degradedUpdateBuckets.has("user")) {
+        this.startUserCatchUp();
+        return;
+      }
       this.scheduleRecoveryRetry({ kind: "user" });
     });
-    return this.userCatchUpInFlight;
+    this.userCatchUpInFlight = task;
+    return task;
   }
-  async doCatchUpUser(startSeq) {
-    let cursor = startSeq;
+  async drainCatchUpUser() {
     while (true) {
-      const requestEndSeq = this.catchUpRequestEndSeq(cursor);
+      const request = this.userCatchUpRequested;
+      if (!request)
+        return;
+      const startSeq = this.state.lastUserSeq ?? 0;
+      const endSeq = request.toLatest ? undefined : request.endSeq;
+      if (endSeq != null && endSeq <= startSeq) {
+        this.satisfyDiscoveryThroughCursor({ kind: "user" }, startSeq);
+        this.clearUpdateBucketDegraded({ kind: "user" });
+        this.userCatchUpRequested = null;
+        return;
+      }
+      const stop = await this.doCatchUpUser(startSeq, endSeq);
+      if (stop) {
+        if (this.userCatchUpRequested !== request)
+          continue;
+        if (this.degradedUpdateBuckets.has("user"))
+          return;
+        this.userCatchUpRequested = null;
+        return;
+      }
+    }
+  }
+  async doCatchUpUser(startSeq, endSeq) {
+    let cursor = startSeq;
+    while (endSeq == null || cursor < endSeq) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor, endSeq);
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -46358,24 +46681,32 @@ class InlineSdkClient {
       if (!Number.isSafeInteger(deliveredSeq)) {
         this.markUpdateBucketDegraded({ kind: "user" });
         this.log.warn?.("GET_UPDATES user catch-up returned non-integer seq; aborting", { deliveredSeq });
-        return;
+        return true;
       }
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq !== requestEndSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" });
+          this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested user target", {
+            requestedEndSeq: requestEndSeq,
+            deliveredSeq
+          });
+          return true;
+        }
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq);
         const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date, !shouldContinue);
         if (repaired && shouldContinue) {
           cursor = deliveredSeq;
           continue;
         }
-        return;
+        return true;
       }
       const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "user" });
       if (requiresSnapshotRepair == null)
-        return;
+        return true;
       if (requiresSnapshotRepair) {
         if (this.options.repairUpdatesBucket) {
           await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date);
-          return;
+          return true;
         }
         this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
           bucket: "user",
@@ -46388,23 +46719,32 @@ class InlineSdkClient {
           cursor,
           deliveredSeq
         });
-        return;
+        return true;
       }
       if (!await this.acceptCatchUpUpdates(payload.updates, "user", { kind: "user" }))
-        return;
+        return true;
       this.bumpUserSeq(deliveredSeq);
       this.scheduleStateSave();
       if (payload.final) {
-        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq)) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)) {
           cursor = deliveredSeq;
           continue;
         }
+        if (endSeq != null && deliveredSeq < endSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" }, "target_not_reached");
+          this.log.warn?.("GET_UPDATES final user page remained behind the requested target", {
+            requestedEndSeq: endSeq,
+            deliveredSeq
+          });
+          return true;
+        }
         this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq);
         this.clearUpdateBucketDegraded({ kind: "user" });
-        return;
+        return true;
       }
       cursor = deliveredSeq;
     }
+    return false;
   }
   requestCatchUpChat(params) {
     if (params.peer)

@@ -21,8 +21,13 @@ import {
   getConnectionReasonFromAuthError,
 } from "@in/server/modules/auth/sessionAuthentication"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
+import { db } from "@in/server/db"
+import { members, spaces, users } from "@in/server/db/schema"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 
 const log = new Log("realtime")
+const MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY = 512
+const MAX_CONCURRENT_SPACE_DELIVERIES = 32
 
 const pickIdFields = (value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== "object") return undefined
@@ -111,6 +116,9 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
   const { ws, connectionId } = rootContext
 
   const conn = connectionManager.getConnection(connectionId)
+  // This only marks in-memory, per-session activity. Presence batches the
+  // durable touch, so authenticated frames never add a database query here.
+  connectionManager.markConnectionActivity(connectionId)
 
   log.trace(
     `handling message ${message.body.oneofKind} for connection ${connectionId} userId: ${conn?.userId} sessionId: ${conn?.sessionId} layer: ${conn?.layer}`,
@@ -325,17 +333,28 @@ const genId = (): bigint => {
   return (timestamp << 22n) | sequence
 }
 
-const sendRaw = (ws: Ws, message: ServerProtocolMessage) => {
-  ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true)
+/**
+ * Bun returns 0 only when it drops a frame. A negative result means the
+ * frame was accepted with backpressure, so it remains a successful transport
+ * handoff. This is deliberately not a client acknowledgement: durable repair
+ * still discovers and replays missed updates independently.
+ */
+const sendRaw = (ws: Ws, message: ServerProtocolMessage): boolean => {
+  return ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true) !== 0
 }
 
-export const sendMessageToRealtimeUser = async (
+/**
+ * Internal delivery primitive for callers that must distinguish a current
+ * transport acceptance from a frame rejected by Bun. It is still not a client
+ * acknowledgement and does not authorize against the database.
+ */
+export const sendMessageToRealtimeUserWithDelivery = async (
   userId: number,
   payload: ServerMessage["payload"],
   options?: { skipSessionId?: number },
 ) => {
   const connections = connectionManager.getUserConnections(userId)
-
+  let accepted = 0
   for (let conn of connections) {
     if (options?.skipSessionId && conn.sessionId === options.skipSessionId) {
       log.debug(`skipping session ${options.skipSessionId} for user ${userId}`)
@@ -344,18 +363,31 @@ export const sendMessageToRealtimeUser = async (
 
     log.trace(`sending message to user ${userId} with session ${conn.sessionId} with payload ${payload}`)
 
-    // re-using id in different sockets should be fine, even beneficial as it avoid duplicate ones
-    let id = genId()
-    sendRaw(conn.ws, {
-      id: id,
+    const id = genId()
+    if (sendRaw(conn.ws, {
+      id,
       body: {
         oneofKind: "message",
-        message: {
-          payload,
-        },
+        message: { payload },
       },
-    })
+    })) {
+      accepted += 1
+    } else {
+      // A frame rejected by the transport cannot be repaired through this
+      // socket. Remove it so a positive result covers every live survivor.
+      connectionManager.closeConnection(conn.connectionId)
+    }
   }
+  return accepted
+}
+
+/** Preserves the established fire-and-forget realtime API for ordinary fanout. */
+export const sendMessageToRealtimeUser = async (
+  userId: number,
+  payload: ServerMessage["payload"],
+  options?: { skipSessionId?: number },
+): Promise<void> => {
+  await sendMessageToRealtimeUserWithDelivery(userId, payload, options)
 }
 
 /** Sends an ephemeral event only to connections authenticated as this bot. */
@@ -369,16 +401,21 @@ export const sendMessageToRealtimeBot = async (
   if (connections.length === 0) return 0
 
   const id = genId()
+  let accepted = 0
   for (const connection of connections) {
-    sendRaw(connection.ws, {
+    if (sendRaw(connection.ws, {
       id,
       body: {
         oneofKind: "message",
         message: { payload },
       },
-    })
+    })) {
+      accepted += 1
+    } else {
+      connectionManager.closeConnection(connection.connectionId)
+    }
   }
-  return connections.length
+  return accepted
 }
 
 /** Selects one exact authenticated bot socket for a private request/reply flow. */
@@ -401,14 +438,15 @@ export const sendMessageToRealtimeBotConnection = async (
   const connection = connectionManager.getConnection(connectionId)
   if (connection?.userId !== botUserId || connection.isBot !== true) return false
 
-  sendRaw(connection.ws, {
+  const accepted = sendRaw(connection.ws, {
     id: genId(),
     body: {
       oneofKind: "message",
       message: { payload },
     },
   })
-  return true
+  if (!accepted) connectionManager.closeConnection(connection.connectionId)
+  return accepted
 }
 
 /**
@@ -427,27 +465,65 @@ export const sendMessageToRealtimeSession = async (
     .filter((connection) => connection.sessionId === sessionId)
   const id = genId()
 
+  let accepted = 0
   for (const connection of connections) {
     log.trace(`sending message to user ${userId} with exact session ${sessionId} with payload ${payload}`)
-    sendRaw(connection.ws, {
+    if (sendRaw(connection.ws, {
       id,
       body: {
         oneofKind: "message",
         message: { payload },
       },
-    })
+    })) {
+      accepted += 1
+    } else {
+      connectionManager.closeConnection(connection.connectionId)
+    }
   }
+  return accepted
 }
 
-/** Sends a message to all users in a space that are connected to the server */
+/**
+ * Sends a message to all locally connected current members of a space.
+ *
+ * The process-local membership index only narrows the candidates. Every
+ * batch is re-authorized from the database so a departed member, a deleted
+ * account, or a deleted space cannot receive a realtime frame from a stale
+ * index. The bounded batches also keep a large space from creating one
+ * oversized `IN (...)` query.
+ */
 export const sendMessageToRealtimeSpace = async (spaceId: number, payload: ServerMessage["payload"]) => {
   const userIds = connectionManager.getSpaceUserIds(spaceId)
-  await Promise.all(userIds.map((userId) => sendMessageToRealtimeUser(userId, payload)))
+  if (userIds.length === 0) return
+  const deliveryErrors: unknown[] = []
+  for (let offset = 0; offset < userIds.length; offset += MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY) {
+    const candidates = userIds.slice(offset, offset + MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY)
+    const authorized = await db.select({ userId: members.userId }).from(members)
+      .innerJoin(spaces, eq(spaces.id, members.spaceId))
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(and(
+        eq(members.spaceId, spaceId),
+        inArray(members.userId, candidates),
+        isNull(spaces.deleted),
+        // The historical nullable column uses NULL/false for active accounts.
+        or(isNull(users.deleted), eq(users.deleted, false)),
+      ))
+    for (let deliveryOffset = 0; deliveryOffset < authorized.length; deliveryOffset += MAX_CONCURRENT_SPACE_DELIVERIES) {
+      const deliveries = await Promise.allSettled(authorized
+        .slice(deliveryOffset, deliveryOffset + MAX_CONCURRENT_SPACE_DELIVERIES)
+        .map(({ userId }) => sendMessageToRealtimeUserWithDelivery(userId, payload)))
+      for (const delivery of deliveries) {
+        if (delivery.status === "rejected") deliveryErrors.push(delivery.reason)
+      }
+    }
+  }
+  if (deliveryErrors.length > 0) throw new AggregateError(deliveryErrors, "Space realtime delivery failed")
 }
 
 export class RealtimeUpdates {
-  static pushToUser(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }) {
-    return sendMessageToRealtimeUser(
+  /** Provides the transport signal for durable-repair only. */
+  static pushToUserWithDelivery(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }): Promise<number> {
+    return sendMessageToRealtimeUserWithDelivery(
       userId,
       {
         oneofKind: "update",
@@ -459,8 +535,13 @@ export class RealtimeUpdates {
     )
   }
 
+  /** Ordinary callers intentionally do not observe frame acceptance. */
+  static async pushToUser(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }): Promise<void> {
+    await this.pushToUserWithDelivery(userId, updates, options)
+  }
+
   static pushToSpace(spaceId: number, updates: UpdatesPayload["updates"]) {
-    sendMessageToRealtimeSpace(spaceId, {
+    return sendMessageToRealtimeSpace(spaceId, {
       oneofKind: "update",
       update: {
         updates: updates,

@@ -147,6 +147,7 @@ export interface ServerAuthorizationKeyRepository {
 export type ServerReplayClaim =
   | { kind: "claimed" }
   | { kind: "in_flight" }
+  | { kind: "unknown_outcome" }
   | { kind: "completed"; resultBody: Uint8Array }
   | { kind: "digest_mismatch" }
 
@@ -907,6 +908,16 @@ export class InlineProtocolServerSession {
           responses: [this.#encryptOutgoing(
             encodeMsgsStateInfo(message.messageId, Uint8Array.of(0x04)), false, 1,
           )],
+          applicationTasks: [],
+        },
+        completed: false,
+      }
+    }
+    if (replay.kind === "unknown_outcome") {
+      return {
+        result: {
+          responses: [this.#encryptOutgoing(encodeRpcResult(message.messageId,
+            encodeRpcError(504, "Realtime application outcome is unknown; reconcile before retrying")), true, 1)],
           applicationTasks: [],
         },
         completed: false,

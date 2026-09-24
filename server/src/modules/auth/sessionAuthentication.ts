@@ -57,7 +57,7 @@ export const getAuthTokenErrorDetails = (
 
 export const getUserIdFromToken = async (
   token: string,
-): Promise<{ userId: number; sessionId: number; isBot: boolean }> => {
+): Promise<{ userId: number; sessionId: number; isBot: boolean; clientType: string }> => {
   const tokenUserId = parseTokenUserId(token)
   const tokenHash = hashToken(token)
   const credentialFingerprint = getCredentialFingerprint(tokenHash)
@@ -142,7 +142,7 @@ export const getUserIdFromToken = async (
       .catch(() => {})
   }
 
-  return { userId: session.userId, sessionId: session.id, isBot: row.userBot === true }
+  return { userId: session.userId, sessionId: session.id, isBot: row.userBot === true, clientType: session.clientType ?? "unknown" }
 }
 
 const parseTokenUserId = (token: string): number | undefined => {

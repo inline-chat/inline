@@ -33,6 +33,7 @@ import { sendInlineOnlyBotEvent } from "@in/server/modules/bot-events"
 import { encrypt, decrypt } from "@in/server/modules/encryption/encryption"
 import { buildOtpAuthUrl, generateTotpSecret, verifyTotpCode } from "@in/server/utils/totp"
 import { connectionManager } from "@in/server/ws/connections"
+import { connectionPresenceForUser } from "@in/server/modules/internalMessaging/presenceView"
 import { getErrorStats } from "@in/server/utils/metrics"
 import { gitCommitHash, version } from "@in/server/buildEnv"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
@@ -1075,7 +1076,6 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         threadCountRow,
         recentThreadCountRow,
         sessionCountRow,
-        activeSessionCountRow,
       ] = await Promise.all([
         db
           .select({
@@ -1084,7 +1084,6 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
             clientVersion: sessions.clientVersion,
             osVersion: sessions.osVersion,
             lastActive: sessions.lastActive,
-            active: sessions.active,
             deviceId: sessions.deviceId,
             date: sessions.date,
             revoked: sessions.revoked,
@@ -1151,15 +1150,9 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           })
           .from(sessions)
           .where(eq(sessions.userId, userId)),
-        db
-          .select({
-            count: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .where(and(eq(sessions.userId, userId), eq(sessions.active, true), isNull(sessions.revoked))),
       ])
 
-      const connections = connectionManager.getUserConnectionSummary(userId)
+      const connections = await connectionPresenceForUser(userId)
 
       const origin = ADMIN_PUBLIC_API_ORIGIN ?? new URL(request.url).origin
       return {
@@ -1192,7 +1185,8 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           threadsCreatedLast7d: recentThreadCountRow[0]?.count ?? 0,
           memberships: membershipCountRow[0]?.count ?? 0,
           sessions: sessionCountRow[0]?.count ?? 0,
-          activeSessions: activeSessionCountRow[0]?.count ?? 0,
+          activeSessions: connections.activeSessionIds.size,
+          presenceComplete: connections.complete,
         },
         memberships: userMemberships.map((membership) => ({
           id: membership.id,
@@ -1215,13 +1209,13 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           clientVersion: sessionRow.clientVersion,
           osVersion: sessionRow.osVersion,
           lastActive: sessionRow.lastActive ? sessionRow.lastActive.toISOString() : null,
-          active: Boolean(sessionRow.active),
+          active: connections.activeSessionIds.has(sessionRow.id),
           deviceId: sessionRow.deviceId,
           date: sessionRow.date ? sessionRow.date.toISOString() : null,
           revoked: sessionRow.revoked ? sessionRow.revoked.toISOString() : null,
           personalData: decryptSessionPersonalData(sessionRow),
         })),
-        connections,
+        connections: { totalConnections: connections.totalConnections, sessions: connections.sessions, complete: connections.complete },
       }
     },
     {

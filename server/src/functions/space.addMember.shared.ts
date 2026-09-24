@@ -17,6 +17,8 @@ import {
   getSpaceRootChatIdsForAccessEvents,
 } from "@in/server/modules/authorization/chatAccessProjection"
 import { activateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
+import { publishAccessChanged } from "@in/server/modules/cache/cluster"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
 import {
   liveUpdateForPersistedUserChatOpenProjection,
@@ -85,6 +87,9 @@ type PersistedMemberAdd = AddSpaceMemberResult & {
 export async function addSpaceMember(input: AddSpaceMemberInput): Promise<AddSpaceMemberResult> {
   const normalized = normalizeInput(input)
   const outcome = await db.transaction((tx) => persistMemberAdd(tx, normalized))
+
+  publishAccessChanged({ kind: "space", spaceId: outcome.space.id }, outcome.user.id)
+  publishDurableReference({ bucket: { kind: "space", spaceId: outcome.space.id }, frontier: outcome.spaceUpdate.seq })
 
   await publishCommittedMemberAdd(outcome)
 

@@ -8,7 +8,6 @@ export type CachedUserSettings = {
   general: UserSettingsGeneral | null
   cacheDate: number
   lastAccessed: number
-  isRefreshing?: boolean
 }
 
 export type CacheStats = {
@@ -21,14 +20,18 @@ export type CacheStats = {
 
 class UserSettingsCache {
   private cache = new Map<number, CachedUserSettings>()
+  private inflight = new Map<number, Promise<UserSettingsGeneral | null>>()
   // A fill may outlive an invalidation. Per-user generations prevent an
   // unrelated user's invalidation from discarding this user's refresh, while
   // the clear generation still fences every in-flight fill after clear().
   private clearEpoch = 0
   private userEpochs = new Map<number, number>()
   private readonly maxSize = 10000 // Maximum cache entries
-  private readonly cacheValidTime = 60 * 60 * 1000 // 1 hour
-  private readonly staleTime = 90 * 60 * 1000 // 1.5 hours (serve stale data up to this point)
+  // Invalidations also fence in-flight fills. Bound their metadata separately
+  // from cached values because a long-running process can invalidate many more
+  // distinct users than it keeps in the cache.
+  private readonly maxUserEpochs = this.maxSize * 2
+  private readonly cacheValidTime = 30 * 1000
 
   private stats: CacheStats = {
     hits: 0,
@@ -51,49 +54,20 @@ class UserSettingsCache {
         return cached.general
       }
 
-      // Stale but within acceptable range - return stale data and refresh in background
-      if (cached.cacheDate + this.staleTime > now && !cached.isRefreshing) {
-        this.stats.hits++
-        this.refreshInBackground(userId, cached)
-        return cached.general
-      }
     }
 
-    // Cache miss or data too stale - fetch fresh data
+    // Cache miss or expired entry: wait for a fresh database result.
     this.stats.misses++
-    return this.fetchAndCache(userId)
-  }
-
-  private async refreshInBackground(userId: number, cached: CachedUserSettings): Promise<void> {
-    if (cached.isRefreshing) return
-
-    cached.isRefreshing = true
-    const generation = this.generationFor(userId)
-
-    try {
-      const general = await UserSettingsModel.getGeneral(userId)
-
-      const newCached: CachedUserSettings = {
-        general,
-        cacheDate: Date.now(),
-        lastAccessed: cached.lastAccessed,
-      }
-
-      if (this.isCurrentGeneration(userId, generation)) {
-        this.set(userId, newCached)
-        log.debug("Background refresh completed", { userId })
-      } else {
-        log.debug("Dropped stale background refresh", { userId })
-      }
-    } catch (error) {
-      this.stats.errors++
-      log.error("Background refresh failed", { userId, error })
-      // Remove isRefreshing flag on error
-      cached.isRefreshing = false
+    const existing = this.inflight.get(userId)
+    if (existing) return existing
+    const promise = this.fetchAndCache(userId)
+    this.inflight.set(userId, promise)
+    try { return await promise } finally {
+      if (this.inflight.get(userId) === promise) this.inflight.delete(userId)
     }
   }
 
-  private async fetchAndCache(userId: number): Promise<UserSettingsGeneral | null> {
+  private async fetchAndCache(userId: number, attempts = 0): Promise<UserSettingsGeneral | null> {
     const generation = this.generationFor(userId)
 
     try {
@@ -109,19 +83,21 @@ class UserSettingsCache {
         this.set(userId, cached)
       } else {
         log.debug("Dropped stale settings fetch", { userId })
+        if (attempts < 2) return this.fetchAndCache(userId, attempts + 1)
+        throw new Error("Settings changed repeatedly during cache fill")
       }
       return general
     } catch (error) {
       this.stats.errors++
       log.error("Failed to fetch user settings", { userId, error })
 
-      // Return stale data if available, even if very old
-      const stale = this.cache.get(userId)
-      if (stale) {
-        log.warn("Returning stale user settings due to fetch error", { userId })
-        return stale.general
+      // An invalidated older fill can fail after a newer fill has installed a
+      // current value. Return only that still-fresh value; expired settings
+      // still reject, so this is not a stale-on-error grace period.
+      const current = this.cache.get(userId)
+      if (current && current.cacheDate + this.cacheValidTime > Date.now()) {
+        return current.general
       }
-
       throw error
     }
   }
@@ -146,7 +122,9 @@ class UserSettingsCache {
 
   private evictOldest(): void {
     let oldestKey: number | undefined
-    let oldestTime = Date.now()
+    // All entries can be written in the same millisecond. Infinity guarantees
+    // the first entry is eligible, preserving the capacity bound on ties.
+    let oldestTime = Infinity
 
     for (const [key, value] of this.cache.entries()) {
       if (value.lastAccessed < oldestTime) {
@@ -164,10 +142,24 @@ class UserSettingsCache {
 
   invalidate(userId: number): void {
     this.userEpochs.set(userId, (this.userEpochs.get(userId) ?? 0) + 1)
+    this.inflight.delete(userId)
     const deleted = this.cache.delete(userId)
     if (deleted) {
       this.stats.size = this.cache.size
       log.debug("Invalidated user settings cache", { userId })
+    }
+
+    // Do not drop individual epochs: an old fill could then look current.
+    // A whole-cache epoch fence preserves that safety property while bounding
+    // metadata for workloads that invalidate a large number of distinct users.
+    if (this.userEpochs.size > this.maxUserEpochs) {
+      const size = this.cache.size
+      this.clearEpoch += 1
+      this.userEpochs.clear()
+      this.inflight.clear()
+      this.cache.clear()
+      this.stats.size = 0
+      log.debug("Cleared user settings cache after invalidation metadata limit", { previousSize: size })
     }
   }
 
@@ -175,6 +167,7 @@ class UserSettingsCache {
     const size = this.cache.size
     this.clearEpoch += 1
     this.userEpochs.clear()
+    this.inflight.clear()
     this.cache.clear()
     this.stats.size = 0
     log.debug("Cleared user settings cache", { previousSize: size })
@@ -190,7 +183,7 @@ class UserSettingsCache {
   // Cleanup old entries periodically
   cleanup(): void {
     const now = Date.now()
-    const maxAge = this.staleTime * 2 // Remove entries older than 2x stale time
+    const maxAge = this.cacheValidTime * 2
     let cleaned = 0
 
     for (const [key, value] of this.cache.entries()) {
@@ -252,6 +245,3 @@ export function stopUserSettingsCacheCleanup(): void {
   clearInterval(cleanupIntervalId)
   cleanupIntervalId = null
 }
-
-// Periodic cleanup (run every 10 minutes)
-startUserSettingsCacheCleanup()

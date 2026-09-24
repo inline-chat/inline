@@ -43,12 +43,9 @@ describe(
             )
 
           yield* UserSettingsCleanupProcess.use(
-            (process) =>
-              Effect.sync(() => {
-                expect(process.running).toBe(
-                  true,
-                )
-              }),
+            (process) => process.start.pipe(Effect.tap((handle) => Effect.sync(() => {
+              expect(typeof handle.stop).toBe("function")
+            }))),
           ).pipe(Effect.provide(layer))
 
           expect(events).toEqual([

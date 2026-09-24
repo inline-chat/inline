@@ -13,16 +13,37 @@ if (!["landing", "server", "mcp"].includes(target ?? "")) {
 if (target === "server") {
   for (const file of [
     "server/dist/index.js",
+    "server/dist/core-production-smoke.js",
+    "server/dist/encrypt-content.js",
+    "server/dist/migrate.js",
+    "server/dist/verify-migrations.js",
+    "server/dist/livekit-cutover-preflight.js",
     "server/scripts/start-production.ts",
-    "server/scripts/helpers/migrate-db.ts",
+    "server/scripts/verify-migrations.ts",
     "server/drizzle/meta/_journal.json",
     "packages/protocol/dist/index.js",
     "packages/oauth-core/dist/index.js",
   ]) await access(file)
+  // Run the actual bundled CLI import graphs with no credentials or network.
+  for (const command of ["migrate", "verify-migrations", "livekit-cutover-preflight"]) {
+    for (const file of [`server/dist/${command}.js`, `server/scripts/${command}.ts`]) {
+      const child = Bun.spawn([process.execPath, "--no-env-file", file, "--help"], {
+        env: { PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe",
+      })
+      const output = await new Response(child.stdout).text()
+      const error = await new Response(child.stderr).text()
+      const expectedExit = command === "livekit-cutover-preflight" ? 2 : 0
+      if (await child.exited !== expectedExit || !(output + error).includes("Usage:")) {
+        throw new Error(`Packaged command failed to load: ${file}: ${error}`)
+      }
+    }
+  }
   const require = createRequire(resolve("server/package.json"))
   // Exercise the native payload, not just the JavaScript package entrypoint.
   await require("sharp")({ create: { width: 1, height: 1, channels: 3, background: "white" } }).png().toBuffer()
-  const { pack, unpack } = require("msgpackr")
+  // MessagePack belongs to Effect's dependency graph. Resolve from its owner
+  // so this works with both isolated local installs and hoisted image installs.
+  const { pack, unpack } = createRequire(require.resolve("effect"))("msgpackr")
   if (unpack(pack({ smoke: true })).smoke !== true) throw new Error("MessagePack smoke failed")
   console.info("Server image packaging and native dependencies passed.")
 } else {

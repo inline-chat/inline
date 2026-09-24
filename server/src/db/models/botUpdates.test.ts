@@ -4,6 +4,8 @@ import { and, eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { botUpdates, botUpdateStreams, chatParticipants } from "@in/server/db/schema"
+import { markServerShuttingDown, resetServerShutdownStateForTests } from "@in/server/lifecycle/shutdownState"
+import { botUpdateWaiters } from "./botUpdateWaiters"
 import {
   BOT_UPDATE_QUEUE_LIMITS,
   BotUpdatesModel,
@@ -150,11 +152,62 @@ describe("BotUpdatesModel", () => {
   })
 
   test("lets a replacement poll proceed and cancels the older long poll", async () => {
-    const older = BotUpdatesModel.getUpdates(botUserId, { timeout: 1 })
-    await Bun.sleep(25)
+    const older = BotUpdatesModel.getUpdates(botUserId, { timeout: 5 })
+    const olderFailure = older.catch((error: unknown) => error)
+    await waitForPollLease(botUserId)
 
     expect(await BotUpdatesModel.getUpdates(botUserId, { timeout: 0 })).toEqual([])
-    await expect(older).rejects.toMatchObject({ type: "POLL_CONFLICT", code: 409 })
+    expect(await olderFailure).toMatchObject({ type: "POLL_CONFLICT", code: 409 })
+  })
+
+  test("wakes a long poll when an update commits", async () => {
+    const poll = BotUpdatesModel.getUpdates(botUserId, { timeout: 5 })
+    await waitForPollLease(botUserId)
+
+    const started = Date.now()
+    const queued = await queueParticipation(botUserId, chatId, "wake")
+    const updates = await poll
+    expect(updates.map((update) => update.update_id)).toEqual([queued!.update_id])
+    expect(Date.now() - started).toBeLessThan(1_500)
+  })
+
+  test("returns an empty poll at its requested deadline", async () => {
+    const started = Date.now()
+    expect(await BotUpdatesModel.getUpdates(botUserId, { timeout: 1 })).toEqual([])
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900)
+  })
+
+  test("ends a long poll when a webhook replaces it", async () => {
+    const poll = BotUpdatesModel.getUpdates(botUserId, { timeout: 5 })
+    const pollFailure = poll.catch((error: unknown) => error)
+    await waitForPollLease(botUserId)
+
+    await BotUpdatesModel.setWebhook(botUserId, { url: "https://example.com/poll-replacement" })
+    expect(await pollFailure).toMatchObject({ type: "POLL_CONFLICT", code: 409 })
+  })
+
+  test("releases the poll lease when the client aborts", async () => {
+    const controller = new AbortController()
+    const poll = BotUpdatesModel.getUpdates(botUserId, { timeout: 5 }, controller.signal)
+    await waitForPollLease(botUserId)
+
+    controller.abort()
+    await expect(poll).rejects.toMatchObject({ name: "AbortError" })
+    expect((await streamFor(botUserId)).pollLeaseToken).toBeNull()
+  })
+
+  test("returns an empty poll promptly during shutdown", async () => {
+    const poll = BotUpdatesModel.getUpdates(botUserId, { timeout: 5 })
+    await waitForPollLease(botUserId)
+
+    try {
+      markServerShuttingDown()
+      botUpdateWaiters.wakeAll()
+      expect(await poll).toEqual([])
+      expect((await streamFor(botUserId)).pollLeaseToken).toBeNull()
+    } finally {
+      resetServerShutdownStateForTests()
+    }
   })
 
   test("drops inaccessible and expired rows without blocking polling", async () => {
@@ -230,4 +283,13 @@ const streamFor = async (botUserId: number) => {
     .limit(1)
   if (!stream) throw new Error("Missing Bot update stream")
   return stream
+}
+
+const waitForPollLease = async (botUserId: number): Promise<void> => {
+  const deadline = Date.now() + 3_000
+  while (Date.now() < deadline) {
+    if ((await streamFor(botUserId)).pollLeaseToken) return
+    await Bun.sleep(10)
+  }
+  throw new Error("Bot poll did not acquire a lease")
 }

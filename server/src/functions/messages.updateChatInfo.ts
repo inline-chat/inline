@@ -7,6 +7,8 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { invalidateChatInfoCache } from "@in/server/modules/cache/chatInfo"
+import { publishCacheInvalidation } from "@in/server/modules/cache/cluster"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
@@ -249,6 +251,9 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
 
   if (result.didUpdate && result.updatePayload) {
     invalidateChatInfoCache(result.chat.id)
+    publishCacheInvalidation({ kind: "chatMetadata", chatId: result.chat.id })
+    publishDurableReference({ bucket: { kind: "chat", chatId: result.chat.id }, frontier: result.chat.updateSeq ?? 0,
+      senderUserId: input.currentUserId })
     await pushUpdates({
       chat: result.chat,
       updatePayload: result.updatePayload,

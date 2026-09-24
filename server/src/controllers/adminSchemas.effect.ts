@@ -779,11 +779,13 @@ export const AdminUserDetailResult = Schema.Struct({
     memberships: WireNonNegativeInteger,
     sessions: WireNonNegativeInteger,
     activeSessions: WireNonNegativeInteger,
+    presenceComplete: Schema.optionalKey(Schema.Boolean),
   }),
   memberships: Schema.Array(AdminUserMembership),
   sessions: Schema.Array(AdminUserSession),
   connections: Schema.Struct({
     totalConnections: WireNonNegativeInteger,
+    complete: Schema.optionalKey(Schema.Boolean),
     sessions: Schema.Array(
       Schema.Struct({
         sessionId: SessionId,

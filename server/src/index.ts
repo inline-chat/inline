@@ -1,4 +1,5 @@
 import "dotenv/config"
+import { validateDatabaseStartup } from "@in/server/db"
 import * as Sentry from "@sentry/bun"
 import { beforeSendEvent, beforeSendSpan } from "@in/server/utils/sentryPrivacy"
 import {
@@ -28,6 +29,10 @@ import {
   clientIpHeaderForMode,
   parseClientIpMode,
 } from "@in/server/core/http/middleware"
+import { makeIngressPolicy } from "@in/server/core/http/ingress"
+import {
+  parseCoreGracefulShutdownMillis,
+} from "@in/server/core/http/shutdownTimeout"
 import {
   coreProductionStartupErrorDetails,
   startCoreProductionServer,
@@ -36,6 +41,9 @@ import {
 import {
   parseHttpRateLimitMax,
 } from "@in/server/core/http/rateLimit"
+import {
+  parseServerProcessRole,
+} from "@in/server/core/http/processRole"
 import {
   EventEmitter,
 } from "node:events"
@@ -98,6 +106,8 @@ export interface StartServerOptions {
     | boolean
     | undefined
   readonly port?: number | undefined
+  /** Test-only escape hatch for the isolated packaged artifact smoke. */
+  readonly startClusterServices?: boolean | undefined
 }
 
 /**
@@ -109,7 +119,19 @@ export interface StartServerOptions {
 const startServerWithProcessOwnership = (
   options: StartServerOptions = {},
   startBackgroundProcesses: boolean,
+  startClusterServices =
+    options.startClusterServices ??
+      NODE_ENV === "production",
 ): Promise<CoreProductionServerHandle> => {
+  if (
+    NODE_ENV === "production" &&
+    options.startClusterServices === false &&
+    process.env["INLINE_SERVER_SMOKE"] !== "1"
+  ) {
+    throw new Error(
+      "Production servers must start cluster services; startClusterServices: false is reserved for the isolated artifact smoke.",
+    )
+  }
   assertContentEncryptionConfigured()
   assertProviderAuthStartupConfiguration({
     isProduction: NODE_ENV === "production",
@@ -120,12 +142,18 @@ const startServerWithProcessOwnership = (
         "INLINE_TRUSTED_CLIENT_IP_HEADER"
       ],
       {
-        requireExplicit:
-          NODE_ENV === "production",
+        requireExplicit: false,
       },
     )
   const clientIpHeader =
     clientIpHeaderForMode(clientIpMode)
+  const ingressPolicy = makeIngressPolicy(process.env, clientIpMode)
+  const gracefulShutdownMillis =
+    parseCoreGracefulShutdownMillis(
+      process.env[
+        "SHUTDOWN_TIMEOUT_MS"
+      ],
+    )
   const application =
     makeCandidateHttpApplication({
       apiBaseUrl: API_BASE_URL,
@@ -143,9 +171,11 @@ const startServerWithProcessOwnership = (
       },
     })
 
-  return startCoreProductionServer({
+  return validateDatabaseStartup().then(() => startCoreProductionServer({
     application,
     clientIpHeader,
+    gracefulShutdownMillis,
+    ingressPolicy,
     inlineProtocolConfiguration:
       options.inlineProtocolConfiguration,
     installSignalHandlers:
@@ -153,7 +183,8 @@ const startServerWithProcessOwnership = (
       true,
     port: options.port ?? PORT,
     startBackgroundProcesses,
-  })
+    startClusterServices,
+  }))
 }
 
 export const startServer = (
@@ -168,10 +199,15 @@ export const runServer =
   async (
     options: StartServerOptions = {},
   ): Promise<CoreProductionServerHandle> => {
+    const processRole =
+      parseServerProcessRole(
+        process.env["INLINE_PROCESS_ROLE"],
+        NODE_ENV === "production",
+      )
     const handle =
       await startServerWithProcessOwnership(
         options,
-        true,
+        processRole === "all",
       )
     Log.shared.info(
       `Running on http://${handle.hostname}:${handle.port}`,

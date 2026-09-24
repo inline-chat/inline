@@ -3,164 +3,227 @@
  *
  * - we should not leak connection ids here, this should act isolated from the connection manager
  * - we should not store connection ids here
- * - goal for this is to mark sessions as active or inactive and update user's online status
+ * - goal for this is to preserve last-seen and update user-reported online status
  * - non goal is to monitor connection status (this is handled by the connection manager)
  * - we should aim to keep this simple and possibly scalable across multiple servers
  */
 
-import { SessionsModel } from "@in/server/db/models/sessions"
 import { UsersModel } from "@in/server/db/models/users"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
-import { db } from "@in/server/db"
-import { sessions } from "@in/server/db/schema"
+import { connectionDirectory } from "@in/server/modules/internalMessaging/directory"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { inArray } from "drizzle-orm"
+import { SessionActivityTracker } from "./sessionActivity"
 
 interface SessionInput {
   userId: number
   sessionId: number
 }
 
-class PresenceManager {
+type OfflineEvaluation = {
+  generation: number
+  timer?: ReturnType<typeof setTimeout>
+  work?: Promise<void>
+  next?: { delayMs: number; retryUnknown: boolean }
+}
+
+const MAX_PENDING_OFFLINE_EVALUATIONS = 4_096
+const OFFLINE_EVALUATION_DELAY_MS = 10_000
+const OFFLINE_RETRY_DELAY_MS = 45_000
+
+export class PresenceManager {
   private readonly log = new Log("presenceManager", LogLevel.WARN)
 
-  private readonly sessionActiveTimeout = 1000 * 60 * 10 // 10 minutes
-  private readonly sessionHeartbeatInterval = this.sessionActiveTimeout - 1000 * 60 // 9 minutes
-
-  /** Keep track of currently active sessions to update them periodically */
-  private readonly currentlyActiveSessions = new Set<number>()
-
-  private readonly evaluateOfflineTimeout = 1000 * 10 // 10 seconds
-  private readonly evaluateOfflineTimeoutIds: Map<number, ReturnType<typeof setTimeout>> = new Map() // userId -> timeoutId
-  private heartbeatIntervalId: ReturnType<typeof setInterval> | null = null
+  private accepting = true
+  /** One pending timer or active check per user; entries disappear on completion. */
+  private readonly offlineEvaluations = new Map<number, OfflineEvaluation>()
+  private shutdownPromise: Promise<void> | undefined
+  private stopping = false
+  private readonly sessionActivity = new SessionActivityTracker({
+    reportError: (error) => this.log.error("Failed to persist session activity", { error }),
+  })
+  private lifecycleGeneration: number
 
   constructor() {
-    // Keep active sessions active so we won't assume they're stuck inactive
-    this.heartbeatIntervalId = setInterval(() => {
-      const ids = Array.from(this.currentlyActiveSessions)
-      if (ids.length === 0) return
-
-      this.log.trace(`Heartbeating active ${ids.length} sessions`)
-      void SessionsModel.setActiveBulk(ids, true).catch((e) => {
-        this.log.error("Failed to heartbeat active sessions", { error: e })
-      })
-    }, this.sessionHeartbeatInterval)
+    this.lifecycleGeneration = this.sessionActivity.start()
   }
 
-  async shutdown(): Promise<void> {
-    if (this.heartbeatIntervalId) {
-      clearInterval(this.heartbeatIntervalId)
-      this.heartbeatIntervalId = null
-    }
-
-    for (const timeoutId of this.evaluateOfflineTimeoutIds.values()) {
-      clearTimeout(timeoutId)
-    }
-    this.evaluateOfflineTimeoutIds.clear()
-
-    const sessionIds = Array.from(this.currentlyActiveSessions)
-    this.currentlyActiveSessions.clear()
-
-    if (sessionIds.length === 0) {
-      return
-    }
-
-    try {
-      await SessionsModel.setActiveBulk(sessionIds, false)
-    } catch (e) {
-      this.log.error("Failed to mark active sessions inactive during shutdown", { error: e, sessionIds })
-    }
+  /** Called by the listener owner after a completed prior shutdown. */
+  start(): number {
+    if (this.stopping) throw new Error("Presence cannot restart before shutdown completes")
+    if (this.accepting) return this.lifecycleGeneration
+    const generation = this.sessionActivity.start()
+    this.accepting = true
+    this.shutdownPromise = undefined
+    this.lifecycleGeneration = generation
+    return this.lifecycleGeneration
   }
 
-  /** Called when a new authenticated connection is made. It marks session as active and re-evaluates user's online status */
-  async handleConnectionOpen(session: SessionInput) {
-    // If we had a pending offline evaluation from a previous disconnect, cancel it.
-    clearTimeout(this.evaluateOfflineTimeoutIds.get(session.userId))
-    this.evaluateOfflineTimeoutIds.delete(session.userId)
+  shutdown(): Promise<void> {
+    this.shutdownPromise ??= this.stop(this.lifecycleGeneration)
+    return this.shutdownPromise
+  }
 
-    // Mark session as active
-    await SessionsModel.setActive(session.sessionId, true)
-    this.currentlyActiveSessions.add(session.sessionId)
+  private async stop(generation: number): Promise<void> {
+    this.stopping = true
+    this.accepting = false
+    const activeChecks: Promise<void>[] = []
+    for (const pending of this.offlineEvaluations.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.timer = undefined
+      pending.next = undefined
+      if (pending.work) activeChecks.push(pending.work)
+    }
+
+    // Stop both producers before joining an already-started directory/DB check.
+    await Promise.allSettled([
+      this.sessionActivity.shutdown(generation),
+      Promise.allSettled(activeChecks).then(() => undefined),
+    ])
+    this.offlineEvaluations.clear()
+    this.stopping = false
+
+    // A process never writes a durable offline flag for sockets owned elsewhere.
+  }
+
+  /** Called when a new authenticated connection is made. */
+  async handleConnectionOpen(session: SessionInput, generation = this.lifecycleGeneration) {
+    if (!this.isCurrentGeneration(generation)) return
+    // A reconnect invalidates a timer or completed-directory result from the
+    // prior disconnected lifetime before it can write an offline transition.
+    this.cancelOfflineEvaluation(session.userId)
+
+    this.sessionActivity.activate(session.sessionId, generation)
+
     // Do not mark users online automatically. That's controlled by the clients.
   }
 
+  /** Coalesced by SessionActivityTracker; safe to call for every authenticated frame. */
+  markSessionActivity(session: SessionInput, generation = this.lifecycleGeneration): void {
+    if (!this.isCurrentGeneration(generation)) return
+    this.sessionActivity.mark(session.sessionId, generation)
+  }
+
   /** Called when a connection is closed */
-  async handleConnectionClose(session: SessionInput) {
-    try {
-      // Revocation can delete the session before an overlapping socket closes.
-      // In that normal race there is no row left to mark inactive.
-      await SessionsModel.setActiveIfPresent(session.sessionId, false)
-    } catch (e) {
-      this.log.error("Failed to set session active to false", { sessionId: session.sessionId, error: e })
-    }
-
-    this.currentlyActiveSessions.delete(session.sessionId)
-
+  async handleConnectionClose(session: SessionInput, generation = this.lifecycleGeneration, loggedOut = false) {
+    if (!this.isCurrentGeneration(generation)) return
     this.log.debug("Connection closed", { userId: session.userId })
 
-    // Re-evaluate user's online status to mark them offline if they have no active sessions
-    clearTimeout(this.evaluateOfflineTimeoutIds.get(session.userId))
-    this.evaluateOfflineTimeoutIds.delete(session.userId)
-    this.evaluateOfflineTimeoutIds.set(
-      session.userId,
-      setTimeout(() => {
-        void this.evaluateUserOnlineStatus(session.userId).catch((e) => {
-          this.log.error("Failed to evaluate user online status", { userId: session.userId, error: e })
-        })
-      }, this.evaluateOfflineTimeout),
-    )
+    this.sessionActivity.deactivate(session.sessionId, generation)
+    if (loggedOut) return
+    this.scheduleOfflineEvaluation(session.userId, OFFLINE_EVALUATION_DELAY_MS, true)
   }
 
-  /** Updates session's last active timestamp every few minutes to give us a hint that the session is still active so we can make wrong sessions offline later in offline evaluation */
-  async sessionHeartbeat(session: SessionInput) {
-    try {
-      await SessionsModel.setActive(session.sessionId, true)
-    } catch (e) {
-      this.log.error("Failed to set session active to true", { sessionId: session.sessionId, error: e })
-    }
-  }
-
-  private async evaluateUserOnlineStatus(userId: number) {
-    let activeSessions: Awaited<ReturnType<typeof SessionsModel.getActiveSessionsByUserId>>
-    try {
-      activeSessions = await SessionsModel.getActiveSessionsByUserId(userId)
-    } catch (e) {
-      this.log.error("Failed to load active sessions for user", { userId, error: e })
+  private scheduleOfflineEvaluation(userId: number, delayMs: number, retryUnknown: boolean): void {
+    if (!this.accepting) return
+    let pending = this.offlineEvaluations.get(userId)
+    if (!pending && this.offlineEvaluations.size >= MAX_PENDING_OFFLINE_EVALUATIONS) {
+      this.log.warn("Offline evaluation capacity reached", { userId, capacity: MAX_PENDING_OFFLINE_EVALUATIONS })
       return
     }
+    if (!pending) {
+      pending = { generation: 0 }
+      this.offlineEvaluations.set(userId, pending)
+    } else {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.timer = undefined
+      pending.generation += 1
+      if (pending.work) {
+        // A slow directory call never forms a promise chain: retain one
+        // replacement deadline and start it only after this call settles.
+        pending.next = { delayMs, retryUnknown }
+        return
+      }
+    }
+    this.scheduleOfflineTimer(userId, pending, delayMs, retryUnknown)
+  }
 
-    // Check invalid sessions
-    const cutoff = new Date(Date.now() - this.sessionActiveTimeout)
-    const recentlyActiveSessions = activeSessions.filter(
-      (session) => session.lastActive && session.lastActive >= cutoff,
+  private scheduleOfflineTimer(
+    userId: number,
+    pending: OfflineEvaluation,
+    delayMs: number,
+    retryUnknown: boolean,
+  ): void {
+    const generation = pending.generation
+    if (!this.isCurrentOfflineEvaluation(userId, pending, generation)) return
+    pending.timer = setTimeout(() => {
+      pending.timer = undefined
+      this.startOfflineEvaluation(userId, pending, generation, retryUnknown)
+    }, delayMs)
+    pending.timer.unref?.()
+  }
+
+  private startOfflineEvaluation(
+    userId: number,
+    pending: OfflineEvaluation,
+    generation: number,
+    retryUnknown: boolean,
+  ): void {
+    if (!this.isCurrentOfflineEvaluation(userId, pending, generation)) return
+    const work = this.evaluateUserOnlineStatus(userId, pending, generation, retryUnknown)
+    pending.work = work
+    void work.then(
+      () => this.finishOfflineEvaluation(userId, pending, work),
+      (error) => {
+        this.log.error("Failed to evaluate user online status", { userId, error })
+        this.finishOfflineEvaluation(userId, pending, work)
+      },
     )
+  }
 
-    const invalidSessionIds = activeSessions
-      .filter((session) => !session.lastActive || session.lastActive < cutoff)
-      .map((session) => session.id)
-    if (invalidSessionIds.length > 0) {
-      // These sessions are still marked `active` in the DB, but we haven't seen a heartbeat recently.
-      // Mark them inactive without touching `lastActive` (we want lastActive to remain a true "last seen").
-      try {
-        await db.update(sessions).set({ active: false }).where(inArray(sessions.id, invalidSessionIds))
-      } catch (e) {
-        this.log.error("Failed to mark invalid sessions inactive", { userId, invalidSessionIds, error: e })
+  private async evaluateUserOnlineStatus(
+    userId: number,
+    pending: OfflineEvaluation,
+    generation: number,
+    retryUnknown: boolean,
+  ): Promise<void> {
+    const view = await connectionDirectory.list(userId)
+    if (!this.isCurrentOfflineEvaluation(userId, pending, generation)) return
+    if (view.status === "unavailable" || !view.complete) {
+      // An empty rebuilding directory must not turn a live remote socket offline.
+      // Retry once after the registration expiry window; sustained loss remains unknown.
+      if (retryUnknown) {
+        // Keep this entry and its generation so a reconnect can invalidate the
+        // retry before it makes any database or transient-update call.
+        this.scheduleOfflineTimer(userId, pending, OFFLINE_RETRY_DELAY_MS, false)
       }
-
-      for (const id of invalidSessionIds) {
-        this.currentlyActiveSessions.delete(id)
-      }
+      return
     }
-
-    this.log.debug("Evaluating user online status", { userId, recentlyActiveSessions: recentlyActiveSessions.length })
-    if (recentlyActiveSessions.length === 0) {
+    this.log.debug("Evaluating user online status", { userId, connections: view.connections.length })
+    if (view.connections.length === 0) {
       this.log.debug("User has no active sessions, marking offline", { userId })
-      try {
-        await this.updateUserOnlineStatus(userId, false)
-      } catch (e) {
-        this.log.error("Failed to mark user offline", { userId, error: e })
-      }
+      if (!this.isCurrentOfflineEvaluation(userId, pending, generation)) return
+      await this.updateUserOnlineStatus(userId, false)
     }
+  }
+
+  private cancelOfflineEvaluation(userId: number): void {
+    const pending = this.offlineEvaluations.get(userId)
+    if (!pending) return
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.timer = undefined
+    pending.next = undefined
+    pending.generation += 1
+    if (!pending.work) this.offlineEvaluations.delete(userId)
+  }
+
+  private finishOfflineEvaluation(userId: number, pending: OfflineEvaluation, work: Promise<void>): void {
+    if (this.offlineEvaluations.get(userId) !== pending || pending.work !== work) return
+    pending.work = undefined
+    if (pending.next && this.accepting) {
+      const next = pending.next
+      pending.next = undefined
+      this.scheduleOfflineTimer(userId, pending, next.delayMs, next.retryUnknown)
+      return
+    }
+    if (!pending.timer) this.offlineEvaluations.delete(userId)
+  }
+
+  private isCurrentOfflineEvaluation(userId: number, pending: OfflineEvaluation, generation: number): boolean {
+    return this.accepting && this.offlineEvaluations.get(userId) === pending && pending.generation === generation
+  }
+
+  private isCurrentGeneration(generation: number): boolean {
+    return this.accepting && this.lifecycleGeneration === generation
   }
 
   /** Best method for updating user's online status */
@@ -171,10 +234,12 @@ class PresenceManager {
     this.log.debug("Updating user online status", { userId, online: newOnline, lastOnline })
 
     // Send update to all users that have a private dialog with the user
-    sendTransientUpdateFor({
+    await sendTransientUpdateFor({
       reason: {
         userPresenceUpdate: { userId, online: newOnline, lastOnline },
       },
+    }).catch((error) => {
+      this.log.warn("Could not publish transient user presence", { userId, error })
     })
     return { online: newOnline, lastOnline }
   }

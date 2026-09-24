@@ -14,6 +14,7 @@ import { messageAttachments } from "./attachments"
 import { translations } from "@in/server/db/schema/translations"
 import { reactions } from "@in/server/db/schema/reactions"
 import { blockContents } from "@in/server/db/schema/blockContents"
+import { sql } from "drizzle-orm"
 
 export const messages = pgTable(
   "messages",
@@ -113,6 +114,9 @@ export const messages = pgTable(
     randomIdPerSenderIndex: unique("random_id_per_sender_unique").on(table.randomId, table.fromId),
     unreadCountIndex: index("unread_count_index").on(table.chatId, table.messageId, table.fromId),
     blockContentIdIndex: index("messages_block_content_id_idx").on(table.blockContentId),
+    activityDateIndex: index("messages_activity_date_from_id_idx")
+      .on(table.date, table.fromId)
+      .where(sql`${table.systemMessageEncrypted} is null`),
   }),
 )
 

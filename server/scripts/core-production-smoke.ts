@@ -95,6 +95,10 @@ export const makeCoreProductionSmokeEnvironment = (
     : {}),
   ENABLE_DATABASE_HEALTH_MONITOR: "0",
   INLINE_API_RATE_LIMIT_MAX: "180",
+  // `start-production.ts` disables cluster services only for this guarded
+  // artifact harness. Keep the production role explicit so the normal entry
+  // point remains fail-closed for deployed Machines.
+  INLINE_PROCESS_ROLE: "api",
   INLINE_TRUSTED_CLIENT_IP_HEADER:
     "direct",
   INLINE_SERVER_SMOKE: "1",
@@ -108,7 +112,6 @@ export const makeCoreProductionSmokeEnvironment = (
   SENTRY_DSN: useArtifact
     ? artifactSmokeValue("SENTRY_DSN")
     : "",
-  SKIP_DB_MIGRATIONS: "1",
   TWILIO_AUTH_TOKEN: useArtifact
     ? "artifact-smoke"
     : environment["TWILIO_AUTH_TOKEN"],

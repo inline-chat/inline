@@ -8,14 +8,16 @@ import {
 } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
-  acquireOwnedProcess,
+  ProcessServiceStopFailure,
+  acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 import type {
   GridProviderEffectWorker,
 } from "./providerEffects"
 
 export interface GridProviderEffectsProcessShape {
-  readonly worker: GridProviderEffectWorker
+  readonly stop: Effect.Effect<void, ProcessServiceStopFailure>
+  readonly start: Effect.Effect<GridProviderEffectWorker, ProcessServiceStartFailure>
 }
 
 export class GridProviderEffectsProcess extends Context.Service<
@@ -78,13 +80,11 @@ export const makeGridProviderEffectsProcessLayer = (
 > =>
   Layer.effect(
     GridProviderEffectsProcess,
-    acquireOwnedProcess({
+    acquireDeferredOwnedProcess({
       name: "grid-provider-effects",
       start: adapter.start,
       stop: adapter.stop,
-    }).pipe(
-      Effect.map((worker) => ({ worker })),
-    ),
+    }),
   )
 
 /**

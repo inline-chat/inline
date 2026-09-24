@@ -5,6 +5,9 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
+import * as transientRealtime from "@in/server/modules/internalMessaging/transient"
+
+const MAX_CONCURRENT_COMPOSE_RECIPIENTS = 32
 
 type Input = {
   peer: InputPeer
@@ -15,64 +18,46 @@ type Output = {}
 
 export const sendComposeAction = async (input: Input, context: FunctionContext): Promise<Output> => {
   // Get the peer information - this validates the peer exists and user has access
-  await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
 
   // Get all users who should receive this update (handles DMs and threads with multiple participants)
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
+  const peerForRecipient: InputPeer = updateGroup.type === "dmUsers"
+    ? { type: { oneofKind: "user", user: { userId: BigInt(context.currentUserId) } } }
+    : input.peer
+  const action = input.action ?? UpdateComposeAction_ComposeAction.NONE
+  const actionName = composeActionName(input.action)
+  const recipients = updateGroup.userIds.filter((userId) => userId !== context.currentUserId)
 
-  // Send to all participants except the sender
-  switch (updateGroup.type) {
-    case "dmUsers": {
-      const { userIds } = updateGroup
-      for (const userId of userIds) {
-        // Don't send compose action to the sender themselves
-        if (userId !== context.currentUserId) {
-          // For DMs, the recipient should see the sender as the peer
-          const encodingForInputPeer: InputPeer = {
-            type: { oneofKind: "user", user: { userId: BigInt(context.currentUserId) } },
-          }
-
-          const update: Update = {
-            update: {
-              oneofKind: "updateComposeAction",
-              updateComposeAction: {
-                userId: BigInt(context.currentUserId),
-                peerId: encodePeerFromInputPeer({ inputPeer: encodingForInputPeer, currentUserId: userId }),
-                action: input.action ?? UpdateComposeAction_ComposeAction.NONE,
-              },
-            },
-          }
-
-          RealtimeUpdates.pushToUser(userId, [update])
-        }
+  for (let offset = 0; offset < recipients.length; offset += MAX_CONCURRENT_COMPOSE_RECIPIENTS) {
+    const batch = recipients.slice(offset, offset + MAX_CONCURRENT_COMPOSE_RECIPIENTS)
+    await Promise.all(batch.map(async (userId) => {
+      const update: Update = {
+        update: {
+          oneofKind: "updateComposeAction",
+          updateComposeAction: {
+            userId: BigInt(context.currentUserId),
+            peerId: encodePeerFromInputPeer({ inputPeer: peerForRecipient, currentUserId: userId }),
+            action,
+          },
+        },
       }
-      break
-    }
 
-    case "threadUsers":
-    case "spaceUsers": {
-      const { userIds } = updateGroup
-      for (const userId of userIds) {
-        // Don't send compose action to the sender themselves
-        if (userId !== context.currentUserId) {
-          // For threads and spaces, everyone sees the same peer
-          const update: Update = {
-            update: {
-              oneofKind: "updateComposeAction",
-              updateComposeAction: {
-                userId: BigInt(context.currentUserId),
-                peerId: encodePeerFromInputPeer({ inputPeer: input.peer, currentUserId: userId }),
-                action: input.action ?? UpdateComposeAction_ComposeAction.NONE,
-              },
-            },
-          }
-
-          RealtimeUpdates.pushToUser(userId, [update])
-        }
-      }
-      break
-    }
+      await RealtimeUpdates.pushToUser(userId, [update])
+      transientRealtime.publishComposeAction(userId, context.currentUserId, chat.id, actionName)
+    }))
   }
-
   return {}
+}
+
+function composeActionName(action: UpdateComposeAction_ComposeAction | undefined):
+  "none" | "typing" | "uploadingDocument" | "uploadingPhoto" | "uploadingVideo" | "recordingVoice" {
+  switch (action) {
+    case UpdateComposeAction_ComposeAction.TYPING: return "typing"
+    case UpdateComposeAction_ComposeAction.UPLOADING_DOCUMENT: return "uploadingDocument"
+    case UpdateComposeAction_ComposeAction.UPLOADING_PHOTO: return "uploadingPhoto"
+    case UpdateComposeAction_ComposeAction.UPLOADING_VIDEO: return "uploadingVideo"
+    case UpdateComposeAction_ComposeAction.RECORDING_VOICE: return "recordingVoice"
+    default: return "none"
+  }
 }

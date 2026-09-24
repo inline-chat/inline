@@ -153,7 +153,16 @@ export async function completeHostedLogin(input: {
       // Transitional MCP bridge: the OAuth target, not the authentication
       // method, owns this backing session until MCP executes grant-aware calls.
       const { token, tokenHash } = await generateToken(input.account.userId)
-      const personalData = encrypt(JSON.stringify({ deviceName: transaction.client.deviceName, ip: input.ip }))
+      const personalData = encrypt(JSON.stringify({
+        deviceName: transaction.client.deviceName,
+        ip: input.ip,
+        signupAttribution: {
+          ...transaction.client.signupAttribution,
+          entryPoint: "oauth",
+          oauthClient: transaction.client.deviceName,
+          authMethod: input.account.method,
+        },
+      }))
       await tx.insert(sessions).values({
         userId: input.account.userId,
         tokenHash,

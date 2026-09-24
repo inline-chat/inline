@@ -3719,6 +3719,7 @@ message Update {
     ChatAcknowledgement acknowledgement = 49;
     UpdateDialogTranslation dialog_translation = 50;
     UpdateSpaceProfile space_profile = 51;
+    UpdateUserHasNewUpdates user_has_new_updates = 52;
   }
 }
 
@@ -3737,6 +3738,14 @@ message UpdateSpaceHasNewUpdates {
 
   // Current sequence of the space
   int32 update_seq = 2;
+}
+
+// Update when the authenticated user's durable bucket has new updates and
+// client should fetch them. The recipient identifies the user, so this payload
+// intentionally contains only the target user-bucket sequence.
+message UpdateUserHasNewUpdates {
+  // Current sequence of the authenticated user's update bucket.
+  int32 update_seq = 1;
 }
 
 // Update when a chat has new updates and client should fetch them

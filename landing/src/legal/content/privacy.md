@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: August 20, 2026.
+Last updated: September 23, 2026.
 
 Inline is a work chat app for teams and communities. This Privacy Policy explains how Inline ("Inline", "we", "us", or "our") collects, uses, shares, and protects personal information when you use our websites, apps, APIs, SDKs, bot surfaces, MCP server, and related services (the "Services").
 
@@ -78,7 +78,7 @@ Inline is a communication service. Your profile, messages, reactions, files, and
 
 ### Service providers and subprocessors
 
-We use third-party providers to host infrastructure, store files, send email and SMS codes, deliver push notifications, monitor errors, measure usage, and provide optional integrations. Our current list is available at [Subprocessors](/legal/subprocessors).
+We use third-party providers for infrastructure and database hosting, file storage, email and SMS codes, push notifications, error monitoring, usage measurement, and optional integrations. Our current list is available at [Subprocessors](/legal/subprocessors).
 
 ### User-directed third parties
 

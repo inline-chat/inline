@@ -9,6 +9,10 @@ import {
   type GridPresenceRemovalState,
 } from "@in/server/modules/grid/roomLifecycle"
 import type { Transaction } from "@in/server/db/types"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
+import { UserId, SessionId } from "@in/server/core/schema/identifiers"
+import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
 
 type RevokeActor = "admin" | "user" | "system"
 
@@ -98,10 +102,26 @@ export async function finishSessionRevocation(
   outcome: RevokeSessionTransactionOutcome,
   input: RevokeSessionInput,
 ): Promise<void> {
+  // The committed local revocation must terminate local authority without
+  // waiting for a best-effort broker round trip.
   if (outcome.result.session) {
+    sessionAuthority.invalidate({ userId: input.targetUserId, sessionId: input.sessionId })
     connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId, {
       authenticationInvalidated: true,
     }, input.preserveConnectionId)
+  }
+  if (outcome.result.revoked) {
+    outboundPublications.enqueue({
+      key: `session-revoked:${input.targetUserId}:${input.sessionId}`,
+      priority: "critical",
+      run: async () => {
+        await internalMessaging.publish({
+          target: { kind: "cluster" },
+          event: { kind: "SessionRevoked", userId: UserId.make(input.targetUserId), sessionId: SessionId.make(input.sessionId) },
+        })
+      },
+      merge: () => {},
+    })
   }
   if (outcome.gridState) {
     await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)

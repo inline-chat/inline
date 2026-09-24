@@ -1,47 +1,23 @@
-import { db } from "@in/server/db"
-import { sessions } from "@in/server/db/schema"
-import { and, eq, isNull } from "drizzle-orm"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { connectionManager } from "@in/server/ws/connections"
 
 type SessionClientType = "ios" | "macos" | "web" | "api" | "android" | "windows" | "linux" | "cli"
 
-const DESKTOP_CLIENT_TYPES = new Set<SessionClientType>(["macos"])
+export type DesktopPushSuppressionReason = "active_desktop_chat" | "urgent_nudge" | "no_recent_desktop_activity"
+export type DesktopPushSuppressionDecision = { suppress: boolean; reason: DesktopPushSuppressionReason }
+export type RecordChatActivityInput = { userId: number; sessionId: number; connectionId?: string; chatId: number; now?: number }
+export type ShouldSuppressIOSSendMessagePushInput = { userId: number; chatId: number; isUrgentNudge: boolean; now?: number }
 
-export type DesktopPushSuppressionReason =
-  | "active_desktop_chat"
-  | "urgent_nudge"
-  | "no_recent_desktop_activity"
-
-export type DesktopPushSuppressionDecision = {
-  suppress: boolean
-  reason: DesktopPushSuppressionReason
+type SessionClientTypeResolver = (input: { userId: number; sessionId: number; connectionId?: string }) => SessionClientType | null | Promise<SessionClientType | null>
+export type DesktopActivityStore = {
+  record(userId: number, chatId: number): Promise<boolean>
+  has(userId: number, chatId: number): Promise<boolean | undefined>
 }
-
-export type RecordChatActivityInput = {
-  userId: number
-  sessionId: number
-  chatId: number
-  now?: number
-}
-
-export type ShouldSuppressIOSSendMessagePushInput = {
-  userId: number
-  chatId: number
-  isUrgentNudge: boolean
-  now?: number
-}
-
-type SessionActivity = {
-  userId: number
-  chatId: number
-  lastActiveAt: number
-}
-
-type SessionClientTypeResolver = (input: { userId: number; sessionId: number }) => Promise<SessionClientType | null>
 
 type DesktopPushSuppressionTrackerOptions = {
-  activityTtlMs?: number
   now?: () => number
   resolveSessionClientType?: SessionClientTypeResolver
+  store?: DesktopActivityStore
 }
 
 export type DesktopPushSuppressionMetrics = {
@@ -59,18 +35,16 @@ export type DesktopPushSuppressionMetrics = {
   lastSuppressedAt: number | null
 }
 
-const DEFAULT_ACTIVITY_TTL_MS = 15_000
+const redisStore: DesktopActivityStore = {
+  record: (userId, chatId) => internalMessaging.recordDesktopActivity(userId, chatId),
+  has: (userId, chatId) => internalMessaging.hasDesktopActivity(userId, chatId),
+}
 
-// NOTE: This module keeps activity state in memory and is only correct in single-instance deployments.
-// For multi-instance deployments, move activity/session-type state to a shared store (e.g. Redis/Postgres).
+/** A user/chat key is the only suppression authority. Missing broker data always allows push. */
 export class DesktopPushSuppressionTracker {
-  private readonly activityTtlMs: number
   private readonly now: () => number
   private readonly resolveSessionClientType: SessionClientTypeResolver
-
-  private readonly sessionActivity = new Map<number, SessionActivity>()
-  private readonly sessionsByUser = new Map<number, Set<number>>()
-  private readonly sessionClientTypeCache = new Map<number, SessionClientType | null>()
+  private readonly store: DesktopActivityStore
 
   private checksTotal = 0
   private suppressedTotal = 0
@@ -84,95 +58,44 @@ export class DesktopPushSuppressionTracker {
   private lastSuppressedAt: number | null = null
 
   constructor(options: DesktopPushSuppressionTrackerOptions = {}) {
-    this.activityTtlMs = options.activityTtlMs ?? DEFAULT_ACTIVITY_TTL_MS
     this.now = options.now ?? Date.now
     this.resolveSessionClientType = options.resolveSessionClientType ?? defaultSessionClientTypeResolver
+    this.store = options.store ?? redisStore
   }
 
   async recordChatActivity(input: RecordChatActivityInput): Promise<void> {
-    const now = input.now ?? this.now()
-    this.pruneStale(now)
-
-    let clientType: SessionClientType | null
+    // The signal is authenticated, but a client cannot assert that it is macOS.
+    // Use the authenticated socket's client type. An absent or unknown socket cannot suppress push.
     try {
-      clientType = await this.getSessionClientType({ userId: input.userId, sessionId: input.sessionId })
-    } catch {
-      this.errorsTotal += 1
-      return
-    }
-
-    if (!clientType) {
-      this.activityIgnoredUnknownSessionTypeTotal += 1
-      return
-    }
-
-    if (!DESKTOP_CLIENT_TYPES.has(clientType)) {
-      this.activityIgnoredNonDesktopTotal += 1
-      return
-    }
-
-    this.sessionActivity.set(input.sessionId, {
-      userId: input.userId,
-      chatId: input.chatId,
-      lastActiveAt: now,
-    })
-
-    let userSessionIds = this.sessionsByUser.get(input.userId)
-    if (!userSessionIds) {
-      userSessionIds = new Set<number>()
-      this.sessionsByUser.set(input.userId, userSessionIds)
-    }
-    userSessionIds.add(input.sessionId)
-
-    this.activityRecordedTotal += 1
+      const clientType = await this.resolveSessionClientType({ userId: input.userId, sessionId: input.sessionId, connectionId: input.connectionId })
+      if (!clientType) { this.activityIgnoredUnknownSessionTypeTotal++; return }
+      if (clientType !== "macos") { this.activityIgnoredNonDesktopTotal++; return }
+      if (!await this.store.record(input.userId, input.chatId)) { this.errorsTotal++; return }
+      this.activityRecordedTotal++
+    } catch { this.errorsTotal++ }
   }
 
-  shouldSuppressIOSSendMessagePush(input: ShouldSuppressIOSSendMessagePushInput): DesktopPushSuppressionDecision {
-    const now = input.now ?? this.now()
-    this.pruneStale(now)
-
-    this.checksTotal += 1
-
+  async shouldSuppressIOSSendMessagePush(input: ShouldSuppressIOSSendMessagePushInput): Promise<DesktopPushSuppressionDecision> {
+    this.checksTotal++
     if (input.isUrgentNudge) {
-      this.allowedTotal += 1
-      this.allowedUrgentNudgeTotal += 1
+      this.allowedTotal++
+      this.allowedUrgentNudgeTotal++
       return { suppress: false, reason: "urgent_nudge" }
     }
-
-    const userSessionIds = this.sessionsByUser.get(input.userId)
-    if (!userSessionIds || userSessionIds.size === 0) {
-      this.allowedTotal += 1
-      this.allowedNoRecentDesktopActivityTotal += 1
-      return { suppress: false, reason: "no_recent_desktop_activity" }
-    }
-
-    for (const sessionId of userSessionIds) {
-      const activity = this.sessionActivity.get(sessionId)
-      if (!activity) {
-        continue
-      }
-      if (activity.chatId !== input.chatId) {
-        continue
-      }
-
-      this.suppressedTotal += 1
-      this.lastSuppressedAt = now
+    let active: boolean | undefined
+    try { active = await this.store.has(input.userId, input.chatId) } catch { this.errorsTotal++ }
+    if (active === true) {
+      this.suppressedTotal++
+      this.lastSuppressedAt = input.now ?? this.now()
       return { suppress: true, reason: "active_desktop_chat" }
     }
-
-    this.allowedTotal += 1
-    this.allowedNoRecentDesktopActivityTotal += 1
+    if (active === undefined) this.errorsTotal++
+    this.allowedTotal++
+    this.allowedNoRecentDesktopActivityTotal++
     return { suppress: false, reason: "no_recent_desktop_activity" }
   }
 
   getMetrics(): DesktopPushSuppressionMetrics {
-    this.pruneStale(this.now())
-
-    const uniqueUserChatPairs = new Set<string>()
-    for (const activity of this.sessionActivity.values()) {
-      uniqueUserChatPairs.add(`${activity.userId}:${activity.chatId}`)
-    }
-
     return {
       checksTotal: this.checksTotal,
       suppressedTotal: this.suppressedTotal,
@@ -183,16 +106,14 @@ export class DesktopPushSuppressionTracker {
       activityIgnoredNonDesktopTotal: this.activityIgnoredNonDesktopTotal,
       activityIgnoredUnknownSessionTypeTotal: this.activityIgnoredUnknownSessionTypeTotal,
       errorsTotal: this.errorsTotal,
-      trackedDesktopSessions: this.sessionActivity.size,
-      trackedDesktopChatActivities: uniqueUserChatPairs.size,
+      // A disposable cluster keyspace is deliberately not enumerated for metrics.
+      trackedDesktopSessions: 0,
+      trackedDesktopChatActivities: 0,
       lastSuppressedAt: this.lastSuppressedAt,
     }
   }
 
-  resetForTests() {
-    this.sessionActivity.clear()
-    this.sessionsByUser.clear()
-    this.sessionClientTypeCache.clear()
+  resetForTests(): void {
     this.checksTotal = 0
     this.suppressedTotal = 0
     this.allowedTotal = 0
@@ -204,56 +125,14 @@ export class DesktopPushSuppressionTracker {
     this.errorsTotal = 0
     this.lastSuppressedAt = null
   }
-
-  private async getSessionClientType(input: { userId: number; sessionId: number }): Promise<SessionClientType | null> {
-    if (this.sessionClientTypeCache.has(input.sessionId)) {
-      return this.sessionClientTypeCache.get(input.sessionId) ?? null
-    }
-
-    const clientType = await this.resolveSessionClientType(input)
-    if (clientType && DESKTOP_CLIENT_TYPES.has(clientType)) {
-      this.sessionClientTypeCache.set(input.sessionId, clientType)
-    }
-    return clientType
-  }
-
-  private pruneStale(now: number) {
-    const staleCutoff = now - this.activityTtlMs
-
-    for (const [sessionId, activity] of this.sessionActivity.entries()) {
-      if (activity.lastActiveAt >= staleCutoff) {
-        continue
-      }
-
-      this.sessionActivity.delete(sessionId)
-      this.sessionClientTypeCache.delete(sessionId)
-
-      const userSessionIds = this.sessionsByUser.get(activity.userId)
-      if (!userSessionIds) {
-        continue
-      }
-
-      userSessionIds.delete(sessionId)
-      if (userSessionIds.size === 0) {
-        this.sessionsByUser.delete(activity.userId)
-      }
-    }
-  }
 }
 
-const defaultSessionClientTypeResolver: SessionClientTypeResolver = async ({ userId, sessionId }) => {
-  const row = await db
-    .select({ clientType: sessions.clientType })
-    .from(sessions)
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId), isNull(sessions.revoked)))
-    .limit(1)
-    .then((rows) => rows[0])
-
-  return row?.clientType ?? null
+const defaultSessionClientTypeResolver: SessionClientTypeResolver = ({ userId, sessionId, connectionId }) => {
+  if (!connectionId) return null
+  const connection = connectionManager.getConnection(connectionId)
+  if (connection?.userId !== userId || connection.sessionId !== sessionId) return null
+  return connection.clientType === "macos" ? "macos" : null
 }
 
 export const desktopPushSuppressionTracker = new DesktopPushSuppressionTracker()
-
-export const getDesktopPushSuppressionMetrics = (): DesktopPushSuppressionMetrics => {
-  return desktopPushSuppressionTracker.getMetrics()
-}
+export const getDesktopPushSuppressionMetrics = (): DesktopPushSuppressionMetrics => desktopPushSuppressionTracker.getMetrics()

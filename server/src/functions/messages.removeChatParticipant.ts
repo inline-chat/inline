@@ -17,6 +17,8 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { retryParticipantMutation } from "@in/server/modules/updates/participantMutationRetry"
 import { pushChatCatchupHintsBestEffort, pushParticipantUserUpdateBestEffort } from "@in/server/modules/updates/participantLiveUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { publishAccessChanged } from "@in/server/modules/cache/cluster"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import {
   prepareChatPermissionUpdates,
   pushChatPermissionUpdates,
@@ -143,6 +145,8 @@ export async function removeChatParticipant(
 
     try {
       // Cache effects belong after the successfully committed attempt.
+      publishAccessChanged({ kind: "chat", chatId: input.chatId }, userId)
+      publishDurableReference({ bucket: { kind: "chat", chatId: input.chatId }, frontier: update.seq })
       AccessGuardsCache.resetChatParticipant(input.chatId, userId)
       for (const accessUpdate of accessUpdates) {
         await pushUserRemovedFromChat(userId, accessUpdate.chatId, undefined, accessUpdate.update)

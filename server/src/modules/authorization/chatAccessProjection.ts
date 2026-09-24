@@ -1,3 +1,4 @@
+import type { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { sql } from "drizzle-orm"
 
@@ -7,6 +8,13 @@ type ChatAccessRow = {
 }
 
 export type ChatAccessMap = Map<number, Set<number>>
+
+/**
+ * The projection is used both inside a mutation transaction and by realtime
+ * fanout after that transaction commits. It only needs a query executor; the
+ * caller chooses the consistency boundary appropriate to its operation.
+ */
+export type ChatAccessQuery = Pick<typeof db, "execute">
 
 type ChatIdRow = { chatId: number }
 
@@ -46,14 +54,14 @@ export async function getSpaceRootChatIdsForAccessEvents(
 }
 
 /**
- * Computes the effective users who can discover each chat from the same database
- * snapshot as the mutation that may change access. This mirrors AccessGuards:
+ * Computes the effective users who can discover each chat from the caller's
+ * database snapshot. This mirrors AccessGuards:
  * an explicit grant on the target wins only within current owning-Space
  * authority; otherwise a child inherits from its root chat. Retained participant
  * rows never preserve access after Space departure or soft deletion.
  */
 export async function getEffectiveChatAccessUserIds(
-  tx: Transaction,
+  tx: ChatAccessQuery,
   chatIds: number[],
   options?: { userIds?: number[] },
 ): Promise<ChatAccessMap> {

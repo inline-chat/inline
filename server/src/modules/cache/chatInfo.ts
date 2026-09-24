@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
+import { LocalCache } from "./localCache"
 
 export type CachedChatInfo = {
   type: "thread" | "private"
@@ -12,30 +13,22 @@ export type CachedChatInfo = {
   cacheDate: number
 }
 
-const cachedChatInfo = new Map<number, CachedChatInfo>()
-const cacheValidTime = 10 * 60 * 1000 // 10 minutes
-const maxCacheSize = 10000 // 10k chats
+// Recipient IDs share this projection, so use the short authority-adjacent TTL.
+const cachedChatInfo = new LocalCache<number, CachedChatInfo | undefined>({
+  ttlMs: 15_000, negativeTtlMs: 5_000, maxEntries: 10_000,
+  isNegative: (value) => value === undefined,
+})
 
 export function clearChatInfoCache() {
   cachedChatInfo.clear()
 }
 
 export function invalidateChatInfoCache(chatId: number) {
-  cachedChatInfo.delete(chatId)
+  cachedChatInfo.invalidate(chatId)
 }
 
 export async function getCachedChatInfo(chatId: number): Promise<CachedChatInfo | undefined> {
-  let cached = cachedChatInfo.get(chatId)
-  if (cached) {
-    if (cached.cacheDate + cacheValidTime > Date.now()) {
-      return cached
-    }
-  }
-
-  if (cachedChatInfo.size >= maxCacheSize) {
-    cachedChatInfo.clear()
-  }
-
+  return cachedChatInfo.get(chatId, async () => {
   const chat = await db.query.chats.findFirst({
     where: {
       id: chatId,
@@ -72,7 +65,6 @@ export async function getCachedChatInfo(chatId: number): Promise<CachedChatInfo 
     cacheDate: Date.now(),
   }
 
-  cachedChatInfo.set(chatId, chatInfo)
-
   return chatInfo
+  })
 }

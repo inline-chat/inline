@@ -64,6 +64,15 @@ const ClockHealth = Schema.Struct({
   identifier: "AuxiliaryClockHealth",
 })
 
+const BrokerHealth = Schema.Struct({
+  ok: Schema.Boolean,
+  error: Schema.optionalKey(
+    Schema.Literal("broker_unavailable"),
+  ),
+}).annotate({
+  identifier: "AuxiliaryBrokerHealth",
+})
+
 export const HealthHttpResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
   status: Schema.Literals(["ok", "degraded"]),
@@ -72,6 +81,7 @@ export const HealthHttpResponseSchema = Schema.Struct({
   checks: Schema.Struct({
     database: DatabaseHealth,
     clock: ClockHealth,
+    broker: Schema.optionalKey(BrokerHealth),
     lifecycle: LifecycleHealth,
   }),
 }).annotate({

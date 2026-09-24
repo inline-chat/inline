@@ -1,5 +1,5 @@
 import { UserSettingsModel } from "@in/server/db/models/userSettings"
-import { invalidateUserSettingsCache } from "@in/server/modules/cache/userSettings"
+import { publishCacheInvalidation } from "@in/server/modules/cache/cluster"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
 import type { Update } from "@inline-chat/protocol/core"
@@ -46,7 +46,7 @@ export const updateUserSettings = async (
           userSettings: { settings },
         },
       },
-      { tx },
+      { tx, senderUserId: context.currentUserId, excludeSessionId: context.currentSessionId },
     )
 
     return { settings, queued }
@@ -57,8 +57,7 @@ export const updateUserSettings = async (
   }
 
   // Invalidate only after the write and its durable projection commit.
-  invalidateUserSettingsCache(context.currentUserId)
-
+  publishCacheInvalidation({ kind: "userSettings", userId: context.currentUserId })
   // Create update for user settings change
   const update: Update = {
     seq: mutation.queued.seq,

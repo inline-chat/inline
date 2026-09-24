@@ -1,6 +1,7 @@
 import { UsersModel } from "@in/server/db/models/users"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { Log } from "@in/server/utils/log"
+import { LocalCache } from "./localCache"
 
 const log = new Log("cache.userPhotos")
 
@@ -11,22 +12,22 @@ export type UserPhotoCacheEntry = {
   cacheDate: number
 }
 
-const cachedUserPhotos = new Map<number, UserPhotoCacheEntry>()
-// Match username cache TTL (240s)
-const cacheValidTime = 240 * 1000
+const cachedUserPhotos = new LocalCache<number, UserPhotoCacheEntry | undefined>({
+  ttlMs: 240_000, negativeTtlMs: 15_000, maxEntries: 10_000,
+  isNegative: (value) => value === undefined,
+})
+export const invalidateUserPhotoCache = (userId: number): void => cachedUserPhotos.invalidate(userId)
+export const clearUserPhotoCache = (): void => cachedUserPhotos.clear()
 
 export async function getCachedUserProfilePhotoUrl(userId: number): Promise<string | undefined> {
   return (await getCachedUserProfilePhoto(userId))?.cdnUrl
 }
 
 export async function getCachedUserProfilePhoto(userId: number): Promise<UserPhotoCacheEntry | undefined> {
-  const cached = cachedUserPhotos.get(userId)
-  if (cached && cached.cacheDate + cacheValidTime > Date.now()) {
-    return cached
-  }
-
+  return cachedUserPhotos.get(userId, async () => {
   try {
     const user = await UsersModel.getUserWithPhoto(userId)
+    if (!user) return undefined
     const photoFile = user?.photo
 
     let cdnUrl: string | undefined
@@ -40,11 +41,10 @@ export async function getCachedUserProfilePhoto(userId: number): Promise<UserPho
       hasPhoto: user.photoFileId != null,
       cacheDate: Date.now(),
     }
-    cachedUserPhotos.set(userId, entry)
-
     return entry
   } catch (error) {
     log.error("Failed to fetch user profile photo", { userId, error })
     return undefined
   }
+  })
 }

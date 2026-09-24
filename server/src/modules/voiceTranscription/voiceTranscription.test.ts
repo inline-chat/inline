@@ -1,13 +1,19 @@
-import { describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { FileModel } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
-import { files, messages, users, voices } from "@in/server/db/schema"
+import { chats, files, messages, users, voices } from "@in/server/db/schema"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
-import { transcribeAndEditVoiceMessage } from "@in/server/modules/voiceTranscription"
+import {
+  scheduleVoiceTranscription,
+  type VoiceMessageTranscriptionInput,
+  VoiceTranscriptionModule,
+  transcribeAndEditVoiceMessage,
+} from "@in/server/modules/voiceTranscription"
 import { buildGptTranscribeRequest, voiceTranscriptionModel } from "@in/server/modules/voiceTranscription/openAITranscriber"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import {
   buildVoiceTranscriptionContext,
   buildVoiceTranscriptionContextFromParts,
@@ -21,6 +27,37 @@ const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.c
 
 describe("voice transcription", () => {
   setupTestLifecycle()
+  const schedule = spyOn(VoiceTranscriptionModule, "schedule")
+
+  beforeAll(() => {
+    // Sending the fixture invokes the fire-and-forget production scheduler.
+    // These tests call the same worker explicitly and await it, so leaving the
+    // automatic copy running would race the lifecycle database cleanup.
+    schedule.mockImplementation(() => {})
+  })
+
+  afterAll(() => schedule.mockRestore())
+
+  test("keeps a scheduled transcription registered until it finishes", async () => {
+    await applicationBackgroundWork.waitForIdle()
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    scheduleVoiceTranscription({} as VoiceMessageTranscriptionInput, async () => {
+      started.resolve()
+      await release.promise
+      return { didEdit: false }
+    })
+
+    await started.promise
+    let drained = false
+    const drain = applicationBackgroundWork.waitForIdle().then(() => { drained = true })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+
+    release.resolve()
+    await drain
+    expect(drained).toBe(true)
+  })
 
   test("edits an unchanged blank voice message with the transcript", async () => {
     const scenario = await createVoiceMessage("voice-transcribe-apply")
@@ -121,6 +158,42 @@ describe("voice transcription", () => {
 
     const fullMessage = await MessageModel.getMessage(scenario.message.messageId, scenario.message.chatId)
     expect(fullMessage.text).toBe("manual edit")
+  })
+
+  test("does not overwrite an edit committed after the final transcription read", async () => {
+    const scenario = await createVoiceMessage("voice-transcribe-race")
+    const result = await transcribeAndEditVoiceMessage(scenario, {
+      transcribeVoice: async () => "late transcript",
+      editText: async (input, context) => {
+        await editMessage({ messageId: input.messageId, peer: input.peer, text: "newer human edit" }, context)
+        return editMessage(input, context)
+      },
+    })
+    expect(result.didEdit).toBe(false)
+    const fullMessage = await MessageModel.getMessage(scenario.message.messageId, scenario.message.chatId)
+    expect(fullMessage.text).toBe("newer human edit")
+    expect(fullMessage.rev).toBe((scenario.message.rev ?? 0) + 1)
+  })
+
+  test("treats deletion between the final read and guarded edit as a no-op", async () => {
+    const scenario = await createVoiceMessage("voice-transcribe-delete-race")
+    const result = await transcribeAndEditVoiceMessage(scenario, {
+      transcribeVoice: async () => "late transcript",
+      editText: async (input, context) => {
+        await db.update(chats).set({ lastMsgId: null }).where(eq(chats.id, scenario.message.chatId))
+        await db.delete(messages).where(and(
+          eq(messages.chatId, scenario.message.chatId),
+          eq(messages.messageId, scenario.message.messageId),
+        ))
+        return editMessage(input, context)
+      },
+    })
+
+    expect(result).toEqual({ didEdit: false, text: "late transcript" })
+    const deleted = await db._query.messages.findFirst({
+      where: and(eq(messages.chatId, scenario.message.chatId), eq(messages.messageId, scenario.message.messageId)),
+    })
+    expect(deleted).toBeUndefined()
   })
 
   test("propagates transcriber failures for scheduler error capture", async () => {

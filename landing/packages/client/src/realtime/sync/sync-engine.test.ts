@@ -81,7 +81,7 @@ class FakeSyncClient implements SyncRpcClient {
   })
   userUpdates: (
     input: Extract<RpcCall["input"], { oneofKind: "getUpdates" }>,
-  ) => RpcResult["result"] = (input) => ({
+  ) => RpcResult["result"] | Promise<RpcResult["result"]> = (input) => ({
     oneofKind: "getUpdates",
     getUpdates: {
       updates: [],
@@ -144,6 +144,70 @@ const createEngine = (
 })
 
 describe("SyncEngine", () => {
+  it("fetches a user hint without advancing its cursor before the replay commits", async () => {
+    const context = createEngine()
+    await context.engine.connectionOpened()
+    await context.engine.idle()
+    let resolveResponse!: (value: RpcResult["result"]) => void
+    const response = {
+      promise: new Promise<RpcResult["result"]>((resolve) => { resolveResponse = resolve }),
+      resolve: (value: RpcResult["result"]) => resolveResponse(value),
+    }
+    let resolveRequested!: () => void
+    const requested = {
+      promise: new Promise<void>((resolve) => { resolveRequested = resolve }),
+      resolve: () => resolveRequested(),
+    }
+    const calls: Array<Extract<RpcCall["input"], { oneofKind: "getUpdates" }>> = []
+    context.client.userUpdates = (input) => {
+      calls.push(input)
+      requested.resolve()
+      return response.promise
+    }
+    const userHint = Update.create({ update: {
+      oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 1 },
+    } })
+    try {
+      await context.engine.processPush([userHint, userHint])
+      await requested.promise
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.getUpdates).toMatchObject({ startSeq: 0n, seqEnd: 1n })
+      expect(await context.storage.getBucketState({ kind: "user" })).toEqual({ seq: 0, date: 0 })
+      response.resolve({ oneofKind: "getUpdates", getUpdates: {
+        updates: [Update.create({ seq: 1, date: 1001n, update: {
+          oneofKind: "updatedUser", updatedUser: { user: { id: 7n, firstName: "Recovered" } },
+        } })],
+        seq: 1n, date: 1001n, final: true,
+        resultType: GetUpdatesResult_ResultType.SLICE, skippedSequences: [],
+      } })
+      await context.engine.idle()
+      expect(await context.storage.getBucketState({ kind: "user" })).toEqual({ seq: 1, date: 1001 })
+      expect(context.db.queryCollection(DbQueryPlanType.Objects, DbObjectKind.User)[0]?.firstName).toBe("Recovered")
+      await context.engine.processPush([userHint])
+      await context.engine.idle()
+      expect(calls).toHaveLength(1)
+    } finally {
+      response.resolve({ oneofKind: "getUpdates", getUpdates: {
+        updates: [], seq: 0n, date: 0n, final: true,
+        resultType: GetUpdatesResult_ResultType.SLICE, skippedSequences: [],
+      } })
+      await context.engine.stop()
+    }
+  })
+
+  it("ignores invalid user-hint targets without starting a replay", async () => {
+    const context = createEngine()
+    await context.engine.connectionOpened()
+    await context.engine.idle()
+    const before = context.client.calls.length
+    await context.engine.processPush([0, -1, NaN, Number.MAX_SAFE_INTEGER + 1].map((updateSeq) =>
+      Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq } } }),
+    ))
+    await context.engine.idle()
+    expect(context.client.calls).toHaveLength(before)
+    await context.engine.stop()
+  })
+
   it("leaves the cold-start budget after TOO_LONG and completes the bounded slice", async () => {
     const context = createEngine()
     let response = 0

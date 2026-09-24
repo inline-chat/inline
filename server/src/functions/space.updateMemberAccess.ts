@@ -12,6 +12,8 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { publishAccessChanged } from "@in/server/modules/cache/cluster"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import {
   prepareSpaceChatPermissionUpdates,
@@ -204,6 +206,8 @@ export const updateMemberAccess = async (
   })
 
   // Reset access caches for this member.
+  publishAccessChanged({ kind: "space", spaceId }, userId)
+  publishDurableReference({ bucket: { kind: "space", spaceId }, frontier: persisted.seq })
   AccessGuardsCache.resetSpaceMember(spaceId, userId)
   AccessGuardsCache.setSpaceMember(spaceId, userId)
   AccessGuardsCache.resetForUser(userId)

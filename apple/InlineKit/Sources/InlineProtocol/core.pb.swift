@@ -17120,6 +17120,14 @@ public nonisolated struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .spaceProfile(newValue)}
   }
 
+  public var userHasNewUpdates: UpdateUserHasNewUpdates {
+    get {
+      if case .userHasNewUpdates(let v)? = _storage._update {return v}
+      return UpdateUserHasNewUpdates()
+    }
+    set {_uniqueStorage()._update = .userHasNewUpdates(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Update: Equatable, Sendable {
@@ -17181,6 +17189,7 @@ public nonisolated struct Update: @unchecked Sendable {
     case acknowledgement(ChatAcknowledgement)
     case dialogTranslation(UpdateDialogTranslation)
     case spaceProfile(UpdateSpaceProfile)
+    case userHasNewUpdates(UpdateUserHasNewUpdates)
 
   }
 
@@ -17235,6 +17244,22 @@ public nonisolated struct UpdateSpaceHasNewUpdates: Sendable {
   public var spaceID: Int64 = 0
 
   /// Current sequence of the space
+  public var updateSeq: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Update when the authenticated user's durable bucket has new updates and
+/// client should fetch them. The recipient identifies the user, so this payload
+/// intentionally contains only the target user-bucket sequence.
+public nonisolated struct UpdateUserHasNewUpdates: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Current sequence of the authenticated user's update bucket.
   public var updateSeq: Int32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -44857,7 +44882,7 @@ nonisolated extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{3}dialog_collapsed_max_id\0\u{3}dialog_folder\0\u{3}user_added_to_chat\0\u{3}user_removed_from_chat\0\u{1}acknowledgement\0\u{3}dialog_translation\0\u{3}space_profile\0\u{c}\u{3}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{3}dialog_collapsed_max_id\0\u{3}dialog_folder\0\u{3}user_added_to_chat\0\u{3}user_removed_from_chat\0\u{1}acknowledgement\0\u{3}dialog_translation\0\u{3}space_profile\0\u{3}user_has_new_updates\0\u{c}\u{3}\u{1}")
 
   fileprivate class _StorageClass {
     var _seq: Int32? = nil
@@ -45520,6 +45545,19 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
             _storage._update = .spaceProfile(v)
           }
         }()
+        case 52: try {
+          var v: UpdateUserHasNewUpdates?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .userHasNewUpdates(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .userHasNewUpdates(v)
+          }
+        }()
         default: break
         }
       }
@@ -45731,6 +45769,10 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
         guard case .spaceProfile(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
       }()
+      case .userHasNewUpdates?: try {
+        guard case .userHasNewUpdates(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 52)
+      }()
       case nil: break
       }
     }
@@ -45850,6 +45892,36 @@ nonisolated extension UpdateSpaceHasNewUpdates: SwiftProtobuf.Message, SwiftProt
 
   public static func ==(lhs: UpdateSpaceHasNewUpdates, rhs: UpdateSpaceHasNewUpdates) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.updateSeq != rhs.updateSeq {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateUserHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUserHasNewUpdates"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}update_seq\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.updateSeq) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.updateSeq != 0 {
+      try visitor.visitSingularInt32Field(value: self.updateSeq, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUserHasNewUpdates, rhs: UpdateUserHasNewUpdates) -> Bool {
     if lhs.updateSeq != rhs.updateSeq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

@@ -24,7 +24,10 @@ import type {
   SetGridRoomTitleInput,
   SetGridRoomTitleResult,
 } from "@inline-chat/protocol/core"
-import { GridConnectionUnavailableReason } from "@inline-chat/protocol/core"
+import { GridConnectionUnavailableReason, ServerMessage } from "@inline-chat/protocol/core"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { connectionDirectory } from "@in/server/modules/internalMessaging/directory"
+import { SessionId, SpaceId, UserId } from "@in/server/core/schema/identifiers"
 import { db } from "@in/server/db"
 import { SpaceSettingsModel } from "@in/server/db/models/spaceSettings"
 import { UsersModel } from "@in/server/db/models/users"
@@ -1135,7 +1138,7 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
         })
         return
       }
-      await sendMessageToRealtimeSession(row.user.id, row.presence.ownerSessionId, {
+      const payload: ServerMessage["payload"] = {
         oneofKind: "grid",
         grid: {
           event: {
@@ -1143,7 +1146,29 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
             connectionReady: { credentials },
           },
         },
-      })
+      }
+      await sendMessageToRealtimeSession(row.user.id, row.presence.ownerSessionId, payload)
+      try {
+        const view = await connectionDirectory.list(row.user.id)
+        if (view.status !== "available") return
+        const owningBoots = new Set(view.connections
+          .filter((registration) => registration.sessionId === row.presence.ownerSessionId && registration.bootId !== internalMessaging.bootId)
+          .map((registration) => registration.bootId))
+        const event = { kind: "SessionRealtime" as const, payload: {
+            kind: "gridCredentials",
+            roomId,
+            spaceId: SpaceId.make(row.room.spaceId),
+            generation: connection.generation,
+            mediaMembershipId: row.presence.mediaMembershipId,
+            encodedPayload: Buffer.from(ServerMessage.toBinary({ payload })).toString("base64"),
+          } as const }
+        await Promise.all([...owningBoots].map((bootId) => internalMessaging.publish({
+          target: { kind: "session", bootId, userId: UserId.make(row.user.id), sessionId: SessionId.make(row.presence.ownerSessionId) },
+          event,
+        })))
+      } catch (error) {
+        log.warn("Failed to encode Grid session hint", { roomId, userId: row.user.id, error })
+      }
     }),
   )
   log.debug("GRID_TRACE phase=ready_push_done", {
@@ -1151,6 +1176,20 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
     generation: connection.generation,
     participantCount: rows.length,
     elapsedMs: Date.now() - startedAt,
+  })
+}
+
+export function subscribeGridCredentialHints(): () => void {
+  return internalMessaging.on("SessionRealtime", async ({ target, event }) => {
+    if (event.payload.kind !== "gridCredentials") return
+    const { roomId, spaceId, generation, mediaMembershipId, encodedPayload } = event.payload
+    if (!(await gridCredentialAuthorityIsActive({ roomId, spaceId, generation, mediaMembershipId, userId: target.userId, sessionId: target.sessionId }))) return
+    let payload: ServerMessage["payload"]
+    try {
+      payload = ServerMessage.fromBinary(Buffer.from(encodedPayload, "base64")).payload
+      if (payload.oneofKind !== "grid" || payload.grid.event.oneofKind !== "connectionReady") return
+    } catch { return }
+    await sendMessageToRealtimeSession(target.userId, target.sessionId, payload)
   })
 }
 

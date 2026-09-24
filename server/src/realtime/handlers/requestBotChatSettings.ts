@@ -6,4 +6,4 @@ export const requestBotChatSettingsHandler = (
   input: RequestBotChatSettingsInput,
   context: HandlerContext,
 ): Promise<RequestBotChatSettingsResult> =>
-  requestBotChatSettings(input, { currentSessionId: context.sessionId, currentUserId: context.userId })
+  requestBotChatSettings(input, { currentSessionId: context.sessionId, currentUserId: context.userId, currentConnectionId: context.connectionId })

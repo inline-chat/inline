@@ -21,6 +21,13 @@ describe("test environment", () => {
     expect(env["ENCRYPTION_KEY"]).not.toBe("real-key")
   })
 
+  test("passes only an explicit unauthenticated local Redis fixture", () => {
+    const local = "redis://127.0.0.1:62061"
+    expect(createTestEnvironment({ INLINE_TEST_REDIS_URL: local })["REDIS_URL"]).toBe(local)
+    expect(() => createTestEnvironment({ INLINE_TEST_REDIS_URL: "redis://remote.example:6379" })).toThrow()
+    expect(() => createTestEnvironment({ INLINE_TEST_REDIS_URL: "redis://:secret@localhost:6379" })).toThrow()
+  })
+
   test("blocks a provider before dispatch, without disclosing request credentials", async () => {
     const realFetch = mock(async () => new Response("unexpected"))
     const denied = mock()

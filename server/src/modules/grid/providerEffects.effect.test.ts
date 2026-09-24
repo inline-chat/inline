@@ -49,12 +49,9 @@ describe(
             )
 
           yield* GridProviderEffectsProcess.use(
-            (process) =>
-              Effect.sync(() => {
-                expect(process.worker).toBe(
-                  worker,
-                )
-              }),
+            (process) => process.start.pipe(Effect.tap((owned) => Effect.sync(() => {
+              expect(owned).toBe(worker)
+            }))),
           ).pipe(Effect.provide(layer))
 
           expect(events).toEqual([

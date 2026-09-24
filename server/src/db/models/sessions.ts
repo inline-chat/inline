@@ -15,12 +15,14 @@ import {
 } from "@in/server/modules/sessions/revokeSession"
 import { lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
 import type { Transaction } from "@in/server/db/types"
+import type { SignupAttribution } from "@in/server/modules/auth/signupAttribution"
 
 type SessionClientType = NonNullable<DbNewSession["clientType"]>
 export type SessionPushNotificationProvider = "apns" | "expo_android"
 
 // Define interfaces for the personal data structure
 export interface SessionPersonalData {
+  signupAttribution?: SignupAttribution
   country?: string | undefined
   region?: string | undefined
   city?: string | undefined
@@ -213,6 +215,25 @@ export class SessionsModel {
     } catch (error) {
       throw new Error(
         `Failed to update sessions last active in bulk: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
+    }
+  }
+
+  /**
+   * Refreshes activity cohorts without changing the legacy `active` flag.
+   * Callers batch and coalesce ids before reaching this database boundary.
+   */
+  static async touchLastActiveBulk(ids: readonly number[]): Promise<void> {
+    if (ids.length === 0) return
+
+    try {
+      await db
+        .update(sessions)
+        .set({ lastActive: new Date() })
+        .where(inArray(sessions.id, [...ids]))
+    } catch (error) {
+      throw new Error(
+        `Failed to touch sessions last active in bulk: ${error instanceof Error ? error.message : "Unknown error"}`,
       )
     }
   }

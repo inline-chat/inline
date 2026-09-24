@@ -213,7 +213,9 @@ public actor UpdatesEngine: Sendable {
         case let .updatedUser(updatedUser):
           try updatedUser.apply(db)
 
-        case .chatSkipPts:
+        case .chatSkipPts, .userHasNewUpdates:
+          // Sync consumes durable discovery hints before projection. Keep this
+          // path a no-op as well for any direct caller.
           break
 
         case let .chatHasNewUpdates(chatHasNewUpdates):
@@ -1684,6 +1686,7 @@ enum RealtimeUpdateDiagnostics {
     case .chatSkipPts: return "chatSkipPts"
     case .chatHasNewUpdates: return "chatHasNewUpdates"
     case .spaceHasNewUpdates: return "spaceHasNewUpdates"
+    case .userHasNewUpdates: return "userHasNewUpdates"
     case .spaceMemberUpdate: return "spaceMemberUpdate"
     case .chatVisibility: return "chatVisibility"
     case .dialogArchived: return "dialogArchived"

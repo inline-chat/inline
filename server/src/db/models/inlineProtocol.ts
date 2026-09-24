@@ -14,6 +14,7 @@ import { InlineProtocolKeyStoreError, InlineProtocolReplayError } from "@in/serv
 import { MAX_REPLAY_RESULT_BYTES, type ReplayIdentity, type ReplayResultCipher } from "@in/server/modules/inlineProtocol/replayCipher"
 
 const DEFAULT_REPLAY_TTL_MS = 10 * 60 * 1_000
+const REPLAY_UNKNOWN_OUTCOME_AFTER_MS = 60_000
 const MAX_RESULT_BYTES = MAX_REPLAY_RESULT_BYTES
 
 export type PermanentAuthorizationKey = {
@@ -239,6 +240,7 @@ export const countInlineProtocolChallengesBlockingPepperRetirement = async (
 export type ReplayClaim =
   | { kind: "claimed" }
   | { kind: "in_flight" }
+  | { kind: "unknown_outcome" }
   | { kind: "completed"; resultBody: Uint8Array }
   | { kind: "digest_mismatch" }
 
@@ -286,6 +288,7 @@ export class InlineProtocolReplayRepository {
         requestDigest: inlineProtocolRequests.requestDigest,
         resultBody: inlineProtocolRequests.resultBody,
         resultFormat: inlineProtocolRequests.resultFormat,
+        claimedAt: inlineProtocolRequests.claimedAt,
       }).from(inlineProtocolRequests).where(and(
         eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
         eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
@@ -295,9 +298,14 @@ export class InlineProtocolReplayRepository {
       if (existing.requestDigest.length !== digest.length || !timingSafeEqual(existing.requestDigest, digest)) {
         return { kind: "digest_mismatch" }
       }
-      return existing.resultBody === null
-        ? { kind: "in_flight" }
-        : { kind: "completed", resultBody: this.decode(input, existing.resultBody, existing.resultFormat) }
+      if (existing.resultBody === null) {
+        // The first owner may have died after committing the mutation. Keep the
+        // claim forever and report uncertainty; never execute it under this ID again.
+        return now.getTime() - existing.claimedAt.getTime() >= REPLAY_UNKNOWN_OUTCOME_AFTER_MS
+          ? { kind: "unknown_outcome" }
+          : { kind: "in_flight" }
+      }
+      return { kind: "completed", resultBody: this.decode(input, existing.resultBody, existing.resultFormat) }
     } catch (cause) {
       if (cause instanceof InlineProtocolReplayError) throw cause
       throw new InlineProtocolReplayError({ operation: "claim" })
@@ -309,12 +317,18 @@ export class InlineProtocolReplayRepository {
     protocolSessionId: bigint
     messageId: bigint
     resultBody: Uint8Array
+    now?: Date
   }): Promise<boolean> {
     if (input.resultBody.length > MAX_RESULT_BYTES) throw new InlineProtocolReplayError({ operation: "complete_size" })
+    const completedAt = input.now ?? new Date()
     try {
       const updated = await db.update(inlineProtocolRequests).set({
         ...this.encode(input, input.resultBody),
-        completedAt: new Date(),
+        completedAt,
+        // An application can outlive the request-time TTL after its deadline
+        // response. Retain the final replay result for a full TTL from its
+        // actual completion so cleanup cannot reopen duplicate execution.
+        expiresAt: new Date(completedAt.getTime() + DEFAULT_REPLAY_TTL_MS),
       }).where(and(
         eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
         eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
@@ -374,8 +388,10 @@ export class InlineProtocolReplayRepository {
     protocolSessionId: bigint
     messageId: bigint
     resultBody: Uint8Array
+    now?: Date
   }): Promise<boolean> {
     if (input.resultBody.length > MAX_RESULT_BYTES) throw new InlineProtocolReplayError({ operation: "replace_size" })
+    const completedAt = input.now ?? new Date()
     try {
       return await db.transaction(async (tx) => {
         const identity = and(
@@ -389,7 +405,8 @@ export class InlineProtocolReplayRepository {
         this.decode(input, row.resultBody, row.resultFormat)
         await tx.update(inlineProtocolRequests).set({
           ...this.encode(input, input.resultBody, row.resultFormat),
-          completedAt: new Date(),
+          completedAt,
+          expiresAt: new Date(completedAt.getTime() + DEFAULT_REPLAY_TTL_MS),
         }).where(identity)
         return true
       })

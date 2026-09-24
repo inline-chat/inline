@@ -9,6 +9,8 @@ import { Sync } from "@in/server/modules/updates/sync"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { InlineError } from "@in/server/types/errors"
 import * as mediaPaths from "@in/server/modules/files/path"
+import * as durable from "@in/server/modules/internalMessaging/durable"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 const context = (userId: number, sessionId: number): HandlerContext => ({
   userId, sessionId, connectionId: "space-profile-test", sendRaw: () => {}, sendRpcReply: () => {},
@@ -27,6 +29,75 @@ async function photo(userId: number, suffix: string, fileType: "photo" | "docume
 
 describe("space profile pictures", () => {
   setupTestLifecycle()
+
+  test("commits before publishing the space frontier and joins local delivery", async () => {
+    const owner = await account("space-owner@example.com")
+    const created = await createSpaceV3({ name: "Delivery" }, owner.ctx)
+    const spaceId = created.space!.id
+    const id = await photo(owner.user.id, "delivery")
+    const deliveryStarted = Promise.withResolvers<void>()
+    const deliveryGate = Promise.withResolvers<void>()
+    const publish = spyOn(durable, "publishDurableReference").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToSpace").mockImplementation(async () => {
+      deliveryStarted.resolve()
+      await deliveryGate.promise
+    })
+    let completed = false
+    const task = setSpacePhotoHandler({ spaceId, fileUniqueId: id }, owner.ctx)
+      .then(result => { completed = true; return result })
+    try {
+      await deliveryStarted.promise
+      const [stored] = await db.select().from(spaces).where(eq(spaces.id, Number(spaceId)))
+      expect(stored?.photoFileUniqueId).toBe(id)
+      expect(publish).toHaveBeenCalledWith({
+        bucket: { kind: "space", spaceId: Number(spaceId) }, frontier: stored!.updateSeq,
+      })
+      expect(completed).toBe(false)
+      deliveryGate.resolve()
+      const result = await task
+      expect(push).toHaveBeenCalledWith(Number(spaceId), result.updates)
+    } finally {
+      deliveryGate.resolve()
+      await task
+      push.mockRestore()
+      publish.mockRestore()
+    }
+  })
+
+  test("rejected edits emit neither a durable hint nor a local update", async () => {
+    const owner = await account("space-owner@example.com")
+    const outsider = await account("space-outsider@example.com")
+    const created = await createSpaceV3({ name: "Protected delivery" }, owner.ctx)
+    const publish = spyOn(durable, "publishDurableReference").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToSpace").mockResolvedValue(undefined)
+    try {
+      await expect(setSpacePhotoHandler({ spaceId: created.space!.id, fileUniqueId: "" }, outsider.ctx))
+        .rejects.toThrow()
+      expect(publish).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      push.mockRestore()
+      publish.mockRestore()
+    }
+  })
+
+  test("local delivery failure does not turn a committed photo edit into an RPC failure", async () => {
+    const owner = await account("space-owner@example.com")
+    const created = await createSpaceV3({ name: "Recoverable delivery" }, owner.ctx)
+    const id = await photo(owner.user.id, "failed-delivery")
+    const publish = spyOn(durable, "publishDurableReference").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToSpace").mockRejectedValue(new Error("transport refused"))
+    try {
+      const result = await setSpacePhotoHandler({ spaceId: created.space!.id, fileUniqueId: id }, owner.ctx)
+      expect(result.space?.photoFileUniqueId).toBe(id)
+      expect(publish).toHaveBeenCalledWith({
+        bucket: { kind: "space", spaceId: Number(created.space!.id) }, frontier: result.updates[0]!.seq,
+      })
+    } finally {
+      push.mockRestore()
+      publish.mockRestore()
+    }
+  })
 
   test("creation attaches an owned photo and leaves Pro disabled", async () => {
     const owner = await account("space-owner@example.com")

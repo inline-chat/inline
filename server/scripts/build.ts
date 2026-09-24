@@ -12,7 +12,12 @@ const commitHash = sourceCommit === "N/A" ? "N/A" : sourceCommit.slice(0, 7)
 console.info("🚧 Building...")
 
 const result = await Bun.build({
-  entrypoints: [resolve(__dirname, "../src/index.ts"), resolve(__dirname, "./encrypt-content.ts")],
+  entrypoints: [
+    resolve(__dirname, "../src/index.ts"),
+    ...["core-production-smoke", "encrypt-content", "migrate", "verify-migrations", "livekit-cutover-preflight"].map(
+      (name) => resolve(__dirname, `./${name}.ts`),
+    ),
+  ],
   naming: "[name].[ext]",
   outdir: resolve(__dirname, "../dist"),
   target: "bun",

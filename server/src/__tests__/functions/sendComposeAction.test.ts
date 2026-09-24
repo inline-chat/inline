@@ -4,6 +4,8 @@ import { sendComposeAction } from "@in/server/functions/messages.sendComposeActi
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { internalMessaging } from "@in/server/modules/internalMessaging/service"
+import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
 
 // Mock RealtimeUpdates.pushToUser to track what updates are sent
 const mockPushToUser = mock(async () => {})
@@ -297,5 +299,53 @@ describe("sendComposeAction", () => {
         },
       },
     ])
+  })
+
+  test("finishes local compose delivery without waiting for bounded broker publications", async () => {
+    const memberEmails = Array.from({ length: 34 }, () => nextEmail("compose-recipient"))
+    const { space, users } = await testUtils.createSpaceWithMembers("Bounded Compose Space", memberEmails)
+    const sender = users[0]
+    if (!sender) throw new Error("Failed to create sender")
+    const chat = await testUtils.createChat(space.id, "Bounded Compose Thread", "thread")
+    if (!chat) throw new Error("Failed to create chat")
+
+    const releasePublications = Promise.withResolvers<void>()
+    const saturated = Promise.withResolvers<void>()
+    let activePublications = 0
+    let maximumActivePublications = 0
+    await outboundPublications.drain()
+    outboundPublications.start()
+    const publications = spyOn(internalMessaging, "publish").mockImplementation(async () => {
+      activePublications += 1
+      maximumActivePublications = Math.max(maximumActivePublications, activePublications)
+      if (activePublications === 28) saturated.resolve()
+      await releasePublications.promise
+      activePublications -= 1
+      return { status: "published", subscribers: 1 }
+    })
+
+    try {
+      await sendComposeAction(
+        {
+          peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+          action: UpdateComposeAction_ComposeAction.TYPING,
+        },
+        { currentUserId: sender.id, currentSessionId: 123 },
+      )
+
+      await saturated.promise
+      expect(publications).toHaveBeenCalledTimes(28)
+      expect(maximumActivePublications).toBe(28)
+
+      releasePublications.resolve()
+      await outboundPublications.drain()
+
+      expect(publications).toHaveBeenCalledTimes(33)
+      expect(maximumActivePublications).toBe(28)
+    } finally {
+      releasePublications.resolve()
+      await outboundPublications.drain()
+      publications.mockRestore()
+    }
   })
 })

@@ -46,6 +46,7 @@ import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
+import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "@in/server/modules/notifications/messagePreview"
 import { notificationPhotoUrl } from "@in/server/modules/notifications/notificationPhoto"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
@@ -72,6 +73,7 @@ import {
 } from "@in/server/modules/threadTitles"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import {
   DIALOG_FOLLOWING,
   getFollowingDialogUserIds,
@@ -471,6 +473,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
     userId: currentUserId,
     sessionId: context.currentSessionId,
+    connectionId: context.currentConnectionId,
     chatId,
   })
 
@@ -562,18 +565,25 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   await recordDesktopChatActivityPromise
 
+  const publishToSelfSession = shouldPublishSendMessageToCurrentSession({
+    isRealtimeV3Session,
+    currentUserLayer,
+    hasAttachments,
+  })
   let { selfUpdates } = await pushUpdates({
     inputPeer,
     messageInfo,
     currentUserId,
     update,
     currentSessionId: context.currentSessionId,
-    publishToSelfSession: shouldPublishSendMessageToCurrentSession({
-      isRealtimeV3Session,
-      currentUserLayer,
-      hasAttachments,
-    }),
+    publishToSelfSession,
     updateGroup,
+  })
+  publishDurableReference({
+    bucket: { kind: "chat", chatId },
+    frontier: update.seq,
+    senderUserId: currentUserId,
+    ...(!publishToSelfSession ? { excludeSessionId: context.currentSessionId } : {}),
   })
   if (initialAgentContextRealtimeUpdate) selfUpdates.unshift(initialAgentContextRealtimeUpdate)
 
@@ -586,7 +596,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
   if (previewRoutes.length > 0) {
-    void processUrlPreviews({
+    const previewWork = processUrlPreviews({
       message: newMessage,
       previewRoutes,
       chatId,
@@ -597,7 +607,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       messageText: text,
       messageEntities: entities,
       titleAttachments,
+    }).catch((error) => {
+      log.error("Failed to process message URL previews", {
+        error,
+        chatId,
+        messageId: newMessage.messageId,
+      })
     })
+    applicationBackgroundWork.track(previewWork)
   }
 
   if (dbFullVoice && !text) {
@@ -610,7 +627,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // send notification
-  void sendNotifications({
+  const notificationWork = sendNotifications({
     updateGroup,
     messageInfo,
     currentUserId,
@@ -628,17 +645,25 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       currentUserId,
     })
   })
+  applicationBackgroundWork.track(notificationWork)
 
   if (previewRoutes.length === 0) {
     if (input.messageAttachments && input.messageAttachments.length > 0) {
-      void scheduleThreadTitleGenerationWithMessageAttachments({
+      const titleContextWork = scheduleThreadTitleGenerationWithMessageAttachments({
         chat,
         message: newMessage,
         text,
         entities,
         attachments: titleAttachments,
         currentUserId,
+      }).catch((error) => {
+        log.error("Failed to schedule message thread title generation", {
+          error,
+          chatId,
+          messageId: newMessage.messageId,
+        })
       })
+      applicationBackgroundWork.track(titleContextWork)
     } else {
       maybeScheduleThreadTitleGeneration({
         chat,
@@ -960,6 +985,7 @@ const pushUpdates = async ({
   }
 
   let selfUpdates: Update[] = []
+  const sends: Promise<void>[] = []
 
   if (resolvedUpdateGroup.type === "dmUsers") {
     resolvedUpdateGroup.userIds.forEach((userId) => {
@@ -982,7 +1008,7 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(
+        sends.push(RealtimeUpdates.pushToUser(
           userId,
           [
             // order matters here
@@ -990,7 +1016,7 @@ const pushUpdates = async ({
             newMessageUpdate,
           ],
           { skipSessionId },
-        )
+        ))
 
         selfUpdates = [
           // order matters here
@@ -999,7 +1025,7 @@ const pushUpdates = async ({
         ]
       } else {
         // other users get the message only
-        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+        sends.push(RealtimeUpdates.pushToUser(userId, [newMessageUpdate]))
       }
     })
   } else if (resolvedUpdateGroup.type === "threadUsers") {
@@ -1024,7 +1050,7 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(
+        sends.push(RealtimeUpdates.pushToUser(
           userId,
           [
             // order matters here
@@ -1032,7 +1058,7 @@ const pushUpdates = async ({
             newMessageUpdate,
           ],
           { skipSessionId },
-        )
+        ))
 
         selfUpdates = [
           // order matters here
@@ -1041,11 +1067,12 @@ const pushUpdates = async ({
         ]
       } else {
         // other users get the message only
-        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+        sends.push(RealtimeUpdates.pushToUser(userId, [newMessageUpdate]))
       }
     })
   }
 
+  await Promise.all(sends)
   return { selfUpdates, updateGroup: resolvedUpdateGroup }
 }
 
@@ -1449,7 +1476,7 @@ async function sendNotificationToUser({
     body = `${senderName}: ${body}`
   }
 
-  const suppressionDecision = desktopPushSuppressionTracker.shouldSuppressIOSSendMessagePush({
+  const suppressionDecision = await desktopPushSuppressionTracker.shouldSuppressIOSSendMessagePush({
     userId,
     chatId: messageInfo.message.chatId,
     isUrgentNudge,

@@ -189,7 +189,7 @@ function expectedProviderFromArguments(arguments_: string[]): LiveKitProvider | 
   return value && isLiveKitProvider(value) ? value : undefined
 }
 
-async function main(): Promise<number> {
+export async function main(): Promise<number> {
   const expectedProvider = expectedProviderFromArguments(process.argv.slice(2))
   if (!expectedProvider) {
     console.error("Usage: bun run livekit:cutover-preflight --expect-provider cloud|self_hosted")

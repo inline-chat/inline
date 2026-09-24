@@ -1,9 +1,11 @@
 import { BotPresenceState_Kind, type BotPresenceState } from "@inline-chat/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { randomUUID } from "node:crypto"
 
 type BotPresenceEntry = {
   state: BotPresenceState
   expiresAt?: number
+  activityId: string
 }
 
 const states = new Map<string, BotPresenceEntry>()
@@ -36,6 +38,7 @@ export function setBotPresenceState(
   chatId: number,
   state: BotPresenceState,
   now = Date.now(),
+  activityId = randomUUID(),
 ): BotPresenceState {
   const normalized = normalizeBotPresenceState(state)
   const entryKey = key(botUserId, chatId)
@@ -48,16 +51,17 @@ export function setBotPresenceState(
 
   states.set(entryKey, {
     state: copyState(normalized),
+    activityId,
     ...(timeoutMs != null ? { expiresAt: now + timeoutMs } : {}),
   })
 
   return normalized
 }
 
-export function expireBotPresenceState(botUserId: number, chatId: number, now = Date.now()): BotPresenceState | undefined {
+export function expireBotPresenceState(botUserId: number, chatId: number, now = Date.now(), expectedActivityId?: string): BotPresenceState | undefined {
   const entryKey = key(botUserId, chatId)
   const entry = states.get(entryKey)
-  if (!entry || !isExpired(entry, now)) {
+  if (!entry || !isExpired(entry, now) || (expectedActivityId && entry.activityId !== expectedActivityId)) {
     return undefined
   }
 

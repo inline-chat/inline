@@ -39,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private let appBridge = AppBridge(app: NSApp)
   @MainActor private lazy var dockBadgeService = DockBadgeService(unreadCounts: dependencies.unreadCounts)
+  @MainActor private lazy var dockMenuController = DockMenuController(database: dependencies.database)
 
   // Common Dependencies
   @MainActor private(set) lazy var dependencies: AppDependencies = {
@@ -80,6 +81,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // Session-scoped guard: show the realtime connection failure alert at most once per app run.
   private var didShowRealtimeConnectionFailureAlert = false
   private var notificationNavigationTask: Task<Void, Never>?
+
+  func applicationDockMenu(_: NSApplication) -> NSMenu? {
+    guard accountOperationAdmissionIsOpen, dependencies.viewModel.topLevelRoute == .main else { return nil }
+    return dockMenuController.makeMenu()
+  }
 
   func applicationWillFinishLaunching(_: Notification) {
     // Start crash reporting before AppDependencies opens and migrates the account database.

@@ -47,13 +47,11 @@ describe(
               ),
             )
 
-          const enabled =
-            yield* DatabaseHealthMonitorProcess.use(
-              (process) =>
-                Effect.succeed(process.enabled),
-            ).pipe(Effect.provide(layer))
+          const acquired = yield* DatabaseHealthMonitorProcess.use(
+            (process) => process.start,
+          ).pipe(Effect.provide(layer))
 
-          expect(enabled).toBe(true)
+          expect(acquired).toBe(monitor)
           expect(events).toEqual([
             "start",
             "stop",
@@ -65,11 +63,9 @@ describe(
       "retains the current disabled no-op state",
       () =>
         DatabaseHealthMonitorProcess.use(
-          (process) =>
-            Effect.sync(() => {
-              expect(process.enabled).toBe(false)
-              expect(process.monitor).toBeNull()
-            }),
+          (process) => process.start.pipe(Effect.tap((monitor) => Effect.sync(() => {
+            expect(monitor).toBeNull()
+          }))),
         ).pipe(
           Effect.provide(
             makeDatabaseHealthMonitorProcessLayer(

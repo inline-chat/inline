@@ -962,7 +962,12 @@ type EditMessageInput = {
   blockContent?: PreparedBlockContent | null
   /** Bot/agent streaming edits reuse this mutation without presenting as user edits. */
   suppressEditDate?: boolean
+  /** Used by asynchronous enhancements that must not replace a newer edit. */
+  expectedRevision?: number
+  expectedVoiceId?: number
 }
+
+export class MessageRevisionConflict extends Error {}
 
 async function editMessage(input: EditMessageInput): Promise<{
   message: DbMessage & { blockContent?: BlockContent | null }
@@ -993,14 +998,21 @@ async function editMessage(input: EditMessageInput): Promise<{
     }
 
     const [currentMessage] = await tx
-      .select({ blockContentId: messages.blockContentId })
+      .select({ blockContentId: messages.blockContentId, rev: messages.rev, voiceId: messages.voiceId })
       .from(messages)
       .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
       .for("update")
       .limit(1)
 
     if (!currentMessage) {
+      if (input.expectedRevision !== undefined || input.expectedVoiceId !== undefined) {
+        throw new MessageRevisionConflict()
+      }
       throw ModelError.MessageInvalid
+    }
+    if ((input.expectedRevision !== undefined && (currentMessage.rev ?? 0) !== input.expectedRevision)
+      || (input.expectedVoiceId !== undefined && currentMessage.voiceId !== input.expectedVoiceId)) {
+      throw new MessageRevisionConflict()
     }
 
     let nextBlockContentId = currentMessage.blockContentId

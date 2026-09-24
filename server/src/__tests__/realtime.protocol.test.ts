@@ -912,7 +912,7 @@ describe("realtime protocol safety", () => {
       .update(users)
       .set({ firstName: "Grace", lastName: "Hopper", pendingSetup: true })
       .where(eq(users.id, userId))
-    const alertSpy = spyOn(BotAlerts, "signupCompleted")
+    const alertSpy = spyOn(BotAlerts, "signupCompleted").mockImplementation(() => {})
 
     wsSendClientProtocolMessage(ws, {
       id: 620n,
@@ -947,6 +947,7 @@ describe("realtime protocol safety", () => {
     expect(storedUser?.username).toBe("newhandle")
     expect(storedUser?.pendingSetup).toBe(false)
     expect(alertSpy).toHaveBeenCalledTimes(1)
+    expect(alertSpy.mock.calls[0]?.[0].sessionId).toBeGreaterThan(0)
     expect(alertSpy.mock.calls[0]?.[0].user).toMatchObject({
       id: userId,
       firstName: "Grace",

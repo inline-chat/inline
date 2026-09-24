@@ -473,6 +473,13 @@ actor Sync {
           spaceHasNewUpdates(payload)
           continue
 
+        case let .userHasNewUpdates(payload):
+          // User-bucket hints carry no payload because this connection is the
+          // authenticated recipient. Fetch a bounded authoritative page rather
+          // than treating the hint as a durable update itself.
+          fetchUserBucket(upToSeq: Int64(payload.updateSeq))
+          continue
+
         default:
           if update.hasSeq, update.seq > 0 {
             if case .userAddedToChat = update.update {

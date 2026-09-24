@@ -346,7 +346,7 @@ export interface BotOperationHandlers {
   readonly answerMessageAction: (input: AnswerMessageActionParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly sendChatAction: (input: SendChatActionParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly getFile: (input: GetFileParams, context: BotOperationContext) => Promise<GetFileResult>
-  readonly getUpdates: (input: GetUpdatesParams, context: BotOperationContext) => Promise<GetUpdatesResult>
+  readonly getUpdates: (input: GetUpdatesParams, context: BotOperationContext, signal?: AbortSignal) => Promise<GetUpdatesResult>
   readonly setWebhook: (input: SetWebhookParams, context: BotOperationContext) => Promise<SetWebhookResult>
   readonly deleteWebhook: (input: DeleteWebhookParams, context: BotOperationContext) => Promise<DeleteWebhookResult>
   readonly getWebhookInfo: (context: BotOperationContext) => Promise<GetWebhookInfoResult>
@@ -527,7 +527,10 @@ export const makeBotOperations = (
   answerMessageAction: (input, context) => adapt("answerMessageAction", () => handlers.answerMessageAction(input, context)),
   sendChatAction: (input, context) => adapt("sendChatAction", () => handlers.sendChatAction(input, context)),
   getFile: (input, context) => adapt("getFile", () => handlers.getFile(input, context)),
-  getUpdates: (input, context) => adapt("getUpdates", () => handlers.getUpdates(input, context)),
+  getUpdates: (input, context) => Effect.tryPromise({
+    try: (signal) => handlers.getUpdates(input, context, signal),
+    catch: (cause) => classifyFailure("getUpdates", cause),
+  }),
   setWebhook: (input, context) => adapt("setWebhook", () => handlers.setWebhook(input, context)),
   deleteWebhook: (input, context) => adapt("deleteWebhook", () => handlers.deleteWebhook(input, context)),
   getWebhookInfo: (context) => adapt("getWebhookInfo", () => handlers.getWebhookInfo(context)),

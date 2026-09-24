@@ -1,0 +1,25 @@
+{
+  "image": "REPLACE_WITH_IMMUTABLE_IMAGE_DIGEST",
+  "env": {
+    "NODE_ENV": "production",
+    "PORT": "8000",
+    "INLINE_PROCESS_ROLE": "api",
+    "INLINE_INGRESS_MODE": "cloudflare",
+    "INLINE_INGRESS_HOST": "api.inline.chat",
+    "INLINE_TRUSTED_CLIENT_IP_HEADER": "cf-connecting-ip",
+    "SHUTDOWN_TIMEOUT_MS": "40000"
+  },
+  "guest": {
+    "cpu_kind": "shared",
+    "cpus": 6,
+    "memory_mb": 1536
+  },
+  "metadata": {
+    "fly_platform_version": "v2",
+    "fly_process_group": "app"
+  },
+  "restart": {
+    "policy": "on-failure",
+    "max_retries": 10
+  }
+}

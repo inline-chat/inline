@@ -6,6 +6,13 @@ on:
       - main
     paths:
       - "cli/**"
+      - "crates/**"
+      - "vendor/**"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "proto/core.proto"
       - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"
@@ -15,6 +22,13 @@ on:
       - main
     paths:
       - "cli/**"
+      - "crates/**"
+      - "vendor/**"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "proto/core.proto"
       - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"

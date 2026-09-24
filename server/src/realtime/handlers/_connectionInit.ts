@@ -9,6 +9,7 @@ import { db } from "@in/server/db"
 import { sessions } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { connectionBackgroundWork } from "@in/server/ws/backgroundWork"
 
 const log = new Log("realtime.handlers._connectionInit")
 
@@ -44,7 +45,7 @@ export const handleConnectionInit = async (
   const nextOsVersion = validateUpToFourSegementSemver(osVersion ?? "") ? osVersion : undefined
 
   if (nextClientVersion || nextOsVersion) {
-    storeSessionInfo(
+    const store = storeSessionInfo(
       userIdFromToken.sessionId,
       userIdFromToken.userId,
       nextClientVersion,
@@ -52,19 +53,23 @@ export const handleConnectionInit = async (
     ).catch((error) => {
       log.error("Failed to store session client metadata", error)
     })
+    connectionBackgroundWork.track(store)
   }
 
   if (connectionManager.getUserConnections(userIdFromToken.userId).length >= MAX_USER_CONNECTIONS) {
     throw RealtimeRpcError.RateLimit()
   }
 
-  connectionManager.authenticateConnection(
+  if (!connectionManager.authenticateConnection(
     handlerContext.connectionId,
     userIdFromToken.userId,
     userIdFromToken.sessionId,
     layer,
     userIdFromToken.isBot,
-  )
+    userIdFromToken.clientType,
+  )) {
+    throw RealtimeRpcError.Unauthenticated()
+  }
 
   // respond back with ack
   return {}

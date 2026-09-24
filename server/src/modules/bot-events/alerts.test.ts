@@ -20,6 +20,7 @@ describe("signup completion alerts", () => {
         "username: @ada",
         "email: ada@example.com",
         "phone: +15555550123",
+        "client: unknown · ref: unknown",
       ].join("\n"),
     )
   })
@@ -41,6 +42,7 @@ describe("signup completion alerts", () => {
         "name: not set",
         "username: not set",
         "phone: +15555550456",
+        "client: unknown · ref: unknown",
       ].join("\n"),
     )
   })

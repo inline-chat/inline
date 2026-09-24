@@ -12,6 +12,8 @@
     "test:effect": "bun --no-env-file scripts/test-effect.ts && bun run test:effect:bun",
     "test:effect:bun": "bun --no-env-file scripts/test-runner.ts --effect-bun",
     "test:postgres": "bun --no-env-file scripts/test-runner.ts --postgres",
+    "test:backend": "bun --no-env-file scripts/test-runner.ts src/__tests__/performance src/__tests__/flows/messageIntegrity.test.ts src/__tests__/modules/userBucketUpdates.test.ts src/__tests__/modules/updateDiscoveryBarrier.test.ts src/__tests__/modules/syncFlow.test.ts src/__tests__/functions/sendMessage.test.ts src/__tests__/functions/getChats.test.ts src/__tests__/functions/getChatHistory.test.ts src/__tests__/functions/updates.getUpdates.test.ts src/__tests__/functions/updates.getUpdatesState.test.ts src/modules/dialogOpen.test.ts scripts/benchmark-backend.test.ts",
+    "bench:backend": "bun --no-env-file scripts/benchmark-backend.ts",
     "test:realtime": "bun --no-env-file scripts/test-runner.ts src/realtime src/__tests__/realtime src/__tests__/handlers",
     "test:shutdown": "bun --no-env-file scripts/test-runner.ts lifecycle.gracefulShutdown",
     "core:shadow": "NODE_ENV=test SENTRY_DSN= PORT=0 bun --watch src/core/shadow.ts",
@@ -40,12 +42,12 @@
     "contracts:routes:update": "NODE_ENV=test bun scripts/contracts/route-manifest.ts --write",
     "contracts:openapi": "NODE_ENV=test bun scripts/contracts/openapi-manifest.ts",
     "contracts:openapi:update": "NODE_ENV=test bun scripts/contracts/openapi-manifest.ts --write",
-    "container:build": "docker build -f Dockerfile ..",
+    "container:build": "docker build --target runtime --build-arg SOURCE_COMMIT=working-tree -f Dockerfile ..",
     "test:unit": "bun --no-env-file scripts/test-runner.ts --unit",
     "test:preview": "bun --no-env-file scripts/test-runner.ts --preview",
     "test:check": "bun --no-env-file scripts/test-runner.ts --check && bun run lint:tests",
     "test:list": "bun --no-env-file scripts/test-runner.ts --list",
-    "lint:tests": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore --ignore-pattern 'scripts/lint/fixtures/**' --allow all --deny inline-tests/no-focused-tests src scripts packages/url-preview/src"
+    "lint:tests": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore --ignore-pattern 'scripts/lint/fixtures/**' --allow all --deny inline-tests/no-focused-tests src scripts bench packages/url-preview/src"
   },
   "overrides": {
     "elysia": "=1.4.29",

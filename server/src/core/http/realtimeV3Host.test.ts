@@ -46,6 +46,7 @@ import {
   type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
 import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHealth"
+import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
 import { connectionManager } from "@in/server/ws/connections"
 import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
 import { makeCoreRealtimeTransport } from "./realtimeHost"
@@ -281,6 +282,18 @@ const upgrade = (
 }
 
 describe("Inline Protocol WebSocket carrier", () => {
+  test("rejects frames on an existing socket as soon as drain begins", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    const data = upgrade(transport)
+    const closes: number[] = []
+    const socket = { data, close: (code: number) => { closes.push(code) }, sendBinary: () => 1 } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    transport.beginDrain()
+    await transport.websocket.message(socket, Buffer.alloc(1))
+    expect(closes).toEqual([1001])
+    await transport.shutdown()
+  })
+
   for (const outcome of [0, -1, "closed-under-pressure", "throw"] as const) {
     test(`handles carrier send outcome ${outcome} without replaying advanced bytes`, async () => {
       const runtime = fixture()
@@ -719,10 +732,15 @@ describe("Inline Protocol WebSocket carrier", () => {
     })
     const data = upgrade(transport)
     const sent: Uint8Array[] = []
+    let outputAvailable = deferred()
     const socket = {
       data,
       close: () => {},
-      sendBinary: (bytes: Uint8Array) => { sent.push(bytes.slice()); return bytes.length },
+      sendBinary: (bytes: Uint8Array) => {
+        sent.push(bytes.slice())
+        outputAvailable.resolve()
+        return bytes.length
+      },
     } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
     transport.websocket.open?.(socket)
 
@@ -749,19 +767,22 @@ describe("Inline Protocol WebSocket carrier", () => {
       await data.state?.queue
       await data.state?.outboundQueue
     }
-    const drainBodies = (): Uint8Array[] => sent.splice(0).map((frame) => {
-      const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
-      if (decoded.kind !== "packet") throw new Error("Expected an encrypted packet")
-      return decryptRecord(decoded.payload, key, {
-        direction: "server-to-client",
-        sessionId,
-        validServerSalts: new Set([serverSalt]),
-        nowSeconds: Date.now() / 1_000,
-      }).body
-    })
+    const drainBodies = (): Uint8Array[] => {
+      const frames = sent.splice(0)
+      outputAvailable = deferred()
+      return frames.map((frame) => {
+        const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
+        if (decoded.kind !== "packet") throw new Error("Expected an encrypted packet")
+        return decryptRecord(decoded.payload, key, {
+          direction: "server-to-client",
+          sessionId,
+          validServerSalts: new Set([serverSalt]),
+          nowSeconds: Date.now() / 1_000,
+        }).body
+      })
+    }
     const waitForOutput = async (): Promise<void> => {
-      for (let attempt = 0; attempt < 100 && sent.length === 0; attempt += 1) await Bun.sleep(1)
-      expect(sent.length).toBeGreaterThan(0)
+      if (sent.length === 0) await outputAvailable.promise
     }
 
     await sendInvoke(firstMessageId, 1, 1)
@@ -814,7 +835,7 @@ describe("Inline Protocol WebSocket carrier", () => {
     const sentAfterClose = sent.length
     let shutdownFinished = false
     const shutdown = transport.shutdown().then(() => { shutdownFinished = true })
-    await Bun.sleep(5)
+    await Promise.resolve()
     expect(shutdownFinished).toBeFalse()
     expect(runtimeClosed).toBeFalse()
     thirdGate.resolve()
@@ -826,7 +847,7 @@ describe("Inline Protocol WebSocket carrier", () => {
   })
 
   test("does not register a compatibility connection after the socket closes", async () => {
-    let authorize: ((authorization: ServerApplicationAuthorization) => void) | undefined
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
     const transport = makeInlineProtocolRealtimeTransport(fixture(), {
       applicationDispatcherFactory: ({ onAuthorized }) => {
         authorize = onAuthorized
@@ -849,13 +870,13 @@ describe("Inline Protocol WebSocket carrier", () => {
 
     try {
       transport.websocket.close?.(socket, 1000, "test close")
-      register({
+      expect(register({
         authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
         permanent: false,
         temporaryBound: true,
         userId: 42,
         accountSessionId: 84,
-      })
+      })).toBeFalse()
 
       expect(addConnection).not.toHaveBeenCalled()
       expect(authenticateConnection).not.toHaveBeenCalled()
@@ -870,7 +891,7 @@ describe("Inline Protocol WebSocket carrier", () => {
   })
 
   test("does not register a compatibility connection after shutdown begins", async () => {
-    let authorize: ((authorization: ServerApplicationAuthorization) => void) | undefined
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
     const transport = makeInlineProtocolRealtimeTransport(fixture(), {
       applicationDispatcherFactory: ({ onAuthorized }) => {
         authorize = onAuthorized
@@ -897,13 +918,13 @@ describe("Inline Protocol WebSocket carrier", () => {
       shutdown = transport.shutdown()
       expect(closeCount).toBe(1)
       expect(data.closed).toBeFalse()
-      register({
+      expect(register({
         authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
         permanent: false,
         temporaryBound: true,
         userId: 42,
         accountSessionId: 84,
-      })
+      })).toBeFalse()
 
       expect(addConnection).not.toHaveBeenCalled()
       expect(authenticateConnection).not.toHaveBeenCalled()
@@ -914,6 +935,45 @@ describe("Inline Protocol WebSocket carrier", () => {
       addConnection.mockRestore()
       authenticateConnection.mockRestore()
       connectionManager.removeConnection(data.id)
+    }
+  })
+
+  test("closes V3 registration when a session revocation wins the admission race", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const data = upgrade(transport)
+    const closes: Array<{ code: number; reason: string }> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => { closes.push({ code, reason }) },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+
+    try {
+      sessionAuthority.invalidate({ userId: 42, sessionId: 84 })
+      expect(register({
+        authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+        permanent: false,
+        temporaryBound: true,
+        userId: 42,
+        accountSessionId: 84,
+      })).toBeFalse()
+
+      expect(closes).toEqual([{ code: 4401, reason: "session_revoked" }])
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
+      expect(data.state?.registered).toBeFalse()
+    } finally {
+      sessionAuthority.stop()
+      connectionManager.removeConnection(data.id)
+      await transport.shutdown()
     }
   })
 

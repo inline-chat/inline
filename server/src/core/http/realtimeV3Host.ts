@@ -43,6 +43,7 @@ import {
   REALTIME_CLOSE_SESSION_REVOKED,
   REALTIME_CLOSE_SESSION_REVOKED_REASON,
 } from "@in/server/ws/connections"
+import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import type { TrustedClientIpHeader } from "./middleware"
 import { Log } from "@in/server/utils/log"
@@ -105,6 +106,7 @@ type InlineProtocolConnectionState = {
 }
 
 export interface InlineProtocolRealtimeTransport {
+  readonly beginDrain: () => void
   readonly handleVerification: (request: Request) => Response | undefined
   readonly tryUpgrade: (request: Request, server: Server<InlineProtocolWebSocketData>) => boolean
   readonly rejectUnsupportedUpgrade: (request: Request) => Response | undefined
@@ -206,7 +208,7 @@ export const makeInlineProtocolRealtimeTransport = (
     applicationDispatcherFactory?: (input: {
       connectionId: string
       metadata?: RealtimeRequestMetadata
-      onAuthorized: (authorization: ServerApplicationAuthorization) => void
+      onAuthorized: (authorization: ServerApplicationAuthorization) => boolean
     }) => ServerApplicationDispatcher
   } = {},
 ): InlineProtocolRealtimeTransport => {
@@ -533,9 +535,19 @@ export const makeInlineProtocolRealtimeTransport = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
     userId: number,
     accountSessionId: number,
-  ): void => {
+  ): boolean => {
     const state = socket.data.state
-    if (!accepting || socket.data.closed || !state || state.registered) return
+    if (!accepting || socket.data.closed || !state) return false
+    if (state.registered) {
+      // The dispatcher calls this fence before every RPC. Do not refresh the
+      // authority timestamp here: that would let traffic hide an unavailable
+      // session revalidation. It only closes the narrow revoke/admit race.
+      const connection = connectionManager.getConnection(socket.data.id)
+      if (connection?.userId === userId && connection.sessionId === accountSessionId &&
+          sessionAuthority.allows({ userId, sessionId: accountSessionId })) return true
+      connectionManager.closeConnection(socket.data.id, { authenticationInvalidated: true })
+      return false
+    }
     const compatibilitySocket = {
       id: socket.data.id,
       close: (code?: number, reason?: string) => socket.close(code, reason),
@@ -585,8 +597,17 @@ export const makeInlineProtocolRealtimeTransport = (
       },
     }
     connectionManager.addConnection(compatibilitySocket as never, ConnVersion.REALTIME_V3)
-    connectionManager.authenticateConnection(socket.data.id, userId, accountSessionId, 3)
+    if (!connectionManager.authenticateConnection(socket.data.id, userId, accountSessionId, 3)) {
+      // authenticateConnection closes and removes the compatibility socket
+      // when its session-authority admission fence rejects this registration.
+      return false
+    }
     state.registered = true
+    // V3 authorization carries the account session but not its client type.
+    // The manager coalesces this lookup across reconnecting sockets and tracks
+    // it for controlled teardown.
+    connectionManager.hydrateAuthenticatedClientType(userId, accountSessionId)
+    return true
   }
 
   const open = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
@@ -598,9 +619,8 @@ export const makeInlineProtocolRealtimeTransport = (
         connectionId: socket.data.id,
         metadata: socket.data.metadata,
         onAuthorized: (authorization) => {
-          if (authorization.userId !== undefined && authorization.accountSessionId !== undefined) {
-            registerAuthenticatedConnection(socket, authorization.userId, authorization.accountSessionId)
-          }
+          if (authorization.userId === undefined || authorization.accountSessionId === undefined) return false
+          return registerAuthenticatedConnection(socket, authorization.userId, authorization.accountSessionId)
         },
       }),
       randomBytes: (length) => Uint8Array.from(randomBytes(length)),
@@ -631,6 +651,7 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   const receive = (socket: ServerWebSocket<InlineProtocolWebSocketData>, message: string | Buffer<ArrayBuffer>): void => {
+    if (!accepting) { socket.close(1001, "Server draining"); return }
     if (typeof message === "string") {
       closeProtocol(socket)
       return
@@ -672,6 +693,9 @@ export const makeInlineProtocolRealtimeTransport = (
           ? { onQuickAck: (quickAckId) => { void sendQuickAck(socket, quickAckId) } }
         : undefined)
         if (state.session.hasEstablishedAuthorization) releaseHandshake(socket)
+        // This only records local activity; the presence owner persists it in
+        // coarse batches, never as a session query or write per V3 frame.
+        if (state.registered) connectionManager.markConnectionActivity(socket.data.id)
         void sendRecords(socket, accepted.responses)
         for (const task of accepted.applicationTasks) scheduleApplicationTask(socket, task)
         closeDestroyedSessionAfterWrites(socket)
@@ -694,6 +718,7 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   return {
+    beginDrain: () => { accepting = false },
     handleVerification: (request) => {
       const url = new URL(request.url)
       if (request.method !== "GET" || url.pathname !== INLINE_PROTOCOL_VERIFICATION_PATH) return undefined

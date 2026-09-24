@@ -20,5 +20,5 @@
     }
   ],
 
-  "include": ["src", "scripts", "drizzle.config.ts"]
+  "include": ["src", "scripts", "bench", "drizzle.config.ts"]
 }

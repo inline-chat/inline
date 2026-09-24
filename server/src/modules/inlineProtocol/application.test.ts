@@ -171,7 +171,7 @@ describe("Inline Protocol application ordering", () => {
       const dispatcher = makeInlineProtocolApplicationDispatcher({
         connectionId: "queued-auth-test",
         authorizationKeys: { load: async () => current },
-        onAuthorized: () => { registrations++ },
+        onAuthorized: () => { registrations++; return true },
         operations: {
           authBegin: async () => { throw new Error("unexpected auth") },
           authComplete: async () => { throw new Error("unexpected auth") },
@@ -226,6 +226,71 @@ describe("Inline Protocol application ordering", () => {
       }
     },
   )
+
+  test("does not execute the first RPC when realtime admission rejects a revoked session", async () => {
+    const authorization = {
+      authKeyId: new Uint8Array(8).fill(1),
+      permanentAuthKeyId: new Uint8Array(8).fill(2),
+      permanent: false,
+      temporaryBound: true,
+      userId: 1,
+      accountSessionId: 2,
+    }
+    const active: LoadedServerAuthorizationKey = {
+      key: new Uint8Array(256),
+      keyId: authorization.authKeyId,
+      temporary: true,
+      currentServerSalt: 1n,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      binding: {
+        permanentAuthKeyId: authorization.permanentAuthKeyId,
+        temporarySessionId: 3n,
+        nonce: 4n,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        userId: authorization.userId,
+        accountSessionId: authorization.accountSessionId,
+      },
+    }
+    const handler = spyOn(rpcHandlers, "handleRpcCall")
+    let executionStarted = false
+    try {
+      const dispatcher = makeInlineProtocolApplicationDispatcher({
+        connectionId: "revoked-first-rpc-admission",
+        authorizationKeys: { load: async () => active },
+        // This is the result from V3 registration when the revoke event wins
+        // after temporary-key validation but before application execution.
+        onAuthorized: () => false,
+        operations: {
+          authBegin: async () => { throw new Error("unexpected auth") },
+          authComplete: async () => { throw new Error("unexpected auth") },
+          authBeginBrowser: async () => { throw new Error("unexpected auth") },
+          authBrowserStatus: async () => { throw new Error("unexpected auth") },
+        },
+      })
+      const result = await dispatcher.dispatch({
+        payload: RealtimeV3Request.toBinary({ body: { oneofKind: "rpc", rpc: RpcCall.create({
+          method: Method.UPDATE_USER_SETTINGS,
+          input: { oneofKind: "updateUserSettings", updateUserSettings: {} },
+        }) } }),
+        authorization,
+        messageId: 1n,
+        sessionId: 3n,
+        signal: new AbortController().signal,
+        markExecutionStarted: () => { executionStarted = true },
+        sendUpdate: () => {},
+      })
+
+      expect(result.kind).toBe("result")
+      if (result.kind !== "result") throw new Error("expected RPC error")
+      const response = RealtimeV3Response.fromBinary(result.payload)
+      expect(response.body.oneofKind).toBe("rpcError")
+      if (response.body.oneofKind === "rpcError") expect(response.body.rpcError.code).toBe(401)
+      expect(executionStarted).toBeFalse()
+      expect(handler).not.toHaveBeenCalled()
+    } finally {
+      handler.mockRestore()
+    }
+  })
 
   test("marks execution at the application boundary and preserves output overload", async () => {
     const dispatcher = makeInlineProtocolApplicationDispatcher({

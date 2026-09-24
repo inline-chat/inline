@@ -324,6 +324,34 @@ describe("realtime update application", () => {
     ])
   })
 
+  it("retains space profile updates in the space bucket", () => {
+    const db = new Db({ autoHydrate: false })
+    const update = Update.create({
+      seq: 20,
+      date: 1_023n,
+      update: {
+        oneofKind: "spaceProfile",
+        spaceProfile: {
+          spaceId: 42n,
+          photoFileUniqueId: "space-photo",
+          isPro: true,
+        },
+      },
+    })
+
+    expect(applyUpdates(db, [update])).toMatchObject({ deferred: 1, failed: 0 })
+    const [deferred] = db.queryCollection(
+      DbQueryPlanType.Objects,
+      DbObjectKind.DeferredUpdate,
+    )
+    expect(deferred).toMatchObject({
+      bucketId: "space:42",
+      seq: 20,
+      updateType: "spaceProfile",
+    })
+    expect(Update.fromBinary(deferred!.payload)).toEqual(update)
+  })
+
   it("applies reaction inserts and deletes to a resident message aggregate", () => {
     const db = new Db({ autoHydrate: false })
     const key = messageKey(threadChatId, messageId(41))
@@ -412,12 +440,15 @@ describe("realtime update application", () => {
           },
         },
       }),
+      Update.create({
+        update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 42 } },
+      }),
     ])
 
     expect(report).toEqual({
       applied: 0,
       ephemeral: 1,
-      syncHint: 1,
+      syncHint: 2,
       deferred: 0,
       failed: 0,
     })

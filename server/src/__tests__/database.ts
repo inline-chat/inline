@@ -5,7 +5,11 @@ import postgres from "postgres"
 import { migrateDb } from "../../scripts/helpers/migrate-db"
 import { assertLocalTestDatabaseUrl } from "../../scripts/test-database-template"
 import { closeDb, db, initDb } from "../db"
+import { waitForPostCommitHooks } from "../db/commitHooks"
+import { applicationBackgroundWork } from "../lifecycle/backgroundWork"
+import { outboundPublications } from "../modules/internalMessaging/outbound"
 import { AccessGuardsCache } from "../modules/authorization/accessGuardsCache"
+import { connectionBackgroundWork } from "../ws/backgroundWork"
 
 type Lease = { refs: number; name: string; ready: Promise<void>; release: () => Promise<void> }
 const state: { active?: Lease; teardown?: Promise<void> } = {}
@@ -17,6 +21,14 @@ const databaseUrl = (base: string, name: string) => {
 const withAdmin = async (base: string, operation: (client: ReturnType<typeof postgres>) => Promise<void>) => {
   const client = postgres(databaseUrl(base, "postgres"), { max: 1, connect_timeout: 5, onnotice: () => {} })
   try { await operation(client) } finally { await client.end({ timeout: 5 }) }
+}
+const drainDatabaseBackgroundWork = async () => {
+  await applicationBackgroundWork.waitForIdle()
+  await connectionBackgroundWork.waitForIdle()
+  // Application work can commit a user update, whose publication must finish
+  // before test teardown closes or truncates its database.
+  await waitForPostCommitHooks()
+  await outboundPublications.drain()
 }
 
 export const setupTestDatabase = async () => {
@@ -37,7 +49,10 @@ export const setupTestDatabase = async () => {
   let created = false
   const release = async () => {
     const errors: unknown[] = []
-    try { await closeDb() } catch (error) { errors.push(error) }
+    try {
+      await drainDatabaseBackgroundWork()
+      await closeDb()
+    } catch (error) { errors.push(error) }
     try {
       if (created) await withAdmin(base, async (client) => {
         await client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`)
@@ -52,6 +67,7 @@ export const setupTestDatabase = async () => {
   state.active = lease
   lease.ready = (async () => {
     try {
+      await drainDatabaseBackgroundWork()
       await closeDb()
       await withAdmin(base, async (client) => {
         await client.unsafe(`CREATE DATABASE "${name}"${template ? ` TEMPLATE "${template}"` : ""}`)
@@ -91,6 +107,7 @@ export const cleanDatabase = async () => {
   const lease = state.active
   if (!lease) throw new Error("Call setupTestDatabase before cleanDatabase.")
   await lease.ready
+  await drainDatabaseBackgroundWork()
   const [current] = await db.execute<{ name: string }>(sql`SELECT current_database() AS name`)
   if (current?.name !== lease.name) throw new Error("Refusing to clean a database not owned by this test lifecycle.")
   AccessGuardsCache.resetAll()

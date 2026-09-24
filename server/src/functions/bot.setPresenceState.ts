@@ -5,13 +5,14 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
   botPresenceStateTimeoutMs,
   expireBotPresenceState,
-  setBotPresenceState,
 } from "@in/server/modules/botPresence/state"
+import { getSharedBotPresence, setSharedBotPresence } from "@in/server/modules/botPresence/shared"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
+import { publishBotPresence } from "@in/server/modules/internalMessaging/transient"
 import type {
   BotPresenceState,
   InputPeer,
@@ -23,7 +24,6 @@ import { and, eq } from "drizzle-orm"
 import type { FunctionContext } from "./_types"
 
 const log = new Log("functions.setBotPresenceState")
-
 export const setBotPresenceStateFn = async (
   input: SetBotPresenceStateInput,
   context: FunctionContext,
@@ -40,7 +40,7 @@ export const setBotPresenceStateFn = async (
   const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context)
   await AccessGuards.ensureChatAccess(chat, botUserId)
 
-  const state = setBotPresenceState(botUserId, chat.id, inputState)
+  const { state, activityId } = await setSharedBotPresence(botUserId, chat.id, inputState)
   const updateGroup = await getUpdateGroupFromInputPeer(peerIdInput, context)
 
   pushBotPresenceUpdate({
@@ -49,15 +49,39 @@ export const setBotPresenceStateFn = async (
     state,
     updateGroup,
   })
+  publishBotPresenceHints({
+    recipientUserIds: updateGroup.userIds,
+    botUserId,
+    chatId: chat.id,
+    activityId,
+  })
   scheduleBotPresenceExpiry({
     botUserId,
     chatId: chat.id,
     inputPeer: peerIdInput,
     state,
+    activityId,
     updateGroup,
   })
 
   return {}
+}
+
+/**
+ * Presence hints are best-effort. The process-owned dispatcher bounds every
+ * recipient publication and never adds broker latency to the RPC result.
+ */
+export function publishBotPresenceHints(input: {
+  readonly recipientUserIds: readonly number[]
+  readonly botUserId: number
+  readonly chatId: number
+  readonly activityId: string
+}): void {
+  for (const userId of input.recipientUserIds) {
+    if (userId !== input.botUserId) {
+      publishBotPresence(userId, input.botUserId, input.chatId, input.activityId)
+    }
+  }
 }
 
 function pushBotPresenceUpdate({
@@ -98,12 +122,14 @@ function scheduleBotPresenceExpiry({
   chatId,
   inputPeer,
   state,
+  activityId,
   updateGroup,
 }: {
   botUserId: number
   chatId: number
   inputPeer: InputPeer
   state: BotPresenceState
+  activityId: string
   updateGroup: UpdateGroup
 }) {
   const timeoutMs = botPresenceStateTimeoutMs(state)
@@ -117,6 +143,7 @@ function scheduleBotPresenceExpiry({
       chatId,
       inputPeer,
       updateGroup,
+      activityId,
     })
   }, timeoutMs + 50)
 
@@ -128,20 +155,24 @@ async function expireAndPushBotPresence({
   chatId,
   inputPeer,
   updateGroup,
+  activityId,
 }: {
   botUserId: number
   chatId: number
   inputPeer: InputPeer
   updateGroup: UpdateGroup
+  activityId: string
 }) {
   try {
+    const shared = await getSharedBotPresence(botUserId, chatId)
+    if (shared.status === "available" && shared.activityId !== undefined) return
     const currentUpdateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId: botUserId }).catch(
       (error) => {
         log.warn("Failed to refresh bot presence expiry update group", { error, botUserId, chatId })
         return updateGroup
       },
     )
-    const expiredState = expireBotPresenceState(botUserId, chatId)
+    const expiredState = expireBotPresenceState(botUserId, chatId, Date.now(), activityId)
     if (!expiredState) {
       return
     }

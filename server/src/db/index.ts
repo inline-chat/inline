@@ -1,42 +1,14 @@
 import { drizzle } from "drizzle-orm/postgres-js"
 import { DATABASE_URL } from "@in/server/env"
-import postgres from "postgres"
+import { makeDatabaseClients } from "./connectionPolicy"
+import { installPostCommitHooks } from "./commitHooks"
+import { checkMigrationHead, MigrationStateError, validateAppliedMigrations } from "./migrationState"
 import * as schema from "./schema"
 import { relations } from "./relations"
 
-const DATABASE_END_TIMEOUT_SECONDS = 5
+let clients = makeDatabaseClients(DATABASE_URL, process.env)
 
-const makeQueryClient = (databaseUrl: string) =>
-  postgres(databaseUrl, {
-    max: 10,
-    connect_timeout: 5,
-    idle_timeout: 30,
-    connection: {
-      application_name: "inline-server",
-      statement_timeout: 30_000,
-      lock_timeout: 5_000,
-      idle_in_transaction_session_timeout: 15_000,
-    },
-  })
-
-const makeHealthQueryClient = (databaseUrl: string) =>
-  postgres(databaseUrl, {
-    max: 1,
-    connect_timeout: 2,
-    idle_timeout: 30,
-    connection: {
-      application_name: "inline-health",
-      statement_timeout: 1_500,
-      lock_timeout: 500,
-      idle_in_transaction_session_timeout: 2_000,
-    },
-  })
-
-let queryClient = makeQueryClient(DATABASE_URL)
-let healthQueryClient =
-  makeHealthQueryClient(DATABASE_URL)
-
-export let db = drizzle(queryClient, {
+const createDatabase = (queryClient: typeof clients.queryClient) => installPostCommitHooks(drizzle(queryClient, {
   relations,
   schema,
   // logger: {
@@ -44,42 +16,41 @@ export let db = drizzle(queryClient, {
   //     console.log(query, params)
   //   },
   // },
-})
+}))
+
+export let db = createDatabase(clients.queryClient)
 
 export const initDb = (databaseUrl: string) => {
   // Best-effort close of existing connections (especially useful for tests that recreate DBs).
-  void Promise.all([
-    queryClient.end({
-      timeout: DATABASE_END_TIMEOUT_SECONDS,
-    }),
-    healthQueryClient.end({
-      timeout: DATABASE_END_TIMEOUT_SECONDS,
-    }),
-  ]).catch(() => {})
+  const next = makeDatabaseClients(databaseUrl, process.env)
+  void clients.close().catch(() => {})
+  clients = next
+  db = createDatabase(clients.queryClient)
+}
 
-  queryClient = makeQueryClient(databaseUrl)
-  healthQueryClient =
-    makeHealthQueryClient(databaseUrl)
-  db = drizzle(queryClient, {
-    relations,
-    schema,
+export const checkDatabaseHealth = () => {
+  const database = clients.checkHealth()
+  const migrations = checkMigrationHead(clients.healthClient)
+  return Object.assign(Promise.all([database, migrations]).then(([rows]) => rows), {
+    cancel: () => {
+      try { database.cancel?.() } finally { migrations.cancel() }
+    },
   })
 }
 
-export const checkDatabaseHealth = () =>
-  healthQueryClient.unsafe(
-    "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::double precision AS database_time_millis",
-  ).execute()
-
-export const closeDb = async () => {
-  await Promise.all([
-    queryClient.end({
-      timeout: DATABASE_END_TIMEOUT_SECONDS,
-    }),
-    healthQueryClient.end({
-      timeout: DATABASE_END_TIMEOUT_SECONDS,
-    }),
-  ])
+export const validateDatabaseStartup = async () => {
+  await clients.validateStartup()
+  try {
+    await validateAppliedMigrations(clients.healthClient)
+  } catch (error) {
+    // Database driver errors may contain connection metadata. Only our own
+    // bounded validation messages are safe to include in production logs.
+    console.error(error instanceof MigrationStateError
+      ? `Database migration check failed: ${error.message}`
+      : "Database migration ledger could not be checked.")
+    throw error
+  }
 }
+export const closeDb = () => clients.close()
 
 export { schema }

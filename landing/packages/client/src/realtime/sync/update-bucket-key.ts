@@ -109,6 +109,8 @@ const inferredUpdateBucketKey = (
           update.update.spaceHasNewUpdates.spaceId,
         ),
       }
+    case "userHasNewUpdates":
+      return { kind: "user" }
     case "spaceMemberAdd":
       return update.update.spaceMemberAdd.member
         ? {
@@ -150,6 +152,11 @@ const inferredUpdateBucketKey = (
       return {
         kind: "space",
         spaceId: spaceId(update.update.spaceSettings.spaceId),
+      }
+    case "spaceProfile":
+      return {
+        kind: "space",
+        spaceId: spaceId(update.update.spaceProfile.spaceId),
       }
     case undefined:
       return undefined

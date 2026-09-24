@@ -7,6 +7,7 @@ import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel, type DbFullMessage, type ProcessedMessageAttachment } from "@in/server/db/models/messages"
 import { chats, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { updateThreadInfo } from "@in/server/functions/messages.updateChatInfo"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { openaiClient } from "@in/server/libs/openAI"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getAnchorMessageForChat, isDefaultReplyThreadTitle } from "@in/server/modules/subthreads"
@@ -161,6 +162,7 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput): P
         messageId: input.message.messageId,
       })
     })
+  applicationBackgroundWork.track(generation)
   return generation
 }
 

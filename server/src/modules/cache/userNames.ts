@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
+import { LocalCache } from "./localCache"
 
 export type UserName = {
   id: number
@@ -13,8 +14,12 @@ export type UserName = {
   cacheDate: number
 }
 
-const cachedUserNames = new Map<number, UserName>()
-const cacheValidTime = 120 * 1000 // 120s
+const cachedUserNames = new LocalCache<number, UserName | undefined>({
+  ttlMs: 120_000, negativeTtlMs: 15_000, maxEntries: 10_000,
+  isNegative: (value) => value === undefined,
+})
+export const invalidateUserNameCache = (userId: number): void => cachedUserNames.invalidate(userId)
+export const clearUserNameCache = (): void => cachedUserNames.clear()
 
 export const UserNamesCache = {
   getCachedUserName,
@@ -22,13 +27,7 @@ export const UserNamesCache = {
 }
 
 export async function getCachedUserName(userId: number): Promise<UserName | undefined> {
-  let cached = cachedUserNames.get(userId)
-  if (cached) {
-    if (cached.cacheDate + cacheValidTime > Date.now()) {
-      return cached
-    }
-  }
-
+  return cachedUserNames.get(userId, async () => {
   const user = await db
     .select()
     .from(users)
@@ -50,9 +49,8 @@ export async function getCachedUserName(userId: number): Promise<UserName | unde
     timeZone: user.timeZone,
   }
 
-  cachedUserNames.set(userId, userName)
-
   return userName
+  })
 }
 
 /**

@@ -7,6 +7,7 @@ import { UserSettingsModel } from "@in/server/db/models/userSettings"
 import {
   clearUserSettingsCache,
   getCachedUserSettings,
+  getUserSettingsCacheStats,
   invalidateUserSettingsCache,
 } from "@in/server/modules/cache/userSettings"
 
@@ -40,9 +41,13 @@ describe("User Settings Cache", () => {
     const fetch = new Promise<UserSettingsGeneral>((resolve) => {
       resolveFetch = resolve
     })
+    let calls = 0
     const getGeneral = spyOn(UserSettingsModel, "getGeneral").mockImplementation(async () => {
-      resolveStarted()
-      return await fetch
+      if (++calls === 1) {
+        resolveStarted()
+        return await fetch
+      }
+      return freshSettings
     })
 
     try {
@@ -51,9 +56,7 @@ describe("User Settings Cache", () => {
 
       invalidateUserSettingsCache(userId)
       resolveFetch(staleSettings)
-      await expect(inFlight).resolves.toEqual(staleSettings)
-
-      getGeneral.mockImplementation(async () => freshSettings)
+      await expect(inFlight).resolves.toEqual(freshSettings)
       await expect(getCachedUserSettings(userId)).resolves.toEqual(freshSettings)
       expect(getGeneral).toHaveBeenCalledTimes(2)
     } finally {
@@ -61,7 +64,87 @@ describe("User Settings Cache", () => {
     }
   })
 
-  test("an unrelated invalidation does not discard another user's background refresh", async () => {
+  test("returns a newer fresh fill when an invalidated older fill fails", async () => {
+    const userId = 90406
+    const oldFetchStarted = Promise.withResolvers<void>()
+    const releaseOldFetch = Promise.withResolvers<void>()
+    let calls = 0
+    const getGeneral = spyOn(UserSettingsModel, "getGeneral").mockImplementation(async () => {
+      if (++calls === 1) {
+        oldFetchStarted.resolve()
+        await releaseOldFetch.promise
+        throw new Error("old database request failed")
+      }
+      return freshSettings
+    })
+
+    try {
+      const oldFill = getCachedUserSettings(userId)
+      await oldFetchStarted.promise
+
+      invalidateUserSettingsCache(userId)
+      await expect(getCachedUserSettings(userId)).resolves.toEqual(freshSettings)
+
+      releaseOldFetch.resolve()
+      await expect(oldFill).resolves.toEqual(freshSettings)
+      expect(getGeneral).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseOldFetch.resolve()
+      getGeneral.mockRestore()
+    }
+  })
+
+  test("uses a whole-cache epoch fence when distinct invalidations reach their metadata bound", async () => {
+    const userId = 90405
+    const fetchStarted = Promise.withResolvers<void>()
+    const releaseOldFetch = Promise.withResolvers<UserSettingsGeneral>()
+    let calls = 0
+    const getGeneral = spyOn(UserSettingsModel, "getGeneral").mockImplementation(async () => {
+      if (++calls === 1) {
+        fetchStarted.resolve()
+        return await releaseOldFetch.promise
+      }
+      return freshSettings
+    })
+
+    try {
+      const inFlight = getCachedUserSettings(userId)
+      await fetchStarted.promise
+
+      // maxSize is 10,000 and invalidation generations retain at most 20,000
+      // entries. The next distinct invalidation must fence the pending fill.
+      for (let invalidatedUserId = 200_000; invalidatedUserId <= 220_000; invalidatedUserId++) {
+        invalidateUserSettingsCache(invalidatedUserId)
+      }
+      releaseOldFetch.resolve(staleSettings)
+
+      await expect(inFlight).resolves.toEqual(freshSettings)
+      await expect(getCachedUserSettings(userId)).resolves.toEqual(freshSettings)
+      expect(getGeneral).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseOldFetch.resolve(staleSettings)
+      getGeneral.mockRestore()
+    }
+  })
+
+  test("stays within its capacity when all fills share one timestamp", async () => {
+    const now = 1_000_000
+    const dateNow = spyOn(Date, "now").mockImplementation(() => now)
+    const getGeneral = spyOn(UserSettingsModel, "getGeneral").mockResolvedValue(staleSettings)
+
+    try {
+      for (let userId = 300_000; userId <= 310_000; userId++) {
+        await getCachedUserSettings(userId)
+      }
+
+      expect(getUserSettingsCacheStats().size).toBe(10_000)
+    } finally {
+      getGeneral.mockRestore()
+      dateNow.mockRestore()
+    }
+  })
+
+  test("keeps a user's fresh settings for 30 seconds and awaits its next fill", async () => {
     const userA = 90402
     const userB = 90403
     let now = 1_000_000
@@ -81,17 +164,38 @@ describe("User Settings Cache", () => {
 
     try {
       await expect(getCachedUserSettings(userB)).resolves.toEqual(staleSettings)
-      now += 61 * 60 * 1000
+      now += 29 * 1000
       await expect(getCachedUserSettings(userB)).resolves.toEqual(staleSettings)
+      expect(getGeneral).toHaveBeenCalledTimes(1)
+
+      now += 2 * 1000
+      const inFlight = getCachedUserSettings(userB)
       await refreshStarted
 
       invalidateUserSettingsCache(userA)
       resolveRefresh(freshSettings)
-      for (let attempt = 0; attempt < 20 && fetches < 2; attempt += 1) await Bun.sleep(1)
-      await Bun.sleep(1)
+      await expect(inFlight).resolves.toEqual(freshSettings)
 
       await expect(getCachedUserSettings(userB)).resolves.toEqual(freshSettings)
       expect(getGeneral).toHaveBeenCalledTimes(2)
+    } finally {
+      getGeneral.mockRestore()
+      dateNow.mockRestore()
+    }
+  })
+
+  test("does not serve an expired settings value when its fresh fill fails", async () => {
+    const userId = 90404
+    let now = 1_000_000
+    const dateNow = spyOn(Date, "now").mockImplementation(() => now)
+    const getGeneral = spyOn(UserSettingsModel, "getGeneral")
+      .mockResolvedValueOnce(staleSettings)
+      .mockRejectedValueOnce(new Error("database unavailable"))
+
+    try {
+      await expect(getCachedUserSettings(userId)).resolves.toEqual(staleSettings)
+      now += 30 * 1000
+      await expect(getCachedUserSettings(userId)).rejects.toThrow("database unavailable")
     } finally {
       getGeneral.mockRestore()
       dateNow.mockRestore()

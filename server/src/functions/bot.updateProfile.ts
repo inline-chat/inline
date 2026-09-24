@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UpdateBotProfileInput, UpdateBotProfileResult } from "@inline-chat/protocol/core"
 import { encodeBotWithAvatar, parseBotUserId, requireManageableBot } from "./bot.avatarHelpers"
+import { publishCacheInvalidation } from "@in/server/modules/cache/cluster"
 
 export const updateBotProfile = async (
   input: UpdateBotProfileInput,
@@ -42,6 +43,7 @@ export const updateBotProfile = async (
   // No-op updates are allowed (e.g. user opens sheet and presses save).
   if (Object.keys(updates).length > 0) {
     await db.update(users).set(updates).where(eq(users.id, botUserId))
+    publishCacheInvalidation({ kind: "userDisplay", userId: botUserId })
   }
 
   return {

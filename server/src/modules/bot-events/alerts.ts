@@ -3,6 +3,8 @@ import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { sendInlineOnlyBotEvent } from "@in/server/modules/bot-events"
 import { Log } from "@in/server/utils/log"
+import { SessionsModel } from "@in/server/db/models/sessions"
+import { formatSignupAttribution } from "@in/server/modules/auth/signupAttribution"
 
 const log = new Log("bot-events.alerts")
 
@@ -101,7 +103,7 @@ function adminUserLink(user: AlertUser): string {
   return `[${label}](${adminUserUrl(user.id)})`
 }
 
-export function formatSignupCompletedAlert(user: AlertUser): string {
+export function formatSignupCompletedAlert(user: AlertUser, source = formatSignupAttribution()): string {
   const lines = [
     `Signup completed: ${adminUserLink(user)}`,
     `name: ${userName(user) ?? "not set"}`,
@@ -110,6 +112,7 @@ export function formatSignupCompletedAlert(user: AlertUser): string {
 
   if (user.email) lines.push(`email: ${compact(user.email)}`)
   if (user.phoneNumber) lines.push(`phone: ${compact(user.phoneNumber)}`)
+  lines.push(source)
 
   return lines.join("\n")
 }
@@ -120,6 +123,26 @@ type AuthContactConfirmedProps = {
   source?: string
   ip?: string
   device?: AlertDevice
+}
+
+export async function loadSignupCompletedAlert(user: AlertUser, sessionId?: number): Promise<string> {
+  let source = formatSignupAttribution()
+  try {
+    if (sessionId && sessionId > 0) {
+      const session = await SessionsModel.getById(sessionId)
+      if (session.userId === user.id) {
+        source = formatSignupAttribution({
+          clientType: session.clientType,
+          clientVersion: session.clientVersion,
+          ip: session.personalData.ip,
+          attribution: session.personalData.signupAttribution,
+        })
+      }
+    }
+  } catch {
+    log.warn("Failed to load signup attribution", { userId: user.id })
+  }
+  return formatSignupCompletedAlert(user, source)
 }
 
 export function formatAuthContactConfirmedAlert(props: AuthContactConfirmedProps): string {
@@ -210,8 +233,9 @@ export const BotAlerts = {
     sendInlineOnlyBotEvent(lines.join("\n"))
   },
 
-  signupCompleted(props: { user: AlertUser }) {
-    sendInlineOnlyBotEvent(formatSignupCompletedAlert(props.user))
+  signupCompleted(props: { user: AlertUser; sessionId?: number }) {
+    // Enrichment is best-effort and must not delay or fail profile completion.
+    void loadSignupCompletedAlert(props.user, props.sessionId).then(sendInlineOnlyBotEvent)
   },
 
   authContactConfirmed(props: AuthContactConfirmedProps) {

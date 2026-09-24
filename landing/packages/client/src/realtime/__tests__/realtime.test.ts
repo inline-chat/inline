@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   ConnectionError_Reason,
   ServerProtocolMessage,
@@ -405,54 +405,61 @@ describe("realtime connection flow", () => {
       },
     })
 
-    await client.startSession({ token: "test-token", userId: userId(1) })
-    await connectAndOpen(transport)
+    vi.useFakeTimers()
+    try {
+      await client.startSession({ token: "test-token", userId: userId(1) })
+      await connectAndOpen(transport)
 
-    const resultPromise = client.execute(getMe())
+      const resultPromise = client.execute(getMe())
 
-    await waitFor(() => transport.rpcSendAttempts === 1)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(39)
 
-    expect(transport.rpcSendAttempts).toBe(1)
-    expect(client.connectionState).toBe("connecting")
-    expect(transport.state).toBe("idle")
+      expect(transport.rpcSendAttempts).toBe(1)
+      expect(client.connectionState).toBe("connecting")
+      expect(transport.state).toBe("idle")
 
-    await waitFor(() => transport.state === "connecting")
-    await connectAndOpen(transport)
-    await waitFor(() => transport.rpcSendAttempts === 2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(transport.state).toBe("connecting")
+      await connectAndOpen(transport)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(transport.rpcSendAttempts).toBe(2)
 
-    const rpcCallMessage = [...transport.sent]
-      .reverse()
-      .find((message) => message.body.oneofKind === "rpcCall")
-    if (!rpcCallMessage || rpcCallMessage.body.oneofKind !== "rpcCall") {
-      throw new Error("Missing retried rpcCall message")
-    }
+      const rpcCallMessage = [...transport.sent]
+        .reverse()
+        .find((message) => message.body.oneofKind === "rpcCall")
+      if (!rpcCallMessage || rpcCallMessage.body.oneofKind !== "rpcCall") {
+        throw new Error("Missing retried rpcCall message")
+      }
 
-    await transport.emitMessage(
-      ServerProtocolMessage.create({
-        id: 4n,
-        body: {
-          oneofKind: "rpcResult",
-          rpcResult: {
-            reqMsgId: rpcCallMessage.id,
-            result: {
-              oneofKind: "getMe",
-              getMe: {
-                user: {
-                  id: 1n,
-                  firstName: "Retry",
+      await transport.emitMessage(
+        ServerProtocolMessage.create({
+          id: 4n,
+          body: {
+            oneofKind: "rpcResult",
+            rpcResult: {
+              reqMsgId: rpcCallMessage.id,
+              result: {
+                oneofKind: "getMe",
+                getMe: {
+                  user: {
+                    id: 1n,
+                    firstName: "Retry",
+                  },
                 },
               },
             },
           },
-        },
-      }),
-    )
+        }),
+      )
 
-    await resultPromise
-    expect(client.connectionState).toBe("connected")
+      await resultPromise
+      expect(client.connectionState).toBe("connected")
 
-    await client.stop()
+    } finally {
+      await client.stop()
+      vi.useRealTimers()
+    }
   })
 
   it("does not apply optimistic state again when a send is retried", async () => {

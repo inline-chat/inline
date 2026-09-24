@@ -99,7 +99,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
 
     if (completedSignup) {
-      BotAlerts.signupCompleted({ user })
+      BotAlerts.signupCompleted({ user, sessionId: context.currentSessionId })
     }
 
     return { user: encodeUserInfo(user) }

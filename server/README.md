@@ -22,6 +22,9 @@ bun run dev:server
 
 Migrations change the configured database. Verify the target database and back up
 any data you need to keep before applying them.
+Server startup only verifies the migration ledger and refuses a database behind
+the packaged journal. Production migrations are a separate deployment step;
+see [Fly deployment and migrations](docs/fly-deployment.md).
 
 Run validation individually, with a separately configured test database:
 

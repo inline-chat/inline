@@ -79,7 +79,7 @@ export const changeUsernameHandler = async (
         },
       )
       if (completedSignup) {
-        BotAlerts.signupCompleted({ user })
+        BotAlerts.signupCompleted({ user, sessionId: context.sessionId })
       }
       return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [update] }
     }

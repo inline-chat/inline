@@ -107,13 +107,6 @@ export async function hasDirectParticipantGrant(
   userId: number,
   query: ThreadAccessQuery = db,
 ): Promise<boolean> {
-  if (query === db) {
-    const cachedParticipant = AccessGuardsCache.getChatParticipant(chatId, userId)
-    if (cachedParticipant !== undefined) {
-      return cachedParticipant
-    }
-  }
-
   const participant = await query
     .select({ id: chatParticipants.id })
     .from(chatParticipants)

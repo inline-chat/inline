@@ -89,9 +89,7 @@ import {
 import {
   decrypt,
 } from "@in/server/modules/encryption/encryption"
-import {
-  connectionManager,
-} from "@in/server/ws/connections"
+import { connectionPresenceForUser } from "@in/server/modules/internalMessaging/presenceView"
 import {
   Log,
 } from "@in/server/utils/log"
@@ -1178,7 +1176,6 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
             threadCountRow,
             recentThreadCountRow,
             sessionCountRow,
-            activeSessionCountRow,
           ] = await Promise.all([
             db
               .select({
@@ -1187,7 +1184,6 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
                 clientVersion: sessions.clientVersion,
                 osVersion: sessions.osVersion,
                 lastActive: sessions.lastActive,
-                active: sessions.active,
                 deviceId: sessions.deviceId,
                 date: sessions.date,
                 revoked: sessions.revoked,
@@ -1289,19 +1285,6 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
               .from(sessions)
               .where(eq(sessions.userId, userId))
               .then((rows) => rows[0]),
-            db
-              .select({
-                count: sql<number>`count(*)::int`,
-              })
-              .from(sessions)
-              .where(
-                and(
-                  eq(sessions.userId, userId),
-                  eq(sessions.active, true),
-                  isNull(sessions.revoked),
-                ),
-              )
-              .then((rows) => rows[0]),
           ])
           return {
             userSessions,
@@ -1312,11 +1295,11 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
             threadCountRow,
             recentThreadCountRow,
             sessionCountRow,
-            activeSessionCountRow,
           }
         },
       )
 
+      const presence = yield* attempt("admin.users.detail.presence", () => connectionPresenceForUser(userId))
       const origin = userOrigin(request.publicOrigin)
       return jsonResult({
         ok: true as const,
@@ -1360,8 +1343,8 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
             detail.membershipCountRow?.count ?? 0,
           sessions:
             detail.sessionCountRow?.count ?? 0,
-          activeSessions:
-            detail.activeSessionCountRow?.count ?? 0,
+          activeSessions: presence.activeSessionIds.size,
+          presenceComplete: presence.complete,
         },
         memberships: detail.userMemberships.map(
           (membership) => ({
@@ -1397,7 +1380,7 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
             lastActive:
               sessionRow.lastActive?.toISOString() ??
               null,
-            active: Boolean(sessionRow.active),
+            active: presence.activeSessionIds.has(sessionRow.id),
             deviceId: sessionRow.deviceId,
             date:
               sessionRow.date?.toISOString() ?? null,
@@ -1407,10 +1390,7 @@ const userDetailOperation: AdminOperationsShape["userDetail"] =
               decryptSessionPersonalData(sessionRow),
           }),
         ),
-        connections:
-          connectionManager.getUserConnectionSummary(
-            userId,
-          ),
+        connections: { totalConnections: presence.totalConnections, sessions: presence.sessions, complete: presence.complete },
       })
     })
 

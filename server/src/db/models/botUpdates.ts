@@ -23,6 +23,8 @@ import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { isServerShuttingDown } from "@in/server/lifecycle/shutdownState"
+import { botUpdateWaiters } from "./botUpdateWaiters"
 
 export const BOT_UPDATE_QUEUE_LIMITS = {
   ttlMs: 24 * 60 * 60 * 1_000,
@@ -33,6 +35,8 @@ export const BOT_UPDATE_QUEUE_LIMITS = {
 } as const
 
 const pollLeaseMs = 55_000
+// Recheck the durable queue when another Machine writes or a local wake is missed.
+const pollFallbackMs = 2_000
 const deliveryLeaseMs = 30_000
 const cleanupBatchSize = 1_000
 const log = new Log("db.models.botUpdates")
@@ -204,6 +208,7 @@ async function queue(input: {
     })
     return undefined
   }
+  if (outcome) botUpdateWaiters.wake(input.botUserId)
   return outcome
 }
 
@@ -635,7 +640,10 @@ async function acquirePoll(botUserId: number, timeoutSeconds: number): Promise<P
       isNull(botUpdateStreams.webhookUrl),
     ))
     .returning({ token: botUpdateStreams.pollLeaseToken, generation: botUpdateStreams.configGeneration })
-  if (leased?.token) return { token: leased.token, generation: leased.generation }
+  if (leased?.token) {
+    botUpdateWaiters.wake(botUserId)
+    return { token: leased.token, generation: leased.generation }
+  }
   const current = await ensureStream(botUserId)
   if (current.webhookUrl) throw new InlineError(InlineError.ApiError.WEBHOOK_ACTIVE)
   throw new InlineError(InlineError.ApiError.POLL_CONFLICT)
@@ -648,7 +656,7 @@ async function releasePoll(botUserId: number, token: string): Promise<void> {
     .where(and(eq(botUpdateStreams.botUserId, botUserId), eq(botUpdateStreams.pollLeaseToken, token)))
 }
 
-async function getUpdates(botUserId: number, input: GetUpdatesParams): Promise<BotUpdate[]> {
+async function getUpdates(botUserId: number, input: GetUpdatesParams, signal?: AbortSignal): Promise<BotUpdate[]> {
   const timeout = input.timeout ?? 0
   const claim = await acquirePoll(botUserId, timeout)
   try {
@@ -656,12 +664,19 @@ async function getUpdates(botUserId: number, input: GetUpdatesParams): Promise<B
     const offset = input.offset === undefined ? undefined : Number(input.offset)
     if (offset !== undefined) await acknowledge(botUserId, offset, claim)
     const deadline = Date.now() + timeout * 1_000
-    let updates = await readPending(botUserId, input.limit ?? 100, claim)
-    while (updates.length === 0 && Date.now() < deadline) {
-      await Bun.sleep(Math.min(250, Math.max(1, deadline - Date.now())))
-      updates = await readPending(botUserId, input.limit ?? 100, claim)
+    while (true) {
+      signal?.throwIfAborted()
+      // Subscribe before reading so an update committed during the read cannot be missed.
+      const waiter = botUpdateWaiters.subscribe(botUserId, signal)
+      try {
+        const updates = await readPending(botUserId, input.limit ?? 100, claim)
+        signal?.throwIfAborted()
+        if (updates.length > 0 || Date.now() >= deadline || isServerShuttingDown()) return updates
+        await waiter.wait(Math.min(pollFallbackMs, Math.max(1, deadline - Date.now())))
+      } finally {
+        waiter.close()
+      }
     }
-    return updates
   } finally {
     await releasePoll(botUserId, claim.token)
   }
@@ -700,6 +715,7 @@ async function setWebhook(botUserId: number, input: SetWebhookParams): Promise<t
       })
       .where(eq(botUpdateStreams.botUserId, botUserId))
   })
+  botUpdateWaiters.wake(botUserId)
   return true
 }
 
@@ -738,6 +754,7 @@ async function deleteWebhook(
       })
       .where(eq(botUpdateStreams.botUserId, botUserId))
   })
+  botUpdateWaiters.wake(botUserId)
   return true
 }
 
