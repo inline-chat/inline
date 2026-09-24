@@ -9,7 +9,6 @@ Inline is a native work chat application with a Bun/TypeScript server, Apple cli
 - `plugins/`: ChatGPT/Codex, OpenClaw, Hermes and Vercel Chat SDK integrations.
 - `cli/`, `crates/`, `vendor/`: Rust CLI and its workspace dependencies.
 - `skills/inline/`: distributable Inline skill; keep `plugins/chatgpt/skills/inline/` identical.
-- Landing owns its transitional browser libraries under `landing/packages/`; URL preview lives in `server/packages/url-preview/`.
 
 ## Rules
 
@@ -18,15 +17,7 @@ Inline is a native work chat application with a Bun/TypeScript server, Apple cli
 - Use Bun for JavaScript and TypeScript tooling. Keep package identifiers and release versions independent.
 - Never run simulator tooling without explicit approval. macOS checks are permitted.
 - Do not deploy, publish packages, change remote refs or access production without explicit authorization.
-- Do not change transport behavior as part of repository maintenance.
-- Never edit a committed database migration; add a forward migration.
+- Don't edit a committed database migration; add a forward migration.
 - Keep private planning, operational skills, credentials and user data outside this repository.
-- Read any scoped instructions present before changing a subtree. Register project builds in `.running` and staging in `.committing`; record change scope in `.wip`.
-
-## Checks
-
-Run `bun install --frozen-lockfile`, then focused checks for the package you changed.
-`bun run check:codex-plugin` checks the marketplace and bundled skill.
-`bun run proto:sync-rust` updates the Rust schema copy from `proto/core.proto`.
-`bun run build:integrations` builds the JavaScript integration workspaces.
-External code contributions are currently closed; maintainers develop the project.
+- Use `../secret-sauce` for private skills, guides, product context, and raw collaboration history in `.context/`; follow its `AGENTS.md` and keep labs local in its ignored `experiments/`. In Secret Sauce, automatically commit relevant work after tasks finish and pull/push regularly as needed without asking for approval, preserving teammates' work.
+- Register project builds in `.running` and staging in `.committing`; record changed file list in `.wip`. Use those files to coordinate work.
