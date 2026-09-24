@@ -11,7 +11,175 @@ mock.module("@in/server/ws/presence", () => ({
   },
 }))
 
+type MembershipManager = typeof import("@in/server/ws/connections").connectionManager
+
+async function withMembershipConnection(
+  userId: number,
+  run: (manager: MembershipManager, connectionId: string) => Promise<void>,
+): Promise<void> {
+  const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
+  const reader = connectionManager as unknown as { getUserSpaceIds(userId: number): Promise<number[]> }
+  const memberships = spyOn(reader, "getUserSpaceIds").mockResolvedValue([])
+  const connectionId = connectionManager.addConnection(
+    { id: `membership-race-${userId}`, close: mock(), subscribe: mock() } as unknown as Parameters<MembershipManager["addConnection"]>[0],
+    ConnVersion.REALTIME_V1,
+  )
+  connectionManager.authenticateConnection(connectionId, userId, userId + 10_000)
+  try {
+    await connectionManager.waitForBackgroundWork()
+    await run(connectionManager, connectionId)
+  } finally {
+    connectionManager.removeConnection(connectionId)
+    await connectionManager.waitForBackgroundWork()
+    memberships.mockRestore()
+  }
+}
+
 describe("ConnectionManager", () => {
+  it("retains one successor for a burst of newer membership invalidations and joins it", async () => {
+    await withMembershipConnection(171, async (manager) => {
+      const oldStarted = Promise.withResolvers<void>()
+      const oldRead = Promise.withResolvers<boolean>()
+      const newStarted = Promise.withResolvers<void>()
+      const newRead = Promise.withResolvers<boolean>()
+      let newerReads = 0
+      manager.activateSpaceMembership(171, 8)
+      try {
+        const first = manager.refreshSpaceMembership(171, 8, () => {
+          oldStarted.resolve()
+          return oldRead.promise
+        })
+        await oldStarted.promise
+        const loadNew = () => {
+          newerReads += 1
+          newStarted.resolve()
+          return newRead.promise
+        }
+        for (let i = 0; i < 5_000; i++) {
+          expect(manager.refreshSpaceMembership(171, 8, loadNew)).toBe(first)
+        }
+        let completed = false
+        const drained = manager.waitForBackgroundWork().then(() => { completed = true })
+        oldRead.resolve(false)
+        await newStarted.promise
+        expect(newerReads).toBe(1)
+        expect(completed).toBe(false)
+        // Do not briefly apply the obsolete removal while the grant is read.
+        expect(manager.getSpaceUserIds(8)).toContain(171)
+        newRead.resolve(true)
+        await Promise.all([first, drained])
+        expect(manager.getSpaceUserIds(8)).toContain(171)
+      } finally {
+        oldRead.resolve(false)
+        newRead.resolve(true)
+      }
+    })
+  })
+
+  it("does not cancel a membership result when another space completes first", async () => {
+    await withMembershipConnection(172, async (manager) => {
+      const a = Promise.withResolvers<boolean>()
+      const b = Promise.withResolvers<boolean>()
+      const startedA = Promise.withResolvers<void>()
+      const startedB = Promise.withResolvers<void>()
+      try {
+        const first = manager.refreshSpaceMembership(172, 8, () => { startedA.resolve(); return a.promise })
+        const second = manager.refreshSpaceMembership(172, 9, () => { startedB.resolve(); return b.promise })
+        await Promise.all([startedA.promise, startedB.promise])
+        a.resolve(true)
+        await first
+        b.resolve(true)
+        await second
+        expect(manager.getSpaceUserIds(8)).toContain(172)
+        expect(manager.getSpaceUserIds(9)).toContain(172)
+      } finally {
+        a.resolve(true)
+        b.resolve(true)
+      }
+    })
+  })
+
+  it("fences a stale result for a locally projected space without cancelling another space", async () => {
+    await withMembershipConnection(173, async (manager) => {
+      const gate = Promise.withResolvers<boolean>()
+      let started = 0
+      const bothStarted = Promise.withResolvers<void>()
+      const load = () => { if (++started === 2) bothStarted.resolve(); return gate.promise }
+      manager.activateSpaceMembership(173, 9)
+      try {
+        const first = manager.refreshSpaceMembership(173, 8, load)
+        const second = manager.refreshSpaceMembership(173, 9, load)
+        await bothStarted.promise
+        manager.activateSpaceMembership(173, 8)
+        gate.resolve(false)
+        await Promise.all([first, second])
+        expect(manager.getSpaceUserIds(8)).toContain(173)
+        expect(manager.getSpaceUserIds(9)).not.toContain(173)
+      } finally { gate.resolve(false) }
+    })
+  })
+
+  it("runs a queued successor even when the obsolete membership read fails", async () => {
+    await withMembershipConnection(174, async (manager) => {
+      const started = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<boolean>()
+      try {
+        const first = manager.refreshSpaceMembership(174, 8, () => { started.resolve(); return gate.promise })
+        await started.promise
+        const successor = manager.refreshSpaceMembership(174, 8, async () => true)
+        gate.reject(new Error("Obsolete read failed"))
+        await Promise.all([first, successor])
+        expect(manager.getSpaceUserIds(8)).toContain(174)
+      } finally { gate.resolve(false) }
+    })
+  })
+
+  it("admits another refresh between the last read settling and its caller completing", async () => {
+    await withMembershipConnection(175, async (manager) => {
+      const started = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<boolean>()
+      let newerReads = 0
+      try {
+        const first = manager.refreshSpaceMembership(175, 8, () => { started.resolve(); return gate.promise })
+        await started.promise
+        gate.resolve(false)
+        // Runs after the owner's await resumes, before its outer promise has
+        // propagated completion. Deferred map cleanup used to lose this call.
+        await gate.promise
+        const second = manager.refreshSpaceMembership(175, 8, async () => { newerReads += 1; return true })
+        await Promise.all([first, second])
+        expect(newerReads).toBe(1)
+        expect(manager.getSpaceUserIds(8)).toContain(175)
+      } finally { gate.resolve(false) }
+    })
+  })
+
+  it("does not let an old targeted read overwrite a reconnected user's membership", async () => {
+    await withMembershipConnection(176, async (manager, oldConnectionId) => {
+      const { ConnVersion } = await import("@in/server/ws/connections")
+      const started = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<boolean>()
+      let newConnectionId: string | undefined
+      try {
+        const first = manager.refreshSpaceMembership(176, 8, () => { started.resolve(); return gate.promise })
+        await started.promise
+        manager.removeConnection(oldConnectionId)
+        newConnectionId = manager.addConnection(
+          { id: "membership-race-176-new", close: mock(), subscribe: mock() } as unknown as Parameters<MembershipManager["addConnection"]>[0],
+          ConnVersion.REALTIME_V1,
+        )
+        manager.authenticateConnection(newConnectionId, 176, 10_176)
+        const successor = manager.refreshSpaceMembership(176, 8, async () => true)
+        gate.resolve(false)
+        await Promise.all([first, successor])
+        expect(manager.getSpaceUserIds(8)).toContain(176)
+      } finally {
+        gate.resolve(false)
+        if (newConnectionId) manager.removeConnection(newConnectionId)
+      }
+    })
+  })
+
   it("does not let a disconnected lifetime's pending membership read repopulate a reconnect", async () => {
     const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
     const membershipReader = connectionManager as unknown as {

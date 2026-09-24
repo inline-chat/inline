@@ -19,9 +19,10 @@ export type SessionActivityTrackerOptions = {
 
 /**
  * Coalesces durable session activity. `mark` is O(1): it writes only into a
- * bounded Map. Each timer tick atomically swaps that Map for a snapshot, then
- * writes its batches sequentially. Marks arriving during a write land in the
- * next snapshot, so they cannot keep the first batch at the head forever.
+ * bounded Map. Each tick reserves half its snapshot for the oldest active
+ * sessions before admitting hot marks, then writes bounded batches in order.
+ * Marks during a write land in the next snapshot and cannot displace that
+ * reserved sweep, even when hot sessions continuously fill the pending Map.
  */
 export class SessionActivityTracker {
   private readonly activeSessions = new Set<number>()
@@ -89,8 +90,7 @@ export class SessionActivityTracker {
       return
     }
 
-    this.enqueueActiveSweep()
-    const snapshot = this.takePendingSnapshot()
+    const snapshot = this.takePeriodicSnapshot()
     if (snapshot.size === 0) return
     await this.runSnapshot(snapshot)
   }
@@ -144,17 +144,28 @@ export class SessionActivityTracker {
   }
 
   /**
-   * Quiet sockets are refreshed without copying every active id. Successful
-   * writes move their session ids to the tail of the Set, so this bounded
-   * iteration starts at sessions that have waited longest on the next tick.
+   * Reserve fair sweep capacity even when pending marks already fill the cap.
+   * Successful writes rotate active ids, so a persistent hot subset cannot
+   * preempt quiet sessions. Both snapshot size and iteration remain bounded.
    */
-  private enqueueActiveSweep(): void {
-    let attempts = Math.min(this.activeSessions.size, this.maxPendingSessions - this.pendingSessions.size)
+  private takePeriodicSnapshot(): Map<number, true> {
+    const pending = this.takePendingSnapshot()
+    const snapshot = new Map<number, true>()
+    const reserved = Math.ceil(this.maxPendingSessions / 2)
     for (const sessionId of this.activeSessions) {
-      if (attempts <= 0) return
-      this.enqueue(sessionId)
-      attempts -= 1
+      snapshot.set(sessionId, true)
+      if (snapshot.size >= reserved) break
     }
+    for (const sessionId of pending.keys()) {
+      if (snapshot.size >= this.maxPendingSessions) break
+      if (this.activeSessions.has(sessionId)) snapshot.set(sessionId, true)
+    }
+    // Use spare room for quiet sessions when there are few traffic marks.
+    for (const sessionId of this.activeSessions) {
+      if (snapshot.size >= this.maxPendingSessions) break
+      snapshot.set(sessionId, true)
+    }
+    return snapshot
   }
 
   private takePendingSnapshot(): Map<number, true> {

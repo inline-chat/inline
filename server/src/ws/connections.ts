@@ -107,6 +107,14 @@ type AuthenticatedSessionConnections = {
   connectionIds: Set<string>
 }
 
+type MembershipRefresh = {
+  /** Latest invalidation only; arrivals during a read require one successor. */
+  pending?: { load: SpaceMembershipHydrator; lifetime: Set<string> }
+  /** Local projections fence only this user/space read, not other spaces. */
+  revision: number
+  promise: Promise<void>
+}
+
 class ConnectionManager {
   private server: Server<unknown> | undefined
   private connections: Map<string, Connection> = new Map()
@@ -123,8 +131,8 @@ class ConnectionManager {
   private durableRepairCloseGuards: Map<number, number> = new Map()
   /** One live lookup per session; removed when its client type resolves or fails. */
   private readonly clientTypeHydrations = new Map<string, Promise<void>>()
-  /** One live database refresh per affected user and space. */
-  private readonly membershipRefreshes = new Map<string, Promise<void>>()
+  /** One owned read and at most one pending invalidation per user/space. */
+  private readonly membershipRefreshes = new Map<string, MembershipRefresh>()
   /** Listener-owned generation rejects late presence callbacks after a restart. */
   private presenceGeneration: number | undefined
 
@@ -553,6 +561,7 @@ class ConnectionManager {
    */
   activateSpaceMembership(userId: number, spaceId: number): void {
     if (!this.authenticatedUsers.has(userId)) return
+    this.invalidateMembershipRefresh(userId, spaceId)
     this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
     this.subscribeToSpace(userId, spaceId)
   }
@@ -562,36 +571,64 @@ class ConnectionManager {
     spaceId: number,
     load: SpaceMembershipHydrator = loadCurrentSpaceMembership,
   ): Promise<void> {
-    if (!this.authenticatedUsers.has(userId)) return Promise.resolve()
+    const lifetime = this.authenticatedUsers.get(userId)
+    if (!lifetime) return Promise.resolve()
     const key = pairKey(userId, spaceId)
     const existing = this.membershipRefreshes.get(key)
-    if (existing) return existing
-    const refresh = this.doRefreshSpaceMembership(userId, spaceId, load)
+    if (existing) {
+      existing.pending = { load, lifetime }
+      return existing.promise
+    }
+    const refresh: MembershipRefresh = {
+      pending: { load, lifetime },
+      revision: 0,
+      // Defer the first read until its owner is registered. Invalidations in
+      // this same turn coalesce without starting an unnecessary stale query.
+      promise: Promise.resolve().then(() => this.doRefreshSpaceMembership(userId, spaceId, key, refresh)),
+    }
     this.membershipRefreshes.set(key, refresh)
-    connectionBackgroundWork.track(refresh)
-    void refresh.then(
-      () => this.clearMembershipRefresh(key, refresh),
-      () => this.clearMembershipRefresh(key, refresh),
-    )
-    return refresh
+    connectionBackgroundWork.track(refresh.promise)
+    return refresh.promise
   }
 
   private async doRefreshSpaceMembership(
     userId: number,
     spaceId: number,
-    load: SpaceMembershipHydrator,
+    key: string,
+    refresh: MembershipRefresh,
   ): Promise<void> {
-    const revision = this.userSpaceMembershipRevision.get(userId) ?? 0
-    const member = await load({ userId, spaceId })
-    if (!this.authenticatedUsers.has(userId)) return
-    if ((this.userSpaceMembershipRevision.get(userId) ?? 0) !== revision) return
-    if (member) this.activateSpaceMembership(userId, spaceId)
-    else this.unsubscribeUserFromSpace(userId, spaceId)
+    try {
+      while (refresh.pending && this.membershipRefreshes.get(key) === refresh) {
+        const request = refresh.pending
+        refresh.pending = undefined
+        if (this.authenticatedUsers.get(userId) !== request.lifetime) continue
+        const revision = refresh.revision
+        const isCurrent = () => this.membershipRefreshes.get(key) === refresh &&
+          this.authenticatedUsers.get(userId) === request.lifetime &&
+          refresh.revision === revision && refresh.pending === undefined
+        let member: boolean
+        try {
+          member = await request.load({ userId, spaceId })
+        } catch (error) {
+          // An obsolete failure must not swallow an already-admitted successor.
+          if (!isCurrent()) continue
+          throw error
+        }
+        if (!isCurrent()) continue
+        if (member) this.activateSpaceMembership(userId, spaceId)
+        else this.unsubscribeUserFromSpace(userId, spaceId)
+      }
+    } finally {
+      // Remove admission synchronously with the final loop check. A later
+      // promise-finally callback would leave a gap that could lose a new event.
+      if (this.membershipRefreshes.get(key) === refresh) this.membershipRefreshes.delete(key)
+    }
   }
 
   /** Immediately removes a former member from process-local Space fanout. */
   unsubscribeUserFromSpace(userId: number, spaceId: number): void {
     log.debug(`Unsubscribing from space ${spaceId} for user ${userId}`)
+    this.invalidateMembershipRefresh(userId, spaceId)
     if (this.authenticatedUsers.has(userId)) {
       this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
     }
@@ -690,8 +727,9 @@ class ConnectionManager {
     return fallback
   }
 
-  private clearMembershipRefresh(key: string, refresh: Promise<void>): void {
-    if (this.membershipRefreshes.get(key) === refresh) this.membershipRefreshes.delete(key)
+  private invalidateMembershipRefresh(userId: number, spaceId: number): void {
+    const refresh = this.membershipRefreshes.get(pairKey(userId, spaceId))
+    if (refresh) refresh.revision += 1
   }
 
   private pruneDurableRepairCloseGuards(now: number): void {

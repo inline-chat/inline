@@ -667,27 +667,96 @@ describe("ConnectedUserRepair", () => {
     expect(replayed).toEqual([9, 9])
   })
 
-  test("does not close a socket admitted while an older replay read is in flight", async () => {
+  test("does not reuse a pruned admission generation after disconnect and reconnect", async () => {
+    const oldScanStarted = Promise.withResolvers<void>()
+    const periodicPruned = Promise.withResolvers<void>()
+    const releaseOldScan = Promise.withResolvers<void>()
+    const hinted: number[] = []
+    const replayed: number[] = []
+    let connected = true
+    let connectionEpoch = 1
+    let scans = 0
+    const runtime: ConnectedUserRepairRuntime = {
+      captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
+      getUpdatesState: async () => {
+        scans += 1
+        if (scans === 2) {
+          oldScanStarted.resolve()
+          await releaseOldScan.promise
+        }
+        return { date: 1n, seq: 9 }
+      },
+      connectedUserIds: () => {
+        if (!connected) periodicPruned.resolve()
+        return connected ? [71] : []
+      },
+      hasConnections: () => connected,
+      getConnectionEpoch: () => connectionEpoch,
+      emitUserHint: async (_userId, frontier) => {
+        hinted.push(frontier)
+        return 1
+      },
+      replayCurrentUserUpdate: async (_userId, frontier) => {
+        replayed.push(frontier)
+        return "replayed"
+      },
+      closeForUnrecoverableFrontier: () => 0,
+      deliverTargetedBucketHint: async () => {},
+    }
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+
+    await repair.start()
+    repair.observeConnection(71)
+    await repair.waitForIdle()
+    repair.observe(71)
+    await oldScanStarted.promise
+
+    // A periodic pass prunes the disconnected account while its prior scan is
+    // still held. Reconnection would restart admissionGenerations at one.
+    connected = false
+    repair.observeConnectedUsers()
+    await periodicPruned.promise
+    connected = true
+    connectionEpoch += 1
+    repair.observeConnection(71)
+    releaseOldScan.resolve()
+    await repair.waitForIdle()
+
+    // The old scan cannot restore its completed frontier over the reconnect;
+    // the new admission owns scan three and sends both recovery paths again.
+    expect(scans).toBe(3)
+    expect(hinted).toEqual([9, 9])
+    expect(replayed).toEqual([9, 9])
+  })
+
+  test("does not checkpoint an old connection after its replay finishes", async () => {
     const replayStarted = Promise.withResolvers<void>()
     const releaseReplay = Promise.withResolvers<void>()
-    const closeAttempts: number[] = []
+    const hinted: number[] = []
+    const replayed: number[] = []
     let connectionEpoch = 1
+    let replayCalls = 0
     const runtime: ConnectedUserRepairRuntime = {
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => ({ date: 1n, seq: 9 }),
       connectedUserIds: () => [71],
       hasConnections: () => true,
       getConnectionEpoch: () => connectionEpoch,
-      emitUserHint: async () => 1,
-      replayCurrentUserUpdate: async () => {
-        replayStarted.resolve()
-        await releaseReplay.promise
-        return "missing_record"
+      emitUserHint: async (_userId, frontier) => {
+        hinted.push(frontier)
+        return 1
       },
-      closeForUnrecoverableFrontier: (_userId, _reason, expectedEpoch) => {
-        if (expectedEpoch === connectionEpoch) closeAttempts.push(expectedEpoch)
-        return 0
+      replayCurrentUserUpdate: async (_userId, frontier) => {
+        replayed.push(frontier)
+        replayCalls += 1
+        if (replayCalls === 1) {
+          replayStarted.resolve()
+          await releaseReplay.promise
+        }
+        return "replayed"
       },
+      closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
     }
     const repair = new ConnectedUserRepair(runtime)
@@ -696,11 +765,17 @@ describe("ConnectedUserRepair", () => {
     await repair.start()
     repair.observe(71)
     await replayStarted.promise
-    connectionEpoch = 2 // a new authenticated socket was admitted
+    // Authentication changes the authoritative epoch before its deferred
+    // observeConnection callback can enqueue repair work.
+    connectionEpoch = 2
+    repair.observe(71)
     releaseReplay.resolve()
     await repair.waitForIdle()
 
-    expect(closeAttempts).toEqual([])
+    // The stale replay result cannot checkpoint frontier 9. The queued scan
+    // for the new epoch therefore emits a fresh hint and replay.
+    expect(hinted).toEqual([9, 9])
+    expect(replayed).toEqual([9, 9])
   })
 
   test("does not emit a stale replay after stop while a state scan is in flight", async () => {

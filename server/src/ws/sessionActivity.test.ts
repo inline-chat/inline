@@ -2,6 +2,41 @@ import { describe, expect, it } from "bun:test"
 import { SessionActivityTracker } from "./sessionActivity"
 
 describe("SessionActivityTracker", () => {
+  it("writes quiet sessions beyond the real queue cap despite sustained hot marks", async () => {
+    const seen = new Set<number>()
+    const batchSizes: number[] = []
+    let snapshotIds = new Set<number>()
+    const tracker = new SessionActivityTracker({
+      write: async (ids) => {
+        batchSizes.push(ids.length)
+        for (const id of ids) {
+          expect(snapshotIds.has(id)).toBe(false)
+          snapshotIds.add(id)
+          seen.add(id)
+        }
+      },
+    })
+    // Exceed two complete snapshot capacities; the last 4,113 sessions stay
+    // quiet while the first 4,096 fill pending marks before every flush.
+    const sessionCount = 4_096 * 2 + 17
+    try {
+      for (let id = 1; id <= sessionCount; id++) tracker.activate(id)
+      for (let flush = 0; flush < 5; flush++) {
+        snapshotIds = new Set()
+        for (let id = 1; id <= 4_096; id++) tracker.mark(id)
+        await tracker.flushNow()
+        expect(snapshotIds.size).toBeLessThanOrEqual(4_096)
+        if (flush === 1) expect(seen.has(4_097)).toBe(true)
+      }
+      expect(seen.size).toBe(sessionCount)
+      expect(batchSizes.length).toBe(40)
+      expect(Math.max(...batchSizes)).toBeLessThanOrEqual(512)
+    } finally {
+      snapshotIds = new Set()
+      await tracker.shutdown()
+    }
+  })
+
   it("joins repeated shutdown calls and rejects restart until the final write settles", async () => {
     const entered = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()

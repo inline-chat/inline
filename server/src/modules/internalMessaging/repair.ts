@@ -405,10 +405,16 @@ export class ConnectedUserRepair {
   private async scan(userId: number, generation: number, discoverySnapshot: DiscoverySnapshot | undefined): Promise<void> {
     const previous = this.observations.get(userId)
     const admissionGeneration = this.admissionGenerations.get(userId) ?? 0
+    // ConnectionManager assigns this monotonically across every authenticated
+    // socket membership change. Unlike the pruned per-user admission map, it
+    // cannot be reused when an old scan spans disconnect, pruning, and a later
+    // reconnect of the same account.
+    const connectionEpoch = this.repairRuntime.getConnectionEpoch(userId)
     const isCurrentScan = () =>
       this.isActive(generation) &&
       this.repairRuntime.hasConnections(userId) &&
-      (this.admissionGenerations.get(userId) ?? 0) === admissionGeneration
+      (this.admissionGenerations.get(userId) ?? 0) === admissionGeneration &&
+      this.repairRuntime.getConnectionEpoch(userId) === connectionEpoch
     try {
       const requestedDate = previous?.date ?? this.baselineDate
       const snapshotCanAdvanceCheckpoint = discoverySnapshot !== undefined &&
