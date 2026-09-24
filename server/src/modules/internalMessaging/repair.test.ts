@@ -9,6 +9,29 @@ import {
   type CurrentUserReplayResult,
 } from "./repair"
 
+// Scheduler tests inject a discovery strategy independently of PostgreSQL.
+const withDiscovery = (input: Omit<ConnectedUserRepairRuntime, "discovery"> & {
+  captureWatermark: () => Promise<Date>
+  loadUserFrontiers?: (ids: readonly number[]) => Promise<Map<number, number>>
+  getUpdatesState: (
+    input: { date: bigint }, context: { currentUserId: number; currentSessionId: number },
+    options?: { shouldEmitHints?: () => boolean; discoveryWatermark?: Date; userFrontier?: number },
+  ) => Promise<{ date: bigint; seq: number }>
+}): ConnectedUserRepairRuntime => ({
+  ...input,
+  discovery: {
+    captureWatermark: input.captureWatermark,
+    async prepare(requests, watermark) {
+      const frontiers = await input.loadUserFrontiers?.(requests.map(({ userId }) => userId))
+      return new Map(requests.map(({ userId }) => [userId, { watermark, userFrontier: frontiers?.get(userId) }]))
+    },
+    discover: ({ userId, date }, { snapshot, shouldEmitHints }) => input.getUpdatesState(
+      { date }, { currentUserId: userId, currentSessionId: 0 },
+      { shouldEmitHints, discoveryWatermark: snapshot?.watermark, userFrontier: snapshot?.userFrontier },
+    ),
+  },
+})
+
 const repairs = new Set<ConnectedUserRepair>()
 
 afterEach(async () => {
@@ -27,7 +50,7 @@ const createRuntime = (input: {
   const replayed: number[] = []
   const closed: { userId: number; reason: string }[] = []
   let stateIndex = 0
-  const runtime: ConnectedUserRepairRuntime = {
+  const runtime: ConnectedUserRepairRuntime = withDiscovery({
     captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
     getUpdatesState: async ({ date }) => {
       requestedDates.push(date)
@@ -52,7 +75,7 @@ const createRuntime = (input: {
       return 1
     },
     deliverTargetedBucketHint: async () => {},
-  }
+  })
   return { runtime, requestedDates, hinted, replayed, closed }
 }
 
@@ -62,11 +85,55 @@ const scan = async (repair: ConnectedUserRepair, userId = 71) => {
 }
 
 describe("ConnectedUserRepair", () => {
+  test("joins preparation on stop and never discovers after it finishes", async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const { runtime, requestedDates } = createRuntime({ states: [] })
+    const prepare = runtime.discovery.prepare
+    runtime.discovery.prepare = async (...args) => {
+      started.resolve()
+      await release.promise
+      return prepare(...args)
+    }
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+    await repair.start()
+    repair.observeConnectedUsers()
+    await started.promise
+    let stopped = false
+    const stop = repair.stop().then(() => { stopped = true })
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    release.resolve()
+    await stop
+    expect(requestedDates).toHaveLength(0)
+  })
+
+  test("failed batch preparation keeps the checkpoint retryable", async () => {
+    const { runtime, requestedDates, hinted } = createRuntime({ states: [{ date: 1n, seq: 9 }] })
+    const prepare = runtime.discovery.prepare
+    let calls = 0
+    runtime.discovery.prepare = (...args) => {
+      if (++calls === 1) throw new Error("temporary discovery failure")
+      return prepare(...args)
+    }
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+    await repair.start()
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    expect(requestedDates).toHaveLength(0)
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    expect(requestedDates).toEqual([BigInt(Date.parse("2026-09-24T00:00:00Z") / 1000 - 1)])
+    expect(hinted).toEqual([9])
+  })
+
   test("shares one fenced watermark across one thousand coalesced admissions", async () => {
     const userIds = Array.from({ length: 1_000 }, (_value, index) => index + 1)
     const fences: Date[] = []
     let captureCalls = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         captureCalls += 1
         return new Date(`2026-09-24T00:00:${String(captureCalls).padStart(2, "0")}.000Z`)
@@ -83,7 +150,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -103,7 +170,7 @@ describe("ConnectedUserRepair", () => {
     const loaderCalls: number[][] = []
     const stateFrontiers: number[] = []
     let captures = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         captures += 1
         return new Date(`2026-09-24T00:00:${String(captures * 10).padStart(2, "0")}.000Z`)
@@ -130,7 +197,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -147,7 +214,7 @@ describe("ConnectedUserRepair", () => {
 
   test("leaves a missing batched user frontier to the per-account fallback", async () => {
     let sawFallback = false
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       loadUserFrontiers: async () => new Map(),
       getUpdatesState: async (_input, _context, options) => {
@@ -161,7 +228,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -183,7 +250,7 @@ describe("ConnectedUserRepair", () => {
     const requests: { date: bigint; watermark?: Date }[] = []
     let captures = 0
     let scans = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         captures += 1
         if (captures === 1) return initialWatermark
@@ -210,7 +277,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -240,7 +307,7 @@ describe("ConnectedUserRepair", () => {
     const releaseSweepCapture = Promise.withResolvers<void>()
     let captures = 0
     let scans = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         captures += 1
         if (captures === 1) return new Date("2026-09-24T00:00:00.000Z")
@@ -259,7 +326,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -286,7 +353,7 @@ describe("ConnectedUserRepair", () => {
     const scannedUserIds = new Set<number>()
     let hintCalls = 0
     let replayCalls = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async (_input, context) => {
         scannedUserIds.add(context.currentUserId)
@@ -307,7 +374,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -344,7 +411,7 @@ describe("ConnectedUserRepair", () => {
     const scansByUser = new Map<number, number>()
     let blockedWorkers = 0
     let captures = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         captures += 1
         if (captures === 3) admissionFenceCaptured.resolve()
@@ -364,7 +431,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -624,7 +691,7 @@ describe("ConnectedUserRepair", () => {
     const hinted: number[] = []
     const replayed: number[] = []
     let scans = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => {
         scans += 1
@@ -647,7 +714,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -676,7 +743,7 @@ describe("ConnectedUserRepair", () => {
     let connected = true
     let connectionEpoch = 1
     let scans = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => {
         scans += 1
@@ -702,7 +769,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -737,7 +804,7 @@ describe("ConnectedUserRepair", () => {
     const replayed: number[] = []
     let connectionEpoch = 1
     let replayCalls = 0
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => ({ date: 1n, seq: 9 }),
       connectedUserIds: () => [71],
@@ -758,7 +825,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -782,7 +849,7 @@ describe("ConnectedUserRepair", () => {
     const started = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
     const replayed: number[] = []
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => {
         started.resolve()
@@ -802,7 +869,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -819,7 +886,7 @@ describe("ConnectedUserRepair", () => {
   test("stop wins over an in-flight startup watermark", async () => {
     const started = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => {
         started.resolve()
         await release.promise
@@ -833,7 +900,7 @@ describe("ConnectedUserRepair", () => {
       replayCurrentUserUpdate: async () => "replayed",
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 
@@ -851,7 +918,7 @@ describe("ConnectedUserRepair", () => {
     const hintStarted = Promise.withResolvers<void>()
     const releaseHint = Promise.withResolvers<void>()
     const replayed: number[] = []
-    const runtime: ConnectedUserRepairRuntime = {
+    const runtime: ConnectedUserRepairRuntime = withDiscovery({
       captureWatermark: async () => new Date("2026-09-24T00:00:00.000Z"),
       getUpdatesState: async () => ({ date: 1n, seq: 9 }),
       connectedUserIds: () => [71],
@@ -868,7 +935,7 @@ describe("ConnectedUserRepair", () => {
       },
       closeForUnrecoverableFrontier: () => 0,
       deliverTargetedBucketHint: async () => {},
-    }
+    })
     const repair = new ConnectedUserRepair(runtime)
     repairs.add(repair)
 

@@ -1,12 +1,11 @@
-import { captureUpdateDiscoveryWatermark } from "@in/server/modules/updates/updateDiscoveryBarrier"
-import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
 import { UpdateBucket, chats, updates } from "@in/server/db/schema"
 import { Sync } from "@in/server/modules/updates/sync"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
-import { loadRepairUserFrontiers } from "./repairDiscovery"
+import { postgresRepairDiscovery } from "./repairDiscovery.postgres"
+import type { RepairDiscovery, RepairDiscoverySnapshot as DiscoverySnapshot } from "./repairDiscovery"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { Update } from "@inline-chat/protocol/core"
 import { and, eq } from "drizzle-orm"
@@ -36,12 +35,6 @@ type Observation = {
   lastCompletedAt: number
 }
 
-type DiscoverySnapshot = {
-  watermark: Date
-  /** Undefined means the batched reader did not find this user; fall back safely. */
-  userFrontier?: number
-}
-
 export type CurrentUserReplayResult =
   | "replayed"
   | "missing_record"
@@ -50,15 +43,7 @@ export type CurrentUserReplayResult =
   | "cancelled"
 
 export type ConnectedUserRepairRuntime = {
-  captureWatermark: () => Promise<Date>
-  /** Optional injection keeps lightweight repair tests independent of database fixtures. */
-  loadUserFrontiers?: (userIds: readonly number[]) => Promise<Map<number, number>>
-  getUpdatesState: (
-    input: { date: bigint },
-    context: { currentUserId: number; currentSessionId: number },
-    options?: { shouldEmitHints?: () => boolean; discoveryWatermark?: Date; userFrontier?: number },
-  ) =>
-    Promise<{ date?: bigint; seq?: number }>
+  discovery: RepairDiscovery
   connectedUserIds: () => number[]
   hasConnections: (userId: number) => boolean
   getConnectionEpoch: (userId: number) => number
@@ -89,13 +74,8 @@ export type ConnectedUserRepairRuntime = {
 }
 
 const runtime: ConnectedUserRepairRuntime = {
-  captureWatermark: captureUpdateDiscoveryWatermark,
-  loadUserFrontiers: loadRepairUserFrontiers,
-  // Keep this lookup inside the call. `updates.getUpdatesState` reaches
-  // update-discovery modules which can import the repair entry point first;
-  // reading the imported binding while this module initializes would hit its
-  // temporal-dead-zone in that circular entry order.
-  getUpdatesState: (input, context, options) => getUpdatesState(input, context, options),
+  // Discovery imports the RPC reader, which can reach this module first.
+  get discovery() { return postgresRepairDiscovery },
   connectedUserIds: () => connectionManager.getAuthenticatedUserIds(),
   hasConnections: (userId) => connectionManager.getUserConnections(userId).length > 0,
   getConnectionEpoch: (userId) => connectionManager.getUserConnectionEpoch(userId),
@@ -154,7 +134,7 @@ export class ConnectedUserRepair {
   private async startAtGeneration(generation: number): Promise<void> {
     // Call after broker subscription. An inclusive warm cursor also covers
     // mutations that raced setup, without treating an absent date as repair.
-    const watermark = await this.repairRuntime.captureWatermark()
+    const watermark = await this.repairRuntime.discovery.captureWatermark()
     if (generation !== this.generation || this.enabled) return
     assertDiscoveryWatermark(watermark)
     this.baselineDate = BigInt(Math.max(0, Math.floor(watermark.getTime() / 1000) - 1))
@@ -209,7 +189,7 @@ export class ConnectedUserRepair {
   }
 
   private async runPeriodicSweep(generation: number): Promise<void> {
-    const watermark = await this.repairRuntime.captureWatermark()
+    const watermark = await this.repairRuntime.discovery.captureWatermark()
     assertDiscoveryWatermark(watermark)
     if (!this.isActive(generation)) return
 
@@ -227,7 +207,7 @@ export class ConnectedUserRepair {
     // sweep.
     const start = this.connectedUserCursor % userIds.length
     const candidates = this.periodicCandidates(userIds, start)
-    const frontiers = await this.loadUserFrontiers(candidates.map((candidate) => candidate.userId))
+    const snapshots = await this.prepareDiscovery(candidates.map((candidate) => candidate.userId), watermark)
     if (!this.isActive(generation)) return
     for (const { index, userId } of candidates) {
       if (this.pending.size >= MAX_PENDING_USERS) {
@@ -236,7 +216,7 @@ export class ConnectedUserRepair {
       }
       this.enqueue(userId, {
         source: "periodic",
-        discoverySnapshot: makeDiscoverySnapshot(watermark, frontiers.get(userId)),
+        discoverySnapshot: snapshots.get(userId),
       })
     }
     this.connectedUserCursor = candidates.length === userIds.length
@@ -309,15 +289,11 @@ export class ConnectedUserRepair {
     return candidates
   }
 
-  private async loadUserFrontiers(userIds: readonly number[]): Promise<Map<number, number>> {
-    if (userIds.length === 0 || !this.repairRuntime.loadUserFrontiers) return new Map()
-    const frontiers = await this.repairRuntime.loadUserFrontiers(userIds)
-    for (const [userId, frontier] of frontiers) {
-      if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(frontier) || frontier < 0) {
-        throw new Error("Invalid batched user frontier")
-      }
-    }
-    return frontiers
+  private async prepareDiscovery(userIds: readonly number[], watermark: Date) {
+    const requests = userIds.map((userId) => ({ userId, date: this.observations.get(userId)?.date ?? this.baselineDate }))
+    const snapshots = await this.repairRuntime.discovery.prepare(requests, watermark)
+    for (const snapshot of snapshots.values()) assertDiscoverySnapshot(snapshot)
+    return snapshots
   }
 
   private enqueue(
@@ -419,16 +395,13 @@ export class ConnectedUserRepair {
       const requestedDate = previous?.date ?? this.baselineDate
       const snapshotCanAdvanceCheckpoint = discoverySnapshot !== undefined &&
         requestedDate <= floorDiscoveryWatermark(discoverySnapshot.watermark)
-      const result = await this.repairRuntime.getUpdatesState(
-        { date: requestedDate },
-        { currentUserId: userId, currentSessionId: 0 },
+      const result = await this.repairRuntime.discovery.discover(
+        { userId, date: requestedDate },
         {
           shouldEmitHints: isCurrentScan,
-          // A delayed periodic batch may hold a watermark older than this
-          // user's current checkpoint. Never pass that stale fence: let the
-          // handler acquire a new one rather than regress its cursor.
-          discoveryWatermark: snapshotCanAdvanceCheckpoint ? discoverySnapshot.watermark : undefined,
-          userFrontier: snapshotCanAdvanceCheckpoint ? discoverySnapshot.userFrontier : undefined,
+          // A delayed batch may hold a watermark older than this account's
+          // checkpoint. The strategy must rediscover rather than regress it.
+          snapshot: snapshotCanAdvanceCheckpoint ? discoverySnapshot : undefined,
         },
       )
       // Do not let a scan that began before a new socket was admitted publish
@@ -558,11 +531,11 @@ export class ConnectedUserRepair {
     this.pendingAdmissionUsers.clear()
     if (userIds.length === 0 || !this.isActive(generation)) return
 
-    const watermark = await this.repairRuntime.captureWatermark()
+    const watermark = await this.repairRuntime.discovery.captureWatermark()
     assertDiscoveryWatermark(watermark)
     if (!this.isActive(generation)) return
     const connectedUserIds = userIds.filter((userId) => this.repairRuntime.hasConnections(userId))
-    const frontiers = await this.loadUserFrontiers(connectedUserIds)
+    const snapshots = await this.prepareDiscovery(connectedUserIds, watermark)
     if (!this.isActive(generation)) return
     for (const userId of userIds) {
       if (!this.repairRuntime.hasConnections(userId)) {
@@ -571,7 +544,7 @@ export class ConnectedUserRepair {
       }
       this.enqueue(userId, {
         source: "admission",
-        discoverySnapshot: makeDiscoverySnapshot(watermark, frontiers.get(userId)),
+        discoverySnapshot: snapshots.get(userId),
       })
     }
   }
@@ -612,14 +585,11 @@ const assertDiscoveryWatermark = (watermark: Date): void => {
   }
 }
 
-const makeDiscoverySnapshot = (watermark: Date, userFrontier: number | undefined): DiscoverySnapshot => {
-  const snapshot = userFrontier === undefined ? { watermark } : { watermark, userFrontier }
-  assertDiscoverySnapshot(snapshot)
-  return snapshot
-}
-
 const assertDiscoverySnapshot = (snapshot: DiscoverySnapshot): void => {
   assertDiscoveryWatermark(snapshot.watermark)
+  if (snapshot.resourcesUnchangedSince !== undefined && snapshot.resourcesUnchangedSince < 0n) {
+    throw new Error("Invalid resource discovery checkpoint")
+  }
   if (snapshot.userFrontier !== undefined &&
     (!Number.isSafeInteger(snapshot.userFrontier) || snapshot.userFrontier < 0)) {
     throw new Error("Invalid batched user frontier")

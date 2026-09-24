@@ -14,6 +14,7 @@ Use Bun 1.4.0 (the CI version). From the repository root, first run
 | `bun run test:unit` | Bun tests without the PostgreSQL lifecycle; no database configuration needed |
 | `bun run test:effect` | Effect tests on Node/Vitest, then Bun-specific Effect integration tests; the latter may need PostgreSQL |
 | `bun run test:postgres` | All database-backed tests, including colocated tests outside `__tests__` |
+| `bun run test:repair` | Recovery strategy, lifecycle/permission regressions and real PostgreSQL discovery query budgets; see [discovery design](docs/recovery-discovery.md) |
 | `bun run test:backend` | Hot-path behavior and query budgets, plus replay, transaction and concurrency contracts |
 | `bun run bench:backend` | Verified backend benchmark scenarios and optional database latency injection; see [BENCHMARKING.md](BENCHMARKING.md) |
 | `bun run test:preview` | URL preview workspace tests, including network boundaries |

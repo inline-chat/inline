@@ -12,6 +12,7 @@
     "test:effect": "bun --no-env-file scripts/test-effect.ts && bun run test:effect:bun",
     "test:effect:bun": "bun --no-env-file scripts/test-runner.ts --effect-bun",
     "test:postgres": "bun --no-env-file scripts/test-runner.ts --postgres",
+    "test:repair": "bun --no-env-file scripts/test-runner.ts src/modules/internalMessaging/repair src/__tests__/performance/repairDiscoveryCost.test.ts",
     "test:backend": "bun --no-env-file scripts/test-runner.ts src/__tests__/performance src/__tests__/flows/messageIntegrity.test.ts src/__tests__/modules/userBucketUpdates.test.ts src/__tests__/modules/updateDiscoveryBarrier.test.ts src/__tests__/modules/syncFlow.test.ts src/__tests__/functions/sendMessage.test.ts src/__tests__/functions/getChats.test.ts src/__tests__/functions/getChatHistory.test.ts src/__tests__/functions/updates.getUpdates.test.ts src/__tests__/functions/updates.getUpdatesState.test.ts src/modules/dialogOpen.test.ts scripts/benchmark-backend.test.ts",
     "bench:backend": "bun --no-env-file scripts/benchmark-backend.ts",
     "test:realtime": "bun --no-env-file scripts/test-runner.ts src/realtime src/__tests__/realtime src/__tests__/handlers",
