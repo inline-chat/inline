@@ -75,7 +75,9 @@ export const assertMigrationLedger = (
     throw new MigrationStateError("The database is ahead of this migration command.")
   }
   const byTime = new Map(applied.map((record) => [record.createdAt, record.hash]))
+  let knownHead: MigrationRecord | undefined
   for (const record of source) {
+    if (record.createdAt <= latestApplied) knownHead = record
     if (!byTime.has(record.createdAt)) {
       if (record.createdAt <= latestApplied) {
         throw new MigrationStateError("A required migration is missing before the database head.")
@@ -87,7 +89,6 @@ export const assertMigrationLedger = (
   }
   // Older SQL files changed across previous Inline branches even though their
   // timestamped ledger entries remain. The active head hash is authoritative.
-  const knownHead = source.findLast((record) => record.createdAt <= latestApplied)
   if (knownHead && byTime.get(knownHead.createdAt) !== knownHead.hash) {
     throw new MigrationStateError("The database migration head differs from the packaged migration.")
   }

@@ -13,6 +13,7 @@ export const HEALTH_TIMEOUTS = {
 
 type ConnectionMode = "direct" | "pgbouncer"
 type DatabaseEnvironment = {
+  [name: string]: string | undefined
   DATABASE_URL?: string
   DATABASE_DIRECT_URL?: string
   DATABASE_CONNECTION_MODE?: string
