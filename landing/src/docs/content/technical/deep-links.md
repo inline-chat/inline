@@ -7,6 +7,12 @@ A deep link names a destination in Inline: a person, conversation, message, or s
 
 `in://` is the canonical production scheme. `inline://` is a supported production alias. Development builds can use separate configured schemes; do not distribute those as production links.
 
+## About this page
+
+For app and integration authors generating navigation URLs. You need destination IDs from Inline; testing navigation also requires an installed production Apple client and an account with destination access. Read the canonical forms before compatibility aliases.
+
+**Applies to:** Production Apple link parser; Bun examples. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Identifiers and Access
 
 Use positive decimal signed 64-bit IDs. Keep message identity as `(chatId, messageId)`, since the message ID alone does not identify its conversation. When constructing links in JavaScript, use decimal strings or `bigint` rather than converting large IDs through `number`.
@@ -27,7 +33,7 @@ Use the space handle or invitation token returned by Inline. The app parser acce
 
 ### Construct a Message Link
 
-This TypeScript example runs in Bun and prints a URL without opening Inline. Replace both IDs with the destination values:
+This TypeScript example runs in Bun `1.4.0` and prints a URL without opening Inline. Replace both IDs with the destination values:
 
 ```ts
 const chatId = 123n
@@ -74,3 +80,7 @@ Use `inline://user/{userId}` for this Markdown contract. For supported formattin
 - [App parser and link generator](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Sources/InlineKit/DeepLinks/InlineDeepLink.swift): accepted routes, validation, and generated URLs.
 - [Deep-link tests](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Tests/InlineKitTests/InlineDeepLinkTests.swift): canonical forms and compatibility cases.
 - [Schema conventions](/docs/technical/schema): ID ranges and message identity.
+
+## Summary
+
+Generate canonical paths with lossless IDs; treat invitation tokens as opaque. Verify navigation in the receiving app with the intended account. To activate a bot through a message, use the [structured mention contract](#markdown-mentions).

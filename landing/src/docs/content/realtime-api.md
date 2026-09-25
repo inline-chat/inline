@@ -18,16 +18,16 @@ The SDK's `token` option selects V2. V3 uses `inlineProtocol.credentials`; a bea
 
 ## Install
 
-The example runs with Bun. Install the TypeScript SDK in your project:
+The example runs with Bun `1.4.0` and SDK `0.0.19-alpha.0`. This is a prerelease package; see the [compatibility baseline](/docs/technical#versions-and-examples). Install it in your project:
 
 ```bash
-bun add @inline-chat/realtime-sdk
+bun add @inline-chat/realtime-sdk@0.0.19-alpha.0
 ```
 
 Or install the same package with npm:
 
 ```bash
-npm install @inline-chat/realtime-sdk
+npm install @inline-chat/realtime-sdk@0.0.19-alpha.0
 ```
 
 ## V2 Quick Start

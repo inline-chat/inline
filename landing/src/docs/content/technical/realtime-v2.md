@@ -5,6 +5,12 @@ description: "Bearer-token compatibility transport and migration boundary."
 
 Realtime V2 is the bearer-token compatibility path for live RPCs and updates. Connect to `wss://api.inline.chat/realtime` when using an existing V2 integration or the SDK's `token` option. New V3 credentials use the separate [Realtime V3](/docs/technical/realtime) transport.
 
+## About this page
+
+For existing bearer-token integrations. Use the [V2 quick start](/docs/realtime-api#v2-quick-start) to make a first request; read this page when implementing its connection envelope or planning V3 migration.
+
+**Applies to:** Realtime V2 compatibility transport. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Connection contract
 
 A V2 client opens a binary WebSocket and sends a Protocol Buffer `ClientMessage` containing `connection_init`. The `ConnectionInit.token` field authenticates the account or bot session. The server responds with `connection_open` after successful authentication; subsequent messages carry typed RPC calls, results, and updates. The token travels in the initial protocol message, not as a V3 authorization key. See [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto), the [server connection handler](https://github.com/inline-chat/inline/blob/main/server/src/realtime/handlers/_connectionInit.ts), and the [V2 WebSocket host](https://github.com/inline-chat/inline/blob/main/server/src/core/http/realtimeHost.ts).
@@ -21,3 +27,7 @@ The [TypeScript V2 quick start](/docs/realtime-api#v2-quick-start) shows SDK set
 | TypeScript SDK selection | `token` | `inlineProtocol.credentials` |
 
 Changing the endpoint or copying a V2 frame to V3 does not migrate credentials or framing. Follow the [V3 authentication lifecycle](/docs/technical/authentication) before switching a client. For uncertain mutation outcomes on either transport, use [RPC semantics](/docs/technical/rpc) rather than treating reconnect as proof of failure.
+
+## Summary
+
+Keep bearer-token clients on the V2 endpoint and wait for authenticated connection completion. A V3 migration requires [new key authority and binding](/docs/technical/authentication), not just a URL change.

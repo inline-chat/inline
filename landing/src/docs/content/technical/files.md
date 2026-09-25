@@ -5,6 +5,12 @@ description: "File identity, access, and download contracts."
 
 An uploaded file has a stable identifier, but knowing it does not grant access. A completed upload creates media; sending a message with that media is a separate operation. Use [Uploads](/docs/technical/uploads) for the resumable realtime upload lifecycle.
 
+## About this page
+
+For integration authors choosing how to store and retrieve media. Start with the API comparison, then check access and download ranges. You need an authenticated bot or account and, for another user’s file, access to its containing message. Use [Uploads](/docs/technical/uploads) to implement transfer and recovery.
+
+**Applies to:** Bot API 0.1; Realtime V3 downloads. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Choose a file API
 
 | Client | Upload | Retrieve |
@@ -47,3 +53,7 @@ Realtime uploads are bound to the account session and, on V3, the permanent auth
 - [Upload task and method contracts](/docs/technical/uploads)
 - [Realtime schema](/docs/technical/protocol-schema) — file locators, byte ranges, and upload messages
 - [Bot API schema](/docs/technical/api-schema) — `uploadFile`, `getFile`, and `BotFile`
+
+## Summary
+
+Choose an API before choosing an identifier. A file ID locates bytes; the account session and message context determine access. To publish a new attachment, [complete an upload](/docs/technical/uploads) and then send its typed media in a separate mutation.

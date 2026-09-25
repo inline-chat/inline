@@ -5,6 +5,12 @@ description: "How to interpret RPC completion and recover an uncertain mutation.
 
 An RPC result confirms what the server returned for one request. A timeout or lost connection does not prove a dispatched mutation failed: the server may have committed it before the result was lost. Use this page when implementing retries after reconnect.
 
+## About this page
+
+For callers deciding whether to repeat an interrupted request. You need an authenticated client and the method’s application identity. Read completion outcomes first, then choose a retry rule; use this page as a behavior reference beside the generated method signature.
+
+**Applies to:** Realtime V2 and V3; TypeScript SDK. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Completion and errors
 
 The request message ID correlates a `RpcCall` with a `RpcResult` or `RpcError`; it is not an application idempotency key. The TypeScript SDK defaults response-waiting calls to a 30-second timeout. Canceling a wait does not undo a dispatched operation.
@@ -53,3 +59,7 @@ Connection-local serialization of selected operations preserves their order on t
 - [TypeScript RPC client](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/protocol-client.ts) owns timeouts, reconnects, and pending calls.
 
 For state reconciliation after a lost update, see [Sync recovery](/docs/technical/sync-recovery).
+
+## Summary
+
+Classify the response before choosing a retry. Retain stable identities for repeat-safe operations and reconcile creations without one. If updates cannot establish the result, use [bucket recovery](/docs/technical/sync-recovery) before declaring the local projection current.

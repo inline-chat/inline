@@ -5,6 +5,12 @@ description: "Realtime protobuf source, generated packages, and compatibility ru
 
 [`proto/core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto) defines realtime application methods, inputs, results, objects, and updates. [Inline Protocol](/docs/technical/protocol) carries those messages; schema compatibility and transport security are separate concerns. Most applications should use a client package rather than construct transport frames.
 
+## About this page
+
+This page is a reference index for SDK and adapter authors familiar with Protocol Buffers. Use canonical declarations for exact fields and the linked behavioral guides for ownership, completion, and recovery. The encode/decode example performs no network request.
+
+**Applies to:** Realtime application schema; Protocol package. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Generated entry points
 
 | Target | Entry point | Purpose |
@@ -21,7 +27,7 @@ The Rust crate builds from its packaged [`crates/protocol/proto/core.proto`](htt
 
 Generated TypeScript uses `bigint` for protobuf `int64` and `uint64`, `Uint8Array` for `bytes`, and tagged `oneofKind` unions for oneofs. Preserve unknown fields when forwarding messages so newer schema fields can survive an older intermediary. If a durable update is unknown to your client, maintain [sequence coverage](/docs/technical/sync#cursor) before advancing a sync cursor.
 
-This TypeScript example encodes and decodes one request locally. It does not send an RPC:
+With Bun `1.4.0` and `@inline-chat/protocol` `0.0.11-alpha.0`, this TypeScript example encodes and decodes one request locally. It does not send an RPC:
 
 ```ts
 import { GetFilePartInput } from "@inline-chat/protocol/core"
@@ -43,3 +49,7 @@ An authenticated V3 download also requires access to the file. For a file owned 
 - [Schema conventions](/docs/technical/schema) — IDs, timestamps, and text offsets.
 - [RPC Semantics](/docs/technical/rpc) — retries and commit-unknown outcomes.
 - [Realtime API](/docs/technical/realtime) — authenticated requests and updates.
+
+## Summary
+
+Pair each method with its input and result member. Preserve 64-bit values and unknown fields at serialization boundaries. For application behavior beyond the declaration, use [RPC semantics](/docs/technical/rpc), [Sync](/docs/technical/sync), and [Uploads](/docs/technical/uploads).

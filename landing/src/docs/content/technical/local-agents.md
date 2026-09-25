@@ -7,6 +7,12 @@ A local bridge connects an Inline bot to a coding-agent process on your computer
 
 Read this page when operating or extending that bridge. For installation, use [Set Up an Agent](/docs/agents). Hermes and OpenClaw use their own gateway integrations; their lifecycle is described in the [Hermes](/docs/hermes) and [OpenClaw](/docs/openclaw) guides.
 
+## About this page
+
+For bridge operators and adapter authors with an installed provider and authenticated Inline account. Read ownership and admission before enabling shared-chat input, then use the diagnostic commands to verify the selected provider and workspace. Provider setup belongs in the linked installation guide.
+
+**Applies to:** Inline CLI bridge; provider support is installation-specific. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Ownership
 
 | Component | Owns |
@@ -69,3 +75,7 @@ Check the named provider and its selected workspace, then send a test request fr
 - [Inbound admission](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/runtime.rs) and [activation routing](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/routing.rs): human operator and bot mention handling.
 - [Operator configuration](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/user_config.rs): stable-ID policy and provider overrides.
 - [Credential boundaries](/docs/technical/security): how bridge credentials differ from other Inline interfaces.
+
+## Summary
+
+Verify provider availability, operator admission, workspace binding, and response delivery separately. A running service proves only one part of that path. Resolve ignored input through [Verify and Diagnose](#verify-and-diagnose) before changing authority.

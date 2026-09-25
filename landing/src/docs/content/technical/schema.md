@@ -5,6 +5,12 @@ description: "Choose the Bot HTTP or realtime schema and interpret scalar conven
 
 Inline has two application schemas. The Bot API is an HTTP and JSON interface described by [OpenAPI](/docs/technical/api-schema). The native realtime API uses Protocol Buffers defined in [`proto/core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto); [Protocol Schema](/docs/technical/protocol-schema) maps its generated packages. Choose the schema matching your client and use its field names and access rules.
 
+## About this page
+
+For authors translating between JSON, generated types, and persisted state. Choose the interface first, then apply its scalar conventions. The local example below demonstrates lossless ID storage; it needs no Inline account.
+
+**Applies to:** Bot API 0.1; Realtime application schema. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Conventions
 
 | Value | Bot HTTP and JSON | Realtime Protocol Buffers |
@@ -14,7 +20,7 @@ Inline has two application schemas. The Bot API is an HTTP and JSON interface de
 | Message identity | Keep conversation ID and message ID together. | Keep `(chat_id, message_id)`; a message ID alone is not a complete location. |
 | Text entity offsets | UTF-16 code units. | UTF-16 code units in `Message.message`. |
 
-JavaScript JSON cannot serialize `bigint` directly. Convert it to a decimal string at a JSON boundary, then parse it back before constructing a realtime request:
+The following self-contained listing runs with Bun `1.4.0` and prints `true`. JavaScript JSON cannot serialize `bigint` directly. Convert it to a decimal string at a JSON boundary, then parse it back before constructing a realtime request:
 
 ```ts
 const messageId = 9007199254740993n
@@ -33,3 +39,7 @@ Do not convert arbitrary 64-bit IDs through a JavaScript `number`; values outsid
 - [API Schema](/docs/technical/api-schema) — Bot HTTP methods, envelopes, and generated TypeScript types.
 - [Protocol Schema](/docs/technical/protocol-schema) — realtime methods, protobuf messages, and generated packages.
 - [Files](/docs/technical/files) — file IDs and access across these surfaces.
+
+## Summary
+
+Preserve the identity domain across API and storage boundaries. Use decimal text for JSON storage of realtime IDs and keep chat/message IDs together. Continue to the [HTTP reference index](/docs/technical/api-schema) or [protobuf reference index](/docs/technical/protocol-schema) for your chosen interface.

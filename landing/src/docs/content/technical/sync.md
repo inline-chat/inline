@@ -5,6 +5,12 @@ description: "Durable update buckets, cursors, live delivery, and discovery."
 
 Inline sync keeps a local projection current by applying ordered durable updates and fetching missing ranges. A realtime connection delivers changes promptly; the server's durable update journal lets clients recover after disconnects. Read this page for the cursor model, then use [Sync recovery](/docs/technical/sync-recovery) to implement gap handling.
 
+## About this page
+
+For authors of persistent clients and update consumers. Read [scalar and identity conventions](/docs/technical/schema) first. This page explains buckets and coverage; [Sync Recovery](/docs/technical/sync-recovery) gives the recovery procedure.
+
+**Applies to:** Realtime update schema; TypeScript SDK and Rust client. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Buckets
 
 A **bucket** is one independently sequenced stream. A **cursor** is the highest bucket sequence the client has safely applied or otherwise accounted for. A **projection** is materialized local state, such as a dialog list or chat view. Possessing a cursor alone does not prove a projection was rebuilt correctly.
@@ -16,6 +22,16 @@ A **bucket** is one independently sequenced stream. A **cursor** is the highest 
 | Chat | Messages, attachments, pins, metadata, visibility, participants, groups, moves, deletion, and scoped history clearing. |
 
 Durable records have one bucket sequence. Wire events such as `chatHasNewUpdates`, `spaceHasNewUpdates`, and `userHasNewUpdates` are hints: they identify work to fetch but do not replace the corresponding journal page. Ephemeral activity such as typing, presence, `GridEvent`, and `BotEvent` does not advance a durable bucket cursor. Do not use a hint or ephemeral event as proof that a projection is complete.
+
+**Figure: Live delivery and replay converge on one durable cursor.**
+
+```text
+live update ──┐
+              ├── validate bucket coverage ── apply projection + commit cursor
+journal page ─┘
+```
+
+Both paths feed the same coverage check. Neither path can advance the cursor across an unaccounted sequence; the projection and cursor become durable together.
 
 ## Cursor
 
@@ -53,3 +69,7 @@ Update continuity and message-history continuity are separate. A chat can have a
 - [Server update pages](https://github.com/inline-chat/inline/blob/main/server/src/functions/updates.getUpdates.ts) enforce pagination and replay limits.
 - [TypeScript SDK sync owner](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/inline-sdk-client.ts) handles live admission and catch-up.
 - [Rust client sync engine](https://github.com/inline-chat/inline/blob/main/crates/client/src/sync.rs) journals updates and cursor progress.
+
+## Summary
+
+Keep bucket coverage and date discovery checkpoints separate. Commit materialized state with its cursor; advance the discovery checkpoint after discovered work succeeds. Continue with [gap and snapshot recovery](/docs/technical/sync-recovery) when replay cannot establish coverage.

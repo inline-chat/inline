@@ -5,6 +5,12 @@ description: "Realtime V3 endpoint, connection lifecycle, and request outcomes."
 
 Realtime V3 carries authenticated RPCs and live updates over a persistent WebSocket. Use `wss://api.inline.chat/realtime/v3` for Inline Protocol v1; the `/realtime` endpoint is the separate [V2 compatibility transport](/docs/technical/realtime-v2). This page is for client and integration authors who already have V3 credentials. See [Authentication](/docs/technical/authentication) to create them and [Protocol](/docs/technical/protocol) for the wire layers.
 
+## About this page
+
+Use this connection model to decide when requests and local state can resume. For executable SDK setup, follow the [Realtime quick start](/docs/realtime-api#v2-quick-start); the numbered wire sequence below is for transport implementers.
+
+**Applies to:** Realtime V3. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Connect and resume
 
 1. Open a WSS connection to `/realtime/v3`. The server admits a binary WebSocket and expects the obfuscated carrier header, followed by Inline Protocol records. It disables WebSocket per-message compression.
@@ -36,3 +42,7 @@ Cancellation ends the local wait; it does not prove server execution stopped. Th
 - [TypeScript V3 connection](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-connection.ts) and [SDK options](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts)
 - [Server V3 WebSocket host](https://github.com/inline-chat/inline/blob/main/server/src/core/http/realtimeV3Host.ts)
 - [Rust V3 connection](https://github.com/inline-chat/inline/blob/main/crates/sdk/src/realtime_v3.rs)
+
+## Summary
+
+Resume in this order: authenticate transport, recover bucket coverage, then expose current local state. For a lost mutation result, use [method-specific retry rules](/docs/technical/rpc); reconnect alone cannot decide whether to repeat it.

@@ -55,16 +55,16 @@ These commands use curl and a POSIX-compatible shell. They omit `offset` so you 
 
 ## TypeScript Client
 
-The example runs with Bun and the `0.1.x` TypeScript client. Install it in your project:
+The example runs with Bun `1.4.0` and `@inline-chat/bot-client` `0.1.2-alpha.0`. This is the [prerelease package baseline](/docs/technical#versions-and-examples) used by these examples. Install it in your project:
 
 ```bash
-bun add @inline-chat/bot-client@^0.1.0
+bun add @inline-chat/bot-client@0.1.2-alpha.0
 ```
 
 Install with npm:
 
 ```bash
-npm install @inline-chat/bot-client@^0.1.0
+npm install @inline-chat/bot-client@0.1.2-alpha.0
 ```
 
 Set `INLINE_BOT_TOKEN` and `INLINE_CHAT_ID`. Save as `send.ts`:

@@ -5,6 +5,22 @@ description: "Realtime V3 credential creation, binding, persistence, rotation, a
 
 Realtime V3 uses Inline Protocol authorization keys. A **permanent key** is associated with an account session after login. A **temporary key** carries ordinary application traffic only after the server binds it to an authorized permanent key. These keys are secret credentials; the production RSA ring contains public verification keys, not account credentials. This page covers V3 credential ownership. [Realtime V2](/docs/technical/realtime-v2), Bot API tokens, and MCP OAuth use separate authentication paths.
 
+## About this page
+
+For V3 client authors implementing login and a protected credential store. You need a trusted server key ring, an account able to complete login, and storage that coordinates rotation with logout. Follow creation → binding → persistence → revocation; the outcome is authorized application access with recoverable credentials.
+
+**Applies to:** Realtime V3; TypeScript SDK. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
+**Figure: Application access begins after login and temporary-key binding.**
+
+```text
+permanent handshake → login authorized ──────────────┐
+                                                    ├→ bind → application RPCs
+temporary handshake ────────────────────────────────┘
+```
+
+The two handshakes establish separate keys. Binding joins temporary traffic authority to the account session established through the permanent key.
+
 ## Create and authorize a permanent key
 
 1. Start a V3 handshake using a trusted, pinned server RSA public-key ring. The handshake creates a permanent authorization key and a server salt. It does not sign the user in.
@@ -21,15 +37,9 @@ Temporary keys have a 24-hour lifetime. The TypeScript and Rust clients treat 80
 
 ## Persist credentials
 
-Persist the permanent key and any bound temporary key in a protected credential store. The TypeScript V3 credential shape is:
+Persist the permanent key and any bound temporary key in a protected credential store.
 
-```ts
-// Shape from @inline-chat/realtime-sdk; illustrative types, not a login example.
-type InlineProtocolV3Credentials = {
-  permanent: InlineProtocolAuthorization
-  temporary?: InlineProtocolAuthorization
-}
-```
+The exported `InlineProtocolV3Credentials` type requires `permanent: InlineProtocolAuthorization` and accepts optional `temporary: InlineProtocolAuthorization`. Import it from `@inline-chat/realtime-sdk`; the [canonical declaration](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-client.ts) defines the complete shape.
 
 `InlineProtocolAuthorization` contains the secret key bytes, key ID, server salt, temporary flag, and optional expiry. The high-level `InlineSdkClient` selects V3 through `inlineProtocol: { credentials, onCredentials }`. Its `onCredentials` callback must persist a replacement credential set before the SDK makes the replacement authenticated session visible. The storage owner must reject a late write after logout begins; otherwise an in-flight rotation can restore credentials that logout removed. See the [SDK credential options](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts) and [V3 transport rotation path](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-transport.ts).
 
@@ -42,3 +52,7 @@ The high-level TypeScript SDK's `logout()` requires a durable `credentialOwner`.
 On the server, revoking a permanent authorization invalidates its bound temporary keys; an expired temporary key is removed from the temporary-key store. Application dispatch also checks the current key binding and account session. See the [authorization-key store](https://github.com/inline-chat/inline/blob/main/server/src/modules/inlineProtocol/authorizationKeys.ts) and [application admission](https://github.com/inline-chat/inline/blob/main/server/src/modules/inlineProtocol/application.ts). Keep local credential erasure and confirmed remote revocation distinct when reporting logout to a user.
 
 For carrier and record details, see [Protocol](/docs/technical/protocol). For reconnect outcomes and mutation retries, see [Realtime](/docs/technical/realtime) and [RPC semantics](/docs/technical/rpc).
+
+## Summary
+
+A handshake creates a key; login grants permanent authority; binding admits temporary-key traffic. Persist replacements before use. Report local erasure separately from remote revocation, and use [RPC outcome rules](/docs/technical/rpc) when logout completion is uncertain.

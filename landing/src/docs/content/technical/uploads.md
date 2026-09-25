@@ -5,6 +5,12 @@ description: "Resumable realtime file uploads and recovery."
 
 Use the realtime upload methods to transfer photo, video, document, or voice bytes over encrypted RPCs. Completion returns typed media and a `file_unique_id`; sending a message with that media is a separate call. Bot HTTP clients use [`uploadFile`](/docs/technical/files#choose-a-file-api) instead.
 
+## About this page
+
+For SDK users uploading a document and adapter authors implementing resumable transfers. The common SDK path comes first; wire-method scheduling and helper internals follow it. Success is a completed media result; verify the separate send when posting it to a chat.
+
+**Applies to:** Realtime V2 and V3 uploads; TypeScript SDK. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Before you begin
 
 Use an authenticated realtime session. On V3, the upload belongs to its user, account session, and permanent auth key. Keep access to the same source bytes throughout retries. To resume after a process restart, persist the 16-byte `client_upload_id`, returned 16-byte `upload_id`, and source identity. Preserve the exact create metadata and whole-file digest.
@@ -18,7 +24,65 @@ Use an authenticated realtime session. On V3, the upload belongs to its user, ac
 
 The part size is currently 524,288 bytes, with at most 1,000 parts. The media limit above is the operative file-size limit. A file must contain at least one byte. `CREATE_UPLOAD` supplies a 32-byte whole-file SHA-256 digest, a nonempty file name and MIME type (each at most 255 characters), and kind-specific metadata. Photos accept JPEG or PNG MIME types. See [`CreateUploadInput`](https://github.com/inline-chat/inline/blob/main/proto/core.proto) for fields.
 
+## Upload a document with TypeScript
+
+This example uses Bun `1.4.0` and `@inline-chat/realtime-sdk` `0.0.19-alpha.0`. [Install the SDK](/docs/realtime-api#install) and supply `INLINE_TOKEN` for the [V2 compatibility connection](/docs/realtime-api#v2-quick-start). V2 protects these calls with WSS; an existing V3 application can use its key-based client for the same `uploadFile()` call.
+
+The sample uploads a small document and prints its completed media identity. It does not send a message. Save it as `upload-document.ts`:
+
+```ts
+import { InlineSdkClient } from "@inline-chat/realtime-sdk"
+
+const token = process.env.INLINE_TOKEN
+const uploadHex = process.env.INLINE_UPLOAD_ID
+if (!token || !uploadHex || !/^[0-9a-f]{32}$/i.test(uploadHex)) {
+  throw new Error("Set INLINE_TOKEN and INLINE_UPLOAD_ID (32 hexadecimal characters)")
+}
+const clientUploadId = Uint8Array.from(Buffer.from(uploadHex, "hex"))
+const source = new TextEncoder().encode("Quarterly report\n")
+const client = new InlineSdkClient({ token, rpcTimeoutMs: 15_000 })
+try {
+  await client.connect(AbortSignal.timeout(15_000))
+  const uploaded = await client.uploadFile({
+    type: "document",
+    file: source,
+    fileName: "report.txt",
+    contentType: "text/plain",
+    clientUploadId,
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (uploaded.documentId === undefined || !uploaded.fileUniqueId) {
+    throw new Error("No completed document returned; reconcile the upload before retrying")
+  }
+  console.log(`Completed file ${uploaded.fileUniqueId}; document ${uploaded.documentId}`)
+} catch (error) {
+  console.error("Upload did not report completion. Keep the upload ID and original bytes for recovery.")
+  throw error
+} finally {
+  await client.close()
+}
+```
+
+Generate an upload identity once and retain the printed value with this source file and its metadata:
+
+```bash
+bun -e 'console.log(Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex"))'
+```
+
+Set `INLINE_UPLOAD_ID` to that value, then run:
+
+```bash
+bun run upload-document.ts
+```
+
+**Verify:** `Completed file …; document …` means finalization returned a document. Store both identities if later work will attach it. To post it, use `sendMessage({ chatId, media: { kind: "document", documentId } })` in your sender and verify the message result under the [send retry contract](/docs/technical/rpc#stable-identities).
+
+After a lost response, reuse the same `INLINE_UPLOAD_ID`, bytes, name, MIME type, and account session; the helper reconciles the existing transfer. Do not generate a new ID merely because a response was lost. A canceled or expired upload needs the [terminal-state recovery](#finish-and-recovery) below. The two-minute deadline aborts local work and triggers best-effort cancellation; it does not certify remote cancellation.
+
 ## Upload a file
+
+This wire-level sequence is for adapter authors. SDK applications can use the preceding example and skip part scheduling.
+
 
 1. Generate and retain a 16-byte `client_upload_id`. Compute SHA-256 over the source bytes.
 2. Call `CREATE_UPLOAD` with that identity, metadata, byte count, and digest. Keep `upload_id`, `part_size`, `part_count`, `expires_at` (Unix seconds), and `accepted_parts`.
@@ -67,3 +131,7 @@ The owner is the user and account session; V3 additionally binds the permanent a
 | `CANCEL_UPLOAD` | `upload_id` | Reports whether cancellation occurred or the upload was already terminal. |
 
 All methods require the upload owner. Invalid input, ownership mismatch, part conflict, or admission capacity can produce RPC errors; inspect the error before retrying. The current service limits each account session to 20 active uploads and 2 GiB of reserved upload bytes; admission beyond either limit returns a rate-limit error. See [RPC Semantics](/docs/technical/rpc) for commit-unknown requests and [Protocol Schema](/docs/technical/protocol-schema) for exact wire fields.
+
+## Summary
+
+Verify two separate outcomes: `uploadFile()` returns completed media; `sendMessage()` returns a message result. Retain the upload identity and source bytes for recovery, and use [RPC retry rules](/docs/technical/rpc#stable-identities) before repeating the send.

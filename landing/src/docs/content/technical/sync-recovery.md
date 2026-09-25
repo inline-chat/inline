@@ -5,6 +5,12 @@ description: "Recover gaps, reconcile snapshots, and distinguish update continui
 
 Use this page when a live sequence skips ahead, discovery reports a changed bucket, or `GET_UPDATES` cannot replay the requested range. Recovery is per bucket: retain the last safe cursor and cached projection until missing coverage is applied or an authoritative replacement is complete. For the basic model, see [Sync](/docs/technical/sync).
 
+## About this page
+
+For hosts that own a local projection. Before implementing this algorithm, provide an authenticated RPC caller, durable bucket cursors, a way to pause and drain live handlers, and authoritative snapshot loaders for your stored state. Success means durable coverage through the target sequence; message-history completeness is a separate check.
+
+**Applies to:** Realtime update schema; TypeScript SDK and Rust client. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Recover a gap
 
 Suppose a chat is durably applied through sequence 41 and a live event arrives at 44. Pause admission for that chat, preserve cursor 41, and request `GET_UPDATES` from 41. Validate that each response accounts for every sequence through its returned `seq`, apply its updates, and persist progress before requesting the next page. Resume live admission only after the required target is covered. An unrelated chat remains live throughout.
@@ -57,3 +63,7 @@ An update cursor certifies delivery or accounted skipping of update records. It 
 - [TypeScript SDK repair contract](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts)
 - [TypeScript SDK catch-up implementation](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/inline-sdk-client.ts)
 - [Rust client repair implementation](https://github.com/inline-chat/inline/blob/main/crates/client/src/sync.rs)
+
+## Summary
+
+Verify that the repaired projection and cursor survive restart, that a duplicate page does not repeat effects, and that a failed apply leaves the prior cursor intact. Resume only the covered bucket. Use [history continuity](#history-continuity) to assess older messages independently.

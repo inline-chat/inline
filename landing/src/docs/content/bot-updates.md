@@ -86,7 +86,7 @@ The webhook request timeout is 10 seconds. For work that takes longer, acknowled
 
 ### Register and Verify the Webhook
 
-Use Bun with the `@inline-chat/bot-client` `0.1.x` client; follow the [client installation instructions](/docs/bot-api#typescript-client). Set `INLINE_WEBHOOK_URL` to your handler's public HTTPS URL and set `INLINE_WEBHOOK_SECRET` to the same nonempty secret configured in the handler. Save this as `webhook.ts`:
+Use Bun `1.4.0` with `@inline-chat/bot-client` `0.1.2-alpha.0`; follow the [client installation instructions](/docs/bot-api#typescript-client). Set `INLINE_WEBHOOK_URL` to your handler's public HTTPS URL and set `INLINE_WEBHOOK_SECRET` to the same nonempty secret configured in the handler. Save this as `webhook.ts`:
 
 ```ts
 import { InlineBotClient } from "@inline-chat/bot-client"

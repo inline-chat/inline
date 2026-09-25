@@ -5,6 +5,12 @@ description: "Inline Protocol v1 layers, records, and application payloads."
 
 Inline Protocol v1 is the secure transport used by [Realtime V3](/docs/technical/realtime). It carries Inline RPCs and updates inside encrypted records over a binary WebSocket. This page explains the wire layers for implementers; use an SDK for ordinary client connections. Inline uses parts of the MTProto 2.0 construction, but its application schema and endpoint are Inline's own. A Telegram client cannot connect by changing its URL.
 
+## About this page
+
+For transport implementers. Read [the connection model](/docs/technical/realtime) and [key lifecycle](/docs/technical/authentication) first; you need binary framing and public-key cryptography knowledge to implement the wire layer. SDK users can skip the construction details.
+
+**Applies to:** Inline Protocol v1 and Realtime V3. See the [version and example baseline](/docs/technical#versions-and-examples) before choosing a package.
+
 ## Layers
 
 | Layer | Responsibility | What it carries |
@@ -35,3 +41,7 @@ The application wrapper's `layer` is `3` for Realtime V3. Its payload is the ser
 - [MTProto 2.0 construction](https://core.telegram.org/mtproto/description) for the inherited cryptographic terminology; Inline's source and schema define Inline behavior
 
 For endpoint selection and connection recovery, continue to [Realtime](/docs/technical/realtime).
+
+## Summary
+
+Use the SDK unless you need wire interoperability. A conforming transport validates records before dispatch and passes exact protobuf payloads to the application layer. Continue with [request outcomes](/docs/technical/realtime#outcomes) to distinguish record delivery from application completion.
