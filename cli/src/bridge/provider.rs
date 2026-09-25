@@ -409,7 +409,16 @@ fn probe_configured_provider_with_runtime(
             })?
         };
         let _ = probe_command(provider_id, &amp, &["--version"], "Amp CLI version")?;
-        let help = probe_command(provider_id, &amp, &["--help"], "Amp CLI compatibility")?;
+        // Root help grows with Amp's command catalog and can be truncated by
+        // the bounded probe before it reaches the execute-mode flags. The
+        // continuation command has the same global flags the adapter uses and
+        // keeps the relevant contract in a small, stable help surface.
+        let help = probe_command(
+            provider_id,
+            &amp,
+            &["threads", "continue", "--help"],
+            "Amp CLI compatibility",
+        )?;
         validate_amp_adapter_cli_contract(&help)?;
         probe_command_allow_empty(
             provider_id,
@@ -1661,7 +1670,7 @@ mod tests {
         let runtime = directory.path().join("verified-amp");
         std::fs::write(
             &runtime,
-            "#!/bin/sh\ncase \"$1\" in\n  --version) echo 'amp 1' ;;\n  --help) echo '--no-archive-after-execute low medium high ultra' ;;\n  threads) exit 0 ;;\n  *) exit 2 ;;\nesac\n",
+            "#!/bin/sh\ncase \"$1 $2 $3\" in\n  '--version  ') echo 'amp 1' ;;\n  'threads continue --help') echo '--no-archive-after-execute low medium high ultra' ;;\n  'threads search __inline_bridge_auth_probe_no_match__') exit 0 ;;\n  *) exit 2 ;;\nesac\n",
         )
         .expect("runtime fixture");
         let mut permissions = std::fs::metadata(&runtime).expect("metadata").permissions();
