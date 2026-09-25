@@ -235,6 +235,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
 
+    if self.message?.id != message.id {
+      clearHighlight()
+    }
+
     if let currentMessage = self.message,
        configuredContentSizeCategory == traitCollection.preferredContentSizeCategory {
       if prevText == message.displayText, self.message == message,
@@ -867,32 +871,17 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   func highlightBubble() {
     guard let messageView else { return }
     guard !isServiceMessage else { return }
-    let bubble = messageView.bubbleView
-    let originalColor = bubble.backgroundColor ?? .systemGray6
     let highlightColor = messageView.outgoing
       ? (theme?.outgoingBubble.uiColor ?? .systemBlue).lighten(by: 0.3)
       : (theme?.primary.uiColor ?? .systemBlue).withAlphaComponent(0.4)
+    messageView.bubbleView.highlight(color: highlightColor)
     messageView.highlightMediaOverlay()
-    UIView.animate(withDuration: 0.18, animations: {
-      bubble.backgroundColor = highlightColor
-    }) { _ in
-      UIView.animate(withDuration: 0.5, delay: 0.2, options: [], animations: {
-        bubble.backgroundColor = originalColor
-      }, completion: nil)
-    }
   }
 
   func clearHighlight() {
     guard let messageView else { return }
     guard !isServiceMessage else { return }
-    let bubble = messageView.bubbleView
-    // V2 highlight cleanup owns color only; preserve its resize animation.
-    if messageViewImplementation == .v2 {
-      bubble.layer.removeAnimation(forKey: "backgroundColor")
-    } else {
-      bubble.layer.removeAllAnimations()
-    }
-    bubble.backgroundColor = messageView.bubbleColor
+    messageView.bubbleView.clearHighlight()
     messageView.clearMediaHighlight()
   }
 }
@@ -1452,6 +1441,7 @@ extension MessageCollectionViewCell {
 
   /// Add avatar if we have user info
   func resetCell() {
+    clearHighlight()
     resetSwipeState(releaseAvatar: true)
     cancelPendingV2Snapshot()
     (messageView as? UIMessageView2)?.cancelPendingGeometryTransitions()

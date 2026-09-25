@@ -20,6 +20,7 @@ final class MessageBubbleView: UIView {
   private let fillLayer = CAShapeLayer()
   private let lightingLayer = CAGradientLayer()
   private var animatedFillView: MessageBubbleFillView?
+  private var highlightFillView: MessageBubbleFillView?
   private var lightingAlphas: (top: CGFloat, bottom: CGFloat)?
   private var lightingVector: (startY: CGFloat, endY: CGFloat)?
   private var colorTraitRegistration: UITraitChangeRegistration?
@@ -100,7 +101,49 @@ final class MessageBubbleView: UIView {
       views.append(animatedFillView)
       if let mask = animatedFillView.mask { views.append(mask) }
     }
+    if let highlightFillView {
+      views.append(highlightFillView)
+      if let mask = highlightFillView.mask { views.append(mask) }
+    }
     return views
+  }
+
+  func highlight(color: UIColor) {
+    let fill: MessageBubbleFillView
+    if let highlightFillView {
+      fill = highlightFillView
+    } else {
+      fill = MessageBubbleFillView()
+      fill.isUserInteractionEnabled = false
+      fill.layer.opacity = 0
+      insertSubview(fill, belowSubview: contentView)
+      highlightFillView = fill
+    }
+    updateHighlightGeometry()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    let resolvedColor = color.resolvedColor(with: traitCollection).cgColor
+    fill.gradient.colors = [resolvedColor, resolvedColor]
+    CATransaction.commit()
+
+    // The normal fill updates its gradient with actions disabled, so animating
+    // backgroundColor cannot produce a pulse. Keep the highlight independent.
+    let pulse = CAKeyframeAnimation(keyPath: "opacity")
+    pulse.values = [0, 1, 1, 0]
+    pulse.keyTimes = [0, 0.2, 0.45, 1]
+    pulse.duration = 0.9
+    fill.layer.add(pulse, forKey: "messageHighlight")
+  }
+
+  func clearHighlight() {
+    highlightFillView?.layer.removeAnimation(forKey: "messageHighlight")
+  }
+
+  private func updateHighlightGeometry() {
+    guard let highlightFillView else { return }
+    highlightFillView.configure(side: side, scale: traitCollection.displayScale)
+    highlightFillView.frame = bounds
+    highlightFillView.layoutIfNeeded()
   }
 
   func configure(side: MessageBubbleTailSide, animated: Bool = false) {
@@ -188,6 +231,7 @@ final class MessageBubbleView: UIView {
   }
 
   private func updateShape() {
+    updateHighlightGeometry()
     if let animatedFillView {
       animatedFillView.configure(side: side, scale: traitCollection.displayScale)
       animatedFillView.frame = bounds
