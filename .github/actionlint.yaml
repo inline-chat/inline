@@ -1,0 +1,6 @@
+# actionlint 1.7.10 predates GitHub's hosted xcode-27 label.
+# https://github.com/actions/runner-images/blob/main/README.md
+paths:
+  .github/workflows/apple-validation.yml:
+    ignore:
+      - 'label "xcode-27" is unknown'

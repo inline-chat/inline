@@ -1,6 +1,8 @@
 name: inline-platform
 label: Inline
 kind: platform
+provides_tools:
+  - inline
 version: 0.0.18-alpha.0
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
