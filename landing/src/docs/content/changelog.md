@@ -27,7 +27,8 @@ Release notes for Inline apps, developer tools, and integrations.
 - Mark an entire folder or a thread and its replies as read on macOS.
 - Start a new thread from the macOS composer's plus menu, or drop attachments onto the empty page to begin composing.
 - Added **Invite to Space** to the macOS command menu.
-- Improved macOS chat and composer layout, tooltips, and Minimal message metadata.
+- Messages and the composer now stay centered on macOS.
+- Improved macOS tooltips and Minimal message metadata.
 
 ### Better tools and APIs for agents and hackers
 
