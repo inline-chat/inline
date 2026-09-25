@@ -420,7 +420,11 @@ struct InlineTooltipTests {
     try await Task.sleep(for: .milliseconds(200))
     #expect(panel.isVisible)
 
-    try await Task.sleep(for: .milliseconds(400))
+    let dismissalDeadline = Date().addingTimeInterval(2)
+    while Date() < dismissalDeadline && (panel.isVisible || !(window.childWindows ?? []).isEmpty) {
+      pumpMainRunLoop(until: Date().addingTimeInterval(0.02))
+      await Task.yield()
+    }
     #expect((window.childWindows ?? []).isEmpty)
     #expect(!panel.isVisible)
 
@@ -433,6 +437,11 @@ struct InlineTooltipTests {
 
     manager.hideImmediately()
     window.orderOut(nil)
+  }
+
+  @MainActor
+  private func pumpMainRunLoop(until date: Date) {
+    RunLoop.main.run(until: date)
   }
 
   @MainActor

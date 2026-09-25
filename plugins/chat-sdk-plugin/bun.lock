@@ -5,8 +5,8 @@
     "": {
       "name": "@inline-chat/chat-sdk",
       "dependencies": {
-        "@inline-chat/bot-api-types": "^0.1.2",
-        "@inline-chat/bot-client": "^0.1.1",
+        "@inline-chat/bot-api-types": "0.1.3-alpha.0",
+        "@inline-chat/bot-client": "0.1.2-alpha.0",
       },
       "devDependencies": {
         "@chat-adapter/state-memory": "4.40.0",
@@ -23,9 +23,9 @@
   "packages": {
     "@chat-adapter/state-memory": ["@chat-adapter/state-memory@4.40.0", "", { "dependencies": { "chat": "4.40.0" } }, "sha512-NmFFkvUfnDBDS/mkzrtKHdW757EGt0eX3OQH5IPxrKqhjSsNzpqUdkJ/uDB4BP0Rbex4oW/HgwhZ+JGONVbMBQ=="],
 
-    "@inline-chat/bot-api-types": ["@inline-chat/bot-api-types@0.1.2", "", {}, "sha512-Js/3SaaWYZUR3v1HslivZnQX7y4rXa6dIgvrYbgOCXxRca0zE7l4aL0r3W/UmGidMWbeiIi7qPKahrNddktnKg=="],
+    "@inline-chat/bot-api-types": ["@inline-chat/bot-api-types@0.1.3-alpha.0", "", {}, "sha512-GAXVvDohtMSrdId0416HYrNcdIgLSy/mtkOy+WfwJp9OAHajz6Jk1+xbfXeL0s8CKSmPhWpYbGKk9u3qDthFMg=="],
 
-    "@inline-chat/bot-client": ["@inline-chat/bot-client@0.1.1", "", { "dependencies": { "@inline-chat/bot-api-types": "^0.1.2" } }, "sha512-bCt5OkHdNEjBj3KrLgjIPH9qMPL5p8lq173cx9Sk9kEGG5hE3Np6diyh9au44CVgCZfpzSOVhCwbrTm7tqHhiA=="],
+    "@inline-chat/bot-client": ["@inline-chat/bot-client@0.1.2-alpha.0", "", { "dependencies": { "@inline-chat/bot-api-types": "0.1.3-alpha.0" } }, "sha512-fKjvmnXj+qSloRgoZXahmM5NP8gUgj2iIit0R7p1bVBGGA4blCKmX6H1NlfTHGIVIITfQhAfVFT74E7lleXRwg=="],
 
     "@oxlint/binding-android-arm-eabi": ["@oxlint/binding-android-arm-eabi@1.82.0", "", { "os": "android", "cpu": "arm" }, "sha512-a3LB+C5Dsj5b/qtmG/mv5WrzuiXEpg1KF5nXWcEvaoN5TYAqkIvxPOwTPp3Jy/FoGpRo8zsTFhMElMXfeoOEzA=="],
 
