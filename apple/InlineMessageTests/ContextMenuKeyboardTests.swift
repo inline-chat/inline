@@ -8,6 +8,80 @@ import Vision
 @Suite("Message context-menu keyboard lifecycle", .serialized)
 @MainActor
 struct ContextMenuKeyboardTests {
+  @Test("More reactions opens immediately over the live menu and can reopen after dismissal")
+  func reactionSheetKeepsNativeMenu() async throws {
+    let fixture = try await Fixture()
+    defer { fixture.close() }
+    fixture.window.makeKeyAndVisible()
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    cell.updateMessageHoldAction(.reactionsMenu)
+    let source = try #require(cell.messageView?.bubbleView)
+    let rect = source.convert(source.bounds, to: list).intersection(list.bounds)
+    let interaction = try #require(list.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+    let selector = NSSelectorFromString("_presentMenuAtLocation:")
+    let method = try #require(class_getInstanceMethod(type(of: interaction), selector))
+    typealias PresentMenu = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    let present = unsafeBitCast(method_getImplementation(method), to: PresentMenu.self)
+    present(interaction, selector, CGPoint(x: rect.midX, y: rect.midY))
+    defer { interaction.dismissMenu() }
+    try await Task.sleep(for: .seconds(1))
+    #expect(list.isContextMenuInteractionActive)
+    func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+    let plus = try #require(descendants(fixture.window).compactMap { $0 as? UIButton }.first {
+      $0.accessibilityIdentifier == "moreReactions"
+    })
+    let scene = try #require(fixture.window.windowScene)
+    let originalWindows = Set(scene.windows.map(ObjectIdentifier.init))
+    var menuDismissals = 0
+    list.onContextMenuDidEnd = { menuDismissals += 1 }
+    defer { list.onContextMenuDidEnd = nil }
+
+    for attempt in 0 ..< 2 {
+      let start = CACurrentMediaTime()
+      plus.sendActions(for: .touchUpInside)
+      let presentationMilliseconds = (CACurrentMediaTime() - start) * 1_000
+      // Presentation must start in this event, without waiting for the menu's
+      // dismissal animation or a delayed dispatch to the main queue.
+      let overlay = try #require(scene.windows.first {
+        !originalWindows.contains(ObjectIdentifier($0)) && !$0.isHidden
+      })
+      defer { overlay.isHidden = true }
+      let presenter = try #require(overlay.rootViewController)
+      let sheet = try #require(presenter.presentedViewController)
+      Attachment.record(
+        "Tap to presentation request: \(presentationMilliseconds) ms (excludes the native sheet animation).",
+        named: "reaction-sheet-presentation-\(attempt).txt"
+      )
+      #expect(sheet.sheetPresentationController != nil)
+      #expect(list.isContextMenuInteractionActive)
+      #expect(menuDismissals == 0)
+      try await Task.sleep(for: .seconds(1))
+      if attempt == 0 {
+        let image = UIGraphicsImageRenderer(size: fixture.window.bounds.size).image { _ in
+          fixture.window.drawHierarchy(in: fixture.window.bounds, afterScreenUpdates: false)
+          overlay.drawHierarchy(in: overlay.bounds, afterScreenUpdates: false)
+        }
+        Attachment.record(Array(try #require(image.pngData())), named: "reaction-sheet-over-menu.png")
+      }
+      #expect(overlay.isKeyWindow)
+      let search = try #require(descendants(sheet.view).compactMap { $0 as? UISearchTextField }.first)
+      #expect(search.becomeFirstResponder())
+      try await Task.sleep(for: .milliseconds(400))
+      #expect(list.isContextMenuInteractionActive)
+      #expect(menuDismissals == 0)
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        presenter.dismiss(animated: false) { continuation.resume() }
+      }
+      #expect(overlay.isHidden)
+      #expect(overlay.rootViewController == nil)
+      #expect(fixture.window.isKeyWindow)
+      #expect(list.isContextMenuInteractionActive)
+      #expect(menuDismissals == 0)
+    }
+  }
+
   @Test("Native menu displays the bubble before and after arrivals", arguments: [false, true], [false, true])
   func nativePresentation(outgoing: Bool, usesV2: Bool) async throws {
     try await checkNativePresentation(outgoing: outgoing, usesV2: usesV2)

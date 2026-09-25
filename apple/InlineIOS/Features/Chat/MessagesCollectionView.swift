@@ -1130,7 +1130,7 @@ private extension MessagesCollectionView {
     private var theme: IOSThemeSnapshot
     private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
-    private var pendingReactionPickerPresentation: (() -> Void)?
+    private var reactionPickerPresentation: ReactionEmojiPickerPresentation?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
@@ -1443,7 +1443,6 @@ private extension MessagesCollectionView {
       let completion = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
-        self?.presentPendingReactionPicker()
         self?.contextMenuSourceItem = nil
         self?.updateContextMenuSourceVisibility(in: collectionView)
         collectionView.onContextMenuDidEnd?()
@@ -4002,30 +4001,10 @@ private extension MessagesCollectionView {
     }
 
     private func showReactionEmojiPicker(for fullMessage: FullMessage) {
-      guard pendingReactionPickerPresentation == nil else { return }
-      pendingReactionPickerPresentation = { [weak self] in
-        self?.presentReactionEmojiPicker(for: fullMessage)
-      }
-      if (currentCollectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true {
-        dismissContextMenuIfNeeded()
-      } else {
-        presentPendingReactionPicker()
-      }
-    }
-
-    private func presentPendingReactionPicker() {
-      let presentation = pendingReactionPickerPresentation
-      pendingReactionPickerPresentation = nil
-      presentation?()
-    }
-
-    private func presentReactionEmojiPicker(for fullMessage: FullMessage) {
-      guard let collectionView = currentCollectionView as? MessagesCollectionView,
-            collectionView.window != nil,
+      guard reactionPickerPresentation == nil,
+            let collectionView = currentCollectionView as? MessagesCollectionView,
+            let sourceWindow = collectionView.window,
             let presenter = collectionView.findViewController(),
-            presenter.presentedViewController == nil,
-            !presenter.isBeingPresented,
-            !presenter.isBeingDismissed,
             let currentMessage = currentFullMessage(
               stableId: fullMessage.id,
               messageId: fullMessage.message.messageId,
@@ -4038,6 +4017,7 @@ private extension MessagesCollectionView {
         .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
         .map { $0.reaction.emoji })
       let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
+        self?.dismissContextMenuIfNeeded()
         self?.toggleReaction(
           emoji,
           messageStableId: fullMessage.id,
@@ -4046,15 +4026,15 @@ private extension MessagesCollectionView {
           randomId: fullMessage.message.randomId
         )
       }
-      let controller = UIHostingController(rootView: picker)
-      controller.modalPresentationStyle = .pageSheet
-      controller.view.tintColor = theme.primary.uiColor
-      if let sheet = controller.sheetPresentationController {
-        sheet.detents = [.medium(), .large()]
-        sheet.prefersGrabberVisible = true
-        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-      }
-      presenter.present(controller, animated: true)
+      // Keep UIKit's live menu and preview in place. Presenting from the chat
+      // requires dismissing that menu first and serializes two animations.
+      reactionPickerPresentation = ReactionEmojiPickerPresentation(
+        picker: picker,
+        presenter: presenter,
+        over: collectionView.isContextMenuInteractionActive ? sourceWindow : nil,
+        tintColor: theme.primary.uiColor,
+        onDismiss: { [weak self] in self?.reactionPickerPresentation = nil }
+      )
     }
 
     private func createReactionButton(
