@@ -119,7 +119,8 @@ public struct VoiceMessageBubble: View {
   }
 
   private var isDownloading: Bool {
-    guard let voiceID else { return false }
+    // Cache publication can make the file playable before download finalization finishes.
+    guard localURL == nil, let voiceID else { return false }
     return FileDownloader.shared.isVoiceDownloadActive(voiceId: voiceID)
   }
 
@@ -145,27 +146,27 @@ public struct VoiceMessageBubble: View {
   }
 
   private var buttonIconName: String {
+    if localURL != nil {
+      return isPlaying ? "pause.fill" : "play.fill"
+    }
     if isDownloading {
       return "xmark"
     }
     if hasDownloadError {
       return "arrow.clockwise"
     }
-    if localURL != nil {
-      return isPlaying ? "pause.fill" : "play.fill"
-    }
     return "arrow.down"
   }
 
   private var buttonActionLabel: String {
+    if localURL != nil {
+      return isPlaying ? "Pause voice message" : "Play voice message"
+    }
     if isDownloading {
       return "Cancel download"
     }
     if hasDownloadError {
       return "Retry voice message download"
-    }
-    if localURL != nil {
-      return isPlaying ? "Pause voice message" : "Play voice message"
     }
     return "Download voice message"
   }
