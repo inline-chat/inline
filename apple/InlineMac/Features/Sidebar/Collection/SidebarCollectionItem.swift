@@ -95,7 +95,8 @@ private struct SidebarHostedRow: View {
 /// outgoing presentation layer has finished fading. The controller explicitly
 /// disables only rows that leave the semantic snapshot; ordinary layout
 /// attributes never latch pointer ownership.
-private final class SidebarCollectionItemRootView: NSView {
+final class SidebarCollectionItemRootView: NSView {
+  let sceneAuditID = UUID()
   var allowsInteraction = false
 
   override func layout() {
@@ -160,6 +161,7 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
 
   override func loadView() {
     let root = SidebarCollectionItemRootView()
+    root.identifier = NSUserInterfaceItemIdentifier("SidebarCollectionItemRootView")
     root.wantsLayer = true
     // Every interactive row owns a full-width item and applies its visual
     // inset internally. Clipping is therefore a safe final boundary for the

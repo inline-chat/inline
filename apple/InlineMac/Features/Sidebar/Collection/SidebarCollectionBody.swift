@@ -6,6 +6,7 @@ import Logger
 import OSLog
 import Observation
 import QuartzCore
+import Sentry
 import SwiftUI
 
 /// Collection-backed body shared by the production Inbox and All Chats modes.
@@ -484,12 +485,18 @@ final class SidebarCollectionBodyController: NSViewController {
   private var hoverRefreshScheduled = false
   private var boundsObserver: NSObjectProtocol?
   private var frameObserver: NSObjectProtocol?
+  private var liveScrollEndObserver: NSObjectProtocol?
   private var lastViewportSize: CGSize?
   private var scrollEdgeVisibility: SidebarScrollEdgeVisibility?
   private var isAwaitingContent = false
   private var firstCompletedAt: TimeInterval?
   private var lastCompletedStructuralIDs: [SidebarCollectionRow.ID]?
   private var scheduledVerificationGeneration: Int?
+  private var lifecycleLedger = SidebarCollectionLifecycleLedger<UUID, IndexPath>()
+  private var inFlightAuditReason = "initial"
+  private var inFlightAuditAnimated = false
+  private static var loggedSceneAnomalyKinds = Set<String>()
+  private static var reportedSceneAnomalyKinds = Set<String>()
   private var escapeMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var autoscrollTimer: Timer?
@@ -660,6 +667,15 @@ final class SidebarCollectionBodyController: NSViewController {
         self?.viewportFrameDidChange()
       }
     }
+    liveScrollEndObserver = NotificationCenter.default.addObserver(
+      forName: NSScrollView.didEndLiveScrollNotification,
+      object: scrollView,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.schedulePresentationVerification(trigger: "live-scroll-end")
+      }
+    }
   }
 
   override func viewWillDisappear() {
@@ -697,6 +713,9 @@ final class SidebarCollectionBodyController: NSViewController {
     }
     if let frameObserver {
       NotificationCenter.default.removeObserver(frameObserver)
+    }
+    if let liveScrollEndObserver {
+      NotificationCenter.default.removeObserver(liveScrollEndObserver)
     }
     if let resignObserver {
       NotificationCenter.default.removeObserver(resignObserver)
@@ -1362,6 +1381,8 @@ final class SidebarCollectionBodyController: NSViewController {
     snapshotApplyInFlight = true
     snapshotApplyOwnsAnimations = animate
     inFlightGeneration = next.generation
+    inFlightAuditReason = update.reason
+    inFlightAuditAnimated = animate
     inFlightCompletions.append(contentsOf: update.completions)
     inFlightRequiresSettledReload = hasAppliedInitialSnapshot && animate == false
     disableInteractionForRowsLeavingSnapshot(next.orderedIDs)
@@ -1433,6 +1454,8 @@ final class SidebarCollectionBodyController: NSViewController {
       pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
       return
     }
+    inFlightAuditReason = update.reason
+    inFlightAuditAnimated = true
 
     let previousPresentation = presentation
     let target = update.presentation
@@ -2177,7 +2200,10 @@ final class SidebarCollectionBodyController: NSViewController {
     )
   }
 
-  private func schedulePresentationVerification(generation: Int? = nil) {
+  private func schedulePresentationVerification(
+    generation: Int? = nil,
+    trigger: String = "settled-update"
+  ) {
     guard let presentation else { return }
     let generation = generation ?? presentation.generation
     scheduledVerificationGeneration = generation
@@ -2189,16 +2215,34 @@ final class SidebarCollectionBodyController: NSViewController {
       scheduledVerificationGeneration = nil
       collectionView.layoutSubtreeIfNeeded()
       collectionView.displayIfNeeded()
-      verifyPresentationMaterialization(generation: generation)
+      verifyPresentationMaterialization(generation: generation, trigger: trigger)
     }
   }
 
-  private func verifyPresentationMaterialization(generation: Int) {
+  private func verifyPresentationMaterialization(
+    generation: Int,
+    trigger: String
+  ) {
     guard let dataSource, let presentation else { return }
-    guard reorderSession == nil,
+    guard snapshotApplyInFlight == false,
+          isCompletingDisplayUpdate == false,
+          reorderSession == nil,
           localSettle == nil,
           disclosureTransition == nil
     else { return }
+
+    // `visibleItems()` is AppKit's ownership API. Immediate collection
+    // subviews are only a sampled view topology, so a mismatch is recorded
+    // for diagnosis and never used to hide or remove a collection-owned view.
+    let scene = auditAttachedItemRoots()
+    if scene.result.hasAnomaly {
+      captureSceneEvidence(
+        generation: generation,
+        trigger: trigger,
+        dataSource: dataSource,
+        scene: scene
+      )
+    }
     let snapshotCount = dataSource.snapshot().itemIdentifiers.count
     let expectedCount = presentation.orderedIDs.count
     let representedIndexPaths = Set(collectionView.visibleItems().compactMap {
@@ -2268,6 +2312,184 @@ final class SidebarCollectionBodyController: NSViewController {
         expectedVisibleIndexPaths.count,
         visibleCount
       )
+    }
+  }
+
+  private func auditAttachedItemRoots() -> (
+    roots: [SidebarCollectionItemRootView],
+    result: SidebarCollectionSceneAudit.Result<UUID>
+  ) {
+    let viewport = collectionView.visibleRect
+    let ownedRootIDs = Set(collectionView.visibleItems().compactMap {
+      ($0.view as? SidebarCollectionItemRootView)?.sceneAuditID
+    })
+    let roots = collectionView.subviews.compactMap { $0 as? SidebarCollectionItemRootView }
+    let samples = roots.map { root in
+      let presentationFrame = root.layer?.presentation()?.frame
+      let opacity = root.layer?.presentation()?.opacity ?? root.layer?.opacity ?? 1
+      let attachedInViewport = !root.isHidden && root.alphaValue > 0.01
+        && opacity > 0.01
+        && (root.frame.intersects(viewport)
+          || presentationFrame?.intersects(viewport) == true)
+      let nativeRow = root.subviews.first as? SidebarNativeRowView
+      return SidebarCollectionSceneAudit.Root(
+        id: root.sceneAuditID,
+        isAttachedInViewport: attachedInViewport,
+        hasActiveAnimation: !ownedRootIDs.contains(root.sceneAuditID)
+          && hasActiveAnimation(in: root.layer),
+        rendererChildCount: root.subviews.count,
+        nativeContentChildCount: nativeRow?.subviews.count
+      )
+    }
+    return (
+      roots: roots,
+      result: SidebarCollectionSceneAudit.inspect(
+        ownedVisibleRootIDs: ownedRootIDs,
+        attachedRoots: samples
+      )
+    )
+  }
+
+  private func hasActiveAnimation(in layer: CALayer?) -> Bool {
+    guard let layer else { return false }
+    if !(layer.animationKeys()?.isEmpty ?? true) { return true }
+    if hasActiveAnimation(in: layer.mask) { return true }
+    return layer.sublayers?.contains { hasActiveAnimation(in: $0) } ?? false
+  }
+
+  private func captureSceneEvidence(
+    generation: Int,
+    trigger: String,
+    dataSource: NSCollectionViewDiffableDataSource<Section, SidebarCollectionRow.ID>,
+    scene: (
+      roots: [SidebarCollectionItemRootView],
+      result: SidebarCollectionSceneAudit.Result<UUID>
+    )
+  ) {
+    let result = scene.result
+    let kind: String
+    if !result.unexpectedRendererIDs.isEmpty {
+      kind = "renderer-multiplicity"
+    } else if !result.animatingUnownedIDs.isEmpty {
+      kind = "unowned-direct-animated"
+    } else {
+      kind = "unowned-direct-static"
+    }
+    let shouldLog = Self.loggedSceneAnomalyKinds.insert(kind).inserted
+    let shouldReport = SentrySDK.isEnabled
+      && Self.reportedSceneAnomalyKinds.insert(kind).inserted
+    guard shouldLog || shouldReport else { return }
+
+    let activeItems = collectionView.visibleItems().compactMap {
+      $0 as? SidebarCollectionBodyItem
+    }
+    let snapshotCount = dataSource.snapshot().itemIdentifiers.count
+    let viewport = collectionView.visibleRect
+    if shouldLog {
+      os_log(
+        .error,
+        log: Self.diagnostics,
+        "component=collection event=scene-anomaly generation=%{public}d trigger=%{public}@ reason=%{public}@ animated=%{public}d expected=%{public}d snapshot=%{public}d active=%{public}d direct-roots=%{public}d unowned-direct=%{public}d animating-unowned=%{public}d renderer-shape=%{public}d lifecycle-seq=%{public}d displayed=%{public}d viewport-x=%{public}d viewport-y=%{public}d viewport-w=%{public}d viewport-h=%{public}d",
+        generation,
+        trigger as NSString,
+        inFlightAuditReason as NSString,
+        inFlightAuditAnimated ? 1 : 0,
+        presentation?.orderedIDs.count ?? 0,
+        snapshotCount,
+        activeItems.count,
+        scene.roots.count,
+        result.unownedAttachedIDs.count,
+        result.animatingUnownedIDs.count,
+        result.unexpectedRendererIDs.count,
+        lifecycleLedger.sequence,
+        lifecycleLedger.displayed.count,
+        Int(viewport.minX.rounded()),
+        Int(viewport.minY.rounded()),
+        Int(viewport.width.rounded()),
+        Int(viewport.height.rounded())
+      )
+
+      let anomalousIDs = result.unownedAttachedIDs.union(result.unexpectedRendererIDs)
+      let anomalousFrames = scene.roots.filter {
+        anomalousIDs.contains($0.sceneAuditID)
+      }.map(\.frame)
+      let relevantRoots = scene.roots.filter { root in
+        anomalousIDs.contains(root.sceneAuditID)
+          || anomalousFrames.contains(where: { $0.intersects(root.frame) })
+      }
+      for root in relevantRoots.prefix(12) {
+        let item = activeItems.first {
+          ($0.viewIfLoaded as? SidebarCollectionItemRootView)?.sceneAuditID == root.sceneAuditID
+        }
+        let indexPath = item.flatMap { collectionView.indexPath(for: $0) }
+        let semanticMatch = item != nil
+          && indexPath.flatMap { dataSource.itemIdentifier(for: $0) }
+            == item?.representedRowID
+        let presentationLayer = root.layer?.presentation()
+        let presentationFrame = presentationLayer?.frame ?? .null
+        let nativeRow = root.subviews.first as? SidebarNativeRowView
+        let lifecycleEvent = lifecycleLedger.lastEvent(for: root.sceneAuditID)
+        os_log(
+          .error,
+          log: Self.diagnostics,
+          "component=collection event=scene-root root=%{public}@ owned=%{public}d index=%{public}d semantic-match=%{public}d lifecycle-kind=%{public}d lifecycle-index=%{public}d lifecycle-seq=%{public}d hidden=%{public}d alpha=%{public}d model-x=%{public}d model-y=%{public}d model-w=%{public}d model-h=%{public}d presentation-x=%{public}d presentation-y=%{public}d presentation-opacity=%{public}d renderer-children=%{public}d native-children=%{public}d content-children=%{public}d model-sublayers=%{public}d presentation-sublayers=%{public}d animation-keys=%{public}d",
+          root.sceneAuditID.uuidString as NSString,
+          item == nil ? 0 : 1,
+          indexPath?.item ?? -1,
+          semanticMatch ? 1 : 0,
+          lifecycleEvent?.kind == .willDisplay ? 1
+            : lifecycleEvent?.kind == .didEndDisplaying ? 2 : 0,
+          lifecycleEvent?.position.item ?? -1,
+          lifecycleEvent?.sequence ?? -1,
+          root.isHidden ? 1 : 0,
+          Int((root.alphaValue * 100).rounded()),
+          Int(root.frame.minX.rounded()),
+          Int(root.frame.minY.rounded()),
+          Int(root.frame.width.rounded()),
+          Int(root.frame.height.rounded()),
+          presentationFrame.isNull ? -1 : Int(presentationFrame.minX.rounded()),
+          presentationFrame.isNull ? -1 : Int(presentationFrame.minY.rounded()),
+          Int(((presentationLayer?.opacity ?? -1) * 100).rounded()),
+          root.subviews.count,
+          nativeRow?.subviews.count ?? -1,
+          nativeRow?.subviews.first?.subviews.count ?? -1,
+          root.layer?.sublayers?.count ?? -1,
+          presentationLayer?.sublayers?.count ?? -1,
+          root.layer?.animationKeys()?.count ?? 0
+        )
+      }
+    }
+
+    guard shouldReport else { return }
+    let unownedCount = result.unownedAttachedIDs.count
+    let rendererCount = result.unexpectedRendererIDs.count
+    let activeCount = activeItems.count
+    let directRootCount = scene.roots.count
+    let animated = inFlightAuditAnimated
+    let viewportWidth = Int(viewport.width.rounded())
+    let viewportHeight = Int(viewport.height.rounded())
+    let lifecycleSequence = lifecycleLedger.sequence
+    let auditReason = inFlightAuditReason
+    let auditTrigger = trigger
+    Task.detached(priority: .utility) {
+      _ = SentrySDK.capture(message: "mac_sidebar_scene_anomaly") { scope in
+        scope.setLevel(.warning)
+        scope.clearBreadcrumbs()
+        scope.setFingerprint(["mac-sidebar-scene-anomaly", kind])
+        scope.setTag(value: kind, key: "sidebar.scene_kind")
+        scope.setTag(value: auditReason, key: "sidebar.update_reason")
+        scope.setTag(value: auditTrigger, key: "sidebar.audit_trigger")
+        scope.setExtra(value: generation, key: "sidebar.generation")
+        scope.setExtra(value: snapshotCount, key: "sidebar.snapshot_count")
+        scope.setExtra(value: activeCount, key: "sidebar.active_count")
+        scope.setExtra(value: directRootCount, key: "sidebar.direct_root_count")
+        scope.setExtra(value: unownedCount, key: "sidebar.unowned_direct_count")
+        scope.setExtra(value: rendererCount, key: "sidebar.renderer_shape_count")
+        scope.setExtra(value: animated, key: "sidebar.animated")
+        scope.setExtra(value: viewportWidth, key: "sidebar.viewport_width")
+        scope.setExtra(value: viewportHeight, key: "sidebar.viewport_height")
+        scope.setExtra(value: lifecycleSequence, key: "sidebar.lifecycle_sequence")
+      }
     }
   }
 
@@ -5174,6 +5396,24 @@ final class SidebarCollectionBodyController: NSViewController {
 }
 
 extension SidebarCollectionBodyController: NSCollectionViewDelegateFlowLayout {
+  func collectionView(
+    _: NSCollectionView,
+    willDisplay item: NSCollectionViewItem,
+    forRepresentedObjectAt indexPath: IndexPath
+  ) {
+    guard let root = item.viewIfLoaded as? SidebarCollectionItemRootView else { return }
+    lifecycleLedger.willDisplay(root.sceneAuditID, at: indexPath)
+  }
+
+  func collectionView(
+    _: NSCollectionView,
+    didEndDisplaying item: NSCollectionViewItem,
+    forRepresentedObjectAt indexPath: IndexPath
+  ) {
+    guard let root = item.viewIfLoaded as? SidebarCollectionItemRootView else { return }
+    lifecycleLedger.didEndDisplaying(root.sceneAuditID, at: indexPath)
+  }
+
   func collectionView(
     _ collectionView: NSCollectionView,
     layout proposedLayout: NSCollectionViewLayout,
