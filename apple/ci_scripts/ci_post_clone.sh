@@ -19,7 +19,7 @@ if [[ "${CI_XCODE_CLOUD:-FALSE}" != "TRUE" || "${CI_WORKFLOW:-}" != "$package_ch
   exit 0
 fi
 
-checks_script="$script_dir/run-ci-checks.sh"
+checks_script="$repo_root/scripts/apple/run-ci-checks.sh"
 
 if [[ ! -x "$checks_script" ]]; then
   echo "error: missing executable Apple CI checks script at $checks_script" >&2
