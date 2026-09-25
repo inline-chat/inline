@@ -180,6 +180,112 @@ final class SyncTests {
     }
   }
 
+  @Test("RPC rejection diagnostics omit the server-provided message")
+  func syncRequestReasonIsPayloadFree() {
+    let error = ProtocolSessionError.rpcError(
+      errorCode: .peerIDInvalid,
+      message: "private-account-and-peer-data",
+      code: 400
+    )
+    let reason = SyncRequestFailureReason(error)
+    #expect(reason == .serverRejected)
+    let stateCategory = SyncStateRequestFailure(reason: reason).privacySafeErrorCategory
+    let bucketCategory = SyncRecoveryFailure(
+      bucketKind: "user", phase: "request_failed:\(reason.rawValue)"
+    ).privacySafeErrorCategory
+    #expect(stateCategory == "sync_state:request_failed:server_rejected")
+    #expect(bucketCategory == "sync_recovery:user:request_failed:server_rejected")
+    #expect(!stateCategory.contains("private-account-and-peer-data"))
+    #expect(!bucketCategory.contains("private-account-and-peer-data"))
+  }
+
+  @Test("state RPC failure retains discovery until the exact user page commits")
+  func stateRequestFailurePreservesUserReplayAndCheckpoint() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    let apply = RecordingApplyUpdates()
+    let peer = makeChatPeer(chatId: 1)
+    let updates = [
+      makeUpdateReadMaxIdUpdate(seq: 1, date: 110, peer: peer, readMaxId: 1, unreadCount: 1),
+      makeUpdateReadMaxIdUpdate(seq: 2, date: 120, peer: peer, readMaxId: 2, unreadCount: 0),
+    ]
+    let client = FakeProtocolClient(
+      responses: [],
+      gateMethods: [.getUpdates],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 120, updatesFound: false, seq: 2)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 2, date: 120, updates: updates, final: true, resultType: .slice
+        )],
+      ],
+      methodErrors: [.getUpdatesState: [ProtocolSessionError.notConnected]]
+    )
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+
+    await sync.acceptedSessionOpened(sessionID: 1)
+    let pageStarted = await waitForCondition(timeout: .seconds(4)) {
+      let methods = await client.getCalledMethods()
+      return methods.filter { $0 == .getUpdatesState }.count == 2 && methods.contains(.getUpdates)
+    }
+    guard pageStarted else {
+      await client.releaseMethod(.getUpdates)
+      await sync.prepareForTermination()
+      Issue.record("The retried state request did not reach the user page")
+      return
+    }
+    #expect(await storage.getState().lastSyncDate == 10)
+    #expect(await storage.getBucketState(for: .user).seq == 0)
+    #expect(await apply.appliedUpdates.isEmpty)
+
+    await client.releaseMethod(.getUpdates)
+    #expect(await waitForCondition(timeout: .seconds(3)) {
+      let user = await storage.getBucketState(for: .user)
+      let global = await storage.getState()
+      let stats = await sync.getStats()
+      return user.seq == 2 && global.lastSyncDate == 105 &&
+        stats.discoveryTargetsPending == 0 && stats.activeBucketFetches == 0
+    })
+    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await client.getUpdatesStartSequences() == [0])
+    #expect(await client.getUpdatesEndSequences() == [2])
+    await sync.prepareForTermination()
+  }
+
+  @Test("failed user page retains its cursor and retries from the same coordinate")
+  func userPageRequestFailureReplaysWithoutLoss() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let peer = makeChatPeer(chatId: 1)
+    let updates = [
+      makeUpdateReadMaxIdUpdate(seq: 1, date: 110, peer: peer, readMaxId: 1, unreadCount: 1),
+      makeUpdateReadMaxIdUpdate(seq: 2, date: 120, peer: peer, readMaxId: 2, unreadCount: 0),
+    ]
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [.getUpdates: [makeGetUpdatesResult(
+        seq: 2, date: 120, updates: updates, final: true, resultType: .slice
+      )]],
+      methodErrors: [.getUpdates: [ProtocolSessionError.timeout]]
+    )
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeUserHasNewUpdatesSignal(updateSeq: 2)])
+    #expect(await waitForCondition { await sync.getStats().bucketFetchFailures == 1 })
+    #expect(await storage.getBucketState(for: .user).seq == 0)
+    #expect(await apply.appliedUpdates.isEmpty)
+    #expect(await sync.getStats().activeBucketFetches == 1)
+
+    #expect(await waitForCondition(timeout: .seconds(4)) {
+      let state = await storage.getBucketState(for: .user)
+      let activity = await sync.getStats().activeBucketFetches
+      return state.seq == 2 && activity == 0
+    })
+    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await client.getUpdatesStartSequences() == [0, 0])
+    #expect(await client.getUpdatesEndSequences() == [2, 2])
+    await sync.prepareForTermination()
+  }
+
   @Test("only an accepted new session wakes discovery")
   func testAcceptedSessionIsSoleDiscoveryWake() async throws {
     let storage = InMemorySyncStorage()
