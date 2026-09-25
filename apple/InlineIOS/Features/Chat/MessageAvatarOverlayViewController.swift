@@ -229,16 +229,21 @@ private final class MessageAvatarOverlayView: UIView {
 
     entry.tapTarget.onTap = item.onTap
     let frame = resolvedFrame(for: item)
-    guard entry.frame != frame else { return }
+    // Updating frame while a reply swipe transform is active moves the view's base center.
+    let bounds = CGRect(origin: .zero, size: frame.size)
+    let center = CGPoint(x: frame.midX, y: frame.midY)
+    guard entry.frame != frame || entry.view.bounds != bounds || entry.view.center != center else { return }
 
     entry.frame = frame
     if animate {
       UIView.animate(withDuration: 0.18) {
-        entry.view.frame = frame
+        entry.view.bounds = bounds
+        entry.view.center = center
       }
     } else {
       UIView.performWithoutAnimation {
-        entry.view.frame = frame
+        entry.view.bounds = bounds
+        entry.view.center = center
       }
     }
   }
