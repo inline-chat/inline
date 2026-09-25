@@ -26,7 +26,7 @@ public final class InlineTooltipManager: NSObject {
   private var currentPlacement: InlineTooltipPlacement?
   private var mouseDownMonitor: Any?
   private var immediatePresentationDeadline = Date.distantPast
-  private var isPresented = false
+  private(set) var isPresented = false
   private var transitionGeneration = 0
 
   override private init() {

@@ -387,7 +387,7 @@ struct InlineTooltipTests {
     window.orderOut(nil)
   }
 
-  @Test("First hover waits 900 milliseconds and immediate handoff expires after 300 milliseconds")
+  @Test("First hover waits 900 milliseconds and exit grace ends before another delayed hover")
   @MainActor
   func tooltipTiming() async throws {
     let manager = InlineTooltipManager.shared
@@ -419,29 +419,65 @@ struct InlineTooltipTests {
     manager.hide(anchoredTo: target)
     try await Task.sleep(for: .milliseconds(200))
     #expect(panel.isVisible)
+    #expect(manager.isPresented)
 
     let dismissalDeadline = Date().addingTimeInterval(2)
-    while Date() < dismissalDeadline && (panel.isVisible || !(window.childWindows ?? []).isEmpty) {
-      pumpMainRunLoop(until: Date().addingTimeInterval(0.02))
-      await Task.yield()
+    while Date() < dismissalDeadline && manager.isPresented {
+      try await Task.sleep(for: .milliseconds(20))
     }
-    #expect((window.childWindows ?? []).isEmpty)
-    #expect(!panel.isVisible)
+    // The child panel is removed by AppKit's fade completion, which may remain pending
+    // for an undisplayed test window. The grace period must still reach dismiss.
+    #expect(!manager.isPresented)
 
     let nextTarget = NSView(frame: CGRect(x: 150, y: 40, width: 40, height: 28))
     window.contentView?.addSubview(nextTarget)
     manager.show(InlineTooltipContent("After grace"), anchoredTo: nextTarget)
     try await Task.sleep(for: .milliseconds(100))
-    #expect((window.childWindows ?? []).isEmpty)
+    #expect(!manager.isPresented)
     manager.hide(anchoredTo: nextTarget)
 
     manager.hideImmediately()
+    #expect((window.childWindows ?? []).isEmpty)
+    #expect(!panel.isVisible)
     window.orderOut(nil)
   }
 
+  @Test("A displayed tooltip finishes its fade and detaches from its window")
   @MainActor
-  private func pumpMainRunLoop(until date: Date) {
-    RunLoop.main.run(until: date)
+  func displayedWindowAnimatedDismissal() async throws {
+    let manager = InlineTooltipManager.shared
+    manager.hideImmediately()
+
+    let window = NSWindow(
+      contentRect: CGRect(x: 100, y: 100, width: 240, height: 120),
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    defer {
+      manager.hideImmediately()
+      window.orderOut(nil)
+    }
+    window.orderFront(nil)
+    #expect(window.isVisible)
+
+    let target = NSView(frame: CGRect(x: 80, y: 40, width: 40, height: 28))
+    window.contentView?.addSubview(target)
+    manager.showImmediately(
+      InlineTooltipContent("Target"),
+      anchoredTo: target,
+      placement: .automatic
+    )
+    let panel = try #require(window.childWindows?.first)
+    #expect(panel.isVisible)
+
+    manager.hide()
+    let dismissalDeadline = Date().addingTimeInterval(2)
+    while Date() < dismissalDeadline && (panel.isVisible || !(window.childWindows ?? []).isEmpty) {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect((window.childWindows ?? []).isEmpty)
+    #expect(!panel.isVisible)
   }
 
   @MainActor
