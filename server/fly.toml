@@ -1,7 +1,7 @@
 # Version-controlled, non-secret settings for the traffic-serving Machine.
 # The dark validation Machine uses fly.dark-machine.json and has no Fly Proxy
-# service. Supply this app and the immutable image explicitly during the
-# reviewed cutover; this file does not create or select a Machine by itself.
+# service. The manual release workflow selects existing public Machines and
+# supplies a qualified immutable image; this file does not select Machines.
 app = "inline-api"
 primary_region = "fra"
 kill_signal = "SIGTERM"
@@ -13,7 +13,7 @@ kill_timeout = "45s"
   image = "REPLACE_WITH_IMMUTABLE_IMAGE_DIGEST"
 
 [deploy]
-  strategy = "immediate"
+  strategy = "bluegreen"
   # No release_command: run the same image's migrator as a controlled job.
 
 [env]

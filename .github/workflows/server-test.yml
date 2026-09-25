@@ -1,11 +1,24 @@
 name: Server Tests
 
 on:
+  workflow_call:
+    inputs:
+      publish_image:
+        description: Publish the qualified runtime image for a manual release
+        type: boolean
+        default: false
+    secrets:
+      FLY_API_TOKEN:
+        required: false
+    outputs:
+      runtime_image:
+        description: Immutable digest of the qualified runtime image
+        value: ${{ jobs.container.outputs.runtime_image }}
+
   push:
-    branches:
-      - main
     paths:
       - ".github/workflows/server-test.yml"
+      - ".github/workflows/server-deploy.yml"
       - "server/**"
       - "proto/**"
       - "packages/**"
@@ -20,6 +33,7 @@ on:
       - main
     paths:
       - ".github/workflows/server-test.yml"
+      - ".github/workflows/server-deploy.yml"
       - "server/**"
       - "proto/**"
       - "packages/**"
@@ -33,7 +47,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A called workflow inherits the caller's github.workflow; keep this namespace
+  # distinct from the manual release lock to avoid cancelling its own caller.
+  group: server-tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -41,6 +57,8 @@ jobs:
     name: Server Linux image and migration commands
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      runtime_image: ${{ steps.publish.outputs.runtime_image }}
     services:
       postgres:
         image: postgres:15
@@ -56,15 +74,20 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      - name: Require manual main context when publishing
+        if: ${{ inputs.publish_image }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
       - name: Check server container and Fly configuration contracts
-        run: bun test scripts/docker/server-context.test.ts scripts/docker/prune-workspace.test.ts
+        run: bun test scripts/docker/server-context.test.ts scripts/docker/prune-workspace.test.ts scripts/ci/fly-release-machines.test.ts
       - name: Export committed server build context
         run: bun --no-env-file scripts/docker/server-context.ts "$GITHUB_SHA" "$RUNNER_TEMP/server-context"
-      - name: Build runtime and Coolify targets (never push)
+      - name: Build runtime and Coolify targets
         run: |
           docker build --platform linux/amd64 --target runtime --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f "$RUNNER_TEMP/server-context/server/Dockerfile" -t inline-server:ci "$RUNNER_TEMP/server-context"
           docker build --platform linux/amd64 --target coolify --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f "$RUNNER_TEMP/server-context/server/Dockerfile" -t inline-server:ci-coolify "$RUNNER_TEMP/server-context"
@@ -90,6 +113,29 @@ jobs:
         run: |
           docker run --rm --network host -e DATABASE_URL \
             inline-server:ci bun server/dist/core-production-smoke.js --artifact
+
+      - name: Setup Fly registry client
+        if: ${{ inputs.publish_image }}
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+
+      - name: Publish the qualified runtime image without rebuilding
+        if: ${{ inputs.publish_image }}
+        id: publish
+        env:
+          # Reusable workflows cannot receive the caller's environment secrets.
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' inline-server:ci)" = "$GITHUB_SHA"
+          flyctl auth docker
+          tag="registry.fly.io/inline-api:ci-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag inline-server:ci "$tag"
+          docker push "$tag"
+          image=$(docker image inspect --format '{{json .RepoDigests}}' "$tag" | jq -er '.[] | select(startswith("registry.fly.io/inline-api@sha256:"))')
+          [[ "$image" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]]
+          printf 'runtime_image=%s\n' "$image" >> "$GITHUB_OUTPUT"
 
   test:
     name: Server Typecheck, Lint, and Tests

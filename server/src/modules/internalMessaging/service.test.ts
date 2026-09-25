@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto"
 import { describe, expect, it } from "bun:test"
-import { InternalBrokerConfigurationError } from "./redis"
 import { encodeEnvelope } from "./schemas"
 import {
   InternalMessagingService,
@@ -12,10 +11,12 @@ import {
   maxReservedPriorityInboundWorkers,
 } from "./service"
 
-it("rejects service startup with a blank broker URL", async () => {
+it("starts with an unavailable optional broker when its URL is blank", async () => {
   const service = new InternalMessagingService("  ")
   try {
-    await expect(service.start()).rejects.toBeInstanceOf(InternalBrokerConfigurationError)
+    await service.start()
+    expect(service.health).toBe("unavailable")
+    await service.start()
     expect(service.health).toBe("unavailable")
   } finally {
     await service.close()

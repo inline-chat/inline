@@ -1,3 +1,4 @@
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import {
   MessageEntities,
   MessageEntity_Type,
@@ -71,15 +72,14 @@ export function queueFirstMessageExperience(input: FirstMessageExperienceInput):
     return
   }
 
-  queueMicrotask(() => {
-    void materializeFirstMessageExperience(input).catch((error) => {
-      log.warn("First-message subthread experience failed", {
-        chatId: input.chat.id,
-        messageId: input.message.messageId,
-        error,
-      })
+  const work = Promise.resolve().then(() => materializeFirstMessageExperience(input)).catch((error) => {
+    log.warn("First-message subthread experience failed", {
+      chatId: input.chat.id,
+      messageId: input.message.messageId,
+      error,
     })
   })
+  applicationBackgroundWork.track(work)
 }
 
 export async function materializeFirstMessageExperience(

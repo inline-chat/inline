@@ -1,3 +1,4 @@
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -748,15 +749,14 @@ export function queueSubthreadParentUpdate(input: {
   currentUserId: number
   reason: string
 }): void {
-  queueMicrotask(() => {
-    void emitMessageSubthreadUpdateIfNeeded(input).catch((error) => {
-      log.warn("Failed to refresh subthread parent card", {
-        chatId: input.chatId,
-        reason: input.reason,
-        error,
-      })
+  const work = Promise.resolve().then(() => emitMessageSubthreadUpdateIfNeeded(input)).catch((error) => {
+    log.warn("Failed to refresh subthread parent card", {
+      chatId: input.chatId,
+      reason: input.reason,
+      error,
     })
   })
+  applicationBackgroundWork.track(work)
 }
 
 export const emitReplyThreadParentRepliesUpdateIfNeeded = emitMessageSubthreadUpdateIfNeeded

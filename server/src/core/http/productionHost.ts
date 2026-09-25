@@ -485,7 +485,6 @@ export const startCoreProductionServer = async <
 
   try {
     outboundPublications.start()
-    internalMessaging.setBrokerRequiredForReadiness(startClusterServices)
     const inlineProtocolConfiguration =
       providedInlineProtocolConfiguration ??
         loadInlineProtocolConfiguration()
@@ -506,17 +505,11 @@ export const startCoreProductionServer = async <
       fetch: (request, bunServer) => {
         const ingressRejection = ingressPolicy?.(request)
         if (ingressRejection) return ingressRejection
-        // Before the broker subscription completes, surface only its actual
-        // readiness state. No application route or WebSocket can become a
-        // one-node writer while the reconnect loop is still running.
-        const isReadinessRequest =
-          new URL(request.url).pathname === "/readyz"
-        if (
-          (!admitting && !isReadinessRequest) ||
-          httpDrain.isDraining()
-        ) {
+        // Admission waits for local recovery and authority ownership, not for
+        // broker availability. Readiness must obey that same startup gate.
+        if (!admitting || httpDrain.isDraining()) {
           return new Response(
-            "Server shutting down.",
+            httpDrain.isDraining() ? "Server shutting down." : "Server starting.",
             { status: 503 },
           )
         }
@@ -615,8 +608,8 @@ export const startCoreProductionServer = async <
         // make a healthy listener unavailable merely because Redis restarted.
         connectedUserRepair.observeConnectedUsers()
       })
-      await internalMessaging.start()
       await connectedUserRepair.start()
+      await internalMessaging.start()
     }
 
     if (startBackgroundProcesses) {
@@ -682,7 +675,6 @@ export const startCoreProductionServer = async <
       await connectedUserRepair.stop()
       await connectionDirectory.shutdown()
       await internalMessaging.close()
-      internalMessaging.setBrokerRequiredForReadiness(false)
     }
     // Bun stops the listener synchronously, but its bookkeeping Promise may
     // remain pending after WebSocket callbacks. Startup rollback must still
@@ -783,7 +775,6 @@ export const startCoreProductionServer = async <
           unsubscribeTransient()
           if (startClusterServices) {
             await internalMessaging.close()
-            internalMessaging.setBrokerRequiredForReadiness(false)
           }
           // TODO(effect-cutover): retry Bun's graceful stop(false) once its
           // Promise no longer retains a server after any async WebSocket close

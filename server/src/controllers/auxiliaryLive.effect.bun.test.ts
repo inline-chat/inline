@@ -184,11 +184,15 @@ describe(
         expect(effectReadiness.status).toBe(
           legacyReadiness.status,
         )
+        expect(effectReadiness.status).toBe(200)
         expect(effectReadinessBody).toMatchObject({
           ok: legacyReadinessBody.ok,
-          status: legacyReadinessBody.status,
+          // The production adapter now reports optional-broker degradation
+          // without withdrawing readiness; liveness compatibility is unchanged.
+          status: "degraded",
           draining: legacyReadinessBody.draining,
           checks: {
+            broker: { ok: false, error: "broker_unavailable" },
             database: {
               ok:
                 legacyReadinessBody.checks.database.ok,

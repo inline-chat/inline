@@ -4,13 +4,6 @@ export type BrokerHealth = "ready" | "unavailable" | "closed"
 export type BrokerPublication = { status: "published"; subscribers: number } | { status: "unavailable" }
 
 const OPERATION_TIMEOUT_MS = 500
-export class InternalBrokerConfigurationError extends Error {
-  constructor() {
-    // Do not include the supplied URL: it may carry credentials.
-    super("Internal broker URL is required")
-    this.name = "InternalBrokerConfigurationError"
-  }
-}
 type ConnectionPair = { commands: RedisClient; subscriber: RedisClient }
 const closeClient = (client: RedisClient): void => {
   // Bun may already have torn the native client down after a remote close.
@@ -32,12 +25,11 @@ export class InternalRedisTransport {
   private readonly listeners = new Map<string, (message: string) => void>()
   private readonly continuityListeners = new Set<() => void>()
   private readonly readyListeners = new Set<() => void>()
-  private readonly readyWaiters = new Set<{
-    readonly resolve: () => void
-    readonly reject: (error: Error) => void
-  }>()
+  private readonly url: string | undefined
 
-  constructor(private readonly url: string | undefined) {}
+  constructor(url: string | undefined) {
+    this.url = url?.trim() || undefined
+  }
 
   get health(): BrokerHealth { return this.state }
 
@@ -51,35 +43,10 @@ export class InternalRedisTransport {
   }
 
   async start(channels: readonly string[], receive: (message: string, channel: string) => void): Promise<void> {
-    // A missing configuration cannot recover through reconnects. Reject before
-    // registering listeners or opening either connection so startup fails fast.
-    if (!this.url?.trim()) throw new InternalBrokerConfigurationError()
     for (const channel of channels) this.listeners.set(channel, (message) => receive(message, channel))
+    // PostgreSQL recovery is always available. Try the optional fast path once;
+    // a failed attempt reconnects in the background without holding admission.
     await this.connect()
-    await this.waitForReady()
-  }
-
-  /**
-   * Startup deliberately waits for a complete command/subscriber pair. A
-   * process without its required broker must stay unready instead of silently
-   * becoming a one-node writer while its reconnect loop runs in the background.
-   */
-  private waitForReady(): Promise<void> {
-    if (this.state === "ready") return Promise.resolve()
-    if (this.stopped) return Promise.reject(new Error("Broker transport closed before becoming ready"))
-    return new Promise<void>((resolve, reject) => {
-      this.readyWaiters.add({ resolve, reject })
-    })
-  }
-
-  private resolveReadyWaiters(): void {
-    for (const waiter of this.readyWaiters) waiter.resolve()
-    this.readyWaiters.clear()
-  }
-
-  private rejectReadyWaiters(error: Error): void {
-    for (const waiter of this.readyWaiters) waiter.reject(error)
-    this.readyWaiters.clear()
   }
 
   private async connect(): Promise<void> {
@@ -105,9 +72,9 @@ export class InternalRedisTransport {
       await Promise.all([commands.connect(), subscriber.connect()])
       if (this.stopped || this.pair !== pair) return
       for (const [channel, listener] of this.listeners) {
-        await subscriber.subscribe(channel, (message) => {
+        await bounded(subscriber.subscribe(channel, (message) => {
           if (this.pair === currentPair && !this.stopped) listener(message)
-        })
+        }))
       }
       // A socket can close while the other subscription is still being
       // established. Never report a half-connected pair as ready.
@@ -116,7 +83,6 @@ export class InternalRedisTransport {
         return
       }
       this.state = "ready"
-      this.resolveReadyWaiters()
       for (const listener of this.readyListeners) {
         try { listener() } catch { /* readiness observers are best effort */ }
       }
@@ -139,6 +105,9 @@ export class InternalRedisTransport {
     this.state = "unavailable"
     this.pair = undefined
     // Invalidate ownership before closing either socket: onclose may re-enter.
+    // Unsubscribe also clears Bun's local subscription references, including
+    // when the remote socket is already closed. Do not wait on a broken pair.
+    void this.unsubscribe(pair)
     closeClient(pair.commands)
     closeClient(pair.subscriber)
     if (wasReady) for (const listener of this.continuityListeners) {
@@ -196,19 +165,28 @@ export class InternalRedisTransport {
     return this.state === "ready" && pair?.commands.connected && pair.subscriber.connected ? pair : undefined
   }
 
+  private async unsubscribe(pair: ConnectionPair): Promise<void> {
+    await Promise.all(Array.from(this.listeners.keys(), async (channel) => {
+      try { await bounded(pair.subscriber.unsubscribe(channel)) }
+      catch { /* local subscription references are cleared even after disconnect */ }
+    }))
+  }
+
   async close(): Promise<void> {
     this.stopped = true
     this.state = "closed"
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     const pair = this.pair
     this.pair = undefined
-    this.rejectReadyWaiters(
-      new Error("Broker transport closed before becoming ready"),
-    )
-    // Closing the dedicated subscriber removes its subscriptions as well.
     if (pair) {
-      closeClient(pair.commands)
-      closeClient(pair.subscriber)
+      // Bun 1.4 keeps subscribed clients referenced after close(). Explicitly
+      // remove subscriptions before closing so shutdown can exit naturally.
+      try {
+        await this.unsubscribe(pair)
+      } finally {
+        closeClient(pair.commands)
+        closeClient(pair.subscriber)
+      }
     }
   }
 }

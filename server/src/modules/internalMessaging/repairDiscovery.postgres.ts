@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { UpdateBucket, chats, dialogs, members, spaces, updates, users } from "@in/server/db/schema"
+import { UpdateBucket, chatParticipants, chats, dialogs, members, spaces, updates, users } from "@in/server/db/schema"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { captureUpdateDiscoveryWatermark } from "@in/server/modules/updates/updateDiscoveryBarrier"
 import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
@@ -11,7 +11,7 @@ const log = new Log("internalMessaging.repairDiscovery")
 
 /** A conservative prefilter, never authorization. A false positive costs a
  * normal scan; a false negative loses recovery. Cover the entire catalog used
- * by ChatModel.getUserChats: DMs, space threads (including group grants), and
+ * by ChatModel.getUserChats: DMs, Home participants, space threads (including group grants), and
  * dialog-backed linked threads. Include all space members deliberately, even
  * those without chat access. The normal discovery path rechecks authority.
  * SQL returns at most one ID per requested user, irrespective of chat count.
@@ -33,6 +33,11 @@ async function findChangedResourceUsers(requests: readonly RepairDiscoveryReques
       select r.user_id from requested r
       inner join ${chats} on ${chats.maxUserId} = r.user_id
       where ${chats.lastUpdateDate} >= r.since
+      union
+      select r.user_id from requested r
+      inner join ${chatParticipants} on ${chatParticipants.userId} = r.user_id
+      inner join ${chats} on ${chats.id} = ${chatParticipants.chatId}
+      where ${chats.spaceId} is null and ${chats.lastUpdateDate} >= r.since
       union
       select r.user_id from requested r
       inner join ${members} on ${members.userId} = r.user_id

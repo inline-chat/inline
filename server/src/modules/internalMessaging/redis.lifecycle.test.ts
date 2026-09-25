@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { RedisClient } from "bun"
 import { createServer } from "node:net"
-import { InternalBrokerConfigurationError, InternalRedisTransport } from "./redis"
+import { InternalRedisTransport } from "./redis"
 
 const redisExecutable = Bun.which("redis-server")
 const waitUntil = async (condition: () => boolean | Promise<boolean>, timeoutMs = 6_000): Promise<void> => {
@@ -19,18 +19,20 @@ describe("Redis connection pair lifecycle", () => {
     cleanups.length = 0
   })
 
-  it("rejects missing or blank broker configuration before startup", async () => {
+  it("starts without a broker and returns explicit unavailable operations", async () => {
     for (const url of [undefined, " \t "]) {
       const transport = new InternalRedisTransport(url)
-      await expect(transport.start(["required-broker"], () => {})).rejects.toBeInstanceOf(
-        InternalBrokerConfigurationError,
-      )
+      await transport.start(["optional-broker"], () => {})
       expect(transport.health).toBe("unavailable")
+      expect(await transport.publish("optional-broker", "hint")).toEqual({ status: "unavailable" })
+      expect(await transport.setExpiring("activity", "1", 1_000)).toBe(false)
+      expect(await transport.get("activity")).toBeUndefined()
       await transport.close()
+      expect(transport.health).toBe("closed")
     }
   })
 
-  it("keeps waiting when a configured broker is temporarily unavailable", async () => {
+  it("finishes startup when a configured broker is unavailable", async () => {
     const listener = createServer()
     await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve))
     const address = listener.address()
@@ -38,19 +40,13 @@ describe("Redis connection pair lifecycle", () => {
     await new Promise<void>((resolve) => listener.close(() => resolve()))
 
     const transport = new InternalRedisTransport(`redis://127.0.0.1:${address.port}`)
-    let settled = false
-    const start = transport.start(["temporarily-unavailable"], () => {}).finally(() => {
-      settled = true
-    })
-
-    await Bun.sleep(20)
-    expect(transport.health).toBe("unavailable")
-    expect(settled).toBe(false)
-
-    await transport.close()
-    await expect(start).rejects.toThrow(
-      "Broker transport closed before becoming ready",
-    )
+    try {
+      await transport.start(["temporarily-unavailable"], () => {})
+      expect(transport.health).toBe("unavailable")
+      expect(await transport.publish("temporarily-unavailable", "hint")).toEqual({ status: "unavailable" })
+    } finally {
+      await transport.close()
+    }
   })
 
   for (const side of ["commands", "subscriber"] as const) {
@@ -101,6 +97,57 @@ describe("Redis connection pair lifecycle", () => {
       }
       await transport.close()
       await waitUntil(async () => (await clients()).length === 1)
+      // Socket counts alone miss Bun's local subscription references: the
+      // entire child must exit naturally after normal and recovered shutdown.
+      await expectTransportProcessExit(url, control)
+      await expectTransportProcessExit(url, control, side)
+      await waitUntil(async () => (await clients()).length === 1)
     }, 25_000)
   }
 })
+
+async function expectTransportProcessExit(
+  url: string,
+  control: RedisClient,
+  disconnect?: "commands" | "subscriber",
+): Promise<void> {
+  const code = `
+    import { InternalRedisTransport } from ${JSON.stringify(import.meta.dir + "/redis.ts")};
+    const transport = new InternalRedisTransport(${JSON.stringify(url)});
+    const recovered = Promise.withResolvers();
+    let readyCount = 0;
+    transport.onReady(() => { if (++readyCount === 2) recovered.resolve(); });
+    await transport.start(["process-exit-a", "process-exit-b"], () => {});
+    if (transport.health !== "ready") throw new Error("Child broker not ready");
+    console.log("READY");
+    ${disconnect ? "await recovered.promise;" : ""}
+    await transport.close();
+  `
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--no-env-file", "--eval", code],
+    stdin: "ignore", stdout: "pipe", stderr: "pipe",
+  })
+  const timer = setTimeout(() => child.kill("SIGTERM"), 4_000)
+  const reader = child.stdout.getReader()
+  try {
+    const ready = await reader.read()
+    expect(new TextDecoder().decode(ready.value)).toContain("READY")
+    if (disconnect) {
+      const controlId = String(await control.send("CLIENT", ["ID"]))
+      const clients = String(await control.send("CLIENT", ["LIST"]))
+        .trim().split("\n").map((line) => Object.fromEntries(line.split(" ").map((part) => part.split("="))))
+      const pair = clients.filter((client) => client.id !== controlId)
+      expect(pair).toHaveLength(2)
+      const victim = pair.find((client) => (client.sub !== "0") === (disconnect === "subscriber"))
+      if (!victim?.id) throw new Error("Missing child Redis connection to kill")
+      await control.send("CLIENT", ["KILL", "ID", victim.id])
+    }
+    expect(await child.exited).toBe(0)
+    expect(await new Response(child.stderr).text()).toBe("")
+  } finally {
+    clearTimeout(timer)
+    reader.releaseLock()
+    if (child.exitCode === null) child.kill("SIGTERM")
+    await child.exited
+  }
+}

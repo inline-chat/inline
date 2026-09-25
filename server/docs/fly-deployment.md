@@ -1,230 +1,187 @@
 # Fly API deployment and schema migrations
 
-## Decision
+## Release contract
 
-The API and the schema migrator are separate commands in the same immutable
-image. Neither the Fly API command nor the Coolify API entrypoint writes schema
-on startup. The API compares its packaged Drizzle journal with
-`drizzle._migrations` before opening its listener. A missing or behind
-required migration, a gap in the recorded sequence, or a mismatched active
-SQL hash stops startup. `/readyz` also checks the required migration head,
-so restoring an older database removes an already-running API from routing.
-A database ahead of the image is accepted when its known sequence and required
-head match. This permits expand/contract rollouts and a tested app rollback;
-it is **not** proof that an arbitrary newer schema is compatible. Historical
-SQL files changed across previous branches, so old hashes are not treated as
-an exact schema fingerprint; schema compatibility still needs real tests.
+Use one continuously running API initially, with temporary **blue-green** overlap.
+The same runtime supports two continuously running APIs later. Redis is an
+optional acceleration path; PostgreSQL holds durable updates, recovery state,
+authorization and worker claims. Neither API boot nor restart migrates schema.
+The portable image also runs on Coolify against the same authoritative database.
 
-The sole schema writer is `bun server/dist/migrate.js`, executed against a
-direct PostgreSQL connection (never the PgBouncer transaction pool). It takes
-a transaction-scoped PostgreSQL advisory lock on the same connection as the
-DDL, checks that required migrations have no gaps through
-the database head, runs Drizzle, and verifies the required resulting head.
-Concurrent jobs fail before writing. It has a 5-second lock timeout, a
-30-second statement timeout, and a 15-second idle-transaction timeout. The
-runner must use the exact image selected for the API release. A failed
-migration stops promotion; investigate before retrying.
+The API compares its packaged Drizzle journal with `drizzle._migrations` before
+listening. A missing required migration, a gap before the known head, a mismatched
+active SQL hash, or the superseded local 0150 index migration stops startup.
+`/readyz` checks the required migration head and removes a running API from
+routing if the database is restored behind it. Readiness remains false until
+mandatory startup completes. Redis loss is reported as degraded broker health
+but does not remove an otherwise healthy API from routing.
 
-## Dark validation then traffic cutover
+A database ahead of the image is accepted when its known required head matches.
+This permits **tested additive** overlap and rollback; it does not establish
+compatibility with arbitrary newer DDL. Historical branch SQL differs, so the
+ledger is not an exact fingerprint of every historical file or manual change.
 
-The new Machine is test-only until the public IP is switched. The repository
-has two deliberately separate configurations:
+```text
+new API + missing required migration -> refuse startup
+old API + tested additive schema -> permit overlap and rollback
+same required migration ID + different active hash -> refuse startup
+```
 
-- `server/fly.dark-machine.json` starts `INLINE_PROCESS_ROLE=api` and has no
-  `services` entry. It serves the full HTTP/WebSocket/authentication and
-  broker-backed recovery stack, but it starts no shared worker or scheduler and
-  Fly Proxy cannot route user traffic to it.
-- `server/fly.toml` starts `INLINE_PROCESS_ROLE=all`, owns the shared workers
-  and schedulers, and is the only configuration with a public HTTP service.
+## Manual release from main
 
-The dark process has the real database, broker, and application credentials.
-No public routing makes it a safe transport and startup check, not a sandbox.
-Do not exercise writes through it unless that exact test has been approved.
-Do not treat a healthy dark Machine, a public-IP switch, or a failed service
-check as a fence for an old writer.
-
-1. Freeze the source revision; run CI, build the Fly Linux image, exercise it
-   against an isolated database, and record its immutable digest. Inspect every
-   pending migration for old-API compatibility, transaction duration, and lock
-   impact. Confirm a current backup and a tested restore path before risky DDL.
-2. Inspect the live API, Fly Machine, routing, secret names, database ledger,
-   and direct connection mode. Run the packaged read-only gate with
-   `bun server/dist/verify-migrations.js` against the selected database.
-   A behind result is expected before a planned migration and blocks promotion
-   until the controlled migration succeeds. Never use a stale backup for an
-   API-host rollback.
-3. If migrations are pending, run `bun server/dist/migrate.js` once in a
-   controlled one-off execution of that exact image with the direct migration
-   credential. Do not paste a database URL into command arguments or logs.
-   The command is a no-op if the ledger is already current. Confirm its exit
-   status and rerun the read-only gate before continuing.
-4. Create the dark Machine from the immutable image and the separate Machine
-   configuration. Confirm the intended app and the new Machine name first;
-   neither is inferred from this repository. `inline-api-fra-1` is a suggested
-   name only, not a name reserved or checked at Fly. Put the exact immutable
-   digest into a temporary complete Machine config; never create from the
-   checked-in placeholder. If this exact Machine will become the
-   traffic-serving Machine, `FLY_DARK_APP` must equal `FLY_APP`: a Fly Machine
-   cannot move to another app. A dark Machine in a separate app is
-   validation-only; create a separate traffic-serving Machine in `FLY_APP`
-   from the verified digest after it passes its own migration and fencing gate.
-
-   ```sh
-   dark_config="$(mktemp)"
-   jq --arg image "$IMAGE_DIGEST" \
-     '.image = $image' server/fly.dark-machine.json > "$dark_config"
-   fly machine create "$IMAGE_DIGEST" --app "$FLY_DARK_APP" \
-     --name "$DARK_MACHINE_NAME" --region fra \
-     --machine-config "$dark_config"
-   fly machine start "$DARK_MACHINE_ID" --app "$FLY_DARK_APP"
-   fly machine status "$DARK_MACHINE_ID" --app "$FLY_DARK_APP" --display-config
-   ```
-
-   `IMAGE_DIGEST` must be a full immutable `registry/repository@sha256:...`
-   reference. The read-back must show that image,
-   `INLINE_PROCESS_ROLE=api`, and no `services` entry.
-   It must also retain `fly_platform_version=v2` and
-   `fly_process_group=app`; those metadata fields make this Machine eligible
-   for the documented same-app `fly deploy --only-machines` promotion. Do not
-   remove them or use that promotion command for a standalone Machine.
-   Use a private operator tunnel or Machine console to check `/readyz`; do not
-   add a public port, custom hostname, or `http_service` to this Machine.
-
-5. Before making the new Machine public, re-read its complete live configuration
-   and the old writer's state. Machine updates replace configuration rather than
-   patching it, so start from the fresh read-back, preserve required settings,
-   change the role to `all`, and apply the public service specification in
-   `server/fly.toml`. This promotion path requires `FLY_DARK_APP == FLY_APP`.
-   Fence the old API, including request-triggered autostart
-   and every shared worker, before that update starts. Confirm the new Machine's
-   service check, authenticated HTTP, both realtime transports, uploads, Bot
-   API polling/webhooks, workers, and drain/restart before switching the public
-   IP.
-6. Keep the old app and a known-compatible image available but stopped after the
-   public switch. On failure, select exactly one fenced writer and roll back
-   only to an application image confirmed to work with the resulting schema.
-   Never roll back the shared database merely to reverse an API-host deployment.
-
-## Preparing the planned replacement app `inline-api`
-
-The app name is infrastructure identity; the public API remains `api.inline.chat`.
-This repository currently targets `inline-api`, but does not reserve the name
-or create resources. Confirm that app name and the dark-Machine name before the
-live operation. The image is independent of the Fly app name and can be built
-and tested before cutover.
-
-Prepare the exact committed image on an approved Linux builder:
+`.github/workflows/server-deploy.yml` has only `workflow_dispatch`. Dispatch it
+from `main` in GitHub Actions, or use:
 
 ```sh
-revision=$(git rev-parse HEAD)
-context="$(mktemp -d)/context"
-bun --no-env-file scripts/docker/server-context.ts "$revision" "$context"
-docker build --platform linux/amd64 --target runtime \
-  --build-arg SOURCE_COMMIT="$revision" \
-  -f "$context/server/Dockerfile" \
-  -t "registry.fly.io/inline-api:$revision" "$context"
+gh workflow run server-deploy.yml --ref main
 ```
 
-Run the Linux packaging and disposable-database checks before publishing. Record
-the commit, source manifest, image digest, and migration head together. The
-working tree may contain unrelated work; it is not included in this context.
-The Cloudflare ingress implementation must be committed and qualified before
-selecting a production cutover image. The public configuration requires the
-Cloudflare origin secret to be staged in the target app's secret store; do not
-put it in a build argument, this file, or a command line.
+Dispatch is the explicit release action: after configured environment approvals,
+it can run production DDL and replace the serving Machines. Ordinary pushes and
+pull requests only run CI. Production releases share a concurrency group and do
+not cancel an in-progress deployment.
 
-For the separately authorized live operation, check app availability, account
-ownership, deploy access, secret names, target IPs, `api.inline.chat`
-certificate, and Cloudflare origin policy. An existing image in the same Fly
-organization can be reused across apps; the new name does not require a
-rebuild. The dark Machine is created before the public Machine is made
-routable, as described above.
+The workflow performs these steps:
 
-See Fly's [app creation](https://fly.io/docs/flyctl/apps-create/),
-[registry and cross-app image reuse](https://fly.io/docs/blueprints/using-the-fly-docker-registry/),
-and [app secrets](https://fly.io/docs/apps/secrets/) documentation.
+1. Require a manual dispatch from `main`; freeze `github.sha` for that run.
+2. Call the existing Server Tests workflow, irrespective of push path filters.
+   It runs the server suite, builds runtime and Coolify images, and exercises
+   packaged migrations and the final runtime artifact against disposable
+   PostgreSQL. Publish that tested runtime image without rebuilding and record
+   its immutable registry digest. A failing parallel test job prevents promotion
+   even if an unused image was already pushed.
+3. Before DDL, inspect the existing Fly fleet: require healthy managed public
+   Machines, reject unmanaged public writers and record the current image/IDs.
+   Pull that digest in a protected production migration job; verify its source
+   revision label. Run `bun server/dist/migrate.js` followed by the read-only
+   `bun server/dist/verify-migrations.js` using the job's direct DDL credential.
+   A failure stops the release before API replacement.
+4. Re-read the fleet immediately before replacement and require the recorded
+   baseline to match. Replace that set with the same digest using blue-green. A service-free dark Machine is excluded. Refuse
+   incomplete Machine observations; verify the final count, image digest,
+   source revision and passing service checks.
+5. Perform authenticated user-path checks and inspect recovery, errors, worker
+   backlog and drain outcomes. The automated Machine checks are infrastructure
+   evidence, not proof that every client or provider integration works.
 
-## Updating an approved traffic-serving Machine
+The runtime image is `registry.fly.io/inline-api@sha256:...`. The source manifest,
+source revision label and immutable digest identify the candidate. The checked-in
+Fly config contains an image sentinel so an ordinary deploy cannot silently
+build or select an unqualified checkout.
 
-After the migration gate passes, the old writer is fenced, and the complete
-target Machine configuration has been read back and reviewed, use the committed
-public configuration and immutable image digest:
+### Required GitHub setup
+
+- Create a `production` environment restricted to `main`; configure reviewer
+  approval according to the release policy.
+- Store `PRODUCTION_DATABASE_MIGRATION_URL` in that environment. It must be a
+  direct PostgreSQL endpoint reachable from the hosted runner with verified TLS.
+  Only the migration command step receives it, by environment variable rather than a
+  command argument. Do not put this DDL credential in the API app's Fly secrets.
+- Supply an app-scoped `FLY_API_TOKEN` for `inline-api`. The reusable image
+  publishing job requires a repository or organization secret; production jobs
+  may use a separately scoped environment secret of the same name. Environment
+  secrets cannot be forwarded to a reusable workflow through its caller.
+- Audit API database grants: application DML and ledger `SELECT` are required;
+  schema DDL belongs to the migration role. Repository configuration does not
+  itself establish provider role separation.
+
+If the direct database is not reachable from GitHub, use a trusted private
+runner or a separately scoped migration execution environment. Do not silently
+move DDL credentials into Fly API secrets: Fly release Machines inherit those
+same app-scoped secrets.
+
+## Blue-green and graceful shutdown
+
+Fly blue-green starts a replacement beside each selected running Machine,
+waits for health checks, then changes routing and stops the old set. One normally
+becomes two temporarily and returns to one; two normally become four temporarily
+and return to two. `--ha=false` suppresses automatic spare creation. This
+preserves the current capacity policy without a server topology flag.
+
+The workflow uses the equivalent of:
 
 ```sh
-fly deploy --config server/fly.toml --app "$FLY_APP" \
-  --image "$IMAGE_DIGEST" --only-machines "$FLY_MACHINE_ID" \
-  --update-only --ha=false --strategy immediate
+fly deploy --config server/fly.toml --image "$IMAGE_DIGEST" \
+  --only-machines "$PUBLIC_MACHINE_IDS" --strategy bluegreen --ha=false \
+  --signal SIGTERM --wait-timeout 5m --yes
 ```
 
-`IMAGE_DIGEST` must be a full `registry/repository@sha256:...` reference, not a
-mutable tag. Check the app and Machine ID together immediately before execution.
-`--only-machines` restricts the update; `--update-only` prevents creating a new
-Machine; `--ha=false` disables spare-Machine creation. Immediate replacement
-accepts a short outage while the single traffic-serving API drains and restarts.
-The configuration alone cannot enforce a single writer: verify all other API
-Machines and the fallback host are fenced. Do not use this managed-deployment
-command to promote a detached dark Machine without first reviewing its complete
-live configuration and Fly's resulting service diff.
+Both generations can run `INLINE_PROCESS_ROLE=all`. Database claims and ownership
+tokens coordinate durable workers; webhook delivery remains at-least-once, with
+`x-inline-update-id` available for receiver deduplication. Keep Grid provider
+targets stable during routine releases; changing providers requires draining
+old-target effects and a separate cutover.
 
-After deployment, read back the image digest and effective Machine settings,
-then run the user-path checks above. A failed smoke check stops the procedure
-for manual investigation. No automatic rollback or routing switch is armed.
-The operator chooses whether to restore a compatible image, after fencing the
-failed writer. A health check only controls routing; it does not prove recovery.
+On SIGTERM, the old process withdraws admission/readiness, drains admitted HTTP,
+realtime and tracked background work, and disconnects clients for reconnect and
+durable catch-up. WebSockets are not transferred between processes. Fly allows
+45 seconds, with a 40-second application drain budget. Forced termination after
+that deadline still requires durable retries; graceful shutdown is not crash
+recovery. Monitor timeouts and reconnect/catch-up outcomes.
 
-## After multi-Machine behavior is qualified
+## Migration safety and rollback
 
-Use Fly's release phase for ordinary additive migrations:
+The migrator uses one direct PostgreSQL connection and a transaction-scoped
+advisory lock shared with its DDL. It validates history, applies pending Drizzle
+migrations and verifies the resulting head. Competing migration jobs fail before
+writing. Lock timeout is five seconds, statement timeout is 30 seconds, and idle
+transaction timeout is 15 seconds. These are not a total transaction deadline.
 
-```toml
-[deploy]
-  release_command = "bun server/dist/migrate.js"
-  release_command_timeout = "10m"
-  strategy = "rolling"
-```
+Use **expand -> deploy -> backfill -> contract in a later release**. Old and new
+binaries overlap, and a migration can commit even if API deployment later fails.
+Never remove a column or change its meaning while an old binary or rollback
+candidate still requires it. Test the chosen rollback image on the resulting
+schema before promotion.
 
-Fly runs the command once per deploy attempt in a temporary Machine built from
-the new image, before it changes API Machines; a nonzero exit stops that
-deploy. The temporary Machine has network and app secrets but no volumes.
-`/readyz` is the service-level routing check. Rolling and blue/green overlap
-old and new versions, so migrations must follow **expand → deploy → backfill →
-contract in a later release**. Do not drop a column, change a meaning, or
-make an old writer invalid while it may still serve traffic or be rolled back.
-Large backfills and DDL needing `CREATE INDEX CONCURRENTLY` need their own
-reviewed job: the current Drizzle migrator wraps migrations in a transaction.
+Preserve public `0150_space-profiles` and forward `0151_insights-query-indexes`.
+The current migrator wraps pending DDL in one transaction: locks from 0150 can
+remain held while 0151 builds indexes. Qualify pending DDL on representative
+isolated data and choose an appropriate production window. Large backfills or
+`CREATE INDEX CONCURRENTLY` require a separately reviewed procedure; do not
+rewrite historical migrations or place concurrent indexes in this transaction.
 
-Serialize deployments per environment in the release pipeline, pin the image
-digest, use an app-scoped Fly deploy token, and record the source revision,
-image digest, migration result, Fly release, health checks, and authenticated
-smoke result. A schema migration may commit even if subsequent API rollout
-fails; rollback is an app-image decision against the resulting schema.
+Coolify fallback means deploying a compatible API image against the **current
+PlanetScale database**, with the same encryption keys, object storage and ingress
+contract. Keep the fallback stopped until the manual failover. A hostname/IP
+change does not stop its workers. Restoring a database backup is a separate
+disaster-recovery action, not application rollback. There is no automatic schema
+rollback or automatic cross-host traffic switch.
 
-## Options and tradeoffs
+## Initial app setup and regional reliability
 
-| Method                                          | Security and failure mode                                                                                                                                                                  | Performance and cost                                                                                                                 | Fit                                                                                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Migrate in every API startup                    | Every API needs DDL credentials; concurrent boots can race and a restart can mutate the database.                                                                                          | Adds migration work and potential DDL locks to every boot.                                                                           | Reject.                                                                                               |
-| Controlled one-off job before promotion         | Can use a separate direct DDL role and a short-lived execution identity; operator/pipeline must keep image and target aligned.                                                             | No standing migration Machine; one bounded job per release.                                                                          | Recommended for dark validation and the current one-API traffic cutover.                              |
-| Fly `release_command`                           | One job per deploy attempt and deploy stops on failure. Fly gives the release Machine the app's secrets, so the normal API Machines can also access any DDL credential stored on that app. | Temporary VM billed only while running; no standing service. Default VM size follows the app and can be reduced after qualification. | Recommended automatic path after multi-Machine qualification if shared-secret exposure is acceptable. |
-| Separate migration Fly app or trusted CI runner | Strongest credential split: deploy token and DDL role can be confined to the migrator; more configuration and a second failure surface.                                                    | No continuously running worker required; stopped Fly Machines incur only rootfs cost. Additional pipeline maintenance.               | Use if least-privilege DDL isolation is required.                                                     |
+`inline-api` is the intended Fly app identity; `api.inline.chat` stays public.
+The routine workflow requires an already bootstrapped healthy public Machine.
+Before first use, confirm account/app ownership, stage runtime secrets, allocate
+networking and certificates, enforce the Cloudflare origin policy, and qualify
+one Machine from the tested image. A new app or cross-host cutover is a separate
+operation from replacing an existing managed fleet.
 
-For every option, keep credentials in managed secrets and use strict TLS to
-PlanetScale. The API role needs application DML and `SELECT` on
-`drizzle._migrations`, not schema DDL once the migration runner has a separate
-role. The current credentials and provider role grants must be audited before
-claiming that separation exists. Do not activate PgBouncer until its separate
-role timeout defaults and exact image are qualified; migrations remain direct.
+`fly.dark-machine.json` remains an optional service-free validation configuration.
+It uses the same image and real dependencies with `INLINE_PROCESS_ROLE=api`,
+which omits shared workers. It is not a sandbox, cannot receive Fly Proxy traffic,
+and must not be promoted implicitly. A validation-only Machine in another app
+cannot be moved into `inline-api`. Verify actual old/new binary compatibility
+and stop the retired host's workers before completing a cross-host cutover.
 
-One running API has the lowest Fly compute cost and a host-failure window.
-Two continuously running APIs roughly double API compute plus connections but
-provide a healthy alternative during host failure. Rolling/canary/blue-green
-temporarily add compute during replacement; blue/green starts a full new set
-before traffic moves. Migration checking reads roughly 151 small ledger rows
-once on startup and one small head query per `/readyz` probe, not per user
-request. DDL locks and data rewrite are the performance risk, not the gate.
+Redis can be added or replaced without changing database authority. A regional
+broker outage leaves connected clients using slower PostgreSQL recovery;
+typing/presence may disappear and cross-instance private bot operations return
+retryable failure. This does not make PostgreSQL or the single API region highly
+available. A Redis regional replica with managed failover or Sentinel is a
+separate availability decision. Two unrelated Redis servers are not a failover
+pair; do not introduce NATS solely for this release's optional fast path.
 
-Fly references: [release commands and strategies](https://fly.io/docs/reference/configuration/#the-deploy-section),
-[service health checks](https://fly.io/docs/reference/health-checks/),
-[secrets](https://fly.io/docs/apps/secrets/),
-[scoped tokens](https://fly.io/docs/security/tokens/), and
-[Machine pricing](https://fly.io/docs/about/pricing/).
+## Qualification boundaries
+
+Local tests cover source behavior; CI Linux builds cover packaging; provider
+readback and real user-path exercises cover the live release. Do not substitute
+one for another. Before rollout, record pending migration/lock evidence, the
+compatible rollback digest, broker-loss repair behavior, shared-worker overlap,
+client reconnect, and supported uploads/Bot API/realtime paths. `/readyz` and
+`fly deploy` success alone are insufficient.
+
+References: [Fly deployments](https://docs.fly.io/launch/deploy/),
+[seamless deployments](https://docs.fly.io/blueprints/seamless-deployments/),
+[Fly app secrets](https://fly.io/docs/apps/secrets/),
+[GitHub reusable workflows](https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations),
+and [Redis Sentinel](https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/).

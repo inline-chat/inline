@@ -96,7 +96,6 @@ export class InternalMessagingService {
   private degradedSharedLimitTotal = 0
   private started = false
   private startPromise: Promise<void> | undefined
-  private brokerRequiredForReadiness = false
   private lastRevocationSaturationWarningAt = 0
 
   constructor(url: string | undefined = process.env["REDIS_URL"] ?? process.env["VALKEY_URL"]) {
@@ -106,9 +105,6 @@ export class InternalMessagingService {
   }
 
   get health(): BrokerHealth { return this.transport.health }
-  get isBrokerRequiredForReadiness(): boolean {
-    return this.brokerRequiredForReadiness
-  }
   get diagnostics() {
     return {
       invalidFrames: this.invalidFrames,
@@ -185,10 +181,6 @@ export class InternalMessagingService {
       await Promise.allSettled([start])
     }
     this.started = false
-  }
-  /** Production host ownership sets this before accepting client traffic. */
-  setBrokerRequiredForReadiness(required: boolean): void {
-    this.brokerRequiredForReadiness = required
   }
   onContinuityLost(listener: () => void): () => void { this.continuityListeners.add(listener); return () => this.continuityListeners.delete(listener) }
   onReady(listener: () => void): () => void { this.readyListeners.add(listener); return () => this.readyListeners.delete(listener) }

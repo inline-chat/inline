@@ -36,8 +36,9 @@ in the deployment platform's secret store and are never build arguments.
 
 After Linux image and disposable-database checks pass, push the exact tested
 image using the separately authorized release process. Record its registry
-`@sha256:` digest and deploy that digest without rebuilding. Neither the context
-exporter nor repository CI publishes or deploys anything.
+`@sha256:` digest and deploy that digest without rebuilding. The context exporter and ordinary push/PR CI do not publish or deploy. The
+manual release workflow publishes the tested runtime digest, migrates once, and
+deploys it as described in [the deployment guide](fly-deployment.md).
 
 ## Packaged commands
 
@@ -61,11 +62,21 @@ against disposable PostgreSQL in the final Linux image.
 
 The command is `bun server/dist/index.js`: one process serving HTTP and
 WebSockets on port 8000. Production requires an explicit
-`INLINE_PROCESS_ROLE`: `api` serves the application and broker-backed realtime
+`INLINE_PROCESS_ROLE`: `api` serves the application and PostgreSQL-backed realtime
 recovery without shared workers, while `all` also owns the shared workers and
 schedulers. The runtime target has no nginx, process supervisor, bundled
 database, health wrapper, or migration-on-start wrapper. Fly Proxy provides
 public TLS and routes directly to the traffic-serving `all` process.
+
+Redis is optional. With no URL, or while a configured broker reconnects, the
+API starts its PostgreSQL recovery loop and remains routable when its required
+dependencies are healthy. `/readyz` exposes `checks.broker.ok=false` and
+`status=degraded` with HTTP 200 after startup; PostgreSQL, schema, unsafe clock
+and lifecycle failures still prevent readiness. Cross-instance durable hints
+are recovered by a jittered 15–30 second sweep plus processing time. Typing and
+presence may disappear; remote private bot operations can fail retryably.
+Older clients whose latest account update cannot be replayed receive a bounded
+reconnect fallback; see [its suppression and capacity limits](recovery-discovery.md#older-client-recovery).
 
 Connected sessions are authenticated on admission. A committed revocation
 closes local sockets immediately and publishes a peer invalidation. To catch
@@ -124,18 +135,20 @@ Fly secrets; never place them in this file, build arguments, or source control.
 Starting or restarting this image never runs schema migrations. It verifies
 the packaged migration history against the database before listening, and
 `/readyz` checks the required migration head. The explicit migration command
-and the current one-API and future multi-Machine release procedures are in
-[the Fly deployment guide](fly-deployment.md). The Fly configuration does not
-automatically run migrations or create additional active APIs.
+and the manual blue-green release procedure are in
+[the Fly deployment guide](fly-deployment.md). Neither API startup nor `fly.toml` runs migrations. The manual workflow runs
+migrations separately and preserves the existing public Machine count while
+allowing temporary old/new overlap.
 
 The temporary dark Machine runs as `api`, not `all`: it keeps HTTP, WebSockets,
 authentication, broker/cache subscriptions and repair available for isolated
 validation, but it does not start shared workers or schedulers. It is not a
 second public API. Its absence from Fly Proxy routing is the fence against user
 traffic; do not send a test mutation unless that test is separately approved.
-At cutover, independently fence the old traffic-serving writer before making
-the new `all` Machine routable. A public-IP change, DNS change, or failing
-health check is not a writer fence.
+Routine blue-green releases overlap compatible `all` Machines. For the initial
+cross-host cutover, separately qualify old/new compatibility and stop the
+retired host and its workers. A public-IP change, DNS change, or failing
+health check does not stop a writer.
 
 [server/fly.toml](../fly.toml) is the committed traffic-serving configuration.
 It names the planned replacement app, `inline-api`; the name and the new

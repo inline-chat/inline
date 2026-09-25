@@ -4,6 +4,7 @@ import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionIn
 import { db } from "@in/server/db"
 import { sessions } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
+import { connectionBackgroundWork } from "@in/server/ws/backgroundWork"
 import { ConnVersion, connectionManager } from "@in/server/ws/connections"
 
 setupTestLifecycle()
@@ -35,6 +36,9 @@ describe("handleConnectionInit", () => {
           sendRpcReply() {},
         },
       )
+
+      // Authentication returns before the detached metadata write completes.
+      await connectionBackgroundWork.waitForIdle()
 
       const updatedSession = await db
         .select({ clientVersion: sessions.clientVersion, osVersion: sessions.osVersion })

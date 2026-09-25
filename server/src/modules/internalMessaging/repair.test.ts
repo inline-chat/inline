@@ -584,7 +584,7 @@ describe("ConnectedUserRepair", () => {
     expect(replayed).toEqual([9, 10])
   })
 
-  test("does not repeat or disconnect a fixed unreplayable historical frontier", async () => {
+  test("reconnects once for a fixed unreplayable frontier instead of silently completing legacy repair", async () => {
     for (const replayResult of ["missing_record", "filtered_record"] as const) {
       const { runtime, hinted, replayed, closed } = createRuntime({
         states: [
@@ -604,7 +604,7 @@ describe("ConnectedUserRepair", () => {
 
       expect(hinted).toEqual([9])
       expect(replayed).toEqual([9])
-      expect(closed).toEqual([])
+      expect(closed).toEqual([{ userId: 71, reason: "no_replayable_record" }])
     }
   })
 
@@ -627,7 +627,7 @@ describe("ConnectedUserRepair", () => {
 
     expect(hinted).toEqual([9, 10])
     expect(replayed).toEqual([9, 10])
-    expect(closed).toEqual([])
+    expect(closed).toEqual([{ userId: 71, reason: "no_replayable_record" }])
   })
 
   test("closes only after a live transport refuses a user recovery hint", async () => {
@@ -682,7 +682,57 @@ describe("ConnectedUserRepair", () => {
 
     expect(hinted).toEqual([9, 9])
     expect(replayed).toEqual([9, 9])
-    expect(closed).toEqual([])
+    expect(closed).toEqual([
+      { userId: 71, reason: "no_replayable_record" },
+      { userId: 71, reason: "no_replayable_record" },
+    ])
+  })
+
+  test("an unreplayable frontier remains pending when its reconnect is rate limited", async () => {
+    const { runtime, replayed } = createRuntime({
+      states: Array.from({ length: 4 }, (_, i) => ({ date: BigInt(i + 1), seq: 9 })),
+      replay: () => "missing_record",
+    })
+    const closes: number[] = []
+    runtime.closeForUnrecoverableFrontier = (_userId, _reason, _epoch, frontier) => {
+      closes.push(frontier!)
+      return closes.length === 1 ? 0 : "frontier_already_reconnected"
+    }
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+    await repair.start()
+    await scan(repair)
+    await scan(repair)
+    await scan(repair)
+    repair.observeConnection(71)
+    await repair.waitForIdle()
+    expect(closes).toEqual([9, 9, 9])
+    expect(replayed).toEqual([9, 9, 9])
+  })
+
+  test("a filtered replay from an old connection epoch cannot reconnect its replacement", async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<CurrentUserReplayResult>()
+    let epoch = 1
+    const { runtime, closed } = createRuntime({
+      states: [{ date: 1n, seq: 9 }],
+      replay: async () => { started.resolve(); return release.promise },
+    })
+    runtime.getConnectionEpoch = () => epoch
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+    try {
+      await repair.start()
+      repair.observe(71)
+      await started.promise
+      epoch = 2
+      release.resolve("filtered_record")
+      await repair.waitForIdle()
+      expect(closed).toEqual([])
+    } finally {
+      release.resolve("cancelled")
+      await repair.stop()
+    }
   })
 
   test("preserves a new admission's repair demand when an earlier discovery scan completes", async () => {

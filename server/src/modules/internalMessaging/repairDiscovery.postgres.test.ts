@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import {
-  chats, chatParticipants, chatParticipantGroups, dialogs, members, spaces, updates,
+  chats, chatParticipants, chatParticipantGroups, dialogs, members, messages, spaces, updates,
   UpdateBucket, userGroups, userGroupMembers, users,
 } from "@in/server/db/schema"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
@@ -13,6 +13,10 @@ import type { RepairDiscoverySnapshot } from "./repairDiscovery"
 import { ConnectedUserRepair } from "./repair"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { measureOperation } from "@in/server/__tests__/performance/measure"
+import { ChatModel } from "@in/server/db/models/chats"
+import { createChat } from "@in/server/functions/messages.createChat"
+import { pinMessage } from "@in/server/functions/messages.pinMessage"
+import { loadRepairUserFrontiers } from "./repairDiscovery.postgres"
 
 setupTestLifecycle()
 
@@ -41,6 +45,134 @@ const compare = async (userId: number, snapshot?: RepairDiscoverySnapshot, since
 }
 const prepare = (userId: number, since = date) => discovery.prepare([{ userId, date: since }], watermark)
 
+const homeFixture = async () => {
+  const creator = await testUtils.createUser("home-creator@example.test")
+  const participant = await testUtils.createUser("home-participant@example.test")
+  const outsider = await testUtils.createUser("home-outsider@example.test")
+  const { chat } = await createChat({
+    title: "Home recovery", participants: [{ userId: BigInt(participant.id) }],
+  }, testUtils.functionContext({ userId: creator.id }))
+  const chatId = Number(chat.id)
+  expect(await db.query.dialogs.findMany({ where: { chatId } })).toMatchObject([{ userId: creator.id }])
+  return { creator, participant, outsider, chatId }
+}
+
+test("the authoritative catalog includes Home participants without requiring a dialog", async () => {
+  const { creator, participant, outsider, chatId } = await homeFixture()
+  await db.update(chats).set({ lastUpdateDate: changedAt }).where(eq(chats.id, chatId))
+  for (const user of [creator, participant]) {
+    const catalog = await ChatModel.getUserChats({ userId: user.id })
+    expect(catalog.chats.map(chat => chat.id)).toEqual([chatId])
+    const snapshots = await prepare(user.id)
+    expect(snapshots.get(user.id)?.resourcesUnchangedSince).toBeUndefined()
+    const { result, hints } = await compare(user.id, snapshots.get(user.id))
+    expect(result.updatesFound).toBe(true)
+    expect(hints.flatMap(([, values]) => values).map(value => value.update)).toMatchObject([{
+      oneofKind: "chatHasNewUpdates", chatHasNewUpdates: { chatId: BigInt(chatId) },
+    }])
+    expect((await ChatModel.getUserChats({ userId: user.id, where: {
+      lastUpdateAtGreaterThanEqual: new Date(changedAt.getTime() + 1),
+    } })).chats).toEqual([])
+  }
+
+  // Even a stale outsider dialog may nominate a candidate, but cannot grant access.
+  await db.insert(dialogs).values({ userId: outsider.id, chatId })
+  expect((await ChatModel.getUserChats({ userId: outsider.id })).chats).toEqual([])
+  const outsiderSnapshot = (await prepare(outsider.id)).get(outsider.id)
+  expect(outsiderSnapshot?.resourcesUnchangedSince).toBeUndefined()
+  const outsiderDiscovery = await compare(outsider.id, outsiderSnapshot)
+  expect(outsiderDiscovery.result.updatesFound).toBe(false)
+  expect(outsiderDiscovery.hints).toEqual([])
+})
+
+test("a lost Home unpin hint is repaired before the scheduler advances either participant's checkpoint", async () => {
+  // Drop the real mutation's live delivery. Recovery must use the durable chat
+  // bucket; no internal event is sent to this scheduler.
+  const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+  let repair: ConnectedUserRepair | undefined
+  try {
+    const { creator, participant, chatId } = await homeFixture()
+    const userIds = [creator.id, participant.id]
+    await db.insert(messages).values({ chatId, fromId: creator.id, messageId: 1, pinnedAt: changedAt })
+    await UserBucketUpdates.enqueue({ userId: creator.id, update: {
+      oneofKind: "userDialogArchived",
+      userDialogArchived: { peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } }, archived: false },
+    } })
+    const frontiers = await loadRepairUserFrontiers(userIds)
+    expect([...frontiers.values()].every(seq => seq > 0)).toBe(true)
+    await db.update(chats).set({ lastUpdateDate: new Date(Number(date - 10n) * 1000) }).where(eq(chats.id, chatId))
+
+    let sweepWatermark = watermark
+    const scans: { userId: number; requestedDate: bigint; result: Awaited<ReturnType<typeof discovery.discover>>;
+      hints: Parameters<typeof RealtimeUpdates.pushToUser>[1] }[] = []
+    const userHints: number[] = []
+    const replay: number[] = []
+    repair = new ConnectedUserRepair({
+      discovery: {
+        ...discovery,
+        captureWatermark: async () => sweepWatermark,
+        async discover(request, options) {
+          const result = await discovery.discover(request, options)
+          // Capture before returning the result that advances the scheduler's
+          // checkpoint. A later empty sweep must not hide a first-sweep miss.
+          scans.push({ userId: request.userId, requestedDate: request.date, result,
+            hints: structuredClone(push.mock.calls.filter(([id]) => id === request.userId).flatMap(([, values]) => values)) })
+          return result
+        },
+      },
+      connectedUserIds: () => userIds, hasConnections: () => true, getConnectionEpoch: () => 1,
+      emitUserHint: async (id) => { userHints.push(id); return 1 },
+      replayCurrentUserUpdate: async (id) => { replay.push(id); return "replayed" },
+      closeForUnrecoverableFrontier: () => { throw new Error("Unexpected disconnect") },
+      deliverTargetedBucketHint: async () => { throw new Error("Unexpected broker event") },
+    })
+    await repair.start()
+    push.mockClear()
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    expect(userHints.toSorted()).toEqual(userIds.toSorted())
+    expect(replay.toSorted()).toEqual(userIds.toSorted())
+    expect(scans).toHaveLength(2)
+    expect(scans.every(scan => scan.result.updatesFound === false)).toBe(true)
+
+    const mutation = await pinMessage({
+      peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } }, messageId: 1n, unpin: true,
+    }, testUtils.functionContext({ userId: creator.id }))
+    const unpinSeq = mutation.updates[0]!.seq!
+    expect((await db.query.messages.findFirst({ where: { chatId, messageId: 1 } }))?.pinnedAt).toBeNull()
+    expect(await loadRepairUserFrontiers(userIds)).toEqual(frontiers)
+    const changed = await db.query.chats.findFirst({ where: { id: chatId } })
+    sweepWatermark = new Date(changed!.lastUpdateDate!.getTime() + 2_000)
+    const recoveryDate = BigInt(Math.floor(sweepWatermark.getTime() / 1000))
+    push.mockClear()
+    scans.length = 0
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    expect(scans).toHaveLength(2)
+    for (const scan of scans) {
+      expect(scan.requestedDate).toBe(date + 10n)
+      expect(scan.result).toEqual({ date: recoveryDate, seq: frontiers.get(scan.userId), updatesFound: true })
+      expect(scan.hints.map(hint => hint.update)).toMatchObject([{
+        oneofKind: "chatHasNewUpdates", chatHasNewUpdates: { chatId: BigInt(chatId), updateSeq: unpinSeq },
+      }])
+    }
+
+    push.mockClear()
+    scans.length = 0
+    sweepWatermark = new Date(sweepWatermark.getTime() + 10_000)
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    expect(scans).toHaveLength(2)
+    expect(scans.every(scan => scan.requestedDate === recoveryDate && scan.result.updatesFound === false)).toBe(true)
+    expect(push).not.toHaveBeenCalled()
+    expect(userHints.toSorted()).toEqual(userIds.toSorted())
+    expect(replay.toSorted()).toEqual(userIds.toSorted())
+  } finally {
+    await repair?.stop()
+    push.mockRestore()
+  }
+})
+
 for (const kind of ["dm-min", "dm-max", "public", "private", "group", "linked", "space"] as const) {
   test(`batched discovery preserves ${kind} hints at the inclusive checkpoint`, async () => {
     let { user, space } = await fixture()
@@ -49,7 +181,9 @@ for (const kind of ["dm-min", "dm-max", "public", "private", "group", "linked", 
       await db.update(spaces).set({ lastUpdateDate: changedAt, updateSeq: 7 }).where(eq(spaces.id, space.id))
     } else if (kind.startsWith("dm")) {
       let other = await testUtils.createUser("other@example.test")
-      if (kind === "dm-max") [user, other] = [other, user]
+      if ((kind === "dm-min" && user.id > other.id) || (kind === "dm-max" && user.id < other.id)) {
+        [user, other] = [other, user]
+      }
       const [chat] = await db.insert(chats).values({
         type: "private", minUserId: kind === "dm-min" ? user.id : other.id,
         maxUserId: kind === "dm-min" ? other.id : user.id, lastUpdateDate: changedAt, updateSeq: 7,

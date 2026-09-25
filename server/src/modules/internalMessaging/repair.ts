@@ -1,4 +1,4 @@
-import { connectionManager } from "@in/server/ws/connections"
+import { connectionManager, type DurableRepairCloseResult } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
 import { UpdateBucket, chats, updates } from "@in/server/db/schema"
@@ -24,10 +24,9 @@ type Observation = {
   /** Highest frontier whose typed user catch-up hint this admission accepted. */
   hintedSeq: number
   /**
-   * Highest frontier for which this admission completed one legacy replay
-   * attempt. This is not a client acknowledgement: missing and filtered
-   * historical records are expected outcomes for an authenticated getUpdates
-   * page, and must not be retried forever.
+   * Highest frontier for which this admission replayed a record or completed
+   * the bounded reconnect fallback. This is not a client acknowledgement.
+   * A refused/cooldown-limited fallback stays pending for another sweep.
    */
   replayAttemptedSeq: number
   /** Bound reconnect attempts for a frontier that cannot be replayed to older clients. */
@@ -68,7 +67,8 @@ export type ConnectedUserRepairRuntime = {
     userId: number,
     reason: "no_replayable_record" | "transport_not_accepted",
     expectedConnectionEpoch: number,
-  ) => number
+    frontier?: number,
+  ) => DurableRepairCloseResult
   /** Sends one current bucket hint without starting a cross-bucket discovery scan. */
   deliverTargetedBucketHint: (event: DurableUpdatesAvailableEvent) => Promise<void>
 }
@@ -81,8 +81,8 @@ const runtime: ConnectedUserRepairRuntime = {
   getConnectionEpoch: (userId) => connectionManager.getUserConnectionEpoch(userId),
   emitUserHint: emitUserHasNewUpdates,
   replayCurrentUserUpdate: replayCurrentUserUpdate,
-  closeForUnrecoverableFrontier: (userId, reason, expectedConnectionEpoch) =>
-    connectionManager.closeUserConnectionsForDurableRepair(userId, reason, expectedConnectionEpoch),
+  closeForUnrecoverableFrontier: (userId, reason, expectedConnectionEpoch, frontier) =>
+    connectionManager.closeUserConnectionsForDurableRepair(userId, reason, expectedConnectionEpoch, frontier),
   deliverTargetedBucketHint: deliverTargetedBucketHint,
 }
 
@@ -132,7 +132,8 @@ export class ConnectedUserRepair {
   }
 
   private async startAtGeneration(generation: number): Promise<void> {
-    // Call after broker subscription. An inclusive warm cursor also covers
+    // Start after subscription handlers are installed, before serving connections.
+    // An inclusive warm cursor also covers
     // mutations that raced setup, without treating an absent date as repair.
     const watermark = await this.repairRuntime.discovery.captureWatermark()
     if (generation !== this.generation || this.enabled) return
@@ -445,10 +446,18 @@ export class ConnectedUserRepair {
         const replayConnectionEpoch = this.repairRuntime.getConnectionEpoch(userId)
         const replay = await this.repairRuntime.replayCurrentUserUpdate(userId, nextSeq, isCurrentScan)
         if (!isCurrentScan() || replay === "cancelled") return
-        if (replay === "replayed" || replay === "missing_record" || replay === "filtered_record") {
-          // This records fallback issuance only. It does not assert that a
-          // client applied the hint or that a historical record was visible.
+        if (replay === "replayed") {
           replayAttemptedSeq = nextSeq
+        } else if (replay === "missing_record" || replay === "filtered_record") {
+          // Released clients may ignore the typed hint. A protocol-open edge
+          // wakes their authenticated user catch-up even without a safe record
+          // to replay. The connection owner retains its bounded frontier guard
+          // across the synchronous close, admission, and observation pruning.
+          const closed = this.repairRuntime.closeForUnrecoverableFrontier(
+            userId, "no_replayable_record", replayConnectionEpoch, nextSeq,
+          )
+          if (closed === "frontier_already_reconnected" || closed > 0) replayAttemptedSeq = nextSeq
+          // A cooldown/stale/empty close is not completion. Retry next sweep.
         } else if (replay === "transport_not_accepted") {
           lastReconnect = this.closeUnrecoverableFrontier(
             userId,

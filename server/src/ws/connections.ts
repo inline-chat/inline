@@ -27,6 +27,7 @@ export const REALTIME_CLOSE_DURABLE_REPAIR_REASON = "durable_repair"
 
 /** A reconnect fallback is only for a confirmed durable-repair delivery gap. */
 export type DurableRepairCloseReason = "no_replayable_record" | "transport_not_accepted"
+export type DurableRepairCloseResult = number | "frontier_already_reconnected"
 
 const DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS = 30_000
 const MAX_DURABLE_REPAIR_CLOSE_GUARDS = 4_096
@@ -128,7 +129,7 @@ class ConnectionManager {
   private userConnectionEpochs: Map<number, number> = new Map()
   private nextUserConnectionEpoch = 0
   /** Rate guard for protocol-compatible reconnect repair, bounded to prevent untrusted user-id churn from retaining memory. */
-  private durableRepairCloseGuards: Map<number, number> = new Map()
+  private durableRepairCloseGuards = new Map<number, { closedAt: number; closedThrough?: number }>()
   /** One live lookup per session; removed when its client type resolves or fails. */
   private readonly clientTypeHydrations = new Map<string, Promise<void>>()
   /** One owned read and at most one pending invalidation per user/space. */
@@ -371,17 +372,33 @@ class ConnectionManager {
     userId: number,
     reason: DurableRepairCloseReason,
     expectedConnectionEpoch?: number,
-  ): number {
+    frontier?: number,
+  ): DurableRepairCloseResult {
     const currentEpoch = this.getUserConnectionEpoch(userId)
     if (expectedConnectionEpoch !== undefined && expectedConnectionEpoch !== currentEpoch) return 0
-    const connectionIds = [...(this.authenticatedUsers.get(userId) ?? [])]
+    const connectionIds = [...(this.authenticatedUsers.get(userId) ?? [])].filter(id => this.connections.has(id))
     if (connectionIds.length === 0) return 0
 
+    if (reason === "no_replayable_record" &&
+      (frontier === undefined || !Number.isSafeInteger(frontier) || frontier <= 0)) return 0
+
     const now = performance.now()
-    this.pruneDurableRepairCloseGuards(now)
-    if (this.durableRepairCloseGuards.has(userId)) return 0
-    this.durableRepairCloseGuards.set(userId, now)
-    this.trimDurableRepairCloseGuards()
+    const previous = this.durableRepairCloseGuards.get(userId)
+    // Admission/pruning and the transport cooldown must not forget that an
+    // unreplayable frontier already forced a protocol-open catch-up edge.
+    if (reason === "no_replayable_record" && frontier! <= (previous?.closedThrough ?? 0)) {
+      this.durableRepairCloseGuards.delete(userId)
+      this.durableRepairCloseGuards.set(userId, previous!)
+      return "frontier_already_reconnected"
+    }
+    if (previous && now - previous.closedAt < DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS) return 0
+    if (!previous && !this.makeDurableRepairCloseGuardRoom(now)) return 0
+    // Store before closeConnection synchronously removes the old admission.
+    this.durableRepairCloseGuards.delete(userId)
+    this.durableRepairCloseGuards.set(userId, {
+      closedAt: now,
+      closedThrough: reason === "no_replayable_record" ? frontier : previous?.closedThrough,
+    })
     log.warn("Closing user connections for durable repair", { userId, reason, connectionEpoch: currentEpoch })
 
     let closed = 0
@@ -732,20 +749,18 @@ class ConnectionManager {
     if (refresh) refresh.revision += 1
   }
 
-  private pruneDurableRepairCloseGuards(now: number): void {
-    for (const [userId, closedAt] of this.durableRepairCloseGuards) {
-      if (now - closedAt >= DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS) {
-        this.durableRepairCloseGuards.delete(userId)
-      }
+  private makeDurableRepairCloseGuardRoom(now: number): boolean {
+    if (this.durableRepairCloseGuards.size < MAX_DURABLE_REPAIR_CLOSE_GUARDS) return true
+    // Never trade an active cooldown for another account's reconnect. If all
+    // entries are protected, its repair remains pending until a later sweep.
+    // An expired entry can lose same-frontier suppression under pressure, but
+    // its previous actual close is already at least 30 seconds old.
+    for (const [userId, guard] of this.durableRepairCloseGuards) {
+      if (now - guard.closedAt < DURABLE_REPAIR_CLOSE_MINIMUM_INTERVAL_MS) continue
+      this.durableRepairCloseGuards.delete(userId)
+      return true
     }
-  }
-
-  private trimDurableRepairCloseGuards(): void {
-    while (this.durableRepairCloseGuards.size > MAX_DURABLE_REPAIR_CLOSE_GUARDS) {
-      const oldestUserId = this.durableRepairCloseGuards.keys().next().value
-      if (oldestUserId === undefined) return
-      this.durableRepairCloseGuards.delete(oldestUserId)
-    }
+    return false
   }
 
   private async subscribeUserToSpaceIds(userId: number): Promise<void> {
