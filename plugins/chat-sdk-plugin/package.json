@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/chat-sdk",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "description": "Inline Bot API adapter for Vercel Chat SDK",
   "type": "module",
   "license": "Apache-2.0",
@@ -36,8 +36,8 @@
     "lint": "oxlint src"
   },
   "dependencies": {
-    "@inline-chat/bot-client": "^0.1.1",
-    "@inline-chat/bot-api-types": "^0.1.2"
+    "@inline-chat/bot-client": "0.1.2-alpha.0",
+    "@inline-chat/bot-api-types": "0.1.3-alpha.0"
   },
   "peerDependencies": {
     "chat": "^4.40.0"

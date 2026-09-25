@@ -6,10 +6,10 @@ import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const repoRoot = path.resolve(packageRoot, "..")
+const repoRoot = path.resolve(packageRoot, "..", "..")
 const { mode, outputDir: requestedOutputDir } = parseArgs(process.argv.slice(2))
 const stageRoot = await mkdtemp(path.join(os.tmpdir(), "inline-hermes-release-"))
-const stagePackageRoot = path.join(stageRoot, "hermes-agent")
+const stagePackageRoot = path.join(stageRoot, "plugins", "hermes-agent")
 const outputDir = requestedOutputDir == null
   ? path.join(stageRoot, "artifact")
   : path.resolve(requestedOutputDir)

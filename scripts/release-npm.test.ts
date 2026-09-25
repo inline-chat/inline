@@ -117,4 +117,6 @@ test("keeps the local allowlist aligned with the workflow security boundary", as
     expect(branch).toContain(`              package_dir="${config.directory}"`)
     expect(branch).toContain(`              package_name="${config.name}"`)
   }
+
+  expect(workflow).toContain('"./$PACKAGE_DIR"')
 })

@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.71",
+  "version": "0.0.71-alpha.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -36,7 +36,7 @@
     "check:host": "bun scripts/check-host.mjs"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.18",
+    "@inline-chat/realtime-sdk": "0.0.19-alpha.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

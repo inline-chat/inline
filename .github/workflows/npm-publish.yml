@@ -14,6 +14,7 @@ on:
           - realtime-sdk
           - openclaw
           - hermes-agent
+          - chat-sdk
       version:
         description: Exact version already committed to package.json
         required: true
@@ -111,6 +112,10 @@ jobs:
               package_dir="plugins/hermes-agent"
               package_name="@inline-chat/hermes-agent-adapter"
               ;;
+            chat-sdk)
+              package_dir="plugins/chat-sdk-plugin"
+              package_name="@inline-chat/chat-sdk"
+              ;;
             *)
               echo "Unsupported package key: $RELEASE_KEY" >&2
               exit 1
@@ -175,7 +180,7 @@ jobs:
             protocol|realtime-sdk|openclaw)
               bun run --cwd "$PACKAGE_DIR" check
               ;;
-            bot-api-types|bot-client)
+            bot-api-types|bot-client|chat-sdk)
               bun run --cwd "$PACKAGE_DIR" build
               bun run --cwd "$PACKAGE_DIR" typecheck
               bun run --cwd "$PACKAGE_DIR" lint
@@ -204,24 +209,66 @@ jobs:
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "artifact-sha256=$artifact_sha256" >> "$GITHUB_OUTPUT"
 
+      - name: Pack and install exact public artifact
+        if: inputs.package != 'hermes-agent'
+        id: package-artifact
+        env:
+          PACKAGE_DIR: ${{ steps.release.outputs.package-dir }}
+          PACKAGE_NAME: ${{ steps.release.outputs.package-name }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          artifact_dir="$RUNNER_TEMP/npm-release-artifact"
+          install_dir="$RUNNER_TEMP/npm-release-install"
+          mkdir -p "$artifact_dir" "$install_dir"
+          pack_json="$(npm pack --ignore-scripts --json --silent --pack-destination "$artifact_dir" "./$PACKAGE_DIR")"
+          artifact_filename="$(printf '%s' "$pack_json" | node -e "const p = JSON.parse(require('fs').readFileSync(0, 'utf8')); if (p.length !== 1 || !p[0].filename) process.exit(1); console.log(p[0].filename)")"
+          artifact="$artifact_dir/$artifact_filename"
+          test -f "$artifact"
+          npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund "$artifact"
+          PACKAGE_NAME="$PACKAGE_NAME" RELEASE_VERSION="$RELEASE_VERSION" INSTALL_DIR="$install_dir" node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = process.env.INSTALL_DIR
+          const name = process.env.PACKAGE_NAME
+          const expectedVersion = process.env.RELEASE_VERSION
+          const manifest = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8'))
+          if (manifest.name !== name || manifest.version !== expectedVersion) {
+            throw new Error(`Installed ${manifest.name}@${manifest.version}; expected ${name}@${expectedVersion}`)
+          }
+          for (const [dependency, version] of Object.entries(manifest.dependencies ?? {})) {
+            if (!dependency.startsWith('@inline-chat/')) continue
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) continue
+            const installed = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', dependency, 'package.json'), 'utf8'))
+            if (installed.version !== version) {
+              throw new Error(`${name} resolved ${dependency}@${installed.version}; expected ${version}`)
+            }
+          }
+          NODE
+          artifact_sha256="$(sha256sum "$artifact" | awk '{print $1}')"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "artifact-sha256=$artifact_sha256" >> "$GITHUB_OUTPUT"
+
       - name: Publish with npm trusted publishing
         env:
           PACKAGE_DIR: ${{ steps.release.outputs.package-dir }}
           HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
           HERMES_ARTIFACT_SHA256: ${{ steps.hermes.outputs.artifact-sha256 }}
+          PACKAGE_ARTIFACT: ${{ steps.package-artifact.outputs.artifact }}
+          PACKAGE_ARTIFACT_SHA256: ${{ steps.package-artifact.outputs.artifact-sha256 }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if [[ -n "$HERMES_ARTIFACT" ]]; then
-            actual_sha256="$(sha256sum "$HERMES_ARTIFACT" | awk '{print $1}')"
-            if [[ "$actual_sha256" != "$HERMES_ARTIFACT_SHA256" ]]; then
-              echo "Hermes artifact changed after preflight" >&2
-              exit 1
-            fi
-            npm publish --ignore-scripts --access public --tag "$RELEASE_TAG" "$HERMES_ARTIFACT"
-            exit 0
+          artifact="${HERMES_ARTIFACT:-$PACKAGE_ARTIFACT}"
+          expected_sha256="${HERMES_ARTIFACT_SHA256:-$PACKAGE_ARTIFACT_SHA256}"
+          if [[ -z "$artifact" || ! -f "$artifact" ]]; then
+            echo "Release artifact is missing" >&2
+            exit 1
           fi
-          cd "$PACKAGE_DIR"
-          npm publish --access public --tag "$RELEASE_TAG"
+          actual_sha256="$(sha256sum "$artifact" | awk '{print $1}')"
+          if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+            echo "Release artifact changed after preflight" >&2
+            exit 1
+          fi
+          npm publish --ignore-scripts --access public --tag "$RELEASE_TAG" "$artifact"
 
       - name: Verify registry version and dist-tag
         env:

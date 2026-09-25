@@ -113,8 +113,8 @@ a peer reference; sending still depends on Bot API access rules.
 
 ## Version 0.1 scope
 
-This adapter uses the existing Bot API with published `@inline-chat/bot-client`
-0.1.1 and `@inline-chat/bot-api-types` 0.1.2. No server, protocol, or native-renderer
+This adapter uses the existing Bot API with `@inline-chat/bot-client`
+0.1.2-alpha.0 and `@inline-chat/bot-api-types` 0.1.3-alpha.0. No server, protocol, or native-renderer
 changes are required. Chat/thread discovery, multiple uploaded attachments in one
 message, and attachment replacement are deferred. The adapter operates on known
 conversation IDs and conversations delivered in bot updates, subject to existing

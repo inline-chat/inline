@@ -150,10 +150,17 @@ fn render(columns: usize, color: bool) -> String {
     let columns = columns.max(20);
     // Very small panes get a useful doorway, rather than overflowing examples.
     if columns < 32 {
+        let version = env!("CARGO_PKG_VERSION");
+        let version_separator = if "inline ".len() + version.len() > columns {
+            "\n"
+        } else {
+            " "
+        };
         let mut page = format!(
-            "\n{} {}\n\nWork chat + agents\n\n",
+            "\n{}{}{}\n\nWork chat + agents\n\n",
             paint("inline", BRAND, color),
-            env!("CARGO_PKG_VERSION")
+            version_separator,
+            version
         );
         for example in GROUPS[0].1 {
             let tokens = example.tokens();

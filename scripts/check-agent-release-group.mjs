@@ -72,9 +72,11 @@ for (const entry of packages) {
     entry.directory === "plugins/openclaw"
       ? manifest.openclaw.install.npmSpec
       : manifest.inlineHermes.install.npmSpec
-  if (specMatch?.[1] !== npmSpec) {
+  const prerelease = manifest.version.includes("-")
+  const expectedInstallSpec = prerelease ? `${npmSpec}@${manifest.version}` : npmSpec
+  if (specMatch?.[1] !== expectedInstallSpec) {
     throw new Error(
-      `${entry.rustPackageSpecConstant} must request latest external spec ${npmSpec}, found ${specMatch?.[1] ?? "missing"}`,
+      `${entry.rustPackageSpecConstant} must request ${expectedInstallSpec}, found ${specMatch?.[1] ?? "missing"}`,
     )
   }
   const minimumVersion = minimumMatch?.[1]
@@ -109,23 +111,28 @@ for (const entry of packages) {
       )
     }
     entry.validate(publishedRelease)
+    if (!semverAtLeast(publishedRelease.version, minimumVersion)) {
+      throw new Error(`${expectedInstallSpec} is below CLI minimum ${minimumVersion}`)
+    }
 
-    const publishedLatest = JSON.parse(
-      execFileSync("npm", ["view", `${npmSpec}@latest`, "--json"], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    )
-    entry.validate(publishedLatest)
-    if (!semverAtLeast(publishedLatest.version, minimumVersion)) {
-      throw new Error(
-        `${npmSpec}@latest is ${publishedLatest.version}, below CLI minimum ${minimumVersion}`,
+    if (!prerelease) {
+      const publishedLatest = JSON.parse(
+        execFileSync("npm", ["view", `${npmSpec}@latest`, "--json"], {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
       )
+      entry.validate(publishedLatest)
+      if (!semverAtLeast(publishedLatest.version, minimumVersion)) {
+        throw new Error(
+          `${npmSpec}@latest is ${publishedLatest.version}, below CLI minimum ${minimumVersion}`,
+        )
+      }
     }
   }
 
   console.log(
-    `${manifest.name}@${manifest.version}: ${sourceOnly ? "source contract ready" : `${npmSpec}@latest install contract verified`}`,
+    `${manifest.name}@${manifest.version}: ${sourceOnly ? "source contract ready" : `${expectedInstallSpec} install contract verified`}`,
   )
 }

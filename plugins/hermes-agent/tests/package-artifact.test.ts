@@ -1,11 +1,14 @@
 import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const repoRoot = path.resolve(packageRoot, "..", "..")
 const realNpmEnv = { ...process.env, npm_config_dry_run: "false" }
 
 type PackFile = {
@@ -130,12 +133,47 @@ describe("packed artifact", () => {
       const pack = parsePackOutput(raw)
       const tarball = path.join(packDir, pack.filename)
 
-      execFileSync("npm", ["install", "--global", "--prefix", prefix, tarball], {
+      // Source CI has unreleased workspace dependencies. Install local packed
+      // prerequisites so this still exercises a clean npm tree. The isolated
+      // release stage has no sibling packages and resolves published versions.
+      const localPrerequisites: string[] = []
+      if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
+        for (const directory of ["protocol", "sdk"]) {
+          const prerequisiteDir = path.join(repoRoot, "packages", directory)
+          const prerequisitePack = parsePackOutput(execFileSync("npm", [
+            "pack", "--pack-destination", packDir, "--json", "--silent", prerequisiteDir,
+          ], {
+            cwd: packageRoot,
+            encoding: "utf8",
+            env: realNpmEnv,
+            stdio: ["ignore", "pipe", "pipe"],
+          }))
+          localPrerequisites.push(path.join(packDir, prerequisitePack.filename))
+        }
+      }
+
+      execFileSync("npm", ["install", "--global", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", ...localPrerequisites, tarball], {
         cwd: packageRoot,
         encoding: "utf8",
         env: realNpmEnv,
         stdio: ["ignore", "pipe", "pipe"],
       })
+
+      const globalModules = process.platform === "win32"
+        ? path.join(prefix, "node_modules")
+        : path.join(prefix, "lib", "node_modules")
+      const hermesManifestPath = path.join(globalModules, "@inline-chat/hermes-agent-adapter/package.json")
+      const hermesManifest = JSON.parse(await readFile(hermesManifestPath, "utf8")) as { dependencies: Record<string, string> }
+      const sdk = await readInstalledManifest("@inline-chat/realtime-sdk", hermesManifestPath)
+      const protocol = await readInstalledManifest("@inline-chat/protocol", sdk.path)
+      const sdkSpec = hermesManifest.dependencies["@inline-chat/realtime-sdk"]
+      const protocolSpec = sdk.manifest.dependencies?.["@inline-chat/protocol"]
+      if (sdkSpec && /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(sdkSpec)) {
+        expect(sdk.manifest.version).toBe(sdkSpec)
+      }
+      if (protocolSpec && /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(protocolSpec)) {
+        expect(protocol.manifest.version).toBe(protocolSpec)
+      }
 
       const bin = process.platform === "win32"
         ? path.join(prefix, "inline-hermes.cmd")
@@ -156,7 +194,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.17")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.18-alpha.0")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,
@@ -228,4 +266,25 @@ function parsePackOutput(raw: string): PackEntry {
   const parsed = JSON.parse(raw.slice(start)) as PackEntry[]
   expect(parsed).toHaveLength(1)
   return parsed[0]!
+}
+
+async function readInstalledManifest(name: string, fromPath: string): Promise<{
+  path: string
+  manifest: { name: string; version: string; dependencies?: Record<string, string> }
+}> {
+  let directory = path.dirname(createRequire(fromPath).resolve(name))
+  for (;;) {
+    const candidate = path.join(directory, "package.json")
+    if (existsSync(candidate)) {
+      const manifest = JSON.parse(await readFile(candidate, "utf8")) as {
+        name: string
+        version: string
+        dependencies?: Record<string, string>
+      }
+      if (manifest.name === name) return { path: candidate, manifest }
+    }
+    const parent = path.dirname(directory)
+    if (parent === directory) throw new Error(`Could not locate installed manifest for ${name}`)
+    directory = parent
+  }
 }

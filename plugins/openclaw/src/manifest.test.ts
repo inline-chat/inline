@@ -368,7 +368,7 @@ describe("plugin manifest", () => {
     }
     const readme = await readFile(path.join(packageDir, "README.md"), "utf8")
     const setup = await readFile(path.join(packageDir, "docs", "openclaw-setup.md"), "utf8")
-    const compatibilityVersions = [...readme.matchAll(/^\| `(\d+\.\d+\.\d+)` \|/gm)].map(
+    const compatibilityVersions = [...readme.matchAll(/^\| `(\d+\.\d+\.\d+(?:-[\w.-]+)?)` \|/gm)].map(
       (match) => match[1],
     )
 

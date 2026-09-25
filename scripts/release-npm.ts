@@ -91,6 +91,11 @@ export const PACKAGE_CONFIGS: Readonly<Record<string, PackageConfig>> = {
     directory: "plugins/hermes-agent",
     name: "@inline-chat/hermes-agent-adapter",
   },
+  "chat-sdk": {
+    key: "chat-sdk",
+    directory: "plugins/chat-sdk-plugin",
+    name: "@inline-chat/chat-sdk",
+  },
 }
 
 const USAGE = `Usage: bun run release:npm <package> [options]
