@@ -20,3 +20,5 @@
 ## Checks
 
 - Use [TESTING.md](TESTING.md) for focused and database-backed tests. From `server/`, run the relevant `bun test <path>`, then `bun run typecheck` and `bun run lint` at a checkpoint. Start `bun run dev` only when local runtime validation is needed.
+- Write useful tests. Try to avoid mocking modules or testing mere implementation detail with no actual gain other than a copy of the implementation steps.
+- Avoid `any` types or suppressing errors. Be strict with type-safety, using effect schema, and idiomatic patterns when it's possible and useful. Escape only in experiments or one-off hot fixes we will refactor later.

@@ -9,3 +9,4 @@
 
 - Never print secrets, tokens, OTPs, or environment-file values. Release scripts use authenticated tools and may publish artifacts; run them only with authorization for the exact release.
 - CLI release: `cd scripts && bun run release:cli`. macOS direct release: `cd scripts && bun run macos:release-app -- --channel <stable|beta|tip>`.
+

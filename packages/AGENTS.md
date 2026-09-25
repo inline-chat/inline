@@ -2,7 +2,7 @@
 
 ## Scope
 
-- `packages/` contains the protocol, SDK, MCP, bot client, Bot API types, and OAuth packages. OpenClaw lives in `plugins/openclaw/`; URL preview lives in `server/packages/url-preview/`.
+- `packages/` contains the protocol, SDK, MCP, bot client, Bot API types, and OAuth packages. 
 - Keep package identifiers and versions independent. Use package exports instead of relative imports across package roots.
 
 ## Checks and releases
