@@ -1,3 +1,4 @@
+import InlineUI
 import SwiftUI
 
 enum OnboardingFormMetrics {
@@ -67,9 +68,9 @@ struct OnboardingFormHeader: View {
   @ViewBuilder
   private var icon: some View {
     let image = Image(systemName: systemImage)
-      .font(.system(size: 38, weight: .regular))
+      .scaledFont(size: 38, weight: .regular)
       .foregroundStyle(.primary)
-      .frame(width: 66, height: 66)
+      .scaledFrame(width: 66, height: 66)
 
     if #available(iOS 26.0, *) {
       image

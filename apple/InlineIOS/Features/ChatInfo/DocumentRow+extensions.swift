@@ -67,7 +67,7 @@ extension DocumentRow {
         // File icon
         Image(systemName: fileIconName)
           .foregroundColor(fileIconColor)
-          .font(.system(size: 22))
+          .scaledFont(size: 22)
       }
     }
     .buttonStyle(PlainButtonStyle())

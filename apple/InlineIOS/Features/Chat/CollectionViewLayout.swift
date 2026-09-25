@@ -143,7 +143,7 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
     let configuration = UICollectionViewCompositionalLayoutConfiguration()
     configuration.scrollDirection = .vertical
 
-    let layout = AnimatedCompositionalLayout(sectionProvider: { sectionIndex, _ in
+    let layout = AnimatedCompositionalLayout(sectionProvider: { sectionIndex, environment in
       // Message item
       let itemSize = NSCollectionLayoutSize(
         widthDimension: .fractionalWidth(1.0),
@@ -168,7 +168,10 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
       // Footer for date separator (appears at bottom because collection view is inverted)
       let footerSize = NSCollectionLayoutSize(
         widthDimension: .fractionalWidth(1.0),
-        heightDimension: .absolute(DateSeparatorView.height)
+        heightDimension: .absolute(max(
+          DateSeparatorView.height,
+          ceil(ChatTypography.font(12, style: .caption1, compatibleWith: environment.traitCollection).lineHeight) + 20
+        ))
       )
       let footer = NSCollectionLayoutBoundarySupplementaryItem(
         layoutSize: footerSize,

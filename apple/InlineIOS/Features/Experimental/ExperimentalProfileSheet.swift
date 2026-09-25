@@ -395,9 +395,9 @@ private struct ExperimentalProfileHeaderEditor: View {
           UserAvatar(userInfo: currentUser, size: 132)
 
           Image(systemName: isUploading ? "hourglass" : "camera.fill")
-            .font(.system(size: 15, weight: .semibold))
+            .scaledFont(size: 15, weight: .semibold)
             .foregroundStyle(.white)
-            .frame(width: 34, height: 34)
+            .scaledFrame(width: 34, height: 34)
             .background(Color.accentColor, in: Circle())
             .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 3))
         }

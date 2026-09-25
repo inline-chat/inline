@@ -119,7 +119,7 @@ struct ReactionEmojiPickerSheet: View {
       dismiss()
     } label: {
       Text(emoji)
-        .font(.system(size: 32))
+        .scaledFont(size: 32)
         .frame(maxWidth: .infinity, minHeight: 48)
         .background {
           if isSelected {
@@ -143,8 +143,8 @@ struct ReactionEmojiPickerSheet: View {
             onSelect(section)
           } label: {
             Image(systemName: categorySymbol(for: section.id))
-              .font(.system(size: 20))
-              .frame(width: 44, height: 48)
+              .scaledFont(size: 20)
+              .scaledFrame(width: 44, height: 48)
           }
           .buttonStyle(.plain)
           .foregroundStyle(.secondary)

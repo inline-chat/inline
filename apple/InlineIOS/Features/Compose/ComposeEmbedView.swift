@@ -12,7 +12,7 @@ enum EmbedType: String {
 }
 
 class ComposeEmbedView: UIView {
-  static let height: CGFloat = ComposeEmbedViewContent.height
+  static var height: CGFloat { ComposeEmbedViewContent.height }
 
   var peerId: Peer
   private var messageChatId: Int64

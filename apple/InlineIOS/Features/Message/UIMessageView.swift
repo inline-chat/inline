@@ -352,7 +352,7 @@ class UIMessageView: UIView {
 
     return MessageTextLayoutPolicy.mode(
       textWidth: singleLineTextWidth,
-      metadataWidth: MessageTimeAndStatus.measuredWidth(for: fullMessage),
+      metadataWidth: MessageTimeAndStatus.measuredWidth(for: fullMessage, compatibleWith: traitCollection),
       maximumBubbleContentWidth: maximumBubbleContentWidth,
       horizontalPadding: StackPadding.leading,
       spacing: StackPadding.inlineTextMetadataSpacing
@@ -491,6 +491,14 @@ class UIMessageView: UIView {
     handleLinkTap()
     if buildHierarchy {
       setupViews()
+      registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: UIMessageView, _: UITraitCollection) in
+        view.updateMessageLabelText()
+        if view.message.isServiceMessage {
+          view.serviceLabel.attributedText = view.serviceAttributedText()
+        }
+        view.invalidateIntrinsicContentSize()
+        view.setNeedsLayout()
+      }
     }
   }
 
@@ -2578,7 +2586,7 @@ class UIMessageView: UIView {
     reactionsFlowView.reactionBackgroundSecondaryOverride = overrides?.secondary
   }
 
-  private lazy var singleLineTextWidth: CGFloat = {
+  private var singleLineTextWidth: CGFloat {
     guard let cacheKey = attributedMessageCacheKey,
           let attributedString = attributedMessageText(),
           attributedString.length > 0
@@ -2597,7 +2605,7 @@ class UIMessageView: UIView {
     ).width)
     Self.singleLineWidthCache.setObject(NSNumber(value: Double(width)), forKey: cacheKey)
     return width
-  }()
+  }
 
   private var attributedMessageCacheKey: NSString? {
     guard let text = fullMessage.displayText else { return nil }
@@ -2609,6 +2617,7 @@ class UIMessageView: UIView {
       text,
       theme.preset.rawValue,
       theme.variant.rawValue,
+      traitCollection.preferredContentSizeCategory.rawValue,
       outgoing ? "outgoing" : "incoming",
     ].joined(separator: "-") as NSString
   }
@@ -2624,8 +2633,10 @@ class UIMessageView: UIView {
     }
 
     let entities = fullMessage.translationEntities ?? fullMessage.message.entities
-    let font = UIFont
-      .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17)
+    let font = ChatTypography.font(
+      isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17,
+      compatibleWith: traitCollection
+    )
 
     let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
     let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)

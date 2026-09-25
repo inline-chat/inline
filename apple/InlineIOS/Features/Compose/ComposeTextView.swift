@@ -8,6 +8,29 @@ import UniformTypeIdentifiers
 
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
+  var bodyFont: UIFont { ChatTypography.font(17, compatibleWith: traitCollection) }
+
+  private func refreshDynamicType() {
+    let selection = selectedRange
+    let targetFont = bodyFont
+    if textStorage.length == 0 {
+      font = targetFont
+    } else {
+      textStorage.beginEditing()
+      textStorage.enumerateAttribute(.font, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+        let existing = value as? UIFont ?? targetFont
+        textStorage.addAttribute(.font, value: existing.withSize(targetFont.pointSize), range: range)
+      }
+      textStorage.endEditing()
+    }
+    var attributes = typingAttributes
+    attributes[.font] = (attributes[.font] as? UIFont ?? targetFont).withSize(targetFont.pointSize)
+    typingAttributes = attributes
+    selectedRange = selection
+    placeholderLabel?.font = targetFont
+    invalidateIntrinsicContentSize()
+    composeView?.updateHeight()
+  }
   weak var composeView: ComposeView?
   private var trackingAccessoryView: UIView?
   private var isProcessingInsertedAttachments = false
@@ -83,6 +106,9 @@ class ComposeTextView: UITextView {
     setupTextView()
     setupPlaceholder()
     setupNotifications()
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: ComposeTextView, _: UITraitCollection) in
+      view.refreshDynamicType()
+    }
   }
 
   @available(*, unavailable)
@@ -104,7 +130,7 @@ class ComposeTextView: UITextView {
   private func setupTextView() {
     backgroundColor = .clear
     allowsEditingTextAttributes = true
-    font = .systemFont(ofSize: 17)
+    font = bodyFont
     typingAttributes[.font] = font
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     translatesAutoresizingMaskIntoConstraints = false
@@ -115,7 +141,7 @@ class ComposeTextView: UITextView {
   private func setupPlaceholder() {
     let label = UILabel()
     label.text = placeholderText
-    label.font = .systemFont(ofSize: 17)
+    label.font = bodyFont
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
     label.textAlignment = .left
@@ -215,7 +241,7 @@ class ComposeTextView: UITextView {
         into: attributedText ?? NSAttributedString(),
         selectedRange: selectedRange,
         typingAttributes: ExperimentalFeatureFlags.richMessageCopyEditingEnabled
-          ? [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label] : typingAttributes,
+          ? [.font: bodyFont, .foregroundColor: UIColor.label] : typingAttributes,
         textColor: UIColor.label
       )
       registerFormattingUndo(actionName: "Paste")
@@ -380,18 +406,17 @@ class ComposeTextView: UITextView {
       in: NSRange(location: 0, length: attributedText.length),
       options: []
     ) { value, _, stop in
-      if let font = value as? UIFont, font.pointSize != 17 {
+      if let font = value as? UIFont, font.pointSize != bodyFont.pointSize {
         needsFix = true
         stop.pointee = true
       }
     }
 
     if needsFix {
-      attributedText.addAttribute(
-        .font,
-        value: UIFont.systemFont(ofSize: 17),
-        range: NSRange(location: 0, length: attributedText.length)
-      )
+      attributedText.enumerateAttribute(.font, in: NSRange(location: 0, length: attributedText.length)) { value, range, _ in
+        let existing = value as? UIFont ?? bodyFont
+        attributedText.addAttribute(.font, value: existing.withSize(bodyFont.pointSize), range: range)
+      }
       attributedText.addAttribute(
         .foregroundColor,
         value: UIColor.label,
@@ -741,7 +766,7 @@ class ComposeTextView: UITextView {
   }
 
   private func normalizeTypingAttributesAfterAttachmentRemoval() {
-    let defaultFontSize: CGFloat = 17
+    let defaultFontSize = bodyFont.pointSize
 
     if textStorage.length == 0 {
       font = .systemFont(ofSize: defaultFontSize)
@@ -843,7 +868,7 @@ class ComposeTextView: UITextView {
         if !shouldAllowBold {
           Log.shared.debug("🛡️ BLOCKING bold typing attributes! Setting default instead.")
           var defaultAttributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 17),
+            .font: bodyFont,
             .foregroundColor: UIColor.label,
           ]
           for style in InlineTextStyle.allCases where newValue[style.marker] as? Bool == true {
@@ -1039,7 +1064,7 @@ extension UITextView {
   /// Default attributes for this text view
   var defaultTypingAttributes: [NSAttributedString.Key: Any] {
     [
-      .font: font ?? UIFont.systemFont(ofSize: 17),
+      .font: font ?? ChatTypography.font(17, compatibleWith: traitCollection),
       .foregroundColor: UIColor.label,
     ]
   }
@@ -1120,7 +1145,7 @@ extension UITextView {
   /// Reset typing attributes to default to prevent style leakage
   func resetTypingAttributesToDefault() {
     let defaultAttributes: [NSAttributedString.Key: Any] = [
-      .font: font ?? UIFont.systemFont(ofSize: 17),
+      .font: font ?? ChatTypography.font(17, compatibleWith: traitCollection),
       .foregroundColor: UIColor.label,
     ]
 
@@ -1173,7 +1198,7 @@ extension UITextView {
 
   /// Updates typing attributes to maintain monospace font for code blocks
   private func updateTypingAttributesForCodeBlock(attributes: [NSAttributedString.Key: Any]) {
-    let defaultFontSize: CGFloat = 17
+    let defaultFontSize = ChatTypography.font(17, compatibleWith: traitCollection).pointSize
     let currentFont = attributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: defaultFontSize)
     let monospaceFont = UIFont.monospacedSystemFont(ofSize: currentFont.pointSize, weight: .regular)
 

@@ -29,7 +29,8 @@ final class MessageActionButton: UIButton {
   override init(frame: CGRect) {
     super.init(frame: frame)
 
-    titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
+    titleLabel?.font = ChatTypography.font(13, weight: .medium, style: .subheadline)
+    titleLabel?.adjustsFontForContentSizeCategory = true
     titleLabel?.lineBreakMode = .byTruncatingTail
     contentEdgeInsets = UIEdgeInsets(top: 7, left: 14, bottom: 7, right: 14)
     layer.cornerRadius = 10
@@ -71,7 +72,8 @@ final class MessageActionButton: UIButton {
 
   func useMessageView2Presentation() {
     usesMessageView2Presentation = true
-    titleLabel?.font = .systemFont(ofSize: 14, weight: .regular)
+    titleLabel?.font = ChatTypography.font(14, weight: .regular, style: .subheadline)
+    titleLabel?.adjustsFontForContentSizeCategory = true
     contentEdgeInsets = UIEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
     layer.cornerRadius = 12
     layer.cornerCurve = .continuous

@@ -20,9 +20,10 @@ final class BlurCircleButton: UIView {
   private lazy var button: UIButton = {
     let button = ScrollGlassButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
 
     let image = UIImage(systemName: "chevron.down")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .semibold)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .semibold))
     )
 
     if #available(iOS 26.0, *) {
@@ -117,11 +118,19 @@ final class BlurCircleButton: UIView {
     return button.hitTest(convert(point, to: button), with: event)
   }
 
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if #unavailable(iOS 26.0) {
+      fallbackBlurView.layer.cornerRadius = fallbackBlurView.bounds.height / 2
+    }
+    unreadBadgeView.layer.cornerRadius = unreadBadgeView.bounds.height / 2
+  }
+
   private func setup() {
     translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: Metrics.hitTargetSize),
-      heightAnchor.constraint(equalToConstant: Metrics.hitTargetSize),
+      widthAnchor.constraint(equalToConstant: Metrics.hitTargetSize).scaledForContentSize(),
+      heightAnchor.constraint(equalToConstant: Metrics.hitTargetSize).scaledForContentSize(),
     ])
 
     if #unavailable(iOS 26.0) {
@@ -129,8 +138,8 @@ final class BlurCircleButton: UIView {
       NSLayoutConstraint.activate([
         fallbackBlurView.centerXAnchor.constraint(equalTo: centerXAnchor),
         fallbackBlurView.centerYAnchor.constraint(equalTo: centerYAnchor),
-        fallbackBlurView.widthAnchor.constraint(equalToConstant: Metrics.visualSize),
-        fallbackBlurView.heightAnchor.constraint(equalToConstant: Metrics.visualSize),
+        fallbackBlurView.widthAnchor.constraint(equalToConstant: Metrics.visualSize).scaledForContentSize(),
+        fallbackBlurView.heightAnchor.constraint(equalToConstant: Metrics.visualSize).scaledForContentSize(),
       ])
     }
 
@@ -138,8 +147,8 @@ final class BlurCircleButton: UIView {
     NSLayoutConstraint.activate([
       button.centerXAnchor.constraint(equalTo: centerXAnchor),
       button.centerYAnchor.constraint(equalTo: centerYAnchor),
-      button.widthAnchor.constraint(equalToConstant: Metrics.visualSize),
-      button.heightAnchor.constraint(equalToConstant: Metrics.visualSize),
+      button.widthAnchor.constraint(equalToConstant: Metrics.visualSize).scaledForContentSize(),
+      button.heightAnchor.constraint(equalToConstant: Metrics.visualSize).scaledForContentSize(),
     ])
 
     unreadBadgeView.translatesAutoresizingMaskIntoConstraints = false
@@ -150,8 +159,8 @@ final class BlurCircleButton: UIView {
     addSubview(unreadBadgeView)
 
     NSLayoutConstraint.activate([
-      unreadBadgeView.widthAnchor.constraint(equalToConstant: 6),
-      unreadBadgeView.heightAnchor.constraint(equalToConstant: 6),
+      unreadBadgeView.widthAnchor.constraint(equalToConstant: 6).scaledForContentSize(),
+      unreadBadgeView.heightAnchor.constraint(equalToConstant: 6).scaledForContentSize(),
       unreadBadgeView.topAnchor.constraint(equalTo: button.topAnchor),
       unreadBadgeView.trailingAnchor.constraint(equalTo: button.trailingAnchor),
     ])

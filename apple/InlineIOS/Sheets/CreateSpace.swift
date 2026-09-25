@@ -113,7 +113,7 @@ struct CreateSpace: View {
           focusedField = .name
         }
     }
-    .frame(width: 48, height: 48)
+    .scaledFrame(width: 48, height: 48)
     .contentShape(Circle())
     .onTapGesture {
       focusedField = .emoji

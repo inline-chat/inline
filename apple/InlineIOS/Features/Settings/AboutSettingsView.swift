@@ -1,3 +1,4 @@
+import InlineUI
 import Foundation
 import InlineKit
 import SwiftUI
@@ -242,7 +243,7 @@ private struct HelpDetailRow: View {
       Image(systemName: systemImage)
         .font(.body)
         .foregroundStyle(.secondary)
-        .frame(width: 24)
+        .scaledFrame(width: 24)
         .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 3) {

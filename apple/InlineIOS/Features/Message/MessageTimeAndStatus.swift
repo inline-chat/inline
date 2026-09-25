@@ -9,25 +9,30 @@ private let dateFormatter: DateFormatter = {
 
 class MessageTimeAndStatus: UIView {
   private static let statusTransitionDuration: CFTimeInterval = 0.25
-  private let symbolSize: CGFloat = 11
+  private var symbolSize: CGFloat {
+    ChatTypography.font(11, style: .caption2, compatibleWith: traitCollection).pointSize
+  }
+  private var symbolWidthConstraint: NSLayoutConstraint?
+  private var symbolHeightConstraint: NSLayoutConstraint?
 
   override var intrinsicContentSize: CGSize {
     CGSize(
-      width: Self.measuredWidth(for: fullMessage),
-      height: symbolSize
+      width: Self.measuredWidth(for: fullMessage, compatibleWith: traitCollection),
+      height: max(symbolSize, ceil(dateLabel.font.lineHeight))
     )
   }
 
-  static func measuredWidth(for message: FullMessage) -> CGFloat {
-    let font = UIFont.systemFont(ofSize: 11)
+  static func measuredWidth(for message: FullMessage, compatibleWith traits: UITraitCollection? = nil) -> CGFloat {
+    let font = ChatTypography.font(11, style: .caption2, compatibleWith: traits)
     let dateText = dateFormatter.string(from: message.message.date)
     let dateWidth = ceil((dateText as NSString).size(withAttributes: [.font: font]).width)
-    return message.message.out == true ? dateWidth + 2 + 11 : dateWidth
+    return message.message.out == true ? dateWidth + 2 + font.pointSize : dateWidth
   }
 
   private let dateLabel: UILabel = {
     let label = UILabel()
-    label.font = .systemFont(ofSize: 11)
+    label.font = ChatTypography.font(11, style: .caption2)
+    // The parent refreshes both the font and symbol constraints in the same trait update.
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
@@ -70,6 +75,13 @@ class MessageTimeAndStatus: UIView {
     displayedStatus = status ?? message.message.status
     super.init(frame: .zero)
     setupViews()
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MessageTimeAndStatus, _: UITraitCollection) in
+      view.dateLabel.font = ChatTypography.font(11, style: .caption2, compatibleWith: view.traitCollection)
+      view.symbolWidthConstraint?.constant = view.symbolSize
+      view.symbolHeightConstraint?.constant = view.symbolSize
+      view.updateStatusImage(animated: false)
+      view.invalidateIntrinsicContentSize()
+    }
   }
 
   @available(*, unavailable)
@@ -92,12 +104,14 @@ class MessageTimeAndStatus: UIView {
     ]
 
     if outgoing {
+      symbolWidthConstraint = statusImageView.widthAnchor.constraint(equalToConstant: symbolSize)
+      symbolHeightConstraint = statusImageView.heightAnchor.constraint(equalToConstant: symbolSize)
       constraints += [
         dateLabel.trailingAnchor.constraint(equalTo: statusImageView.leadingAnchor, constant: -2),
         statusImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
         statusImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-        statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
-        statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
+        symbolWidthConstraint!,
+        symbolHeightConstraint!,
       ]
     } else {
       constraints += [
@@ -130,8 +144,9 @@ class MessageTimeAndStatus: UIView {
 
   private func updateStatusImage(animated: Bool) {
     let imageName: String
-    let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
-      .applying(UIImage.SymbolConfiguration(weight: .medium))
+    let symbolConfig = UIImage.SymbolConfiguration(font: ChatTypography.font(
+      11, weight: .medium, style: .caption2, compatibleWith: traitCollection
+    ))
 
     switch displayedStatus {
       case .sent:
@@ -139,8 +154,9 @@ class MessageTimeAndStatus: UIView {
         statusImageView.preferredSymbolConfiguration = symbolConfig
       case .sending:
         imageName = "clock"
-        statusImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: symbolSize - 1)
-          .applying(UIImage.SymbolConfiguration(weight: .medium))
+        statusImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: ChatTypography.font(
+          10, weight: .medium, style: .caption2, compatibleWith: traitCollection
+        ))
       case .failed:
         imageName = "exclamationmark"
         statusImageView.preferredSymbolConfiguration = symbolConfig

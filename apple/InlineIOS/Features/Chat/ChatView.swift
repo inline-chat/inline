@@ -74,6 +74,7 @@ struct ChatView: View {
 
   @Environment(Router.self) var router
   @Environment(\.scenePhase) var scenePhase
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.colorScheme) var colorScheme
   @Environment(\.appDatabase) private var appDatabase
@@ -211,6 +212,7 @@ struct ChatView: View {
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
+            .environment(\.dynamicTypeSize, dynamicTypeSize)
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
           }
           .sharedBackgroundVisibility(.hidden)
@@ -225,6 +227,7 @@ struct ChatView: View {
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
+            .environment(\.dynamicTypeSize, dynamicTypeSize)
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
           }
         }
@@ -673,7 +676,7 @@ struct ChatView: View {
 
       VStack(spacing: 16) {
         Image(systemName: "exclamationmark.triangle")
-          .font(.system(size: 48))
+          .scaledFont(size: 48)
           .foregroundColor(.secondary)
 
         Text("Chat unavailable")

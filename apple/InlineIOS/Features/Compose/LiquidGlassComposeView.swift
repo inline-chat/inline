@@ -92,7 +92,8 @@ class LiquidGlassComposeView: UIView {
     view.backgroundColor = .clear
     view.layer.cornerRadius = Self.capsuleCornerRadius - 4
     view.layer.cornerCurve = .continuous
-    view.font = .systemFont(ofSize: 17)
+    view.font = .preferredFont(forTextStyle: .body)
+    view.adjustsFontForContentSizeCategory = true
     view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     return view
   }()
@@ -108,10 +109,11 @@ class LiquidGlassComposeView: UIView {
   // Send button with glass effect
   lazy var sendButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
 
     // Configure button appearance
-    let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+    let config = UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .semibold))
     button.setImage(UIImage(systemName: "arrow.up", withConfiguration: config), for: .normal)
     button.tintColor = .white
     button.backgroundColor = ThemeManager.shared.selected.accent
@@ -136,10 +138,11 @@ class LiquidGlassComposeView: UIView {
   // Plus button with glass effect
   lazy var plusButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
 
     // Configure button appearance
-    let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+    let config = UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
     button.setImage(UIImage(systemName: "plus", withConfiguration: config), for: .normal)
     button.tintColor = ThemeManager.shared.selected.accent
     button.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.1)

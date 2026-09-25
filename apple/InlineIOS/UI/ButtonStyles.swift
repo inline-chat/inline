@@ -21,7 +21,7 @@ struct SimpleButtonStyle: ButtonStyle {
     configuration.label
       .foregroundColor(.white)
       .font(.body)
-      .frame(height: 52)
+      .frame(minHeight: 52)
       .frame(maxWidth: .infinity)
       .fontWeight(.medium)
       .background(colorScheme == .dark ? Color(hex: "#8b77dc") : Color(hex: "#a28cf2"))
@@ -37,7 +37,7 @@ struct OnboardingAccentButtonStyle: ButtonStyle {
     configuration.label
       .foregroundStyle(.white)
       .font(.onboardingIOSBody)
-      .frame(height: 52)
+      .frame(minHeight: 52)
       .frame(maxWidth: .infinity)
       .background(Color.accentColor, in: Capsule())
       .opacity(configuration.isPressed ? 0.8 : 1)

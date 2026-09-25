@@ -357,13 +357,17 @@ private struct ChatToolbarTitleStack: View {
         )
 
         if let userID = peerId.asUserId(), let spaceID = badgeSpaceID {
-          SpaceMemberBadge(userID: userID, spaceID: spaceID, size: 17)
-            .id("\(userID):\(spaceID)")
+          ChatToolbarBadge { size in
+            SpaceMemberBadge(userID: userID, spaceID: spaceID, size: size)
+          }
+          .id("\(userID):\(spaceID)")
         }
 
         if showsInlineTeamBadge {
-          InlineTeamToolbarBadge(size: 17, baselineOffset: 3.5)
-            .help("Inline Team")
+          ChatToolbarBadge { size in
+            InlineTeamToolbarBadge(size: size)
+          }
+          .help("Inline Team")
         }
       }
 
@@ -558,21 +562,21 @@ private struct ChatToolbarBreadcrumbSubtitle: View {
 private struct AnimatedPhotoUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+      .scaledFrame(width: 14)
   }
 }
 
 private struct AnimatedDocumentUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+      .scaledFrame(width: 14)
   }
 }
 
 private struct AnimatedVideoUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+      .scaledFrame(width: 14)
   }
 }
 
@@ -620,4 +624,18 @@ struct ChatSubtitlePreview: View {
   }
   .padding()
   .background(Color(uiColor: .systemBackground))
+}
+
+/// Align square badges with the title's capital letters, rather than the bottom of its line box.
+struct ChatToolbarBadge<Content: View>: View {
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 17
+  @ScaledMetric(relativeTo: .body) private var capHeight: CGFloat = UIFont.systemFont(ofSize: 17, weight: .medium).capHeight
+  @ViewBuilder var content: (CGFloat) -> Content
+
+  var body: some View {
+    content(size)
+      .alignmentGuide(.firstTextBaseline) { dimensions in
+        dimensions[VerticalAlignment.center] + capHeight / 2
+      }
+  }
 }

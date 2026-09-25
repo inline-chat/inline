@@ -107,7 +107,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private let avatarLeading: CGFloat = 0
   private let nameLabelLeading: CGFloat = 9
   private let nameLabelTop: CGFloat = 9
-  private let nameLabelHeight: CGFloat = 16
+  private var nameLabelHeight: CGFloat { ceil(nameLabel.font.lineHeight) }
+  private var configuredContentSizeCategory: UIContentSizeCategory?
   private let horizontalPadding = MessageCollectionViewCell.sendAnimationHorizontalPadding
 
   // MARK: - Views
@@ -122,7 +123,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   private lazy var nameLabel: UILabel = {
     var label = UILabel()
-    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.font = ChatTypography.font(13, weight: .medium, style: .caption1)
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
@@ -132,9 +134,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   private func makeMessageActionsButton() -> UIButton {
     let button = UIButton(type: .system)
-    button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(
-      pointSize: 17, weight: .medium
-    )), for: .normal)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
+    button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))), for: .normal)
     button.tintColor = .secondaryLabel
     button.accessibilityLabel = "Message actions"
     button.accessibilityIdentifier = "messageActions"
@@ -181,8 +182,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // their existing geometry. Keep a 44pt target wherever the gutter permits.
     let bubble = messageView.bubbleView.convert(messageView.bubbleView.bounds, to: contentView)
     let gutterWidth = outgoing ? bubble.minX : contentView.bounds.width - bubble.maxX
-    let width = min(44, max(0, gutterWidth))
-    let height = min(44, contentView.bounds.height)
+    let targetSize = UIFontMetrics(forTextStyle: .body).scaledValue(for: 44, compatibleWith: traitCollection)
+    let width = min(targetSize, max(0, gutterWidth))
+    let height = min(targetSize, contentView.bounds.height)
     button.frame = CGRect(
       x: outgoing ? bubble.minX - width : bubble.maxX,
       y: min(max(0, bubble.maxY - height), max(0, contentView.bounds.height - height)),
@@ -220,7 +222,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
 
-    if let currentMessage = self.message {
+    if let currentMessage = self.message,
+       configuredContentSizeCategory == traitCollection.preferredContentSizeCategory {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
          self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
@@ -354,6 +357,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     cancelPendingV2Snapshot()
     resetSelfSizingState()
 
+    configuredContentSizeCategory = traitCollection.preferredContentSizeCategory
+
     // update it first
     prevText = message.displayText
     self.message = message
@@ -370,6 +375,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     resetCell()
 
+    nameLabel.font = ChatTypography.font(13, weight: .medium, style: .caption1, compatibleWith: traitCollection)
     nameLabel.text = message.from?.firstName ?? "USER"
 
     setupThreadHeaderViewsIfNeeded()

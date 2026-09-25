@@ -252,7 +252,6 @@ final class RichBlockLayoutPlannerV2 {
   @MainActor private struct Builder {
     static let blockSpacing: CGFloat = 8
     static let codeHorizontalInset: CGFloat = 8
-    static let codeHeaderHeight: CGFloat = 21
     static let codeLanguageBodyTopInset: CGFloat = 3
     static let codeOverlayBodyTopInset: CGFloat = 8
     static let codeBottomInset: CGFloat = 9
@@ -534,7 +533,7 @@ final class RichBlockLayoutPlannerV2 {
         x: x,
         y: height,
         width: width,
-        height: ceil(bodyHeight + bodyTopInset + Self.codeBottomInset + (language == nil ? 0 : Self.codeHeaderHeight))
+        height: ceil(bodyHeight + bodyTopInset + Self.codeBottomInset + (language == nil ? 0 : ChatTypography.codeHeaderHeight(baseFontSize: baseFontSize)))
       )
       nodes.append(.init(
         path: path,

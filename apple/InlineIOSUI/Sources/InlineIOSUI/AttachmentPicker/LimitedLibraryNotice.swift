@@ -1,4 +1,5 @@
 #if os(iOS)
+import InlineUI
 import SwiftUI
 
 public struct LimitedLibraryNotice: View {
@@ -20,7 +21,7 @@ public struct LimitedLibraryNotice: View {
           .foregroundStyle(.secondary)
 
         Image(systemName: "exclamationmark.circle")
-          .font(.system(size: 18, weight: .semibold))
+          .scaledFont(size: 18, weight: .semibold)
           .foregroundStyle(.secondary)
       }
       .padding(.trailing, 20)

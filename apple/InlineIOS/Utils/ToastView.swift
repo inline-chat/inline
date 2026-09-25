@@ -1,3 +1,4 @@
+import InlineUI
 import SwiftUI
 
 struct ToastView: View {
@@ -104,7 +105,7 @@ struct ToastView: View {
       Image(systemImage)
         .resizable()
         .scaledToFit()
-        .frame(width: 16, height: 16)
+        .scaledFrame(width: 16, height: 16)
         .padding(.top, toast.showsProgressDetails ? 3 : 0)
         .transition(.scale.combined(with: .opacity))
         .id(systemImage)
@@ -317,11 +318,11 @@ private struct CountdownToastIndicator: View {
           .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
           .rotationEffect(.degrees(-90))
         Text("\(seconds)")
-          .font(.system(size: 11, weight: .semibold, design: .rounded))
+          .scaledFont(size: 11, weight: .semibold, design: .rounded)
           .monospacedDigit()
           .foregroundStyle(.secondary)
       }
-      .frame(width: 24, height: 24)
+      .scaledFrame(width: 24, height: 24)
       .accessibilityLabel("\(seconds) seconds remaining")
     }
   }

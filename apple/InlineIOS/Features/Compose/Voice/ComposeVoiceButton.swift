@@ -19,12 +19,13 @@ final class ComposeVoiceButton: UIButton {
   }
 
   private func setup() {
+    adjustsImageSizeForAccessibilityContentSizeCategory = true
     translatesAutoresizingMaskIntoConstraints = false
     frame = CGRect(origin: .zero, size: CGSize(width: Self.size, height: Self.size))
 
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "mic.fill")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+      UIImage.SymbolConfiguration(textStyle: .footnote).applying(UIImage.SymbolConfiguration(weight: .semibold))
     )
     config.baseForegroundColor = .tertiaryLabel
     config.cornerStyle = .capsule

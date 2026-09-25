@@ -1,5 +1,6 @@
 import Logger
 import QuickLook
+import InlineUI
 import SwiftUI
 
 extension DocumentRow {
@@ -10,7 +11,7 @@ extension DocumentRow {
     } else {
       VStack(spacing: 16) {
         Image(systemName: "exclamationmark.triangle")
-          .font(.system(size: 48))
+          .scaledFont(size: 48)
           .foregroundColor(.orange)
         
         Text("Cannot preview document")

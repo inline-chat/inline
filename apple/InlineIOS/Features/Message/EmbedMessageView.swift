@@ -31,19 +31,28 @@ class EmbedMessageView: UIView {
     case compose
   }
 
-  static let height: CGFloat = {
-    let headerFont = UIFont.systemFont(ofSize: 14, weight: .medium)
-    let messageFont = UIFont.systemFont(ofSize: 14)
-    let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + messageFont.lineHeight
-    return ceil(totalHeight)
-  }()
-  static let composeHeight: CGFloat = {
-    let headerFont = UIFont.systemFont(ofSize: 17, weight: .medium)
-    let messageFont = UIFont.systemFont(ofSize: 17)
-    let spacing: CGFloat = 4
-    let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + spacing + messageFont.lineHeight
-    return ceil(totalHeight)
-  }()
+  static var height: CGFloat { height(for: .replyBubble) }
+  static var composeHeight: CGFloat { height(for: .compose) }
+
+  static func height(for style: Style, compatibleWith traits: UITraitCollection? = nil) -> CGFloat {
+    let size: CGFloat = style == .replyBubble ? 14 : 17
+    let headerFont = ChatTypography.font(size, weight: .medium, compatibleWith: traits)
+    let messageFont = ChatTypography.font(size, compatibleWith: traits)
+    let spacing: CGFloat = style == .replyBubble ? 0 : 4
+    return ceil(Constants.verticalPadding * 2 + headerFont.lineHeight + spacing + messageFont.lineHeight)
+  }
+
+  override var intrinsicContentSize: CGSize {
+    CGSize(width: UIView.noIntrinsicMetric, height: Self.height(for: style, compatibleWith: traitCollection))
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      applyAppearance()
+      invalidateIntrinsicContentSize()
+    }
+  }
 
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
@@ -201,7 +210,7 @@ class EmbedMessageView: UIView {
       ? forwardDescription(for: senderName, messageText: fallbackText)
       : fallbackText
 
-    let config = UIImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium)
+    let config = UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
     imageIconView.image = UIImage(systemName: "exclamationmark.circle", withConfiguration: config)
     imageIconView.isHidden = false
 
@@ -480,7 +489,7 @@ private extension EmbedMessageView {
   }
 
   func updateIcon(for message: Message, document: Document?) {
-    let config = UIImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium)
+    let config = UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
 
     if message.isSticker == true {
       imageIconView.image = UIImage(systemName: "face.smiling", withConfiguration: config)
@@ -557,14 +566,14 @@ private extension EmbedMessageView {
 
   func applyAppearance() {
     if style == .replyBubble {
-      headerLabel.font = .systemFont(ofSize: 14, weight: .medium)
+      headerLabel.font = ChatTypography.font(14, weight: .medium, compatibleWith: traitCollection)
     } else {
-      headerLabel.font = .systemFont(ofSize: 17, weight: .medium)
+      headerLabel.font = ChatTypography.font(17, weight: .medium, compatibleWith: traitCollection)
     }
 
     messageLabel.font = style == .replyBubble
-      ? .systemFont(ofSize: 14)
-      : .systemFont(ofSize: 17)
+      ? ChatTypography.font(14, compatibleWith: traitCollection)
+      : ChatTypography.font(17, compatibleWith: traitCollection)
 
     headerToMessageConstraint?.constant = style == .replyBubble ? 0 : 4
 

@@ -119,7 +119,7 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
     textView.attributedText = NSAttributedString(
       string: "/",
       attributes: [
-        .font: UIFont.systemFont(ofSize: 17),
+        .font: textView.bodyFont,
         .foregroundColor: UIColor.label,
       ]
     )

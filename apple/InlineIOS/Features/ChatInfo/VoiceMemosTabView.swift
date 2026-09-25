@@ -88,9 +88,9 @@ private struct VoiceMemoRow: View {
   var body: some View {
     HStack(spacing: 12) {
       Image(systemName: "waveform")
-        .font(.system(size: 20, weight: .semibold))
+        .scaledFont(size: 20, weight: .semibold)
         .foregroundStyle(Color(ThemeManager.shared.selected.accent))
-        .frame(width: 42, height: 42)
+        .scaledFrame(width: 42, height: 42)
         .background(Circle().fill(.primary.opacity(0.04)))
 
       VStack(alignment: .leading, spacing: 8) {

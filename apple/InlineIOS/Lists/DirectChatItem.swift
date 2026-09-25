@@ -88,7 +88,7 @@ struct DirectChatItem: View {
       }
       Spacer()
     }
-    .frame(height: 50)
+    .frame(minHeight: 50)
     .frame(maxWidth: .infinity, alignment: .top)
     .padding(.leading, -8)
   }
@@ -102,7 +102,7 @@ struct DirectChatItem: View {
           if #available(iOS 26.0, *) {
             Circle()
               .fill(.yellow.opacity(0.9))
-              .frame(width: 22, height: 22)
+              .scaledFrame(width: 22, height: 22)
               .glassEffect()
               .overlay {
                 Image(systemName: "pin.fill")
@@ -113,7 +113,7 @@ struct DirectChatItem: View {
           } else {
             Circle()
               .fill(.yellow)
-              .frame(width: 22, height: 22)
+              .scaledFrame(width: 22, height: 22)
               .overlay {
                 Image(systemName: "pin.fill")
                   .font(.caption)
@@ -130,7 +130,7 @@ struct DirectChatItem: View {
     HStack(alignment: .center, spacing: 5) {
       Circle()
         .fill(hasUnreadMessages ? Color.accentColor : .clear)
-        .frame(width: 8, height: 8)
+        .scaledFrame(width: 8, height: 8)
         .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
 
       userProfile
@@ -200,13 +200,13 @@ struct DirectChatItem: View {
       TypingActivityIndicator(color: .accentColor)
     case .uploadingPhoto:
       UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+        .scaledFrame(width: 14)
     case .uploadingDocument:
       UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+        .scaledFrame(width: 14)
     case .uploadingVideo:
       UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+        .scaledFrame(width: 14)
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
         barWidth: 2.2,

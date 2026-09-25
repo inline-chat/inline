@@ -101,7 +101,8 @@ private final class MessageListV2FixtureCell: UICollectionViewCell {
       failureLabel.removeFromSuperview()
     } else {
       failureLabel.text = "Fixture plan rejected: check width, traits and snapshot."
-      failureLabel.font = .systemFont(ofSize: 12)
+      failureLabel.font = .preferredFont(forTextStyle: .caption1)
+      failureLabel.adjustsFontForContentSizeCategory = true
       failureLabel.textColor = .systemRed
       failureLabel.numberOfLines = 2
       failureLabel.frame = CGRect(x: 12, y: 0, width: environment.renderWidth, height: row.plan.bubble.size.height)
@@ -246,7 +247,8 @@ final class MessageListV2LabController: UIViewController, UICollectionViewDelega
       return cell
     }
 
-    status.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    status.font = UIFontMetrics(forTextStyle: .caption2).scaledFont(for: .monospacedSystemFont(ofSize: 11, weight: .regular))
+    status.adjustsFontForContentSizeCategory = true
     status.numberOfLines = 3
     status.text = "Experimental · synthetic messages only\nPreparing exact layouts…"
     status.accessibilityIdentifier = "message-list-v2-status"

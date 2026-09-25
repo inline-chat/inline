@@ -484,11 +484,11 @@ private struct LinkRow: View {
     ZStack(alignment: .top) {
       RoundedRectangle(cornerRadius: linkIconCornerRadius)
         .fill(fileCircleFill)
-        .frame(width: fileCircleSize, height: fileCircleSize)
+        .scaledFrame(width: fileCircleSize, height: fileCircleSize)
 
       Image(systemName: "link")
         .foregroundColor(linkIconColor)
-        .font(.system(size: 11))
+        .scaledFont(size: 11)
         .padding(.top, linkIconTopPadding)
     }
   }

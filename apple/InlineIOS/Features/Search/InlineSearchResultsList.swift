@@ -444,7 +444,7 @@ private struct InlineSearchResultRow<Icon: View>: View {
   var body: some View {
     HStack(alignment: .center, spacing: 9) {
       icon()
-        .frame(width: 34, height: 34)
+        .scaledFrame(width: 34, height: 34)
 
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 8) {

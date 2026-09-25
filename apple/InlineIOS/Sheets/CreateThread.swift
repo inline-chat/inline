@@ -38,7 +38,7 @@ struct CreateThread: View {
                     endPoint: .bottom
                   )
                 )
-                .frame(width: 40, height: 40)
+                .scaledFrame(width: 40, height: 40)
                 .overlay {
                   if !selectedEmoji.isEmpty {
                     Text(selectedEmoji)

@@ -95,6 +95,7 @@ final class ImageViewerController: UIViewController {
     configuration.cornerStyle = .capsule
     configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
     let button = UIButton(configuration: configuration)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
     button.titleLabel?.numberOfLines = 0
     button.isHidden = true
@@ -125,6 +126,7 @@ final class ImageViewerController: UIViewController {
     
   private lazy var closeButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.setImage(UIImage(systemName: "xmark"), for: .normal)
     button.tintColor = .white
     button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
@@ -136,6 +138,7 @@ final class ImageViewerController: UIViewController {
     
   private lazy var shareButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
     button.tintColor = .white
     button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
@@ -147,11 +150,13 @@ final class ImageViewerController: UIViewController {
 
   private lazy var showInChatButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.setTitle("Show in Chat", for: .normal)
     button.setImage(UIImage(systemName: "text.bubble"), for: .normal)
     button.tintColor = .white
     button.setTitleColor(.white, for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+    button.titleLabel?.font = ChatTypography.font(14, weight: .semibold)
+    button.titleLabel?.adjustsFontForContentSizeCategory = true
     button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
     button.layer.cornerRadius = 18
     button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -174,7 +179,8 @@ final class ImageViewerController: UIViewController {
   private lazy var pageIndicatorLabel: UILabel = {
     let label = UILabel()
     label.textColor = .white
-    label.font = .systemFont(ofSize: 13, weight: .semibold)
+    label.font = ChatTypography.font(13, weight: .semibold)
+    label.adjustsFontForContentSizeCategory = true
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
@@ -273,11 +279,17 @@ final class ImageViewerController: UIViewController {
     fatalError("init(coder:) has not been implemented")
   }
     
+  private var compactControlsConstraints: [NSLayoutConstraint] = []
+  private var expandedControlsConstraints: [NSLayoutConstraint] = []
+
   // MARK: - Lifecycle Methods
     
   override func viewDidLoad() {
     super.viewDidLoad()
     setupViews()
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: ImageViewerController, _: UITraitCollection) in
+      controller.updateControlsLayout()
+    }
     setupGestures()
     updatePageIndicator()
 
@@ -364,29 +376,41 @@ final class ImageViewerController: UIViewController {
       controlsContainerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
       controlsContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       controlsContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      controlsContainerView.heightAnchor.constraint(equalToConstant: 60),
+      controlsContainerView.bottomAnchor.constraint(greaterThanOrEqualTo: closeButton.bottomAnchor, constant: 4),
+      controlsContainerView.bottomAnchor.constraint(greaterThanOrEqualTo: showInChatButton.bottomAnchor, constant: 4),
             
       closeButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
       closeButton.leadingAnchor.constraint(equalTo: controlsContainerView.leadingAnchor, constant: 16),
-      closeButton.widthAnchor.constraint(equalToConstant: 40),
-      closeButton.heightAnchor.constraint(equalToConstant: 40),
+      closeButton.widthAnchor.constraint(equalToConstant: 40).scaledForContentSize(),
+      closeButton.heightAnchor.constraint(equalToConstant: 40).scaledForContentSize(),
          
       shareButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
       shareButton.trailingAnchor.constraint(equalTo: controlsContainerView.trailingAnchor, constant: -16),
-      shareButton.widthAnchor.constraint(equalToConstant: 40),
-      shareButton.heightAnchor.constraint(equalToConstant: 40),
+      shareButton.widthAnchor.constraint(equalToConstant: 40).scaledForContentSize(),
+      shareButton.heightAnchor.constraint(equalToConstant: 40).scaledForContentSize(),
 
-      showInChatButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
       showInChatButton.centerXAnchor.constraint(equalTo: controlsContainerView.centerXAnchor),
-      showInChatButton.heightAnchor.constraint(equalToConstant: 36),
-      showInChatButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8),
-      showInChatButton.trailingAnchor.constraint(lessThanOrEqualTo: shareButton.leadingAnchor, constant: -8)
+      showInChatButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).scaledForContentSize(),
+      showInChatButton.leadingAnchor.constraint(greaterThanOrEqualTo: controlsContainerView.leadingAnchor, constant: 16),
+      showInChatButton.trailingAnchor.constraint(lessThanOrEqualTo: controlsContainerView.trailingAnchor, constant: -16)
     ])
 
+    compactControlsConstraints = [
+      showInChatButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
+      showInChatButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8),
+      showInChatButton.trailingAnchor.constraint(lessThanOrEqualTo: shareButton.leadingAnchor, constant: -8),
+    ]
+    expandedControlsConstraints = [
+      showInChatButton.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
+    ]
     if imageItems.count > 1 {
+      compactControlsConstraints.append(pageIndicatorView.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor))
+      expandedControlsConstraints.append(pageIndicatorView.topAnchor.constraint(
+        equalTo: showInChatButton.isHidden ? closeButton.bottomAnchor : showInChatButton.bottomAnchor, constant: 8
+      ))
       NSLayoutConstraint.activate([
         pageIndicatorView.centerXAnchor.constraint(equalTo: controlsContainerView.centerXAnchor),
-        pageIndicatorView.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+        controlsContainerView.bottomAnchor.constraint(greaterThanOrEqualTo: pageIndicatorView.bottomAnchor, constant: 4),
 
         pageIndicatorLabel.topAnchor.constraint(equalTo: pageIndicatorView.topAnchor, constant: 6),
         pageIndicatorLabel.bottomAnchor.constraint(equalTo: pageIndicatorView.bottomAnchor, constant: -6),
@@ -395,9 +419,25 @@ final class ImageViewerController: UIViewController {
       ])
     }
         
+    let minimumHeight = controlsContainerView.heightAnchor.constraint(equalToConstant: 60)
+    minimumHeight.priority = .defaultLow
+    minimumHeight.isActive = true
+    updateControlsLayout()
     setupImageViewConstraints()
+  }
 
-    // No extra setup required here.
+  private func updateControlsLayout() {
+    NSLayoutConstraint.deactivate(compactControlsConstraints + expandedControlsConstraints)
+    NSLayoutConstraint.activate(traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+      ? expandedControlsConstraints : compactControlsConstraints)
+    view.setNeedsLayout()
+  }
+
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    closeButton.layer.cornerRadius = closeButton.bounds.height / 2
+    shareButton.layer.cornerRadius = shareButton.bounds.height / 2
+    showInChatButton.layer.cornerRadius = showInChatButton.bounds.height / 2
   }
 
   private func setupImageViewConstraints() {

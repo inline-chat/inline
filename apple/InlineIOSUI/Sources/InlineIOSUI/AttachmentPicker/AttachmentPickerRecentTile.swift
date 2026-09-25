@@ -1,4 +1,5 @@
 #if os(iOS)
+import InlineUI
 import SwiftUI
 
 public struct AttachmentPickerRecentTile: View {
@@ -79,11 +80,11 @@ private struct AttachmentPickerSelectionCircle: View {
 
       if isSelected {
         Image(systemName: "checkmark")
-          .font(.system(size: 10, weight: .bold))
+          .scaledFont(size: 10, weight: .bold)
           .foregroundStyle(.white)
       }
     }
-    .frame(
+    .scaledFrame(
       width: AttachmentPickerTileMetrics.selectionIndicatorSize,
       height: AttachmentPickerTileMetrics.selectionIndicatorSize
     )
@@ -104,7 +105,7 @@ private struct AttachmentPickerVideoBadgeOverlay: View {
 
       HStack(spacing: AttachmentPickerTileMetrics.videoBadgeSpacing) {
         Image(systemName: "video.fill")
-          .font(.system(size: 11, weight: .semibold))
+          .scaledFont(size: 11, weight: .semibold)
           .foregroundStyle(.white)
 
         Spacer(minLength: 0)

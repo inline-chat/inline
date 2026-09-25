@@ -11,14 +11,16 @@ final class PinnedMessageHeaderView: UIView {
     static let backgroundTopInset: CGFloat = 8
     static let backgroundBottomInset: CGFloat = 8
     static let contentSpacing: CGFloat = 8
-    static let closeButtonSize: CGFloat = max(44, EmbedMessageView.height)
+    static let closeButtonSize: CGFloat = 44
     static let fadeDuration: TimeInterval = 0.2
   }
 
-  static let preferredHeight: CGFloat = max(EmbedMessageView.height, Constants.closeButtonSize)
-    + (Constants.contentVerticalPadding * 2)
-    + Constants.backgroundTopInset
-    + Constants.backgroundBottomInset
+  private var preferredHeight: CGFloat {
+    max(EmbedMessageView.height(for: .replyBubble, compatibleWith: traitCollection), UIFontMetrics(forTextStyle: .body).scaledValue(for: Constants.closeButtonSize, compatibleWith: traitCollection))
+      + (Constants.contentVerticalPadding * 2)
+      + Constants.backgroundTopInset
+      + Constants.backgroundBottomInset
+  }
 
   var onHeightChange: ((CGFloat) -> Void)?
   var onOpenMessage: ((Int64) -> Void)?
@@ -40,6 +42,7 @@ final class PinnedMessageHeaderView: UIView {
 
   private lazy var primaryButton: UIButton = {
     let button = UIButton(type: .system)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
     button.accessibilityLabel = "Open pinned message"
     button.accessibilityHint = "Jumps to the pinned message in this chat"
@@ -86,7 +89,8 @@ final class PinnedMessageHeaderView: UIView {
 
   private lazy var closeButton: UIButton = {
     let button = UIButton(type: .system)
-    let config = UIImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
+    let config = UIImage.SymbolConfiguration(textStyle: .footnote).applying(UIImage.SymbolConfiguration(weight: .regular))
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .secondaryLabel
     button.accessibilityLabel = "Unpin message"
@@ -147,7 +151,7 @@ final class PinnedMessageHeaderView: UIView {
       equalTo: bottomAnchor,
       constant: -Constants.backgroundBottomInset
     )
-    closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
+    closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize).scaledForContentSize()
 
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
@@ -162,14 +166,20 @@ final class PinnedMessageHeaderView: UIView {
 
       embedView.leadingAnchor.constraint(equalTo: primaryButton.leadingAnchor, constant: Constants.horizontalPadding),
       embedView.centerYAnchor.constraint(equalTo: primaryButton.centerYAnchor),
-      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
 
       closeButton.leadingAnchor.constraint(equalTo: embedView.trailingAnchor, constant: Constants.contentSpacing),
       closeButton.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor, constant: -Constants.horizontalPadding),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
-      closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
+      closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize).scaledForContentSize(),
       closeButtonHeightConstraint!,
     ])
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory, isVisible {
+      onHeightChange?(preferredHeight)
+    }
   }
 
   override func layoutSubviews() {
@@ -349,8 +359,8 @@ final class PinnedMessageHeaderView: UIView {
       alpha = canAnimate ? 0 : 1
       backgroundViewTopConstraint?.constant = Constants.backgroundTopInset
       backgroundViewBottomConstraint?.constant = -Constants.backgroundBottomInset
-      closeButtonHeightConstraint?.constant = Constants.closeButtonSize
-      onHeightChange?(Self.preferredHeight)
+      closeButtonHeightConstraint?.constant = UIFontMetrics(forTextStyle: .body).scaledValue(for: Constants.closeButtonSize, compatibleWith: traitCollection)
+      onHeightChange?(preferredHeight)
       superview?.layoutIfNeeded()
 
       guard canAnimate else { return }

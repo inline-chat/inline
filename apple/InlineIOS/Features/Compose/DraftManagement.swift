@@ -45,7 +45,7 @@ extension ComposeView {
           text: draft,
           entities: entities,
           configuration: .init(
-            font: textView.font ?? UIFont.systemFont(ofSize: 17),
+            font: textView.font ?? textView.bodyFont,
             primaryColor: UIColor.label,
             linkColor: ThemeManager.shared.selected.accent,
             convertMentionsToLink: false

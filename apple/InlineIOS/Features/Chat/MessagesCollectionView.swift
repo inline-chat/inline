@@ -105,6 +105,16 @@ final class MessagesCollectionView: UICollectionView {
     super.init(frame: .zero, collectionViewLayout: layout)
 
     setupCollectionView()
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MessagesCollectionView, _: UITraitCollection) in
+      // Defer until descendants have inherited the new category, then discard old row measurements.
+      DispatchQueue.main.async { [weak view] in
+        guard let view else { return }
+        (view.collectionViewLayout as? AnimatedCompositionalLayout)?.preserveVisibleMessageForHistoryUpdate()
+        view.coordinator.clearSizeCache()
+        view.coordinator.reconfigureVisibleItemsForCurrentWidth()
+        view.collectionViewLayout.invalidateLayout()
+      }
+    }
   }
 
   var highestPositiveMessageId: Int64? {
@@ -3909,6 +3919,7 @@ private extension MessagesCollectionView {
       // Only the plus stays fixed; learned reactions scroll with the rest, as on macOS.
       let moreButton = UIButton(type: .system)
       moreButton.translatesAutoresizingMaskIntoConstraints = false
+      moreButton.adjustsImageSizeForAccessibilityContentSizeCategory = true
       var moreConfiguration: UIButton.Configuration
       if #available(iOS 26.0, *) {
         moreConfiguration = .glass()
@@ -3919,9 +3930,7 @@ private extension MessagesCollectionView {
       moreConfiguration.cornerStyle = .capsule
       moreConfiguration.contentInsets = .zero
       moreConfiguration.image = UIImage(systemName: "plus")
-      moreConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-        pointSize: 20, weight: .medium
-      )
+      moreConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .title3).applying(UIImage.SymbolConfiguration(weight: .medium))
       moreConfiguration.baseForegroundColor = .secondaryLabel
       moreButton.configuration = moreConfiguration
       moreButton.accessibilityLabel = "More reactions"
@@ -3934,14 +3943,14 @@ private extension MessagesCollectionView {
       containerView.addSubview(moreButton)
 
       NSLayoutConstraint.activate([
-        moreButton.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-        moreButton.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
+        moreButton.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize).scaledForContentSize(),
+        moreButton.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize).scaledForContentSize(),
         moreButton.trailingAnchor.constraint(
           equalTo: effectView.trailingAnchor, constant: -ContextMenuAccessoryLayout.reactionPickerContentInset
         ),
         moreButton.centerYAnchor.constraint(equalTo: effectView.centerYAnchor),
         containerView.widthAnchor.constraint(equalToConstant: preferredWidth),
-        containerView.heightAnchor.constraint(equalToConstant: containerHeight),
+        containerView.heightAnchor.constraint(equalToConstant: containerHeight).scaledForContentSize(),
 
         effectView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: verticalGlassInset),
         effectView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalGlassInset),
@@ -3963,7 +3972,7 @@ private extension MessagesCollectionView {
           equalTo: scrollView.contentLayoutGuide.bottomAnchor,
           constant: -ContextMenuAccessoryLayout.reactionPickerContentInset
         ),
-        stackView.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
+        stackView.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize).scaledForContentSize(),
       ])
 
       containerView.clipsToBounds = false
@@ -4043,7 +4052,7 @@ private extension MessagesCollectionView {
       configuration.title = reaction
       configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
         var outgoing = incoming
-        outgoing.font = .systemFont(ofSize: ContextMenuAccessoryLayout.reactionEmojiPointSize)
+        outgoing.font = ChatTypography.font(ContextMenuAccessoryLayout.reactionEmojiPointSize)
         return outgoing
       }
 
@@ -4054,8 +4063,8 @@ private extension MessagesCollectionView {
       button.layer.cornerRadius = ContextMenuAccessoryLayout.reactionButtonSize / 2
       button.clipsToBounds = true
       NSLayoutConstraint.activate([
-        button.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-        button.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
+        button.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize).scaledForContentSize(),
+        button.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize).scaledForContentSize(),
       ])
 
       button.addAction(UIAction { [weak self, weak button] _ in

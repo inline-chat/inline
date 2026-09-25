@@ -1,5 +1,6 @@
 #if os(iOS)
 import Photos
+import InlineUI
 import SwiftUI
 import UIKit
 
@@ -25,7 +26,7 @@ struct AttachmentPickerAssetThumbnail: View {
           .scaledToFill()
       } else {
         Image(systemName: mediaType == .video ? "video" : "photo")
-          .font(.system(size: 24, weight: .medium))
+          .scaledFont(size: 24, weight: .medium)
           .foregroundStyle(.secondary)
       }
     }

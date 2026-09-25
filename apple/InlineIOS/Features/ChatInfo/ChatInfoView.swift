@@ -1149,7 +1149,7 @@ struct InfoTabView: View {
       Image(systemName: "person.3.fill")
         .font(.callout.weight(.semibold))
         .foregroundStyle(.white)
-        .frame(width: 36, height: 36)
+        .scaledFrame(width: 36, height: 36)
         .background(Color.accentColor)
         .clipShape(Circle())
 

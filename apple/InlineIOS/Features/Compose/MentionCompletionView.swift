@@ -14,6 +14,7 @@ protocol MentionCompletionDelegate: AnyObject {
 
 public class MentionCompletionView: UIView {
   public static let maxHeight: CGFloat = 200
+  private var scaledItemHeight: CGFloat { UIFontMetrics(forTextStyle: .body).scaledValue(for: 58, compatibleWith: traitCollection) }
   public static let itemHeight: CGFloat = 58
 
   weak var delegate: MentionCompletionDelegate?
@@ -88,6 +89,14 @@ public class MentionCompletionView: UIView {
 
   var hasItems: Bool {
     model.isVisible
+  }
+
+  public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      updateRows()
+      updateHeight()
+    }
   }
 
   override init(frame: CGRect) {
@@ -249,14 +258,16 @@ public class MentionCompletionView: UIView {
     }
 
     let nameLabel = UILabel()
-    nameLabel.font = .systemFont(ofSize: 17, weight: .medium)
+    nameLabel.font = ChatTypography.font(17, weight: .medium)
+    nameLabel.adjustsFontForContentSizeCategory = true
     nameLabel.textColor = .label
     nameLabel.numberOfLines = 1
     nameLabel.text = item.title
     nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
     let subtitleLabel = UILabel()
-    subtitleLabel.font = .systemFont(ofSize: 15, weight: .regular)
+    subtitleLabel.font = ChatTypography.font(15, weight: .regular)
+    subtitleLabel.adjustsFontForContentSizeCategory = true
     subtitleLabel.textColor = .secondaryLabel
     subtitleLabel.numberOfLines = 1
     subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -290,9 +301,9 @@ public class MentionCompletionView: UIView {
       containerStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
       containerStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
       containerStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
-      containerStackView.heightAnchor.constraint(equalToConstant: 36),
+      containerStackView.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
 
-      containerView.heightAnchor.constraint(equalToConstant: Self.itemHeight),
+      containerView.heightAnchor.constraint(equalToConstant: scaledItemHeight),
     ])
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(rowTapped(_:)))
@@ -317,14 +328,14 @@ public class MentionCompletionView: UIView {
 
       if isSelected {
         // Scroll to selected item
-        let yOffset = CGFloat(index) * Self.itemHeight
+        let yOffset = CGFloat(index) * scaledItemHeight
         let visibleHeight = scrollView.bounds.height
         let contentHeight = scrollView.contentSize.height
 
         if yOffset < scrollView.contentOffset.y {
           scrollView.setContentOffset(CGPoint(x: 0, y: yOffset), animated: true)
-        } else if yOffset + Self.itemHeight > scrollView.contentOffset.y + visibleHeight {
-          let newOffset = min(yOffset + Self.itemHeight - visibleHeight, contentHeight - visibleHeight)
+        } else if yOffset + scaledItemHeight > scrollView.contentOffset.y + visibleHeight {
+          let newOffset = min(yOffset + scaledItemHeight - visibleHeight, contentHeight - visibleHeight)
           scrollView.setContentOffset(CGPoint(x: 0, y: max(0, newOffset)), animated: true)
         }
       }
@@ -333,7 +344,7 @@ public class MentionCompletionView: UIView {
 
   private func updateHeight() {
     let itemCount = min(model.items.count, 4) // Max 4 items visible
-    let height = CGFloat(itemCount) * Self.itemHeight
+    let height = CGFloat(itemCount) * scaledItemHeight
     let constrainedHeight = min(height, Self.maxHeight)
 
     // Update height constraint if needed

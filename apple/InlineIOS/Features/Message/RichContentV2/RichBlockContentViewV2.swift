@@ -962,7 +962,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     scrollView.addSubview(textView)
     copyButton.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
     copyButton.setPreferredSymbolConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 13, weight: .medium),
+      UIImage.SymbolConfiguration(textStyle: .footnote).applying(UIImage.SymbolConfiguration(weight: .medium)),
       forImageIn: .normal
     )
     copyButton.imageView?.contentMode = .scaleAspectFit
@@ -983,6 +983,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     language = codeNode.language
     gutterWidth = codeNode.gutterWidth
     codeContentWidth = codeNode.contentWidth
+    languageLabel.font = ChatTypography.codeLanguageFont(baseFontSize: context.baseFontSize)
     languageLabel.text = codeNode.language.map(Self.displayLanguage)
     languageLabel.textColor = context.palette.secondary
     copyButton.tintColor = context.palette.secondary
@@ -1059,9 +1060,9 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
   override func layoutSubviews() {
     super.layoutSubviews()
     let hasLanguage = languageLabel.text?.isEmpty == false
-    let headerHeight: CGFloat = hasLanguage ? 21 : 0
+    let headerHeight: CGFloat = hasLanguage ? max(21, ceil(languageLabel.font.lineHeight) + 7) : 0
     let bodyTopInset: CGFloat = hasLanguage ? 3 : 8
-    languageLabel.frame = CGRect(x: 8, y: 5, width: max(0, bounds.width - 44), height: 14)
+    languageLabel.frame = CGRect(x: 8, y: 5, width: max(0, bounds.width - 44), height: max(14, ceil(languageLabel.font.lineHeight)))
     copyButton.frame = CGRect(x: bounds.width - 26, y: hasLanguage ? 3 : 4, width: 18, height: 18)
     let gutterWidth = gutterLabel.isHidden ? CGFloat.zero : gutterWidth
     gutterLabel.frame = CGRect(

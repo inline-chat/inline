@@ -134,7 +134,7 @@ struct UserRow: View {
       Circle()
         .fill(selectedParticipants.contains(userInfo.user.id) ? Color(theme.accent) : Color.clear)
         .stroke(selectedParticipants.contains(userInfo.user.id) ? Color(theme.accent) : Color.gray, lineWidth: 1)
-        .frame(width: 18, height: 18)
+        .scaledFrame(width: 18, height: 18)
         .scaleEffect(selectedParticipants.contains(userInfo.user.id) ? 1.0 : 0.8)
         .animation(
           .spring(response: 0.3, dampingFraction: 0.6, blendDuration: 0),
@@ -144,7 +144,7 @@ struct UserRow: View {
           if selectedParticipants.contains(userInfo.user.id) {
             Image(systemName: "checkmark")
               .foregroundColor(.white)
-              .font(.system(size: 12))
+              .scaledFont(size: 12)
               .opacity(selectedParticipants.contains(userInfo.user.id) ? 1.0 : 0.0)
               .scaleEffect(selectedParticipants.contains(userInfo.user.id) ? 1.0 : 0.8)
               .animation(

@@ -291,7 +291,7 @@ private struct ExperimentalSearchEmptyPlaceholder: View {
   var body: some View {
     VStack(spacing: 14) {
       Image(systemName: "magnifyingglass")
-        .font(.system(size: 34, weight: .regular))
+        .scaledFont(size: 34, weight: .regular)
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)
 
@@ -407,9 +407,9 @@ private struct ExperimentalSearchInput: View {
       onClose()
     } label: {
       Image(systemName: "xmark")
-        .font(.system(size: 14, weight: .semibold))
-        .frame(width: 40, height: 40)
-        .frame(width: 44, height: 44)
+        .scaledFont(size: 14, weight: .semibold)
+        .scaledFrame(width: 40, height: 40)
+        .scaledFrame(width: 44, height: 44)
         .contentShape(.circle)
     }
     .buttonStyle(.plain)

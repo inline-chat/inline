@@ -399,7 +399,7 @@ extension UIMessageView {
     let textView = CodeBlockTextView(usingTextLayoutManager: usingTextLayoutManager)
     textView.backgroundColor = .clear
     textView.textAlignment = .natural
-    textView.font = .systemFont(ofSize: 17)
+    textView.font = ChatTypography.font(17, compatibleWith: traitCollection)
     textView.textColor = textColor
     textView.isEditable = false
     textView.isSelectable = false
@@ -416,7 +416,8 @@ extension UIMessageView {
     label.text = "Unsupported message"
     label.backgroundColor = .clear
     label.textAlignment = .natural
-    label.font = .italicSystemFont(ofSize: 18)
+    label.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .italicSystemFont(ofSize: 18))
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = textColor.withAlphaComponent(0.9)
     label.numberOfLines = 0
 
@@ -431,6 +432,7 @@ extension UIMessageView {
   func createForwardHeaderLabel() -> UILabel {
     let label = UILabel()
     label.font = .preferredFont(forTextStyle: .caption1)
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = theme.primary.uiColor
     label.numberOfLines = 1
     label.lineBreakMode = .byTruncatingTail
@@ -491,7 +493,7 @@ extension UIMessageView {
     NSLayoutConstraint.activate([
       controller.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
       preferredWidth,
-      controller.view.heightAnchor.constraint(equalToConstant: 54),
+      controller.view.heightAnchor.constraint(equalToConstant: 54).scaledForContentSize(),
     ])
     return controller
   }
@@ -547,6 +549,7 @@ extension UIMessageView {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .preferredFont(forTextStyle: .caption1)
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = .secondaryLabel
     label.textAlignment = .center
     label.numberOfLines = 0

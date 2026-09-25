@@ -33,7 +33,7 @@ struct DefaultSendButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: iconSize, weight: .bold)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .bold))
     )
     config.baseForegroundColor = .white
     config.background.backgroundColor = accentColor
@@ -81,7 +81,7 @@ struct MinimalSendButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "paperplane.fill")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
     )
     config.baseForegroundColor = tintColor
     config.background.backgroundColor = backgroundColor
@@ -114,7 +114,7 @@ struct RoundedSendButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up.circle.fill")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
     )
     config.baseForegroundColor = accentColor
     config.background.backgroundColor = .clear
@@ -153,7 +153,7 @@ struct DefaultAttachmentButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+      UIImage.SymbolConfiguration(textStyle: .subheadline).applying(UIImage.SymbolConfiguration(weight: .medium))
     )
     config.baseForegroundColor = tintColor
     config.background.backgroundColor = backgroundColor
@@ -182,7 +182,7 @@ struct CircularAttachmentButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: iconName)?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
     )
     config.baseForegroundColor = .white
     config.background.backgroundColor = accentColor
@@ -216,7 +216,7 @@ struct BorderedAttachmentButtonStyle: ComposeButtonStyle {
   func configure(_ button: UIButton) {
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "plus.circle")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .regular))
     )
     config.baseForegroundColor = tintColor
     config.background.backgroundColor = .clear
@@ -367,6 +367,7 @@ class ComposeButtonFactory {
     action: Selector
   ) -> UIButton {
     let button = UIButton()
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
 
     style.configure(button)
@@ -392,6 +393,7 @@ class ComposeButtonFactory {
     menu: UIMenu
   ) -> UIButton {
     let button = UIButton()
+    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
 
     style.configure(button)

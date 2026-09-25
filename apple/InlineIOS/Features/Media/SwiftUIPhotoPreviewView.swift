@@ -1,3 +1,4 @@
+import InlineUI
 import SwiftUI
 import UIKit
 
@@ -270,7 +271,7 @@ struct SwiftUIPhotoPreviewView: View {
       if #available(iOS 26.0, *) {
         Circle()
           .fill(ThemeManager.shared.cardBackgroundColor)
-          .frame(width: closeButtonSize, height: closeButtonSize)
+          .scaledFrame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
@@ -280,7 +281,7 @@ struct SwiftUIPhotoPreviewView: View {
       } else {
         Circle()
           .fill(ThemeManager.shared.surfaceBackgroundColor)
-          .frame(width: closeButtonSize, height: closeButtonSize)
+          .scaledFrame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
@@ -301,7 +302,7 @@ struct SwiftUIPhotoPreviewView: View {
         .foregroundColor(ThemeManager.shared.textSecondaryColor)
     }
     .padding(.horizontal, 12)
-    .frame(height: closeButtonSize)
+    .scaledFrame(height: closeButtonSize)
     .fixedSize(horizontal: true, vertical: false)
     .background {
       if #available(iOS 26.0, *) {
@@ -323,7 +324,7 @@ struct SwiftUIPhotoPreviewView: View {
         Text("\(viewModel.currentIndex + 1)")
           .font(.callout.bold())
           .foregroundColor(ThemeManager.shared.textPrimaryColor)
-          .frame(width: closeButtonSize, height: closeButtonSize)
+          .scaledFrame(width: closeButtonSize, height: closeButtonSize)
           .background(
             Group {
               if #available(iOS 26.0, *) {
@@ -398,7 +399,7 @@ struct SwiftUIPhotoPreviewView: View {
   private var captionTextField: some View {
     TextField("Add a caption...", text: $viewModel.caption, axis: .vertical)
       .focused($isCaptionFocused)
-      .font(.system(size: 16))
+      .scaledFont(size: 16)
       .foregroundColor(ThemeManager.shared.textPrimaryColor)
       .padding(.horizontal, textFieldHorizontalPadding)
       .padding(.vertical, textFieldVerticalPadding)
@@ -427,20 +428,20 @@ struct SwiftUIPhotoPreviewView: View {
       if #available(iOS 26.0, *) {
         Circle()
           .fill(ThemeManager.shared.cardBackgroundColor)
-          .frame(width: actionButtonSize, height: actionButtonSize)
+          .scaledFrame(width: actionButtonSize, height: actionButtonSize)
           .overlay {
             Image(systemName: systemImage)
-              .font(.system(size: 18, weight: .medium))
+              .scaledFont(size: 18, weight: .medium)
               .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
           .glassEffect(.regular, in: Circle())
       } else {
         Circle()
           .fill(ThemeManager.shared.surfaceBackgroundColor)
-          .frame(width: actionButtonSize, height: actionButtonSize)
+          .scaledFrame(width: actionButtonSize, height: actionButtonSize)
           .overlay {
             Image(systemName: systemImage)
-              .font(.system(size: 18, weight: .medium))
+              .scaledFont(size: 18, weight: .medium)
               .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
       }
@@ -457,9 +458,9 @@ struct SwiftUIPhotoPreviewView: View {
       }
     }) {
       Image(systemName: isCaptionFocused ? "checkmark" : "arrow.up")
-        .font(.system(size: 20, weight: .semibold))
+        .scaledFont(size: 20, weight: .semibold)
         .foregroundColor(.white)
-        .frame(width: sendButtonSize, height: sendButtonSize)
+        .scaledFrame(width: sendButtonSize, height: sendButtonSize)
         .background(
           Circle()
             .fill(ThemeManager.shared.accentColor)

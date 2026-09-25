@@ -31,10 +31,10 @@ struct ChatListItem: View {
   var rowStyle: RowStyle = .standard
 
   // fonts
-  static var titleFont: Font = .system(size: 16.0, weight: .regular, design: .default)
-  static var subtitleFont: Font = .system(size: 15.0).weight(.regular)
-  static var tertiaryFont: Font = .system(size: 14.0, weight: .regular, design: .default)
-  static var unreadCountFont: Font = .system(size: 14.0, weight: .regular, design: .default)
+  static var titleFont: Font = .callout
+  static var subtitleFont: Font = .subheadline
+  static var tertiaryFont: Font = .footnote
+  static var unreadCountFont: Font = .footnote
 
   // sizes
   static var avatarAndContentSpacing: CGFloat = 12
@@ -191,11 +191,11 @@ struct ChatListItem: View {
     case .standard:
       Self.titleFont
     case .prototypeCompact:
-      .system(size: 18, weight: .medium)
+      .headline
     case .prototypeWithPreview:
-      .system(size: 16, weight: .medium)
+      .callout.weight(.medium)
     case .prototypeLarge:
-      .system(size: 16, weight: .medium)
+      .callout.weight(.medium)
     }
   }
 
@@ -204,7 +204,7 @@ struct ChatListItem: View {
     case .standard, .prototypeLarge:
       Self.subtitleFont
     case .prototypeCompact, .prototypeWithPreview:
-      .system(size: 14, weight: .regular)
+      .footnote
     }
   }
 
@@ -237,13 +237,13 @@ struct ChatListItem: View {
         if showsTrailingUnreadCount {
           unreadCountView
             .padding(.leading, 8)
-            .frame(height: rowHeight, alignment: .center)
+            .frame(minHeight: rowHeight, alignment: .center)
         }
       }
       .padding(.leading, usesCenteredUnreadAccessory ? 10 : 0)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .frame(height: rowHeight)
+    .frame(minHeight: rowHeight)
     // .listRowInsets(EdgeInsets(
     //   top: Self.verticalPadding,
     //   leading: Self.horizontalPadding,
@@ -385,7 +385,7 @@ struct ChatListItem: View {
     if usesCenteredUnreadAccessory {
       if let unreadCount {
         Text(String(unreadCount))
-          .font(.system(size: 13, weight: .semibold).monospacedDigit())
+          .scaledFont(size: 13, weight: .semibold).monospacedDigit()
           .foregroundStyle(hasProminentUnread ? Color.white : Color.primary.opacity(0.76))
           .lineLimit(1)
           .contentTransition(.numericText())
@@ -398,7 +398,7 @@ struct ChatListItem: View {
       } else if hasUnreadMark {
         Circle()
           .fill(hasProminentUnread ? Color.accentColor : Color.secondary)
-          .frame(width: 7, height: 7)
+          .scaledFrame(width: 7, height: 7)
       }
     } else {
       if let unreadCount {
@@ -413,7 +413,7 @@ struct ChatListItem: View {
       } else if hasUnreadMark {
         Circle()
           .fill(Self.unreadCircleColor)
-          .frame(width: 10, height: 10)
+          .scaledFrame(width: 10, height: 10)
       }
     }
   }
@@ -425,7 +425,7 @@ private struct ChatListPinnedIndicator: View {
   var body: some View {
     if isVisible {
       Image(systemName: "pin.fill")
-        .font(.system(size: 11, weight: .semibold))
+        .scaledFont(size: 11, weight: .semibold)
         .foregroundStyle(.tertiary)
         .padding(.leading, 4)
     }

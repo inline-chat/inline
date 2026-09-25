@@ -385,8 +385,8 @@ final class ComposeAutocompleteCompletionView: UIView {
     containerView.addSubview(rowStack)
 
     NSLayoutConstraint.activate([
-      iconView.widthAnchor.constraint(equalToConstant: 30),
-      iconView.heightAnchor.constraint(equalToConstant: 30),
+      iconView.widthAnchor.constraint(equalToConstant: 30).scaledForContentSize(),
+      iconView.heightAnchor.constraint(equalToConstant: 30).scaledForContentSize(),
 
       rowStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
       rowStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
@@ -437,8 +437,8 @@ final class ComposeAutocompleteCompletionView: UIView {
     NSLayoutConstraint.activate([
       iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
       iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-      iconView.widthAnchor.constraint(equalToConstant: 20),
-      iconView.heightAnchor.constraint(equalToConstant: 20),
+      iconView.widthAnchor.constraint(equalToConstant: 20).scaledForContentSize(),
+      iconView.heightAnchor.constraint(equalToConstant: 20).scaledForContentSize(),
       label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
       label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
       label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
@@ -481,7 +481,8 @@ final class ComposeAutocompleteCompletionView: UIView {
     if let emoji = item.emoji, !emoji.isEmpty {
       let label = UILabel()
       label.text = emoji
-      label.font = .systemFont(ofSize: 17)
+      label.font = .preferredFont(forTextStyle: .body)
+      label.adjustsFontForContentSizeCategory = true
       label.textAlignment = .center
       label.translatesAutoresizingMaskIntoConstraints = false
       container.addSubview(label)
@@ -502,8 +503,8 @@ final class ComposeAutocompleteCompletionView: UIView {
       NSLayoutConstraint.activate([
         imageView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
         imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        imageView.widthAnchor.constraint(equalToConstant: 16),
-        imageView.heightAnchor.constraint(equalToConstant: 16),
+        imageView.widthAnchor.constraint(equalToConstant: 16).scaledForContentSize(),
+        imageView.heightAnchor.constraint(equalToConstant: 16).scaledForContentSize(),
       ])
     }
 

@@ -1,6 +1,7 @@
 #if os(iOS)
 import Combine
 import Photos
+import InlineUI
 import SwiftUI
 
 public extension Notification.Name {
@@ -197,9 +198,9 @@ public struct AttachmentPickerSheet: View {
     Button(action: action) {
       HStack(spacing: 14) {
         Image(systemName: systemImage)
-          .font(.system(size: 20, weight: .regular))
+          .scaledFont(size: 20, weight: .regular)
           .foregroundStyle(.primary)
-          .frame(width: 28)
+          .scaledFrame(width: 28)
 
         VStack(alignment: .leading, spacing: 2) {
           Text(title)

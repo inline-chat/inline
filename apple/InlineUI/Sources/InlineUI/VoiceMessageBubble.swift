@@ -254,21 +254,21 @@ public struct VoiceMessageBubble: View {
     ZStack {
       Circle()
         .fill(outgoing ? .white.opacity(0.14) : accentColor.opacity(0.12))
-        .frame(width: buttonSize, height: buttonSize)
+        .scaledFrame(width: buttonSize, height: buttonSize)
 
       if let downloadProgress = visibleDownloadProgress {
         Circle()
           .trim(from: 0, to: max(0.04, downloadProgress.progress))
           .stroke(primaryTint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
           .rotationEffect(.degrees(-90))
-          .frame(width: buttonSize - 7, height: buttonSize - 7)
+          .scaledFrame(width: buttonSize - 7, height: buttonSize - 7)
 
         Image(systemName: "xmark")
-          .font(.system(size: iconSize - 1, weight: .bold))
+          .scaledFont(size: iconSize - 1, weight: .bold)
           .foregroundStyle(primaryTint)
       } else {
         Image(systemName: buttonIconName)
-          .font(.system(size: iconSize, weight: .semibold))
+          .scaledFont(size: iconSize, weight: .semibold)
           .foregroundStyle(primaryTint)
       }
     }

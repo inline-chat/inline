@@ -220,6 +220,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     view.isHidden = true
     return view
   }()
+  var measuredVoiceInputHeight: CGFloat {
+    voiceInputView.updateTraitsIfNeeded()
+    let width = max(1, voiceInputView.bounds.width)
+    return voiceInputHostingController.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
+  }
+
   private lazy var embedContainerView = makeEmbedContainerView()
   var embedContainerHeightConstraint: NSLayoutConstraint?
   var attachmentContainerHeightConstraint: NSLayoutConstraint?
@@ -277,7 +283,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       setupAutocompleteManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
-      if hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
+      if isVoiceActive || hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
         updateHeight()
       }
     }
@@ -289,7 +295,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
 
     // Update height after layout if text view now has proper bounds and there's text, attachments, or an embed
-    if textView.bounds.width > 0, hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
+    if textView.bounds.width > 0, isVoiceActive || hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
       updateHeight()
     }
   }
@@ -420,7 +426,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func setupInitialHeight() {
-    composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
+    composeHeightConstraint = heightAnchor.constraint(equalToConstant: minimumInputHeight)
   }
 
   func addDropInteraction() {
@@ -460,8 +466,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         equalTo: glassContent.bottomAnchor,
         constant: -composePlusButtonBottomInset
       ),
-      plusButton.widthAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
-      plusButton.heightAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
+      plusButton.widthAnchor.constraint(equalToConstant: composePlusButtonVisualSize).scaledForContentSize(),
+      plusButton.heightAnchor.constraint(equalToConstant: composePlusButtonVisualSize).scaledForContentSize(),
 
       // Container constraints
       composeLeadingToPlusConstraint,
@@ -502,15 +508,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         equalTo: composeContent.bottomAnchor,
         constant: -5
       ),
-      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
-      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width).scaledForContentSize(),
+      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height).scaledForContentSize(),
     ])
 
     NSLayoutConstraint.activate([
       voiceButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
       voiceButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-      voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
-      voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
+      voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size).scaledForContentSize(),
+      voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size).scaledForContentSize(),
 
       voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
       voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
@@ -778,7 +784,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       voiceViewModel.$isSending.removeDuplicates()
     )
       .sink { [weak self] _, _ in
-        self?.reconcileVoiceControls(animated: true)
+        // Published emits before storage changes; measure the new phase after that update.
+        DispatchQueue.main.async { [weak self] in
+          self?.reconcileVoiceControls(animated: true)
+        }
       }
   }
 
@@ -1374,8 +1383,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     stopDraftSaveTimer()
     textView.text = ""
     resetTextViewState()
-    textView.font = .systemFont(ofSize: 17)
-    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+    textView.font = textView.bodyFont
+    textView.typingAttributes[.font] = textView.bodyFont
     textView.showPlaceholder(true)
     updateSendButtonVisibility(syncVoiceAvailability: false)
     updateHeight(animated: false)
@@ -1430,7 +1439,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func updateSendButtonForEditing(_ isEditing: Bool) {
     let imageName = isEditing ? "checkmark" : "arrow.up"
     sendButton.configuration?.image = UIImage(systemName: imageName)?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+      UIImage.SymbolConfiguration(textStyle: .subheadline).applying(UIImage.SymbolConfiguration(weight: .bold))
     )
   }
 
@@ -1533,7 +1542,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         // The experiment exposes Markdown syntax; otherwise keep rendered formatting.
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
-            font: .systemFont(ofSize: 17),
+            font: textView.bodyFont,
             primaryColor: .label,
             linkColor: linkColor,
             convertMentionsToLink: false, // Keep as attributes for editing
@@ -1601,6 +1610,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     updateEmbedState(animated: true)
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      if embedView != nil {
+        embedContainerHeightConstraint?.constant = EmbedMessageView.height(for: .compose, compatibleWith: traitCollection) + 8
+      }
+      updateHeight()
+    }
   }
 
   private func updateEmbedState(animated: Bool) {
@@ -1695,7 +1714,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           newEmbedView.leadingAnchor.constraint(equalTo: embedContainerView.leadingAnchor),
           newEmbedView.trailingAnchor.constraint(equalTo: embedContainerView.trailingAnchor),
           newEmbedView.bottomAnchor.constraint(equalTo: embedContainerView.bottomAnchor),
-          newEmbedView.heightAnchor.constraint(equalToConstant: ComposeEmbedView.height),
         ])
         embedContainerView.layoutIfNeeded()
       }
@@ -1712,7 +1730,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
     }
 
-    let targetHeight = ComposeEmbedView.height
+    let targetHeight = EmbedMessageView.height(for: .compose, compatibleWith: traitCollection) + 8
     let shouldUpdateHeight = embedContainerHeightConstraint?.constant != targetHeight
     embedContainerHeightConstraint?.constant = targetHeight
 
@@ -1829,8 +1847,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     resetTextViewState()
 
     // Ensure font is reset after clearing text
-    textView.font = .systemFont(ofSize: 17)
-    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+    textView.font = textView.bodyFont
+    textView.typingAttributes[.font] = textView.bodyFont
 
     resetHeight(animated: shouldAnimateHeightReset)
     textView.showPlaceholder(true)
@@ -1860,8 +1878,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     stopDraftSaveTimer()
     textView.text = ""
     resetTextViewState()
-    textView.font = .systemFont(ofSize: 17)
-    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+    textView.font = textView.bodyFont
+    textView.typingAttributes[.font] = textView.bodyFont
     textView.showPlaceholder(true)
     updateSendButtonVisibility(syncVoiceAvailability: false)
     updateHeight(
@@ -2384,7 +2402,8 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   private let extensionBadge: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 9, weight: .semibold)
+    label.font = ChatTypography.font(9, weight: .semibold, style: .caption2)
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = .white
     label.textAlignment = .center
     label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
@@ -2434,8 +2453,9 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     let view = UIImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isUserInteractionEnabled = false
+    view.adjustsImageSizeForAccessibilityContentSizeCategory = true
     view.image = UIImage(systemName: "xmark")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+      UIImage.SymbolConfiguration(textStyle: .caption2).applying(UIImage.SymbolConfiguration(weight: .bold))
     )
     view.tintColor = .black
     return view
@@ -2543,17 +2563,22 @@ private final class ComposeAttachmentPreviewItemView: UIView {
 
       removeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-      removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
-      removeButton.heightAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
+      removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize).scaledForContentSize(),
+      removeButton.heightAnchor.constraint(equalToConstant: Metrics.removeButtonSize).scaledForContentSize(),
 
       removeBadgeView.centerXAnchor.constraint(equalTo: removeButton.centerXAnchor),
       removeBadgeView.centerYAnchor.constraint(equalTo: removeButton.centerYAnchor),
-      removeBadgeView.widthAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
-      removeBadgeView.heightAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
+      removeBadgeView.widthAnchor.constraint(equalToConstant: Metrics.removeBadgeSize).scaledForContentSize(),
+      removeBadgeView.heightAnchor.constraint(equalToConstant: Metrics.removeBadgeSize).scaledForContentSize(),
 
       removeIconView.centerXAnchor.constraint(equalTo: removeBadgeView.centerXAnchor),
       removeIconView.centerYAnchor.constraint(equalTo: removeBadgeView.centerYAnchor),
     ])
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    removeBadgeView.layer.cornerRadius = removeBadgeView.bounds.height / 2
   }
 
   private func configure(mediaItem: FileMediaItem) {
@@ -2657,7 +2682,7 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     localThumbnailImageView.isHidden = true
 
     centerIconView.image = UIImage(systemName: iconName)?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .semibold))
     )
     centerIconView.isHidden = false
 

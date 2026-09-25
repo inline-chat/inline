@@ -792,7 +792,7 @@ final class ComposeAutocompleteManager: NSObject {
 
   private func baseTextAttributes(for textView: UITextView?) -> [NSAttributedString.Key: Any] {
     [
-      .font: textView?.font ?? UIFont.systemFont(ofSize: 17),
+      .font: textView?.font ?? ChatTypography.font(17),
       .foregroundColor: UIColor.label,
     ]
   }
