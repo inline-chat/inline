@@ -1713,6 +1713,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         NSLayoutConstraint.activate([
           newEmbedView.leadingAnchor.constraint(equalTo: embedContainerView.leadingAnchor),
           newEmbedView.trailingAnchor.constraint(equalTo: embedContainerView.trailingAnchor),
+          newEmbedView.topAnchor.constraint(equalTo: embedContainerView.topAnchor),
           newEmbedView.bottomAnchor.constraint(equalTo: embedContainerView.bottomAnchor),
         ])
         embedContainerView.layoutIfNeeded()
