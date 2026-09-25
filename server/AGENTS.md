@@ -1,0 +1,17 @@
+# Instructions for server
+
+## Scope
+
+- The backend uses Bun, TypeScript, and Effect. `server/src/index.ts` is the entry point; `src/core/http/productionHost.ts` owns the production HTTP/WebSocket host, `src/functions/` contains retained business operations, and `src/db/` owns schema and models.
+- Realtime V2 and V3 coexist. Trace the current contract and routing through `src/realtime/` and `src/core/http/realtimeV3Host.ts` before adding a client-facing API.
+
+## Data and lifecycle
+
+- Schema lives in `src/db/schema/` and forward Drizzle migrations in `drizzle/`. Generate with `bun run db:generate <name>` from `server/`; review the SQL and never edit a committed migration. Startup checks the migration ledger; `db:migrate` is a separate database mutation.
+- PostgreSQL is authoritative; Redis Pub/Sub provides wake-up hints, so retain durable catch-up and repair paths when changing delivery.
+- Follow existing encryption patterns in `src/modules/encryption/` and privacy-safe `Log`/Sentry handling. Add shutdown cleanup for new long-lived resources, and account for downtime, retries, and sync correctness in write paths.
+- Access production only when authorized; keep inspection read-only by default and require explicit authorization for mutations.
+
+## Checks
+
+- Use [TESTING.md](TESTING.md) for focused and database-backed tests. From `server/`, run the relevant `bun test <path>`, then `bun run typecheck` and `bun run lint` at a checkpoint. Start `bun run dev` only when local runtime validation is needed.

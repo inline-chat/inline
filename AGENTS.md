@@ -22,6 +22,7 @@
 ## Working rules
 
 - Use .wip, .running and .committing files as hints.
+- When brainstorming or writing specs for a refactor, rewrite, or weighing a change, new feature or fix for a major flaw in the core logic of a core module like realtime, sync, message lists, message views, chat view, chat view model, dbs, etc, first check prior research, labs, findings, my ground truth, and brainstorming sessions from secret-sauce's context or memory to understand the larger goals and plans so you can be more aligned by keeping the vision for those modules in mind when changing them.
 
 ### Operational Effectiveness Hints
 
@@ -90,8 +91,9 @@ These are useful invariants, hints, constraints and benchmarks for assessing you
 
 ## Stack
 
-- Servers: Hetzner, Fly
-- Infra/Cloud: Cloudflare, PlanetScale, Coolify
-- Backend: Bun, TS, Effect.TS
-- Clients: Swift, TS, React, Rust
-- CI/Builds: GitHub Actions, Xcode Cloud
+- Hosting and cloud: Fly, Hetzner, Cloudflare (including R2), PlanetScale, Coolify
+- Backend and data: Bun, TypeScript, Effect, PostgreSQL, Redis, Drizzle
+- Apple clients: Swift, SwiftUI, UIKit, AppKit, GRDB
+- Web client: React, TanStack Router, Vite
+- CLI and contracts: Rust, Protocol Buffers
+- CI and builds: GitHub Actions, Xcode Cloud
