@@ -33,7 +33,6 @@ struct ComposeVoiceInputView: View {
         recordingIndicator
         waveform(progress: 1)
         durationLabel
-        inputMenuButton
         iconButton("stop.fill", title: "Stop recording", action: onStop)
 
       case .finishing:
@@ -118,21 +117,6 @@ struct ComposeVoiceInputView: View {
       isEnabled: !viewModel.isSending,
       action: onPlay
     )
-  }
-
-  private var inputMenuButton: some View {
-    VoiceInputPickerButton(
-      controller: viewModel.inputController,
-      isEnabled: viewModel.phase == .recording,
-      onSelectAuto: {
-        viewModel.selectAutomaticInput()
-      }
-    ) { deviceId in
-      viewModel.selectInputDevice(deviceId)
-    }
-    .buttonStyle(VoiceIconButtonStyle(isPrimary: false))
-    .frame(width: 30, height: 30)
-    .contentShape(Circle())
   }
 
   private var reservedIconSpace: some View {
