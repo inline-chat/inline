@@ -125,7 +125,7 @@ public actor InboxMembershipReconciler {
     // so post-acceptance cancellation can only detach this caller's waiter.
     startWorkerIfNeeded(for: peer)
 
-    return try await withTaskCancellationHandler {
+    let outcome = try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<InboxMembershipIntentOutcome, any Error>) in
         guard !Task.isCancelled else {
           continuation.resume(throwing: CancellationError())
@@ -139,6 +139,8 @@ public actor InboxMembershipReconciler {
     } onCancel: {
       Task { await self.cancelWaiter(peer: peer, revision: requestRevision) }
     }
+    try Task.checkCancellation()
+    return outcome
   }
 
   public static func nextMutation(

@@ -163,6 +163,7 @@ struct InboxMembershipReconcilerTests {
     }
     _ = try await reconciler.submit(peer: peer, intent: .open)
     #expect(await store.currentState() == .open)
+    #expect(await store.performedMutations() == [.setOpen(true)])
   }
 
   @Test("Different peers reconcile concurrently")
