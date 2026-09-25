@@ -21,8 +21,7 @@
 
 ## Working rules
 
-- Use .wip, .running and .committing files as hints.
-- When brainstorming or writing specs for a refactor, rewrite, or weighing a change, new feature or fix for a major flaw in the core logic of a core module like realtime, sync, message lists, message views, chat view, chat view model, dbs, etc, first check prior research, labs, findings, my ground truth, and brainstorming sessions from secret-sauce's context or memory to understand the larger goals and plans so you can be more aligned by keeping the vision for those modules in mind when changing them.
+- Use .wip, .running and .committing files as hints for coordinating work with sibling agents.
 
 ### Operational Effectiveness Hints
 
@@ -47,6 +46,7 @@
 - Save plans, research or investigations in `../secret-sauce/.context/YYYY-MM-DD-title-kebab-case.md`. Delete discarded or superseded ones.
 - For every spec or plan, print a self-contained version in the chat response. Always include the high-level design, concrete specification, scope of work, and a few short representative schema/code snippets. Do not stop at linking to a Markdown file; saved documents are supporting artifacts because the user rarely opens them.
 - When iterating on a feature, and i give you bullet lists of feedback, spec, and alike, record all of my words in a massive spec bullet list and accumulate my feedback as ground truth in a separate markdown file for that feature so you and future rounds of agent still have my direct spec/feedback as ground truth. This file must be free from your own investigations. Only modify previous items if i contradict them explicitly. Treat these as quotes of me and don't modify them. add additional context in brackets or something if I make unclear claims. Fix grammar and types, that's fine.
+- When brainstorming or writing specs for a refactor, rewrite, or weighing a change, new feature or fix for a major flaw in the core logic of a core module like realtime, sync, message lists, message views, chat view, chat view model, dbs, etc, first check prior research, labs, findings, my ground truth, and brainstorming sessions from secret-sauce's context or memory to understand the larger goals and plans so you can be more aligned by keeping the vision for those modules in mind when changing them.
 
 ### Brainstorming
 
@@ -58,18 +58,14 @@
 
 - Commit messages should be lowercase and scoped when useful, for example `macos: fix ...`, `server: add ...`, or `chore: ...`.
 
-### Video, screenshots, logs, research, review
+### Large evidence and review
 
-These are suggestions for working with large, extensive or media heavy investigations and research. These are not strict rules but suggestions to avoid context bloat.
+These are optional ways to keep large investigations readable:
 
-- For better performance we ideally filter, group, batch, preprocess large corpses of evidence and artifacts to avoid pulling in huge amounts of noise into the main sessions context. We achieve it by filtering, parsing and filtering using code and temp files, fast subagents, and alike.
-- Prefer reasonably sized screenshots (1x or less) when too large, and frames of video in a sprite sheet when makes sense.
-- Pipe build outputs to a temp file to only extract useful stuff (ie. errors).
-- Feel free to inspect historic logs when clear and specific filters which doesn't pull in noise. Before inspecting logs save them in a file and inspect if that file has a small enough size to be worth looking at. This saves you from pulling in lots of noise.
-- For pulling in extensive debug information, crash logs, plowing through evidence corpse, lots of images, etc you may spin a `luna` subagent to parse and provide findings and evidence in structured cleaned up format.
-- For extensive research/exploration from other reference repositories, docs, etc you may similarly use tools to provide a rough graph/structure/map of where useful things are by spinning a few `luna` xhigh subagents to constructs lists/maps/graphs of links, content, source, folders, flows, etc so you can get to the good stuff without polluting the context of the main chat.
-- For reviewing large amounts of diffs, use `luna` subagents to inspect those diffs to skip generated/boilerplate/repeated patterns from important changes, suspicious logic, hot paths or core areas touched (eg. sync, network, send message, message list, database, etc), possible drifts from ground truth, over expansion patterns, under abstracted, etc you know common important failure points instead of going through every single diff in main context.
-- Avoid delegating feature work to subagents. Subagents are for aforementioned use-cases and alike. If user explicitly insists on doing that, you may spawn new threads/sessions with `sol`.
+- For builds, historical logs, traces, research, and large diffs, save noisy output, check its size, then extract relevant errors, sources, and hot paths instead of loading entire artifacts into the session.
+- For extensive evidence or diff review, experiment with different filters and after a good filter use a `luna` subagent to distill signal from noise. Keep feature implementation in the main task unless the user explicitly delegates it.
+- You may use `sol` subagents to implement scoped changes to keep you main task focused. `luna` subagents are useful for plowing through lots of raw research materials and markdowns to find relevant bits to your goals.
+- Downsize oversized screenshots (2x -> 1x) and use sprite sheets for video frames when useful.
 
 ## Product Design
 

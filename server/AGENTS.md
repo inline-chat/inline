@@ -8,7 +8,7 @@
 ## Effect references
 
 - For unfamiliar Effect APIs, inspect the installed `server/node_modules/effect` package and this server's `src/core/effect/` code first. Match examples to the Effect version used here.
-- The local Effect and Executor checkouts in `../inline-core/.references/` (paths from the repo root) are available for patterns. If absent, clone references into `~/dev/libraries`; adapt patterns to Inline's error, dependency, and lifecycle boundaries.
+- For broader patterns, use the ignored `.references/effect/` checkout at the repo root; clone Effect there if absent. Check examples against the installed version and adapt them to Inline's error, dependency, and lifecycle conventions.
 
 ## Data and lifecycle
 
