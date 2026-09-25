@@ -7,6 +7,7 @@ import InlineProtocol
 import InlineUI
 import Logger
 import os.signpost
+import RealtimeV2
 import SwiftUI
 
 struct AllChatsComposeSpace: Identifiable, Equatable {
@@ -824,9 +825,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     )
   }
 
-  /// The common text/user-mention path is fully local until transaction replay:
-  /// create a reserved shell, project the message, and navigate immediately.
-  /// The first-message transaction is durably blocked on server chat creation.
+  /// Human-only text threads can use a reserved shell. Agent threads wait for
+  /// server confirmation in createThreadLocally so rejection leaves the
+  /// composer intact, before the first message or navigation is admitted.
   private func submitOptimistically(
     _ draft: PreparedNewThreadDraft,
     participantIDs: [Int64],
@@ -897,7 +898,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       log.error("Optimistic new-thread submission failed", error: error)
       return .failure(NewThreadComposeSubmissionFailure(
         message: createdPeer == nil
-          ? "Failed to create thread. Your message is still here."
+          ? creationFailureMessage(error)
           : "The thread was created, but the message couldn't be sent. It was saved as a draft.",
         createdPeer: createdPeer
       ))
@@ -915,20 +916,16 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
     var createdPeer: InlineKit.Peer?
     do {
-      let result = try await dependencies.realtimeV2.send(.createChat(
+      let chatID = try await dependencies.realtimeV2.createThreadLocally(
         title: nil,
         placeholderTitle: placeholderTitle(for: draft),
         emoji: nil,
         isPublic: draft.destination.isPublic,
         spaceId: draft.destination.spaceID,
         participants: participantIDs,
-        agentContext: draft.agentContext
-      ))
-      guard case let .createChat(response) = result else {
-        throw NewThreadComposeSubmitError.invalidCreateResponse
-      }
-
-      let chatID = response.chat.id
+        agentContext: draft.agentContext,
+        requireServerConfirmation: true
+      )
       let peer: InlineKit.Peer = .thread(id: chatID)
       createdPeer = peer
       ChatsManager.get(for: peer, chatId: chatID).setSendSilently(draft.sendSilently)
@@ -1014,11 +1011,22 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       }
       return .failure(NewThreadComposeSubmissionFailure(
         message: createdPeer == nil
-          ? "Failed to create thread. Your message is still here."
+          ? creationFailureMessage(error)
           : "The thread was created, but the message couldn't be sent. It was saved as a draft.",
         createdPeer: createdPeer
       ))
     }
+  }
+
+  private func creationFailureMessage(_ error: Error) -> String {
+    if let accessError = error as? AgentThreadSpaceAccessError {
+      return accessError.localizedDescription
+    }
+    if let transactionError = error as? TransactionError2,
+       case .commitOutcomeUnknownAfterReconnect = transactionError {
+      return "Couldn't confirm whether the thread was created. Check All Chats before trying again. Your message is still here."
+    }
+    return "Failed to create thread. Your message is still here."
   }
 
   private func validateGroupMentions(in draft: PreparedNewThreadDraft) async throws {
@@ -1149,7 +1157,6 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 }
 
 private enum NewThreadComposeSubmitError: Error {
-  case invalidCreateResponse
   case invalidGroupMentionDestination
 }
 

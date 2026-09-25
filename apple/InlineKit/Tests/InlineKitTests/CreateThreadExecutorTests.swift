@@ -4,6 +4,56 @@ import Testing
 
 @Suite("InlineKit.CreateThreadExecutor")
 struct CreateThreadExecutorTests {
+  @Test("confirmed creation bypasses optimistic reservations")
+  func confirmedCreationBypassesReservations() async throws {
+    let recorder = CreateThreadExecutionRecorder()
+    let executor = CreateThreadExecutor(
+      reservedChatIdProvider: {
+        Issue.record("Confirmed creation must not consume a cached reservation")
+        return 777
+      },
+      queuedCreateWithReservation: { id in
+        await recorder.markReserved(id)
+        return id
+      },
+      directCreate: {
+        await recorder.markDirect()
+        return 551
+      }
+    )
+
+    let id = try await executor.create(requireServerConfirmation: true)
+    #expect(id == 551)
+    #expect(await recorder.didRunDirect())
+    #expect(await recorder.reservedChatIds().isEmpty)
+  }
+
+  @Test("server rejection never returns an optimistic chat or falls back to queued creation")
+  func confirmedCreationPropagatesRejection() async throws {
+    struct ServerRejection: Error {}
+    let recorder = CreateThreadExecutionRecorder()
+    let executor = CreateThreadExecutor(
+      reservedChatIdProvider: {
+        Issue.record("Rejected agent creation must not consume a reservation")
+        return 777
+      },
+      queuedCreateWithReservation: { id in
+        await recorder.markReserved(id)
+        return id
+      },
+      directCreate: {
+        await recorder.markDirect()
+        throw ServerRejection()
+      }
+    )
+
+    await #expect(throws: ServerRejection.self) {
+      try await executor.create(requireServerConfirmation: true)
+    }
+    #expect(await recorder.didRunDirect())
+    #expect(await recorder.reservedChatIds().isEmpty)
+  }
+
   @Test("createThreadLocally falls back to direct create when no cached reservation exists")
   func testCreateThreadLocallyFallsBackWhenNoCachedReservationExists() async throws {
     let recorder = CreateThreadExecutionRecorder()

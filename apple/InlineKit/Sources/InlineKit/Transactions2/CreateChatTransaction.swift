@@ -149,9 +149,10 @@ public struct CreateChatTransaction: Transaction2 {
   }
 
   public func failed(error: TransactionError2) async {
+    let failure = CreateChatFailureTelemetryError(error: error, context: context)
     log.error(
-      "Failed to create chat",
-      error: CreateChatFailureTelemetryError(error: error, context: context)
+      "Failed to create chat [\(failure.privacySafeErrorCategory)]",
+      error: failure
     )
     await markOptimisticCreationFailed()
   }

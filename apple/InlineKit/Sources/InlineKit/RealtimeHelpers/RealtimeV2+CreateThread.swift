@@ -15,7 +15,14 @@ struct CreateThreadExecutor {
   let directCreate: @Sendable () async throws -> Int64
 
   @discardableResult
-  func create() async throws -> Int64 {
+  func create(requireServerConfirmation: Bool = false) async throws -> Int64 {
+    // An agent request must not look submitted until the server has accepted
+    // its destination and participants. Do not consume a reservation or install
+    // an optimistic shell on this path.
+    if requireServerConfirmation {
+      return try await directCreate()
+    }
+
     let reservedChatId: Int64?
     do {
       reservedChatId = try await reservedChatIdProvider()
@@ -44,8 +51,24 @@ public extension RealtimeV2 {
     isPublic: Bool,
     spaceId: Int64?,
     participants: [Int64],
-    agentContext: InlineProtocol.AgentThreadContext? = nil
+    agentContext: InlineProtocol.AgentThreadContext? = nil,
+    requireServerConfirmation: Bool = false
   ) async throws -> Int64 {
+    if let agentContext, let spaceId {
+      // Owned bots are not necessarily members of the selected space. Refresh
+      // at submission time rather than trusting the picker or a cached roster.
+      let result = try await send(.getSpaceMembers(spaceId: spaceId))
+      guard case let .getSpaceMembers(response) = result else {
+        throw CreateThreadLocalError.invalidResponse
+      }
+      try AgentThreadSpaceAccess.validate(
+        botUserID: agentContext.botUserID,
+        spaceID: spaceId,
+        isPublic: isPublic,
+        members: response.members
+      )
+    }
+
     let executor = CreateThreadExecutor(
       reservedChatIdProvider: {
         await ReservedChatIDPool.shared.consumeCached(realtimeV2: self)
@@ -89,6 +112,6 @@ public extension RealtimeV2 {
       }
     )
 
-    return try await executor.create()
+    return try await executor.create(requireServerConfirmation: requireServerConfirmation || agentContext != nil)
   }
 }
