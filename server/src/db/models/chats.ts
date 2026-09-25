@@ -350,7 +350,7 @@ type GetUserChatsOutput = {
 export async function getUserChats(input: GetUserChatsInput): Promise<GetUserChatsOutput> {
   let { userId, where } = input
 
-  // Fetch a list of public threads the user is a part of and don't have a dialog
+  // Root threads are discoverable through access, even before a dialog exists.
   const baseChats = await db.query.chats.findMany({
     where: {
       ...(where && "lastUpdateAtGreaterThanEqual" in where
@@ -394,7 +394,22 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
           },
         },
 
-        // Private threads
+        // Private Home threads have no owning space or membership row.
+        {
+          type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
+          spaceId: {
+            isNull: true,
+          },
+          publicThread: false,
+          participants: {
+            userId,
+          },
+        },
+
+        // Private space threads
         {
           type: "thread",
           parentChatId: {

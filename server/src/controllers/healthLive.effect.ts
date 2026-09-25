@@ -16,8 +16,6 @@ export const HealthOperationsLive = Layer.succeed(
   HealthOperations,
   makeHealthOperations(async () =>
     withLifecycleCheck(await runHealthChecks({
-      brokerRequired:
-        internalMessaging.isBrokerRequiredForReadiness,
       checkBroker: () =>
         internalMessaging.health === "ready",
     })),

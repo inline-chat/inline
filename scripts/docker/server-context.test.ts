@@ -119,7 +119,7 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
   expect(config.build).toEqual({
     image: "REPLACE_WITH_IMMUTABLE_IMAGE_DIGEST",
   })
-  expect(config.deploy).toEqual({ strategy: "immediate" })
+  expect(config.deploy).toEqual({ strategy: "bluegreen" })
   expect(config.kill_signal).toBe("SIGTERM")
   expect(parseInt(config.kill_timeout) * 1000).toBeGreaterThan(20_000)
   expect(config.env.INLINE_PROCESS_ROLE).toBe("all")
@@ -155,6 +155,6 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
   expect(dark.restart).toEqual({ policy: "on-failure", max_retries: 10 })
 
   const deploymentGuide = await readFile(resolve(root, "server/docs/fly-deployment.md"), "utf8")
-  expect(deploymentGuide).toContain("`FLY_DARK_APP` must equal `FLY_APP`")
-  expect(deploymentGuide).toContain("A dark Machine in a separate app is\n   validation-only")
+  expect(deploymentGuide).toContain("must not be promoted implicitly")
+  expect(deploymentGuide).toContain("cannot be moved into `inline-api`")
 })

@@ -58,6 +58,48 @@ const deferred = <A>() => {
 }
 
 describe("production startup diagnostics", () => {
+  it("keeps readiness and application admission closed until startup completes", async () => {
+    const bound = deferred<number>()
+    const releaseStartup = deferred<void>()
+    const application = Layer.effectDiscard(HttpRouter.HttpRouter.use((router) =>
+      Effect.forEach(["/readyz", "/healthz", "/application"] as const, (path) =>
+        router.add("GET", path, HttpServerResponse.jsonUnsafe({ ok: true })),
+      ),
+    )).pipe(Layer.provideMerge(makeHttpKernelMiddlewareLayer({ isProduction: false })))
+    const starting = startCoreProductionServer({
+      application,
+      hostname: "127.0.0.1",
+      inlineProtocolConfiguration: { enabled: false },
+      markShuttingDown: () => {},
+      startClusterServices: false,
+      bindRealtimeServer: async (server) => {
+        bound.resolve(server.port!)
+        await releaseStartup.promise
+      },
+    })
+
+    try {
+      const port = await bound.promise
+      for (const path of ["/readyz", "/healthz", "/application"]) {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`)
+        await response.text()
+        expect(response.status).toBe(503)
+      }
+
+      releaseStartup.resolve()
+      await starting
+      for (const path of ["/readyz", "/healthz", "/application"]) {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true })
+      }
+    } finally {
+      releaseStartup.resolve()
+      const handle = await starting
+      await handle.shutdown()
+    }
+  })
+
   it("keeps the original startup failure available to the process boundary", () => {
     const error = new CoreProductionStartupError({
       cause: Cause.die(new Error("Failed to bind port 8000")),

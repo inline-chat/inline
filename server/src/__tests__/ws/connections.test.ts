@@ -481,13 +481,191 @@ describe("ConnectionManager", () => {
       const reconnectId = connectionManager.addConnection(reconnect, ConnVersion.REALTIME_V1)
       connectionManager.authenticateConnection(reconnectId, 4, 40)
       const reconnectEpoch = connectionManager.getUserConnectionEpoch(4)
-      expect(connectionManager.closeUserConnectionsForDurableRepair(4, "no_replayable_record", reconnectEpoch)).toBe(0)
+      expect(connectionManager.closeUserConnectionsForDurableRepair(4, "no_replayable_record", reconnectEpoch, 9)).toBe(0)
       expect(reconnect.close).not.toHaveBeenCalled()
       connectionManager.removeConnection(reconnectId)
     } finally {
       connectionManager.removeConnection(firstId)
       readMemberships.mockRestore()
     }
+  })
+
+  it("retains unreplayable frontiers across reconnects without suppressing newer or transport-refused repair", async () => {
+    await withMembershipConnection(180, async (manager, initialId) => {
+      let now = performance.now()
+      const clock = spyOn(performance, "now").mockImplementation(() => now)
+      const { ConnVersion } = await import("@in/server/ws/connections")
+      let currentId = initialId
+      const reconnect = async () => {
+        const ws = { id: "frontier-reconnect", close: mock(), subscribe: mock() }
+        currentId = manager.addConnection(ws as unknown as Parameters<MembershipManager["addConnection"]>[0], ConnVersion.REALTIME_V1)
+        manager.authenticateConnection(currentId, 180, 10_180)
+        await manager.waitForBackgroundWork()
+        return ws
+      }
+      const close = (reason: "no_replayable_record" | "transport_not_accepted", frontier: number) =>
+        manager.closeUserConnectionsForDurableRepair(180, reason, manager.getUserConnectionEpoch(180), frontier)
+      try {
+        const firstEpoch = manager.getUserConnectionEpoch(180)
+        expect(close("no_replayable_record", 9)).toBe(1)
+        expect(manager.getConnection(initialId)).toBeUndefined()
+        // Disconnected observations may be pruned before any replacement exists.
+        expect(close("no_replayable_record", 10)).toBe(0)
+        for (let wave = 0; wave < 4; wave++) {
+          now += 31_000
+          const ws = await reconnect()
+          expect(manager.closeUserConnectionsForDurableRepair(180, "no_replayable_record", firstEpoch, 10)).toBe(0)
+          expect(close("no_replayable_record", 9)).toBe("frontier_already_reconnected")
+          expect(ws.close).not.toHaveBeenCalled()
+          manager.removeConnection(currentId)
+        }
+        await reconnect()
+        expect(close("no_replayable_record", 10)).toBe(1)
+        const ws = await reconnect()
+        expect(close("no_replayable_record", 11)).toBe(0)
+        expect(close("transport_not_accepted", 10)).toBe(0)
+        expect(ws.close).not.toHaveBeenCalled()
+        now += 31_000
+        expect(close("transport_not_accepted", 10)).toBe(1)
+        await reconnect()
+        now += 31_000
+        expect(close("no_replayable_record", 10)).toBe("frontier_already_reconnected")
+        expect(close("no_replayable_record", 11)).toBe(1)
+      } finally {
+        manager.removeConnection(currentId)
+        clock.mockRestore()
+      }
+    })
+  })
+
+  it("protects every cooldown through capacity pressure, then permits expired frontier eviction", async () => {
+    const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
+    const manager = new (connectionManager.constructor as new () => MembershipManager)()
+    const reader = manager as unknown as { getUserSpaceIds(userId: number): Promise<number[]> }
+    const memberships = spyOn(reader, "getUserSpaceIds").mockResolvedValue([])
+    const guards = manager as unknown as {
+      durableRepairCloseGuards: Map<number, { closedAt: number; closedThrough?: number }>
+    }
+    const startedAt = performance.now()
+    let now = startedAt
+    const clock = spyOn(performance, "now").mockImplementation(() => now)
+    const actualCloses: { userId: number; at: number }[] = []
+    const connect = (userId: number) => {
+      const ws = {
+        id: `guard-capacity-${userId}`,
+        close: mock(() => { actualCloses.push({ userId, at: now }) }), subscribe: mock(),
+      }
+      const id = manager.addConnection(ws as unknown as Parameters<MembershipManager["addConnection"]>[0], ConnVersion.REALTIME_V1)
+      manager.authenticateConnection(id, userId, userId)
+      return id
+    }
+    const close = (userId: number) => manager.closeUserConnectionsForDurableRepair(
+      userId, "no_replayable_record", manager.getUserConnectionEpoch(userId), 9,
+    )
+    const wave = () => {
+      for (let userId = 70_000; userId <= 74_096; userId++) {
+        if (manager.getUserConnections(userId).length === 0) connect(userId)
+        close(userId)
+      }
+    }
+    try {
+      wave()
+      expect(actualCloses).toHaveLength(4096)
+      expect(guards.durableRepairCloseGuards.size).toBe(4096)
+      for (const elapsed of [1_000, 2_000]) {
+        now = startedAt + elapsed
+        wave()
+        expect(actualCloses).toHaveLength(4096)
+        expect(guards.durableRepairCloseGuards.size).toBe(4096)
+      }
+      expect(manager.getUserConnections(74_096)).toHaveLength(1)
+
+      now = startedAt + 30_000
+      expect(close(74_096)).toBe(1)
+      // Capacity eviction can forget an old frontier, but never before that
+      // account's last actual close has completed its minimum interval.
+      expect(close(70_000)).toBe(1)
+      expect(actualCloses.filter(value => value.userId === 70_000)).toEqual([
+        { userId: 70_000, at: startedAt }, { userId: 70_000, at: startedAt + 30_000 },
+      ])
+      expect(actualCloses).toHaveLength(4098)
+      expect(guards.durableRepairCloseGuards.size).toBe(4096)
+      connect(70_000)
+      expect(close(70_000)).toBe("frontier_already_reconnected")
+      expect(actualCloses).toHaveLength(4098)
+    } finally {
+      await manager.shutdown()
+      clock.mockRestore()
+      memberships.mockRestore()
+    }
+  })
+
+  it("keeps scheduler reconnect recovery complete across pruning and retries a newer cooldown-limited frontier", async () => {
+    await withMembershipConnection(181, async (manager) => {
+      const { ConnectedUserRepair } = await import("@in/server/modules/internalMessaging/repair")
+      const { ConnVersion } = await import("@in/server/ws/connections")
+      let now = performance.now()
+      let frontier = 9
+      const clock = spyOn(performance, "now").mockImplementation(() => now)
+      const closed: number[] = []
+      const repair = new ConnectedUserRepair({
+        discovery: {
+          captureWatermark: async () => new Date(1_700_000_000_000),
+          prepare: async () => new Map(),
+          discover: async () => ({ date: 1_700_000_000n, seq: frontier }),
+        },
+        connectedUserIds: () => manager.getAuthenticatedUserIds().filter(id => id === 181),
+        hasConnections: id => manager.getUserConnections(id).length > 0,
+        getConnectionEpoch: id => manager.getUserConnectionEpoch(id),
+        emitUserHint: async () => 1,
+        replayCurrentUserUpdate: async () => "filtered_record",
+        closeForUnrecoverableFrontier: (id, reason, epoch, seq) => {
+          const result = manager.closeUserConnectionsForDurableRepair(id, reason, epoch, seq)
+          if (typeof result === "number" && result > 0) closed.push(seq!)
+          return result
+        },
+        deliverTargetedBucketHint: async () => {},
+      })
+      const sweep = async () => { repair.observeConnectedUsers(); await repair.waitForIdle() }
+      const reconnect = async () => {
+        const id = manager.addConnection({ id: "scheduler-reconnect", close: mock(), subscribe: mock() } as unknown as
+          Parameters<MembershipManager["addConnection"]>[0], ConnVersion.REALTIME_V1)
+        manager.authenticateConnection(id, 181, 10_181)
+        await manager.waitForBackgroundWork()
+        repair.observeConnection(181)
+        await repair.waitForIdle()
+      }
+      try {
+        await repair.start()
+        await sweep()
+        expect(closed).toEqual([9])
+        await sweep() // prune every observation for the disconnected account
+        for (let wave = 0; wave < 3; wave++) {
+          now += 31_000
+          await reconnect()
+          await sweep()
+          expect(closed).toEqual([9])
+          for (const connection of manager.getUserConnections(181)) manager.removeConnection(connection.connectionId)
+          expect(manager.getUserConnections(181)).toHaveLength(0)
+          await sweep()
+        }
+        await reconnect()
+        frontier = 10
+        await sweep()
+        expect(closed).toEqual([9, 10])
+        await reconnect()
+        frontier = 11
+        await sweep()
+        expect(closed).toEqual([9, 10])
+        now += 31_000
+        await sweep()
+        expect(closed).toEqual([9, 10, 11])
+      } finally {
+        await repair.stop()
+        for (const connection of manager.getUserConnections(181)) manager.removeConnection(connection.connectionId)
+        clock.mockRestore()
+      }
+    })
   })
 
   it("preserves the logout caller until its terminal protocol result is written", async () => {

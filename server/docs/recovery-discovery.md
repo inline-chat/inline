@@ -36,13 +36,33 @@ recovery guarantees. Retrying Pub/Sub publication alone does not make consumptio
 resumable. A journal also needs receiver checkpoints, complete writer coverage,
 safe commit ordering, retention and an authoritative fallback.
 
+## Older-client recovery
+
+Hint-aware clients fetch their authenticated user bucket after `userHasNewUpdates`.
+Older clients also receive the latest actual access-filtered record. If that
+record is missing or filtered, the server closes the current connection epoch
+with the existing `durable_repair` reason so the client's on-open catch-up runs.
+No synthetic durable record is invented. Current connection metadata cannot
+reliably identify hint support, so this rare fallback can also reconnect a newer
+client.
+
+The existing connection owner remembers the highest unreplayable frontier it
+closed and suppresses it across admission and observation pruning. It retains
+at most 4,096 guards and never evicts a guard inside its 30-second cooldown. If
+all entries are protected, a new fallback remains pending for another sweep.
+Capacity eviction after the cooldown, or a process restart, can permit another
+reconnect for the same frontier. Under sustained capacity pressure repeated
+reconnects remain possible after the cooldown; this is not durable client
+acknowledgment or a once-forever guarantee. Monitor fallback-close rates.
+
 ## Current optimization
 
 The PostgreSQL implementation checks at most 512 accounts per SQL batch. It
 reconciles user sequences against retained update history and separately finds
 accounts with potentially changed resources. The query deliberately includes a
 superset of the normal catalog: both DM endpoints, all chats in member spaces,
-dialog-backed threads and member spaces. Private/deleted or inaccessible
+dialog-backed threads, private Home roots with direct participants (including
+participants without dialogs), and member spaces. Private/deleted or inaccessible
 candidates can cause extra work, but never grant access. Changes in unrelated
 spaces do not make every account dirty.
 
@@ -75,7 +95,8 @@ TEST_DATABASE_URL=postgres://localhost:5432/postgres bun run test:repair --jobs 
 ```
 
 Normal CI Bun/PostgreSQL lanes also discover these tests. Correctness cases cover
-DM endpoints, public/private/group/linked chats, spaces, current access, retained
+DM endpoints, public/private/group/linked/Home chats, participants without
+dialogs, lost Home pin/unpin hints, spaces, current access, retained
 sequences, user-only missed hints, inclusive boundaries, stale/missing snapshots,
 prepare failures and shutdown. Performance cases cover 1, 10, 100 and 1,000 users,
 idle/shared/sparse activity, 1,005 shared chats, and the actual scheduler-to-strategy path. Command

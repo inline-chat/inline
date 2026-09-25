@@ -1,0 +1,127 @@
+name: Deploy Server
+
+# Release only the SHA selected by dispatching main; no arbitrary ref input or
+# push trigger. Configure the production environment to allow main only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Require a manual main release
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+
+  qualify:
+    name: Qualify and publish the exact release image
+    needs: validate
+    uses: ./.github/workflows/server-test.yml
+    with:
+      publish_image: true
+    secrets:
+      # Repository/org secret: environment secrets are unavailable to this call.
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  preflight:
+    name: Record a healthy public Machine baseline before DDL
+    needs: qualify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    outputs:
+      baseline: ${{ steps.baseline.outputs.baseline }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+      - name: Validate public Machine compatibility and service readiness
+        id: baseline
+        run: |
+          test -n "$FLY_API_TOKEN"
+          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/machines.json"
+          baseline=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines.json")
+          printf 'baseline=%s\n' "$baseline" >> "$GITHUB_OUTPUT"
+
+  migrate:
+    name: Migrate and verify with the qualified image
+    needs: [qualify, preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+      - name: Pull and verify the qualified image revision
+        run: |
+          test -n "$FLY_API_TOKEN"
+          [[ "$RUNTIME_IMAGE" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]]
+          flyctl auth docker
+          docker pull "$RUNTIME_IMAGE"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$RUNTIME_IMAGE")" = "$GITHUB_SHA"
+      - name: Apply and verify the migration ledger
+        env:
+          # DDL credentials belong only to this step, never to the API Machines.
+          DATABASE_DIRECT_URL: ${{ secrets.PRODUCTION_DATABASE_MIGRATION_URL }}
+          DATABASE_CONNECTION_MODE: direct
+        run: |
+          test -n "$DATABASE_DIRECT_URL"
+          docker run --rm -e DATABASE_DIRECT_URL -e DATABASE_CONNECTION_MODE \
+            "$RUNTIME_IMAGE" bun server/dist/migrate.js
+          docker run --rm -e DATABASE_DIRECT_URL -e DATABASE_CONNECTION_MODE \
+            "$RUNTIME_IMAGE" bun server/dist/verify-migrations.js
+
+  deploy:
+    name: Replace the public Machines and verify readiness
+    needs: [qualify, preflight, migrate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      BASELINE: ${{ needs.preflight.outputs.baseline }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+      - name: Revalidate the recorded baseline and deploy the same digest
+        run: |
+          test -n "$FLY_API_TOKEN"
+          [[ "$RUNTIME_IMAGE" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]]
+          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/machines-before.json"
+          current=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines-before.json")
+          test "$current" = "$BASELINE"
+          MACHINE_IDS=$(jq -er '.ids' <<< "$BASELINE")
+          flyctl deploy --config server/fly.toml --image "$RUNTIME_IMAGE" \
+            --only-machines "$MACHINE_IDS" --strategy bluegreen --ha=false \
+            --signal SIGTERM --wait-timeout 5m --yes
+      - name: Verify baseline count, image revision, and service health
+        run: |
+          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/machines-after.json"
+          current=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines-after.json")
+          BASELINE_COUNT=$(jq -er '.count' <<< "$BASELINE")
+          jq -e --argjson count "$BASELINE_COUNT" --arg digest "${RUNTIME_IMAGE##*@}" --arg sha "$GITHUB_SHA" \
+            '.count == $count and .digest == $digest and .revision == $sha' <<< "$current" > /dev/null
+          printf 'Released `%s` at `%s`; %s public Machine(s) passed Fly service checks.\n' \
+            "$GITHUB_SHA" "$RUNTIME_IMAGE" "$BASELINE_COUNT" >> "$GITHUB_STEP_SUMMARY"

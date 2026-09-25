@@ -34,7 +34,7 @@ describe("empty Redis restart", () => {
     }
   })
 
-  it.skipIf(!redisExecutable)("keeps concurrent startup waiting and isolates a bad readiness observer", async () => {
+  it.skipIf(!redisExecutable)("admits concurrent degraded starts and recovers when the broker appears", async () => {
     const port = await unusedLoopbackPort()
     const url = `redis://127.0.0.1:${port}`
     const messaging = new InternalMessagingService(url)
@@ -53,17 +53,8 @@ describe("empty Redis restart", () => {
       survivingContinuityCalls++
     })
 
-    let firstSettled = false
-    let secondSettled = false
-    const first = messaging.start().finally(() => {
-      firstSettled = true
-    })
-    const second = messaging.start().finally(() => {
-      secondSettled = true
-    })
-    await Bun.sleep(20)
-    expect(firstSettled).toBe(false)
-    expect(secondSettled).toBe(false)
+    await Promise.all([messaging.start(), messaging.start()])
+    expect(messaging.health).toBe("unavailable")
 
     const redis = Bun.spawn({
       cmd: [redisExecutable!, "--bind", "127.0.0.1", "--port", String(port), "--save", "", "--appendonly", "no"],
@@ -71,7 +62,7 @@ describe("empty Redis restart", () => {
     })
     children.push(redis)
     try {
-      await Promise.all([first, second])
+      await waitUntil(() => messaging.health === "ready")
       expect(messaging.health).toBe("ready")
       expect(survivingObserverCalls).toBe(1)
       redis.kill("SIGTERM")

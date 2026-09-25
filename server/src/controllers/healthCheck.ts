@@ -22,7 +22,6 @@ export interface HealthDeps {
   readonly checkDatabase: () =>
     CancellableHealthCheck
   readonly clock?: Pick<InlineProtocolClock, "sample">
-  readonly brokerRequired?: boolean
   readonly checkBroker?: () => boolean
   readonly timeoutMs?: number
 }
@@ -169,7 +168,7 @@ export const runHealthChecks = async (
   const clock = (resolved.clock ?? inlineProtocolClock).sample(
     databaseResult.referenceTimeMillis,
   )
-  const broker = resolved.brokerRequired
+  const broker = resolved.checkBroker
     ? (() => {
       const ok = resolved.checkBroker?.() === true
       return ok
@@ -177,11 +176,13 @@ export const runHealthChecks = async (
         : { ok, error: "broker_unavailable" as const }
     })()
     : undefined
-  const ok = database.ok && clock.ok && (broker?.ok ?? true)
+  // Broker loss slows cross-instance delivery; the PostgreSQL recovery path
+  // keeps the API routable. Still expose the degradation for monitoring.
+  const ok = database.ok && clock.ok
 
   return {
     ok,
-    status: ok ? "ok" : "degraded",
+    status: ok && (broker?.ok ?? true) ? "ok" : "degraded",
     timestamp: Math.floor(Date.now() / 1000),
     checks: {
       database,

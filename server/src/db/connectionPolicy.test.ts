@@ -50,6 +50,72 @@ describe("database connection safety", () => {
     expect(() => directDatabaseUrl({ DATABASE_URL: pooled })).toThrow()
   })
 
+  test("direct mode accepts the same endpoint with or without an override", () => {
+    expect(databaseConnectionPolicy(direct).healthUrl).toBe(direct)
+    const override = direct.replace("app:secret@", "migrator:other@").replace("db.example/", "db.example:5432/")
+    expect(databaseConnectionPolicy(direct, { DATABASE_DIRECT_URL: override }).healthUrl).toBe(override)
+    expect(directDatabaseUrl({ DATABASE_URL: direct, DATABASE_DIRECT_URL: override })).toBe(override)
+    expect(directDatabaseUrl({ DATABASE_DIRECT_URL: override })).toBe(override)
+  })
+
+  test("direct health and migration endpoints cannot target another host, database or port", () => {
+    for (const override of [
+      direct.replace("db.example", "other.example"),
+      direct.replace("/test?", "/other?"),
+      direct.replace("db.example/", "db.example:5433/"),
+    ]) {
+      const configured = { DATABASE_URL: direct, DATABASE_DIRECT_URL: override }
+      expect(() => databaseConnectionPolicy(direct, configured)).toThrow("same")
+      expect(() => directDatabaseUrl(configured)).toThrow("same")
+    }
+  })
+
+  test("standalone migration URL selection checks pooled endpoint identity", () => {
+    for (const queryUrl of [pooled.replace("db.example", "other.example"), pooled.replace("/test?", "/other?")]) {
+      expect(() => directDatabaseUrl({ ...environment, DATABASE_URL: queryUrl })).toThrow("same host and database")
+    }
+  })
+
+  test("dual endpoints require explicit database names and preserve driver pathname encoding", () => {
+    const implicit = "postgres://app:secret@db.example"
+    expect(directDatabaseUrl({ DATABASE_URL: implicit })).toBe(implicit)
+    expect(directDatabaseUrl({ DATABASE_DIRECT_URL: implicit })).toBe(implicit)
+    for (const override of [implicit, implicit + "/", implicit.replace("app:", "other:")]) {
+      expect(() => directDatabaseUrl({ DATABASE_URL: implicit, DATABASE_DIRECT_URL: override })).toThrow("explicitly name the database")
+    }
+    // postgres.js keeps database paths encoded, so these are different names.
+    expect(() => directDatabaseUrl({ DATABASE_URL: direct, DATABASE_DIRECT_URL: direct.replace("/test?", "/%74est?") })).toThrow("same host and database")
+  })
+
+  test("dual endpoint URLs cannot override startup database or user identity", () => {
+    for (const parameter of ["database=other", "user=other", "data%62ase=other"]) {
+      for (const configured of [
+        { DATABASE_URL: direct + "&" + parameter, DATABASE_DIRECT_URL: direct },
+        { DATABASE_URL: direct, DATABASE_DIRECT_URL: direct + "&" + parameter },
+      ]) {
+        expect(() => directDatabaseUrl(configured)).toThrow("must not override identity")
+        expect(() => databaseConnectionPolicy(configured.DATABASE_URL, configured)).toThrow("must not override identity")
+      }
+    }
+  })
+
+  test("standalone URL selection rejects malformed query and override URLs without exposing values", () => {
+    for (const invalid of ["postgres://private-user:private-password@", "https://private-user:private-password@db.example/test"]) {
+      for (const configured of [
+        { DATABASE_URL: invalid, DATABASE_DIRECT_URL: direct },
+        { DATABASE_URL: direct, DATABASE_DIRECT_URL: invalid },
+      ]) {
+        expect(() => directDatabaseUrl(configured)).toThrow("Database connection URL is invalid.")
+        try { directDatabaseUrl(configured) }
+        catch (error) {
+          expect(String(error)).not.toContain("private-user")
+          expect(String(error)).not.toContain("private-password")
+          expect(error).not.toHaveProperty("cause")
+        }
+      }
+    }
+  })
+
   test("qualification rejects missing, disabled or changed timeout defaults", () => {
     const rows = Object.entries(QUERY_TIMEOUTS).map(([name, value]) => ({ name, setting: String(value), unit: "ms" }))
     expect(() => assertQueryTimeouts(rows)).not.toThrow()

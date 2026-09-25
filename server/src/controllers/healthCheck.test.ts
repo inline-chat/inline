@@ -3,15 +3,14 @@ import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHeal
 import { runHealthChecks } from "./healthCheck"
 
 describe("runHealthChecks", () => {
-  it("fails readiness while a required broker is unavailable", async () => {
+  it("keeps readiness while reporting an unavailable optional broker", async () => {
     const result = await runHealthChecks({
       checkDatabase: async () => [{ database_time_millis: Date.now() }],
-      brokerRequired: true,
       checkBroker: () => false,
     })
 
     expect(result).toMatchObject({
-      ok: false,
+      ok: true,
       status: "degraded",
       checks: {
         broker: {
@@ -22,15 +21,25 @@ describe("runHealthChecks", () => {
     })
   })
 
-  it("reports the required broker once its complete pair is ready", async () => {
+  it("reports the broker once its complete pair is ready", async () => {
     const result = await runHealthChecks({
       checkDatabase: async () => [{ database_time_millis: Date.now() }],
-      brokerRequired: true,
       checkBroker: () => true,
     })
 
     expect(result.ok).toBe(true)
     expect(result.checks.broker).toEqual({ ok: true })
+  })
+
+  it("still refuses readiness when PostgreSQL is unavailable", async () => {
+    const result = await runHealthChecks({
+      checkDatabase: async () => { throw new Error("database unavailable") },
+      checkBroker: () => true,
+    })
+    expect(result).toMatchObject({
+      ok: false, status: "degraded",
+      checks: { database: { ok: false, error: "database_unavailable" }, broker: { ok: true } },
+    })
   })
 
   it("fails readiness when database time proves the protocol clock unsafe", async () => {

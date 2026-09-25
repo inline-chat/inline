@@ -1,10 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
 import { MessageEntity_Type, type Message, type MessageEntities } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
 import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { and, eq, isNull } from "drizzle-orm"
+import * as threadLinks from "@in/server/modules/threadGraph/links"
+import { trackBackgroundWork } from "../background"
+
+const background = trackBackgroundWork()
+const trackedMessageLinks = background.wrap(threadLinks.replaceMessageThreadLinks)
+const graphWork = spyOn(threadLinks, "replaceMessageThreadLinks").mockImplementation(trackedMessageLinks)
+afterEach(() => background.drain())
+afterAll(() => graphWork.mockRestore())
 
 setupTestLifecycle()
 
@@ -233,7 +241,7 @@ describe("messages thread title links", () => {
     const message = extractNewMessage(sent)
     expect(message).toBeTruthy()
 
-    await sleep(50)
+    await background.drain()
 
     const links = await db
       .select()
@@ -307,35 +315,25 @@ async function expectGraphLink(input: {
   scopeType?: "space" | "user"
   scopeId: number
 }): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const links = await db
-      .select()
-      .from(schema.threadGraphLinks)
-      .where(
-        and(
-          eq(schema.threadGraphLinks.kind, "thread_link"),
-          eq(schema.threadGraphLinks.fromChatId, input.fromChatId),
-          eq(schema.threadGraphLinks.fromMessageId, input.fromMessageId),
-          eq(schema.threadGraphLinks.toChatId, input.toChatId),
-          isNull(schema.threadGraphLinks.deletedAt),
-        ),
-      )
+  await background.drain()
+  const links = await db
+    .select()
+    .from(schema.threadGraphLinks)
+    .where(
+      and(
+        eq(schema.threadGraphLinks.kind, "thread_link"),
+        eq(schema.threadGraphLinks.fromChatId, input.fromChatId),
+        eq(schema.threadGraphLinks.fromMessageId, input.fromMessageId),
+        eq(schema.threadGraphLinks.toChatId, input.toChatId),
+        isNull(schema.threadGraphLinks.deletedAt),
+      ),
+    )
 
-    if (links.length === 1 && links[0]?.backlinkMessageGlobalId !== null) {
-      expect(links[0]).toMatchObject({
-        scopeType: input.scopeType ?? "space",
-        scopeId: input.scopeId,
-        entityIndex: 0,
-      })
-      return
-    }
-
-    await sleep(10)
-  }
-
-  throw new Error(`Expected graph link ${input.fromChatId}:${input.fromMessageId} -> ${input.toChatId}`)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  expect(links).toHaveLength(1)
+  expect(links[0]?.backlinkMessageGlobalId).not.toBeNull()
+  expect(links[0]).toMatchObject({
+    scopeType: input.scopeType ?? "space",
+    scopeId: input.scopeId,
+    entityIndex: 0,
+  })
 }

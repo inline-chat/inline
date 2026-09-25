@@ -740,7 +740,7 @@ describe("messages.createSubthread", () => {
       { peerId: childPeer, message: "A later message" },
       testUtils.functionContext({ userId: creator.id }),
     )
-    await sleep(10)
+    await background.drain()
 
     const placementRows = await db
       .select()
@@ -1058,45 +1058,30 @@ describe("messages.createSubthread", () => {
 })
 
 async function waitForSubthreadParentMessage(childChatId: number) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const [placement] = await db
-      .select({
-        parentMessageGlobalId: schema.subthreadParentMessages.parentMessageGlobalId,
-        parentMessageId: schema.messages.messageId,
-      })
-      .from(schema.subthreadParentMessages)
-      .innerJoin(
-        schema.messages,
-        eq(schema.messages.globalId, schema.subthreadParentMessages.parentMessageGlobalId),
-      )
-      .where(eq(schema.subthreadParentMessages.childChatId, childChatId))
-      .limit(1)
-    if (placement) {
-      return placement
-    }
-    await sleep(5)
-  }
-  return undefined
+  await background.drain()
+  const [placement] = await db
+    .select({
+      parentMessageGlobalId: schema.subthreadParentMessages.parentMessageGlobalId,
+      parentMessageId: schema.messages.messageId,
+    })
+    .from(schema.subthreadParentMessages)
+    .innerJoin(
+      schema.messages,
+      eq(schema.messages.globalId, schema.subthreadParentMessages.parentMessageGlobalId),
+    )
+    .where(eq(schema.subthreadParentMessages.childChatId, childChatId))
+    .limit(1)
+  return placement
 }
 
 async function waitForReplyThreadGraphLink(toChatId: number) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const [link] = await db
-      .select()
-      .from(schema.threadGraphLinks)
-      .where(and(eq(schema.threadGraphLinks.kind, "reply_thread"), eq(schema.threadGraphLinks.toChatId, toChatId)))
-      .limit(1)
+  await background.drain()
+  const [link] = await db
+    .select()
+    .from(schema.threadGraphLinks)
+    .where(and(eq(schema.threadGraphLinks.kind, "reply_thread"), eq(schema.threadGraphLinks.toChatId, toChatId)))
+    .limit(1)
 
-    if (link) {
-      return link
-    }
-
-    await sleep(10)
-  }
-
-  throw new Error(`Reply-thread graph link not materialized for chat ${toChatId}`)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  if (!link) throw new Error(`Reply-thread graph link not materialized for chat ${toChatId}`)
+  return link
 }

@@ -40,8 +40,32 @@ export const directDatabaseUrl = (environment: DatabaseEnvironment): string => {
   const mode = databaseConnectionMode(environment.DATABASE_CONNECTION_MODE)
   const value = environment.DATABASE_DIRECT_URL ?? (mode === "direct" ? environment.DATABASE_URL : undefined)
   if (!value) throw new Error(mode === "pgbouncer" ? "DATABASE_DIRECT_URL is required in PgBouncer mode." : "DATABASE_URL is required.")
-  if (parseDatabaseUrl(value).port === "6432") {
+  const direct = parseDatabaseUrl(value)
+  if (direct.port === "6432") {
     throw new Error("Health checks and migrations require a direct PostgreSQL endpoint.")
+  }
+  // Standalone migration jobs may supply only a direct URL. When both URLs
+  // exist, validate here so migrations and verification enforce the API's guard.
+  if (environment.DATABASE_URL !== undefined && environment.DATABASE_DIRECT_URL !== undefined) {
+    const query = parseDatabaseUrl(environment.DATABASE_URL)
+    // Implicit database names depend on PGDATABASE/user defaults. Require an
+    // explicit path for two endpoints, and preserve postgres.js's path encoding.
+    if (!query.pathname.slice(1) || !direct.pathname.slice(1)) {
+      throw new Error("Query and direct endpoints must explicitly name the database.")
+    }
+    for (const url of [query, direct]) {
+      // postgres.js copies these URL options into the startup message, where
+      // they override the identity parsed from the URL authority and path.
+      if (url.searchParams.has("database") || url.searchParams.has("user")) {
+        throw new Error("Database endpoint URLs must not override identity with query parameters.")
+      }
+    }
+    if (direct.hostname !== query.hostname || direct.pathname !== query.pathname) {
+      throw new Error("Query and direct endpoints must address the same host and database.")
+    }
+    if (mode === "direct" && (direct.port || "5432") !== (query.port || "5432")) {
+      throw new Error("Query and direct endpoints must use the same port in direct mode.")
+    }
   }
   return value
 }
@@ -55,9 +79,6 @@ export const databaseConnectionPolicy = (databaseUrl: string, environment: Datab
   const healthUrl = directDatabaseUrl({ ...environment, DATABASE_URL: databaseUrl })
   if (mode === "pgbouncer") {
     const direct = parseDatabaseUrl(healthUrl)
-    if (direct.hostname !== queryUrl.hostname || direct.pathname !== queryUrl.pathname) {
-      throw new Error("Pooled and direct endpoints must address the same host and database.")
-    }
     if ((direct.port || "5432") === (queryUrl.port || "5432")) {
       throw new Error("Pooled and direct endpoints must use distinct ports.")
     }
