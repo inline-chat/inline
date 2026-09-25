@@ -636,12 +636,14 @@ private struct ProfileEditSheet: View {
           Section {
             LabeledContent("First Name") {
               TextField("First Name", text: $firstName)
+                .labelsHidden()
                 .textContentType(.givenName)
                 .frame(minWidth: 220, idealWidth: 280)
             }
 
             LabeledContent("Last Name") {
               TextField("Last Name", text: $lastName)
+                .labelsHidden()
                 .textContentType(.familyName)
                 .frame(minWidth: 220, idealWidth: 280)
             }
