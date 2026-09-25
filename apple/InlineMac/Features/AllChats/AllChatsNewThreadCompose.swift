@@ -859,7 +859,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       guard await admitTextSend(draft, peer: peer, chatID: chatID) else {
         log.error("New-thread durable send admission failed after local creation")
         installDraft(draft, on: peer)
-        finishCreatedThread(peer, intent: intent)
+        await finishCreatedThread(peer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -883,7 +883,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         "durable"
       )
 
-      finishCreatedThread(peer, intent: intent)
+      await finishCreatedThread(peer, intent: intent)
       os_signpost(
         .event,
         log: performanceLog,
@@ -963,7 +963,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       }
       guard admitted else {
         log.error("New-thread send transaction admission failed after thread creation")
-        finishCreatedThread(peer, intent: intent)
+        await finishCreatedThread(peer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -989,7 +989,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       )
       Drafts2.shared.clear(peer: peer)
       await Drafts2.shared.flush()
-      finishCreatedThread(peer, intent: intent)
+      await finishCreatedThread(peer, intent: intent)
       os_signpost(
         .event,
         log: performanceLog,
@@ -1002,7 +1002,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     } catch {
       log.error("New-thread submission failed", error: error)
       if let createdPeer {
-        finishCreatedThread(createdPeer, intent: intent)
+        await finishCreatedThread(createdPeer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -1058,19 +1058,15 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private func finishCreatedThread(
     _ peer: InlineKit.Peer,
     intent: NewThreadComposeSubmissionIntent
-  ) {
+  ) async {
+    // Install the local open state and admit its durable transaction before
+    // navigation replaces the composer. This awaits local work, not the server.
+    await dependencies.realtimeV2.sendQueued(
+      .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+    )
+    SidebarCleanup.shared.markOpened(peer)
     if case .openThread = intent {
       dependencies.openNewlyCreatedChatInCurrentContext(peer: peer)
-    }
-    queueDialogOpen(peer)
-  }
-
-  private func queueDialogOpen(_ peer: InlineKit.Peer) {
-    let realtimeV2 = dependencies.realtimeV2
-    Task {
-      await realtimeV2.sendQueued(
-        .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
-      )
     }
   }
 
