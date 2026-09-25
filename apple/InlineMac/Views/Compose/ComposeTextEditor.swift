@@ -568,9 +568,41 @@ extension NSTextView {
     typingAttributes = attributes
   }
 
+  private func resetLinkTypingAttributesIfNeeded() {
+    let selection = selectedRange()
+    guard selection.length == 0,
+          typingAttributes[.link] != nil ||
+          (typingAttributes[.foregroundColor] as? NSColor) == ComposeTextEditor.linkColor
+    else { return }
+
+    // Keep editing a surviving link's label, but never extend its formatting
+    // past its boundaries or retain it after the linked text has been deleted.
+    let text = attributedString()
+    if selection.location > 0, selection.location < text.length {
+      var linkRange = NSRange()
+      let link = text.attribute(
+        .link,
+        at: selection.location,
+        longestEffectiveRange: &linkRange,
+        in: NSRange(location: 0, length: text.length)
+      )
+      if link != nil, selection.location > linkRange.location { return }
+    }
+
+    var attributes = typingAttributes
+    attributes.removeValue(forKey: .link)
+    attributes.removeValue(forKey: .cursor)
+    attributes[.foregroundColor] = ComposeTextEditor.textColor
+    attributes[.underlineStyle] = attributes[.richTextUnderline] as? Bool == true
+      ? NSUnderlineStyle.single.rawValue : 0
+    typingAttributes = attributes
+  }
+
   /// Update typing attributes based on cursor position to prevent style leakage
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange()
+
+    resetLinkTypingAttributesIfNeeded()
 
     // If cursor is after an entity or typing attributes have entity styling, reset to default.
     if selectedRange.length == 0,

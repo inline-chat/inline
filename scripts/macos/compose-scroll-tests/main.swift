@@ -12,7 +12,14 @@ func check(_ condition: Bool, _ message: String) {
 
 final class ChangeObserver: NSObject, ComposeTextViewDelegate {
   var changes = 0
-  func textDidChange(_ notification: Notification) { changes += 1 }
+  func textDidChange(_ notification: Notification) {
+    changes += 1
+    (notification.object as? NSTextView)?.updateTypingAttributesIfNeeded()
+  }
+
+  func textViewDidChangeSelection(_ notification: Notification) {
+    (notification.object as? NSTextView)?.updateTypingAttributesIfNeeded()
+  }
 }
 
 let app = NSApplication.shared
@@ -122,4 +129,76 @@ for mode: ComposeControlMode in [.glass, .legacy] {
   checkScrolling("\(mode): normal text insertion")
   check(observer.changes > 0, "\(mode): normal insertion did not notify observers")
   print("PASS: \(mode) clear and normal text insertion")
+
+  let textView = editor.textView
+  var linkAttributes = textView.defaultTypingAttributes
+  linkAttributes[.link] = "https://example.com"
+  linkAttributes[.foregroundColor] = ComposeTextEditor.linkColor
+  linkAttributes[.cursor] = NSCursor.pointingHand
+  let link = NSAttributedString(string: "Example", attributes: linkAttributes)
+
+  func loadLink(prefix: String = "") {
+    let text = NSMutableAttributedString(string: prefix, attributes: textView.defaultTypingAttributes)
+    text.append(link)
+    editor.replaceAttributedString(text)
+    textView.setSelectedRange(NSRange(location: text.length, length: 0))
+  }
+
+  func checkPlainTyping(_ label: String) {
+    let start = textView.selectedRange().location
+    textView.insertText("hello", replacementRange: textView.selectedRange())
+    let attributes = textView.attributedString().attributes(at: start, effectiveRange: nil)
+    check(attributes[.link] == nil, "\(mode) \(label): new text is still a link")
+    check(attributes[.foregroundColor] as? NSColor == ComposeTextEditor.textColor,
+          "\(mode) \(label): new text is still blue")
+    check(attributes[.cursor] == nil, "\(mode) \(label): new text retains link cursor")
+    print("PASS: \(mode) \(label)")
+  }
+
+  loadLink()
+  for _ in 0..<link.length { textView.deleteBackward(nil) }
+  check(textView.string.isEmpty, "\(mode): backspace did not delete link")
+  checkPlainTyping("backspace entire link")
+
+  loadLink(prefix: "Before ")
+  textView.setSelectedRange(NSRange(location: 7, length: link.length))
+  textView.deleteBackward(nil)
+  checkPlainTyping("delete selected link after plain text")
+
+  loadLink()
+  textView.setSelectedRange(NSRange(location: 0, length: link.length))
+  textView.deleteForward(nil)
+  checkPlainTyping("forward-delete selected link")
+
+  // AppKit can also leave just the visual attributes after dropping .link.
+  editor.clear()
+  var staleAttributes = linkAttributes
+  staleAttributes.removeValue(forKey: .link)
+  let boldFont = NSFont.boldSystemFont(ofSize: ComposeTextEditor.font.pointSize)
+  staleAttributes[.font] = boldFont
+  staleAttributes[.richTextUnderline] = true
+  staleAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+  textView.typingAttributes = staleAttributes
+  textView.updateTypingAttributesIfNeeded()
+  check(textView.typingAttributes[.font] as? NSFont == boldFont, "link reset lost bold")
+  check(textView.typingAttributes[.underlineStyle] as? Int == NSUnderlineStyle.single.rawValue,
+        "link reset lost intentional underline")
+  checkPlainTyping("stale blue styling with intentional formatting")
+
+  for position in [0, link.length] {
+    loadLink()
+    textView.setSelectedRange(NSRange(location: position, length: 0))
+    textView.typingAttributes = linkAttributes
+    textView.updateTypingAttributesIfNeeded()
+    checkPlainTyping("typing at link boundary \(position)")
+  }
+
+  loadLink()
+  textView.setSelectedRange(NSRange(location: 3, length: 0))
+  textView.typingAttributes = linkAttributes
+  textView.updateTypingAttributesIfNeeded()
+  textView.insertText("x", replacementRange: textView.selectedRange())
+  check(textView.attributedString().attribute(.link, at: 3, effectiveRange: nil) as? String == "https://example.com",
+        "\(mode): editing inside a link lost its target")
+  print("PASS: \(mode) editing inside surviving link")
 }
