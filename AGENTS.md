@@ -67,6 +67,30 @@ These are optional ways to keep large investigations readable:
 - You may use `sol` subagents to implement scoped changes to keep you main task focused. `luna` subagents are useful for plowing through lots of raw research materials and markdowns to find relevant bits to your goals.
 - Downsize oversized screenshots (2x -> 1x) and use sprite sheets for video frames when useful.
 
+### Subagents
+
+Optionally spin subagents, you may choose different models and reasoning efforts depending on the workflow.
+Hints on which to use for what:
+
+- `luna` for mapping, filtering, extracting. Reasoning effort `xhigh`.
+- `sol` for review, audit, deep dives. Reasoning effort from `high` and `xhigh`. `med` for small quick patches and checks.
+- `astra` for reviews when parent model was astra already, extremely tricky stuff, and tricky implementations, research or debugging with multiple rounds of failure to achieve the goal. Reasoning efforts from `med` to `xhigh` for extreme cases. `light` for small quick patches and checks.
+
+Some workflows to pick from. Keep in mind you do not have to run any subagents unless it's needed based on criteria mentioned or user explicitly asks for.
+
+- One main `astra` or `sol` agent: most of work does not require subagents and should be done within one parent agent with no subagent.
+- `astra` brainstorming and writing spec. one or multiple `sol` xhigh implementing. if multiple were implementing, parent `astra` would check the difference results and merge them itself or another `sol`.
+- `sol` xhigh or high implementing, `astra` doing an adversarial review.
+- Main `astra` or `sol` agent focusing on task, `luna` xhigh plowing through evidence corpse.
+- Main `astra` or `sol` agent doing the work, after finishing one adversarial review, and one fixer agent working sequentially to finalize the complex task.
+
+You can tweak, mix, or change these. There are just ideas.
+For prompting these subagents, you may also pick one of the general directions:
+
+- Default - whatever you see fit.
+- Keeping the prompt concise and high level and letting their thinking help you navigate the idea space as well. (Do not do this with `luna`.)
+- Making the prompt detailed in terms of spec and constraints and ground truth and helping the subagent stay within the intended scope with public edges and high level design provided as strong guidelines.
+
 ### Reviews
 
 - When asked to review your work, run an adversarial review subagent that assumes something like: "Assume changes are wrong, done without care or understanding the root cause. They are done by a junior engineer who just wanted to get it done fast and move on." Something long those lines. For important changes use `astra` model or inherit the parent threads model. For scoped reviews or changes use `sol` agents. If you are confident in the change and it's not extensive or doesn't touch anything of substance, skip running subagents and do a quick review and finalization pass yourself.
