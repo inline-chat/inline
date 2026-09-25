@@ -89,11 +89,60 @@ and initial Machine bootstrap. This option does not bootstrap or migrate an app.
 `publish_only` defaults to `false`. Routine releases retain the healthy-fleet
 preflight before DDL and the immediate baseline recheck before replacement.
 
+### Bootstrap the first API and finish cutover in the same run
+
+After rehearsal and the GitHub setup below, dispatch:
+
+```sh
+gh workflow run server-deploy.yml --ref main -f bootstrap=true
+```
+
+`bootstrap` defaults to `false` and cannot be combined with `publish_only`.
+It still runs the full reusable CI, publishes the qualified image, and uses the
+normal packaged migration and verification job. Its pre-DDL inventory requires
+no service-bearing or Fly-managed Machines and every existing rehearsal Machine
+stopped with healthy, complete configuration. The workflow records their IDs/versions and requires
+that snapshot to match immediately before creating the first API.
+
+The initial deploy excludes those stopped rehearsal Machines and creates exactly
+one managed API with six shared CPUs and 1536 MB memory, using the qualified
+digest and `--ha=false`. Only `INLINE_PROCESS_ROLE=api` overrides the repo config;
+`INLINE_INGRESS_HOST=api.inline.chat` remains in place from first boot. Readiness
+and TLS can be checked through `inline-api.fly.dev`; authenticated qualification
+uses a private proxy/loopback with the expected Host and origin-secret headers.
+The workflow verifies the new Machine, source revision, image, capacity, and
+unchanged rehearsal inventory, then waits at `production-cutover`.
+
+Before approving that job, qualify authenticated paths, transfer the production
+hostname and routing while both APIs are alive, verify traffic on the new API,
+then disable autostart and stop the old all-role API. Attaching the Fly certificate
+can itself move hostname routing; treat it as a live cutover action. The final
+job rechecks the exact bootstrap Machine ID/version/digest and API-only role. A
+separate read-only credential verifies the configured predecessor exists and
+every nondestroyed legacy Machine is observable and stopped, including detached
+workers; all legacy services must explicitly have `autostart=false`.
+
+Only then does the same workflow blue-green the selected bootstrap Machine to
+the standard `all` role with the same qualified digest. It neither rebuilds nor
+reruns migrations. The API keeps serving while its replacement starts; the
+intentional worker pause avoids overlap with unfenced legacy workers. Final
+checks require one healthy public Machine with the expected digest, revision,
+production ingress host, and `all` role. A failed gate stops this continuation;
+it does not roll back DDL or automatically re-enable the predecessor.
+
 ### Required GitHub setup
 
 - Create a `production` environment restricted to `main`; configure reviewer
   approval according to the release policy.
-- Store `PRODUCTION_DATABASE_MIGRATION_URL` in that environment. It must be a
+- Before any bootstrap dispatch, create `production-cutover`, restrict it to
+  `main`, and configure a required reviewer. Verify the protection is active;
+  merely naming an environment in YAML does not make it approval-gated. Set its
+  `PREDECESSOR_FLY_APP=inline-fra-standby` and
+  `PREDECESSOR_MACHINE_ID=683d52ea309078` variables. Store the temporary read-only
+  legacy-app credential as its environment-only `LEGACY_FLY_READ_TOKEN`; it is
+  exposed only to the predecessor readback step. The new-app `FLY_API_TOKEN`
+  continues to authorize deployment to `inline-api`.
+- Store `PRODUCTION_DATABASE_MIGRATION_URL` only in `production`. It must be a
   direct PostgreSQL endpoint reachable from the hosted runner with verified TLS.
   Only the migration command step receives it, by environment variable rather than a
   command argument. Do not put this DDL credential in the API app's Fly secrets.
