@@ -36,8 +36,8 @@ from `main` in GitHub Actions, or use:
 gh workflow run server-deploy.yml --ref main
 ```
 
-Dispatch is the explicit release action: after configured environment approvals,
-it can run production DDL and replace the serving Machines. Ordinary pushes and
+The default dispatch is the explicit release action: after configured environment
+approvals, it can run production DDL and replace the serving Machines. Ordinary pushes and
 pull requests only run CI. Production releases share a concurrency group and do
 not cancel an in-progress deployment.
 
@@ -68,6 +68,26 @@ The runtime image is `registry.fly.io/inline-api@sha256:...`. The source manifes
 source revision label and immutable digest identify the candidate. The checked-in
 Fly config contains an image sentinel so an ordinary deploy cannot silently
 build or select an unqualified checkout.
+
+### Prepare an image for rehearsal or initial bootstrap
+
+When no healthy public fleet exists yet, or an exact-image rehearsal is needed,
+dispatch from `main` with `publish_only` enabled:
+
+```sh
+gh workflow run server-deploy.yml --ref main -f publish_only=true
+```
+
+This runs the entire reusable CI workflow and publishes its tested runtime image
+without rebuilding. After all CI succeeds, the run summary records the selected
+source SHA and immutable digest. It skips the production environment jobs,
+fleet preflight, migrations, and deployment; it never receives the production
+database credential. Registry publishing still requires the repository/org Fly
+token. Use the recorded digest for the separately authorized clone rehearsal
+and initial Machine bootstrap. This option does not bootstrap or migrate an app.
+
+`publish_only` defaults to `false`. Routine releases retain the healthy-fleet
+preflight before DDL and the immediate baseline recheck before replacement.
 
 ### Required GitHub setup
 

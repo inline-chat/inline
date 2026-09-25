@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
 import { resolve } from "node:path"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
 
 const digest = "sha256:" + "1".repeat(64)
 const machine = (id = "abc123") => ({
@@ -78,4 +80,75 @@ test("the reusable workflow publishing guard only accepts manual main dispatch",
     })
     expect(result.exitCode === 0, `${event} ${ref}`).toBe(allowed)
   }
+})
+
+type ReleaseJob = {
+  if?: string
+  needs?: string | string[]
+  environment?: string
+  uses?: string
+  with?: Record<string, unknown>
+  steps?: { run?: string }[]
+}
+const releaseWorkflow = async () => Bun.YAML.parse(await Bun.file(
+  resolve(import.meta.dir, "../../.github/workflows/server-deploy.yml"),
+).text()) as {
+  on: { workflow_dispatch: { inputs: { publish_only: { type: string; default: boolean } } } }
+  jobs: Record<string, ReleaseJob>
+}
+
+test("publish-only keeps full CI and excludes every production job; normal and failed releases retain their gates", async () => {
+  const workflow = await releaseWorkflow()
+  expect(workflow.on.workflow_dispatch.inputs.publish_only).toMatchObject({ type: "boolean", default: false })
+  expect(workflow.jobs.qualify).toMatchObject({ needs: "validate", uses: "./.github/workflows/server-test.yml", with: { publish_image: true } })
+  // Interpret the workflow's deliberately simple boolean guards and dependency
+  // success requirements, so changing either changes the jobs exercised here.
+  const runnable = (id: string, publishOnly: boolean, failed?: string): boolean => {
+    const job = workflow.jobs[id]!
+    if (job.if !== undefined) {
+      const guard = job.if.match(/^\$\{\{\s*(!?)inputs\.publish_only\s*\}\}$/)
+      if (!guard) throw new Error("Unexpected release job condition")
+      if (!(guard[1] ? !publishOnly : publishOnly)) return false
+    }
+    const needs = typeof job.needs === "string" ? [job.needs] : job.needs ?? []
+    return needs.every((dependency) => dependency !== failed && runnable(dependency, publishOnly, failed))
+  }
+  for (const [publishOnly, expected] of [
+    [true, ["validate", "qualify", "prepared"]],
+    [false, ["validate", "qualify", "preflight", "migrate", "deploy"]],
+  ] as const) {
+    expect(Object.keys(workflow.jobs).filter((id) => runnable(id, publishOnly)).sort()).toEqual([...expected].sort())
+    for (const [id, job] of Object.entries(workflow.jobs)) {
+      if (job.environment === "production" || JSON.stringify(job).includes("PRODUCTION_DATABASE_MIGRATION_URL")) {
+        expect(runnable(id, true)).toBe(false)
+      }
+    }
+    expect(runnable("prepared", publishOnly, "qualify")).toBe(false)
+    expect(runnable("migrate", publishOnly, "qualify")).toBe(false)
+    expect(runnable("deploy", publishOnly, "qualify")).toBe(false)
+  }
+  expect(runnable("qualify", true, "validate")).toBe(false)
+  expect(runnable("migrate", false, "preflight")).toBe(false)
+  expect(runnable("deploy", false, "migrate")).toBe(false)
+  expect(JSON.stringify(workflow.jobs.prepared)).not.toContain("secrets.")
+  expect(workflow.jobs.prepared?.environment).toBeUndefined()
+})
+
+test("the publish-only summary records the exact SHA and digest and rejects a mutable image tag", async () => {
+  const workflow = await releaseWorkflow()
+  const script = workflow.jobs.prepared?.steps?.[0]?.run
+  if (!script) throw new Error("Missing prepared image summary")
+  const directory = await mkdtemp(resolve(tmpdir(), "inline-prepared-image-"))
+  const summaryPath = resolve(directory, "summary.md")
+  const image = `registry.fly.io/inline-api@${digest}`
+  const execute = (runtimeImage: string) => Bun.spawnSync(["bash", "-e", "-c", script], {
+    env: { PATH: process.env.PATH, GITHUB_SHA: "a".repeat(40), RUNTIME_IMAGE: runtimeImage, GITHUB_STEP_SUMMARY: summaryPath },
+  })
+  expect(execute(image).exitCode).toBe(0)
+  const output = await Bun.file(summaryPath).text()
+  expect(output).toContain("a".repeat(40))
+  expect(output).toContain(image)
+  expect(output).toContain("migrations, and deployment were skipped")
+  expect(execute("registry.fly.io/inline-api:latest").exitCode).not.toBe(0)
+  expect(await Bun.file(summaryPath).text()).toBe(output)
 })

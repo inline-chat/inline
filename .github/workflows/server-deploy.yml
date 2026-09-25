@@ -4,6 +4,11 @@ name: Deploy Server
 # push trigger. Configure the production environment to allow main only.
 on:
   workflow_dispatch:
+    inputs:
+      publish_only:
+        description: Qualify and publish the image for rehearsal or initial bootstrap; do not deploy
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,9 +36,24 @@ jobs:
       # Repository/org secret: environment secrets are unavailable to this call.
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+  prepared:
+    name: Report the qualified image for rehearsal or bootstrap
+    needs: qualify
+    if: ${{ inputs.publish_only }}
+    runs-on: ubuntu-latest
+    env:
+      RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+    steps:
+      - name: Record the exact image without accessing production
+        run: |
+          [[ "$RUNTIME_IMAGE" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]] || exit 1
+          printf 'Prepared `%s` at `%s` for rehearsal or initial bootstrap. Production preflight, migrations, and deployment were skipped.\n' \
+            "$GITHUB_SHA" "$RUNTIME_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
   preflight:
     name: Record a healthy public Machine baseline before DDL
     needs: qualify
+    if: ${{ !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
@@ -59,6 +79,7 @@ jobs:
   migrate:
     name: Migrate and verify with the qualified image
     needs: [qualify, preflight]
+    if: ${{ !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -91,6 +112,7 @@ jobs:
   deploy:
     name: Replace the public Machines and verify readiness
     needs: [qualify, preflight, migrate]
+    if: ${{ !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
