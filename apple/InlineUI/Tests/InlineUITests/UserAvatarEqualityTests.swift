@@ -100,16 +100,24 @@ struct UserAvatarEqualityTests {
     original.unlockFocus()
     cache.store(original, forKey: source.cacheKey, toDisk: false)
 
-    let thumbnail: RetrieveImageResult = try await withCheckedThrowingContinuation { continuation in
+    let thumbnail = try await withCheckedThrowingContinuation {
+      (continuation: CheckedContinuation<(cacheTypeIsNone: Bool, data: Data?), any Error>) in
       manager.retrieveImage(
         with: KF.ImageResource(downloadURL: source.url, cacheKey: source.cacheKey),
         options: [.onlyFromCache, .processor(DownsamplingImageProcessor(size: CGSize(width: 22, height: 22)))],
-        completionHandler: { continuation.resume(with: $0) }
+        completionHandler: { result in
+          switch result {
+          case .success(let image):
+            continuation.resume(returning: (image.cacheType == .none, image.data()))
+          case .failure(let error):
+            continuation.resume(throwing: error)
+          }
+        }
       )
     }
     // Kingfisher reports .none when processing a cached original, even though the returned data is a thumbnail.
-    #expect(thumbnail.cacheType == .none)
-    let thumbnailData = try #require(thumbnail.data())
+    #expect(thumbnail.cacheTypeIsNone)
+    let thumbnailData = try #require(thumbnail.data)
     let thumbnailImage = try #require(NSBitmapImageRep(data: thumbnailData))
     #expect(thumbnailImage.pixelsWide == 22)
 
