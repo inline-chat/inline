@@ -152,11 +152,18 @@ jobs:
           test "$current" = "$BASELINE"
           MACHINE_IDS=$(jq -er '.ids' <<< "$BASELINE")
           if [[ "$BOOTSTRAP" = true ]]; then
-            exclusions=()
-            if [[ -n "$MACHINE_IDS" ]]; then exclusions=(--exclude-machines "$MACHINE_IDS"); fi
-            flyctl deploy --config server/fly.toml --image "$RUNTIME_IMAGE" \
-              "${exclusions[@]}" --strategy immediate --ha=false --wait-timeout 5m --yes \
-              --vm-cpu-kind shared --vm-cpus 6 --vm-memory 1536 --env INLINE_PROCESS_ROLE=api
+            API_ID=$(jq -r '.api.id // empty' <<< "$BASELINE")
+            if [[ -n "$API_ID" ]]; then
+              flyctl deploy --config server/fly.toml --image "$RUNTIME_IMAGE" \
+                --only-machines "$API_ID" --strategy bluegreen --ha=false --signal SIGTERM --wait-timeout 5m --yes \
+                --env INLINE_PROCESS_ROLE=api
+            else
+              exclusions=()
+              if [[ -n "$MACHINE_IDS" ]]; then exclusions=(--exclude-machines "$MACHINE_IDS"); fi
+              flyctl deploy --config server/fly.toml --image "$RUNTIME_IMAGE" \
+                "${exclusions[@]}" --strategy immediate --ha=false --wait-timeout 5m --yes \
+                --vm-cpu-kind shared --vm-cpus 6 --vm-memory 1536 --env INLINE_PROCESS_ROLE=api
+            fi
           else
             flyctl deploy --config server/fly.toml --image "$RUNTIME_IMAGE" \
               --only-machines "$MACHINE_IDS" --strategy bluegreen --ha=false \
@@ -165,23 +172,16 @@ jobs:
       - name: Verify baseline count, image revision, and service health
         id: verify
         run: |
-          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/machines-after.json"
+          BASELINE_COUNT=1
+          if [[ "$BOOTSTRAP" != true ]]; then BASELINE_COUNT=$(jq -er '.count' <<< "$BASELINE"); fi
+          bash scripts/ci/fly-release-wait.sh "$RUNNER_TEMP/machines-after.json" \
+            "$BASELINE_COUNT" "${RUNTIME_IMAGE##*@}" "$GITHUB_SHA"
           current=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines-after.json")
           if [[ "$BOOTSTRAP" = true ]]; then
-            jq --argjson baseline "$BASELINE" '[.[] | .id as $id | select(any($baseline.machines[]; .id == $id))]' \
-              "$RUNNER_TEMP/machines-after.json" > "$RUNNER_TEMP/rehearsal-after.json"
-            test "$(jq -ce -f scripts/ci/fly-release-machines-bootstrap.jq "$RUNNER_TEMP/rehearsal-after.json")" = "$BASELINE"
-            jq --argjson baseline "$BASELINE" '[.[] | select(.state != "destroyed") | .id as $id | select(any($baseline.machines[]; .id == $id) | not)]' \
-              "$RUNNER_TEMP/machines-after.json" > "$RUNNER_TEMP/bootstrap-api.json"
-            jq -e 'length == 1 and all(.[]; .config.env.INLINE_PROCESS_ROLE == "api" and
-              .config.env.INLINE_INGRESS_HOST == "api.inline.chat" and .config.guest.cpu_kind == "shared" and
-              .config.guest.cpus == 6 and .config.guest.memory_mb == 1536 and (.version | type) == "string")' \
-              "$RUNNER_TEMP/bootstrap-api.json" > /dev/null
-            snapshot=$(jq -c '.[0] | {id, version, digest: .image_ref.digest, revision: .image_ref.labels["org.opencontainers.image.revision"]}' "$RUNNER_TEMP/bootstrap-api.json")
+            after=$(jq -ce -f scripts/ci/fly-release-machines-bootstrap.jq "$RUNNER_TEMP/machines-after.json")
+            test "$(jq -c 'del(.api)' <<< "$after")" = "$(jq -c 'del(.api)' <<< "$BASELINE")"
+            snapshot=$(jq -ce '.api' <<< "$after")
             printf 'bootstrap_baseline=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
-            BASELINE_COUNT=1
-          else
-            BASELINE_COUNT=$(jq -er '.count' <<< "$BASELINE")
           fi
           jq -e --argjson count "$BASELINE_COUNT" --arg digest "${RUNTIME_IMAGE##*@}" --arg sha "$GITHUB_SHA" \
             '.count == $count and .digest == $digest and .revision == $sha' <<< "$current" > /dev/null
@@ -243,7 +243,8 @@ jobs:
             --only-machines "$MACHINE_ID" --strategy bluegreen --ha=false --signal SIGTERM --wait-timeout 5m --yes
       - name: Verify the all-role Machine
         run: |
-          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/after-activation.json"
+          bash scripts/ci/fly-release-wait.sh "$RUNNER_TEMP/after-activation.json" \
+            1 "${RUNTIME_IMAGE##*@}" "$GITHUB_SHA"
           current=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/after-activation.json")
           jq -e --arg digest "${RUNTIME_IMAGE##*@}" --arg sha "$GITHUB_SHA" \
             '.count == 1 and .digest == $digest and .revision == $sha' <<< "$current" > /dev/null

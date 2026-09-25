@@ -99,10 +99,11 @@ gh workflow run server-deploy.yml --ref main -f bootstrap=true
 
 `bootstrap` defaults to `false` and cannot be combined with `publish_only`.
 It still runs the full reusable CI, publishes the qualified image, and uses the
-normal packaged migration and verification job. Its pre-DDL inventory requires
-no service-bearing or Fly-managed Machines and every existing rehearsal Machine
-stopped with healthy, complete configuration. The workflow records their IDs/versions and requires
-that snapshot to match immediately before creating the first API.
+normal packaged migration and verification job. Its pre-DDL inventory permits
+stopped, service-free, unmanaged rehearsal Machines and optionally one healthy
+managed API-only Machine with the production ingress host and expected size.
+It records rehearsal IDs/versions and the existing API's ID/version/digest/revision,
+then requires that snapshot to match immediately before deployment.
 
 The initial deploy excludes those stopped rehearsal Machines and creates exactly
 one managed API with six shared CPUs and 1536 MB memory, using the qualified
@@ -112,6 +113,14 @@ and TLS can be checked through `inline-api.fly.dev`; authenticated qualification
 uses a private proxy/loopback with the expected Host and origin-secret headers.
 The workflow verifies the new Machine, source revision, image, capacity, and
 unchanged rehearsal inventory, then waits at `production-cutover`.
+
+If a previous bootstrap created the API but stopped before cutover, dispatch
+`bootstrap=true` again. The same strict preflight must pass; the new run qualifies
+its own image, applies the idempotent migration job, and blue-greens only the
+existing API to that image while keeping its role `api`. Rehearsal Machines remain
+untouched. Every deployment polls for the expected image and service readiness
+before postflight checks: at most 30 reads, each capped at five seconds, with
+five-second intervals. An API that remains unhealthy fails the gate.
 
 Before approving that job, qualify authenticated paths, transfer the production
 hostname and routing while both APIs are alive, verify traffic on the new API,

@@ -158,6 +158,11 @@ const inspectInitial = (machines: unknown[], legacy = false) => Bun.spawnSync([
   resolve(import.meta.dir, legacy ? "fly-release-machines-legacy.jq" : "fly-release-machines-bootstrap.jq"),
 ], { stdin: new TextEncoder().encode(JSON.stringify(machines)) })
 const stopped = () => ({ ...machine(), version: "version1", state: "stopped", config: { ...machine().config, metadata: {}, services: [] } })
+const bootstrapApi = () => ({ ...machine("api123"), version: "api-version",
+  image_ref: { ...machine().image_ref, labels: { "org.opencontainers.image.revision": "a".repeat(40) } },
+  config: { ...machine().config, env: { INLINE_PROCESS_ROLE: "api", INLINE_INGRESS_HOST: "api.inline.chat" },
+    guest: { cpu_kind: "shared", cpus: 6, memory_mb: 1536 } },
+})
 
 test("bootstrap accepts empty or stopped service-free inventory and detects version changes", () => {
   expect(inspectInitial([]).exitCode).toBe(0)
@@ -174,6 +179,24 @@ test("bootstrap accepts empty or stopped service-free inventory and detects vers
   }
 })
 
+test("bootstrap resume accepts exactly one healthy API-only Machine and rejects unsafe adoption", () => {
+  const api = bootstrapApi()
+  const result = inspectInitial([stopped(), api])
+  expect(result.exitCode, result.stderr.toString()).toBe(0)
+  expect(JSON.parse(result.stdout.toString())).toEqual({ ids: "abc123", machines: [{ id: "abc123", version: "version1" }],
+    api: { id: "api123", version: "api-version", digest, revision: "a".repeat(40) } })
+  for (const invalid of [
+    { ...api, state: "created" }, { ...api, checks: [] }, { ...api, checks: [{ status: "critical" }] },
+    { ...api, config: { ...api.config, env: { ...api.config.env, INLINE_PROCESS_ROLE: "all" } } },
+    { ...api, config: { ...api.config, env: { ...api.config.env, INLINE_INGRESS_HOST: "other" } } },
+    { ...api, config: { ...api.config, guest: { ...api.config.guest, cpus: 2 } } },
+    { ...api, config: { ...api.config, metadata: {} } },
+    { ...api, image_ref: { ...api.image_ref, digest: "latest" } },
+    { ...api, image_ref: { ...api.image_ref, labels: {} } },
+  ]) expect(inspectInitial([stopped(), invalid]).exitCode).not.toBe(0)
+  expect(inspectInitial([api, { ...api, id: "other" }]).exitCode).not.toBe(0)
+})
+
 test("legacy fence requires the exact predecessor and refuses active or auto-startable old workers", () => {
   const predecessor = { ...stopped(), config: { ...machine().config, services: [{ internal_port: 8000, autostart: false }] } }
   expect(inspectInitial([predecessor], true).exitCode).toBe(0)
@@ -186,7 +209,7 @@ test("legacy fence requires the exact predecessor and refuses active or auto-sta
   }
 })
 
-test("the actual bootstrap deploy shell excludes rehearsal Machines and refuses changed inventory", async () => {
+test("the actual first/resumed bootstrap shell preserves rehearsal Machines and refuses changed inventory", async () => {
   const workflow = await releaseWorkflow()
   const script = workflow.jobs.deploy?.steps?.find((step) => step.name === "Revalidate the recorded baseline and deploy the same digest")?.run
   if (!script) throw new Error("Missing deployment command")
@@ -202,7 +225,7 @@ test("the actual bootstrap deploy shell excludes rehearsal Machines and refuses 
     env: { PATH: `${directory}:${process.env.PATH}`, FLY_API_TOKEN: "synthetic", RUNTIME_IMAGE: image,
       BASELINE: baseline, BOOTSTRAP: "true", RUNNER_TEMP: directory, STUB_INVENTORY: inventory, STUB_CALLS: calls },
   })
-  for (const machines of [[stopped()], []]) {
+  for (const machines of [[stopped()], [], [stopped(), bootstrapApi()]]) {
     await Bun.write(inventory, JSON.stringify(machines))
     const baseline = inspectInitial(machines).stdout.toString().trim()
     const result = execute(baseline)
@@ -211,16 +234,65 @@ test("the actual bootstrap deploy shell excludes rehearsal Machines and refuses 
     expect(args).toContain(image)
     expect(args).toContain("--ha=false")
     expect(args).toContain("INLINE_PROCESS_ROLE=api")
-    expect(args).not.toContain("--only-machines")
     expect(args.join(" ")).not.toContain("INLINE_INGRESS_HOST")
-    expect(args.includes("--exclude-machines")).toBe(machines.length > 0)
-    if (machines.length) expect(args[args.indexOf("--exclude-machines") + 1]).toBe("abc123")
+    if (machines.length === 2) {
+      expect(args).not.toContain("--exclude-machines")
+      expect(args[args.indexOf("--only-machines") + 1]).toBe("api123")
+      expect(args[args.indexOf("--strategy") + 1]).toBe("bluegreen")
+    } else {
+      expect(args).not.toContain("--only-machines")
+      expect(args.includes("--exclude-machines")).toBe(machines.length > 0)
+      expect(args[args.indexOf("--strategy") + 1]).toBe("immediate")
+      if (machines.length) expect(args[args.indexOf("--exclude-machines") + 1]).toBe("abc123")
+    }
     await Bun.write(calls, "not-called")
     await Bun.write(inventory, JSON.stringify([{ ...stopped(), version: "changed" }]))
     expect(execute(baseline).exitCode).not.toBe(0)
     expect(await Bun.file(calls).text()).toBe("not-called")
   }
 })
+
+test("readiness polling tolerates creation, requires the exact image, and has bounded reads and attempts", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "inline-release-wait-"))
+  const initial = resolve(directory, "initial.json")
+  const ready = resolve(directory, "ready.json")
+  const count = resolve(directory, "count")
+  const sleeps = resolve(directory, "sleeps")
+  for (const [name, script] of Object.entries({
+    flyctl: 'count=$(cat "$STUB_COUNT"); count=$((count + 1)); echo "$count" > "$STUB_COUNT"\nif [[ "$count" -ge "$STUB_READY_AFTER" ]]; then cat "$STUB_READY"; else cat "$STUB_INITIAL"; fi',
+    timeout: 'test "$1" = --signal=KILL; test "$2" = 5s; shift 2; exec "$@"',
+    sleep: 'test "$1" = 5; echo sleep >> "$STUB_SLEEPS"',
+  })) {
+    const path = resolve(directory, name)
+    await Bun.write(path, `#!/bin/bash\nset -eu\n${script}\n`)
+    await chmod(path, 0o700)
+  }
+  await Bun.write(initial, JSON.stringify([{ ...bootstrapApi(), state: "created", checks: [] }]))
+  const execute = async (readyAfter: number, readyMachine = bootstrapApi()) => {
+    await Bun.write(count, "0")
+    await Bun.write(sleeps, "")
+    await Bun.write(ready, JSON.stringify([readyMachine]))
+    return Bun.spawnSync(["bash", "scripts/ci/fly-release-wait.sh", resolve(directory, "output.json"), "1", digest, "a".repeat(40)], {
+      cwd: resolve(import.meta.dir, "../.."),
+      env: { PATH: `${directory}:${process.env.PATH}`, STUB_COUNT: count, STUB_SLEEPS: sleeps,
+        STUB_INITIAL: initial, STUB_READY: ready, STUB_READY_AFTER: String(readyAfter) },
+    })
+  }
+  expect((await execute(3)).exitCode).toBe(0)
+  expect((await Bun.file(count).text()).trim()).toBe("3")
+  for (const [readyAfter, readyMachine] of [[31, bootstrapApi()], [1, { ...bootstrapApi(),
+    image_ref: { ...bootstrapApi().image_ref, digest: "sha256:" + "2".repeat(64) } }]] as const) {
+    const result = await execute(readyAfter, readyMachine)
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr.toString()).toContain("Timed out waiting")
+    expect((await Bun.file(count).text()).trim()).toBe("30")
+    expect((await Bun.file(sleeps).text()).trim().split("\n")).toHaveLength(29)
+  }
+  const workflow = await releaseWorkflow()
+  for (const job of ["deploy", "activate"]) {
+    expect(workflow.jobs[job]?.steps?.some((step) => step.run?.includes("bash scripts/ci/fly-release-wait.sh"))).toBe(true)
+  }
+}, 15_000)
 
 test("the publish-only summary records the exact SHA and digest and rejects a mutable image tag", async () => {
   const workflow = await releaseWorkflow()
