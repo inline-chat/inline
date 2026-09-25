@@ -7,6 +7,54 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## September 25, 2026
+
+### New
+
+- 🎙️ Added **dictation** on macOS. Speak to write a message or start a new thread.
+- 🗂️ Select **multiple chats** in the macOS sidebar to move them together, create a folder, or mark them as read.
+- 🖼️ Added **space photos** on iOS and macOS, plus space badges for members of Pro spaces.
+- Added **iPad split navigation**, with chats and the sidebar side by side.
+- Open unread chats or mark them all as read from Inline's **macOS Dock menu**.
+
+### Quality of life improvements
+
+- Choose your **swipe-to-reply direction** or turn off message double-tap and double-click actions. Your message gesture settings now sync across devices.
+- Reaction pickers now suggest emoji from the message first. Also refreshed the iOS reaction picker.
+- Chat translation preferences now sync across devices.
+- Added a **pink theme** on iOS and macOS.
+- Reply threads now inherit their parent chat's notification settings unless you choose otherwise.
+- Mark an entire folder or a thread and its replies as read on macOS.
+- Start a new thread from the macOS composer's plus menu, or drop attachments onto the empty page to begin composing.
+- Added **Invite to Space** to the macOS command menu.
+- Improved macOS chat and composer layout, tooltips, and Minimal message metadata.
+
+### Better tools and APIs for agents and hackers
+
+- Browse folders on your agent's machine and choose its project from macOS Agent Settings. Requires an updated bridge.
+- See your agent provider's remaining usage and reset times in Agent Settings, where supported by the provider and bridge.
+- Codex now shows collapsible work summaries, command previews, and file changes. Also improved model and reasoning settings, `/compact`, and `/stop`.
+- Improved Claude and Codex setup, with clearer errors and retry options.
+- [OpenClaw](/docs/openclaw) now supports 2026.9, with improved approvals, reply-thread support, and connection recovery.
+- Improved reconnects and catching up on missed updates in [Hermes](/docs/hermes), the realtime SDK, and the [CLI](/docs/cli).
+
+### Fixes
+
+- Improved catching up on messages, unread counts, and membership changes after reconnecting.
+- Fixed iOS message menus losing their preview, keyboard, or scroll position during live updates.
+- Improved loading older messages on iOS. Your own messages no longer increase the scroll-to-bottom unread badge.
+- Fixed scrolling while editing long messages and selecting text with double-click set to Ack on macOS.
+- Fixed stale profile photos, full-size avatar previews, duplicate image drops, and missing files in macOS Chat Info.
+- Improved notification delivery across desktop and mobile, with fewer stale or duplicate notifications.
+- Fixed agent settings not remembering project and provider choices, stale agent lists, and skilled-agent mentions in new threads.
+- Improved macOS dictation and restored the iOS microphone button after clearing the composer.
+- Fixed macOS sidebar hover targets, closing pinned chats, and new-thread picker placement.
+- Fixed copied thread links and backlinks, automatic thread titles, and mention matching.
+- Improved rich-text rendering, forwarded-media spacing, and link-preview colors.
+- Improved startup and resuming interrupted onboarding.
+
+---
+
 ## September 2, 2026
 
 ### New
