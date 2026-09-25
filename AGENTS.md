@@ -67,6 +67,10 @@ These are optional ways to keep large investigations readable:
 - You may use `sol` subagents to implement scoped changes to keep you main task focused. `luna` subagents are useful for plowing through lots of raw research materials and markdowns to find relevant bits to your goals.
 - Downsize oversized screenshots (2x -> 1x) and use sprite sheets for video frames when useful.
 
+### Reviews
+
+- When asked to review your work, run an adversarial review subagent that assumes something like: "Assume changes are wrong, done without care or understanding the root cause. They are done by a junior engineer who just wanted to get it done fast and move on." Something long those lines. For important changes use `astra` model or inherit the parent threads model. For scoped reviews or changes use `sol` agents. If you are confident in the change and it's not extensive or doesn't touch anything of substance, skip running subagents and do a quick review and finalization pass yourself.
+
 ## Product Design
 
 These are useful invariants, hints, constraints and benchmarks for assessing your implementations. In different situations some of these may not apply or be relevant so do not treat them as strict rules.
