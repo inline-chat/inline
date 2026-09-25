@@ -1,23 +1,97 @@
-# Inline contributor and agent guide
+# Instructions
 
-Inline is a native work chat application with a Bun/TypeScript server, Apple clients, and developer integrations.
+## Project
 
-## Layout
+- Inline is a chat app for work. With a focus on performance, native experience, agentic workflows, and thread-first chat.
+- Website: inline.chat. api.inline.chat.
 
-- `apple/`: iOS and macOS clients; `server/`: backend; `landing/`: website and product docs.
-- `proto/`: canonical schemas; `packages/`: Inline SDK, MCP server and shared libraries.
-- `plugins/`: ChatGPT/Codex, OpenClaw, Hermes and Vercel Chat SDK integrations.
-- `cli/`, `crates/`, `vendor/`: Rust CLI and its workspace dependencies.
-- `skills/inline/`: distributable Inline skill; keep `plugins/chatgpt/skills/inline/` identical.
+## Repository
 
-## Rules
+- `apple/`: native iOS and macOS clients.
+- `server/`: Bun and TypeScript backend.
+- `landing/`: website and product documentation.
+- `proto/`: canonical protocol schemas.
+- `packages/`: shared TypeScript packages, including the SDK, protocol, bot client, and MCP server.
+- `plugins/`: ChatGPT, OpenClaw, Hermes, and other integrations.
+- `cli/`, `crates/`, `vendor/`: Rust CLI, workspace crates, and vendored dependencies.
+- `skills/inline/`: distributable Inline agent skill.
+- `scripts/`: repository maintenance and development scripts.
+- `.github/`, `.codex/`, `.agents/`: CI configuration and agent tooling.
+- Root manifests include `package.json`, `bun.lock`, `Cargo.toml`, `Cargo.lock`, and `rust-toolchain.toml`.
 
-- Never read, write, copy, move or delete environment files. Programs may consume them normally without printing their contents.
-- Preserve unrelated local changes. Ask before deleting or discarding existing work.
-- Use Bun for JavaScript and TypeScript tooling. Keep package identifiers and release versions independent.
-- Never run simulator tooling without explicit approval. macOS checks are permitted.
-- Do not deploy, publish packages, change remote refs or access production without explicit authorization.
-- Don't edit a committed database migration; add a forward migration.
-- Keep private planning, operational skills, credentials and user data outside this repository.
-- Use `../secret-sauce` for private skills, guides, product context, and raw collaboration history in `.context/`; follow its `AGENTS.md` and keep labs local in its ignored `experiments/`. In Secret Sauce, automatically commit relevant work after tasks finish and pull/push regularly as needed without asking for approval, preserving teammates' work.
-- Register project builds in `.running` and staging in `.committing`; record changed file list in `.wip`. Use those files to coordinate work.
+## Working rules
+
+- Use .wip, .running and .committing files as hints.
+
+### Operational Effectiveness Hints
+
+- Manage local system resources RAM/CPU/Disk if you detect they are under pressure and coordinate in the best manner.
+- Do not run docker runs locally.
+- Do not run simulators unless explicitly approved.
+- Try to not run checks and heavy builds after every small change. It's best to manage our resources and do checks at real checkpoints when necessary.
+- Prefer taking a backup before running destructive commands.
+- Don't read .env files, print them, or inspect them. It's fine to move them with a script with strict care to not expose them.
+- Be careful with database migrations to not accidentally change an earlier migration and mess up the database.
+- Before shipping a user-facing action, verify that it can perform its stated behavior. If a missing contract or unclear fallback would make it inert or misleading, ask the user instead of silently degrading the action or its copy.
+
+### Working with sibling agents
+
+- Read/modify .wip, .running and .committing files as hints for coordinating with other agents. Files currently changed are listed in .wip. Build commands running are in go in .running, and in progress commits go in .committing. There may be stale values in those so don't get stuck.
+- If you notice mixed in hunks and diffs mid-committing you may stop committing instead of fighting it.
+- Final handoffs should explain the issue and fix technically, call out security/performance/compatibility risks, mention production readiness, and state validation performed or skipped, and anything else an engineer should know.
+
+### Context, memory and responses
+
+- Use `../secret-sauce` for private skills, guides, context, and raw markdown files related to tasks in `../secret-sauce/.context/`; In Secret Sauce, automatically commit relevant work after tasks finish and sync with origin.
+- Save plans, research or investigations in `../secret-sauce/.context/YYYY-MM-DD-title-kebab-case.md`. Delete discarded or superseded ones.
+- For every spec or plan, print a self-contained version in the chat response. Always include the high-level design, concrete specification, scope of work, and a few short representative schema/code snippets. Do not stop at linking to a Markdown file; saved documents are supporting artifacts because the user rarely opens them.
+- When iterating on a feature, and i give you bullet lists of feedback, spec, and alike, record all of my words in a massive spec bullet list and accumulate my feedback as ground truth in a separate markdown file for that feature so you and future rounds of agent still have my direct spec/feedback as ground truth. This file must be free from your own investigations. Only modify previous items if i contradict them explicitly. Treat these as quotes of me and don't modify them. add additional context in brackets or something if I make unclear claims. Fix grammar and types, that's fine.
+
+### Brainstorming
+
+- When brainstorming plans, research and early spec-like documents, keep the results concise, yet with detailed technical details and decision-focused. Start as small as possible without losing requirements or leaving ambiguity; omit obvious details and implementation noise. Unless the user asks otherwise.
+
+### Commits
+
+- Keep commits fast: before committing, run one concise finalization/review pass and apply relevant formatting fixes, reusing any equivalent checks already completed instead of repeating them. Then register `.committing`, stage exact paths/hunks, inspect `git diff --cached --name-only` once, and commit immediately; prefer `scripts/committer "<msg>" <file...>` when whole-file ownership is clean.
+
+- Commit messages should be lowercase and scoped when useful, for example `macos: fix ...`, `server: add ...`, or `chore: ...`.
+
+### Video, screenshots, logs, research, review
+
+These are suggestions for working with large, extensive or media heavy investigations and research. These are not strict rules but suggestions to avoid context bloat.
+
+- For better performance we ideally filter, group, batch, preprocess large corpses of evidence and artifacts to avoid pulling in huge amounts of noise into the main sessions context. We achieve it by filtering, parsing and filtering using code and temp files, fast subagents, and alike.
+- Prefer reasonably sized screenshots (1x or less) when too large, and frames of video in a sprite sheet when makes sense.
+- Pipe build outputs to a temp file to only extract useful stuff (ie. errors).
+- Feel free to inspect historic logs when clear and specific filters which doesn't pull in noise. Before inspecting logs save them in a file and inspect if that file has a small enough size to be worth looking at. This saves you from pulling in lots of noise.
+- For pulling in extensive debug information, crash logs, plowing through evidence corpse, lots of images, etc you may spin a `luna` subagent to parse and provide findings and evidence in structured cleaned up format.
+- For extensive research/exploration from other reference repositories, docs, etc you may similarly use tools to provide a rough graph/structure/map of where useful things are by spinning a few `luna` xhigh subagents to constructs lists/maps/graphs of links, content, source, folders, flows, etc so you can get to the good stuff without polluting the context of the main chat.
+- For reviewing large amounts of diffs, use `luna` subagents to inspect those diffs to skip generated/boilerplate/repeated patterns from important changes, suspicious logic, hot paths or core areas touched (eg. sync, network, send message, message list, database, etc), possible drifts from ground truth, over expansion patterns, under abstracted, etc you know common important failure points instead of going through every single diff in main context.
+- Avoid delegating feature work to subagents. Subagents are for aforementioned use-cases and alike. If user explicitly insists on doing that, you may spawn new threads/sessions with `sol`.
+
+## Product Design
+
+These are useful invariants, hints, constraints and benchmarks for assessing your implementations. In different situations some of these may not apply or be relevant so do not treat them as strict rules.
+
+- First-frame correctness is non-negotiable: persisted state required for presentation must be present before initial row/view construction. Never render known-wrong content and remove it after an observer fires.
+
+- Rendering and scrolling paths must remain pure and lightweight. Do not perform database reads, network work, heavy setup, or blocking waits in view/cell construction or on the main thread.
+
+- Before implementation, compare the proposed slice with a plausible overbuilt version and delete fields, timestamps, states, layers, and edge-case machinery that are not required by the accepted contract. Keep the rejected before/after as reusable design evidence when it reveals a general pattern.
+
+- Public Inline's `spaces` (aka workspaces) should be treated as internet-accessible unless banned. Default to minimum member/user data disclosure.
+
+- Start every feature spec with a complexity budget: durable fields, RPCs/updates, migrations, new state owners/observers, background tasks, UI row types, and touched subsystems. Any item beyond the minimum requires a concrete invariant it protects.
+
+- Try to avoid adding parallel observers, duplicate state, generic registries, custom non-standard patches, unless this is an experimental thing or hot fix or something we'll get rid of later. In that case, keep the impact scoped from leaking so it can easily be replaced later.
+
+- Keep v0.1 boundaries honest. If the user accepts a bounded imperfection, record and test that limitation instead of solving it through unrelated infrastructure. Surface unavoidable correctness risks for sign-off; never smuggle a large prerequisite into a small feature.
+
+## Stack
+
+- Servers: Hetzner, Fly
+- Infra/Cloud: Cloudflare, PlanetScale, Coolify
+- Backend: Bun, TS, Effect.TS
+- Clients: Swift, TS, React, Rust
+- CI/Builds: GitHub Actions, Xcode Cloud
