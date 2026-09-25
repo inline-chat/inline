@@ -64,6 +64,7 @@ struct ContextMenuKeyboardTests {
       }
     }
     #expect(list.isContextMenuInteractionActive)
+    #expect(source.isHidden)
     func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
     let platter = try #require(descendants(fixture.window).first {
       String(describing: type(of: $0)) == "_UIContentPlatterView"
@@ -148,7 +149,18 @@ struct ContextMenuKeyboardTests {
     #expect(list.isContextMenuInteractionActive)
     try await capture("after")
     interaction.dismissMenu()
-    try await Task.sleep(for: .milliseconds(600))
+    // Wait for UIKit's completion rather than assuming a fixed spring duration.
+    for _ in 0 ..< 60 {
+      if !list.isContextMenuInteractionActive { break }
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(!list.isContextMenuInteractionActive)
+    // Arrivals can replace or move the original cell offscreen. Validate the
+    // live rows; retained offscreen cells reset on redisplay or reuse.
+    for case let visibleCell as MessageCollectionViewCell in list.visibleCells {
+      #expect(!visibleCell.isContextMenuSourceHidden)
+      #expect(visibleCell.messageView?.bubbleView.isHidden == false)
+    }
   }
 
   @Test("Expanded preview shaping leaves ordinary previews unchanged")
@@ -266,6 +278,43 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: nil)
   }
 
+  @Test("Native lift uses the touched bubble and restores it with dismissal", arguments: [false, true])
+  func highlightsTouchedBubble(usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    cell.updateMessageHoldAction(.reactionsMenu)
+    let bubble = try #require(cell.messageView?.bubbleView)
+    let point = bubble.convert(CGPoint(x: bubble.bounds.midX, y: bubble.bounds.midY), to: list)
+    let configuration = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfigurationForItemsAt: [indexPath], point: point
+    ))
+    let highlight = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    #expect(highlight.view === bubble)
+    #expect(highlight.view.window === fixture.window)
+    #expect(!bubble.isHidden)
+    list.delegate?.collectionView?(list, willDisplayContextMenu: configuration, animator: nil)
+    let dismissal = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
+    ))
+    #expect(dismissal.view === bubble)
+    #expect(!bubble.isHidden)
+    let animator = MenuAnimator()
+    fixture.endMenu(configuration, animator: animator)
+    #expect(!bubble.isHidden)
+    animator.animate()
+    // The source must be back while UIKit finishes the interaction; waiting
+    // for completion leaves a visible hole after the menu has disappeared.
+    #expect(!bubble.isHidden)
+    #expect(list.isContextMenuInteractionActive)
+    animator.complete()
+    #expect(!bubble.isHidden)
+  }
+
   @Test("Arrivals remain visible while the menu snapshot stays intact", arguments: [false, true], [false, true])
   func arrivalsWhileHoldingMenu(animated: Bool, usesV2: Bool) async throws {
     let fixture = try await Fixture(usesV2: usesV2)
@@ -285,6 +334,7 @@ struct ContextMenuKeyboardTests {
     let originalImage = try #require(imageView.image?.pngData())
     let pixels = try #require(imageView.image?.sendAnimationVisibleAlphaSample())
     #expect(pixels.visible > 0)
+    #expect(renderer.bubbleView.isHidden)
 
     let first = try fixture.addMessage(id: 31)
     try await fixture.settleUpdates()
@@ -300,10 +350,14 @@ struct ContextMenuKeyboardTests {
     let currentCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
       .first { $0.message?.id == messageID })
     let currentBubble = try #require(currentCell.messageView?.bubbleView)
+    #expect(currentBubble.isHidden)
+    let arrivingCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == first.id })
+    #expect(arrivingCell.messageView?.bubbleView.isHidden == false)
     let dismissal = try #require(list.delegate?.collectionView?(
       list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
     ))
-    #expect(dismissal.view === preview.view)
+    #expect(dismissal.view === currentBubble)
     let expectedCenter = currentBubble.convert(
       CGPoint(x: currentBubble.bounds.midX, y: currentBubble.bounds.midY), to: fixture.window
     )
@@ -314,6 +368,7 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: animator)
     animator?.animate()
     if animated {
+      #expect(!currentBubble.isHidden)
       // A new day exercises section changes during dismissal too.
       _ = try fixture.addMessage(id: 32, nextDay: true)
       try await fixture.settleUpdates()
@@ -324,6 +379,9 @@ struct ContextMenuKeyboardTests {
     try await fixture.settleUpdates()
     #expect(fixture.displayedMessageCount == originalCount + (animated ? 2 : 1))
     #expect(!list.isContextMenuInteractionActive)
+    let restoredCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == messageID })
+    #expect(restoredCell.messageView?.bubbleView.isHidden == false)
   }
 
   @Test("A stale dismissal cannot discard the reopened menu snapshot")
@@ -363,12 +421,14 @@ struct ContextMenuKeyboardTests {
     let updatedCell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
       .first { $0.message?.id == edited.id })
     #expect(updatedCell.messageView?.fullMessage.displayText == edited.displayText)
+    #expect(updatedCell.messageView?.bubbleView.isHidden == true)
     #expect(imageView.image?.pngData() == originalImage)
     let dismissal = try #require(list.delegate?.collectionView?(
       list, contextMenuConfiguration: current, dismissalPreviewForItemAt: indexPath
     ))
-    #expect(dismissal.view === preview.view)
+    #expect(dismissal.view === updatedCell.messageView?.bubbleView)
     fixture.endMenu(current, animator: nil)
+    #expect(updatedCell.messageView?.bubbleView.isHidden == false)
   }
 
   @Test("Deleting the menu message keeps its snapshot and does not target a different row")
@@ -396,7 +456,64 @@ struct ContextMenuKeyboardTests {
       list, contextMenuConfiguration: configuration, dismissalPreviewForItemAt: indexPath
     )
     #expect(dismissal == nil)
+    #expect(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .allSatisfy { $0.messageView?.bubbleView.isHidden == false })
     fixture.endMenu(configuration, animator: nil)
+  }
+
+  @Test("Reusing a menu source cell restores its original bubble", arguments: [false, true])
+  func restoresReusedSource(usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    let configuration = fixture.beginMenu()
+    _ = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath
+    ))
+    let bubble = try #require(cell.messageView?.bubbleView)
+    #expect(bubble.isHidden)
+    cell.prepareForReuse()
+    #expect(!cell.isContextMenuSourceHidden)
+    #expect(!bubble.isHidden)
+    fixture.endMenu(configuration, animator: nil)
+  }
+
+  @Test("Preparing and reopening a real menu preserves source visibility", arguments: [false, true])
+  func sourceVisibilityAcrossConfigurations(usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
+    let cell = try #require(list.cellForItem(at: indexPath) as? MessageCollectionViewCell)
+    cell.updateMessageHoldAction(.reactionsMenu)
+    let source = try #require(cell.messageView?.bubbleView)
+    let point = source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: list)
+    func configuration() throws -> UIContextMenuConfiguration {
+      try #require(list.delegate?.collectionView?(
+        list, contextMenuConfigurationForItemsAt: [indexPath], point: point
+      ))
+    }
+    let first = try configuration()
+    #expect(!source.isHidden)
+    list.delegate?.collectionView?(list, willDisplayContextMenu: first, animator: nil)
+    #expect(source.isHidden)
+    let animator = MenuAnimator()
+    fixture.endMenu(first, animator: animator)
+    let reopened = try configuration()
+    #expect(source.isHidden)
+    let preview = try #require(list.delegate?.collectionView?(
+      list, contextMenuConfiguration: reopened, highlightPreviewForItemAt: indexPath
+    ))
+    let pixels = try #require((preview.view as? UIImageView)?.image?.sendAnimationVisibleAlphaSample())
+    #expect(pixels.visible > 0)
+    list.delegate?.collectionView?(list, willDisplayContextMenu: reopened, animator: nil)
+    animator.animate()
+    animator.complete()
+    #expect(source.isHidden)
+    fixture.endMenu(reopened, animator: nil)
+    #expect(!source.isHidden)
   }
 
   @Test("Dismissal replays a hidden keyboard before completion", arguments: [false, true])

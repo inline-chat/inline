@@ -1193,6 +1193,14 @@ private extension MessagesCollectionView {
       item: MessageListItem,
       preview: UITargetedPreview
     )?
+    private var contextMenuSourceItem: MessageListItem?
+
+    private func updateContextMenuSourceVisibility(in collectionView: UICollectionView) {
+      for case let cell as MessageCollectionViewCell in collectionView.visibleCells {
+        let item = collectionView.indexPath(for: cell).flatMap { dataSource.itemIdentifier(for: $0) }
+        cell.isContextMenuSourceHidden = contextMenuSourceItem != nil && item == contextMenuSourceItem
+      }
+    }
     private var lastVisibleReadCandidateID: Int64?
     private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
 
@@ -1233,6 +1241,8 @@ private extension MessagesCollectionView {
     ) {
       if let cell = cell as? MessageCollectionViewCell {
         cell.updateMessageHoldAction(INUserSettings.current.messageGestures.holdAction)
+        cell.isContextMenuSourceHidden = contextMenuSourceItem != nil
+          && dataSource.itemIdentifier(for: indexPath) == contextMenuSourceItem
       }
       defer {
         if let messagesCollectionView = collectionView as? MessagesCollectionView,
@@ -1392,6 +1402,8 @@ private extension MessagesCollectionView {
         collectionView.cancelContextMenuKeyboardRestoration()
         collectionView.contextMenuConfiguration = configuration
         collectionView.contextMenuPhase = .presented
+        contextMenuSourceItem = contextMenuPreview?.configuration === configuration ? contextMenuPreview?.item : nil
+        updateContextMenuSourceVisibility(in: collectionView)
         collectionView.stopComposeInsetAnimationAtPresentation()
         collectionView.onContextMenuWillDisplay?()
       }
@@ -1418,18 +1430,25 @@ private extension MessagesCollectionView {
       // Release geometry before replay, but keep background taps suspended
       // until UIKit has returned the independent preview.
       collectionView.contextMenuPhase = .dismissing
-      let updateInsets = { [weak collectionView] in
+      let animateDismissal = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
+        // UIKit's completion can arrive after the platter has disappeared.
+        // Restore the source with the closing animation, not at that late
+        // callback, or the message leaves a blank slot before popping back.
+        self?.contextMenuSourceItem = nil
+        self?.updateContextMenuSourceVisibility(in: collectionView)
         collectionView.updateContentInsetsAfterContextMenuIfNeeded()
       }
       let completion = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
         self?.presentPendingReactionPicker()
+        self?.contextMenuSourceItem = nil
+        self?.updateContextMenuSourceVisibility(in: collectionView)
         collectionView.onContextMenuDidEnd?()
         // Focus restoration can synchronously deliver one more keyboard frame.
-        updateInsets()
+        animateDismissal()
         collectionView.contextMenuPhase = .idle
         collectionView.contextMenuConfiguration = nil
         // If an action kept the keyboard closed, the old keyboard-area offset
@@ -1446,10 +1465,10 @@ private extension MessagesCollectionView {
         }
       }
       if let animator {
-        animator.addAnimations(updateInsets)
+        animator.addAnimations(animateDismissal)
         animator.addCompletion(completion)
       } else {
-        updateInsets()
+        animateDismissal()
         completion()
       }
     }
@@ -2568,6 +2587,7 @@ private extension MessagesCollectionView {
         }
 
         let configureCell = {
+          cell.isContextMenuSourceHidden = self.contextMenuSourceItem == item
           cell.onV2GeometryChange = v2GeometryChangeHandler
           cell.configure(
             with: message,
@@ -3331,6 +3351,7 @@ private extension MessagesCollectionView {
 
         let firstInGroup = item.isThreadAnchor ? true : groupInfoByItem[item]?.isFirst ?? true
         let lastInGroup = item.isThreadAnchor ? true : groupInfoByItem[item]?.isLast ?? true
+        cell.isContextMenuSourceHidden = contextMenuSourceItem == item
         cell.configure(
           with: message,
           firstInGroup: firstInGroup,
@@ -4938,11 +4959,24 @@ private extension MessagesCollectionView {
       highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
       if let state = contextMenuPreview, state.configuration === configuration {
+        // Give UIKit the actual touched view for the press/lift animation.
+        // The expanded preview still owns its bitmap, so live list updates
+        // cannot empty the menu after the source cell changes or gets reused.
+        if (collectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == false,
+           let currentIndexPath = dataSource.indexPath(for: state.item),
+           let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
+           let messageView = cell.messageView {
+          if let preview = liveTargetedPreview(for: messageView) { return preview }
+        }
         return state.preview
       }
       guard let item = dataSource.itemIdentifier(for: indexPath),
             let preview = targetedPreview(for: indexPath) else { return nil }
       contextMenuPreview = (configuration, item, preview)
+      if (collectionView as? MessagesCollectionView)?.contextMenuConfiguration === configuration {
+        contextMenuSourceItem = item
+        updateContextMenuSourceVisibility(in: collectionView)
+      }
       return preview
     }
 
@@ -4956,23 +4990,34 @@ private extension MessagesCollectionView {
       guard let state = contextMenuPreview, state.configuration === configuration,
             let currentIndexPath = dataSource.indexPath(for: state.item),
             let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
-            let messageView = cell.messageView,
-            let window = messageView.window else { return nil }
-      let geometry = contextMenuPreviewGeometry(for: messageView)
-      let size = state.preview.size
-      guard size.width > 0, size.height > 0 else { return nil }
-      let target = UIPreviewTarget(
-        container: window,
-        center: geometry.view.convert(CGPoint(x: geometry.rect.midX, y: geometry.rect.midY), to: window),
-        transform: CGAffineTransform(
-          scaleX: geometry.rect.width / size.width,
-          y: geometry.rect.height / size.height
-        )
-      )
-      return preserveBubbleShape(in: state.preview.retargetedPreview(with: target))
+            let messageView = cell.messageView else { return nil }
+      // Pair the native lift with its real destination. Returning another
+      // detached bitmap here leaves UIKit suppressing the original source
+      // while the returning preview fades away, producing a blank slot.
+      contextMenuSourceItem = nil
+      updateContextMenuSourceVisibility(in: collectionView)
+      return liveTargetedPreview(for: messageView)
     }
 
     // MARK: - Private
+
+    private func liveTargetedPreview(for messageView: UIMessageView) -> UITargetedPreview? {
+      let geometry = contextMenuPreviewGeometry(for: messageView)
+      guard !geometry.view.isHidden, let window = geometry.view.window else { return nil }
+      let parameters = UIPreviewParameters()
+      parameters.backgroundColor = .clear
+      let path = geometry.path
+      path.apply(CGAffineTransform(translationX: geometry.rect.minX, y: geometry.rect.minY))
+      parameters.visiblePath = path
+      parameters.shadowPath = path
+      let target = UIPreviewTarget(
+        container: window,
+        center: geometry.view.convert(
+          CGPoint(x: geometry.view.bounds.midX, y: geometry.view.bounds.midY), to: window
+        )
+      )
+      return preserveBubbleShape(in: UITargetedPreview(view: geometry.view, parameters: parameters, target: target))
+    }
 
     private func contextMenuPreviewGeometry(for messageView: UIMessageView) -> (
       view: UIView, rect: CGRect, path: UIBezierPath
@@ -5017,6 +5062,12 @@ private extension MessagesCollectionView {
       parameters.backgroundColor = .clear
       parameters.visiblePath = geometry.path
       parameters.shadowPath = geometry.path
+
+      // A menu can reopen before the previous dismissal finishes. Unhide only
+      // for this synchronous capture; no frame exposes the original bubble.
+      let wasHidden = geometry.view.isHidden
+      geometry.view.isHidden = false
+      defer { geometry.view.isHidden = wasHidden }
 
       // Capture the layer tree before UIKit hides the source. Keep the bitmap
       // independent of cell reuse while retaining the complete bubble silhouette.

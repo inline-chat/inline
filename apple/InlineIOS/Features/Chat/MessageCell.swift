@@ -31,7 +31,20 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
   private static let insertionContentTransform = contentTransform.scaledBy(x: 0.985, y: 0.985)
 
-  var messageView: UIMessageView?
+  var messageView: UIMessageView? {
+    didSet { updateContextMenuSourceVisibility() }
+  }
+  var isContextMenuSourceHidden = false {
+    didSet { updateContextMenuSourceVisibility() }
+  }
+
+  private func updateContextMenuSourceVisibility() {
+    guard let messageView else { return }
+    let source: UIView = messageView.fullMessage.message.isServiceMessage
+      ? messageView.serviceContainerView : messageView.bubbleView
+    source.isHidden = isContextMenuSourceHidden
+  }
+
   private var messageRootView: UIView?
   var avatarView: UserAvatarView?
   var avatarSpacerView: UIView?
@@ -696,6 +709,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    isContextMenuSourceHidden = false
     if messageViewImplementation == .v2 {
       cancelPendingV2Snapshot()
       layer.removeAllAnimations()
