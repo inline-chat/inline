@@ -20,8 +20,13 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */ = {isa = PBXBuildFile; productRef = A55C00022FA0003000000001 /* InlineMacScripting */; };
+		A55C00032FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef in Resources */ = {isa = PBXBuildFile; fileRef = A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */; };
+		A83010012F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
+		A83010022F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
 		A9E100042F50000100000001 /* MemojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100022F50000100000001 /* MemojiKit */; };
 		A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100032F50000100000001 /* MemojiPickerUI */; };
+		A9F100012F52000100000001 /* InlineTheme in Frameworks */ = {isa = PBXBuildFile; productRef = A9F100002F52000100000001 /* InlineTheme */; };
 		B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B7020C422DCE1534007099D9 /* InlineShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B7020C542DCE157F007099D9 /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C532DCE157F007099D9 /* InlineConfig */; };
 		B7020C562DCE157F007099D9 /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C552DCE157F007099D9 /* InlineKit */; };
@@ -68,9 +73,6 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
-		A83010012F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
-		A83010022F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
-		A9F100012F52000100000001 /* InlineTheme in Frameworks */ = {isa = PBXBuildFile; productRef = A9F100002F52000100000001 /* InlineTheme */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
 		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
@@ -79,12 +81,10 @@
 		E12407240000000100000001 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000000 /* InlineIntents */; };
 		E12407240000000100000003 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000002 /* InlineIntents */; };
 		E12407240000000100000005 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000004 /* InlineIntents */; };
-		E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
+		E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
-		A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */ = {isa = PBXBuildFile; productRef = A55C00022FA0003000000001 /* InlineMacScripting */; };
-		A55C00032FA0003000000001 /* Inline.sdef in Resources */ = {isa = PBXBuildFile; fileRef = A55C00042FA0003000000001 /* Inline.sdef */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -127,6 +127,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.sdef; path = InlineMacScripting/Resources/Inline.sdef; sourceTree = "<group>"; };
+		A55C00052FA0003000000001 /* InlineMacScripting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacScripting; sourceTree = "<group>"; };
 		A9E100012F50000100000001 /* MemojiKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MemojiKit; sourceTree = "<group>"; };
 		B7020C422DCE1534007099D9 /* InlineShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = iMessageUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -140,8 +142,6 @@
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
 		E5A100012FA0000100000001 /* InlineSyntaxHighlighting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineSyntaxHighlighting; sourceTree = "<group>"; };
-		A55C00042FA0003000000001 /* Inline.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.sdef; path = InlineMacScripting/Resources/Inline.sdef; sourceTree = "<group>"; };
-		A55C00052FA0003000000001 /* InlineMacScripting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacScripting; sourceTree = "<group>"; };
 		E60906022FA1000100000001 /* InlineMessageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMessageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -353,7 +353,8 @@
 		E60906072FA1000100000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -374,7 +375,7 @@
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				A55C00052FA0003000000001 /* InlineMacScripting */,
-				A55C00042FA0003000000001 /* Inline.sdef */,
+				A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
 				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
@@ -598,9 +599,14 @@
 				E60906072FA1000100000001 /* Frameworks */,
 				E60906082FA1000100000001 /* Resources */,
 			);
-			buildRules = ();
-			dependencies = (E60906042FA1000100000001 /* PBXTargetDependency */,);
-			fileSystemSynchronizedGroups = (E60906052FA1000100000001 /* InlineMessageTests */,);
+			buildRules = (
+			);
+			dependencies = (
+				E60906042FA1000100000001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E60906052FA1000100000001 /* InlineMessageTests */,
+			);
 			name = InlineMessageTests;
 			productName = InlineMessageTests;
 			productReference = E60906022FA1000100000001 /* InlineMessageTests.xctest */;
@@ -701,7 +707,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A55C00032FA0003000000001 /* Inline.sdef in Resources */,
+				A55C00032FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -715,7 +721,8 @@
 		E60906082FA1000100000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -778,7 +785,8 @@
 		E60906062FA1000100000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
@@ -1118,6 +1126,52 @@
 			};
 			name = Release;
 		};
+		CD16FFDC3066D3FC004A381F /* Debug #2 */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMessageTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InlineIOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InlineIOS";
+			};
+			name = "Debug #2";
+		};
+		CD16FFDD3066D3FC004A381F /* DevBuild */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMessageTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InlineIOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InlineIOS";
+			};
+			name = DevBuild;
+		};
 		CD2661272CA01CB100EB186F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1417,9 +1471,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
-				INLINE_USER_PROFILE = devbuild;
-				DISPLAY_NAME = "Inline-Dev";
 				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = InlineIOS/InlineIOS.entitlements;
@@ -1427,6 +1478,7 @@
 				CURRENT_PROJECT_VERSION = 841;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 2487AN8AL4;
+				DISPLAY_NAME = "Inline-Dev";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineIOS/Info.plist;
@@ -1446,6 +1498,7 @@
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				INLINE_URL_SCHEME = "inline-dev";
 				INLINE_URL_SCHEME_ALIAS = "inline-dev";
+				INLINE_USER_PROFILE = devbuild;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1458,6 +1511,7 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1504,8 +1558,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
-				INLINE_USER_PROFILE = devbuild;
 				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 841;
@@ -1514,6 +1566,7 @@
 				INFOPLIST_FILE = InlineShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INLINE_USER_PROFILE = devbuild;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1525,6 +1578,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1535,8 +1589,6 @@
 		CDD122EC2F9029AF0081894E /* DevBuild */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
-				INLINE_USER_PROFILE = devbuild;
 				CODE_SIGN_ENTITLEMENTS = InlineNotificationExtension/InlineNotificationExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 841;
@@ -1545,6 +1597,7 @@
 				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = InlineNotificationExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INLINE_USER_PROFILE = devbuild;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1557,6 +1610,7 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -1824,7 +1878,11 @@
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
-				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMessageTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1843,7 +1901,11 @@
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
-				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks",);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMessageTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1939,6 +2001,8 @@
 			buildConfigurations = (
 				E609060A2FA1000100000001 /* Debug */,
 				E609060B2FA1000100000001 /* Release */,
+				CD16FFDC3066D3FC004A381F /* Debug #2 */,
+				CD16FFDD3066D3FC004A381F /* DevBuild */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1946,13 +2010,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		C37F343E2D5A4D4800D7D7CC /* XCLocalSwiftPackageReference "Vendor/MCEmojiPicker" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Vendor/MCEmojiPicker;
-		};
 		A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = InlineMacScripting;
+		};
+		C37F343E2D5A4D4800D7D7CC /* XCLocalSwiftPackageReference "Vendor/MCEmojiPicker" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/MCEmojiPicker;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -2028,6 +2092,15 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacWindow;
 		};
+		A55C00022FA0003000000001 /* InlineMacScripting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */;
+			productName = InlineMacScripting;
+		};
+		A83010002F52000100000001 /* InlineAppIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAppIntents;
+		};
 		A9E100022F50000100000001 /* MemojiKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MemojiKit;
@@ -2035,6 +2108,10 @@
 		A9E100032F50000100000001 /* MemojiPickerUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MemojiPickerUI;
+		};
+		A9F100002F52000100000001 /* InlineTheme */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineTheme;
 		};
 		B7020C532DCE157F007099D9 /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -2232,14 +2309,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIOSUI;
 		};
-		A83010002F52000100000001 /* InlineAppIntents */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineAppIntents;
-		};
-		A9F100002F52000100000001 /* InlineTheme */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineTheme;
-		};
 		D4ACD0022F1B000000000001 /* MacDevtools */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MacDevtools;
@@ -2279,11 +2348,6 @@
 		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineCLIInstaller;
-		};
-		A55C00022FA0003000000001 /* InlineMacScripting */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */;
-			productName = InlineMacScripting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
