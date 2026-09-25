@@ -2,14 +2,15 @@ import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import postgres from "postgres"
 import { assertLocalTestDatabaseUrl, prepareTestDatabaseTemplate } from "../../server/scripts/test-database-template.ts"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const serverRoot = path.join(repoRoot, "server")
+const postgres = createRequire(path.join(serverRoot, "package.json"))("postgres")
 const artifactDir = path.resolve(process.argv[2] ?? "")
 if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
 const provisioningUrl = process.env.TEST_DATABASE_URL

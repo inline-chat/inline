@@ -39,12 +39,18 @@ for configuration in Debug Release; do
     build 2>&1 | tee "$report_dir/$platform-$configuration.log"
 
   product_path="$derived_data/Build/Products/$configuration/$product"
-  if [[ "$platform" == ios ]]; then
+  if [[ "$platform" == macos ]]; then
+    if [[ "$configuration" == Debug ]]; then
+      product_path="$derived_data/Build/Products/$configuration/Inline Debug.app"
+    fi
+    info_plist="$product_path/Contents/Info.plist"
+  else
     product_path="$derived_data/Build/Products/$configuration-iphoneos/$product"
+    info_plist="$product_path/Info.plist"
   fi
-  if [[ ! -f "$product_path/Info.plist" ]]; then
-    echo "error: missing $product_path/Info.plist" >&2
+  if [[ ! -f "$info_plist" ]]; then
+    echo "error: missing $info_plist" >&2
     exit 1
   fi
-  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$product_path/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist"
 done

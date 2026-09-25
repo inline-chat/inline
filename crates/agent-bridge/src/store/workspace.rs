@@ -1324,6 +1324,9 @@ mod tests {
         fs::create_dir(&project).expect("project");
         let project = fs::canonicalize(project).expect("canonical project");
         let workspace_id = WorkspaceId::new("workspace-replaced").expect("id");
+        let original_filesystem_identity = workspace_filesystem_identity(&project)
+            .expect("filesystem identity");
+        #[cfg(target_os = "macos")]
         let original_persistent_identity = workspace_persistent_identity(&project);
         store
             .select_workspace(&installation(), &workspace_id, &project, 1)
@@ -1332,6 +1335,12 @@ mod tests {
         let original = parent.path().join("original-project");
         fs::rename(&project, &original).expect("move original root");
         fs::create_dir(&project).expect("replacement root");
+        assert_ne!(
+            original_filesystem_identity,
+            workspace_filesystem_identity(&project).expect("replacement filesystem identity"),
+            "replacement directory must have a distinct filesystem identity"
+        );
+        #[cfg(target_os = "macos")]
         assert_ne!(
             original_persistent_identity,
             workspace_persistent_identity(&project),

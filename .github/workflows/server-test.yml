@@ -204,15 +204,17 @@ jobs:
 
       - name: Setup environment
         run: |
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-          echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-          echo "RESEND_API_KEY=re_ci_placeholder" >> $GITHUB_ENV
+          {
+            echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db"
+            echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db"
+            echo "RESEND_API_KEY=re_ci_placeholder"
+          } >> "$GITHUB_ENV"
 
       - name: Install local integration executables
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server postgresql-15 pgbouncer
-          echo '/usr/lib/postgresql/15/bin' >> "$GITHUB_PATH"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server postgresql pgbouncer
+          pg_config --bindir >> "$GITHUB_PATH"
 
       - name: Run Effect tests
         run: cd server && bun run test:effect

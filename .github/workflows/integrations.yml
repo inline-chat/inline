@@ -381,7 +381,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['0.17.0', '0.20.3']
+        host: ['0.17.0', '0.19.0']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
