@@ -30,6 +30,7 @@ async fn installed_claude_exposes_settings_and_completes_a_direct_new_session_tu
             descriptor.process_host = Some(ProcessHostConfig {
                 executable: PathBuf::from(host),
                 lock_file: std::env::temp_dir().join("inline-claude-live-provider.lock"),
+                provider_id: "claude".into(),
             });
         }
         let spawned = spawn_acp_driver(descriptor, "live-test")

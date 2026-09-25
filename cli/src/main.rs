@@ -699,6 +699,8 @@ struct BridgeRunArgs {
 
 #[derive(Args)]
 struct BridgeProviderHostArgs {
+    #[arg(long, hide = true)]
+    provider_id: Option<String>,
     #[arg(long, value_name = "PATH")]
     lock_file: PathBuf,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
@@ -2427,6 +2429,14 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
         install_broken_pipe_handler();
     }
     let telemetry_command = cli.command.telemetry_name();
+    let provider_host_target = match &cli.command {
+        Command::Bridge {
+            command: BridgeCommand::ProviderHost(args),
+        } => Some(telemetry::provider_host_target(
+            args.provider_id.as_deref().unwrap_or_default(),
+        )),
+        _ => None,
+    };
     if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
             drop(telemetry);
@@ -2448,7 +2458,17 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
                 diagnostics::safe_text(&report_error.to_string())
             ),
         }
-        telemetry::report(&error_payload, None, None, Some(telemetry_command));
+        let host_failure = error
+            .downcast_ref::<inline_agent_bridge::ProcessHostError>()
+            .map(telemetry::process_host_failure_code);
+        let reported_host_target = host_failure.as_ref().and(provider_host_target);
+        telemetry::report(
+            &error_payload,
+            reported_host_target,
+            reported_host_target.map(|_| "provider_process"),
+            Some(telemetry_command),
+            host_failure.as_deref(),
+        );
         if flags.json {
             let payload = JsonErrorEnvelope {
                 error: error_payload,
@@ -7550,6 +7570,8 @@ mod cli_parsing_tests {
             "inline",
             "bridge",
             "provider-host",
+            "--provider-id",
+            "codex",
             "--lock-file",
             "/tmp/provider.lock",
             "--",
@@ -7564,6 +7586,7 @@ mod cli_parsing_tests {
             panic!("expected hidden provider host command");
         };
         assert_eq!(args.lock_file, PathBuf::from("/tmp/provider.lock"));
+        assert_eq!(args.provider_id.as_deref(), Some("codex"));
         assert_eq!(
             args.command,
             [
@@ -7571,6 +7594,28 @@ mod cli_parsing_tests {
                 OsString::from("--agent-mode")
             ]
         );
+
+        // An older bridge service may still invoke a newly installed host
+        // executable without the attribution flag during an update.
+        let legacy = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "provider-host",
+            "--lock-file",
+            "/tmp/provider.lock",
+            "--",
+            "/opt/provider",
+        ])
+        .expect("legacy provider host invocation parses");
+        assert!(matches!(
+            legacy.command,
+            Command::Bridge {
+                command: BridgeCommand::ProviderHost(BridgeProviderHostArgs {
+                    provider_id: None,
+                    ..
+                })
+            }
+        ));
 
         let cli = Cli::try_parse_from(["inline", "bridge", "inline-tools-mcp"])
             .expect("hidden Inline tools MCP command parses");

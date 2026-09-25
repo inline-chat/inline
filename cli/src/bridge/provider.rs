@@ -912,6 +912,7 @@ impl ProviderLaunch {
                 format!("could not locate the Inline bridge executable: {error}")
             })?,
             lock_file: installation.state_dir.join("provider.process.lock"),
+            provider_id: installation.provider_id.clone(),
         };
         match installation.provider_id.as_str() {
             "codex" => {

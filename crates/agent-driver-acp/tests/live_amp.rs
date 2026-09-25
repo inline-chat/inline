@@ -44,6 +44,7 @@ async fn installed_amp_completes_a_direct_new_session_turn() {
             descriptor.process_host = Some(ProcessHostConfig {
                 executable: PathBuf::from(executable),
                 lock_file: process_host_root.path().join("provider.process.lock"),
+                provider_id: "amp".into(),
             });
         }
         let spawned = spawn_acp_driver(descriptor, "live-test")

@@ -257,6 +257,7 @@ pub async fn probe_codex_version(
     let probe_host = config.process_host.as_ref().map(|host| ProcessHostConfig {
         executable: host.executable.clone(),
         lock_file: host.lock_file.with_extension("version.lock"),
+        provider_id: host.provider_id.clone(),
     });
     if let Some(host) = probe_host.as_ref() {
         reap_stale_process_host(&host.lock_file)
@@ -498,6 +499,7 @@ async fn spawn_shared_host(
     let process_host = config.process_host.as_ref().map(|host| ProcessHostConfig {
         executable: host.executable.clone(),
         lock_file: shared_host_lock_file(&host.lock_file),
+        provider_id: host.provider_id.clone(),
     });
     if let Some(host) = process_host.as_ref() {
         reap_stale_process_host(&host.lock_file)
@@ -892,7 +894,9 @@ fn hosted_codex_command(
         Some(host) => {
             let mut command = Command::new(&host.executable);
             command
-                .args(["bridge", "provider-host", "--lock-file"])
+                .args(["bridge", "provider-host", "--provider-id"])
+                .arg(&host.provider_id)
+                .arg("--lock-file")
                 .arg(&host.lock_file)
                 .arg("--")
                 .arg(&config.executable);
@@ -1757,6 +1761,7 @@ mod tests {
             process_host: Some(ProcessHostConfig {
                 executable: "/opt/inline".into(),
                 lock_file: "/tmp/provider.process.lock".into(),
+                provider_id: "codex".into(),
             }),
             ..CodexLaunchConfig::default()
         };
@@ -1775,6 +1780,8 @@ mod tests {
             [
                 "bridge",
                 "provider-host",
+                "--provider-id",
+                "codex",
                 "--lock-file",
                 "/tmp/provider.process.lock",
                 "--",

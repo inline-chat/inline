@@ -146,6 +146,8 @@ fn scrubbed_launch_config(descriptor: &AcpLaunchDescriptor) -> AcpAgentConfig {
         arguments.extend([
             "bridge".to_string(),
             "provider-host".to_string(),
+            "--provider-id".to_string(),
+            process_host.provider_id.clone(),
             "--lock-file".to_string(),
             process_host.lock_file.to_string_lossy().into_owned(),
             "--".to_string(),
@@ -273,6 +275,7 @@ mod tests {
         descriptor.process_host = Some(inline_agent_bridge::ProcessHostConfig {
             executable: "/opt/inline".into(),
             lock_file: "/tmp/provider.process.lock".into(),
+            provider_id: "opencode".into(),
         });
 
         let config = scrubbed_launch_config(&descriptor);
@@ -287,6 +290,8 @@ mod tests {
                 "/opt/inline",
                 "bridge",
                 "provider-host",
+                "--provider-id",
+                "opencode",
                 "--lock-file",
                 "/tmp/provider.process.lock",
                 "--",
