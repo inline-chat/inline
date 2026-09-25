@@ -5,6 +5,11 @@
 - The backend uses Bun, TypeScript, and Effect. `server/src/index.ts` is the entry point; `src/core/http/productionHost.ts` owns the production HTTP/WebSocket host, `src/functions/` contains retained business operations, and `src/db/` owns schema and models.
 - Realtime V2 and V3 coexist. Trace the current contract and routing through `src/realtime/` and `src/core/http/realtimeV3Host.ts` before adding a client-facing API.
 
+## Effect references
+
+- For unfamiliar Effect APIs, inspect the installed `server/node_modules/effect` package and this server's `src/core/effect/` code first. Match examples to the Effect version used here.
+- The local Effect and Executor checkouts in `../inline-core/.references/` (paths from the repo root) are available for patterns. If absent, clone references into `~/dev/libraries`; adapt patterns to Inline's error, dependency, and lifecycle boundaries.
+
 ## Data and lifecycle
 
 - Schema lives in `src/db/schema/` and forward Drizzle migrations in `drizzle/`. Generate with `bun run db:generate <name>` from `server/`; review the SQL and never edit a committed migration. Startup checks the migration ledger; `db:migrate` is a separate database mutation.
