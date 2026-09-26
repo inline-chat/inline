@@ -36,6 +36,7 @@ def run(workflow_id, *, sha=SHA, status="completed", conclusion="success", event
 class FakeGitHub:
     def __init__(self):
         self.runs = {name: [run(10)] for name in gate.REQUIRED_WORKFLOWS}
+        self.runs.update({name: [] for name in gate.OPTIONAL_PUSH_WORKFLOWS})
         self.codeql = [{"id": 1, "name": "Analyze (actions)", "app": {"slug": "github-actions"},
                         "status": "completed", "conclusion": "success"}]
 
@@ -68,6 +69,13 @@ class NightlyTipGateTests(unittest.TestCase):
         github = FakeGitHub()
         github.runs["apple-validation.yml"] = [run(1, sha=OTHER_SHA)]
         self.assertIn("missing", gate.inspect_main(github)[1])
+
+    def test_triggered_cli_build_must_be_green(self):
+        github = FakeGitHub()
+        github.runs["cli-check.yml"] = [run(12, conclusion="failure")]
+        self.assertIn("cli-check.yml", gate.inspect_main(github)[1])
+        github.runs["cli-check.yml"] = [run(12)]
+        self.assertEqual(gate.inspect_main(github), (SHA, None))
 
     def test_skip_requires_matching_tag_release_asset_and_latest_feed(self):
         feed = gate.latest_feed_item(feed_xml())

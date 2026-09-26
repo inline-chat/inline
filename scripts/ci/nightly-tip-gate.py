@@ -17,6 +17,7 @@ REQUIRED_WORKFLOWS = (
     "apple-validation.yml",
     "server-test.yml",
 )
+OPTIONAL_PUSH_WORKFLOWS = ("cli-check.yml",)
 TIP_FEED_URL = "https://public-assets.inline.chat/mac/tip/appcast.xml"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 COMMIT_DESCRIPTION = re.compile(r"from commit ([0-9a-f]{7,40})")
@@ -173,9 +174,11 @@ def public_feed():
 
 def inspect_main(github):
     sha = require_sha(github.request("git/ref/heads/main")["object"]["sha"])
-    for workflow in REQUIRED_WORKFLOWS:
+    for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS):
         path = f"actions/workflows/{workflow}/runs?head_sha={sha}&event=push&per_page=100"
         run = latest_push_run(github.request(path)["workflow_runs"], sha)
+        if not run and workflow in OPTIONAL_PUSH_WORKFLOWS:
+            continue
         if not run or run.get("status") != "completed" or run.get("conclusion") != "success":
             state = f"{run.get('status')}/{run.get('conclusion')}" if run else "missing"
             return sha, f"{workflow} is {state} for latest main"
