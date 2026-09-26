@@ -58,6 +58,7 @@ jobs:
         run: bash scripts/apple/run-ci-checks.sh InlineKit InlineUI InlineIOSUI InlineMacUI
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: swift-main-reports
           path: ${{ runner.temp }}/swift-main-reports/
@@ -82,6 +83,7 @@ jobs:
         run: bash scripts/apple/run-ci-checks.sh InlineRealtimeCore InlineMacSidebarModel InlineThumbnailing InlineSyntaxHighlighting InlineMacScripting InlineMath MemojiKit InlineDevCompanion
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: swift-utility-reports
           path: ${{ runner.temp }}/swift-utility-reports/
@@ -99,6 +101,7 @@ jobs:
         run: bash scripts/apple/build-ci-app.sh macos
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: macos-app-build-logs
           path: ${{ runner.temp }}/macos-app-reports/
@@ -116,6 +119,7 @@ jobs:
         run: bash scripts/apple/build-ci-app.sh ios
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: ios-app-build-logs
           path: ${{ runner.temp }}/ios-app-reports/

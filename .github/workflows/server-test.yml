@@ -246,6 +246,7 @@ jobs:
 
       - name: Upload test reports and timings
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: server-test-results
