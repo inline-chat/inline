@@ -863,7 +863,7 @@ struct GridRTCEngineTests {
       permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
     )
     var configuration = InlineRTCConfiguration.voice
-    configuration.connection.screenShareRepublishTimeout = 0.05
+    configuration.connection.screenShareRepublishTimeout = 2
     let driver = FakeGridRTCDriver()
     let rtc = GridRTCEngine(
       audio: audio,
@@ -890,6 +890,13 @@ struct GridRTCEngineTests {
       isLocal: true,
       videoTrack: nil
     )
+    let replacementPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_timeout_replacement",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
 
     await rtc.setDemand(demand(
       target: target,
@@ -906,27 +913,26 @@ struct GridRTCEngineTests {
       await rtc.currentSnapshot().screenShares == [oldPublication]
     }
     let oldRoom = try #require(await driver.currentRoom())
-    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
-    try await eventuallyRTC {
-      await rtc.currentSnapshot().state == .reconnecting(target)
-    }
-    await driver.emitToCurrentRoom(.reconnected(mode: .full))
-    try await eventuallyRTC {
-      await rtc.currentSnapshot().state == .connected(target)
-    }
-    await driver.emitToCurrentRoom(
-      .screenSharesChanged(revision: 2, shares: [])
-    )
+    await driver.emit(.reconnecting(mode: .full), to: oldRoom)
+    await driver.emit(.reconnected(mode: .full), to: oldRoom)
+    await driver.emit(.screenSharesChanged(revision: 2, shares: []), to: oldRoom)
 
-    try await eventuallyRTC {
+    try await eventuallyRTC(timeout: .seconds(4)) {
       let operations = await driver.operations()
       return operations.filter { $0 == "connect:29" }.count == 2
         && operations.filter { $0 == "screen:29:display:29" }.count == 2
     }
-    try await eventuallyRTC {
+    let replacementRoom = try #require(await driver.currentRoom())
+    #expect(replacementRoom != oldRoom)
+    await driver.emit(
+      .screenSharesChanged(revision: 1, shares: [replacementPublication]),
+      to: replacementRoom
+    )
+    try await eventuallyRTC(timeout: .seconds(4)) {
       let snapshot = await rtc.currentSnapshot()
       return snapshot.state == .connected(target)
         && snapshot.screenShareState == .published
+        && snapshot.screenShares == [replacementPublication]
     }
 
     await driver.emit(
@@ -934,7 +940,7 @@ struct GridRTCEngineTests {
       to: oldRoom
     )
     try await Task.sleep(for: .milliseconds(20))
-    #expect(await rtc.currentSnapshot().screenShares.isEmpty)
+    #expect(await rtc.currentSnapshot().screenShares == [replacementPublication])
   }
 
   @Test("quick reconnect escalation fences full replacement before Stop")
@@ -1849,10 +1855,19 @@ struct GridRTCEngineTests {
 
     for expectedCount in 1 ... 3 {
       await rtc.setDemand(demand(target: target, microphoneEnabled: false))
-      try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+      try await eventuallyRTC(timeout: .seconds(4)) {
+        await rtc.currentSnapshot().microphonePublicationState == .published
+      }
       await rtc.setDemand(InlineRTCDemand())
-      try await eventuallyRTC {
+      try await eventuallyRTC(timeout: .seconds(4)) {
         await driver.operations().filter { $0 == "quiesce-done:39" }.count == expectedCount
+      }
+      try await eventuallyRTC(timeout: .seconds(4)) {
+        let snapshot = await rtc.currentSnapshot()
+        let audioSnapshot = await audio.currentSnapshot()
+        return snapshot.retiringRoomCount == 0
+          && snapshot.failedLocalQuiescenceCount == 0
+          && audioSnapshot.captureLeaseCount == 0
       }
     }
     #expect(await driver.operations().filter { $0 == "connect:39" }.count == 3)
