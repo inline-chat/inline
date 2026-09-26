@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync, readFileSync, rmdi
 import { basename, dirname, resolve } from "path";
 import { createInterface } from "node:readline";
 import { readBuiltAppMetadata, readDmgAppMetadata, metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
+import { getR2Context } from "./release-direct";
 import {
   macosReleaseSourceStatusLines,
   macosSourceSnapshotPathsFromManifest,
@@ -598,6 +599,20 @@ export function nextTipArtifactBuild(baseBuild: string, appcastXml: string | und
   const next = experimental ? Math.max(base + 1, latest + 1) : Math.max(base, latest + 1);
   if (next > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
   return String(next);
+}
+
+export async function firstVacantTipBuild(
+  candidate: string,
+  exists: (build: string) => Promise<boolean>,
+): Promise<string> {
+  let build = Number.parseInt(candidate, 10);
+  if (!Number.isSafeInteger(build) || build < 1 || build > 2_147_483_647) {
+    throw new Error(`Invalid candidate tip build: ${candidate}`);
+  }
+  for (let checked = 0; checked < 100 && build <= 2_147_483_647; checked++, build++) {
+    if (!await exists(String(build))) return String(build);
+  }
+  throw new Error("Unable to allocate an unoccupied tip DMG build in the next 100 numbers.");
 }
 
 export function safeResumeTask(taskId: string, operation: "release" | "rollback" | "drop-build"): string {
@@ -1405,7 +1420,14 @@ async function main() {
           fetchDecision,
           () => readFileSync(ctx.appcastPath, "utf8"),
         );
-        ctx.artifactBuild = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
+        const candidate = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
+        if (ctx.dryRun || !taskEnabled(ctx, "upload-dmg")) {
+          ctx.artifactBuild = candidate;
+        } else {
+          const { r2, prefix } = getR2Context();
+          ctx.artifactBuild = await firstVacantTipBuild(candidate, (build) =>
+            r2.exists(`${prefix}/tip/${build}/Inline.dmg`));
+        }
       }
       if (ctx.experimentalTip && buildWillRun(ctx)) {
         if (!ctx.artifactBuild) {

@@ -8,6 +8,7 @@ import { macosReleaseSourceDiffPaths, macosReleaseSourceStatusLines } from "./ma
 import {
   appcastXmlForBuildAllocation,
   decideAppcastFetch,
+  firstVacantTipBuild,
   nextTipArtifactBuild,
   releaseIntegrityGateErrors,
   safeResumeTask,
@@ -82,6 +83,16 @@ describe("release integrity helpers", () => {
     expect(nextTipArtifactBuild("5226", appcast(["5229"]), true)).toBe("5230");
     expect(() => nextTipArtifactBuild("5226", appcast([]), false)).toThrow("has no versions");
     expect(() => nextTipArtifactBuild("5226", appcast(["5226.1"]), true)).toThrow("unsupported");
+  });
+
+  test("tip build allocation skips DMGs orphaned before appcast publication", async () => {
+    const checked: string[] = [];
+    const build = await firstVacantTipBuild("5226", async (candidate) => {
+      checked.push(candidate);
+      return candidate === "5226" || candidate === "5227";
+    });
+    expect(build).toBe("5228");
+    expect(checked).toEqual(["5226", "5227", "5228"]);
   });
 
   test("channel and DerivedData ownership use exclusive filesystem locks", () => {

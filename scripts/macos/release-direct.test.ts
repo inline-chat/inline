@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   appcastConditionFromEnv,
@@ -49,12 +51,31 @@ describe("conditional appcast publication", () => {
     expect(signal).toBeInstanceOf(AbortSignal);
   });
   test("DMG upload refuses to replace an occupied build object", async () => {
-    const fakeFetch: typeof fetch = (async () => new Response("PreconditionFailed", { status: 412 })) as typeof fetch;
+    const fakeFetch: typeof fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("PreconditionFailed", { status: 412 })) as typeof fetch;
     await expect(uploadDmgPut(
       "https://r2.invalid/Inline.dmg",
       resolve(import.meta.dir, "test-fixtures/sign-update.txt"),
       fakeFetch,
     )).rejects.toThrow("refusing to overwrite immutable release bytes");
+  });
+  test("a resumed DMG upload accepts only identical remote bytes", async () => {
+    const path = resolve(import.meta.dir, "test-fixtures/sign-update.txt");
+    const bytes = readFileSync(path);
+    const existing = {
+      readUrl: "https://r2.invalid/read/Inline.dmg",
+      size: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const fakeFetch: typeof fetch = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "PUT"
+        ? new Response("PreconditionFailed", { status: 412 })
+        : new Response(bytes)) as typeof fetch;
+    await expect(uploadDmgPut("https://r2.invalid/Inline.dmg", path, fakeFetch, existing)).resolves.toBeUndefined();
+    await expect(uploadDmgPut("https://r2.invalid/Inline.dmg", path, fakeFetch, {
+      ...existing,
+      sha256: "0".repeat(64),
+    })).rejects.toThrow("differs from the attested artifact");
   });
   test("existing feeds require their exact fetched ETag", () => {
     const condition = appcastConditionFromEnv({ APPCAST_EXPECTED_ETAG: '"abc123"' });
