@@ -147,13 +147,23 @@ import Testing
 @Suite @MainActor struct ScriptingExecutionTests {
   @Test func replyWaitsForCompletion() async throws {
     var results: [Result<ScriptingValue, ScriptingError>] = []
-    let execution = ScriptExecution { results.append($0) }
-    execution.start(request: .account) { _ in
-      try await Task.sleep(for: .milliseconds(10))
-      return .text("ready")
+    let (started, didStart) = AsyncStream<CheckedContinuation<ScriptingValue, Never>>.makeStream()
+    let (replies, didReply) = AsyncStream<Void>.makeStream()
+    let execution = ScriptExecution {
+      results.append($0)
+      didReply.yield()
     }
+    execution.start(request: .account) { _ in
+      await withCheckedContinuation { continuation in
+        didStart.yield(continuation)
+      }
+    }
+    var startIterator = started.makeAsyncIterator()
+    let continuation = try #require(await startIterator.next())
     #expect(results.isEmpty)
-    try await Task.sleep(for: .milliseconds(60))
+    continuation.resume(returning: .text("ready"))
+    var replyIterator = replies.makeAsyncIterator()
+    await replyIterator.next()
     #expect(results == [.success(.text("ready"))])
   }
 
