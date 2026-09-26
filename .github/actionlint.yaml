@@ -4,6 +4,9 @@ paths:
   .github/workflows/apple-validation.yml:
     ignore:
       - 'label "xcode-27" is unknown'
+  .github/workflows/macos-tip-nightly.yml:
+    ignore:
+      - 'label "xcode-27" is unknown'
   # These inherited workflow snippets are valid shell; actionlint cannot see
   # step env declarations or intentionally literal jq/summary strings.
   .github/workflows/cli-release.yml:

@@ -412,7 +412,6 @@ jobs:
     needs: candidate-packages
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    continue-on-error: true # Qualification until the full synthetic server flow has a green baseline.
     services:
       postgres:
         image: postgres:15

@@ -60,6 +60,7 @@ export async function uploadDmgPut(
   const response = await fetchImpl(uploadUrl, {
     method: "PUT",
     headers: {
+      "If-None-Match": "*",
       "Content-Type": "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
     },
@@ -68,6 +69,9 @@ export async function uploadDmgPut(
   });
   if (response.ok) return;
   const detail = (await response.text()).trim().slice(0, 500);
+  if (response.status === 412) {
+    throw new Error("DMG build object already exists; refusing to overwrite immutable release bytes. Allocate a new build or verify the existing object before resuming.");
+  }
   throw new Error(`DMG upload failed with HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
 }
 

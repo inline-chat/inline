@@ -782,6 +782,14 @@ function assertNightlyMainStillSelected(ctx: ReleaseContext): void {
   if (current !== expected) {
     throw new Error(`main advanced during the nightly release: selected ${expected}, current ${current || "unavailable"}.`);
   }
+  const qualification = spawnSync({
+    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (qualification.exitCode !== 0) {
+    throw new Error("The selected main commit no longer has green CI; refusing to publish the nightly release.");
+  }
 }
 
 function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {

@@ -38,6 +38,8 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 120
     permissions:
+      actions: read
+      checks: read
       contents: write
     env:
       EXPECTED_SHA: ${{ needs.select.outputs.sha }}

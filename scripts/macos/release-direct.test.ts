@@ -43,9 +43,18 @@ describe("conditional appcast publication", () => {
       fakeFetch,
     );
     expect(method).toBe("PUT");
+    expect(headers?.get("if-none-match")).toBe("*");
     expect(headers?.get("content-type")).toBe("application/octet-stream");
     expect(headers?.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(signal).toBeInstanceOf(AbortSignal);
+  });
+  test("DMG upload refuses to replace an occupied build object", async () => {
+    const fakeFetch: typeof fetch = (async () => new Response("PreconditionFailed", { status: 412 })) as typeof fetch;
+    await expect(uploadDmgPut(
+      "https://r2.invalid/Inline.dmg",
+      resolve(import.meta.dir, "test-fixtures/sign-update.txt"),
+      fakeFetch,
+    )).rejects.toThrow("refusing to overwrite immutable release bytes");
   });
   test("existing feeds require their exact fetched ETag", () => {
     const condition = appcastConditionFromEnv({ APPCAST_EXPECTED_ETAG: '"abc123"' });

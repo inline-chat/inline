@@ -54,7 +54,7 @@ try {
   process.env.TEST_DATABASE_URL = databaseUrl.toString()
   process.env.ENCRYPTION_KEY = "0".repeat(64)
   const { makeCoreProductionSmokeEnvironment } = await import("../../server/scripts/core-production-smoke.ts")
-  const environment = makeCoreProductionSmokeEnvironment(process.env, false)
+  const environment = { ...makeCoreProductionSmokeEnvironment(process.env, true), NODE_ENV: "test" }
   Object.assign(process.env, environment)
 
   const database = await import("../../server/src/db/index.ts")
