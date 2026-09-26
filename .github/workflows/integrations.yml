@@ -291,6 +291,7 @@ jobs:
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
           bun test scripts/ci/workflow-policy.test.ts
+          python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck

@@ -772,6 +772,18 @@ function assertFrozenSource(ctx: ReleaseContext): void {
   }
 }
 
+function assertNightlyMainStillSelected(ctx: ReleaseContext): void {
+  const expected = process.env.INLINE_NIGHTLY_MAIN_SHA;
+  if (!expected) return;
+  if (ctx.channel !== "tip" || ctx.experimentalTip || ctx.sourceCommit !== expected) {
+    throw new Error("Nightly release source does not match the selected green main commit.");
+  }
+  const current = git(ctx.rootDir, ["ls-remote", "origin", "refs/heads/main"]).split(/\s+/)[0];
+  if (current !== expected) {
+    throw new Error(`main advanced during the nightly release: selected ${expected}, current ${current || "unavailable"}.`);
+  }
+}
+
 function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {
   const build = ctx.buildNumber || ctx.rollbackSelectedBuild || ctx.pruneLatestBuild || ctx.dropBuild || "unknown";
   const path = resolve(ctx.historyDir, `${nowIsoCompact()}-${ctx.channel}-${action}-${build}.json`);
@@ -1942,6 +1954,7 @@ async function main() {
       ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
     run: async (ctx, ui) => {
+      assertNightlyMainStillSelected(ctx);
       // Validate local artifacts.
       if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
@@ -2129,6 +2142,7 @@ async function main() {
       ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
     run: async (ctx, ui) => {
+      assertNightlyMainStillSelected(ctx);
       requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
       requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
       requireEnv("PUBLIC_RELEASES_R2_BUCKET");

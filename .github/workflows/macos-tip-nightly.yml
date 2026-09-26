@@ -1,0 +1,122 @@
+name: macOS Tip Nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: macos-tip-release
+  cancel-in-progress: false
+
+jobs:
+  select:
+    name: Select latest green main
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
+      should_release: ${{ steps.gate.outputs.should_release }}
+      create_new_appcast: ${{ steps.gate.outputs.create_new_appcast }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Qualify exact main and detect an existing tip
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/nightly-tip-gate.py select
+
+  release:
+    name: Build, sign, notarize, and publish tip
+    needs: select
+    if: needs.select.outputs.should_release == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      EXPECTED_SHA: ${{ needs.select.outputs.sha }}
+      INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+      SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
+      MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+      MACOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PROVISIONING_PROFILE_BASE64 }}
+      MACOS_SPARKLE_PUBLIC_KEY: ${{ secrets.MACOS_SPARKLE_PUBLIC_KEY }}
+      MACOS_SPARKLE_PRIVATE_KEY: ${{ secrets.MACOS_SPARKLE_PRIVATE_KEY }}
+      APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
+      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+      APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
+      PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
+      PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
+      PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
+      PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+      PUBLIC_RELEASES_R2_PREFIX: ${{ secrets.PUBLIC_RELEASES_R2_PREFIX }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.0'
+      - name: Verify checkout and current main
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(gh api repos/inline-chat/inline/git/ref/heads/main --jq '.object.sha')" = "$EXPECTED_SHA"
+          test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
+          xcodebuild -version
+      - name: Install release tools
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          npm install --global create-dmg@8.1.0
+          create-dmg --version
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
+        run: |
+          set -euo pipefail
+          test -n "$MACOS_CERTIFICATE"
+          test -n "$MACOS_CERTIFICATE_PWD"
+          test -n "$MACOS_CI_KEYCHAIN_PWD"
+          certificate_path="$RUNNER_TEMP/inline-tip-signing.p12"
+          keychain_path="$RUNNER_TEMP/inline-tip-signing.keychain-db"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+      - name: Publish frozen tip release
+        env:
+          CREATE_NEW_APPCAST: ${{ needs.select.outputs.create_new_appcast }}
+        run: |
+          set -euo pipefail
+          args=(--channel tip --source-commit "$EXPECTED_SHA")
+          if [[ "$CREATE_NEW_APPCAST" == 'true' ]]; then
+            args+=(--create-new-appcast)
+          fi
+          if [[ -z "${SENTRY_AUTH_TOKEN:-}" ]]; then
+            args+=(--skip upload-sentry-dsyms)
+          fi
+          bun --no-env-file scripts/macos/release-app.ts "${args[@]}"
+      - name: Verify published GitHub and Sparkle state
+        run: python3 scripts/ci/nightly-tip-gate.py verify

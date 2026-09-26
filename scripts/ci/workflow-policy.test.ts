@@ -51,8 +51,19 @@ describe("public CI contracts", () => {
   })
 
   it("does not expose publication workflows to pull requests", () => {
-    for (const name of ["npm-publish.yml", "cli-release.yml", "server-deploy.yml"]) {
+    for (const name of ["npm-publish.yml", "cli-release.yml", "server-deploy.yml", "macos-tip-nightly.yml"]) {
       expect(workflow(name).on.pull_request, name).toBeUndefined()
     }
+  })
+
+  it("limits the nightly tip release to a green main selection", () => {
+    const tip = workflow("macos-tip-nightly.yml")
+    expect(tip.on.schedule).toBeDefined()
+    expect(tip.on.workflow_dispatch).toBeDefined()
+    const source = read(".github/workflows/macos-tip-nightly.yml")
+    expect(source).toContain("github.ref == 'refs/heads/main'")
+    expect(source).toContain("scripts/ci/nightly-tip-gate.py select")
+    expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
+    expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
   })
 })
