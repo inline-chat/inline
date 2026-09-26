@@ -87,6 +87,12 @@ jobs:
           bun install --frozen-lockfile
           npm install --global create-dmg@8.1.0
           create-dmg --version
+      - name: Resolve release dependencies
+        run: |
+          bash scripts/apple/resolve-ci-packages.sh \
+            apple/Inline.xcodeproj "${SCHEME:-Inline (macOS)}" \
+            "$GITHUB_WORKSPACE/build/InlineMacDirect/reusable" \
+            "$RUNNER_TEMP/tip-package-resolution.log"
       - name: Import Developer ID certificate
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
