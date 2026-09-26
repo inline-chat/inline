@@ -10,7 +10,8 @@ import { assertLocalTestDatabaseUrl, prepareTestDatabaseTemplate } from "../../s
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const serverRoot = path.join(repoRoot, "server")
-const postgres = createRequire(path.join(serverRoot, "package.json"))("postgres")
+const postgresModule = createRequire(path.join(serverRoot, "package.json"))("postgres")
+const postgres = postgresModule.default ?? postgresModule
 const artifactDir = path.resolve(process.argv[2] ?? "")
 if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
 const provisioningUrl = process.env.TEST_DATABASE_URL

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(CDPATH='' cd -- "$script_dir/../.." && pwd)"
 build_jobs="${SWIFT_BUILD_JOBS:-2}"
 if [[ ! "$build_jobs" =~ ^[1-9][0-9]*$ ]]; then
   echo "error: SWIFT_BUILD_JOBS must be a positive integer" >&2

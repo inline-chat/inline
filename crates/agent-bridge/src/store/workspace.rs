@@ -1324,8 +1324,8 @@ mod tests {
         fs::create_dir(&project).expect("project");
         let project = fs::canonicalize(project).expect("canonical project");
         let workspace_id = WorkspaceId::new("workspace-replaced").expect("id");
-        let original_filesystem_identity = workspace_filesystem_identity(&project)
-            .expect("filesystem identity");
+        let original_filesystem_identity =
+            workspace_filesystem_identity(&project).expect("filesystem identity");
         #[cfg(target_os = "macos")]
         let original_persistent_identity = workspace_persistent_identity(&project);
         store
