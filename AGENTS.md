@@ -23,6 +23,11 @@
 
 - Use .wip, .running and .committing files as hints for coordinating work with sibling agents.
 
+### Worktrees
+
+- Useful for big long feature work, or quick fixes in a dirty workspace that must reach main ASAP. Most changes can happen in the main worktree safely.
+- After creating a worktree, copy config files like `apple/Local.xcconfig` alongside it.
+
 ### Operational Effectiveness Hints
 
 - Manage local system resources RAM/CPU/Disk if you detect they are under pressure and coordinate in the best manner.
@@ -84,7 +89,24 @@ Some workflows to pick from. Keep in mind you do not have to run any subagents u
 - Main `astra` or `sol` agent focusing on task, `luna` xhigh plowing through evidence corpse.
 - Main `astra` or `sol` agent doing the work, after finishing one adversarial review, and one fixer agent working sequentially to finalize the complex task.
 
-You can tweak, mix, or change these. There are just ideas.
+Note: you can tweak, mix, or change these. There are just ideas.
+
+On reasoning efforts for `astra`:
+
+- Low: for quick responses that are in the loop, e.g. brainstorming, sketching, easy changes
+- Medium: for most of regular software engineering work, e.g. new feature implementation.
+- High/xHigh: for work where verification is important or there are edge cases, e.g. fixing a bug in a brownfield codebase.
+
+On reasoning efforts for `sol`:
+
+- Medium: for quick responses
+- xHigh: for most of regular software engineering. Similar to `astra` medium but cheaper and a bit slower when speed doesn't matter, or task isn't very tricky.
+
+On reasoning efforts for `luna`:
+
+- low/medium: never actually useful for meaningful work. maybe for dumb filtering through thousands of files.
+- xHigh: the usable option for mapping modules, organizing, gathering lots of corpse and filtering. do not use its judgement or thoughts. only get raw graph, mapping, list, etc from this and deduct yourself or in another sol/astra agent that needs it.
+
 For prompting these subagents, you may also pick one of the general directions:
 
 - Default - whatever you see fit.
@@ -112,6 +134,8 @@ These are useful invariants, hints, constraints and benchmarks for assessing you
 - Try to avoid adding parallel observers, duplicate state, generic registries, custom non-standard patches, unless this is an experimental thing or hot fix or something we'll get rid of later. In that case, keep the impact scoped from leaking so it can easily be replaced later.
 
 - Keep v0.1 boundaries honest. If the user accepts a bounded imperfection, record and test that limitation instead of solving it through unrelated infrastructure. Surface unavoidable correctness risks for sign-off; never smuggle a large prerequisite into a small feature.
+
+- When user asks for a 90/10 solution, they mean how to get 90% of results with 10% of effort. This is a Paul Buchheit term that means not overthinking even largest features and shipping the code/module that can satisfy the use-case in house without relying on third-party, expensive, "official best practices", worrying about scalability, etc that can make a feature take 10x more time. This can come in handy in early prototypes, quick experiments/mockups, infra work when alternatives are costly or too much of a liability, exploring a complex feature, etc.
 
 ## Stack
 
