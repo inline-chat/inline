@@ -1,5 +1,4 @@
 import InlineKit
-import InlineUI
 import SwiftUI
 
 struct LogoutSection: View {
@@ -19,7 +18,7 @@ struct LogoutSection: View {
           Image(systemName: "rectangle.portrait.and.arrow.right.fill")
             .font(.callout)
             .foregroundColor(.white)
-            .scaledFrame(width: 25, height: 25)
+            .frame(width: 25, height: 25)
             .background(ThemeManager.shared.logoutRedColor)
             .clipShape(RoundedRectangle(cornerRadius: 6))
           Text("Logout")

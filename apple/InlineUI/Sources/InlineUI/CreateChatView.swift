@@ -82,11 +82,11 @@ public struct CreateChatView: View {
         if let selectedEmoji {
           Text(selectedEmoji)
             .font(.title)
-            .scaledFrame(width: 28, height: 28)
+            .frame(width: 28, height: 28)
         } else {
           Image(systemName: "message.fill")
             .font(.body)
-            .scaledFrame(width: 28, height: 28)
+            .frame(width: 28, height: 28)
             .background(Circle().fill(Color.gray.opacity(0.2)))
         }
       }
@@ -109,7 +109,7 @@ public struct CreateChatView: View {
             showEmojiPicker = false
           }) {
             Text(emoji)
-              .scaledFont(size: 24)
+              .font(.system(size: 24))
               .padding(8)
           }
           .buttonStyle(PlainButtonStyle())

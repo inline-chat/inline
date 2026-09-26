@@ -30,14 +30,14 @@ class Theme {
 
 extension Font {
   static func customTitle(size: CGFloat = 17, weight: Weight = .medium, style: TextStyle = .body) -> Font {
-    .system(style, design: .default, weight: weight)
+    .system(size: size, weight: weight, design: .default)
   }
 
   static func customCaption(size: CGFloat = 15, weight: Weight = .regular, style: TextStyle = .callout) -> Font {
-    .system(style, design: .default, weight: weight)
+    .system(size: size, weight: weight, design: .default)
   }
 
   static func smallLabel(size: CGFloat = 13, weight: Weight = .regular, style: TextStyle = .caption) -> Font {
-    .system(style, design: .default, weight: weight)
+    .system(size: size, weight: weight, design: .default)
   }
 }

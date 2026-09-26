@@ -3,7 +3,6 @@ import InlineUI
 import SwiftUI
 
 struct MemberItemRow: View {
-  @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 14
   let member: FullMemberItem
   let hasUnread: Bool
   @Environment(Router.self) private var router
@@ -17,7 +16,7 @@ struct MemberItemRow: View {
           HStack(alignment: .center, spacing: 5) {
             Circle()
               .fill(hasUnread ? Color.accentColor : .clear)
-              .scaledFrame(width: 6, height: 6)
+              .frame(width: 6, height: 6)
               .animation(.easeInOut(duration: 0.3), value: hasUnread)
             UserAvatar(user: member.userInfo.user, size: 32)
           }
@@ -28,7 +27,7 @@ struct MemberItemRow: View {
       }
       .buttonStyle(.plain)
 
-      SpaceMemberBadge(userID: member.userInfo.user.id, spaceID: member.member.spaceId, size: badgeSize)
+      SpaceMemberBadge(userID: member.userInfo.user.id, spaceID: member.member.spaceId)
         .id("\(member.userInfo.user.id):\(member.member.spaceId)")
     }
     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))

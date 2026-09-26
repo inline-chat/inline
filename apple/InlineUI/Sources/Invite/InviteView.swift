@@ -705,7 +705,7 @@ private struct InviteContactsPermissionView: View {
   private var content: some View {
     VStack(spacing: 18) {
       Image(systemName: "person.crop.circle.badge.plus")
-        .scaledFont(size: 40, weight: .medium)
+        .font(.system(size: 40, weight: .medium))
         .foregroundStyle(Color.accentColor)
       Text("Find people from Contacts")
         .font(.title3.weight(.semibold))

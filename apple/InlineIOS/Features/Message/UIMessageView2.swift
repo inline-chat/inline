@@ -1061,7 +1061,7 @@ final class UIMessageView2: UIMessageView {
         NodeID.reply,
         size: CGSize(
           width: min(200, max(1, maximumContentWidth - insets.leading - insets.trailing)),
-          height: EmbedMessageView.height(for: .replyBubble, compatibleWith: traitCollection)
+          height: EmbedMessageView.height
         ),
         widthBehavior: .fill,
         insets: insets,
@@ -1092,8 +1092,7 @@ final class UIMessageView2: UIMessageView {
       let availableWidth = max(1, maximumContentWidth - 24)
       append(
         NodeID.voice,
-        size: CGSize(width: min(availableWidth, max(120, min(240, availableWidth))),
-                     height: UIFontMetrics(forTextStyle: .body).scaledValue(for: 54, compatibleWith: traitCollection)),
+        size: CGSize(width: min(availableWidth, max(120, min(240, availableWidth))), height: 54),
         widthBehavior: .fill,
         insets: standardInsets
       )
@@ -2063,7 +2062,7 @@ final class UIMessageView2: UIMessageView {
       } + CGFloat(max(0, buttons.count - 1)) * 4
       return max(rowMaximum, rowWidth)
     }
-    let rowHeight = actionButtonRows.flatMap { $0 }.reduce(CGFloat(36)) { max($0, $1.intrinsicContentSize.height) }
+    let rowHeight: CGFloat = 36
     return CGSize(
       width: min(maximumWidth, max(180, naturalWidth)),
       height: CGFloat(actionButtonRows.count) * rowHeight + CGFloat(max(0, actionButtonRows.count - 1)) * 4

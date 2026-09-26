@@ -355,7 +355,7 @@ private struct ConnectorAction: View {
         #if os(macOS)
         .frame(width: 24, height: 18)
         #else
-        .scaledFrame(width: 44, height: 44)
+        .frame(width: 44, height: 44)
         #endif
         .contentShape(Rectangle())
     }
@@ -440,7 +440,7 @@ private struct ConnectorIcon: View {
 
       providerMark
     }
-    .scaledFrame(width: iconSize, height: iconSize)
+    .frame(width: iconSize, height: iconSize)
     .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous)
@@ -459,7 +459,7 @@ private struct ConnectorIcon: View {
         #if os(macOS)
         .frame(width: 19, height: 19)
         #else
-        .scaledFrame(width: 23, height: 23)
+        .frame(width: 23, height: 23)
         #endif
     case .linear:
       Image(provider.assetName)
@@ -468,7 +468,7 @@ private struct ConnectorIcon: View {
         #if os(macOS)
         .frame(width: 30, height: 30)
         #else
-        .scaledFrame(width: 38, height: 38)
+        .frame(width: 38, height: 38)
         #endif
         .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous))
     case .github:
@@ -478,7 +478,7 @@ private struct ConnectorIcon: View {
         #if os(macOS)
         .frame(width: 18, height: 18)
         #else
-        .scaledFrame(width: 22, height: 22)
+        .frame(width: 22, height: 22)
         #endif
     }
   }

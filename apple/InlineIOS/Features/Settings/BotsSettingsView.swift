@@ -445,7 +445,7 @@ private struct IOSBotAgentsSection: View {
             HStack(spacing: 10) {
               Text(agent.hasEmoji ? agent.emoji : "🤖")
                 .font(.title2)
-                .scaledFrame(width: 34, height: 34)
+                .frame(width: 34, height: 34)
                 .background(.quaternary, in: Circle())
               VStack(alignment: .leading, spacing: 2) {
                 Text(agent.name)

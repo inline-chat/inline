@@ -24,14 +24,6 @@ public enum ComposeActionAnimationInventory {
 }
 
 public struct ComposeActionActivityIndicator: View {
-  @ScaledMetric(relativeTo: .body) private var dynamicScale: CGFloat = 1
-  private var scale: CGFloat {
-    #if os(iOS)
-    dynamicScale
-    #else
-    1
-    #endif
-  }
   private let action: ApiComposeAction
   private let color: Color
 
@@ -48,23 +40,23 @@ public struct ComposeActionActivityIndicator: View {
     switch ComposeActionAnimationInventory.animation(for: action) {
     case .typing:
       TypingActivityIndicator(
-        dotSize: 3 * scale,
-        spacing: 2 * scale,
+        dotSize: 3,
+        spacing: 2,
         color: color,
-        lift: 1.8 * scale
+        lift: 1.8
       )
     case .upload:
       UploadActivityIndicator(
-        width: 14 * scale,
-        height: 4 * scale,
+        width: 14,
+        height: 4,
         color: color
       )
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
-        barWidth: 2.2 * scale,
-        spacing: 2.2 * scale,
-        minBarHeight: 4 * scale,
-        maxBarHeight: 11 * scale,
+        barWidth: 2.2,
+        spacing: 2.2,
+        minBarHeight: 4,
+        maxBarHeight: 11,
         color: color
       )
     case nil:
@@ -98,7 +90,7 @@ public struct ComposeActionCompactAccessory: View {
         indicator(for: presentation)
       }
     }
-    .scaledFrame(width: 16, height: 12)
+    .frame(width: 16, height: 12)
     .clipped()
     .animation(.easeInOut(duration: 0.18), value: visiblePresentation)
     .accessibilityElement(children: .ignore)
@@ -110,7 +102,7 @@ public struct ComposeActionCompactAccessory: View {
   private var collapsibleAccessory: some View {
     if let presentation = visiblePresentation {
       indicator(for: presentation)
-        .scaledFrame(width: 16, height: 12)
+        .frame(width: 16, height: 12)
         .clipped()
         .animation(.easeInOut(duration: 0.18), value: visiblePresentation)
         .accessibilityElement(children: .ignore)

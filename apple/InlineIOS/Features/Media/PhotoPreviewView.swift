@@ -1,5 +1,4 @@
 // PhotoPreviewView.swift
-import InlineUI
 import SwiftUI
 
 class PhotoPreviewViewModel: ObservableObject {
@@ -62,9 +61,9 @@ struct PhotoPreviewView: View {
             isPresented = false
           }) {
             Image(systemName: "arrow.up")
-              .scaledFont(size: 20, weight: .semibold)
+              .font(.system(size: 20, weight: .semibold))
               .foregroundColor(.white)
-              .scaledFrame(width: 40, height: 40)
+              .frame(width: 40, height: 40)
               .background(Color.blue)
               .clipShape(Circle())
           }

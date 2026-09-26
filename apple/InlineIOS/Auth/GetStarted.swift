@@ -1,7 +1,6 @@
 #if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
 #endif
-import InlineUI
 import SwiftUI
 
 struct GetStarted: View {
@@ -56,7 +55,7 @@ private struct SignInMethods: View {
           Image("google-g")
             .resizable()
             .scaledToFit()
-            .scaledFrame(width: 18, height: 18)
+            .frame(width: 18, height: 18)
         }
       }
       .buttonStyle(SimpleWhiteButtonStyle())
@@ -66,9 +65,9 @@ private struct SignInMethods: View {
       } label: {
         loginMethodLabel("Continue with Email") {
           Image(systemName: "envelope.fill")
-            .scaledFont(size: 16)
+            .font(.system(size: 16))
             .foregroundStyle(.black)
-            .scaledFrame(width: 18, height: 18)
+            .frame(width: 18, height: 18)
         }
       }
       .buttonStyle(SimpleWhiteButtonStyle())
@@ -78,9 +77,9 @@ private struct SignInMethods: View {
       } label: {
         loginMethodLabel("Continue with Phone") {
           Image(systemName: "checkmark.message.fill")
-            .scaledFont(size: 16)
+            .font(.system(size: 16))
             .foregroundStyle(.black)
-            .scaledFrame(width: 18, height: 18)
+            .frame(width: 18, height: 18)
         }
       }
       .buttonStyle(SimpleWhiteButtonStyle())
@@ -88,8 +87,8 @@ private struct SignInMethods: View {
       NativeAppleSignInButton(navigation: nav) {
         loginMethodLabel("Continue with Apple") {
           Image(systemName: "apple.logo")
-            .scaledFont(size: 18, weight: .medium)
-            .scaledFrame(width: 18, height: 18)
+            .font(.system(size: 18, weight: .medium))
+            .frame(width: 18, height: 18)
             .accessibilityHidden(true)
         }
       }

@@ -191,7 +191,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       if showsDotUnread {
         Circle()
           .fill(item.isProminent ? Color.accentColor : Color.secondary)
-          .scaledFrame(width: 7, height: 7)
+          .frame(width: 7, height: 7)
           .offset(x: dotUnreadOffset)
           .transition(unreadTransition)
           .accessibilityHidden(true)

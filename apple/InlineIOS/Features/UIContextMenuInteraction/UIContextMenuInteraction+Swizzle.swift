@@ -40,9 +40,7 @@ extension UIContextMenuInteraction {
 
       let containerWidth = view?.window?.bounds.width ?? view?.bounds.width ?? UIScreen.main.bounds.width
       let width = ContextMenuAccessoryLayout.reactionPickerWidth(for: containerWidth)
-      let metrics = UIFontMetrics(forTextStyle: .body)
-      let traits = view?.traitCollection
-      let height = metrics.scaledValue(for: ContextMenuAccessoryLayout.accessoryHostHeight, compatibleWith: traits)
+      let height = ContextMenuAccessoryLayout.accessoryHostHeight
 
       accessoryView?.frame = CGRect(x: 0, y: 0, width: width, height: height)
       accessoryView?.backgroundColor = .clear
@@ -52,7 +50,7 @@ extension UIContextMenuInteraction {
         x: 0,
         y: 0,
         width: width,
-        height: metrics.scaledValue(for: ContextMenuAccessoryLayout.reactionPickerHeight, compatibleWith: traits)
+        height: ContextMenuAccessoryLayout.reactionPickerHeight
       )
 
       contentView.translatesAutoresizingMaskIntoConstraints = false

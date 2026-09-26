@@ -1,6 +1,5 @@
 import Auth
 import InlineKit
-import InlineUI
 import SwiftUI
 
 struct IntegrationOptionsView: View {
@@ -84,7 +83,7 @@ struct IntegrationOptionsView: View {
           if provider == "notion" || provider == "linear" {
             Image(provider == "linear" ? "linear-icon" : "notion-logo")
               .resizable()
-              .scaledFrame(width: 24, height: 24)
+              .frame(width: 24, height: 24)
               .padding(.trailing, 4)
 
             VStack(alignment: .leading) {

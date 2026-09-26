@@ -148,7 +148,7 @@ private struct IOSNudgeToolbarButton: View {
       Image(systemName: NudgeButtonState.nudgeIconName)
         .font(.body.weight(.regular))
         .imageScale(.medium)
-        .scaledFrame(width: 24, height: 24)
+        .frame(width: 24, height: 24)
     }
     .overlay {
       NudgeHoldProgressRing(progress: holdProgress, size: 32, lineWidth: 3)
@@ -204,7 +204,7 @@ private struct MacNudgeToolbarButton: View {
       }
     } label: {
       Image(systemName: NudgeButtonState.nudgeIconName)
-        .scaledFont(size: 16, weight: .regular)
+        .font(.system(size: 16, weight: .regular))
         .imageScale(.medium)
     }
     .overlay {
@@ -366,7 +366,7 @@ private struct UrgentNudgeConfirmationView: View {
   var body: some View {
     VStack(spacing: 14) {
       Text(NudgeButtonState.urgentNudgeText)
-        .scaledFont(size: 48)
+        .font(.system(size: 48))
         .accessibilityHidden(true)
 
       Text("Send an Urgent Nudge?")

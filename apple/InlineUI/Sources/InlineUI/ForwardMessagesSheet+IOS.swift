@@ -87,9 +87,9 @@ private struct IOSForwardDestinationRow: View, Equatable {
     HStack(spacing: 12) {
       if isSelecting {
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-          .scaledFont(size: 21, weight: .medium)
+          .font(.system(size: 21, weight: .medium))
           .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-          .scaledFrame(width: 24, height: 24)
+          .frame(width: 24, height: 24)
           .accessibilityHidden(true)
       }
 
@@ -103,14 +103,14 @@ private struct IOSForwardDestinationRow: View, Equatable {
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
           Text(destination.title)
-            .scaledFont(size: 16, weight: .regular)
+            .font(.system(size: 16, weight: .regular))
             .foregroundStyle(.primary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
 
           if destination.pinned {
             Image(systemName: "pin.fill")
-              .scaledFont(size: 11, weight: .semibold)
+              .font(.system(size: 11, weight: .semibold))
               .foregroundStyle(.secondary)
               .accessibilityLabel("Pinned")
           }
@@ -124,7 +124,7 @@ private struct IOSForwardDestinationRow: View, Equatable {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(minHeight: Self.rowHeight)
+    .frame(height: Self.rowHeight)
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(.isButton)
@@ -138,7 +138,7 @@ private struct IOSForwardDestinationRow: View, Equatable {
       EmptyView()
     } else {
       Text(text)
-        .scaledFont(size: 13)
+        .font(.system(size: 13))
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -88,7 +88,7 @@ private struct UserGroupSettingsRow: View {
       Image(systemName: "person.3.fill")
         .font(.callout.weight(.semibold))
         .foregroundStyle(.white)
-        .scaledFrame(width: 30, height: 30)
+        .frame(width: 30, height: 30)
         .background(Color.accentColor)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 

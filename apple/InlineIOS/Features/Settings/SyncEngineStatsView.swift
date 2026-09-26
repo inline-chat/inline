@@ -1,6 +1,5 @@
 import Foundation
 import RealtimeV2
-import InlineUI
 import SwiftUI
 
 struct SyncEngineStatsView: View {
@@ -231,7 +230,7 @@ private struct SyncDebugScenarioRow: View {
       Image(systemName: scenario.systemImage)
         .font(.callout)
         .foregroundStyle(.white)
-        .scaledFrame(width: 25, height: 25)
+        .frame(width: 25, height: 25)
         .background(.purple)
         .clipShape(.rect(cornerRadius: 6))
 
@@ -262,7 +261,7 @@ private struct SyncDebugConnectionRow: View {
       Image(systemName: "network.badge.shield.half.filled")
         .font(.callout)
         .foregroundStyle(.white)
-        .scaledFrame(width: 25, height: 25)
+        .frame(width: 25, height: 25)
         .background(.purple)
         .clipShape(.rect(cornerRadius: 6))
 

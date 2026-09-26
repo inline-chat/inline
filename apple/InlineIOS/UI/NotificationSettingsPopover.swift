@@ -1,5 +1,4 @@
 import InlineKit
-import InlineUI
 import SwiftUI
 
 /// A button that opens the notification settings popover for iOS.
@@ -207,10 +206,10 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
       HStack(spacing: 12) {
         Circle()
           .fill(selected ? Color(theme.accent) : Color(.systemGray5))
-          .scaledFrame(width: 36, height: 36)
+          .frame(width: 36, height: 36)
           .overlay {
             Image(systemName: systemImage)
-              .scaledFont(size: iconFontSize ?? 18, weight: .medium)
+              .font(.system(size: iconFontSize ?? 18, weight: .medium))
               .foregroundStyle(selected ? Color.white : Color(.systemGray))
           }
 
@@ -230,10 +229,10 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         Spacer(minLength: 8)
 
         Image(systemName: "checkmark")
-          .scaledFont(size: 16, weight: .semibold)
+          .font(.system(size: 16, weight: .semibold))
           .foregroundStyle(Color(theme.accent))
           .opacity(selected ? 1 : 0)
-          .scaledFrame(width: 18, alignment: .trailing)
+          .frame(width: 18, alignment: .trailing)
       }
       .contentShape(Rectangle())
     }

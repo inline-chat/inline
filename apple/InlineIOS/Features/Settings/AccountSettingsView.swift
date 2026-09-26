@@ -1,4 +1,3 @@
-import InlineUI
 import InlineKit
 import InlineProtocol
 import Logger
@@ -151,7 +150,7 @@ private struct AccountSessionRow: View {
       Image(systemName: iconName)
         .font(.title3)
         .foregroundStyle(.secondary)
-        .scaledFrame(width: 28)
+        .frame(width: 28)
 
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {

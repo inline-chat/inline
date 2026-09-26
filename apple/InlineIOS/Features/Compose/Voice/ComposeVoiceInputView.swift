@@ -1,10 +1,8 @@
-import InlineUI
 import SwiftUI
 import UIKit
 
 @MainActor
 struct ComposeVoiceInputView: View {
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @ObservedObject var viewModel: ComposeVoiceRecordingViewModel
 
   let onStop: @MainActor () -> Void
@@ -14,41 +12,33 @@ struct ComposeVoiceInputView: View {
   let onSendSilently: @MainActor () -> Void
 
   var body: some View {
-    VStack(spacing: 4) {
-      if dynamicTypeSize.isAccessibilitySize {
-        waveform(progress: viewModel.phase == .recording ? 1 : viewModel.playbackProgress) { progress in
-          if viewModel.phase == .review { viewModel.seekPlayback(to: progress) }
-        }
-        durationLabel
-      }
-      controls
-    }
-    .padding(.horizontal, 4)
-    .frame(maxWidth: .infinity, minHeight: ComposeView.minHeight)
-    .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
-    .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
-    .animation(.easeInOut(duration: 0.14), value: viewModel.isSending)
+    controls
+      .padding(.horizontal, 4)
+      .frame(maxWidth: .infinity, minHeight: ComposeView.minHeight, maxHeight: ComposeView.minHeight)
+      .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isSending)
   }
 
   private var controls: some View {
-    VoiceComposeControlsLayout {
+    HStack(spacing: 8) {
       switch viewModel.phase {
       case .starting:
         progressIndicator
-        if !dynamicTypeSize.isAccessibilitySize { waveform(progress: 0) }
-        if !dynamicTypeSize.isAccessibilitySize { durationLabel.hidden() }
+        waveform(progress: 0)
+        durationLabel.hidden()
         reservedIconSpace
 
       case .recording:
         recordingIndicator
-        if !dynamicTypeSize.isAccessibilitySize { waveform(progress: 1) }
-        if !dynamicTypeSize.isAccessibilitySize { durationLabel }
+        waveform(progress: 1)
+        durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onStop)
 
       case .finishing:
         progressIndicator
-        if !dynamicTypeSize.isAccessibilitySize { waveform(progress: 1) }
-        if !dynamicTypeSize.isAccessibilitySize { durationLabel }
+        waveform(progress: 1)
+        durationLabel
         reservedIconSpace
 
       case .review:
@@ -59,12 +49,10 @@ struct ComposeVoiceInputView: View {
             action: onDiscard
           )
         }
-        if !dynamicTypeSize.isAccessibilitySize {
-          waveform(progress: viewModel.playbackProgress) { progress in
-            viewModel.seekPlayback(to: progress)
-          }
+        waveform(progress: viewModel.playbackProgress) { progress in
+          viewModel.seekPlayback(to: progress)
         }
-        if !dynamicTypeSize.isAccessibilitySize { durationLabel }
+        durationLabel
         playButton
         sendButton
 
@@ -79,15 +67,15 @@ struct ComposeVoiceInputView: View {
   private var recordingIndicator: some View {
     Circle()
       .fill(Color.red)
-      .scaledFrame(width: 8, height: 8)
-      .scaledFrame(width: 20, height: 20, relativeTo: .caption)
+      .frame(width: 8, height: 8)
+      .frame(width: 20, height: 20)
       .accessibilityLabel("Recording")
   }
 
   private var progressIndicator: some View {
     ProgressView()
       .controlSize(.small)
-      .scaledFrame(width: 20, height: 20, relativeTo: .caption)
+      .frame(width: 20, height: 20)
   }
 
   private var durationLabel: some View {
@@ -133,7 +121,7 @@ struct ComposeVoiceInputView: View {
 
   private var reservedIconSpace: some View {
     Color.clear
-      .scaledFrame(width: 30, height: 30, relativeTo: .caption)
+      .frame(width: 30, height: 30)
       .accessibilityHidden(true)
   }
 
@@ -174,23 +162,6 @@ struct ComposeVoiceInputView: View {
   }
 }
 
-/// Keep large controls in complete rows instead of compressing their symbols or timestamp.
-struct VoiceComposeControlsLayout<Content: View>: View {
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @ScaledMetric(relativeTo: .caption) private var controlSize: CGFloat = 30
-  @ViewBuilder var content: () -> Content
-
-  var body: some View {
-    if dynamicTypeSize.isAccessibilitySize {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: controlSize), spacing: 8)], spacing: 8) {
-        content()
-      }
-    } else {
-      HStack(spacing: 8) { content() }
-    }
-  }
-}
-
 @MainActor
 private struct VoiceIconControl: View {
   let systemName: String
@@ -204,7 +175,7 @@ private struct VoiceIconControl: View {
       Image(systemName: systemName)
     }
     .buttonStyle(VoiceIconButtonStyle(isPrimary: isPrimary))
-    .scaledFrame(width: 30, height: 30, relativeTo: .caption)
+    .frame(width: 30, height: 30)
     .contentShape(Circle())
     .disabled(!isEnabled)
     .accessibilityLabel(title)
@@ -221,9 +192,9 @@ private struct VoiceIconButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .scaledFont(size: 11, weight: .semibold, relativeTo: .caption)
+      .font(.system(size: 11, weight: .semibold))
       .foregroundStyle(isPrimary ? Color.white : Color(uiColor: .secondaryLabel))
-      .scaledFrame(width: Self.visualSize, height: Self.visualSize, relativeTo: .caption)
+      .frame(width: Self.visualSize, height: Self.visualSize)
       .contentShape(Circle())
       .background(
         Circle()

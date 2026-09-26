@@ -74,8 +74,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
 
     textView.resetTypingAttributesToDefault()
-    textView.font = textView.bodyFont
-    textView.typingAttributes[.font] = textView.bodyFont
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
 
     let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
     let isEmpty = normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

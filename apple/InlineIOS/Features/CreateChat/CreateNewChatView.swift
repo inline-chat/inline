@@ -1,5 +1,4 @@
 import InlineKit
-import InlineUI
 import SwiftUI
 
 struct CreateNewChatView: View {
@@ -40,7 +39,7 @@ struct CreateNewChatView: View {
       Section {
         HStack(spacing: 12) {
           Circle().fill(Color(theme.accent).opacity(0.1))
-            .scaledFrame(width: 52, height: 52)
+            .frame(width: 52, height: 52)
             .overlay {
               ZStack {
                 TextField("", text: $emoji)

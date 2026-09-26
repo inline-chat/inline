@@ -1501,7 +1501,7 @@ private struct ExperimentalMemberRow: View {
       UserAvatar(userInfo: member.userInfo, size: 34)
 
       Text(member.userInfo.user.displayName)
-        .scaledFont(size: 16, weight: .medium)
+        .font(.system(size: 16, weight: .medium))
         .foregroundStyle(.primary)
         .lineLimit(1)
 
@@ -1509,9 +1509,9 @@ private struct ExperimentalMemberRow: View {
 
       Button(action: onMessage) {
         Image(systemName: "bubble.left.and.bubble.right.fill")
-          .scaledFont(size: 14, weight: .semibold)
+          .font(.system(size: 14, weight: .semibold))
           .foregroundStyle(.primary)
-          .scaledFrame(width: 34, height: 34)
+          .frame(width: 34, height: 34)
           .background(buttonFill, in: Circle())
           .overlay(
             Circle().stroke(borderColor, lineWidth: 0.5)

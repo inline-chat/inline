@@ -1,4 +1,3 @@
-import InlineUI
 import SwiftUI
 
 struct PhoneNumberField: View {
@@ -57,9 +56,9 @@ struct PhoneNumberField: View {
 
   var font: Font {
     switch size {
-    case .small: .body
-    case .medium: .callout
-    case .large: .onboardingIOSBody
+      case .small: .body
+      case .medium: .system(size: 16, weight: .regular)
+      case .large: .onboardingIOSBody
     }
   }
 
@@ -72,7 +71,7 @@ struct PhoneNumberField: View {
       }) {
         HStack(spacing: 6) {
           Text(selectedCountry.flag)
-            .scaledFont(size: 18)
+            .font(.system(size: 18))
           Text(selectedCountry.dialCode)
             .foregroundColor(.primary)
             .font(font.monospacedDigit())
@@ -107,7 +106,7 @@ struct PhoneNumberField: View {
               }) {
                 HStack {
                   Text(country.flag)
-                    .scaledFont(size: 20)
+                    .font(.system(size: 20))
                   Text(country.name)
                     .foregroundColor(.primary)
                   Spacer()
@@ -150,7 +149,7 @@ struct PhoneNumberField: View {
           phoneNumber = newValue.filter(\.isNumber)
         }
     }
-    .frame(minHeight: height)
+    .frame(height: height)
     .background(
       RoundedRectangle(cornerRadius: cornerRadius)
         .fill(.ultraThinMaterial)

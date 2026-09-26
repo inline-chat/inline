@@ -28,20 +28,8 @@ struct ComposeHeightChangeAnimation {
 }
 
 extension ComposeView {
-  var minimumInputHeight: CGFloat {
-    max(
-      UIFontMetrics(forTextStyle: .body).scaledValue(for: Self.minHeight, compatibleWith: traitCollection),
-      ceil(textView.bodyFont.lineHeight) + textView.textContainerInset.top + textView.textContainerInset.bottom
-        + Self.textViewVerticalPadding * 2
-    )
-  }
-
-  private var voiceInputHeight: CGFloat {
-    max(minimumInputHeight, ceil(measuredVoiceInputHeight))
-  }
-
   func textViewHeightByContentHeight(_ contentHeight: CGFloat) -> CGFloat {
-    let newHeight = min(maxHeight, max(minimumInputHeight, contentHeight + Self.textViewVerticalPadding * 2))
+    let newHeight = min(maxHeight, max(Self.minHeight, contentHeight + Self.textViewVerticalPadding * 2))
     return newHeight
   }
 
@@ -63,7 +51,7 @@ extension ComposeView {
     ))
 
     let contentHeight = size.height
-    let inputHeight = textView.isHidden ? voiceInputHeight : textViewHeightByContentHeight(contentHeight)
+    let inputHeight = textView.isHidden ? Self.minHeight : textViewHeightByContentHeight(contentHeight)
     let embedHeight = embedContainerHeightConstraint?.constant ?? 0
     let attachmentHeight = attachmentContainerHeightConstraint?.constant ?? 0
     let newHeight = inputHeight + embedHeight + attachmentHeight
@@ -107,18 +95,17 @@ extension ComposeView {
   }
 
   func resetHeight(animated: Bool = true) {
-    let height = textView.isHidden ? voiceInputHeight : minimumInputHeight
     if animated {
       UIView.animate(withDuration: 0.2) {
-        self.composeHeightConstraint.constant = height
+        self.composeHeightConstraint.constant = Self.minHeight
         self.superview?.layoutIfNeeded()
       }
     } else {
-      composeHeightConstraint.constant = height
+      composeHeightConstraint.constant = Self.minHeight
       superview?.layoutIfNeeded()
     }
     onHeightChange?(
-      height,
+      Self.minHeight,
       animated
         ? .animated(duration: 0.2, timingParameters: nil)
         : .immediate

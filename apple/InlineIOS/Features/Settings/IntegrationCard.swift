@@ -23,7 +23,7 @@ struct IntegrationCard: View {
       HStack(alignment: .center, spacing: 12) {
         Image(image)
           .resizable()
-          .scaledFrame(width: 36, height: 36)
+          .frame(width: 36, height: 36)
           .clipShape(RoundedRectangle(cornerRadius: clipped ? 18 : 0))
 
         VStack(alignment: .leading, spacing: 2) {

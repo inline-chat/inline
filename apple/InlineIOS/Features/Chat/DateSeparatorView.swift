@@ -13,8 +13,7 @@ final class DateSeparatorView: UICollectionReusableView {
 
   private let label: UILabel = {
     let label = UILabel()
-    label.font = ChatTypography.font(12, weight: .regular, style: .caption1)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = UIFont.systemFont(ofSize: 12, weight: .regular)
     label.textColor = UIColor.label
     label.textAlignment = .center
     label.isAccessibilityElement = false
@@ -71,9 +70,7 @@ final class DateSeparatorView: UICollectionReusableView {
     NSLayoutConstraint.activate([
       backgroundEffectView.centerXAnchor.constraint(equalTo: centerXAnchor),
       backgroundEffectView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Self.backgroundVerticalOffset),
-      backgroundEffectView.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
-      label.topAnchor.constraint(equalTo: backgroundEffectView.contentView.topAnchor, constant: 3),
-      label.bottomAnchor.constraint(equalTo: backgroundEffectView.contentView.bottomAnchor, constant: -3),
+      backgroundEffectView.heightAnchor.constraint(equalToConstant: 20),
       backgroundEffectView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
       backgroundEffectView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
 

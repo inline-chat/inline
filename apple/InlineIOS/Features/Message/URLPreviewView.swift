@@ -245,8 +245,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     playIconView.tintColor = .white
 
     titleLabel.text = titleText
-    titleLabel.font = ChatTypography.font(mode == .large ? 15 : 13, weight: .medium, style: .subheadline)
-    titleLabel.adjustsFontForContentSizeCategory = true
+    titleLabel.font = UIFont.systemFont(ofSize: mode == .large ? 15 : 13, weight: .medium)
     titleLabel.textColor = primaryTextColor
     titleLabel.numberOfLines = usesMultilineTitle ? 2 : 1
     titleLabel.lineBreakMode = usesMultilineTitle ? .byWordWrapping : .byTruncatingTail
@@ -258,8 +257,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
     let shouldShowDescription = descriptionText != nil
     descriptionLabel.text = descriptionText
-    descriptionLabel.font = ChatTypography.font(isXStyle ? 14 : 12, style: .subheadline)
-    descriptionLabel.adjustsFontForContentSizeCategory = true
+    descriptionLabel.font = UIFont.systemFont(ofSize: isXStyle ? 14 : 12)
     descriptionLabel.textColor = isXStyle ? primaryTextColor : secondaryTextColor
     descriptionLabel.numberOfLines = isXStyle ? 0 : 1
     descriptionLabel.lineBreakMode = isXStyle ? .byWordWrapping : .byTruncatingTail
@@ -269,8 +267,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     authorLabel.text = authorName
-    authorLabel.font = ChatTypography.font(12, weight: .medium, style: .subheadline)
-    authorLabel.adjustsFontForContentSizeCategory = true
+    authorLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
     authorLabel.textColor = primaryTextColor
     authorLabel.numberOfLines = 1
     authorLabel.lineBreakMode = .byTruncatingTail
@@ -279,8 +276,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     authorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     authorSubtitleLabel.text = authorSubtitle
-    authorSubtitleLabel.font = ChatTypography.font(11, style: .subheadline)
-    authorSubtitleLabel.adjustsFontForContentSizeCategory = true
+    authorSubtitleLabel.font = UIFont.systemFont(ofSize: 11)
     authorSubtitleLabel.textColor = tertiaryTextColor
     authorSubtitleLabel.numberOfLines = 1
     authorSubtitleLabel.lineBreakMode = .byTruncatingTail

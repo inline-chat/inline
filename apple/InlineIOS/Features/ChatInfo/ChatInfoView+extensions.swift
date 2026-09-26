@@ -480,7 +480,7 @@ extension ChatInfoView {
         HStack(spacing: 10) {
           Image(systemName: "person.3.fill")
             .foregroundStyle(.white)
-            .scaledFrame(width: 32, height: 32)
+            .frame(width: 32, height: 32)
             .background(Color.accentColor)
             .clipShape(Circle())
 

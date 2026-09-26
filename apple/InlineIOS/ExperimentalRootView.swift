@@ -1138,8 +1138,8 @@ private struct ExperimentalAuthedRootView: View {
     _ connectionState: RealtimeConnectionState
   ) -> some View {
     ExperimentalConnectionToolbarSpinner(lineWidth: 2.25)
-      .scaledFrame(width: 18, height: 18)
-      .scaledFrame(width: 28, height: 28)
+      .frame(width: 18, height: 18)
+      .frame(width: 28, height: 28)
       .fixedSize(horizontal: true, vertical: true)
       .accessibilityLabel(connectionState.title)
   }

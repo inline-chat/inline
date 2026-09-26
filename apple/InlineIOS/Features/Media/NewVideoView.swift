@@ -104,7 +104,7 @@ private final class InlineAnimatedVideoPlayerView: UIView {
 final class NewVideoView: UIView {
   // MARK: - Properties
 
-  private static let overlaySymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .title2).applying(UIImage.SymbolConfiguration(weight: .semibold))
+  private static let overlaySymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
 
   private static func overlaySymbolImage(named systemName: String) -> UIImage? {
     UIImage(systemName: systemName, withConfiguration: overlaySymbolConfiguration)?
@@ -201,7 +201,7 @@ final class NewVideoView: UIView {
   }()
 
   private let cancelTransferButton: UIButton = {
-    let config = UIImage.SymbolConfiguration(textStyle: .subheadline).applying(UIImage.SymbolConfiguration(weight: .bold))
+    let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     let button = UIButton(type: .system)
     button.translatesAutoresizingMaskIntoConstraints = false
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
@@ -213,8 +213,7 @@ final class NewVideoView: UIView {
 
   private let durationBadge: PillLabel = {
     let label = PillLabel()
-    label.font = ChatTypography.font(10, weight: .semibold)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 10, weight: .semibold)
     label.textColor = .white
     label.backgroundColor = UIColor.black.withAlphaComponent(0.55)
     label.layer.masksToBounds = true
@@ -403,8 +402,8 @@ final class NewVideoView: UIView {
 
       overlayBackground.centerXAnchor.constraint(equalTo: centerXAnchor),
       overlayBackground.centerYAnchor.constraint(equalTo: centerYAnchor),
-      overlayBackground.widthAnchor.constraint(equalToConstant: 44).scaledForContentSize(relativeTo: .title2),
-      overlayBackground.heightAnchor.constraint(equalToConstant: 44).scaledForContentSize(relativeTo: .title2),
+      overlayBackground.widthAnchor.constraint(equalToConstant: 44),
+      overlayBackground.heightAnchor.constraint(equalToConstant: 44),
 
       overlayIconView.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
       overlayIconView.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),

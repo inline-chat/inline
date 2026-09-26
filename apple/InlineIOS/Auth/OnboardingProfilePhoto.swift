@@ -1,5 +1,4 @@
 import ImageIO
-import InlineUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -302,9 +301,7 @@ struct OnboardingXPhotoPicker: View {
               .fill(Color(uiColor: .secondarySystemBackground))
               .overlay {
                 Image(systemName: "person.crop.circle")
-                  .resizable()
-                  .scaledToFit()
-                  .padding(28)
+                  .font(.system(size: 44))
                   .foregroundStyle(.secondary)
               }
           }

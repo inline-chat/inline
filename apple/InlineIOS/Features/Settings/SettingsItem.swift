@@ -1,4 +1,3 @@
-import InlineUI
 import SwiftUI
 
 struct SettingsItem<TrailingContent: View>: View {
@@ -24,7 +23,7 @@ struct SettingsItem<TrailingContent: View>: View {
       Image(systemName: icon)
         .font(.callout)
         .foregroundColor(.white)
-        .scaledFrame(width: 25, height: 25)
+        .frame(width: 25, height: 25)
         .background(iconColor)
         .clipShape(RoundedRectangle(cornerRadius: 6))
       

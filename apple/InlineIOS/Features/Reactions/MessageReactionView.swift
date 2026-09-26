@@ -67,8 +67,7 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
 
   private lazy var emojiLabel: UILabel = {
     let label = UILabel()
-    label.font = ChatTypography.font(Constants.emojiSize, weight: .medium)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = UIFont.systemFont(ofSize: Constants.emojiSize, weight: .medium)
     label.translatesAutoresizingMaskIntoConstraints = false
     configureEmojiLabel(label)
     return label

@@ -9,7 +9,6 @@ protocol SlashCommandCompletionDelegate: AnyObject {
 
 final class SlashCommandCompletionView: UIView {
   static let maxHeight: CGFloat = 216
-  private var scaledItemHeight: CGFloat { UIFontMetrics(forTextStyle: .body).scaledValue(for: 56, compatibleWith: traitCollection) }
   static let itemHeight: CGFloat = 56
 
   weak var delegate: SlashCommandCompletionDelegate?
@@ -58,14 +57,6 @@ final class SlashCommandCompletionView: UIView {
 
   var isVisible: Bool {
     !isHidden && alpha > 0
-  }
-
-  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-    super.traitCollectionDidChange(previousTraitCollection)
-    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
-      rebuildRows()
-      updateHeight()
-    }
   }
 
   override init(frame: CGRect) {
@@ -178,23 +169,20 @@ final class SlashCommandCompletionView: UIView {
     avatarView.translatesAutoresizingMaskIntoConstraints = false
 
     let commandLabel = UILabel()
-    commandLabel.font = ChatTypography.font(14, weight: .semibold)
-    commandLabel.adjustsFontForContentSizeCategory = true
+    commandLabel.font = .systemFont(ofSize: 14, weight: .semibold)
     commandLabel.text = "/\(suggestion.command)"
     commandLabel.textColor = .label
     commandLabel.lineBreakMode = .byTruncatingTail
 
     let botLabel = UILabel()
-    botLabel.font = ChatTypography.font(12, weight: .medium)
-    botLabel.adjustsFontForContentSizeCategory = true
+    botLabel.font = .systemFont(ofSize: 12, weight: .medium)
     botLabel.textColor = .secondaryLabel
     botLabel.textAlignment = .right
     botLabel.text = suggestion.isAmbiguous ? (suggestion.botLabel ?? suggestion.botDisplayName) : nil
     botLabel.lineBreakMode = .byTruncatingTail
 
     let descriptionLabel = UILabel()
-    descriptionLabel.font = ChatTypography.font(12, weight: .regular)
-    descriptionLabel.adjustsFontForContentSizeCategory = true
+    descriptionLabel.font = .systemFont(ofSize: 12, weight: .regular)
     descriptionLabel.textColor = .secondaryLabel
     descriptionLabel.numberOfLines = 1
     descriptionLabel.text = suggestion.description
@@ -226,7 +214,7 @@ final class SlashCommandCompletionView: UIView {
       rowStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
       rowStack.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
       rowStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
-      containerView.heightAnchor.constraint(equalToConstant: scaledItemHeight),
+      containerView.heightAnchor.constraint(equalToConstant: Self.itemHeight),
     ])
 
     commandLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -254,7 +242,7 @@ final class SlashCommandCompletionView: UIView {
   private func updateHeight() {
     let constrainedHeight = suggestionListHeight(
       itemCount: suggestions.count,
-      itemHeight: scaledItemHeight,
+      itemHeight: Self.itemHeight,
       maxVisibleItems: 4,
       maxHeight: Self.maxHeight
     )

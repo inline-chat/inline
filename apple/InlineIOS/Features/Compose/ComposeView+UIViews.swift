@@ -156,10 +156,9 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
     accessibilityLabel = "Add"
     accessibilityTraits = .button
 
-    imageView.adjustsImageSizeForAccessibilityContentSizeCategory = true
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .medium))
+      UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
     )
     imageView.tintColor = .secondaryLabel
     imageView.contentMode = .center
@@ -188,13 +187,12 @@ extension ComposeView {
 
   func makeSendButton() -> UIButton {
     let button = UIButton()
-    button.adjustsImageSizeForAccessibilityContentSizeCategory = true
     button.translatesAutoresizingMaskIntoConstraints = false
     button.frame = CGRect(origin: .zero, size: buttonSize)
 
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
-      UIImage.SymbolConfiguration(textStyle: .subheadline).applying(UIImage.SymbolConfiguration(weight: .bold))
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
     config.baseForegroundColor = .white
     config.background.backgroundColor = ThemeManager.shared.selected.accent

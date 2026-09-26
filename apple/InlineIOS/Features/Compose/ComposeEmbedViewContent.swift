@@ -10,7 +10,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     static let closeButtonSize: CGFloat = 24
   }
 
-  static var height: CGFloat { EmbedMessageView.composeHeight + Constants.topPadding }
+  static let height: CGFloat = EmbedMessageView.composeHeight + Constants.topPadding
 
   enum Mode {
     case reply
@@ -33,7 +33,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
 
   private lazy var closeButton: UIButton = {
     let button = ComposeEmbedCloseButton()
-    let config = UIImage.SymbolConfiguration(textStyle: .body)
+    let config = UIImage.SymbolConfiguration(pointSize: 17)
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .secondaryLabel
     button.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
@@ -80,11 +80,12 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
       embedView.leadingAnchor.constraint(equalTo: leadingAnchor),
       embedView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.topPadding),
       embedView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.composeHeight),
 
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
-      closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize).scaledForContentSize(),
-      closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize).scaledForContentSize(),
+      closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
+      closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize),
     ])
   }
 

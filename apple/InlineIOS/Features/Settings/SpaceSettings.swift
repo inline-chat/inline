@@ -53,7 +53,7 @@ struct SpaceSettingsView: View {
           } else {
             Circle()
               .fill(Color(.systemGray6))
-              .scaledFrame(width: 42, height: 42)
+              .frame(width: 42, height: 42)
               .padding(.trailing, 6)
           }
           VStack(alignment: .leading, spacing: 0) {
@@ -172,7 +172,7 @@ private struct SpaceConnectorsLinkLabel: View {
     HStack {
       Image(systemName: "app.connected.to.app.below.fill")
         .foregroundColor(.white)
-        .scaledFrame(width: 25, height: 25)
+        .frame(width: 25, height: 25)
         .background(Color.purple)
         .clipShape(RoundedRectangle(cornerRadius: 6))
       Text("Connectors")
@@ -259,7 +259,7 @@ private struct SpaceUrlPreviewExclusionRow: View {
     HStack(spacing: 10) {
       Image(systemName: exclusion.pathPrefix == nil ? "network" : "link")
         .foregroundColor(.secondary)
-        .scaledFrame(width: 24, height: 24)
+        .frame(width: 24, height: 24)
 
       Text(exclusion.displayValue)
         .lineLimit(1)

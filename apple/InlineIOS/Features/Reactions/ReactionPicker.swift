@@ -1,4 +1,3 @@
-import InlineUI
 import SwiftUI
 import UIKit
 
@@ -19,7 +18,7 @@ struct ReactionPickerView: View {
             onEmojiSelected(emoji)
           }) {
             Text(emoji)
-              .scaledFont(size: 24)
+              .font(.system(size: 24))
           }
           .buttonStyle(PlainButtonStyle())
         }
@@ -28,7 +27,7 @@ struct ReactionPickerView: View {
           onShowEmojiPicker()
         }) {
           Image(systemName: "plus")
-            .scaledFont(size: 16, weight: .bold)
+            .font(.system(size: 16, weight: .bold))
             .foregroundColor(.primary)
         }
         .buttonStyle(ReactionButtonStyle())
@@ -99,7 +98,7 @@ struct EmojiGridView: View {
               onEmojiSelected(emoji)
             }) {
               Text(emoji)
-                .scaledFont(size: 24)
+                .font(.system(size: 24))
             }
             .buttonStyle(PlainButtonStyle())
             .padding(4)

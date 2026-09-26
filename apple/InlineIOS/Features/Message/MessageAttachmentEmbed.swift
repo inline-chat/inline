@@ -30,8 +30,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private lazy var usernameLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = ChatTypography.font(14, weight: .medium, style: .subheadline)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 14, weight: .medium)
     label.numberOfLines = 1
     return label
   }()
@@ -48,8 +47,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private lazy var taskTitleLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = ChatTypography.font(14, style: .subheadline)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 14)
     label.numberOfLines = 2
     label.lineBreakMode = .byTruncatingTail
     return label

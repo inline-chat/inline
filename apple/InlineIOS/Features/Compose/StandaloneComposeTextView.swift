@@ -14,7 +14,6 @@ class StandaloneComposeTextView: UITextView {
 
   weak var composeDelegate: StandaloneComposeTextViewDelegate?
   private var placeholderLabel: UILabel?
-  private var bodyFont: UIFont { ChatTypography.font(17, compatibleWith: traitCollection) }
 
   // MARK: - Initialization
 
@@ -39,9 +38,8 @@ class StandaloneComposeTextView: UITextView {
   private func setupTextView() {
     backgroundColor = .clear
     allowsEditingTextAttributes = true
-    font = bodyFont
+    font = .systemFont(ofSize: 17)
     typingAttributes[.font] = font
-    adjustsFontForContentSizeCategory = true
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     translatesAutoresizingMaskIntoConstraints = false
     tintColor = ThemeManager.shared.selected.accent
@@ -50,8 +48,7 @@ class StandaloneComposeTextView: UITextView {
   private func setupPlaceholder() {
     let label = UILabel()
     label.text = "Write a message"
-    label.font = bodyFont
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 17)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
     label.textAlignment = .left
@@ -118,7 +115,7 @@ class StandaloneComposeTextView: UITextView {
       ?? UIPasteboard.general.string {
       if ExperimentalFeatureFlags.richMessageCopyEditingEnabled {
         // Keep Markdown markers visible while preserving the surrounding draft and native undo.
-        typingAttributes = [.font: bodyFont, .foregroundColor: UIColor.label]
+        typingAttributes = [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
         insertText(string)
       } else {
         text = (text as NSString).replacingCharacters(in: selectedRange, with: string)
@@ -149,7 +146,7 @@ class StandaloneComposeTextView: UITextView {
       in: NSRange(location: 0, length: attributedText.length),
       options: []
     ) { value, _, stop in
-      if let font = value as? UIFont, font.pointSize != bodyFont.pointSize {
+      if let font = value as? UIFont, font.pointSize != 17 {
         needsFix = true
         stop.pointee = true
       }
@@ -158,7 +155,7 @@ class StandaloneComposeTextView: UITextView {
     if needsFix {
       attributedText.addAttribute(
         .font,
-        value: bodyFont,
+        value: UIFont.systemFont(ofSize: 17),
         range: NSRange(location: 0, length: attributedText.length)
       )
       attributedText.addAttribute(

@@ -19,7 +19,7 @@ struct ChatItemRow: View {
         HStack(alignment: .center, spacing: 5) {
           Circle()
             .fill(hasUnread ? Color.accentColor : .clear)
-            .scaledFrame(width: 6, height: 6)
+            .frame(width: 6, height: 6)
             .animation(.easeInOut(duration: 0.3), value: hasUnread)
           ThreadIconView(
             item.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(

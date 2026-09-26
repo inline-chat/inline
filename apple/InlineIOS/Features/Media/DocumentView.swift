@@ -1121,8 +1121,7 @@ extension DocumentView {
   static func createFileNameLabel() -> UILabel {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = ChatTypography.font(15, style: .subheadline)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 15)
     label.numberOfLines = 1
     label.lineBreakMode = .byTruncatingMiddle
     return label
@@ -1131,8 +1130,7 @@ extension DocumentView {
   static func createFileSizeLabel() -> UILabel {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = ChatTypography.font(13, style: .caption1)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 13)
     return label
   }
 }

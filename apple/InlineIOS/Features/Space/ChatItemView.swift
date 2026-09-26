@@ -83,7 +83,7 @@ struct ChatItemView: View {
       }
     }
 
-    .frame(minHeight: 50)
+    .frame(height: 50)
     .frame(maxWidth: .infinity, alignment: .top)
     .padding(.leading, -8)
   }
@@ -105,7 +105,7 @@ struct ChatItemView: View {
           if #available(iOS 26.0, *) {
             Circle()
               .fill(.yellow.opacity(0.9))
-              .scaledFrame(width: 22, height: 22)
+              .frame(width: 22, height: 22)
               .glassEffect()
               .overlay {
                 Image(systemName: "pin.fill")
@@ -116,7 +116,7 @@ struct ChatItemView: View {
           } else {
             Circle()
               .fill(.yellow)
-              .scaledFrame(width: 22, height: 22)
+              .frame(width: 22, height: 22)
               .overlay {
                 Image(systemName: "pin.fill")
                   .font(.caption)
@@ -132,7 +132,7 @@ struct ChatItemView: View {
     HStack(alignment: .center, spacing: 5) {
       Circle()
         .fill(hasUnreadMessages ? Color.accentColor : .clear)
-        .scaledFrame(width: 8, height: 8)
+        .frame(width: 8, height: 8)
         .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
 
       chatProfile

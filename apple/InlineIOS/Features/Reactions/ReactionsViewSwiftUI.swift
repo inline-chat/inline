@@ -1,5 +1,4 @@
 import InlineKit
-import InlineUI
 import SwiftUI
 
 // Custom flow layout implementation
@@ -87,13 +86,13 @@ struct ReactionsView: View {
       ForEach(reactionsDict.sorted(by: { $0.value > $1.value }), id: \.key) { reaction, count in
         HStack(spacing: 4) {
           Text(reaction)
-            .scaledFont(size: 17)
+            .font(.system(size: 17))
 
           Text("\(count)")
-            .scaledFont(size: 13)
+            .font(.system(size: 13))
             .foregroundColor(.secondary)
         }
-        .scaledFrame(width: 45, height: 26)
+        .frame(width: 45, height: 26)
         .background(Color(.systemGray6))
         .cornerRadius(14)
       }

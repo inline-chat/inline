@@ -1,4 +1,3 @@
-import InlineUI
 import InlineKit
 import InlineProtocol
 import Logger
@@ -48,7 +47,7 @@ struct CreateSpaceChat: View {
                     endPoint: .bottom
                   )
                 )
-                .scaledFrame(width: 40, height: 40)
+                .frame(width: 40, height: 40)
                 .overlay {
                   if !selectedEmoji.isEmpty {
                     Text(selectedEmoji)

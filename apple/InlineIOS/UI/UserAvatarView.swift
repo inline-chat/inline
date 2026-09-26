@@ -154,7 +154,7 @@ final class MessageAcknowledgementView: UIView {
   private let check = UIImageView(
     image: UIImage(
       systemName: "checkmark",
-      withConfiguration: UIImage.SymbolConfiguration(textStyle: .caption2).applying(UIImage.SymbolConfiguration(weight: .bold))
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
     )
   )
   private let countLabel = UILabel()

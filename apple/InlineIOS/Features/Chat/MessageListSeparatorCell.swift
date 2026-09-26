@@ -38,8 +38,7 @@ final class MessageListSeparatorCell: UICollectionViewCell {
   private func setup() {
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
 
-    label.font = ChatTypography.font(12, weight: .semibold, style: .caption1)
-    label.adjustsFontForContentSizeCategory = true
+    label.font = .systemFont(ofSize: 12, weight: .semibold)
     label.textColor = .secondaryLabel
     label.textAlignment = .center
     label.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -58,8 +57,6 @@ final class MessageListSeparatorCell: UICollectionViewCell {
 
       label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-      label.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 8),
-      label.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -8),
 
       leadingLine.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
       leadingLine.trailingAnchor.constraint(equalTo: label.leadingAnchor, constant: -10),

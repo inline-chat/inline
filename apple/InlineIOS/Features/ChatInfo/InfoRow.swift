@@ -1,4 +1,3 @@
-import InlineUI
 import SwiftUI
 
 struct InfoRow: View {
@@ -12,7 +11,7 @@ struct InfoRow: View {
       HStack {
         RoundedRectangle(cornerRadius: 8)
           .fill(color)
-          .scaledFrame(width: 28, height: 28)
+          .frame(width: 28, height: 28)
           .overlay {
             Image(systemName: symbol)
               .foregroundColor(.white)
