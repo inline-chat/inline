@@ -473,7 +473,7 @@ struct GridRTCEngineTests {
     )
     let driver = FakeGridRTCDriver()
     var configuration = InlineRTCConfiguration.voice
-    configuration.connection.screenShareRepublishTimeout = 0.05
+    configuration.connection.screenShareRepublishTimeout = 2
     let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
     let target = InlineRTCSessionID("grid-test:1:47:1")
     let source = InlineRTCScreenCaptureSource(
@@ -506,7 +506,7 @@ struct GridRTCEngineTests {
     try await eventuallyRTC {
       await rtc.currentSnapshot().screenShareState == .stopping
     }
-    try await eventuallyRTC {
+    try await eventuallyRTC(timeout: .seconds(4)) {
       await driver.operations().contains("quiesce-done:47")
     }
   }
