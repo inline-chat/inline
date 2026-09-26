@@ -120,7 +120,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private let avatarLeading: CGFloat = 0
   private let nameLabelLeading: CGFloat = 9
   private let nameLabelTop: CGFloat = 9
-  private let nameLabelHeight: CGFloat = 16
+  private var nameLabelHeight: CGFloat { max(16, ceil(nameLabel.font.lineHeight)) }
+  private var configuredContentSizeCategory: UIContentSizeCategory?
   private let horizontalPadding = MessageCollectionViewCell.sendAnimationHorizontalPadding
 
   // MARK: - Views
@@ -237,7 +238,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       clearHighlight()
     }
 
-    if let currentMessage = self.message {
+    if let currentMessage = self.message,
+       configuredContentSizeCategory == traitCollection.preferredContentSizeCategory {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
          self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
@@ -372,6 +374,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     resetSelfSizingState()
 
     // update it first
+    configuredContentSizeCategory = traitCollection.preferredContentSizeCategory
     prevText = message.displayText
     self.message = message
     self.firstInGroup = firstInGroup
@@ -387,6 +390,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     resetCell()
 
+    nameLabel.font = ChatTypography.font(13, weight: .medium, style: .caption1, compatibleWith: traitCollection)
     nameLabel.text = message.from?.firstName ?? "USER"
 
     setupThreadHeaderViewsIfNeeded()

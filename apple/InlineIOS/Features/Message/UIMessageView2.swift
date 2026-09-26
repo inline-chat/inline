@@ -212,6 +212,7 @@ final class UIMessageView2: UIMessageView {
     // The lab controller replaces plans and views together when its environment changes.
     guard renderingMode == .automatic else { return }
     if message.isServiceMessage {
+      serviceLabel.font = .preferredFont(forTextStyle: .caption1, compatibleWith: traitCollection)
       serviceLabel.attributedText = serviceAttributedText()
     } else {
       updateMessageLabelText()
@@ -256,12 +257,7 @@ final class UIMessageView2: UIMessageView {
       return cached
     }
 
-    let baseSize: CGFloat = isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17
-    let baseFont = UIFont.systemFont(ofSize: baseSize)
-    let font = UIFontMetrics(forTextStyle: .body).scaledFont(
-      for: baseFont,
-      compatibleWith: traitCollection
-    )
+    let font = messageBodyFont
     let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
     let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)
     let attributed = ProcessEntities.toAttributedString(
@@ -1013,6 +1009,12 @@ final class UIMessageView2: UIMessageView {
       || bubbleNodeViews[NodeID.photo] != nil
       || bubbleNodeViews[NodeID.video] != nil
     let mediaOnlyChrome = hasFullBleedMedia && !message.hasText
+    let hasAcknowledgement = displayMode != .threadAnchor
+      && !fullMessage.acknowledgementActors.isEmpty
+    let acknowledgementSize: CGSize? = hasAcknowledgement
+      ? CGSize(width: fullMessage.acknowledgementPillWidth, height: 16)
+      : nil
+    let externalReactions = reactionsAreExternal(in: fullMessage)
     var flowNodes: [MessageMeasuredNodeV2] = []
     var belowBubbleNodes: [MessageMeasuredNodeV2] = []
     var overlayNodes: [MessageOverlayNodeV2] = []
@@ -1061,7 +1063,7 @@ final class UIMessageView2: UIMessageView {
         NodeID.reply,
         size: CGSize(
           width: min(200, max(1, maximumContentWidth - insets.leading - insets.trailing)),
-          height: EmbedMessageView.height
+          height: EmbedMessageView.height(compatibleWith: traitCollection)
         ),
         widthBehavior: .fill,
         insets: insets,
@@ -1109,10 +1111,25 @@ final class UIMessageView2: UIMessageView {
       1,
       min(maximumContentWidth, primaryMediaWidth ?? maximumContentWidth) - 24
     )
-    let textMeasurement: (size: CGSize, isSingleLine: Bool) = if let currentRichPlan {
+    var textMeasurement: (size: CGSize, isSingleLine: Bool) = if let currentRichPlan {
       (currentRichPlan.size, false)
     } else {
       measureText(attributedText, maximumWidth: plainTextMaximumWidth)
+    }
+    if isEmojiOnlyMessage, !floatingMetadataUsesExternalAccessoryRowV2 {
+      // Keep the emoji's existing size and reserve room for a larger timestamp.
+      let defaultHeight = MessageTimeAndStatus.measuredHeight(
+        compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
+      )
+      textMeasurement.size.height += max(
+        0, MessageTimeAndStatus.measuredHeight(compatibleWith: traitCollection) - defaultHeight
+      )
+      // Floating metadata has 6-point horizontal padding and a 4-point trailing inset.
+      textMeasurement.size.width = max(
+        textMeasurement.size.width,
+        MessageTimeAndStatus.measuredWidth(for: fullMessage, compatibleWith: traitCollection) + 16
+          + (hasAcknowledgement && !externalReactions ? (acknowledgementSize?.width ?? 0) + 5 : 0)
+      )
     }
     if bubbleNodeViews[NodeID.text] != nil {
       append(
@@ -1162,12 +1179,6 @@ final class UIMessageView2: UIMessageView {
     }
 
     let metadataSize = metadataView.intrinsicContentSize
-    let hasAcknowledgement = displayMode != .threadAnchor
-      && !fullMessage.acknowledgementActors.isEmpty
-    let acknowledgementSize: CGSize? = hasAcknowledgement
-      ? CGSize(width: fullMessage.acknowledgementPillWidth, height: 16)
-      : nil
-    let externalReactions = reactionsAreExternal(in: fullMessage)
     let footerMaximumWidth = max(1, maximumContentWidth - 24)
     let acknowledgementTrailingWidth = acknowledgementSize.map {
       externalReactions ? $0.width + 5 : metadataSize.width + 5 + $0.width + 5
