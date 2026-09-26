@@ -229,6 +229,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var centeredChats: Bool {
+    didSet {
+      UserDefaults.standard.set(centeredChats, forKey: "centeredChats")
+    }
+  }
+
   @Published var chatFontFamilies: String {
     didSet {
       Self.persistOptionalString(
@@ -465,6 +471,7 @@ final class AppSettings: ObservableObject {
     } else {
       messageRenderStyle = .bubble
     }
+    centeredChats = UserDefaults.standard.object(forKey: "centeredChats") as? Bool ?? true
     let chatTypographySource = ChatTypography.storedSource()
     chatFontFamilies = chatTypographySource.fontFamilies
     chatFontSize = chatTypographySource.fontSize

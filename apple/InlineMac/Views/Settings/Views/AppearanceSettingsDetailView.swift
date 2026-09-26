@@ -52,6 +52,17 @@ struct AppearanceSettingsDetailView: View {
 
       ToolbarSettingsSection(usesCompactToolbar: $appSettings.usesCompactToolbar)
 
+      Section {
+        Toggle(isOn: $appSettings.centeredChats) {
+          SettingsRowLabel(
+            "Centered Chats",
+            description: "Keep messages and the composer in a centered column. Turn off to use the full chat width."
+          )
+        }
+      } header: {
+        SettingsSectionHeader("Chat Layout")
+      }
+
       ChatTypographySettingsSection(settings: appSettings)
     }
     .settingsFormStyle()

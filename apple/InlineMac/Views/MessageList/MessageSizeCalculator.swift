@@ -239,10 +239,17 @@ class MessageSizeCalculator {
     case .minimal:
       Self.minimalHoverSideInset + Self.minimalHoverContentInset
     }
-    // The conversation column supplies the outer limit; reserve avatar and padding
-    // space, then let text use the remaining width in either message style.
+    // Centered chats use the column as their outer limit. Full-width chats keep
+    // the earlier per-message caps so text stays readable in a wide window.
     let reservedWidth = leadingSafeWidth + trailingSafeWidth + Self.extraSafeWidth
-    return max(0, ceiledWidth - reservedWidth)
+    let availableWidth = max(0, ceiledWidth - reservedWidth)
+    guard !AppSettings.shared.centeredChats else { return availableWidth }
+    switch style {
+    case .bubble:
+      return min(availableWidth, Self.maxMessageWidth)
+    case .minimal:
+      return min(availableWidth, Self.minimalMaxMessageWidth)
+    }
   }
 
   func getTextWidthIfSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> CGFloat? {

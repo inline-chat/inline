@@ -87,6 +87,7 @@ class ChatViewAppKit: NSViewController {
   private var appDidBecomeActiveObserver: NSObjectProtocol?
   private var mediaSendFailedObserver: NSObjectProtocol?
   private var chatItemCancellable: AnyCancellable?
+  private var centeredChatsCancellable: AnyCancellable?
   private var fetchChatTask: Task<Void, Never>?
   private var isDisposed = false
   private var didStartDeferredObservation = false
@@ -422,9 +423,17 @@ class ChatViewAppKit: NSViewController {
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
-    messageListVC_.setMaximumContentWidth(ChatLayoutMetrics.maximumWidth)
+    messageListVC_.setMaximumContentWidth(AppSettings.shared.centeredChats ? ChatLayoutMetrics.maximumWidth : nil)
 
     messageListVC = messageListVC_
+    centeredChatsCancellable = AppSettings.shared.$centeredChats
+      .removeDuplicates()
+      .dropFirst()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] centered in
+        guard let self, !isDisposed else { return }
+        messageListVC?.setMaximumContentWidth(centered ? ChatLayoutMetrics.maximumWidth : nil)
+      }
 
     // Compose
     let compose: ComposeAppKit
@@ -556,6 +565,8 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func clearCurrentViews() {
+    centeredChatsCancellable?.cancel()
+    centeredChatsCancellable = nil
     messageSelectionCoordinator?.dispose()
     messageSelectionCoordinator = nil
     // Remove any non-controller views

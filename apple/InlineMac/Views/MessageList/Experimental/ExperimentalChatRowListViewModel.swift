@@ -40,6 +40,7 @@ final class ExperimentalChatRowListViewModel {
     let id: Int64
     let props: MessageViewInputProps
     let width: CGFloat
+    let centeredChats: Bool
     let richContent: Bool
     let inlineMath: Bool
   }
@@ -57,6 +58,7 @@ final class ExperimentalChatRowListViewModel {
   ) -> Measurement {
     let key = PlanKey(
       id: message.id, props: props, width: width,
+      centeredChats: AppSettings.shared.centeredChats,
       richContent: AppSettings.shared.richContentRendererEnabled,
       inlineMath: AppSettings.shared.richTextInlineMathEnabled
     )
