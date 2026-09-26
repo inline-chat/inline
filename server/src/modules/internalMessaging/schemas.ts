@@ -38,6 +38,12 @@ const TransientPayload = Schema.Union([
 ])
 
 const TransientRealtime = Schema.Struct({ kind: Schema.Literal("TransientRealtime"), payload: TransientPayload })
+/** Encrypted server-only RealtimeDelivery protobuf, never a JSON content projection. */
+const RealtimeDelivery = Schema.Struct({
+  kind: Schema.Literal("RealtimeDelivery"),
+  partition: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(15)),
+  payload: Schema.String.check(Schema.isMaxLength(393216)),
+})
 const SessionRevoked = Schema.Struct({ kind: Schema.Literal("SessionRevoked"), userId: UserId, sessionId: SessionId })
 /** A committed Grid room change; receivers re-read and deliver only locally. */
 const GridChanged = Schema.Struct({
@@ -94,6 +100,7 @@ const Header = { version: Schema.Literal(1), eventId: Uuid, originBootId: Uuid }
 
 /** The union makes invalid event/target pairs unrepresentable at the service boundary. */
 export const InternalEnvelope = Schema.Union([
+  Schema.Struct({ ...Header, target: ClusterTarget, event: RealtimeDelivery }),
   Schema.Struct({ ...Header, target: ClusterTarget, event: DurableUpdatesAvailable }),
   Schema.Struct({ ...Header, target: UserTarget, event: TransientRealtime }),
   Schema.Struct({ ...Header, target: ClusterTarget, event: SessionRevoked }),

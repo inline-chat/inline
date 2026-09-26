@@ -1,3 +1,5 @@
+import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { testUtils } from "@in/server/__tests__/setup"
 import { ServerProtocolMessage } from "@inline-chat/protocol/core"
 import { closeDb } from "@in/server/db"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
@@ -26,6 +28,12 @@ const socket = {
       const message = ServerProtocolMessage.fromBinary(bytes)
       if (message.body.oneofKind === "message" && message.body.message.payload.oneofKind === "update") {
         for (const update of message.body.message.payload.update.updates) {
+          if (update.update.oneofKind === "newMessage" || update.update.oneofKind === "editMessage") {
+            const value = update.update.oneofKind === "newMessage" ? update.update.newMessage.message : update.update.editMessage.message
+            console.log(`INLINE_TEST:${JSON.stringify({ kind: "live", updateKind: update.update.oneofKind, chatId: String(value?.chatId), seq: update.seq, text: value?.message })}`)
+          } else if (update.update.oneofKind === "updateReaction" || update.update.oneofKind === "deleteReaction") {
+            console.log(`INLINE_TEST:${JSON.stringify({ kind: "live", updateKind: update.update.oneofKind, seq: 0 })}`)
+          }
           if (update.update.oneofKind === "chatHasNewUpdates") {
             console.log(`INLINE_TEST:${JSON.stringify({ kind: "chat", chatId: String(update.update.chatHasNewUpdates.chatId), seq: update.update.chatHasNewUpdates.updateSeq })}`)
           }
@@ -69,6 +77,12 @@ try {
   console.log("INLINE_TEST:READY")
   for await (const line of createInterface({ input: Readable.fromWeb(Bun.stdin.stream() as never) })) {
     if (line.trim() === "STOP") break
+    if (line.startsWith("SEND:")) {
+      const input = JSON.parse(line.slice(5)) as { chatId: number; text: string }
+      await sendMessage({ peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(input.chatId) } } }, message: input.text, randomId: 9898n },
+        testUtils.functionContext({ userId, sessionId }))
+      console.log("INLINE_TEST:SENT")
+    }
     if (line.trim() === "SCAN") connectedUserRepair.observe(userId)
     if (line.trim() === "REBUILD") {
       await connectionDirectory.rebuild()

@@ -3,19 +3,29 @@ import { generateKeyPairSync } from "node:crypto"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { startCoreProductionServer } from "./productionHost"
-import { makeIngressPolicy, ORIGIN_SECRET_HEADER } from "./ingress"
+import { makeIngressPolicy, ORIGIN_SECRET_HEADER, PROXY_SECRET_HEADER } from "./ingress"
 import { makeHttpKernelMiddlewareLayer } from "./middleware"
 
 // The server's DOM types mask Bun's documented client-header overload.
 const BunSocket = WebSocket as unknown as new (url: string, options: Bun.WebSocketOptions) => WebSocket
 
-test("the production listener gates HTTP, verification and both WebSocket upgrades", async () => {
+for (const [mode, proof] of [
+  ["cloudflare", "cloudflare"],
+  ["cloudflare-or-proxy", "cloudflare"],
+  ["cloudflare-or-proxy", "proxy"],
+] as const) {
+test(`the ${mode} listener with ${proof} proof gates HTTP, verification and both WebSocket upgrades`, async () => {
   const secret = "ab".repeat(32)
+  const proxySecret = "cd".repeat(32)
+  const clientIpHeader = mode === "cloudflare" ? "cf-connecting-ip" : "x-real-ip"
+  const proofHeader = proof === "cloudflare" ? ORIGIN_SECRET_HEADER : PROXY_SECRET_HEADER
+  const suppliedIpHeader = proof === "cloudflare" ? "cf-connecting-ip" : "x-real-ip"
   const ingressPolicy = makeIngressPolicy({
-    INLINE_INGRESS_MODE: "cloudflare",
+    INLINE_INGRESS_MODE: mode,
     INLINE_INGRESS_HOST: "api.example.test",
     INLINE_ORIGIN_SECRET: secret,
-  }, "cf-connecting-ip")!
+    ...(mode === "cloudflare-or-proxy" ? { INLINE_PROXY_SECRET: proxySecret } : {}),
+  }, clientIpHeader)!
   let ready = false
   let handled = 0
   const application = Layer.effectDiscard(HttpRouter.HttpRouter.use((router) =>
@@ -27,12 +37,12 @@ test("the production listener gates HTTP, verification and both WebSocket upgrad
           handled++
           return HttpServerResponse.jsonUnsafe({
             body,
-            ip: request.headers["cf-connecting-ip"],
-            secretPresent: ORIGIN_SECRET_HEADER in request.headers,
-            conflictingIpPresent: "x-real-ip" in request.headers,
+            ip: request.headers[clientIpHeader],
+            secretPresent: ORIGIN_SECRET_HEADER in request.headers || PROXY_SECRET_HEADER in request.headers,
+            conflictingIpPresent: (mode === "cloudflare" ? "x-real-ip" : "cf-connecting-ip") in request.headers,
           })
         })))),
-    ]))).pipe(Layer.provideMerge(makeHttpKernelMiddlewareLayer({ clientIpHeader: "cf-connecting-ip", isProduction: false })))
+    ]))).pipe(Layer.provideMerge(makeHttpKernelMiddlewareLayer({ clientIpHeader, isProduction: false })))
   const ring = { activeId: "test", keys: new Map([["test", new Uint8Array(32).fill(1)]]) }
   const rsaPrivateKeysJson = JSON.stringify(Array.from({ length: 2 }, () => ({
     privateKeyPem: generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }),
@@ -41,7 +51,7 @@ test("the production listener gates HTTP, verification and both WebSocket upgrad
     application,
     hostname: "127.0.0.1",
     ingressPolicy,
-    clientIpHeader: "cf-connecting-ip",
+    clientIpHeader,
     markShuttingDown: () => {},
     startClusterServices: false,
     inlineProtocolConfiguration: {
@@ -52,9 +62,10 @@ test("the production listener gates HTTP, verification and both WebSocket upgrad
   const base = `http://127.0.0.1:${handle.port}`
   const headers = {
     host: "api.example.test",
-    [ORIGIN_SECRET_HEADER]: secret,
-    "cf-connecting-ip": "2001:db8::42",
-    "x-real-ip": "192.0.2.1",
+    [proofHeader]: proof === "cloudflare" ? secret : proxySecret,
+    "cf-connecting-ip": "192.0.2.1",
+    "x-real-ip": "192.0.2.2",
+    [suppliedIpHeader]: "2001:db8::42",
   }
   try {
     expect((await fetch(`${base}/echo`, { method: "POST", body: "rejected" })).status).toBe(403)
@@ -74,7 +85,7 @@ test("the production listener gates HTTP, verification and both WebSocket upgrad
 
     for (const path of ["/realtime", "/realtime/v3"]) {
       const denied = await fetch(`${base}${path}`, { headers: {
-        ...headers, [ORIGIN_SECRET_HEADER]: "wrong", upgrade: "websocket", connection: "Upgrade",
+        ...headers, [proofHeader]: "wrong", upgrade: "websocket", connection: "Upgrade",
         "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
       } })
       expect(denied.status).toBe(403)
@@ -95,3 +106,4 @@ test("the production listener gates HTTP, verification and both WebSocket upgrad
     await handle.shutdown()
   }
 }, 15_000)
+}

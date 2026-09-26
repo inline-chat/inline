@@ -24,6 +24,7 @@ import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggrega
 import { db } from "@in/server/db"
 import { members, spaces, users } from "@in/server/db/schema"
 import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { liveRealtimeDelivery, observeLocalDelivery } from "@in/server/modules/internalMessaging/liveDelivery"
 
 const log = new Log("realtime")
 const MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY = 512
@@ -387,7 +388,12 @@ export const sendMessageToRealtimeUser = async (
   payload: ServerMessage["payload"],
   options?: { skipSessionId?: number },
 ): Promise<void> => {
-  await sendMessageToRealtimeUserWithDelivery(userId, payload, options)
+  const epoch = connectionManager.getUserConnectionEpoch(userId)
+  const accepted = await sendMessageToRealtimeUserWithDelivery(userId, payload, options)
+  if (payload.oneofKind === "update") {
+    observeLocalDelivery(userId, payload.update.updates, epoch, accepted, options?.skipSessionId)
+    liveRealtimeDelivery.toUser(userId, payload.update.updates, options?.skipSessionId)
+  }
 }
 
 /** Sends an ephemeral event only to connections authenticated as this bot. */
@@ -492,8 +498,12 @@ export const sendMessageToRealtimeSession = async (
  * index. The bounded batches also keep a large space from creating one
  * oversized `IN (...)` query.
  */
-export const sendMessageToRealtimeSpace = async (spaceId: number, payload: ServerMessage["payload"]) => {
-  const userIds = connectionManager.getSpaceUserIds(spaceId)
+export const sendMessageToRealtimeSpace = async (spaceId: number, payload: ServerMessage["payload"], controls?: {
+  candidateUserIds?: readonly number[]
+  shouldDeliver?: (userId: number) => boolean
+  onDelivered?: (userId: number, accepted: number) => void
+}) => {
+  const userIds = (controls?.candidateUserIds ?? connectionManager.getSpaceUserIds(spaceId)).filter((id) => controls?.shouldDeliver?.(id) ?? true)
   if (userIds.length === 0) return
   const deliveryErrors: unknown[] = []
   for (let offset = 0; offset < userIds.length; offset += MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY) {
@@ -511,7 +521,11 @@ export const sendMessageToRealtimeSpace = async (spaceId: number, payload: Serve
     for (let deliveryOffset = 0; deliveryOffset < authorized.length; deliveryOffset += MAX_CONCURRENT_SPACE_DELIVERIES) {
       const deliveries = await Promise.allSettled(authorized
         .slice(deliveryOffset, deliveryOffset + MAX_CONCURRENT_SPACE_DELIVERIES)
-        .map(({ userId }) => sendMessageToRealtimeUserWithDelivery(userId, payload)))
+        .map(async ({ userId }) => {
+          if (controls?.shouldDeliver && !controls.shouldDeliver(userId)) return
+          const accepted = await sendMessageToRealtimeUserWithDelivery(userId, payload)
+          controls?.onDelivered?.(userId, accepted)
+        }))
       for (const delivery of deliveries) {
         if (delivery.status === "rejected") deliveryErrors.push(delivery.reason)
       }
@@ -537,15 +551,17 @@ export class RealtimeUpdates {
 
   /** Ordinary callers intentionally do not observe frame acceptance. */
   static async pushToUser(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }): Promise<void> {
-    await this.pushToUserWithDelivery(userId, updates, options)
+    await sendMessageToRealtimeUser(userId, { oneofKind: "update", update: { updates } }, options)
   }
 
-  static pushToSpace(spaceId: number, updates: UpdatesPayload["updates"]) {
-    return sendMessageToRealtimeSpace(spaceId, {
+  static async pushToSpace(spaceId: number, updates: UpdatesPayload["updates"]) {
+    const epochs = new Map(connectionManager.getSpaceUserIds(spaceId).map((id) => [id, connectionManager.getUserConnectionEpoch(id)]))
+    await sendMessageToRealtimeSpace(spaceId, {
       oneofKind: "update",
       update: {
         updates: updates,
       },
-    })
+    }, { onDelivered: (userId, accepted) => observeLocalDelivery(userId, updates, epochs.get(userId) ?? -1, accepted) })
+    liveRealtimeDelivery.toSpace(spaceId, updates)
   }
 }

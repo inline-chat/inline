@@ -65,20 +65,22 @@ test("an empty fleet fails, and changed IDs, count or image cannot match the rec
 
 test("the reusable workflow publishing guard only accepts manual main dispatch", async () => {
   const workflow = Bun.YAML.parse(await Bun.file(resolve(import.meta.dir, "../../.github/workflows/server-test.yml")).text()) as {
-    jobs: { container: { steps: { name?: string; run?: string }[] } }
+    jobs: Record<string, { steps: { name?: string; run?: string }[] }>
   }
-  const guard = workflow.jobs.container.steps.find((step) => step.name === "Require manual main context when publishing")
-  expect(guard?.run).toBeDefined()
-  for (const [event, ref, allowed] of [
-    ["workflow_dispatch", "refs/heads/main", true],
-    ["push", "refs/heads/main", false],
-    ["pull_request", "refs/heads/main", false],
-    ["workflow_dispatch", "refs/heads/other", false],
-  ] as const) {
-    const result = Bun.spawnSync(["bash", "-e", "-c", guard!.run!], {
-      env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
-    })
-    expect(result.exitCode === 0, `${event} ${ref}`).toBe(allowed)
+  for (const job of ["container", "container-arm"]) {
+    const guard = workflow.jobs[job]?.steps.find((step) => step.name === "Require manual main context when publishing")
+    expect(guard?.run).toBeDefined()
+    for (const [event, ref, allowed] of [
+      ["workflow_dispatch", "refs/heads/main", true],
+      ["push", "refs/heads/main", false],
+      ["pull_request", "refs/heads/main", false],
+      ["workflow_dispatch", "refs/heads/other", false],
+    ] as const) {
+      const result = Bun.spawnSync(["bash", "-e", "-c", guard!.run!], {
+        env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
+      })
+      expect(result.exitCode === 0, `${job} ${event} ${ref}`).toBe(allowed)
+    }
   }
 })
 
@@ -294,21 +296,26 @@ test("readiness polling tolerates creation, requires the exact image, and has bo
   }
 }, 15_000)
 
-test("the publish-only summary records the exact SHA and digest and rejects a mutable image tag", async () => {
+test("the publish-only summary records both qualified image digests and rejects mutable tags", async () => {
   const workflow = await releaseWorkflow()
   const script = workflow.jobs.prepared?.steps?.[0]?.run
   if (!script) throw new Error("Missing prepared image summary")
   const directory = await mkdtemp(resolve(tmpdir(), "inline-prepared-image-"))
   const summaryPath = resolve(directory, "summary.md")
   const image = `registry.fly.io/inline-api@${digest}`
-  const execute = (runtimeImage: string) => Bun.spawnSync(["bash", "-e", "-c", script], {
-    env: { PATH: process.env.PATH, GITHUB_SHA: "a".repeat(40), RUNTIME_IMAGE: runtimeImage, GITHUB_STEP_SUMMARY: summaryPath },
+  const standbyImage = `registry.fly.io/inline-api@sha256:${"2".repeat(64)}`
+  const execute = (runtimeImage: string, standby = standbyImage) => Bun.spawnSync(["bash", "-e", "-c", script], {
+    env: { PATH: process.env.PATH, GITHUB_SHA: "a".repeat(40), RUNTIME_IMAGE: runtimeImage, STANDBY_IMAGE: standby, GITHUB_STEP_SUMMARY: summaryPath },
   })
   expect(execute(image).exitCode).toBe(0)
   const output = await Bun.file(summaryPath).text()
   expect(output).toContain("a".repeat(40))
   expect(output).toContain(image)
+  expect(output).toContain(standbyImage)
+  expect(output).toContain("No Hetzner deployment was performed")
   expect(output).toContain("migrations, and deployment were skipped")
   expect(execute("registry.fly.io/inline-api:latest").exitCode).not.toBe(0)
+  expect(execute(image, "registry.fly.io/inline-api:latest").exitCode).not.toBe(0)
+  expect(execute(image, "").exitCode).not.toBe(0)
   expect(await Bun.file(summaryPath).text()).toBe(output)
 })

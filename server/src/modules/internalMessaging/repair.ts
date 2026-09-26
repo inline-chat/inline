@@ -616,7 +616,12 @@ const floorDiscoveryWatermark = (watermark: Date): bigint => BigInt(Math.floor(w
  * getUpdatesState, so routine fanout cannot multiply account-wide discovery
  * work by the number of recipients on this process.
  */
-export async function deliverTargetedBucketHint(event: DurableUpdatesAvailableEvent): Promise<void> {
+export type TargetedRepairControls = {
+  shouldDeliver?: (userId: number) => boolean
+  onDelivered?: (userId: number, accepted: number) => void
+}
+
+export async function deliverTargetedBucketHint(event: DurableUpdatesAvailableEvent, controls?: TargetedRepairControls): Promise<void> {
   if (event.bucket.kind === "space") {
     // Keep this dynamic: websocket connection registration imports repair for
     // the periodic fallback, and a static repair -> realtime -> connections
@@ -635,6 +640,12 @@ export async function deliverTargetedBucketHint(event: DurableUpdatesAvailableEv
           },
         }],
       },
+    }, {
+      ...controls,
+      // An access grant from another process can commit while its Redis cache
+      // invalidation is unavailable. The Space index is then incomplete, so
+      // repair must authorize all locally connected users in bounded batches.
+      candidateUserIds: connectionManager.getAuthenticatedUserIds(),
     })
     return
   }
@@ -654,9 +665,11 @@ export async function deliverTargetedBucketHint(event: DurableUpdatesAvailableEv
 
   for (let offset = 0; offset < candidateUserIds.length; offset += MAX_TARGETED_RECIPIENTS_PER_QUERY) {
     const candidates = candidateUserIds.slice(offset, offset + MAX_TARGETED_RECIPIENTS_PER_QUERY)
+      .filter((userId) => controls?.shouldDeliver?.(userId) !== false)
+    if (candidates.length === 0) continue
     const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: candidates })
     const recipients = access.get(chat.id) ?? new Set<number>()
-    await deliverChatHintBatch(chat, recipients, event)
+    await deliverChatHintBatch(chat, recipients, event, controls)
   }
 }
 
@@ -676,6 +689,7 @@ export const deliverChatHintBatch = async (
   chat: typeof chats.$inferSelect,
   recipients: ReadonlySet<number>,
   event: DurableUpdatesAvailableEvent,
+  controls?: TargetedRepairControls,
 ): Promise<void> => {
   const { RealtimeUpdates } = await import("@in/server/realtime/message")
   const userIds = Array.from(recipients)
@@ -687,6 +701,7 @@ export const deliverChatHintBatch = async (
     // and a transient socket failure does not prevent later recipients from
     // receiving their independent best-effort signal.
     const results = await Promise.allSettled(batch.map(async (userId) => {
+      if (controls?.shouldDeliver?.(userId) === false) return
       const update: Update = {
         update: {
           oneofKind: "chatHasNewUpdates",
@@ -700,11 +715,12 @@ export const deliverChatHintBatch = async (
       const skipSessionId = event.senderUserId === userId && event.excludeSessionId !== undefined
         ? event.excludeSessionId
         : undefined
-      await RealtimeUpdates.pushToUserWithDelivery(
+      const accepted = await RealtimeUpdates.pushToUserWithDelivery(
         userId,
         [update],
         skipSessionId === undefined ? undefined : { skipSessionId },
       )
+      controls?.onDelivered?.(userId, accepted)
     }))
     for (const result of results) {
       if (result.status === "rejected") failures.push(result.reason)

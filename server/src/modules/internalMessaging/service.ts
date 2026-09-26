@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { Log } from "@in/server/utils/log"
 import { InternalRedisTransport, type BrokerHealth, type BrokerPublication } from "./redis"
 import { decodeEnvelope, encodeEnvelope, InternalEnvelope, type InternalEvent } from "./schemas"
+import { distributedRealtimeConfig } from "./config"
 
 type Delivery = InternalEnvelope extends infer T
   ? T extends InternalEnvelope ? Pick<T, "target" | "event"> : never
@@ -27,6 +28,8 @@ type InboundTask = {
   readonly lane: "normal" | "private" | "revocation"
   readonly durableBucketKey?: string
   readonly revocationKey?: string
+  readonly realtimeOrigin?: string
+  readonly bytes: number
 }
 type DurableBucketState = {
   active?: InboundTask
@@ -78,6 +81,8 @@ export class InternalMessagingService {
   /** A revocation is idempotent; retain one task per authenticated session. */
   private readonly revocationsBySession = new Map<string, InboundTask>()
   private readonly activeInbound = new Set<Promise<void>>()
+  private readonly activeRealtimeOrigins = new Set<string>()
+  private inboundBytes = 0
   private readonly inboundIdleWaiters = new Set<() => void>()
   private invalidFrames = 0
   private droppedFrames = 0
@@ -98,7 +103,7 @@ export class InternalMessagingService {
   private startPromise: Promise<void> | undefined
   private lastRevocationSaturationWarningAt = 0
 
-  constructor(url: string | undefined = process.env["REDIS_URL"] ?? process.env["VALKEY_URL"]) {
+  constructor(url: string | undefined = distributedRealtimeConfig().url) {
     this.url = url
     this.transport = new InternalRedisTransport(url)
     this.attachTransportObservers()
@@ -114,6 +119,7 @@ export class InternalMessagingService {
       droppedRevocationEvents: this.droppedRevocationEvents,
       coalescedRevocationEvents: this.coalescedRevocationEvents,
       inboundActive: this.inboundActiveCount,
+      inboundBytes: this.inboundBytes,
       inboundPriorityActive: this.inboundPriorityActiveCount,
       inboundRevocationActive: this.inboundRevocationActiveCount,
       inboundPrivateActive: this.inboundPrivateActiveCount,
@@ -206,9 +212,9 @@ export class InternalMessagingService {
     return () => handlers?.delete(callback)
   }
 
-  async publish(input: Delivery): Promise<BrokerPublication> {
+  async publish(input: Delivery, eventId = randomUUID()): Promise<BrokerPublication> {
     const envelope = {
-      version: 1, eventId: randomUUID(), originBootId: this.bootId, ...input,
+      version: 1, eventId, originBootId: this.bootId, ...input,
     } as InternalEnvelope
     const channel = envelope.target.kind === "connection" || envelope.target.kind === "session"
       ? inboxChannel(envelope.target.bootId)
@@ -320,6 +326,7 @@ export class InternalMessagingService {
     this.inboundRevocations.length = 0
     this.inboundTargeted.length = 0
     this.inboundNormal.length = 0
+    this.inboundBytes = 0
     this.durableBuckets.clear()
     this.revocationsBySession.clear()
     this.notifyInboundIdle()
@@ -394,6 +401,8 @@ export class InternalMessagingService {
       lane: this.inboundLane(envelope),
       durableBucketKey: this.durableBucketKey(envelope),
       revocationKey: this.revocationKey(envelope),
+      realtimeOrigin: envelope.event.kind === "RealtimeDelivery" ? `${envelope.originBootId}:${envelope.event.partition}` : undefined,
+      bytes: Buffer.byteLength(frame),
     })
   }
 
@@ -419,6 +428,12 @@ export class InternalMessagingService {
 
   private enqueueInbound(task: InboundTask): void {
     if (!this.inboundAccepting || task.generation !== this.inboundGeneration) {
+      this.droppedInboundEvents++
+      return
+    }
+    // Count as well as byte limits matter once ordinary events carry content.
+    // Priority lanes keep their existing reserved capacity.
+    if (task.lane === "normal" && this.inboundBytes + task.bytes > 8 * 1024 * 1024) {
       this.droppedInboundEvents++
       return
     }
@@ -460,6 +475,7 @@ export class InternalMessagingService {
       }
       this.inboundNormal.push(task)
     }
+    this.inboundBytes += task.bytes
     this.pumpInbound()
   }
 
@@ -523,6 +539,8 @@ export class InternalMessagingService {
     while (this.inboundAccepting) {
       const task = this.nextInboundTask()
       if (!task) return
+      this.inboundBytes -= task.bytes
+      if (task.realtimeOrigin) this.activeRealtimeOrigins.add(task.realtimeOrigin)
       if (task.durableBucketKey) {
         const state = this.durableBuckets.get(task.durableBucketKey)
         if (state?.pending === task) {
@@ -550,8 +568,9 @@ export class InternalMessagingService {
       this.inboundActiveCount < maxConcurrentInboundEvents) {
       // A durable successor waits for the previous event from its bucket, but
       // a blocked bucket cannot head-of-line block unrelated buckets.
-      const index = this.inboundNormal.findIndex((candidate) => !candidate.durableBucketKey ||
-        !this.durableBuckets.get(candidate.durableBucketKey)?.active)
+      const index = this.inboundNormal.findIndex((candidate) =>
+        (!candidate.realtimeOrigin || !this.activeRealtimeOrigins.has(candidate.realtimeOrigin)) &&
+        (!candidate.durableBucketKey || !this.durableBuckets.get(candidate.durableBucketKey)?.active))
       return index < 0 ? undefined : this.inboundNormal.splice(index, 1)[0]
     }
     return undefined
@@ -568,6 +587,7 @@ export class InternalMessagingService {
     let tracked: Promise<void>
     tracked = this.runInboundTask(task).finally(() => {
       this.activeInbound.delete(tracked)
+      if (task.realtimeOrigin) this.activeRealtimeOrigins.delete(task.realtimeOrigin)
       this.inboundActiveCount--
       if (task.lane === "normal") this.inboundNormalActiveCount--
       else {

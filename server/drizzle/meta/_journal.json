@@ -1065,6 +1065,13 @@
       "when": 1790193451066,
       "tag": "0151_insights-query-indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1790392618081,
+      "tag": "0152_recent-realtime-buckets",
+      "breakpoints": true
     }
   ]
 }

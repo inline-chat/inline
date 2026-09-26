@@ -45,6 +45,8 @@ import { internalMessaging } from "../../modules/internalMessaging/service"
 import { outboundPublications } from "../../modules/internalMessaging/outbound"
 import { connectionDirectory } from "../../modules/internalMessaging/directory"
 import { connectedUserRepair } from "../../modules/internalMessaging/repair"
+import { recentRealtimeRepair } from "../../modules/internalMessaging/recentRepair"
+import { liveRealtimeDelivery } from "../../modules/internalMessaging/liveDelivery"
 import { subscribeBotPresenceHints } from "../../modules/botPresence/cluster"
 import { subscribeGridCredentialHints } from "../../functions/grid"
 import { subscribeGridChangeHints } from "../../modules/grid/realtime"
@@ -585,7 +587,8 @@ export const startCoreProductionServer = async <
     if (startClusterServices) {
       connectionDirectory.resume()
       unsubscribeDurable = internalMessaging.on("DurableUpdatesAvailable", ({ event }) =>
-        connectedUserRepair.observeBucket(event))
+        recentRealtimeRepair.observeBucket(event))
+      liveRealtimeDelivery.start()
       unsubscribeRevocations = internalMessaging.on("SessionRevoked", ({ event }) => {
         sessionAuthority.invalidate({
           userId: event.userId,
@@ -610,6 +613,7 @@ export const startCoreProductionServer = async <
       })
       await connectedUserRepair.start()
       await internalMessaging.start()
+      recentRealtimeRepair.start()
     }
 
     if (startBackgroundProcesses) {
@@ -671,6 +675,8 @@ export const startCoreProductionServer = async <
     await applicationBackgroundWork.waitForIdle()
     await waitForPostCommitHooks()
     await outboundPublications.stop()
+    await liveRealtimeDelivery.stop()
+    await recentRealtimeRepair.stop()
     if (startClusterServices) {
       await connectedUserRepair.stop()
       await connectionDirectory.shutdown()
@@ -742,10 +748,11 @@ export const startCoreProductionServer = async <
           unsubscribeRepairContinuity()
           const incomingStopped = startClusterServices ? internalMessaging.stopIncoming() : Promise.resolve()
           const repairStopped = startClusterServices ? connectedUserRepair.stop() : Promise.resolve()
+          const recentRepairStopped = recentRealtimeRepair.stop()
           const botPresenceStopped = unsubscribeBotPresence()
           shutdownStage = "background producer stop"
           await stopBackgroundProducers()
-          await Promise.all([authorityStopped, incomingStopped, repairStopped, botPresenceStopped])
+          await Promise.all([authorityStopped, incomingStopped, repairStopped, recentRepairStopped, botPresenceStopped])
           // V3 admission deliberately starts membership and client-type reads
           // outside its protocol callback. Bun may deliver a socket's close
           // callback after the transport has finished draining, so close the
@@ -763,6 +770,7 @@ export const startCoreProductionServer = async <
           await waitForPostCommitHooks()
           shutdownStage = "outbound publication drain"
           await outboundPublications.stop()
+          await liveRealtimeDelivery.stop()
           if (startClusterServices) await connectionDirectory.shutdown()
           unsubscribeDurable()
           unsubscribeRevocations()
