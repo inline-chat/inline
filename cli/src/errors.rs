@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal};
 
+use inline_agent_bridge::ProcessHostError;
 use inline_sdk::api::ApiError;
 use inline_sdk::realtime::RealtimeError;
 
@@ -423,6 +424,22 @@ pub(crate) fn json_cli_error_from_error(error: &(dyn std::error::Error + 'static
         return payload;
     }
 
+    if let Some(host_error) = error.downcast_ref::<ProcessHostError>() {
+        let (code, hint) = match host_error {
+            ProcessHostError::ProviderExited(_) => (
+                "provider_child_exit",
+                "The local agent process exited unsuccessfully. Inspect the bridge logs for the provider's startup or shutdown reason.",
+            ),
+            ProcessHostError::Io(_) => (
+                "provider_host_io",
+                "The provider supervisor encountered a local I/O error. Inspect the bridge logs and local process state.",
+            ),
+        };
+        let mut payload = JsonCliError::new(code, host_error.to_string());
+        payload.hint = Some(hint.into());
+        return payload;
+    }
+
     if let Some(api_error) = error.downcast_ref::<ApiError>() {
         return json_cli_error_from_api_error(api_error);
     }
@@ -820,6 +837,22 @@ mod tests {
                 .as_deref()
                 .is_some_and(|hint| hint.contains("deadline"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_child_exit_is_not_reported_as_file_io() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let child = ProcessHostError::ProviderExited(std::process::ExitStatus::from_raw(1 << 8));
+        let payload = json_cli_error_from_error(&child);
+        assert_eq!(payload.code, "provider_child_exit");
+        assert!(payload.message.contains("exit status: 1"));
+        assert!(payload.hint.unwrap().contains("bridge logs"));
+
+        let host = ProcessHostError::Io(io::Error::other("lock failed"));
+        let payload = json_cli_error_from_error(&host);
+        assert_eq!(payload.code, "provider_host_io");
     }
 
     #[test]

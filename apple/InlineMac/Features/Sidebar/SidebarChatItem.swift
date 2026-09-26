@@ -776,7 +776,7 @@ private struct SidebarComposeActivityPreview: View {
       } else {
         Text(preview)
           .font(font)
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(Color(nsColor: Theme.sidebarPreviewTextColor))
           .lineLimit(1)
           .id("preview")
           .transition(Self.swapTransition)

@@ -47,7 +47,9 @@ pub use presentation::{
     sanitize_diagnostic_text, sanitize_visible_command, sanitize_visible_transcript,
     semantic_activity_title,
 };
-pub use process_host::{ProcessHostConfig, reap_stale_process_host, run_process_host};
+pub use process_host::{
+    ProcessHostConfig, ProcessHostError, reap_stale_process_host, run_process_host,
+};
 pub use session::{
     PreparedSessionThread, ProviderSessionManager, ProviderWorkLease, SessionManagerError,
     SessionOpenOutcome,

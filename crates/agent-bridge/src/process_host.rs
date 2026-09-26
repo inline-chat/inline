@@ -11,6 +11,15 @@ use std::time::Duration;
 pub struct ProcessHostConfig {
     pub executable: PathBuf,
     pub lock_file: PathBuf,
+    pub provider_id: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessHostError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("provider exited with {0}")]
+    ProviderExited(std::process::ExitStatus),
 }
 
 #[cfg(unix)]
@@ -240,7 +249,7 @@ fn supervise_provider_process(
 /// real provider gets its own process group and closes the lock on `exec`, so
 /// descendants cannot extend or transfer the bridge's ownership proof.
 #[cfg(unix)]
-pub fn run_process_host(lock_file: &Path, command: &[OsString]) -> io::Result<()> {
+pub fn run_process_host(lock_file: &Path, command: &[OsString]) -> Result<(), ProcessHostError> {
     use std::os::unix::process::CommandExt;
 
     let (program, arguments) = command
@@ -253,14 +262,16 @@ pub fn run_process_host(lock_file: &Path, command: &[OsString]) -> io::Result<()
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "provider process host must own its process group",
-        ));
+        )
+        .into());
     }
     let mut lock = open_lock_file(lock_file)?;
     if !try_lock(&lock)? {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             "provider process host is already active",
-        ));
+        )
+        .into());
     }
     install_process_host_signal_handlers()?;
     lock.set_len(0)?;
@@ -282,16 +293,17 @@ pub fn run_process_host(lock_file: &Path, command: &[OsString]) -> io::Result<()
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("provider exited with {status}")))
+        Err(ProcessHostError::ProviderExited(status))
     }
 }
 
 #[cfg(not(unix))]
-pub fn run_process_host(_lock_file: &Path, _command: &[OsString]) -> io::Result<()> {
+pub fn run_process_host(_lock_file: &Path, _command: &[OsString]) -> Result<(), ProcessHostError> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "provider process hosting requires Unix",
-    ))
+    )
+    .into())
 }
 
 #[cfg(all(test, unix))]

@@ -1833,6 +1833,7 @@ actor Sync {
     while true {
       let attempt = retryAttempt + 1
       let attemptStartedAt = Date()
+      var requestFailureReason: SyncRequestFailureReason?
       let span = PerformanceTrace.begin(
         "SyncGetUpdatesState",
         category: .sync,
@@ -1862,11 +1863,17 @@ actor Sync {
         // wire-ordered account event has been processed by the account collector.
         // Therefore all hints caused by this request are registered before the
         // result is allowed to stage its global checkpoint.
-        let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
-          if !isFreshCheckpoint {
-            $0.date = state.lastSyncDate
-          }
-        }), timeout: Self.getUpdatesStateTimeout)
+        let result: InlineProtocol.RpcResult.OneOf_Result?
+        do {
+          result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
+            if !isFreshCheckpoint {
+              $0.date = state.lastSyncDate
+            }
+          }), timeout: Self.getUpdatesStateTimeout)
+        } catch {
+          requestFailureReason = SyncRequestFailureReason(error)
+          throw error
+        }
         guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
         guard case let .getUpdatesState(payload) = result else {
           throw StateFetchAttemptError.invalidResponse
@@ -2125,9 +2132,12 @@ actor Sync {
         PerformanceTrace.breadcrumb(
           "sync state check completed",
           category: "sync.lifecycle",
+          // This is discovery completion; exact bucket targets may still hold
+          // the global checkpoint behind this pass.
           data: [
             "attempt": attempt,
             "duration_ms": PerformanceTrace.elapsedMilliseconds(since: totalStartedAt),
+            "success": true,
           ]
         )
         return
@@ -2143,8 +2153,23 @@ actor Sync {
           // Keep retries visible locally without creating a second issue group.
           log.warning("fresh account bootstrap will retry after repair failure")
         } else {
-          log.error("failed to get updates state", error: error)
+          let reportedError: Error
+          // Preserve Logger's existing cancellation and URL-error suppression.
+          let hasExistingSuppression = error is CancellationError ||
+            (error as NSError).domain == NSURLErrorDomain
+          if let requestFailureReason, !hasExistingSuppression {
+            reportedError = SyncStateRequestFailure(reason: requestFailureReason)
+          } else {
+            reportedError = error
+          }
+          log.error("failed to get updates state", error: reportedError)
         }
+        PerformanceTrace.breadcrumb(
+          "sync state check scheduled retry",
+          category: "sync.lifecycle",
+          level: .warning,
+          data: ["attempt": attempt, "success": false]
+        )
         let delay = getUpdatesStateRetryDelay(
           attempt: retryAttempt,
           rateLimited: isRateLimitError(error)
@@ -3563,34 +3588,6 @@ actor BucketActor {
     }
 
     completed = finishedWithoutRetry
-    if completed {
-      PerformanceTrace.breadcrumb(
-        "sync bucket fetch completed",
-        category: "sync.catchup",
-        data: [
-          "bucket": key.traceKind,
-          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
-          "seq": seq,
-        ]
-      )
-    } else {
-      PerformanceTrace.breadcrumb(
-        "sync bucket fetch scheduled retry",
-        category: "sync.catchup",
-        level: .warning,
-        data: [
-          "bucket": key.traceKind,
-          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
-        ]
-      )
-    }
-    if scheduleBackgroundFollowUp, !isInvalidated {
-      Task { await self.fetchNewUpdates() }
-    }
-
-    // Keep the keyed lease through retry sleep, authoritative repair, and any
-    // higher-target follow-up. It ends only once this bucket has no unresolved
-    // target or buffered gap (or has been retired as inaccessible).
     let hasOutstandingFetchTarget = fetchSeqEnd.map { $0 > seq } ?? false
     let remainsActive = !isInvalidated && (
       pendingUserRepair != nil ||
@@ -3601,6 +3598,40 @@ actor BucketActor {
       retryTask != nil ||
       scheduleBackgroundFollowUp
     )
+    if completed {
+      PerformanceTrace.breadcrumb(
+        "sync bucket fetch completed",
+        category: "sync.catchup",
+        // Success means this bucket has no unresolved local demand now; it
+        // does not assert the global discovery checkpoint has committed.
+        data: [
+          "bucket": key.traceKind,
+          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
+          "seq": seq,
+          "success": !remainsActive,
+          "outstanding": remainsActive ? 1 : 0,
+        ]
+      )
+    } else {
+      PerformanceTrace.breadcrumb(
+        "sync bucket fetch scheduled retry",
+        category: "sync.catchup",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
+          "success": false,
+          "outstanding": 1,
+        ]
+      )
+    }
+    if scheduleBackgroundFollowUp, !isInvalidated {
+      Task { await self.fetchNewUpdates() }
+    }
+
+    // Keep the keyed lease through retry sleep, authoritative repair, and any
+    // higher-target follow-up. It ends only once this bucket has no unresolved
+    // target or buffered gap (or has been retired as inaccessible).
     if !remainsActive, holdsActivityLease {
       holdsActivityLease = false
       await sync.bucketFetchActivityEnded(for: key)
@@ -4030,7 +4061,8 @@ actor BucketActor {
         retryUsesRateLimitDelay = true
       }
       await sync.recordBucketFetchFailure()
-      resultLabel = retryUsesRateLimitDelay ? "rate_limited" : "request_failed"
+      resultLabel = retryUsesRateLimitDelay
+        ? "rate_limited" : "request_failed:\(SyncRequestFailureReason(error).rawValue)"
       return false
     }
   }

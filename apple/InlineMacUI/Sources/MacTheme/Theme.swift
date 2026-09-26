@@ -194,6 +194,10 @@ public enum Theme {
   public static let sidebarItemUnreadDotLeadingSpacing: CGFloat =
     (Theme.sidebarItemInnerSpacing - Theme.sidebarItemUnreadDotSize) / 2
   public static let sidebarNativeDefaultEdgeInsets: CGFloat = 16.0
+  /// Resolve before applying opacity so previews stay legible in vibrant appearances.
+  public static let sidebarPreviewTextColor: NSColor = .init(name: nil) { appearance in
+    NSColor.labelColor.resolvedColor(with: appearance).withAlphaComponent(0.70)
+  }
 
   // MARK: - Message View
 

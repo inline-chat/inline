@@ -4,7 +4,7 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::errors::JsonCliError;
-use inline_agent_bridge::StoreError;
+use inline_agent_bridge::{ProcessHostError, StoreError};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_RUNTIME_MESSAGE: &str = "Inline CLI bridge runtime failed";
@@ -85,6 +85,7 @@ pub(crate) fn report(
     target: Option<&str>,
     phase: Option<&str>,
     command: Option<&str>,
+    failure: Option<&str>,
 ) {
     if matches!(
         error.code.as_str(),
@@ -109,13 +110,42 @@ pub(crate) fn report(
     if let Some(command) = command {
         event.tags.insert("command".into(), safe_code(command));
     }
-    if let Some(failure) = command_failure_kind(error) {
-        event.tags.insert("failure".into(), failure.into());
+    if let Some(failure) = failure.or_else(|| command_failure_kind(error)) {
+        event.tags.insert("failure".into(), safe_code(failure));
     }
     event
         .extra
         .insert("failure_text".into(), command_failure_text(error).into());
     sentry::capture_event(event);
+}
+
+pub(crate) fn provider_host_target(provider_id: &str) -> &'static str {
+    match provider_id {
+        "codex" => "codex",
+        "claude" => "claude",
+        "opencode" => "opencode",
+        "amp" => "amp",
+        _ => "unknown",
+    }
+}
+
+pub(crate) fn process_host_failure_code(error: &ProcessHostError) -> String {
+    match error {
+        ProcessHostError::Io(_) => "host_io".into(),
+        ProcessHostError::ProviderExited(status) => {
+            if let Some(code) = status.code().filter(|code| (0..=255).contains(code)) {
+                return format!("exit_{code}");
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                if let Some(signal) = status.signal().filter(|signal| (1..=64).contains(signal)) {
+                    return format!("signal_{signal}");
+                }
+            }
+            "exit_unknown".into()
+        }
+    }
 }
 
 fn command_failure_kind(error: &JsonCliError) -> Option<&'static str> {
@@ -447,7 +477,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         ]
         .into()
     } else {
-        vec![
+        let mut fingerprint = vec![
             "inline-cli".into(),
             safe.tags.get("command").cloned().unwrap_or_default().into(),
             safe.tags
@@ -457,8 +487,15 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
                 .into(),
             safe.tags.get("target").cloned().unwrap_or_default().into(),
             safe.tags.get("phase").cloned().unwrap_or_default().into(),
-        ]
-        .into()
+        ];
+        if safe
+            .tags
+            .get("command")
+            .is_some_and(|command| command == "bridge_provider_host")
+        {
+            fingerprint.push(safe.tags.get("failure").cloned().unwrap_or_default().into());
+        }
+        fingerprint.into()
     };
     safe
 }
@@ -503,6 +540,50 @@ mod tests {
         assert_eq!(command_failure_kind(&error), None);
         error.message = "private provider details".into();
         assert_eq!(command_failure_kind(&error), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_host_exit_metadata_is_typed_and_allowlisted() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let exited = ProcessHostError::ProviderExited(std::process::ExitStatus::from_raw(1 << 8));
+        let signaled =
+            ProcessHostError::ProviderExited(std::process::ExitStatus::from_raw(libc::SIGTERM));
+        let io = ProcessHostError::Io(std::io::Error::other("private /Users/example/path"));
+        assert_eq!(process_host_failure_code(&exited), "exit_1");
+        assert_eq!(process_host_failure_code(&signaled), "signal_15");
+        assert_eq!(process_host_failure_code(&io), "host_io");
+        assert_eq!(provider_host_target("claude"), "claude");
+        assert_eq!(provider_host_target("private-provider-name"), "unknown");
+
+        let mut event = sentry::protocol::Event::default();
+        event
+            .tags
+            .insert("command".into(), "bridge_provider_host".into());
+        event
+            .tags
+            .insert("error_code".into(), "provider_child_exit".into());
+        event
+            .tags
+            .insert("target".into(), provider_host_target("claude").into());
+        event
+            .tags
+            .insert("failure".into(), process_host_failure_code(&exited));
+        let safe = allowlisted_event(event);
+        assert_eq!(safe.tags.get("target").map(String::as_str), Some("claude"));
+        assert_eq!(safe.tags.get("failure").map(String::as_str), Some("exit_1"));
+        assert_eq!(
+            safe.fingerprint,
+            vec![
+                "inline-cli",
+                "bridge_provider_host",
+                "provider_child_exit",
+                "claude",
+                "",
+                "exit_1",
+            ]
+        );
     }
 
     #[test]

@@ -3089,7 +3089,7 @@ private final class SidebarNativeComposeActivityView: NSView {
     addSubview(indicatorView)
     addSubview(label)
     label.font = .systemFont(ofSize: 11)
-    label.textColor = .tertiaryLabelColor
+    label.textColor = Theme.sidebarPreviewTextColor
     setAccessibilityElement(false)
     setAccessibilityHidden(true)
   }
@@ -3160,7 +3160,7 @@ private final class SidebarNativeComposeActivityView: NSView {
     switch mode {
     case .text:
       label.stringValue = supported?.text ?? preview
-      label.textColor = supported == nil ? .tertiaryLabelColor : Theme.accentColor
+      label.textColor = supported == nil ? Theme.sidebarPreviewTextColor : Theme.accentColor
       label.isHidden = false
     case .indicator:
       label.stringValue = ""

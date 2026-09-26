@@ -704,7 +704,7 @@ fn report_setup_failure_for_target(
             None
         }
     };
-    crate::telemetry::report(&payload, target_id, Some(phase), Some("agents_setup"));
+    crate::telemetry::report(&payload, target_id, Some(phase), Some("agents_setup"), None);
     let retry = progress.retry.clone();
     let status = if may_have_mutated || !changes.is_empty() {
         "partial"
