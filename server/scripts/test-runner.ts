@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { availableParallelism } from "node:os"
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
@@ -88,6 +88,19 @@ const batches = [false, true].flatMap((usesDatabase) => {
     files.slice(index * batchSize, (index + 1) * batchSize),
   )
 })
+const runManifest = reportDir ? resolve(reportDir, "run.json") : undefined
+const batchResults = batches.map((batch, index) => ({
+  report: `${reportLane}-${String(index + 1).padStart(3, "0")}.xml`,
+  files: batch.map((file) => file.path),
+  exitCode: null as number | null,
+}))
+const writeManifest = (status: "running" | "complete") => {
+  if (!runManifest) return
+  writeFileSync(runManifest, JSON.stringify({
+    lane: reportLane, status, selected: selected.map((file) => file.path), batches: batchResults,
+  }, null, 2) + "\n")
+}
+writeManifest("running")
 if (batches.length > 1 && forwarded.some((flag) => /^--(?:reporter-outfile|timings|coverage-dir)(?:=|$)/.test(flag))) {
   throw new Error("Use --report-dir for a multi-batch run so reports cannot overwrite one another.")
 }
@@ -126,10 +139,13 @@ try {
         stdin: "inherit", stdout: "inherit", stderr: "inherit",
       })
       const batchExit = await child.exited
+      batchResults[index]!.exitCode = batchExit
+      writeManifest("running")
       if (batchExit !== 0) exitCode = batchExit
     }
   }
 } finally {
+  writeManifest("complete")
   await template?.dispose()
   process.off("SIGINT", onInterrupt)
   process.off("SIGTERM", onTerminate)

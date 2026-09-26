@@ -1,0 +1,11 @@
+{
+  "requiredFiles": [
+    "src/__tests__/bot-api.test.ts",
+    "src/db/connectionPolicy.integration.test.ts",
+    "src/modules/internalMessaging/redis.integration.test.ts",
+    "src/modules/internalMessaging/redis.lifecycle.test.ts",
+    "src/modules/internalMessaging/redis.restart.test.ts",
+    "src/modules/internalMessaging/twoProcess.test.ts"
+  ],
+  "allowedSkips": []
+}

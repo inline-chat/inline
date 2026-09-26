@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync, readFileSync, rmdi
 import { basename, dirname, resolve } from "path";
 import { createInterface } from "node:readline";
 import { readBuiltAppMetadata, readDmgAppMetadata, metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
+import { getR2Context } from "./release-direct";
 import {
   macosReleaseSourceStatusLines,
   macosSourceSnapshotPathsFromManifest,
@@ -600,6 +601,20 @@ export function nextTipArtifactBuild(baseBuild: string, appcastXml: string | und
   return String(next);
 }
 
+export async function firstVacantTipBuild(
+  candidate: string,
+  exists: (build: string) => Promise<boolean>,
+): Promise<string> {
+  let build = Number.parseInt(candidate, 10);
+  if (!Number.isSafeInteger(build) || build < 1 || build > 2_147_483_647) {
+    throw new Error(`Invalid candidate tip build: ${candidate}`);
+  }
+  for (let checked = 0; checked < 100 && build <= 2_147_483_647; checked++, build++) {
+    if (!await exists(String(build))) return String(build);
+  }
+  throw new Error("Unable to allocate an unoccupied tip DMG build in the next 100 numbers.");
+}
+
 export function safeResumeTask(taskId: string, operation: "release" | "rollback" | "drop-build"): string {
   if (operation !== "release") return taskId === "preflight" ? "preflight" : "fetch-appcast";
   if (["upload-dmg", "verify-dmg", "gen-appcast", "validate-appcast", "upload-appcast", "github"].includes(taskId)) {
@@ -769,6 +784,26 @@ function assertFrozenSource(ctx: ReleaseContext): void {
   const currentBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
   if (currentCommit !== ctx.sourceCommit || currentBuild !== ctx.sourceBuild) {
     throw new Error(`Source changed during release. Frozen ${ctx.sourceCommit} (build ${ctx.sourceBuild}); current ${currentCommit || "unknown"} (build ${currentBuild || "unknown"}).`);
+  }
+}
+
+function assertNightlyMainStillSelected(ctx: ReleaseContext): void {
+  const expected = process.env.INLINE_NIGHTLY_MAIN_SHA;
+  if (!expected) return;
+  if (ctx.channel !== "tip" || ctx.experimentalTip || ctx.sourceCommit !== expected) {
+    throw new Error("Nightly release source does not match the selected green main commit.");
+  }
+  const current = git(ctx.rootDir, ["ls-remote", "origin", "refs/heads/main"]).split(/\s+/)[0];
+  if (current !== expected) {
+    throw new Error(`main advanced during the nightly release: selected ${expected}, current ${current || "unavailable"}.`);
+  }
+  const qualification = spawnSync({
+    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (qualification.exitCode !== 0) {
+    throw new Error("The selected main commit no longer has green CI; refusing to publish the nightly release.");
   }
 }
 
@@ -1385,7 +1420,14 @@ async function main() {
           fetchDecision,
           () => readFileSync(ctx.appcastPath, "utf8"),
         );
-        ctx.artifactBuild = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
+        const candidate = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
+        if (ctx.dryRun || !taskEnabled(ctx, "upload-dmg")) {
+          ctx.artifactBuild = candidate;
+        } else {
+          const { r2, prefix } = getR2Context();
+          ctx.artifactBuild = await firstVacantTipBuild(candidate, (build) =>
+            r2.exists(`${prefix}/tip/${build}/Inline.dmg`));
+        }
       }
       if (ctx.experimentalTip && buildWillRun(ctx)) {
         if (!ctx.artifactBuild) {
@@ -1942,6 +1984,7 @@ async function main() {
       ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
     run: async (ctx, ui) => {
+      assertNightlyMainStillSelected(ctx);
       // Validate local artifacts.
       if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
@@ -2129,6 +2172,7 @@ async function main() {
       ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
     run: async (ctx, ui) => {
+      assertNightlyMainStillSelected(ctx);
       requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
       requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
       requireEnv("PUBLIC_RELEASES_R2_BUCKET");
@@ -2175,6 +2219,7 @@ async function main() {
       if (!ctx.releaseTag) throw new Error("Internal error: github task enabled without releaseTag");
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
       verifyArtifactIdentity(ctx, ui);
+      assertNightlyMainStillSelected(ctx);
 
       // Force-update tag and attach DMG.
       await runStreaming(ui, ["git", "-C", ctx.rootDir, "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "tag", "-fa", ctx.releaseTag, "-m", "Latest Sparkle release", ctx.sourceCommit], {

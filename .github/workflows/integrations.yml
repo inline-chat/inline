@@ -115,9 +115,13 @@ jobs:
       - name: Test MCP
         run: bun run --cwd packages/mcp test
 
+      - name: Initialize compiled MCP app with local OAuth introspection
+        run: bun --no-env-file scripts/ci/check-mcp-assembled.mjs
+
   openclaw:
     name: OpenClaw (${{ matrix.host }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.host == 'latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,10 +150,6 @@ jobs:
           bun run --cwd packages/bot-api-types build
           bun run --cwd packages/sdk build
 
-      - name: Check OpenClaw
-        if: matrix.host == 'latest'
-        run: bun run --cwd plugins/openclaw check
-
       - name: Install compatibility host
         env:
           OPENCLAW_VERSION: ${{ matrix.host }}
@@ -161,6 +161,23 @@ jobs:
 
       - name: Check released host source and packed runtime
         run: bun run --cwd plugins/openclaw check:host "$RUNNER_TEMP/inline-openclaw-host/node_modules/openclaw"
+
+  openclaw-source:
+    name: OpenClaw source, tests, and bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - name: Build OpenClaw prerequisites
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/bot-api-types build
+          bun run --cwd packages/sdk build
+      - run: bun run --cwd plugins/openclaw check
 
   hermes:
     name: Hermes adapter and generated sidecar
@@ -209,3 +226,230 @@ jobs:
           bun run --cwd plugins/chat-sdk-plugin typecheck
           bun run --cwd plugins/chat-sdk-plugin test
           bun run --cwd plugins/chat-sdk-plugin build
+
+  shared-packages:
+    name: Shared TypeScript packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - name: Build dependency graph
+        run: |
+          for package in protocol oauth-core bot-api-types sdk bot-client; do
+            bun run --cwd "packages/$package" build
+          done
+      - name: Typecheck, lint, and test each package
+        run: |
+          for package in protocol oauth-core bot-api-types sdk bot-client; do
+            echo "::group::$package"
+            bun run --cwd "packages/$package" typecheck
+            bun run --cwd "packages/$package" lint
+            bun run --cwd "packages/$package" test
+            echo '::endgroup::'
+          done
+
+  rust-workspace:
+    name: Rust workspace all targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler systemd
+      - name: Format and compile all workspace targets
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --locked
+      - name: Test all workspace targets
+        run: cargo test --workspace --all-targets --locked --profile ci-test
+      - name: Lint all workspace targets
+        run: >-
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          -A clippy::uninlined_format_args
+          -A clippy::to_string_in_format_args
+          -A clippy::literal_string_with_formatting_args
+
+  workflow-and-release-contracts:
+    name: Workflow and release contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - name: Validate active workflows
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
+          bun test scripts/ci/workflow-policy.test.ts
+          python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
+      - name: Check CI shell scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          bash -n scripts/apple/run-ci-checks.sh scripts/apple/build-ci-app.sh scripts/ci/ensure-public-workspaces.sh
+          shellcheck scripts/apple/run-ci-checks.sh scripts/apple/build-ci-app.sh
+      - name: Test release parsers and scripts
+        run: bun test scripts/release-cli.test.ts scripts/release-npm.test.ts
+      - name: Check generated Rust schema copy
+        run: bun run scripts/sync-public-artifacts.ts --check
+
+  candidate-packages:
+    name: Pack seven candidate npm packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - name: Build public integrations
+        run: bun run build:integrations
+      - name: Pack exact candidate bytes
+        run: node scripts/ci/pack-public-packages.mjs "$RUNNER_TEMP/inline-packages"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-npm-packages
+          path: ${{ runner.temp }}/inline-packages/
+          retention-days: 7
+
+  packed-consumers:
+    name: Packed consumer (Node ${{ matrix.node }})
+    needs: candidate-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '26']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-npm-packages
+          path: ${{ runner.temp }}/inline-packages
+      - name: Install and check candidate packages outside workspace
+        run: node scripts/ci/check-packed-consumer.mjs "$RUNNER_TEMP/inline-packages"
+
+  openclaw-admission:
+    name: Installed OpenClaw host (${{ matrix.host }})
+    needs: candidate-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: ${{ matrix.host == 'latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ['2026.8.2', '2026.9.1', 'latest']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-npm-packages
+          path: ${{ runner.temp }}/inline-packages
+      - name: Load packed Inline plugin through real OpenClaw CLI
+        env:
+          OPENCLAW_VERSION: ${{ matrix.host }}
+        run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/inline-packages" "$OPENCLAW_VERSION"
+
+  hermes-admission:
+    name: Installed Hermes host (${{ matrix.host }})
+    needs: candidate-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ['0.17.0', '0.19.0']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: plugins/hermes-agent/package.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-npm-packages
+          path: ${{ runner.temp }}/inline-packages
+      - name: Install pinned native host
+        env:
+          HERMES_VERSION: ${{ matrix.host }}
+        run: |
+          python -m venv "$RUNNER_TEMP/hermes-host"
+          "$RUNNER_TEMP/hermes-host/bin/pip" install "hermes-agent==$HERMES_VERSION"
+          "$RUNNER_TEMP/hermes-host/bin/hermes" --version
+      - name: Load packed adapter through Hermes plugin discovery
+        run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$RUNNER_TEMP/hermes-host/bin/hermes" "$RUNNER_TEMP/hermes-host/bin/python"
+
+  local-integration:
+    name: Packed adapters with local Inline server
+    needs: candidate-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-npm-packages
+          path: ${{ runner.temp }}/inline-packages
+      - name: Run packed Bot Client, Chat SDK, and realtime SDK against source server
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test_db
+          INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"

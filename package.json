@@ -71,6 +71,8 @@
   },
   "devDependencies": {
     "@types/bun": "catalog:",
+    "fast-xml-parser": "4.5.7",
+    "yaml": "2.9.0",
     "oxlint": "catalog:",
     "typescript": "catalog:"
   },

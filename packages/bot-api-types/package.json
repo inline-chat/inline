@@ -24,7 +24,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
-    "test": "echo \"No tests yet for @inline-chat/bot-api-types\""
+    "test": "bun test src"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

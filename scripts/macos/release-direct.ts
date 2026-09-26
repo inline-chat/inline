@@ -1,4 +1,5 @@
 import { S3Client } from "bun";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -41,7 +42,7 @@ export function validateDmgAttestation(
   }
 }
 
-function getR2Context() {
+export function getR2Context() {
   const accessKeyId = requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
   const secretAccessKey = requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
   const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
@@ -56,10 +57,12 @@ export async function uploadDmgPut(
   uploadUrl: string,
   path: string,
   fetchImpl: typeof fetch = fetch,
+  existing?: { readUrl: string; size: number; sha256: string },
 ): Promise<void> {
   const response = await fetchImpl(uploadUrl, {
     method: "PUT",
     headers: {
+      "If-None-Match": "*",
       "Content-Type": "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
     },
@@ -68,6 +71,38 @@ export async function uploadDmgPut(
   });
   if (response.ok) return;
   const detail = (await response.text()).trim().slice(0, 500);
+  if (response.status === 412) {
+    if (!existing) {
+      throw new Error("DMG build object already exists; refusing to overwrite immutable release bytes.");
+    }
+    const remote = await fetchImpl(existing.readUrl, {
+      method: "GET",
+      signal: AbortSignal.timeout(5 * 60 * 1000),
+    });
+    if (!remote.ok || !remote.body) {
+      throw new Error(`Existing DMG could not be verified (HTTP ${remote.status}); refusing to overwrite it.`);
+    }
+    const hash = createHash("sha256");
+    const reader = remote.body.getReader();
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > existing.size) {
+          throw new Error("Existing DMG exceeds the attested size; refusing to overwrite it.");
+        }
+        hash.update(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    if (size !== existing.size || hash.digest("hex") !== existing.sha256) {
+      throw new Error("Existing DMG differs from the attested artifact; refusing to overwrite it.");
+    }
+    return;
+  }
   throw new Error(`DMG upload failed with HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
 }
 
@@ -152,7 +187,12 @@ async function main(): Promise<void> {
 
   if (uploadMode === "dmg") {
     const uploadUrl = r2.presign(dmgKey, { method: "PUT", expiresIn: 600 });
-    await uploadDmgPut(uploadUrl, dmgPath);
+    const readUrl = r2.presign(dmgKey, { method: "GET", expiresIn: 600 });
+    await uploadDmgPut(uploadUrl, dmgPath, fetch, {
+      readUrl,
+      size: Number(requireEnv("DMG_EXPECTED_SIZE")),
+      sha256: requireEnv("DMG_EXPECTED_SHA256"),
+    });
   }
 
   if (uploadMode === "appcast") {

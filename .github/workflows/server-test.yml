@@ -16,32 +16,12 @@ on:
         value: ${{ jobs.container.outputs.runtime_image }}
 
   push:
-    paths:
-      - ".github/workflows/server-test.yml"
-      - ".github/workflows/server-deploy.yml"
-      - "server/**"
-      - "proto/**"
-      - "packages/**"
-      - "scripts/**"
-      - ".oxlintignore"
-      - ".oxlintrc.json"
-      - "package.json"
-      - "bun.lock"
+    branches:
+      - main
 
   pull_request:
     branches:
       - main
-    paths:
-      - ".github/workflows/server-test.yml"
-      - ".github/workflows/server-deploy.yml"
-      - "server/**"
-      - "proto/**"
-      - "packages/**"
-      - "scripts/**"
-      - ".oxlintignore"
-      - ".oxlintrc.json"
-      - "package.json"
-      - "bun.lock"
 
 permissions:
   contents: read
@@ -224,9 +204,17 @@ jobs:
 
       - name: Setup environment
         run: |
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-          echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
-          echo "RESEND_API_KEY=re_ci_placeholder" >> $GITHUB_ENV
+          {
+            echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db"
+            echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db"
+            echo "RESEND_API_KEY=re_ci_placeholder"
+          } >> "$GITHUB_ENV"
+
+      - name: Install local integration executables
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server postgresql pgbouncer
+          pg_config --bindir >> "$GITHUB_PATH"
 
       - name: Run Effect tests
         run: cd server && bun run test:effect
@@ -252,8 +240,13 @@ jobs:
       - name: Run isolated server tests
         run: cd server && bun run test:bun
 
+      - name: Audit selected tests, reports, and skips
+        if: always()
+        run: bun scripts/ci/audit-server-tests.ts server/.test-results
+
       - name: Upload test reports and timings
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: server-test-results

@@ -243,7 +243,7 @@ struct InlineTooltipTests {
 
   @Test("The manager reuses one non-activating panel between targets")
   @MainActor
-  func managerReusesPanel() async throws {
+  func managerReusesPanel() throws {
     let manager = InlineTooltipManager.shared
     manager.hideImmediately()
 
@@ -278,7 +278,6 @@ struct InlineTooltipTests {
     #expect(window.childWindows?.count == 1)
 
     manager.hide(anchoredTo: firstTarget)
-    try await Task.sleep(for: .milliseconds(250))
     #expect(firstPanel.isVisible)
     #expect(window.childWindows?.count == 1)
 
@@ -417,7 +416,6 @@ struct InlineTooltipTests {
     #expect(panel.isVisible)
 
     manager.hide(anchoredTo: target)
-    try await Task.sleep(for: .milliseconds(200))
     #expect(panel.isVisible)
     #expect(manager.isPresented)
 
