@@ -26,6 +26,24 @@ derived_data="${APPLE_CI_DERIVED_DATA:-$RUNNER_TEMP/inline-$platform-derived-dat
 report_dir="${APPLE_CI_REPORT_DIR:-$RUNNER_TEMP/inline-$platform-reports}"
 mkdir -p "$report_dir"
 
+# Binary SwiftPM artifacts are served by upstream GitHub releases. Retry only
+# dependency resolution so a transient download error cannot waste a full build.
+for attempt in 1 2 3; do
+  echo "Resolving $scheme packages (attempt $attempt/3)"
+  if xcodebuild \
+    -project "$repo_root/apple/Inline.xcodeproj" \
+    -scheme "$scheme" \
+    -derivedDataPath "$derived_data" \
+    -resolvePackageDependencies 2>&1 | tee -a "$report_dir/$platform-package-resolution.log"; then
+    break
+  fi
+  if [[ "$attempt" == 3 ]]; then
+    echo "error: $scheme package resolution failed after three attempts" >&2
+    exit 1
+  fi
+  sleep "$((attempt * 5))"
+done
+
 for configuration in Debug Release; do
   echo "Building $scheme $configuration for $destination"
   xcodebuild \
