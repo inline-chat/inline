@@ -2219,6 +2219,7 @@ async function main() {
       if (!ctx.releaseTag) throw new Error("Internal error: github task enabled without releaseTag");
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
       verifyArtifactIdentity(ctx, ui);
+      assertNightlyMainStillSelected(ctx);
 
       // Force-update tag and attach DMG.
       await runStreaming(ui, ["git", "-C", ctx.rootDir, "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "tag", "-fa", ctx.releaseTag, "-m", "Latest Sparkle release", ctx.sourceCommit], {
