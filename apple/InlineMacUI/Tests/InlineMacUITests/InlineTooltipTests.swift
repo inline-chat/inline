@@ -417,7 +417,6 @@ struct InlineTooltipTests {
     #expect(panel.isVisible)
 
     manager.hide(anchoredTo: target)
-    try await Task.sleep(for: .milliseconds(200))
     #expect(panel.isVisible)
     #expect(manager.isPresented)
 

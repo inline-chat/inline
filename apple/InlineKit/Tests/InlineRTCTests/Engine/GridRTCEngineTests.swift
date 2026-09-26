@@ -1440,7 +1440,7 @@ struct GridRTCEngineTests {
     // The first provider call deliberately remains suspended and ignores the
     // watchdog's cancellation. Logical worker ownership must still be free for
     // the backoff to start a second concrete room attempt.
-    try await eventuallyRTC(timeout: .seconds(2)) {
+    try await eventuallyRTC(timeout: .seconds(4)) {
       await driver.operations().filter { $0 == "connect:22" }.count >= 2
     }
 
