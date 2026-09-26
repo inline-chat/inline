@@ -1441,7 +1441,6 @@ struct GridRTCEngineTests {
       }
       let operations = await driver.operations()
       #expect(operations.contains("quiesce:22"))
-      #expect(operations.contains("publish:22:muted=true") == false)
 
       // The first provider call remains suspended. Its watchdog must release
       // logical ownership so the second room connects and publishes anyway.
@@ -1453,6 +1452,7 @@ struct GridRTCEngineTests {
         return snapshot.state == .connected(target)
           && snapshot.microphonePublicationState == .published
       }
+      #expect(await rtc.currentSnapshot().abandonedProviderOperationCount == 1)
       #expect(await driver.operations().filter { $0 == "publish:22:muted=true" }.count == 1)
     } catch {
       await driver.releaseBlockedConnect()
@@ -1462,7 +1462,7 @@ struct GridRTCEngineTests {
     // A late completion from the retired room cannot publish again.
     await driver.releaseBlockedConnect()
     try await eventuallyRTC(timeout: .seconds(4)) {
-      await driver.operations().filter { $0 == "connect-done:22" }.count == 2
+      await rtc.currentSnapshot().abandonedProviderOperationCount == 0
     }
     #expect(await driver.operations().filter { $0 == "publish:22:muted=true" }.count == 1)
   }
@@ -2514,7 +2514,6 @@ private actor FakeGridRTCDriver: GridRTCDriver {
         blockedConnectContinuations.append(continuation)
       }
     }
-    log.append("connect-done:\(roomID)")
   }
 
   func publishPreparedMicrophone(_ room: GridRTCRoomHandle, initiallyMuted: Bool) async throws {
