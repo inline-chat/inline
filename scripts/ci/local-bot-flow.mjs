@@ -51,6 +51,7 @@ const stopServer = async () => {
 try {
   await admin.unsafe(`CREATE DATABASE "${databaseName}" TEMPLATE "${template.name}"`)
   process.env.DATABASE_URL = databaseUrl.toString()
+  process.env.TEST_DATABASE_URL = databaseUrl.toString()
   process.env.ENCRYPTION_KEY = "0".repeat(64)
   const { makeCoreProductionSmokeEnvironment } = await import("../../server/scripts/core-production-smoke.ts")
   const environment = makeCoreProductionSmokeEnvironment(process.env, false)
