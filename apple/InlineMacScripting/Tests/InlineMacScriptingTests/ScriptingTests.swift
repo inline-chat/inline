@@ -145,7 +145,8 @@ import Testing
 }
 
 @Suite @MainActor struct ScriptingExecutionTests {
-  @Test func replyWaitsForCompletion() async throws {
+  @Test(.timeLimit(.minutes(1)))
+  func replyWaitsForCompletion() async throws {
     var results: [Result<ScriptingValue, ScriptingError>] = []
     let (started, didStart) = AsyncStream<CheckedContinuation<ScriptingValue, Never>>.makeStream()
     let (replies, didReply) = AsyncStream<Void>.makeStream()
