@@ -157,7 +157,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.18-alpha.0   inline-platform
+enabled      user     0.0.18   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -179,13 +179,17 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 ## Compatibility
 
 - Hermes Agent: requires the external user plugin registry and native platform
-  plugin loader available in Hermes Agent `>=0.17.0`. This package was validated
-  against Hermes Agent `0.21.0` from source commit `29112bef` (tag
-  `v2026.8.31`).
+  plugin loader available in Hermes Agent `>=0.21.4`. This package was validated
+  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
+  `v2026.9.24`).
+- CI checks the minimum supported Hermes release, newest stable source, and upstream
+  `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
+  `inline-hermes doctor` requires successful host loading and compatibility validation;
+  unavailable Hermes diagnostics no longer count as healthy.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.19-alpha.0` and is
+- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.18` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.

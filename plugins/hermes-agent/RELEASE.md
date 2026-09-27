@@ -37,6 +37,31 @@ Expected tarball shape:
 - `plugin/inline/sidecar/index.mjs`
 - `plugin/inline/tools.py`
 
+## Host Compatibility and Message Flow
+
+PR/main CI installs official Hermes source at the minimum supported version
+(`0.21.4`, tag `v2026.9.21`), the newest stable release, and upstream `main`.
+Each host validates the packed plugin manifest, rejects deprecated imports,
+loads the platform and tool through Hermes, and exercises inbound/reply delivery,
+deduplication, and media URL rejection. Host modules are not stubbed; this fast
+lane uses an offline transport and a deterministic reply handler.
+
+The local integration lane additionally runs the packaged Python adapter and its
+bundled Node sidecar against the source Inline server and verifies an inbound
+message and persisted outbound reply. This needs no production credential or LLM.
+
+`Hermes stable compatibility` runs every six hours against npm `latest` and both
+the latest stable Hermes source and upstream `main`. Failures remain failed
+GitHub Actions runs; enable Actions notifications to receive them. The tested
+adapter version, host ref/SHA, and candidate artifact hash are logged.
+
+The publish workflow repeats host admission against the exact immutable release
+tarball before npm trusted publishing. Release checks use the adapter's pinned
+registry dependencies; an unrelated workspace prerelease is not substituted.
+
+These checks do not establish live provider or production messaging health.
+The following live checks remain useful before broader rollout.
+
 ## Manual Live Test
 
 Install from the locally packed tarball:
@@ -89,12 +114,12 @@ Manual behavior checks:
 
 ## Publish
 
-After manual live testing passes, commit the scoped release group and dispatch
+After the required CI gates pass, record any live-test evidence or gap, commit the scoped release group, and dispatch
 the trusted-publishing workflow through the repository wrapper:
 
 ```sh
 cd ..
-bun run release:npm hermes-agent --version 0.0.16 --tag latest
+bun run release:npm hermes-agent --version 0.0.18 --tag latest
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```

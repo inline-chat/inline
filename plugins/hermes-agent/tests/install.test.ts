@@ -69,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.18-alpha.0",
-      "@inline-chat/hermes-agent-adapter@0.0.18-alpha.0",
-      "@inline-chat/hermes-agent-adapter@0.0.18-alpha.0",
+      "@inline-chat/hermes-agent-adapter@0.0.18",
+      "@inline-chat/hermes-agent-adapter@0.0.18",
+      "@inline-chat/hermes-agent-adapter@0.0.18",
     ])
   })
 
@@ -295,7 +295,7 @@ describe("inline-hermes installer", () => {
     await writeEnabledHermesConfig(home)
     const code = await main(["doctor", "--hermes-home", home, "--json"])
 
-    expect(code).toBe(0)
+    expect(code).toBe(1)
     const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
     expect(payload.sidecar.source).toMatchObject({ exists: true })
     expect(payload.sidecar.target).toMatchObject({ exists: true })
@@ -320,7 +320,7 @@ describe("inline-hermes installer", () => {
     await writePluginEnabledConfig(home)
     const code = await main(["doctor", "--hermes-home", home, "--json"])
 
-    expect(code).toBe(0)
+    expect(code).toBe(1)
     const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
     expect(payload.activation.credentialState).toBe("unknown")
     expect(payload.warnings).not.toContain("Inline platform config is not enabled. Add platforms.inline.enabled: true and set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config")
@@ -358,6 +358,77 @@ describe("inline-hermes installer", () => {
     })
     expect(payload.warnings).toEqual([])
     expect(text).not.toContain("secret-token")
+  })
+
+  it.each([
+    ["missing attestation", undefined, 0],
+    ["failed host loader", { ok: false, reason: "plugin_load_failed" }, 0],
+    ["another plugin path", { ok: true, pluginPath: "/wrong/plugin" }, 0],
+    ["failed subprocess", "valid", 1],
+  ])("fails doctor with %s despite successful credential verification", async (_name, compatibility, exitCode) => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await useFakeHermes(home, {
+      action: "inline.status",
+      setupProtocolVersion: 1,
+      configured: true,
+      ...(compatibility === "valid" ? {} : { compatibility }),
+      probe: { ok: true, botUserId: "42" },
+    }, Number(exitCode))
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
+    const text = String(log.mock.calls.at(-1)?.[0])
+    const payload = JSON.parse(text)
+    expect(payload.activation.hermesCompatibilityVerified).toBe(false)
+    expect(payload.issues.join(" ")).toContain("could not validate the installed plugin compatibility")
+    expect(text).not.toContain("secret-token")
+  })
+
+  it("requires a successful host load and rejects deprecated imports without exposing errors", () => {
+    const script = String.raw`
+import importlib.util
+import pathlib
+import sys
+import types
+
+plugin_dir = pathlib.Path(${JSON.stringify(path.join(packageRoot, "plugin", "inline"))}).resolve()
+spec = importlib.util.spec_from_file_location("inline_doctor_test", plugin_dir / "cli.py")
+cli = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cli)
+hermes = types.ModuleType("hermes_cli")
+hermes.__path__ = []
+plugins = types.ModuleType("hermes_cli.plugins")
+compat = types.ModuleType("hermes_cli.plugin_compat")
+sys.modules.update({"hermes_cli": hermes, "hermes_cli.plugins": plugins, "hermes_cli.plugin_compat": compat})
+manifest = types.SimpleNamespace(name="inline-platform", path=plugin_dir)
+loaded = types.SimpleNamespace(manifest=manifest, enabled=True, error=None, module=object(), tools_registered=["inline"])
+manager = types.SimpleNamespace(_plugins={"inline": loaded}, discover_and_load=lambda: None)
+plugins.get_plugin_manager = lambda: manager
+compat.plugin_hits = lambda _manifest: []
+assert cli._compatibility_status() == {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
+compat.plugin_hits = lambda _manifest: [object()]
+assert cli._compatibility_status()["reason"] == "deprecated_imports"
+compat.plugin_hits = lambda _manifest: []
+loaded.tools_registered = []
+assert cli._compatibility_status()["reason"] == "tool_not_registered"
+loaded.tools_registered = ["inline"]
+loaded.error = "secret-token"
+assert cli._compatibility_status() == {"ok": False, "reason": "plugin_load_failed"}
+loaded.error = None
+loaded.module = None
+assert cli._compatibility_status()["reason"] == "plugin_load_failed"
+loaded.module = object()
+manifest.path = plugin_dir / "another-copy"
+assert cli._compatibility_status()["reason"] == "plugin_not_loaded"
+def broken():
+    raise RuntimeError("secret-token")
+manager.discover_and_load = broken
+assert cli._compatibility_status() == {"ok": False, "reason": "loader_unavailable"}
+`
+    const result = spawnSync("python3", ["-c", script], { encoding: "utf8" })
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).not.toContain("secret-token")
   })
 
   it("distinguishes a canonical missing credential from unavailable introspection", async () => {
@@ -456,7 +527,7 @@ describe("inline-hermes installer", () => {
     expect(text).not.toContain("yaml-only-token")
   })
 
-  it("treats a Hermes config token as runtime-ready without printing it", async () => {
+  it("does not accept a config token as proof of Hermes compatibility", async () => {
     const home = await tempDir()
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
 
@@ -464,7 +535,7 @@ describe("inline-hermes installer", () => {
     await writeEnabledHermesConfig(home, { token: "fake-config-token" })
     const code = await main(["doctor", "--hermes-home", home, "--json"])
 
-    expect(code).toBe(0)
+    expect(code).toBe(1)
     const text = String(log.mock.calls.at(-1)?.[0])
     const payload = JSON.parse(text)
     expect(payload.activation).toMatchObject({
@@ -476,7 +547,7 @@ describe("inline-hermes installer", () => {
     expect(text).not.toContain("fake-config-token")
   })
 
-  it("treats a Hermes config token env reference as runtime-ready without printing it", async () => {
+  it("does not accept an env token reference as proof of Hermes compatibility", async () => {
     const home = await tempDir()
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
     setEnv("INLINE_DOC_TOKEN", "fake-env-config-token")
@@ -485,7 +556,7 @@ describe("inline-hermes installer", () => {
     await writeEnabledHermesConfig(home, { token: "${INLINE_DOC_TOKEN}" })
     const code = await main(["doctor", "--hermes-home", home, "--json"])
 
-    expect(code).toBe(0)
+    expect(code).toBe(1)
     const text = String(log.mock.calls.at(-1)?.[0])
     const payload = JSON.parse(text)
     expect(payload.activation).toMatchObject({
@@ -498,7 +569,7 @@ describe("inline-hermes installer", () => {
     expect(text).not.toContain("INLINE_DOC_TOKEN")
   })
 
-  it("treats top-level inline.token config as runtime-ready without printing it", async () => {
+  it("does not accept a top-level config token as proof of Hermes compatibility", async () => {
     const home = await tempDir()
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
 
@@ -506,7 +577,7 @@ describe("inline-hermes installer", () => {
     await writeTopLevelInlineConfig(home, "fake-top-level-token")
     const code = await main(["doctor", "--hermes-home", home, "--json"])
 
-    expect(code).toBe(0)
+    expect(code).toBe(1)
     const text = String(log.mock.calls.at(-1)?.[0])
     const payload = JSON.parse(text)
     expect(payload.activation).toMatchObject({
@@ -829,10 +900,11 @@ async function writeTopLevelInlineConfig(home: string, token: string): Promise<v
   ].join("\n"))
 }
 
-async function useFakeHermes(home: string, payload: Record<string, unknown>): Promise<void> {
+async function useFakeHermes(home: string, payload: Record<string, unknown>, exitCode = 0): Promise<void> {
   const executable = path.join(home, "fake-hermes")
-  const encoded = JSON.stringify(payload).replaceAll("'", "'\\''")
-  await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' 'secret-token' >&2\nprintf '%s\\n' '${encoded}'\n`)
+  const response = { compatibility: { ok: true, pluginPath: path.join(await realpath(home), "plugins", "inline") }, ...payload }
+  const encoded = JSON.stringify(response).replaceAll("'", "'\\''")
+  await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' 'secret-token' >&2\nprintf '%s\\n' '${encoded}'\nexit ${exitCode}\n`)
   await chmod(executable, 0o755)
   setEnv("INLINE_HERMES_BIN", executable)
 }

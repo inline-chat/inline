@@ -382,7 +382,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['0.17.0', '0.19.0']
+        host: ['v2026.9.21', latest, main]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -397,15 +397,17 @@ jobs:
         with:
           name: candidate-npm-packages
           path: ${{ runner.temp }}/inline-packages
-      - name: Install pinned native host
+      - name: Install official Hermes source
+        id: host
         env:
-          HERMES_VERSION: ${{ matrix.host }}
-        run: |
-          python -m venv "$RUNNER_TEMP/hermes-host"
-          "$RUNNER_TEMP/hermes-host/bin/pip" install "hermes-agent==$HERMES_VERSION"
-          "$RUNNER_TEMP/hermes-host/bin/hermes" --version
-      - name: Load packed adapter through Hermes plugin discovery
-        run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$RUNNER_TEMP/hermes-host/bin/hermes" "$RUNNER_TEMP/hermes-host/bin/python"
+          GH_TOKEN: ${{ github.token }}
+          HERMES_REF: ${{ matrix.host }}
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" "$HERMES_REF"
+      - name: Validate packed adapter and message flow through real Hermes
+        env:
+          HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$HERMES_BIN" "$HERMES_PYTHON"
 
   local-integration:
     name: Packed adapters with local Inline server
@@ -448,8 +450,18 @@ jobs:
         with:
           name: candidate-npm-packages
           path: ${{ runner.temp }}/inline-packages
-      - name: Run packed Bot Client, Chat SDK, and realtime SDK against source server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install stable Hermes for local transport end-to-end test
+        id: hermes-host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
+      - name: Run packed adapters and Hermes against source server
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test_db
           INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
         run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"

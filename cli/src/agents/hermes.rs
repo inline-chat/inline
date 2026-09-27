@@ -15,8 +15,8 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
 // This CLI prerelease installs and verifies the matching Hermes adapter.
-const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.18-alpha.0";
-const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter@0.0.18-alpha.0";
+const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.18";
+const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter";
 
 struct HermesProfile {
     home: Option<PathBuf>,

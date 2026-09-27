@@ -27,7 +27,7 @@ _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
 _MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _MACHINE_SETUP_PROTOCOL_VERSION = 1
-_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.18-alpha.0"
+_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.18"
 _ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
@@ -362,6 +362,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--json", action="store_true", help="Print compact machine-readable setup output.")
     status = subs.add_parser("status", help="Show Inline adapter status", description="Check Inline configuration, sidecar, Node runtime, and optional credential identity.")
     status.add_argument("--json", action="store_true", help="Print compact machine-readable status output.")
+    status.add_argument("--check-compatibility", action="store_true", help="Validate the installed plugin with the Hermes loader.")
     status.add_argument("--probe", action="store_true", help="Verify the configured Inline credential and bot identity.")
     parser.set_defaults(func=dispatch)
 
@@ -453,7 +454,9 @@ def _status(args) -> int:
         and sidecar["size"] > 0
     )
     runtime_usable = bool(sidecar["ok"] and node["ok"])
-    ready = runtime_usable and configured and (not probe_requested or bool(probe and probe.get("ok")))
+    compatibility = _compatibility_status() if getattr(args, "check_compatibility", False) else None
+    compatible = compatibility is None or compatibility["ok"]
+    ready = compatible and runtime_usable and configured and (not probe_requested or bool(probe and probe.get("ok")))
     result = {
         "ok": ready,
         "ready": ready,
@@ -467,11 +470,14 @@ def _status(args) -> int:
         "node": node,
         "probeRequested": probe_requested,
         "gateway": _gateway_status(),
+        **({"compatibility": compatibility} if compatibility is not None else {}),
         **({"probe": probe} if probe is not None else {}),
     }
     if getattr(args, "json", False):
         print(json.dumps(result, separators=(",", ":")))
     else:
+        if compatibility is not None:
+            print(f"Hermes plugin compatible: {'yes' if compatibility['ok'] else 'no'} ({compatibility['reason']})")
         print(f"Inline configured: {'yes' if configured else 'no'}")
         print(f"Inline sidecar usable: {'yes' if sidecar['ok'] else 'no'}")
         print(f"Node available: {_node_status_text(node)}")
@@ -481,7 +487,46 @@ def _status(args) -> int:
         elif probe_requested:
             print(f"Inline credential probe: {'ready' if ready else 'failed'}")
         print("Advanced diagnostics: inline-hermes doctor --json")
-    return 0 if runtime_usable and (not probe_requested or ready) else 1
+    return 0 if compatible and runtime_usable and (not probe_requested or ready) else 1
+
+
+def _compatibility_status() -> dict:
+    """Attest only a successful host load of this exact installed plugin.
+
+    Never return host exception text: configuration or import errors may contain
+    credentials. A missing diagnostic API is an inconclusive check, not success.
+    """
+    unavailable = {"ok": False, "reason": "loader_unavailable"}
+    try:
+        from hermes_cli.plugins import get_plugin_manager
+
+        manager = get_plugin_manager()
+        manager.discover_and_load()
+        plugin_dir = Path(__file__).resolve().parent
+        loaded = next((
+            item for item in manager._plugins.values()
+            if item.manifest.name == "inline-platform"
+            and Path(item.manifest.path).resolve() == plugin_dir
+        ), None)
+        if loaded is None:
+            return {"ok": False, "reason": "plugin_not_loaded"}
+        if not loaded.enabled or loaded.error or loaded.module is None:
+            return {"ok": False, "reason": "plugin_load_failed"}
+        if "inline" not in loaded.tools_registered:
+            return {"ok": False, "reason": "tool_not_registered"}
+        # Older supported Hermes releases predate the moved-import scanner.
+        # Their loader still checks real imports and plugin registration above.
+        try:
+            from hermes_cli.plugin_compat import plugin_hits
+        except ModuleNotFoundError as error:
+            if error.name != "hermes_cli.plugin_compat":
+                raise
+        else:
+            if plugin_hits(loaded.manifest):
+                return {"ok": False, "reason": "deprecated_imports"}
+        return {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
+    except Exception:
+        return unavailable
 
 
 def _gateway_status() -> dict:

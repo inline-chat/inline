@@ -32,13 +32,16 @@ for (const relative of packages) {
 const sdk = artifacts.find((artifact) => artifact.name === "@inline-chat/realtime-sdk")
 const protocol = artifacts.find((artifact) => artifact.name === "@inline-chat/protocol")
 if (!sdk || !protocol) throw new Error("candidate SDK/protocol tarballs are missing")
+const hermesManifest = JSON.parse(await readFile(path.join(repoRoot, "plugins/hermes-agent/package.json"), "utf8"))
+const candidateDependencies = hermesManifest.dependencies["@inline-chat/realtime-sdk"] === sdk.version
+  ? ["--candidate-sdk-tarball", path.join(outputDir, sdk.file),
+    "--candidate-protocol-tarball", path.join(outputDir, protocol.file)]
+  : []
 execFileSync("node", [path.join(repoRoot, "plugins/hermes-agent/scripts/release-stage.mjs"),
   "--prepare-only", "--output-dir", outputDir,
-  "--candidate-sdk-tarball", path.join(outputDir, sdk.file),
-  "--candidate-protocol-tarball", path.join(outputDir, protocol.file)], {
+  ...candidateDependencies], {
   cwd: repoRoot, stdio: "inherit",
 })
-const hermesManifest = JSON.parse(await readFile(path.join(repoRoot, "plugins/hermes-agent/package.json"), "utf8"))
 const hermesFile = `${hermesManifest.name.replace(/^@/, "").replace("/", "-")}-${hermesManifest.version}.tgz`
 artifacts.push(await receipt("plugins/hermes-agent", hermesManifest, hermesFile))
 

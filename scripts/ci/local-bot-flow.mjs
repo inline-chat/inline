@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
@@ -14,6 +14,9 @@ const postgresModule = createRequire(path.join(serverRoot, "package.json"))("pos
 const postgres = postgresModule.default ?? postgresModule
 const artifactDir = path.resolve(process.argv[2] ?? "")
 if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
+const hermesBin = process.env.HERMES_BIN
+const hermesPython = process.env.HERMES_PYTHON_BIN
+if (!hermesBin || !hermesPython) throw new Error("HERMES_BIN and HERMES_PYTHON_BIN are required for the real Hermes transport test")
 const provisioningUrl = process.env.TEST_DATABASE_URL
 if (!provisioningUrl) throw new Error("TEST_DATABASE_URL is required")
 assertLocalTestDatabaseUrl(provisioningUrl)
@@ -71,6 +74,9 @@ try {
   const { token } = await generateToken(bot.id)
   await SessionsModel.create({ userId: bot.id, tokenHash: hashToken(token), personalData: {}, clientType: "api" })
 
+  const { token: humanToken } = await generateToken(human.id)
+  await SessionsModel.create({ userId: human.id, tokenHash: hashToken(humanToken), personalData: {}, clientType: "api" })
+
   let ready
   const readyPromise = new Promise((resolve) => { ready = resolve })
   child = Bun.spawn({
@@ -97,7 +103,7 @@ try {
   assert.equal(health.status, 200, `server readiness ${health.status}`)
 
   const manifest = JSON.parse(await readFile(path.join(artifactDir, "manifest.json"), "utf8"))
-  const names = ["@inline-chat/protocol", "@inline-chat/bot-api-types", "@inline-chat/bot-client", "@inline-chat/realtime-sdk", "@inline-chat/chat-sdk"]
+  const names = ["@inline-chat/protocol", "@inline-chat/bot-api-types", "@inline-chat/bot-client", "@inline-chat/realtime-sdk", "@inline-chat/chat-sdk", "@inline-chat/hermes-agent-adapter"]
   const dependencies = { chat: "4.40.0" }
   for (const name of names) {
     const pkg = manifest.packages.find((entry) => entry.name === name)
@@ -143,6 +149,24 @@ console.log('Packed Bot Client, Chat SDK adapter, and realtime SDK reached the l
     cwd: consumer, stdio: "inherit", timeout: 60_000,
     env: { ...process.env, INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_TOKEN: token, INLINE_E2E_HUMAN_ID: String(human.id) },
   })
+  const hermesHome = path.join(consumer, "hermes-home")
+  await mkdir(hermesHome)
+  const hermesEnv = {
+    ...process.env, HERMES_HOME: hermesHome, HOME: consumer,
+    INLINE_NODE_BIN: "node", INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
+    INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
+    INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
+    INLINE_E2E_CONSUMER: consumer,
+  }
+  // Never allow the mock sidecar transport to make this lane pass accidentally.
+  delete hermesEnv.INLINE_SIDECAR_TEST_MOCK
+  const runHermes = (bin, args) => execFileSync(bin, args, {
+    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout: 90_000,
+  })
+  runHermes(path.join(consumer, "node_modules/.bin/inline-hermes"), ["install", "--hermes-home", hermesHome, "--force", "--json"])
+  runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
+  await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
+  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
   await closeDb()
   closeDb = undefined
   await stopServer()

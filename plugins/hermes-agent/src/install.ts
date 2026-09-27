@@ -60,6 +60,7 @@ type ActivationInfo = {
   pluginEnabled: boolean
   platformConfigured: boolean
   configTokenConfigured: boolean
+  hermesCompatibilityVerified: boolean
   hermesCredentialStoreChecked: boolean
   hermesCredentialStoreTokenConfigured: boolean
   credentialState: "not_configured" | "configured_unverified" | "verified" | "invalid" | "unknown"
@@ -259,6 +260,12 @@ async function inspectInstall(params: {
   }
   if (!node.ok) {
     issues.push(node.error || `${node.source} is not usable: ${node.path}`)
+  }
+  if (params.opts.command === "doctor" && !activation.hermesCompatibilityVerified) {
+    issues.push("Hermes could not validate the installed plugin compatibility; check `hermes inline status --json --check-compatibility` and update or repair the plugin")
+  }
+  if (params.opts.command === "doctor" && !activation.hermesCredentialStoreChecked) {
+    issues.push("Hermes credential verification is unavailable; doctor cannot confirm runtime readiness")
   }
   if (params.opts.command === "doctor" && !activation.pluginEnabled) {
     issues.push(`Hermes plugin '${pluginEnableKey}' is not enabled. Run: hermes plugins enable ${pluginEnableKey}`)
@@ -681,7 +688,7 @@ async function inspectActivation(hermesHome: string, target: string, probeCreden
   }
   const tokenPresent = Boolean(process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN)
   const configTokenConfigured = configTokenIsConfigured(config, ["platforms", defaultPluginId, "token"]) || configTokenIsConfigured(config, [defaultPluginId, "token"])
-  const machineCredential = inspectHermesCredential(hermesHome, probeCredential)
+  const machineCredential = inspectHermesCredential(hermesHome, probeCredential, target)
   const fallbackConfigured = tokenPresent || configTokenConfigured
   const credentialState = (
     (machineCredential.state === "unknown" || machineCredential.state === "not_configured")
@@ -697,6 +704,7 @@ async function inspectActivation(hermesHome: string, target: string, probeCreden
     pluginEnabled: readConfigList(config, ["plugins", "enabled"]).includes(pluginEnableKey),
     platformConfigured: readConfigBoolean(config, ["platforms", defaultPluginId, "enabled"]) || readConfigBoolean(config, [defaultPluginId, "enabled"]),
     configTokenConfigured,
+    hermesCompatibilityVerified: machineCredential.compatible === true,
     hermesCredentialStoreChecked: machineCredential.checked,
     hermesCredentialStoreTokenConfigured: machineCredential.configured === true,
     credentialState,
@@ -759,6 +767,7 @@ async function chownTree(target: string, uid: number, gid: number): Promise<void
 }
 
 type HermesCredentialInspection = {
+  compatible?: boolean
   checked: boolean
   configured: boolean | null
   state: ActivationInfo["credentialState"]
@@ -766,9 +775,9 @@ type HermesCredentialInspection = {
   botUsername?: string
 }
 
-function inspectHermesCredential(hermesHome: string, probe: boolean): HermesCredentialInspection {
+function inspectHermesCredential(hermesHome: string, probe: boolean, target: string): HermesCredentialInspection {
   const executable = normalizeToken(process.env.INLINE_HERMES_BIN) || "hermes"
-  const args = ["inline", "status", "--json", ...(probe ? ["--probe"] : [])]
+  const args = ["inline", "status", "--json", ...(probe ? ["--probe", "--check-compatibility"] : [])]
   const result = spawnSync(executable, args, {
     encoding: "utf8",
     timeout: hermesMachineTimeoutMs,
@@ -797,11 +806,14 @@ function inspectHermesCredential(hermesHome: string, probe: boolean): HermesCred
   ) {
     return { checked: false, configured: null, state: "unknown" }
   }
+  const compatibility = record.compatibility as Record<string, unknown> | undefined
+  const compatible = result.status === 0 && compatibility?.ok === true
+    && compatibility.pluginPath === safeRealpathSync(target)
   if (!record.configured) {
-    return { checked: true, configured: false, state: "not_configured" }
+    return { compatible, checked: true, configured: false, state: "not_configured" }
   }
   if (!probe) {
-    return { checked: true, configured: true, state: "configured_unverified" }
+    return { compatible, checked: true, configured: true, state: "configured_unverified" }
   }
   const probeResult = record.probe && typeof record.probe === "object" && !Array.isArray(record.probe)
     ? record.probe as Record<string, unknown>
@@ -815,6 +827,7 @@ function inspectHermesCredential(hermesHome: string, probe: boolean): HermesCred
       ? probeResult.botUsername.trim()
       : undefined
     return {
+      compatible,
       checked: true,
       configured: true,
       state: "verified",
@@ -823,9 +836,17 @@ function inspectHermesCredential(hermesHome: string, probe: boolean): HermesCred
     }
   }
   if (probeResult?.errorKind === "invalid_credential") {
-    return { checked: true, configured: true, state: "invalid" }
+    return { compatible, checked: true, configured: true, state: "invalid" }
   }
-  return { checked: true, configured: true, state: "unknown" }
+  return { compatible, checked: true, configured: true, state: "unknown" }
+}
+
+function safeRealpathSync(target: string): string | null {
+  try {
+    return realpathSync(target)
+  } catch {
+    return null
+  }
 }
 
 function readConfigList(config: unknown, pathParts: string[]): string[] {
@@ -1278,6 +1299,7 @@ Options:
     console.log(`Usage: inline-hermes ${topic} [options]
 
 ${topic === "doctor" ? "Diagnose" : "Inspect"} the installed Inline plugin, sidecar integrity, and Node runtime.
+${topic === "doctor" ? "Doctor also requires a successful Hermes loader compatibility check and credential probe." : ""}
 
 Options:
   --hermes-home <path>  Hermes home directory. Defaults to HERMES_HOME or ~/.hermes.

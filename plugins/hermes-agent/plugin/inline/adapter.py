@@ -45,6 +45,7 @@ from gateway.platforms.base import (
     SendResult,
     cache_audio_from_url,
     cache_image_from_url,
+    safe_url_for_log,
 )
 from gateway.platforms.helpers import strip_markdown
 
@@ -575,7 +576,7 @@ def _normalize_inline_command_description(raw: str) -> str:
 
 
 def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[List[Dict[str, Any]], int]:
-    from hermes_cli.commands import telegram_menu_commands
+    from hermes_cli.commands_platforms import telegram_menu_commands
 
     command_specs = _inline_command_specs()
     local_commands = [
@@ -1209,7 +1210,7 @@ class InlineAdapter(BasePlatformAdapter):
 
         try:
             from gateway.run import _load_gateway_config
-            from hermes_cli.model_switch import list_picker_providers
+            from hermes_cli.model_switch_providers import list_picker_providers
 
             cfg = _load_gateway_config() or {}
             model_cfg = cfg.get("model") if isinstance(cfg, dict) else {}
@@ -3001,16 +3002,15 @@ class InlineAdapter(BasePlatformAdapter):
                 return await cache_audio_from_url(url, ext=_extension_for_media(mime, file_name, ".ogg"))
             return await self._download_inline_media_url(url, mime=mime, file_name=file_name)
         except Exception as exc:
-            logger.warning("[inline] failed to cache %s attachment: %s", kind, exc)
-            return url
+            logger.warning("[inline] failed to cache %s attachment (%s)", kind, type(exc).__name__)
+            # Never pass an unvalidated URL on to Hermes for another fetch.
+            return None
 
     async def _download_inline_media_url(self, url: str, *, mime: str, file_name: Optional[str]) -> str:
-        try:
-            from tools.url_safety import is_safe_url, safe_url_for_log
-            if not is_safe_url(url):
-                raise ValueError(f"blocked unsafe media URL: {safe_url_for_log(url)}")
-        except ImportError:
-            pass
+        # A missing host safety helper must stop the download, never bypass it.
+        from tools.url_safety import is_safe_url
+        if not is_safe_url(url):
+            raise ValueError(f"blocked unsafe media URL: {safe_url_for_log(url)}")
         _MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         name = _safe_media_file_name(url=url, mime=mime, file_name=file_name)
         path = _MEDIA_CACHE_DIR / name
@@ -4230,7 +4230,7 @@ class InlineAdapter(BasePlatformAdapter):
         label = group_id
         member_slugs: list[str] = []
         try:
-            from hermes_cli.models import PROVIDER_GROUPS
+            from hermes_cli.models_catalog_static import PROVIDER_GROUPS
             label, _desc, members = PROVIDER_GROUPS.get(group_id, (group_id, "", []))
             member_slugs = [str(member) for member in members]
         except Exception:
@@ -4686,7 +4686,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def send_image(self, chat_id: str, image_url: str, caption: Optional[str] = None, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
         try:
-            from gateway.platforms.base import cache_image_from_url
             local_path = await cache_image_from_url(image_url)
             return await self.send_image_file(chat_id, local_path, caption, reply_to, metadata)
         except Exception:
@@ -4694,7 +4693,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def send_animation(self, chat_id: str, animation_url: str, caption: Optional[str] = None, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
         try:
-            from gateway.platforms.base import cache_image_from_url
             local_path = await cache_image_from_url(animation_url, ext=".gif")
             return await self.send_document(chat_id, local_path, caption, file_name=Path(local_path).name, reply_to=reply_to, metadata=metadata)
         except Exception:
@@ -4982,7 +4980,7 @@ class InlineAdapter(BasePlatformAdapter):
         }
         actions: list[Dict[str, str]] = []
         try:
-            from hermes_cli.models import group_providers
+            from hermes_cli.models_catalog_static import group_providers
             grouped = group_providers(list(by_slug.keys()))
         except Exception:
             grouped = [{"kind": "single", "slug": slug} for slug in by_slug.keys()]

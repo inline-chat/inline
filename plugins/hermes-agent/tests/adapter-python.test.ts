@@ -40,7 +40,7 @@ clarify_gateway = types.ModuleType("tools.clarify_gateway")
 skills_tool = types.ModuleType("tools.skills_tool")
 hermes_cli = types.ModuleType("hermes_cli")
 hermes_cli.__version__ = "0.18.2"
-commands = types.ModuleType("hermes_cli.commands")
+commands = types.ModuleType("hermes_cli.commands_platforms")
 hermes_plugins = types.ModuleType("hermes_cli.plugins")
 model_cost_guard = types.ModuleType("hermes_cli.model_cost_guard")
 gateway_cli = types.ModuleType("hermes_cli.gateway")
@@ -135,6 +135,7 @@ base.BasePlatformAdapter = BasePlatformAdapter
 base.MessageEvent = MessageEvent
 base.MessageType = MessageType
 base.SendResult = SendResult
+base.safe_url_for_log = lambda url: "[redacted URL]"
 platform_registry.PlatformEntry = PlatformEntry
 helpers.strip_markdown = lambda text: text
 
@@ -273,7 +274,7 @@ sys.modules["tools.slash_confirm"] = slash_confirm
 sys.modules["tools.clarify_gateway"] = clarify_gateway
 sys.modules["tools.skills_tool"] = skills_tool
 sys.modules["hermes_cli"] = hermes_cli
-sys.modules["hermes_cli.commands"] = commands
+sys.modules["hermes_cli.commands_platforms"] = commands
 sys.modules["hermes_cli.plugins"] = hermes_plugins
 sys.modules["hermes_cli.model_cost_guard"] = model_cost_guard
 sys.modules["hermes_cli.gateway"] = gateway_cli
@@ -414,7 +415,7 @@ version_text = _inline_version_text({
     "skills": {"state": "synced", "count": 2},
 })
 assert "Inline Hermes plugin" in version_text
-assert "Plugin version: 0.0.18-alpha.0" in version_text
+assert "Plugin version: 0.0.18" in version_text
 assert "Hermes version: 0.18.2" in version_text
 assert "Installed or updated at:" in version_text
 assert "commands 10 published" in version_text
@@ -1295,7 +1296,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.18-alpha.0",
+    "pluginVersion": "0.0.18",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1345,7 +1346,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.18-alpha.0"
+assert probe_payload["pluginVersion"] == "0.0.18"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1360,7 +1361,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18-alpha.0"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1393,7 +1394,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18-alpha.0"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -1775,7 +1776,7 @@ async def assert_bot_command_sync():
         thread_id=None,
     )
     assert handled is True
-    assert "Plugin version: 0.0.18-alpha.0" in sent[-1][1]
+    assert "Plugin version: 0.0.18" in sent[-1][1]
     assert "Last catalog sync:" in sent[-1][1]
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
@@ -4765,6 +4766,37 @@ async def assert_join_mention_recovery():
     assert [event.message_id for event in paged_events] == ["5000"]
 
 asyncio.run(assert_join_mention_recovery())
+
+async def assert_media_download_fails_closed():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    safety = types.ModuleType("tools.url_safety")
+    safety.is_safe_url = lambda url: False
+    sys.modules["tools.url_safety"] = safety
+    original_client = httpx.AsyncClient
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("unsafe media opened an HTTP client")
+    httpx.AsyncClient = forbidden_client
+    try:
+        for url in ("http://127.0.0.1/private?token=secret", "http://[::1]/private", "http://10.0.0.1/private"):
+            try:
+                await adapter._download_inline_media_url(url, mime="application/pdf", file_name=None)
+                raise AssertionError("unsafe media accepted")
+            except ValueError as exc:
+                assert str(exc) == "blocked unsafe media URL: [redacted URL]"
+            assert await adapter._cache_inline_media_url(url, kind="document", mime="application/pdf", file_name=None) is None
+        # The original bug silently continued when importing the safety helper failed.
+        sys.modules["tools.url_safety"] = None
+        try:
+            await adapter._download_inline_media_url("https://cdn.inline.chat/file", mime="application/pdf", file_name=None)
+            raise AssertionError("missing safety helper accepted")
+        except ImportError:
+            pass
+        assert await adapter._cache_inline_media_url("https://cdn.inline.chat/file", kind="document", mime="application/pdf", file_name=None) is None
+    finally:
+        httpx.AsyncClient = original_client
+        sys.modules.pop("tools.url_safety", None)
+
+asyncio.run(assert_media_download_fails_closed())
 
 async def assert_inline_media_normalization():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))

@@ -66,4 +66,24 @@ describe("public CI contracts", () => {
     expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
     expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
   })
+
+  it("tests published Hermes compatibility regularly and gates the exact release artifact", () => {
+    const scheduled = workflow("hermes-compatibility.yml")
+    expect(scheduled.on.schedule).toBeDefined()
+    expect(scheduled.on.workflow_dispatch).toBeDefined()
+    expect(scheduled.permissions.contents).toBe("read")
+    const monitor = read(".github/workflows/hermes-compatibility.yml")
+    expect(monitor).toContain("host: [latest, main]")
+    expect(monitor).toContain("check-hermes-admission.mjs --latest")
+    expect(monitor).not.toContain("continue-on-error: true")
+    const integration = read(".github/workflows/integrations.yml")
+    expect(integration).toContain("host: ['v2026.9.21', latest, main]")
+    expect(integration).not.toContain('pip" install "hermes-agent==')
+    const publish = read(".github/workflows/npm-publish.yml")
+    expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
+    expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
+      publish.indexOf("HERMES_ARTIFACT_SHA256:"),
+    )
+  })
+
 })
