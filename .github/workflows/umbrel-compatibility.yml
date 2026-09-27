@@ -46,7 +46,8 @@ jobs:
       - name: Test adapter candidate, or published CLI and adapter on schedule
         run: |
           if [[ "${{ github.event_name }}" != schedule ]]; then
-            export HERMES_ARTIFACT="$(find "$RUNNER_TEMP/hermes-artifact" -maxdepth 1 -name '*.tgz' -print -quit)"
+            HERMES_ARTIFACT="$(find "$RUNNER_TEMP/hermes-artifact" -maxdepth 1 -name '*.tgz' -print -quit)"
+            export HERMES_ARTIFACT
             test -n "$HERMES_ARTIFACT"
             bash scripts/ci/check-umbrel-hermes.sh --plugin-only
           else

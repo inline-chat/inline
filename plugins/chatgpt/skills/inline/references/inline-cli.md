@@ -166,6 +166,11 @@ container, service user, persisted `HERMES_HOME`, and profile before installing.
 Run the CLI inside that same environment; host-side `agents discover` cannot
 see across SSH or Docker boundaries. Preserve model settings, memory, skills,
 and other channels. Use a persistent CLI directory and npm prefix on Umbrel.
+An interactive container shell may omit Hermes from PATH; the official app
+needs `/opt/data/.local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin` prepended,
+with the supervisor wrapper before the Python virtual environment. Restore
+owner sign-in and reuse a previously created bot with `--bot-id ID` when
+resuming setup; do not create a duplicate bot or reset the Hermes home.
 
 After authenticating the owner, preview and run:
 

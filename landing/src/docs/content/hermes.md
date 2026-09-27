@@ -48,12 +48,12 @@ sudo docker exec -it --user hermes -e HOME=/opt/data/home CONTAINER bash
 Inside that container, verify the runtime and install into its persistent volume:
 
 ```bash
+export HERMES_HOME=/opt/data
+export PATH="/opt/data/.local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"
+export npm_config_prefix=/opt/data/.local
 hermes --version
 node --version
 npm --version
-export HERMES_HOME=/opt/data
-export PATH="/opt/data/.local/bin:$PATH"
-export npm_config_prefix=/opt/data/.local
 curl -fsSL https://inline.chat/cli/install.sh | INLINE_INSTALL_DIR=/opt/data/.local/bin sh
 inline --version
 ```
@@ -62,12 +62,15 @@ Use these paths only for the official app layout. For a custom image, identify
 its actual service user and durable Hermes home first. Do not install into the
 Umbrel host's home or create a new profile. `inline agents discover` inspects
 only the environment where it runs; it does not discover Hermes across SSH or
-Docker boundaries. The official app includes `/opt/data/.local/bin` in the
-gateway's PATH. Guided setup uses npm's cache under the persistent `HOME`;
+Docker boundaries. An interactive `docker exec` shell may omit Hermes from
+PATH even when the gateway runs normally. Keep `/opt/hermes/bin` before
+`/opt/hermes/.venv/bin` so gateway commands use the app's supervisor wrapper.
+Guided setup uses npm's cache under the persistent `HOME`;
 `npm_config_prefix` selects the persistent location for the manual global
 install/update commands below. It does not need to remain in the gateway
-environment. Persistent files survive container replacement. For custom images, retain any custom PATH or
-Node settings in the app's supported startup configuration.
+environment. Persistent files survive container replacement. For custom
+images, retain any custom PATH or Node settings in the app's supported
+startup configuration.
 
 ## Connect Inline
 
@@ -105,6 +108,29 @@ gateway commands through their s6 supervisor; they do not need a systemd
 service inside the container. If the installed host cannot manage its gateway,
 use `--no-restart`, then restart it through that deployment's existing process
 manager. A configured result is not a ready gateway.
+
+## Resume an incomplete setup
+
+If a previous attempt already created a bot, sign in as its owner in this
+same container with `inline login --browser --no-open`, then list your bots:
+
+```bash
+inline bots list --json
+```
+
+Find the intended bot's ID and reuse it instead of creating another:
+
+```bash
+inline agents setup --target hermes --bot-id BOT_ID --dry-run --non-interactive --json
+inline agents setup --target hermes --bot-id BOT_ID --non-interactive --json
+```
+
+Replace `BOT_ID` with the returned numeric ID. Add `--profile NAME` when
+using a named existing profile. A signed-out CLI and a disabled Hermes plugin
+are separate states: signing in restores the owner's CLI session, while setup
+enables and configures the plugin. Do not reset the Hermes home or replace a
+conflicting bot credential to recover a partial setup. If setup reports a
+conflict, confirm the intended bot before using `--replace`.
 
 ## Verify
 

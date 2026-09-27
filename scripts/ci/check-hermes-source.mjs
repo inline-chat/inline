@@ -57,7 +57,9 @@ assert.equal(metadata["inline-platform"].pinned, true)
 assert.equal(typeof metadata["inline-platform"].source, "string")
 const expectedVersion = /^version:\s*[\'"]?([^\'"\n#]+)/m.exec(await readFile(path.join(source, "plugin.yaml"), "utf8"))?.[1]?.trim()
 assert.ok(expectedVersion)
-console.log(run(hermesBin, ["plugins", "validate", installed, "--install-deps", "--json"]))
+// Native install already resolves manifest dependencies. Hermes 0.21.3
+// validates plugins but predates the optional validate --install-deps flag.
+console.log(run(hermesBin, ["plugins", "validate", installed, "--json"]))
 const hostTest = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-hermes-host.py")
 console.log(run(pythonBin, [hostTest, installed], 60_000))
 

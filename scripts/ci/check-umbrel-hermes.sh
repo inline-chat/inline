@@ -36,6 +36,8 @@ fi
 docker exec "$container" chown -R hermes:hermes /tmp/inline-smoke
 docker exec --user hermes -e HOME=/opt/data/home -e INLINE_PLUGIN_TELEMETRY=0 -e DO_NOT_TRACK=1 -e "INLINE_SMOKE_MODE=${1:-latest}" \
   -w /tmp/inline-smoke "$container" bash -euc '
+  # docker exec may not inherit the login-shell PATH used by the dashboard.
+  export PATH="/opt/data/.local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"
   test "$HERMES_HOME" = /opt/data
   test "$(id -u)" = 1000
   python -c "from hermes_cli.service_manager import detect_service_manager; assert detect_service_manager() == \"s6\""
