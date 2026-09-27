@@ -15,6 +15,7 @@ on:
       - "proto/core.proto"
       - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
+      - "scripts/ci/test-cli-installer.py"
       - ".github/workflows/cli-check.yml"
       - ".github/workflows/cli-release.yml"
   pull_request:
@@ -31,6 +32,7 @@ on:
       - "proto/core.proto"
       - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
+      - "scripts/ci/test-cli-installer.py"
       - ".github/workflows/cli-check.yml"
       - ".github/workflows/cli-release.yml"
 
@@ -43,8 +45,16 @@ concurrency:
 
 jobs:
   build:
-    name: Build CLI
-    runs-on: ubuntu-latest
+    name: Build CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
     timeout-minutes: 20
 
     steps:
@@ -61,7 +71,7 @@ jobs:
         working-directory: cli
         run: |
           set -euo pipefail
-          rustup target add x86_64-unknown-linux-musl
+          rustup target add "${{ matrix.target }}"
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
@@ -82,7 +92,15 @@ jobs:
 
       - name: Build Linux musl
         working-directory: cli
-        run: cargo build --locked --target x86_64-unknown-linux-musl
+        run: cargo build --locked --target "${{ matrix.target }}"
+
+      - name: Smoke static Linux CLI
+        run: |
+          target/${{ matrix.target }}/debug/inline --version
+          target/${{ matrix.target }}/debug/inline capabilities agents setup --compact
+
+      - name: Test installer with Debian sh
+        run: python3 scripts/ci/test-cli-installer.py
 
       - name: Test
         working-directory: cli

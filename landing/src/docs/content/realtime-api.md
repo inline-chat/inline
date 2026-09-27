@@ -104,3 +104,10 @@ For implementation details, read the [TypeScript V3 connection](https://github.c
 - To maintain state across live updates and reconnects, read [Sync](/docs/technical/sync).
 - To handle failures without duplicating mutations, read [RPC semantics](/docs/technical/rpc).
 - To implement a Rust client, start with the [Rust SDK](/docs/rust-sdk).
+
+## Source
+
+- [SDK option contracts](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts)
+- [TypeScript V3 connection](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-connection.ts)
+- [V3 transport](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-transport.ts)
+- [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)

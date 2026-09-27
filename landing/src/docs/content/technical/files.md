@@ -57,3 +57,7 @@ Realtime uploads are bound to the account session and, on V3, the permanent auth
 ## Summary
 
 Choose an API before choosing an identifier. A file ID locates bytes; the account session and message context determine access. To publish a new attachment, [complete an upload](/docs/technical/uploads) and then send its typed media in a separate mutation.
+
+## Source
+
+- [`NativeDownloadClient`](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/downloads.ts)

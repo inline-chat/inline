@@ -46,3 +46,10 @@ Cancellation ends the local wait; it does not prove server execution stopped. Th
 ## Summary
 
 Resume in this order: authenticate transport, recover bucket coverage, then expose current local state. For a lost mutation result, use [method-specific retry rules](/docs/technical/rpc); reconnect alone cannot decide whether to repeat it.
+
+## Source
+
+- [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [TypeScript V3 transport](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-transport.ts)
+- [Rust V3 connection](https://github.com/inline-chat/inline/blob/main/crates/sdk/src/realtime_v3.rs)
+- [TypeScript V3 connection](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-connection.ts)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildArgsForTarget,
   isPrereleaseVersion,
   manifestObjectKey,
   releaseTag,
@@ -85,5 +86,23 @@ describe("Homebrew cask release updates", () => {
         linuxIntel: "not-a-sha256",
       }),
     ).toThrow("expected 64 lowercase hex digits");
+  });
+});
+
+
+describe("portable Linux release builds", () => {
+  test("pins glibc even when building for the runner architecture", async () => {
+    for (const target of ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]) {
+      expect(await buildArgsForTarget(target, true, target)).toEqual([
+        "zigbuild", "--release", "--locked", "--target", `${target}.2.28`,
+      ]);
+      await expect(buildArgsForTarget(target, false, target)).rejects.toThrow("require cargo-zigbuild");
+    }
+  });
+  test("keeps static and macOS targets unchanged", async () => {
+    expect(await buildArgsForTarget("aarch64-unknown-linux-musl", true, "aarch64-unknown-linux-gnu"))
+      .toEqual(["zigbuild", "--release", "--locked", "--target", "aarch64-unknown-linux-musl"]);
+    expect(await buildArgsForTarget("aarch64-apple-darwin", false, "aarch64-apple-darwin"))
+      .toEqual(["build", "--release", "--locked", "--target", "aarch64-apple-darwin"]);
   });
 });

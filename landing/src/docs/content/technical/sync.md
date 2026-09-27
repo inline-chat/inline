@@ -73,3 +73,10 @@ Update continuity and message-history continuity are separate. A chat can have a
 ## Summary
 
 Keep bucket coverage and date discovery checkpoints separate. Commit materialized state with its cursor; advance the discovery checkpoint after discovered work succeeds. Continue with [gap and snapshot recovery](/docs/technical/sync-recovery) when replay cannot establish coverage.
+
+## Source
+
+- [Wire schema](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [Server update pages](https://github.com/inline-chat/inline/blob/main/server/src/functions/updates.getUpdates.ts)
+- [TypeScript SDK sync owner](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/inline-sdk-client.ts)
+- [Rust client sync engine](https://github.com/inline-chat/inline/blob/main/crates/client/src/sync.rs)

@@ -114,4 +114,8 @@ openclaw gateway restart
 
 ---
 
-[Plugin source and configuration](https://github.com/inline-chat/inline/tree/main/openclaw)
+[Plugin source and configuration](https://github.com/inline-chat/inline/tree/main/plugins/openclaw)
+
+## Source
+
+- [Plugin source and configuration](https://github.com/inline-chat/inline/tree/main/plugins/openclaw)

@@ -83,3 +83,10 @@ The schema pages are indexes into canonical declarations and behavioral guides. 
 ## Summary
 
 Choose identity and transport first. Then establish authority, perform the operation, and verify its application result. Use the relevant recovery guide for uncertain RPC results, missing update coverage, or unfinished media; each preserves a different durable identity.
+
+## Source
+
+- [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [TypeScript SDK](https://github.com/inline-chat/inline/tree/main/packages/sdk)
+- [Rust SDK](https://github.com/inline-chat/inline/tree/main/crates/sdk)
+- [stateful client](https://github.com/inline-chat/inline/tree/main/crates/client)

@@ -42,7 +42,7 @@ Expected tarball shape:
 ## Host Compatibility and Message Flow
 
 PR/main CI installs official Hermes source at the minimum supported version
-(`0.21.4`, tag `v2026.9.21`), the newest stable release, and upstream `main`.
+(`0.21.3`, tag `v2026.9.14`), the newest stable release, and upstream `main`.
 Each host validates the packed plugin manifest, rejects deprecated imports,
 loads the platform and tool through Hermes, and exercises inbound/reply delivery,
 deduplication, and media URL rejection. Host modules are not stubbed; this fast
@@ -130,7 +130,7 @@ the trusted-publishing workflow through the repository wrapper:
 
 ```sh
 cd ..
-bun run release:npm hermes-agent --version 0.0.19 --tag latest
+bun run release:npm hermes-agent --version 0.0.20 --tag latest
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```

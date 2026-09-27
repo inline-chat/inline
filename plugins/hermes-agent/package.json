@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/hermes-agent-adapter",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "description": "Hermes Agent platform adapter for Inline, with a native Python plugin and bundled Inline realtime sidecar.",
   "license": "Apache-2.0",
   "type": "module",
@@ -83,7 +83,7 @@
       "npmSpec": "@inline-chat/hermes-agent-adapter"
     },
     "machineSetupProtocol": 1,
-    "minHermesVersion": "0.21.4",
+    "minHermesVersion": "0.21.3",
     "testedHermesVersion": "0.21.5",
     "testedHermesCommit": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
   }

@@ -170,3 +170,8 @@ Message actions are delivered as `message_action` updates. Messages from another
 ## Next Steps
 
 Once you can receive and durably handle an update, use the [Bot API guide](/docs/bot-api#typescript-client) to send a reply. Keep the [method reference](https://api.inline.chat/bot-api-reference) available for exact request and response fields.
+
+## Source
+
+- [Update projection and delivery](https://github.com/inline-chat/inline/tree/main/server/src/modules/botUpdates)
+- [TypeScript bot client](https://github.com/inline-chat/inline/tree/main/packages/bot-client)

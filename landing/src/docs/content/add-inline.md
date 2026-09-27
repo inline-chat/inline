@@ -71,4 +71,9 @@ Use Inline to list my chats.
 
 ---
 
-[Inline plugin](https://github.com/inline-chat/inline/tree/main/plugins/inline) · [Inline skill](https://github.com/inline-chat/inline/tree/main/skills/inline) · [MCP](/docs/mcp) · [CLI](/docs/cli)
+[Inline plugin](https://github.com/inline-chat/inline/tree/main/plugins/chatgpt) · [Inline skill](https://github.com/inline-chat/inline/tree/main/skills/inline) · [MCP](/docs/mcp) · [CLI](/docs/cli)
+
+## Source
+
+- [`skills/inline` folder](https://github.com/inline-chat/inline/tree/main/skills/inline)
+- [Inline plugin](https://github.com/inline-chat/inline/tree/main/plugins/chatgpt)

@@ -326,20 +326,23 @@ async function rustHostTarget(): Promise<string | null> {
   return result.stdout.match(/^host:\s*(\S+)/m)?.[1] ?? null;
 }
 
-async function buildArgsForTarget(
+export async function buildArgsForTarget(
   target: string,
   canZigbuild: boolean,
   hostTarget: string | null,
 ): Promise<string[]> {
-  if (!isLinuxTarget(target) || target === hostTarget) {
+  // GNU releases must not inherit the CI runner's newer glibc requirement.
+  // Umbrel and its Hermes container can run an older Debian userspace.
+  const gnuLinux = target.endsWith("-unknown-linux-gnu");
+  if (!isLinuxTarget(target) || (target === hostTarget && !gnuLinux)) {
     return ["build", "--release", "--locked", "--target", target];
   }
   if (!canZigbuild) {
     throw new Error(
-      `Cross-building ${target} requires cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
+      `Portable Linux builds for ${target} require cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
     );
   }
-  return ["zigbuild", "--release", "--locked", "--target", target];
+  return ["zigbuild", "--release", "--locked", "--target", gnuLinux ? `${target}.2.28` : target];
 }
 
 async function runBuild(context: ReleaseContext) {

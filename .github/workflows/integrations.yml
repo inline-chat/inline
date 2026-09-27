@@ -372,7 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['v2026.9.21', latest, main]
+        host: ['v2026.9.14', 'v2026.9.21', latest, main]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4

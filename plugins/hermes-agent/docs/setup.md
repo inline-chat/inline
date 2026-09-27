@@ -4,7 +4,7 @@ Install the official Inline platform adapter for Hermes Agent.
 
 ## Requirements
 
-- Hermes Agent `>=0.21.4` (validated against `0.21.5`)
+- Hermes Agent `>=0.21.3` (validated against `0.21.5`)
 - Node.js `20` or newer
 - The Inline CLI for guided bot creation, or an existing Inline bot/user token
 
@@ -28,24 +28,24 @@ configure access.
 
 ## Coding Agent Setup Prompt
 
-Use this with Codex, Claude Code, or another local coding agent for a simple setup:
+For an existing server or Umbrel installation, follow the
+[remote Hermes setup guide](https://inline.chat/docs/hermes.md). Run setup in
+the existing container as its service user with the same persisted Hermes home
+and profile. The guide includes a copyable coding-agent prompt, persistent
+installation paths, browser approval over SSH, and live verification.
 
-```text
-Set up the Inline Hermes Agent adapter on this machine.
+After signing in with `inline login --browser --no-open`, the CLI can configure
+the channel without putting tokens in command arguments:
 
-Constraints:
-- Do not read, print, or edit .env files.
-- Do not print Inline tokens or other secrets.
-- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN when already available; otherwise use Hermes's guided setup without exposing the token.
-
-Tasks:
-1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
-2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
-3. Run inline-hermes install and hermes plugins enable inline-platform.
-4. Run hermes gateway setup and select Inline. Prefer its guided bot-creation path; if no Inline token is available, let this interactive wizard ask the user to sign in or paste one.
-5. Run inline-hermes doctor --json, hermes inline status --json --probe, and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
-6. Report the exact commands run and any remaining manual steps, without revealing secrets.
+```bash
+inline agents setup --target hermes --dry-run --non-interactive --json
+inline agents setup --target hermes --non-interactive --json
 ```
+
+Add `--profile NAME` for an existing named profile. Preserve the existing
+models, memory, skills, and channels. Do not read or print `.env` files or
+secrets. A dry-run or credential probe is not proof of a live reply; verify
+the running gateway and a final response in Inline.
 
 ## Manual configuration
 

@@ -74,7 +74,7 @@ describe("packed artifact", () => {
       pluginPath: "plugin/inline",
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
-      minHermesVersion: "0.21.4",
+      minHermesVersion: "0.21.3",
       testedHermesVersion: "0.21.5",
       testedHermesCommit: "f97608f178d1ffeca59860195ab7da295f7c8e5f",
     })
@@ -83,7 +83,7 @@ describe("packed artifact", () => {
     expect(installJs).not.toContain("sourceMappingURL")
 
     const manifest = await readFile(path.join(packageRoot, "plugin/inline/plugin.yaml"), "utf8")
-    expect(manifest).toContain('requires_hermes: ">=0.21.4"')
+    expect(manifest).toContain('requires_hermes: ">=0.21.3"')
     expect(manifest).toContain("INLINE_BOT_TOKEN, platforms.inline.token, inline.token, and simple ${ENV_NAME} config references are also accepted")
     expect(manifest).toContain("INLINE_CONTEXT_BACKFILL")
     expect(manifest).toContain("INLINE_OBSERVE_UNMENTIONED_MESSAGES")
@@ -195,7 +195,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.19")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.20")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

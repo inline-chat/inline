@@ -85,3 +85,8 @@ If `ok` is `false`, use `error_code` and `description` to diagnose the failure. 
 ## Next Steps
 
 To receive your first message, follow [Receive Bot Updates](/docs/bot-updates). Initialize delivery **before** sending the test message; earlier messages are not backfilled. To send replies or choose a client library, continue with the [Bot API guide](/docs/bot-api).
+
+## Source
+
+- [CLI bot setup](https://github.com/inline-chat/inline/blob/main/cli/src/agents/bot.rs)
+- [Server bot creation](https://github.com/inline-chat/inline/blob/main/server/src/functions/createBot.ts)

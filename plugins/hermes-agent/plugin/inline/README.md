@@ -6,7 +6,7 @@ npm packages when the gateway starts.
 
 ## Requirements
 
-- Hermes Agent 0.21.4 or newer.
+- Hermes Agent 0.21.3 or newer.
 - Node.js 20 or newer, available on the gateway host.
 - An Inline bot token. [Create a bot](https://inline.chat/docs/creating-a-bot),
   or use the guided setup below.

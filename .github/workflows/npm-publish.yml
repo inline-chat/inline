@@ -235,6 +235,12 @@ jobs:
           HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
 
+      - name: Validate exact Hermes release artifact in the Umbrel app image
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
+        run: bash scripts/ci/check-umbrel-hermes.sh --plugin-only
+
       - name: Pack and install exact public artifact
         if: inputs.package != 'hermes-agent'
         id: package-artifact

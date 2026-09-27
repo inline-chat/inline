@@ -41,4 +41,8 @@ Use Inline to list my chats.
 
 ---
 
-[MCP tools](https://github.com/inline-chat/inline/tree/main/mcp) · [OAuth metadata](https://api.inline.chat/.well-known/oauth-authorization-server) · [Protected resource metadata](https://mcp.inline.chat/.well-known/oauth-protected-resource)
+[MCP tools](https://github.com/inline-chat/inline/tree/main/packages/mcp) · [OAuth metadata](https://api.inline.chat/.well-known/oauth-authorization-server) · [Protected resource metadata](https://mcp.inline.chat/.well-known/oauth-protected-resource)
+
+## Source
+
+- [MCP tools](https://github.com/inline-chat/inline/tree/main/packages/mcp)
