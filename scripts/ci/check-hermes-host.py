@@ -14,7 +14,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
-import yaml
+try:
+    import hermes_yaml as yaml
+except ModuleNotFoundError as exc:
+    if exc.name != "hermes_yaml":
+        raise
+    import yaml
 
 home = Path(os.environ["HERMES_HOME"])
 plugin = home / "plugins" / "inline"

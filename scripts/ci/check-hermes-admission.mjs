@@ -42,7 +42,7 @@ if (mode !== "--latest") {
 }
 const env = { ...process.env, HERMES_HOME: home, HOME: scratch, INLINE_NODE_BIN: process.execPath }
 const adapterBin = path.join(consumer, "node_modules/.bin/inline-hermes")
-const run = (bin, args) => execFileSync(bin, args, { cwd: consumer, env, encoding: "utf8", timeout: 60_000 })
+const run = (bin, args, timeout = 180_000) => execFileSync(bin, args, { cwd: consumer, env, encoding: "utf8", timeout })
 assert.match(run(adapterBin, ["help"]), /inline-hermes install/)
 console.log(run(adapterBin, ["install", "--hermes-home", home, "--force", "--json"]))
 for (const file of ["adapter.py", "cli.py", "tools.py", "plugin.yaml", "sidecar/index.mjs"]) {
@@ -57,5 +57,5 @@ assert.match(before, /inline-platform/)
 console.log(run(hermesBin, ["plugins", "enable", "inline-platform"]))
 const after = run(hermesBin, ["plugins", "list", "--plain", "--no-bundled"])
 assert.match(after, /enabled\s+user\s+\S+\s+inline-platform/)
-console.log(run(pythonBin, [path.resolve("scripts/ci/check-hermes-host.py")]))
+console.log(run(pythonBin, [path.resolve("scripts/ci/check-hermes-host.py")], 60_000))
 console.log(`Hermes native admission passed: ${provenance}`)

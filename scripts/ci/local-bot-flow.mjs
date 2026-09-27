@@ -153,7 +153,7 @@ console.log('Packed Bot Client, Chat SDK adapter, and realtime SDK reached the l
   await mkdir(hermesHome)
   const hermesEnv = {
     ...process.env, HERMES_HOME: hermesHome, HOME: consumer,
-    INLINE_NODE_BIN: "node", INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
+    INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
     INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
     INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
     INLINE_E2E_CONSUMER: consumer,

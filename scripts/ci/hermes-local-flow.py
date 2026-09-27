@@ -42,7 +42,7 @@ async def main():
     try:
         assert await adapter.connect(), "Hermes failed to connect its bundled sidecar"
         sender = await asyncio.create_subprocess_exec(
-            "node", str(Path(os.environ["INLINE_E2E_CONSUMER"]) / "hermes-human.mjs"),
+            os.environ["INLINE_NODE_BIN"], str(Path(os.environ["INLINE_E2E_CONSUMER"]) / "hermes-human.mjs"),
         )
         assert await asyncio.wait_for(sender.wait(), 30) == 0, "human SDK sender failed"
         await asyncio.wait_for(inbound.wait(), 30)
