@@ -2054,6 +2054,7 @@ asyncio.run(assert_activated_agent_avoids_lookup())
 async def assert_forced_reply_thread_creation():
     adapter = InlineAdapter(PlatformConfig(extra={
         **base_extra,
+        "allow_from": "u1",
         "reply_threads": "on",
         "require_mention": False,
         "channel_prompts": {"99": "Thread prompt", "10": "Parent prompt"},
@@ -2154,7 +2155,7 @@ async def assert_forced_reply_thread_creation():
 asyncio.run(assert_forced_reply_thread_creation())
 
 async def assert_default_dm_reply_thread_creation():
-    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "allow_from": "u1"}))
     events = []
     calls = []
 
@@ -2546,6 +2547,7 @@ asyncio.run(assert_observed_context_buffer())
 async def assert_explicit_addressing_precedence():
     adapter = InlineAdapter(PlatformConfig(extra={
         **base_extra,
+        "allow_from": "u1",
         "require_mention": True,
         "reply_threads": False,
         "context_backfill": "off",
@@ -2690,6 +2692,7 @@ async def assert_reply_thread_slash_command():
         settings_path = Path(tmp) / "settings.json"
         adapter = InlineAdapter(PlatformConfig(extra={
             **base_extra,
+            "allow_from": "u1,1600",
             "settings_path": str(settings_path),
             "require_mention": True,
         }))
@@ -2945,6 +2948,56 @@ async def assert_reply_thread_slash_command():
         assert saved["reply_threads"] == {}
 
 asyncio.run(assert_reply_thread_slash_command())
+
+async def assert_local_commands_require_authorized_sender():
+    """Under the default open policy an unlisted sender must not reach adapter-local
+    handlers before core authz: /threads falls through to Hermes, th: buttons are denied."""
+    with tempfile.TemporaryDirectory() as tmp:
+        settings_path = Path(tmp) / "settings.json"
+        adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "settings_path": str(settings_path)}))
+        events = []
+        answers = []
+        sidecar_calls = []
+
+        async def fake_handle_message(event):
+            events.append(event)
+
+        async def fake_answer_action(interaction_id, toast):
+            answers.append((interaction_id, toast))
+
+        async def fake_sidecar_call(path, body):
+            sidecar_calls.append((path, body))
+            return {"ok": True, "result": {}}
+
+        async def fake_fetch_message(chat_id, message_id):
+            return {"peerId": {"type": {"oneofKind": "user", "user": {"userId": chat_id}}}}
+
+        adapter.handle_message = fake_handle_message
+        adapter._answer_action = fake_answer_action
+        adapter._sidecar_call = fake_sidecar_call
+        adapter._fetch_message = fake_fetch_message
+
+        for text in ("/threads off", "/follow", "/inline-sync"):
+            await adapter._dispatch_message({
+                "seq": len(events) + 300,
+                "chatId": "20",
+                "message": {"id": f"stranger-{len(events)}", "chatId": "20", "fromId": "stranger", "message": text, "peerId": {"peer": {"oneofKind": "user"}}},
+            })
+        assert [e.text for e in events] == ["/threads off", "/follow", "/inline-sync"]
+        assert adapter._reply_thread_mode_for_chat("20") == "auto"
+        assert not settings_path.exists()
+        assert sidecar_calls == []
+
+        assert not await adapter._thread_action_allowed({
+            "chatId": "20",
+            "messageId": "m1",
+            "interactionId": "stranger-thread-action",
+            "actorUserId": "stranger",
+            "actionId": "th:x:on",
+        }, {"display_chat_id": "20", "target_chat_id": "20"})
+        assert answers[-1] == ("stranger-thread-action", "Not authorized")
+
+asyncio.run(assert_local_commands_require_authorized_sender())
 
 async def assert_new_message_delivery_dedup():
     def event(seq, date, text):

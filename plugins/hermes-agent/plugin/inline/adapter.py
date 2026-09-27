@@ -2402,7 +2402,10 @@ class InlineAdapter(BasePlatformAdapter):
         )
         if has_command_target and not command_addressed_to_me:
             return
-        if not agent_action and await self._handle_thread_command(
+        # Adapter-local commands and thread creation run before core's authz, so they
+        # need the same default-deny sender check the button actions use.
+        actor_authorized = self._actor_authorized(chat_type, from_id)
+        if not agent_action and actor_authorized and await self._handle_thread_command(
             chat_id=chat_id,
             msg_id=msg_id,
             text=text,
@@ -2411,7 +2414,7 @@ class InlineAdapter(BasePlatformAdapter):
             parent_chat_id=parent_chat_id,
         ):
             return
-        if not agent_action and await self._handle_follow_command(
+        if not agent_action and actor_authorized and await self._handle_follow_command(
             chat_id=chat_id,
             msg_id=msg_id,
             from_id=from_id,
@@ -2420,7 +2423,7 @@ class InlineAdapter(BasePlatformAdapter):
             thread_id=thread_id,
         ):
             return
-        if not agent_action and await self._handle_inline_maintenance_command(
+        if not agent_action and actor_authorized and await self._handle_inline_maintenance_command(
             chat_id=chat_id,
             msg_id=msg_id,
             text=text,
@@ -2474,6 +2477,7 @@ class InlineAdapter(BasePlatformAdapter):
         if (
             not edit
             and not agent_action
+            and actor_authorized
             and not thread_id
             and self._should_create_reply_thread_for_message(
                 chat_id=chat_id,
@@ -4018,14 +4022,6 @@ class InlineAdapter(BasePlatformAdapter):
         chat_type = await self._action_chat_type(event)
         if self._actor_authorized(chat_type, actor_id):
             return True
-        display_chat_id = self._chat_key(state.get("display_chat_id"))
-        target_chat_id = self._chat_key(state.get("target_chat_id"))
-        if chat_type and actor_id and self._allowed(chat_type, actor_id):
-            if chat_type == "dm":
-                return True
-            thread_id = display_chat_id if target_chat_id and display_chat_id != target_chat_id else None
-            if self._chat_allowed(display_chat_id or str(event.get("chatId") or ""), thread_id, target_chat_id):
-                return True
         await self._answer_action(interaction_id, "Not authorized")
         logger.info("[inline] blocked thread action actor=%s chat_type=%s action=%s", actor_id or "unknown", chat_type or "unknown", event.get("actionId") or "")
         return False
