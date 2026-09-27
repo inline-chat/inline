@@ -251,6 +251,8 @@ const expectedFiles = [
   "dist/install.d.ts",
   "dist/install.js",
   "package.json",
+  "plugin/inline/LICENSE",
+  "plugin/inline/README.md",
   "plugin/inline/__init__.py",
   "plugin/inline/adapter.py",
   "plugin/inline/cli.py",

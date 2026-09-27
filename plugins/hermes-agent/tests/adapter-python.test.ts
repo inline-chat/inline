@@ -421,6 +421,42 @@ assert "Installed or updated at:" in version_text
 assert "commands 10 published" in version_text
 assert "skills 2 published" in version_text
 
+# Catalog installs use the manifest name, while legacy npm installs use inline.
+# Metadata must always describe the module Hermes actually loaded.
+with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tmp:
+    catalog_home = Path(tmp).resolve()
+    legacy_dir = catalog_home / "plugins" / "inline"
+    catalog_dir = catalog_home / "plugins" / "inline-platform"
+    legacy_dir.mkdir(parents=True)
+    catalog_dir.mkdir(parents=True)
+    (legacy_dir / "plugin.yaml").write_text("version: 0.0.1\n", encoding="utf-8")
+    (catalog_dir / "plugin.yaml").write_text("version: 0.0.18\n", encoding="utf-8")
+    saved_adapter_file = inline_adapter_module.__file__
+    saved_cli_file = inline_cli.__file__
+    saved_catalog_home = os.environ.get("HERMES_HOME")
+    original_catalog_lstat = Path.lstat
+    try:
+        inline_adapter_module.__file__ = str(catalog_dir / "adapter.py")
+        inline_cli.__file__ = str(catalog_dir / "cli.py")
+        os.environ["HERMES_HOME"] = str(catalog_home)
+        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.18"
+        assert inline_cli._plugin_version() == "0.0.18"
+        # Distinct directory timestamps ensure the test catches the legacy path.
+        Path.lstat = lambda self: types.SimpleNamespace(st_ctime=100 if self == catalog_dir else 200)
+        assert inline_adapter_module._inline_install_timestamp() == "1970-01-01T00:01:40Z"
+        catalog_text = _inline_version_text()
+        assert "Plugin version: 0.0.18" in catalog_text
+        assert "1970-01-01T00:01:40Z" in catalog_text
+        assert "Plugin version: 0.0.1\n" not in catalog_text
+    finally:
+        Path.lstat = original_catalog_lstat
+        inline_adapter_module.__file__ = saved_adapter_file
+        inline_cli.__file__ = saved_cli_file
+        if saved_catalog_home is None:
+            os.environ.pop("HERMES_HOME", None)
+        else:
+            os.environ["HERMES_HOME"] = saved_catalog_home
+
 os.environ["INLINE_CUSTOM_TOKEN"] = "custom-token"
 env_ref_token = "$" + "{INLINE_CUSTOM_TOKEN}"
 assert validate_config(PlatformConfig(token=env_ref_token))
@@ -531,6 +567,7 @@ async def assert_inline_update_command():
 
         saved_home = os.environ.get("HERMES_HOME")
         saved_token = os.environ.get("INLINE_TOKEN")
+        saved_adapter_file = inline_adapter_module.__file__
         saved_hermes_version = hermes_cli.__version__
         original_which = inline_adapter_module.shutil.which
         original_run = inline_adapter_module.subprocess.run
@@ -539,6 +576,7 @@ async def assert_inline_update_command():
         failure_output = None
         error_logs = []
         try:
+            inline_adapter_module.__file__ = str(plugin_dir / "adapter.py")
             os.environ["HERMES_HOME"] = str(hermes_home)
             os.environ["INLINE_TOKEN"] = "must-not-reach-npm"
             inline_adapter_module.shutil.which = lambda name: "/usr/bin/npm" if name == "npm" else None
@@ -636,6 +674,7 @@ async def assert_inline_update_command():
             finally:
                 inline_adapter_module._INLINE_UPDATE_LOCK.release()
         finally:
+            inline_adapter_module.__file__ = saved_adapter_file
             inline_adapter_module.shutil.which = original_which
             inline_adapter_module.subprocess.run = original_run
             inline_adapter_module.logger.error = original_log_error

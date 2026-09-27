@@ -5376,8 +5376,8 @@ def _log_inline_update_failure(
     )
 
 
-def _installed_inline_plugin_version(hermes_home: Path) -> Optional[str]:
-    manifest = hermes_home / "plugins" / "inline" / "plugin.yaml"
+def _installed_inline_plugin_version() -> Optional[str]:
+    manifest = Path(__file__).resolve().with_name("plugin.yaml")
     try:
         text = manifest.read_text(encoding="utf-8")
     except OSError:
@@ -5386,8 +5386,8 @@ def _installed_inline_plugin_version(hermes_home: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _inline_install_timestamp(hermes_home: Path) -> Optional[str]:
-    target = hermes_home / "plugins" / "inline"
+def _inline_install_timestamp() -> Optional[str]:
+    target = Path(__file__).resolve().parent
     try:
         timestamp = target.lstat().st_ctime
     except OSError:
@@ -5404,21 +5404,13 @@ def _inline_catalog_part_summary(part: Dict[str, Any]) -> str:
 
 
 def _inline_version_text(last_sync: Optional[Dict[str, Any]] = None) -> str:
-    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
-    version = _installed_inline_plugin_version(hermes_home)
-    if not version:
-        try:
-            manifest = Path(__file__).with_name("plugin.yaml").read_text(encoding="utf-8")
-        except OSError:
-            manifest = ""
-        match = re.search(r"(?m)^version:\s*['\"]?([^\s'\"]+)", manifest)
-        version = match.group(1) if match else None
+    version = _installed_inline_plugin_version()
     try:
         from hermes_cli import __version__ as hermes_version
     except Exception:
         hermes_version = None
 
-    installed_at = _inline_install_timestamp(hermes_home)
+    installed_at = _inline_install_timestamp()
     if last_sync:
         sync_text = (
             f"{last_sync.get('completed_at') or 'unknown'} "
@@ -5476,7 +5468,7 @@ def _run_inline_update_locked() -> str:
             "Update the linked source checkout and restart Hermes instead."
         )
 
-    installed_version = _installed_inline_plugin_version(hermes_home)
+    installed_version = _installed_inline_plugin_version()
     lane = _inline_update_lane(installed_version)
     if not lane:
         return (
@@ -5598,7 +5590,7 @@ def _run_inline_update_locked() -> str:
             "inline-hermes install --force` on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
         )
 
-    version = _installed_inline_plugin_version(hermes_home)
+    version = _installed_inline_plugin_version()
     version_text = f" to `{version}`" if version else ""
     return f"Inline plugin updated{version_text} from the `{lane}` channel. Run `/restart` to load the new version."
 

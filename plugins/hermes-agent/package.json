@@ -28,6 +28,8 @@
     "README.md",
     "dist/install.d.ts",
     "dist/install.js",
+    "plugin/inline/README.md",
+    "plugin/inline/LICENSE",
     "plugin/inline/__init__.py",
     "plugin/inline/adapter.py",
     "plugin/inline/cli.py",

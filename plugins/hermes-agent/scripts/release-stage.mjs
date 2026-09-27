@@ -7,7 +7,17 @@ import { fileURLToPath } from "node:url"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageRoot, "..", "..")
-const { mode, outputDir: requestedOutputDir, candidateSdkTarball, candidateProtocolTarball } = parseArgs(process.argv.slice(2))
+const { mode, outputDir: requestedOutputDir, candidateSdkTarball, candidateProtocolTarball, verifySourceBundle } = parseArgs(process.argv.slice(2))
+if (verifySourceBundle && (candidateSdkTarball || candidateProtocolTarball)) {
+  throw new Error("--verify-source-bundle requires registry dependencies; candidate tarball overrides are not allowed")
+}
+const sourceBundle = path.join(packageRoot, "plugin", "inline", "sidecar", "index.mjs")
+if (verifySourceBundle) {
+  execFileSync("git", ["ls-files", "--error-unmatch", "--", path.relative(repoRoot, sourceBundle)], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  })
+}
 const stageRoot = await mkdtemp(path.join(os.tmpdir(), "inline-hermes-release-"))
 const stagePackageRoot = path.join(stageRoot, "plugins", "hermes-agent")
 const outputDir = requestedOutputDir == null
@@ -79,6 +89,14 @@ execFileSync("bun", ["run", "check"], {
   stdio: "inherit",
 })
 
+if (verifySourceBundle) {
+  const builtBundle = await readFile(path.join(stagePackageRoot, "plugin", "inline", "sidecar", "index.mjs"))
+  if (!builtBundle.equals(await readFile(sourceBundle))) {
+    throw new Error("Hermes source sidecar differs from the isolated registry-dependency build; regenerate the tracked source bundle from release staging")
+  }
+  console.log(`Hermes source bundle verified: sha256:${createHash("sha256").update(builtBundle).digest("hex")}`)
+}
+
 const packed = JSON.parse(execFileSync("npm", [
   "pack",
   "--ignore-scripts",
@@ -118,10 +136,15 @@ function parseArgs(argv) {
   let outputDir
   let candidateSdkTarball
   let candidateProtocolTarball
+  let verifySourceBundle = false
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === "--dry-run" || arg === "--prepare-only") {
       mode = arg
+      continue
+    }
+    if (arg === "--verify-source-bundle") {
+      verifySourceBundle = true
       continue
     }
     if (arg === "--output-dir") {
@@ -139,5 +162,5 @@ function parseArgs(argv) {
     }
     throw new Error(`unknown argument: ${arg}`)
   }
-  return { mode, outputDir, candidateSdkTarball, candidateProtocolTarball }
+  return { mode, outputDir, candidateSdkTarball, candidateProtocolTarball, verifySourceBundle }
 }

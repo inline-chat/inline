@@ -30,6 +30,8 @@ Expected tarball shape:
 - `dist/install.d.ts`
 - `dist/install.js`
 - `package.json`
+- `plugin/inline/LICENSE`
+- `plugin/inline/README.md`
 - `plugin/inline/__init__.py`
 - `plugin/inline/adapter.py`
 - `plugin/inline/cli.py`
@@ -58,6 +60,15 @@ adapter version, host ref/SHA, and candidate artifact hash are logged.
 The publish workflow repeats host admission against the exact immutable release
 tarball before npm trusted publishing. Release checks use the adapter's pinned
 registry dependencies; an unrelated workspace prerelease is not substituted.
+
+Catalog source also carries the bundled sidecar. Source CI and npm publication
+run `release-stage.mjs --verify-source-bundle` to compare that tracked bundle with
+the isolated build from pinned registry dependencies. Candidate dependency
+overrides cannot be combined with this check. To regenerate after an SDK or
+sidecar change, run `release:stage`, copy the sidecar from the reported stage
+into `plugin/inline/sidecar/index.mjs`, then rerun staging with
+`--verify-source-bundle` and commit the result. A workspace build is not the
+canonical catalog artifact.
 
 These checks do not establish live provider or production messaging health.
 The following live checks remain useful before broader rollout.

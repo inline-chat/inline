@@ -199,7 +199,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/hermes-release-artifact"
           mkdir -p "$artifact_dir"
           stage_log="$(mktemp)"
-          node plugins/hermes-agent/scripts/release-stage.mjs --dry-run --output-dir "$artifact_dir" | tee "$stage_log"
+          node plugins/hermes-agent/scripts/release-stage.mjs --dry-run --verify-source-bundle --output-dir "$artifact_dir" | tee "$stage_log"
           artifact="$(sed -n 's/^Hermes release artifact: //p' "$stage_log" | tail -1)"
           artifact_sha256="$(sed -n 's/^Hermes release artifact sha256: //p' "$stage_log" | tail -1)"
           if [[ -z "$artifact" || -z "$artifact_sha256" || ! -f "$artifact" ]]; then
