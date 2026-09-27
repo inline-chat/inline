@@ -176,12 +176,31 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 ## Compatibility
 
+Hermes is pre-1.0; the rows below are minor release lines, not major versions.
+One current Inline adapter line covers all four supported Hermes lines.
+
+| Hermes line | Latest compatible Inline adapter | CI host versions | Gateway setup |
+| --- | --- | --- | --- |
+| `0.18.x` | `0.0.20` | `0.18.0` | `--no-restart`, then restart with the existing process manager |
+| `0.19.x` | `0.0.20` | `0.19.0` | `--no-restart`, then restart with the existing process manager |
+| `0.20.x` | `0.0.20` | `0.20.0` | `--no-restart`, then restart with the existing process manager |
+| `0.21.x` through `0.21.5` | `0.0.20` | `0.21.0`, `0.21.3`, `0.21.4`, `0.21.5` | Automatic verified restart when the host provides gateway management |
+
+CI also follows newest stable Hermes and upstream `main`. Those moving checks
+are early compatibility signals, not a guarantee for untested future releases.
+The host versions above identify the release matrix; they do not establish
+that a particular deployed bot can reach its model provider or reply in Inline.
+Verify a real reply after setup.
+
 - Hermes Agent: requires the external user plugin registry and native platform
-  plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
-  `v2026.9.24`).
-- CI checks the minimum supported Hermes release, newest stable source, and upstream
-  `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
+  plugin loader available in Hermes Agent `>=0.18.0`. Automatic gateway restart
+  verification requires `>=0.21.0`. On `0.18`–`0.20`, use
+  `inline agents setup --target hermes --no-restart --non-interactive --json`,
+  restart through the existing process manager, and verify a final reply in
+  Inline. That setup returns `configured`, not `ready`; the older host cannot
+  prove the restarted gateway's process identity.
+- CI checks Hermes `0.18.0`, `0.19.0`, `0.20.0`, `0.21.0`, `0.21.3`, `0.21.4`, newest stable source,
+  and upstream `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
   `inline-hermes doctor` requires successful host loading and compatibility validation;
   unavailable Hermes diagnostics no longer count as healthy.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,

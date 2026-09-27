@@ -6,7 +6,11 @@ npm packages when the gateway starts.
 
 ## Requirements
 
-- Hermes Agent 0.21.3 or newer.
+- Hermes Agent 0.18.0 or newer. Automatic gateway restart verification requires
+  0.21.0 or newer. With the Inline CLI on 0.18–0.20, use
+  `inline agents setup --target hermes --no-restart --non-interactive --json`.
+  The result is `configured`, not `ready`; restart through the existing process
+  manager and verify an actual final reply in Inline.
 - Node.js 20 or newer, available on the gateway host.
 - An Inline bot token. [Create a bot](https://inline.chat/docs/creating-a-bot),
   or use the guided setup below.

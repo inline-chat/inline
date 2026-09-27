@@ -77,7 +77,7 @@ describe("public CI contracts", () => {
     expect(monitor).toContain("check-hermes-admission.mjs --latest")
     expect(monitor).not.toContain("continue-on-error: true")
     const integration = read(".github/workflows/integrations.yml")
-    expect(integration).toContain("host: ['v2026.9.14', 'v2026.9.21', latest, main]")
+    expect(integration).toContain("host: ['v2026.7.1', 'v2026.7.20', 'v2026.8.3', 'v2026.8.31', 'v2026.9.14', 'v2026.9.21', latest, main]")
     expect(integration).not.toContain('pip" install "hermes-agent==')
     const publish = read(".github/workflows/npm-publish.yml")
     expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')

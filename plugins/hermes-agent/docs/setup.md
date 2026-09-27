@@ -4,7 +4,7 @@ Install the official Inline platform adapter for Hermes Agent.
 
 ## Requirements
 
-- Hermes Agent `>=0.21.3` (validated against `0.21.5`)
+- Hermes Agent `>=0.18.0`; automatic gateway restart verification requires `>=0.21.0`.
 - Node.js `20` or newer
 - The Inline CLI for guided bot creation, or an existing Inline bot/user token
 
@@ -46,6 +46,20 @@ Add `--profile NAME` for an existing named profile. Preserve the existing
 models, memory, skills, and channels. Do not read or print `.env` files or
 secrets. A dry-run or credential probe is not proof of a live reply; verify
 the running gateway and a final response in Inline.
+
+## Older Hermes versions
+
+On Hermes `0.18`–`0.20`, add `--no-restart` to the CLI setup command:
+
+```bash
+inline agents setup --target hermes --no-restart --non-interactive --json
+```
+
+This configures the adapter and returns `configured`, not `ready`. Restart the
+existing gateway with its current process manager. Check configuration and
+credential validity, then verify an actual final reply in Inline. These host
+versions cannot supply the process identity required to certify a restarted
+gateway automatically. Preserve the existing Hermes home, profile, and supervisor.
 
 ## Manual configuration
 

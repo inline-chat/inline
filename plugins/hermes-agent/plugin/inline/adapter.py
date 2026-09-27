@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import importlib
+import inspect
 import json
 import logging
 import math
@@ -567,8 +569,30 @@ def _normalize_inline_command_description(raw: str) -> str:
     return description
 
 
+def _hermes_picker_providers(**kwargs) -> list:
+    try:
+        from hermes_cli.model_switch_providers import list_picker_providers
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_cli.model_switch_providers":
+            raise
+        list_picker_providers = importlib.import_module("hermes_cli.model_switch").list_picker_providers
+    # Older picker APIs predate this setting. Preserve its result filtering
+    # without passing an unsupported keyword or catching arbitrary TypeErrors.
+    if "excluded_providers" in inspect.signature(list_picker_providers).parameters:
+        return list_picker_providers(**kwargs)
+    excluded = {str(value).strip().lower() for value in (kwargs.pop("excluded_providers", None) or [])}
+    return [provider for provider in list_picker_providers(**kwargs)
+            if str(provider.get("slug", "")).lower() not in excluded]
+
+
 def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[List[Dict[str, Any]], int]:
-    from hermes_cli.commands_platforms import telegram_menu_commands
+    try:
+        from hermes_cli.commands_platforms import telegram_menu_commands
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_cli.commands_platforms":
+            raise
+        # Before the Hermes CLI module split (0.18–0.21.2).
+        telegram_menu_commands = importlib.import_module("hermes_cli.commands").telegram_menu_commands
 
     command_specs = _inline_command_specs()
     local_commands = [
@@ -1202,7 +1226,6 @@ class InlineAdapter(BasePlatformAdapter):
 
         try:
             from gateway.run import _load_gateway_config
-            from hermes_cli.model_switch_providers import list_picker_providers
 
             cfg = _load_gateway_config() or {}
             model_cfg = cfg.get("model") if isinstance(cfg, dict) else {}
@@ -1224,7 +1247,7 @@ class InlineAdapter(BasePlatformAdapter):
                     catalog_started = time.monotonic()
                     providers = await asyncio.wait_for(
                         asyncio.to_thread(
-                            list_picker_providers,
+                            _hermes_picker_providers,
                             current_provider=current_provider,
                             current_base_url=str(override.get("base_url") or model_cfg.get("base_url") or ""),
                             current_model=current_model,
@@ -4222,7 +4245,12 @@ class InlineAdapter(BasePlatformAdapter):
         label = group_id
         member_slugs: list[str] = []
         try:
-            from hermes_cli.models_catalog_static import PROVIDER_GROUPS
+            try:
+                from hermes_cli.models_catalog_static import PROVIDER_GROUPS
+            except ModuleNotFoundError as exc:
+                if exc.name != "hermes_cli.models_catalog_static":
+                    raise
+                PROVIDER_GROUPS = importlib.import_module("hermes_cli.models").PROVIDER_GROUPS
             label, _desc, members = PROVIDER_GROUPS.get(group_id, (group_id, "", []))
             member_slugs = [str(member) for member in members]
         except Exception:
@@ -4972,7 +5000,12 @@ class InlineAdapter(BasePlatformAdapter):
         }
         actions: list[Dict[str, str]] = []
         try:
-            from hermes_cli.models_catalog_static import group_providers
+            try:
+                from hermes_cli.models_catalog_static import group_providers
+            except ModuleNotFoundError as exc:
+                if exc.name != "hermes_cli.models_catalog_static":
+                    raise
+                group_providers = importlib.import_module("hermes_cli.models").group_providers
             grouped = group_providers(list(by_slug.keys()))
         except Exception:
             grouped = [{"kind": "single", "slug": slug} for slug in by_slug.keys()]

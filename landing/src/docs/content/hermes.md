@@ -5,12 +5,32 @@ description: "Connect an existing Hermes Agent to Inline, locally or on an Umbre
 
 ## Before you begin
 
-Use Hermes Agent `>=0.21.3`, Node.js `>=20`, npm, and the
-[Inline CLI](/docs/cli). Hermes `0.21.3`, shipped in the official Umbrel app,
-requires adapter `0.0.20` or later.
+Use Hermes Agent `>=0.18.0`, Node.js `>=20`, npm, the
+[Inline CLI](/docs/cli), and adapter `0.0.20`. Automatic gateway
+restart verification requires Hermes `>=0.21.0`; older supported versions use
+the manual restart flow below. Hermes `0.21.3` in the official Umbrel app
+supports the automatic flow.
 Run setup as the user and in the container that already runs Hermes, with the
 same `HERMES_HOME` and profile. Setup adds an Inline channel to that agent;
 it does not migrate or replace its models, memory, skills, or other channels.
+
+## Compatibility
+
+Hermes is pre-1.0; the rows below are minor release lines, not major versions.
+One current Inline adapter line covers all four supported Hermes lines.
+
+| Hermes line | Latest compatible Inline adapter | CI host versions | Gateway setup |
+| --- | --- | --- | --- |
+| `0.18.x` | `0.0.20` | `0.18.0` | `--no-restart`, then restart with the existing process manager |
+| `0.19.x` | `0.0.20` | `0.19.0` | `--no-restart`, then restart with the existing process manager |
+| `0.20.x` | `0.0.20` | `0.20.0` | `--no-restart`, then restart with the existing process manager |
+| `0.21.x` through `0.21.5` | `0.0.20` | `0.21.0`, `0.21.3`, `0.21.4`, `0.21.5` | Automatic verified restart when the host provides gateway management |
+
+CI also follows newest stable Hermes and upstream `main`. Those moving checks
+are early compatibility signals, not a guarantee for untested future releases.
+The host versions above identify the release matrix; they do not establish
+that a particular deployed bot can reach its model provider or reply in Inline.
+Verify a real reply after setup.
 
 ## Agent setup prompt
 
@@ -109,6 +129,23 @@ service inside the container. If the installed host cannot manage its gateway,
 use `--no-restart`, then restart it through that deployment's existing process
 manager. A configured result is not a ready gateway.
 
+## Hermes 0.18–0.20
+
+These versions support the adapter but cannot provide the gateway process
+identity needed for automatic restart verification. Configure without restarting:
+
+```bash
+inline agents setup --target hermes --no-restart --dry-run --non-interactive --json
+inline agents setup --target hermes --no-restart --non-interactive --json
+```
+
+Add the existing `--profile NAME` or `--bot-id ID` when applicable. This returns
+`status: "configured"`, not `"ready"`. Restart the existing gateway through
+its current process manager, then check the credential probe and gateway status
+below. On these versions a probe cannot certify the new gateway's identity;
+confirm an actual final reply in Inline before considering setup complete.
+Do not install a second gateway or replace the existing process manager.
+
 ## Resume an incomplete setup
 
 If a previous attempt already created a bot, sign in as its owner in this
@@ -143,7 +180,7 @@ hermes inline status --json --probe
 hermes gateway status
 ```
 
-Use the same profile and home for these checks. Setup reports `status: "ready"`
+Use the same profile and home for these checks. On Hermes `>=0.21.0`, setup reports `status: "ready"`
 and `service.ready: true` only after checking the credential and gateway.
 Inspect the nested gateway readiness in a standalone status probe as well;
 a valid credential alone does not prove that the gateway is running.

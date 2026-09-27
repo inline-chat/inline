@@ -58,6 +58,18 @@ loaded = next(p for p in manager.list_plugins() if p["name"] == "inline-platform
 assert loaded["enabled"] and not loaded["error"], loaded
 assert registry.get_schema("inline")["name"] == "inline", "tool registration failed"
 cli = importlib.import_module(type(adapter).__module__.rsplit(".", 1)[0] + ".cli")
+adapter_module = sys.modules[type(adapter).__module__]
+# Exercise the moved command/model APIs on every real host in the matrix,
+# without provider requests or a running gateway.
+commands, hidden = adapter_module._inline_menu_commands()
+assert commands and isinstance(hidden, int), (commands, hidden)
+actions = adapter._build_provider_actions("compatibility", [{"slug": "openai", "name": "OpenAI", "models": ["offline-model"]}])
+assert actions.get("rows"), actions
+from hermes_cli import __version__ as host_version
+host_minor = tuple(int(part) for part in host_version.split(".")[:2])
+if host_minor < (0, 21):
+    gateway = cli._gateway_status()
+    assert gateway["supported"] is False and gateway["ready"] is False, gateway
 if hasattr(cli, "_compatibility_status"):
     compatibility = cli._compatibility_status()
     assert compatibility.get("ok") is True, compatibility

@@ -49,6 +49,12 @@ docker exec --user hermes -e HOME=/opt/data/home -e INLINE_PLUGIN_TELEMETRY=0 -e
     else
       INLINE_INSTALL_DIR=/opt/data/.local/bin sh /tmp/inline-smoke/install.sh
     fi
+    if test -f /tmp/inline-smoke/inline-candidate; then
+      # Regression: Umbrel docker exec can omit Hermes from PATH, even though
+      # the existing agent is installed in /opt/hermes. Discovery must find it.
+      PATH=/usr/local/bin:/usr/bin:/bin /opt/data/.local/bin/inline agents discover --json > /tmp/inline-smoke/stripped-discovery.json
+      python -c "import json; d=json.load(open(\"/tmp/inline-smoke/stripped-discovery.json\")); assert any(t[\"id\"] == \"hermes\" and t[\"installed\"] for t in d[\"targets\"])"
+    fi
     inline --version
     inline auth --help
     inline agents --help
