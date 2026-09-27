@@ -21,7 +21,7 @@ class InstallerTest(unittest.TestCase):
             tools = root / "tools"
             tools.mkdir()
             # Deliberately omit jq by default to exercise minimal Linux images.
-            for name in ["mktemp", "tar", "install", "shasum", "sha256sum", "curl", "dirname",
+            for name in ["mktemp", "tar", "gzip", "install", "shasum", "sha256sum", "curl", "dirname",
                          "mkdir", "cat", "tr", "sed", "head", "grep", "rm", "mv"] + (["jq"] if jq else []):
                 executable = shutil.which(name)
                 if executable:
