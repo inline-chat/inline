@@ -372,26 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['v2026.7.1', 'v2026.7.20', 'v2026.8.3', 'v2026.8.31', 'v2026.9.14', 'v2026.9.21', latest, main]
-        # These hosts support npm plugin admission but predate native --ref
-        # and plugins validate. Keep their artifact/real-host tests mandatory.
-        include:
-          - host: 'v2026.7.1'
-            native_source: false
-          - host: 'v2026.7.20'
-            native_source: false
-          - host: 'v2026.8.3'
-            native_source: false
-          - host: 'v2026.8.31'
-            native_source: true
-          - host: 'v2026.9.14'
-            native_source: true
-          - host: 'v2026.9.21'
-            native_source: true
-          - host: latest
-            native_source: true
-          - host: main
-            native_source: true
+        host: ['v2026.9.14', 'v2026.9.21', latest, main]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -418,7 +399,6 @@ jobs:
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$HERMES_BIN" "$HERMES_PYTHON"
       - name: Validate native catalog source installation
-        if: matrix.native_source
         env:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}

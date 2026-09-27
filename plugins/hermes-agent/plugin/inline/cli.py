@@ -533,13 +533,6 @@ def _gateway_status() -> dict:
     """Project local runtime facts without changing the credential-status contract."""
     unavailable = {"supported": False, "ready": False, "reason": "runtime_status_unavailable"}
     try:
-        from hermes_cli import __version__ as hermes_version
-        version = re.match(r"^(\d+)\.(\d+)\.(\d+)", str(hermes_version))
-        # Before 0.21, an absent status file cannot demonstrate that this host
-        # will emit per-platform writer identity after restart. Reject before
-        # creating a bot or restarting; these hosts can use manual setup.
-        if version is None or tuple(map(int, version.groups())) < (0, 21, 0):
-            return {"supported": False, "ready": False, "reason": "runtime_writer_identity_unavailable"}
         from gateway.status import read_runtime_status, get_runtime_status_running_pid
         from hermes_constants import get_hermes_home
 

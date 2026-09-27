@@ -10,33 +10,10 @@ Use this checklist before publishing `@inline-chat/hermes-agent-adapter`.
   the final compatibility smoke.
 - No tokens or `.env` contents are printed, copied, or committed.
 
-## Compatibility policy
-
-Prefer one current adapter release that supports the widest Hermes range using
-public host APIs and small, explicit capability checks. Keep the last three
-minor Hermes lines plus the current line in the compatibility matrix while
-Hermes remains pre-1.0. Do not add unsupported internal patches just to keep a
-host version on the current adapter line.
-
-If an upstream change makes clean compatibility impossible, retain a pinned
-legacy adapter line for the older hosts and a current line for newer hosts.
-Publish and test both only when that split is necessary. Before releasing the
-break, update the compatibility tables in `README.md` and
-`landing/src/docs/content/hermes.md` with each Hermes line's last compatible
-adapter version and a pinned installation command. Keep the CLI's package
-selection aligned with that table.
-
-For each release, record exact tested Hermes versions and artifact identity.
-Require the full advertised host matrix to pass before publication; testing
-`main` or one latest stable version does not prove every historical or future
-patch release. Separate adapter loading, gateway readiness, and live model
-reply evidence. Hermes `0.18`–`0.20` supports manual restart only; do not label
-its configured result as ready.
-
 ## Automated Preflight
 
 ```sh
-cd plugins/hermes-agent
+cd hermes-agent
 bun run release:preflight
 ```
 
@@ -64,9 +41,8 @@ Expected tarball shape:
 
 ## Host Compatibility and Message Flow
 
-PR/main CI installs official Hermes source at `0.18.0`, `0.19.0`, `0.20.0`,
-`0.21.0`, `0.21.3`, `0.21.4`, the newest stable release (currently `0.21.5`),
-and upstream `main`.
+PR/main CI installs official Hermes source at the minimum supported version
+(`0.21.3`, tag `v2026.9.14`), the newest stable release, and upstream `main`.
 Each host validates the packed plugin manifest, rejects deprecated imports,
 loads the platform and tool through Hermes, and exercises inbound/reply delivery,
 deduplication, and media URL rejection. Host modules are not stubbed; this fast
@@ -102,7 +78,7 @@ The following live checks remain useful before broader rollout.
 Install from the locally packed tarball:
 
 ```sh
-cd plugins/hermes-agent
+cd hermes-agent
 bun run release:preflight
 # Use the exact path printed as `Hermes release artifact:` above.
 npm install -g "/absolute/path/to/inline-chat-hermes-agent-adapter-<version>.tgz"

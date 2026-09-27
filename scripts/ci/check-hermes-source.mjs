@@ -57,9 +57,9 @@ assert.equal(metadata["inline-platform"].pinned, true)
 assert.equal(typeof metadata["inline-platform"].source, "string")
 const expectedVersion = /^version:\s*[\'"]?([^\'"\n#]+)/m.exec(await readFile(path.join(source, "plugin.yaml"), "utf8"))?.[1]?.trim()
 assert.ok(expectedVersion)
-// Native install already resolves manifest dependencies. Hermes 0.21.3
-// validates plugins but predates the optional validate --install-deps flag.
-console.log(run(hermesBin, ["plugins", "validate", installed, "--json"]))
+// The host test below invokes validate_plugin_dir when the host provides it,
+// then always exercises the real loader and message flow. Native source install
+// exists in Hermes 0.21.0 before the separate `plugins validate` CLI command.
 const hostTest = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-hermes-host.py")
 console.log(run(pythonBin, [hostTest, installed], 60_000))
 

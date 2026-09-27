@@ -1071,15 +1071,7 @@ gateway_status.get_runtime_status_running_pid = lambda runtime, expected_home=No
 saved_hermes_home_helper = getattr(hermes_constants, "get_hermes_home", None)
 hermes_constants.get_hermes_home = lambda: Path("/test-profile")
 sys.modules["gateway.status"] = gateway_status
-saved_hermes_version = hermes_cli.__version__
 try:
-    gateway_status.read_runtime_status = lambda: None
-    for old_version in ["0.18.0", "0.19.1", "0.20.6"]:
-        hermes_cli.__version__ = old_version
-        assert inline_cli._gateway_status()["supported"] is False
-    hermes_cli.__version__ = "0.21.0"
-    assert inline_cli._gateway_status()["reason"] == "missing_status"
-    gateway_status.read_runtime_status = lambda: gateway_runtime
     live_status = inline_cli._gateway_status()
     assert live_status["ready"] is True
     assert len(live_status["generation"]) == 64
@@ -1116,7 +1108,6 @@ try:
     assert unavailable["supported"] is False
     assert "private-token" not in json.dumps(unavailable)
 finally:
-    hermes_cli.__version__ = saved_hermes_version
     sys.modules.pop("gateway.status", None)
     if saved_hermes_home_helper is None:
         del hermes_constants.get_hermes_home
@@ -5158,54 +5149,6 @@ async def assert_bot_settings_fail_closed_and_serialized():
     assert adapter._bot_settings_lock_users == {}
 
 asyncio.run(assert_bot_settings_fail_closed_and_serialized())
-
-# The pre-split Hermes API must work, but missing dependencies inside a
-# modern module must propagate instead of silently selecting an older facade.
-import builtins
-from unittest.mock import patch
-real_import = builtins.__import__
-modern_menu = _inline_menu_commands()
-legacy_commands = types.ModuleType("hermes_cli.commands")
-legacy_commands.telegram_menu_commands = commands.telegram_menu_commands
-sys.modules["hermes_cli.commands"] = legacy_commands
-
-def missing_commands(name, *args, **kwargs):
-    if name == "hermes_cli.commands_platforms":
-        raise ModuleNotFoundError("old Hermes", name=name)
-    return real_import(name, *args, **kwargs)
-with patch("builtins.__import__", side_effect=missing_commands):
-    assert _inline_menu_commands() == modern_menu
-
-def broken_commands(name, *args, **kwargs):
-    if name == "hermes_cli.commands_platforms":
-        raise ModuleNotFoundError("missing nested dependency", name="nested_dependency")
-    return real_import(name, *args, **kwargs)
-with patch("builtins.__import__", side_effect=broken_commands):
-    try:
-        _inline_menu_commands()
-    except ModuleNotFoundError as exc:
-        assert exc.name == "nested_dependency"
-    else:
-        raise AssertionError("masked a modern Hermes dependency failure")
-
-legacy_models = types.ModuleType("hermes_cli.model_switch")
-legacy_models.list_picker_providers = lambda current_provider="": [{"slug": "keep"}, {"slug": "exclude"}]
-sys.modules["hermes_cli.model_switch"] = legacy_models
-
-def missing_picker(name, *args, **kwargs):
-    if name == "hermes_cli.model_switch_providers":
-        raise ModuleNotFoundError("old Hermes", name=name)
-    return real_import(name, *args, **kwargs)
-with patch("builtins.__import__", side_effect=missing_picker):
-    assert inline_adapter_module._hermes_picker_providers(current_provider="keep", excluded_providers=["exclude"]) == [{"slug": "keep"}]
-
-modern_models = types.ModuleType("hermes_cli.model_switch_providers")
-def modern_picker(current_provider="", excluded_providers=None):
-    assert excluded_providers == ["exclude"]
-    return [{"slug": "keep"}]
-modern_models.list_picker_providers = modern_picker
-with patch.dict(sys.modules, {"hermes_cli.model_switch_providers": modern_models}):
-    assert inline_adapter_module._hermes_picker_providers(current_provider="keep", excluded_providers=["exclude"]) == [{"slug": "keep"}]
 
 print("adapter python smoke ok")
 `

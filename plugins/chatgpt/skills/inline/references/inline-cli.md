@@ -182,9 +182,7 @@ inline agents setup --target hermes --non-interactive --json
 Use `--profile NAME` only for a named existing profile and `--bot-id ID` to
 reuse a known bot. Do not pass `--replace` without explicit authorization to
 replace the conflicting credential. Current official Umbrel Hermes images
-support gateway management through s6. Adapter `0.0.20+` supports Hermes
-`>=0.18.0`; automatic verified restart requires `>=0.21.0`. On Hermes
-`0.18`–`0.20`, or a host without gateway management,
+support gateway management through s6. For a host without gateway management,
 `--no-restart` only configures the integration; restart with its existing
 process manager and verify separately.
 
