@@ -22,7 +22,7 @@ except ModuleNotFoundError as exc:
     import yaml
 
 home = Path(os.environ["HERMES_HOME"])
-plugin = home / "plugins" / "inline"
+plugin = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else home / "plugins" / "inline"
 manifest = yaml.safe_load((plugin / "plugin.yaml").read_text())
 assert "inline" in manifest.get("provides_tools", []), "inline tool missing from plugin.yaml"
 

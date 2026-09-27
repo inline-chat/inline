@@ -31,7 +31,7 @@ Supported:
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
-- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_update`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
 - Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged immediately and becomes a normal Hermes turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
@@ -61,9 +61,8 @@ hermes gateway setup
 
 When installation runs as root but the Hermes home belongs to its service user,
 the installer automatically aligns the plugin directory ownership with that
-service user. Subsequent `/inline_update` commands replace the durable plugin
-directly; users do not need to maintain a second npm prefix or repeat the
-host-side install commands for routine updates.
+service user. Use the same service user and Hermes home when applying manual
+npm updates.
 
 Select Inline in the messaging-platform picker. The default path is: go to
 **Inline → Settings → Bots → Create a new bot**, then paste its token. See the
@@ -157,7 +156,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.18   inline-platform
+enabled      user     0.0.19   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -386,17 +385,18 @@ choice. Hermes accepts that form only when the suffix matches its own username,
 then removes the suffix before command dispatch; commands addressed to another
 bot are ignored.
 
-Run `/inline_update` to install the newest adapter from the plugin's current
-npm release channel. Stable installs continue following `latest`, while
-prerelease installs continue following their existing channel such as `alpha`
-or `beta`. Before changing files, the command checks the selected release's
-minimum Hermes version against the running agent and refuses incompatible or
-unverifiable updates. The update runs in the background without exposing the
-Inline token to npm, then asks you to run `/restart` so Hermes loads the
-installed version. Development symlink installs are left untouched.
-Unexpected precheck or installer failures write bounded, credential-redacted
-diagnostics to the standard Hermes log stream under the `[inline-update]`
-marker, so `hermes logs` and Hermes debug reports can surface the root cause.
+Plugin updates are managed on the Hermes host. For a catalog installation, use
+`hermes plugins update inline-platform` after a new reviewed catalog pin is
+available, then restart the gateway. For an npm installation:
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@latest
+inline-hermes install --force
+```
+
+Restart the gateway after refreshing the plugin. Version 0.0.19 removes the
+in-chat updater so the same plugin can comply with the catalog's exact-commit
+trust policy. Hermes's own `/update` command is unchanged.
 
 Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
 eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt

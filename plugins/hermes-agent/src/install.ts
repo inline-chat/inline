@@ -291,7 +291,7 @@ async function inspectInstall(params: {
     else warnings.push(message)
   }
   if (targetExists && !activation.installOwnershipAligned) {
-    warnings.push("Installed plugin ownership differs from the Hermes home owner; internal /inline_update may fail until inline-hermes install --force repairs it")
+    warnings.push("Installed plugin ownership differs from the Hermes home owner; manual updates may fail until inline-hermes install --force repairs it")
   }
 
   return {

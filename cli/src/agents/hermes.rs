@@ -15,7 +15,7 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
 // This CLI prerelease installs and verifies the matching Hermes adapter.
-const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.18";
+const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.19";
 const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter";
 
 struct HermesProfile {
@@ -828,7 +828,7 @@ mod tests {
     fn plugin_health_requires_the_machine_setup_contract_version() {
         assert!(plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.18"}"#
+            r#"{"ok":true,"packageVersion":"0.0.19"}"#
         ));
         assert!(!plugin_status_healthy(
             true,
@@ -884,10 +884,10 @@ mod tests {
     fn live_machine_contract_is_independent_of_installer_state() {
         let status = parse_machine_plugin_status(
             true,
-            r#"{"ok":false,"setupProtocolVersion":1,"pluginVersion":"0.0.18","configured":false,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
+            r#"{"ok":false,"setupProtocolVersion":1,"pluginVersion":"0.0.19","configured":false,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
         )
         .expect("unconfigured live plugin still provides setup capability");
-        assert_eq!(status.version, "0.0.18");
+        assert_eq!(status.version, "0.0.19");
         assert!(!status.configured);
 
         assert!(
@@ -900,21 +900,21 @@ mod tests {
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.18","configured":true,"sidecarBundled":false,"sidecar":{"ok":true},"node":{"ok":true}}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.19","configured":true,"sidecarBundled":false,"sidecar":{"ok":true},"node":{"ok":true}}"#,
             )
             .is_none()
         );
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.18","configured":true,"sidecarBundled":true,"sidecar":{"ok":false},"node":{"ok":true}}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.19","configured":true,"sidecarBundled":true,"sidecar":{"ok":false},"node":{"ok":true}}"#,
             )
             .is_none()
         );
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.18","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":false}}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.19","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":false}}"#,
             )
             .is_none()
         );

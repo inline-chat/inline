@@ -398,6 +398,11 @@ jobs:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Validate native catalog source installation
+        env:
+          HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
 
   local-integration:
     name: Packed adapters with local Inline server

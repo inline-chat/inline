@@ -14,6 +14,7 @@ import contextlib
 import io
 import os
 import inspect
+import ast
 import argparse
 import base64
 import json
@@ -185,7 +186,6 @@ commands.telegram_menu_commands = lambda max_commands=100: ([
     ("bad-name", "Hyphenated command"),
 ][:max_commands], max(0, 5 - max_commands))
 hermes_plugins.get_plugin_commands = lambda: {
-    "inline-update": {},
     "inline-sync": {},
     "inline-version": {},
 }
@@ -295,7 +295,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_skill_catalog, _inline_update_lane, _inline_update_log_text, _inline_version_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_skill_catalog, _inline_version_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -373,21 +373,20 @@ inline_adapter_module.strip_markdown = original_strip_markdown
 menu_commands, hidden_commands = _inline_menu_commands(100)
 assert hidden_commands == 0
 menu_names = [entry["command"] for entry in menu_commands]
-assert menu_names == ["threads", "follow", "unfollow", "inline_update", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
+assert menu_names == ["threads", "follow", "unfollow", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
 assert menu_commands[0]["description"] == "Configure Inline reply-thread routing"
 assert menu_commands[1]["description"] == "Explicitly follow this Inline chat or thread"
 assert menu_commands[2]["description"] == "Explicitly unfollow this Inline chat or thread"
-assert menu_commands[3]["description"] == "Update the Inline Hermes plugin"
-assert menu_commands[4]["description"] == "Resync Inline commands and skills"
-assert menu_commands[5]["description"] == "Show Inline plugin and sync information"
-assert menu_commands[8]["description"] == "Update Hermes"
+assert menu_commands[3]["description"] == "Resync Inline commands and skills"
+assert menu_commands[4]["description"] == "Show Inline plugin and sync information"
+assert menu_commands[7]["description"] == "Update Hermes"
 assert _inline_skill_catalog() == [
     {"key": "data-analysis", "name": "data-analysis", "description": "Analyze data", "sort_order": 0},
     {"key": "research", "name": "research", "description": "Research with sources", "sort_order": 1},
 ]
 assert all("/" not in name and "-" not in name for name in menu_names)
-assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
-assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
+assert _normalize_inline_plugin_command_text("/inline_update") == "/inline_update"
+assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline_update now"
 assert _normalize_inline_plugin_command_text("/inline_sync") == "/inline-sync"
 assert _normalize_inline_plugin_command_text("/inline_version") == "/inline-version"
 assert _normalize_inline_plugin_command_text("/not_a_plugin") == "/not_a_plugin"
@@ -395,19 +394,6 @@ assert _resolve_inline_targeted_command("/status@InlineBot now", "inlinebot") ==
 assert _resolve_inline_targeted_command("/status@otherbot now", "inlinebot") == ("/status@otherbot now", True, False)
 assert _resolve_inline_targeted_command("/status@inlinebot", None) == ("/status@inlinebot", True, False)
 assert _resolve_inline_targeted_command("/status now", "inlinebot") == ("/status now", False, False)
-assert _inline_update_lane("1.2.3") == "latest"
-assert _inline_update_lane("1.2.3-beta.4") == "beta"
-assert _inline_update_lane("1.2.3-canary-edge.2") == "canary-edge"
-assert _inline_update_lane("not-semver") is None
-redacted_update_log = _inline_update_log_text(
-    "Bearer top-secret-token https://user:pass@example.com/pkg?token=query-secret "
-    "NPM_TOKEN=env-secret-value /Users/example/.hermes/plugins/inline"
-)
-assert "top-secret-token" not in redacted_update_log
-assert "user:pass" not in redacted_update_log
-assert "query-secret" not in redacted_update_log
-assert "env-secret-value" not in redacted_update_log
-assert "[REDACTED]" in redacted_update_log
 version_text = _inline_version_text({
     "reason": "manual",
     "completed_at": "2026-09-04T10:00:00Z",
@@ -415,7 +401,7 @@ version_text = _inline_version_text({
     "skills": {"state": "synced", "count": 2},
 })
 assert "Inline Hermes plugin" in version_text
-assert "Plugin version: 0.0.18" in version_text
+assert "Plugin version: 0.0.19" in version_text
 assert "Hermes version: 0.18.2" in version_text
 assert "Installed or updated at:" in version_text
 assert "commands 10 published" in version_text
@@ -430,7 +416,7 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
     legacy_dir.mkdir(parents=True)
     catalog_dir.mkdir(parents=True)
     (legacy_dir / "plugin.yaml").write_text("version: 0.0.1\n", encoding="utf-8")
-    (catalog_dir / "plugin.yaml").write_text("version: 0.0.18\n", encoding="utf-8")
+    (catalog_dir / "plugin.yaml").write_text("version: 0.0.19\n", encoding="utf-8")
     saved_adapter_file = inline_adapter_module.__file__
     saved_cli_file = inline_cli.__file__
     saved_catalog_home = os.environ.get("HERMES_HOME")
@@ -439,13 +425,13 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
         inline_adapter_module.__file__ = str(catalog_dir / "adapter.py")
         inline_cli.__file__ = str(catalog_dir / "cli.py")
         os.environ["HERMES_HOME"] = str(catalog_home)
-        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.18"
-        assert inline_cli._plugin_version() == "0.0.18"
+        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.19"
+        assert inline_cli._plugin_version() == "0.0.19"
         # Distinct directory timestamps ensure the test catches the legacy path.
         Path.lstat = lambda self: types.SimpleNamespace(st_ctime=100 if self == catalog_dir else 200)
         assert inline_adapter_module._inline_install_timestamp() == "1970-01-01T00:01:40Z"
         catalog_text = _inline_version_text()
-        assert "Plugin version: 0.0.18" in catalog_text
+        assert "Plugin version: 0.0.19" in catalog_text
         assert "1970-01-01T00:01:40Z" in catalog_text
         assert "Plugin version: 0.0.1\n" not in catalog_text
     finally:
@@ -532,9 +518,9 @@ assert "inline-hermes install" in ctx.platform["install_hint"]
 assert "INLINE_TOKEN/INLINE_BOT_TOKEN" in ctx.platform["install_hint"]
 assert "platforms.inline.token" in ctx.platform["install_hint"]
 assert "inline.token" in ctx.platform["install_hint"]
-assert len(ctx.commands) == 6
+assert len(ctx.commands) == 5
 registered_commands = {command["name"]: command for command in ctx.commands}
-assert list(registered_commands) == ["threads", "follow", "unfollow", "inline-update", "inline-sync", "inline-version"]
+assert list(registered_commands) == ["threads", "follow", "unfollow", "inline-sync", "inline-version"]
 assert registered_commands["threads"]["description"] == "Configure Inline reply-thread routing"
 assert registered_commands["threads"]["args_hint"] == "[status|on|off|auto|reset]"
 thread_fallback = registered_commands["threads"]["handler"]("off")
@@ -543,8 +529,6 @@ assert "inside the target Inline DM or group chat" in thread_fallback
 assert "restart the Hermes gateway" in thread_fallback
 assert "target Inline DM, group chat, or reply thread" in registered_commands["follow"]["handler"]("")
 assert "/unfollow" in registered_commands["unfollow"]["handler"]("unexpected")
-assert registered_commands["inline-update"]["description"] == "Update the Inline Hermes plugin"
-assert registered_commands["inline-update"]["args_hint"] == ""
 assert registered_commands["inline-sync"]["description"] == "Resync Inline commands and skills"
 assert registered_commands["inline-version"]["description"] == "Show Inline plugin and sync information"
 
@@ -558,137 +542,22 @@ try:
 finally:
     PlatformEntry.__dataclass_fields__ = saved_platform_fields
 
-async def assert_inline_update_command():
-    with tempfile.TemporaryDirectory(prefix="inline-hermes-update-") as tmp:
-        hermes_home = Path(tmp)
-        plugin_dir = hermes_home / "plugins" / "inline"
-        plugin_dir.mkdir(parents=True)
-        (plugin_dir / "plugin.yaml").write_text("version: 0.0.5-alpha.4\n", encoding="utf-8")
+# Catalog plugins must leave software updates to their host installer.
+assert "inline-update" not in registered_commands
+assert "inline_update" not in menu_names
+assert "update" in menu_names  # Hermes's own update command remains available.
+adapter_source = Path(inline_adapter_module.__file__).read_text(encoding="utf-8")
+adapter_tree = ast.parse(adapter_source)
+assert not any(
+    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and "inline_update" in node.name
+    for node in ast.walk(adapter_tree)
+)
+assert not any(
+    isinstance(node, ast.Constant) and isinstance(node.value, str)
+    and (node.value == "npm" or "npm exec" in node.value or "--package=" in node.value)
+    for node in ast.walk(adapter_tree)
+), "plugin adapter must not execute npm package installation or upgrades"
 
-        saved_home = os.environ.get("HERMES_HOME")
-        saved_token = os.environ.get("INLINE_TOKEN")
-        saved_adapter_file = inline_adapter_module.__file__
-        saved_hermes_version = hermes_cli.__version__
-        original_which = inline_adapter_module.shutil.which
-        original_run = inline_adapter_module.subprocess.run
-        original_log_error = inline_adapter_module.logger.error
-        calls = []
-        failure_output = None
-        error_logs = []
-        try:
-            inline_adapter_module.__file__ = str(plugin_dir / "adapter.py")
-            os.environ["HERMES_HOME"] = str(hermes_home)
-            os.environ["INLINE_TOKEN"] = "must-not-reach-npm"
-            inline_adapter_module.shutil.which = lambda name: "/usr/bin/npm" if name == "npm" else None
-
-            def fake_run(command, **kwargs):
-                calls.append((command, kwargs))
-                if command[1] == "view":
-                    stable = command[2].endswith("@latest")
-                    metadata = {
-                        "version": "0.0.5" if stable else "0.0.5-alpha.5",
-                        "inlineHermes": {"minHermesVersion": "0.17.0"},
-                    }
-                    return types.SimpleNamespace(returncode=0, stdout=json.dumps(metadata))
-                if failure_output is not None:
-                    return types.SimpleNamespace(returncode=1, stdout=failure_output)
-                return types.SimpleNamespace(returncode=0, stdout="installed")
-
-            inline_adapter_module.subprocess.run = fake_run
-            inline_adapter_module.logger.error = lambda message, *args: error_logs.append(message % args)
-            update_handler = registered_commands["inline-update"]["handler"]
-            response = await update_handler("")
-            assert response.startswith("Inline plugin updated to ")
-            assert "0.0.5-alpha.4" in response
-            assert "alpha" in response
-            assert "/restart" in response
-            assert len(calls) == 2
-            precheck_command, precheck_kwargs = calls[0]
-            assert precheck_command == [
-                "/usr/bin/npm",
-                "view",
-                "@inline-chat/hermes-agent-adapter@alpha",
-                "--json",
-            ]
-            assert precheck_kwargs["timeout"] == 30
-            assert precheck_kwargs["stderr"] is inline_adapter_module.subprocess.PIPE
-            assert "INLINE_TOKEN" not in precheck_kwargs["env"]
-            command, kwargs = calls[1]
-            assert command == [
-                "/usr/bin/npm",
-                "exec",
-                "--yes",
-                "--package=@inline-chat/hermes-agent-adapter@alpha",
-                "--",
-                "inline-hermes",
-                "install",
-                "--force",
-                "--hermes-home",
-                str(hermes_home),
-            ]
-            assert kwargs["timeout"] == 300
-            assert kwargs["check"] is False
-            assert "INLINE_TOKEN" not in kwargs["env"]
-
-            calls.clear()
-            (plugin_dir / "plugin.yaml").write_text("version: 0.0.4\n", encoding="utf-8")
-            stable_response = await update_handler("")
-            assert "latest" in stable_response
-            assert calls[0][0][2] == "@inline-chat/hermes-agent-adapter@latest"
-            assert calls[1][0][3] == "--package=@inline-chat/hermes-agent-adapter@latest"
-
-            calls.clear()
-            hermes_cli.__version__ = "0.16.0"
-            incompatible = await update_handler("")
-            assert "requires Hermes" in incompatible
-            assert "Update Hermes first" in incompatible
-            assert len(calls) == 1
-            assert calls[0][0][1] == "view"
-            hermes_cli.__version__ = "0.18.2"
-
-            calls.clear()
-            (plugin_dir / "plugin.yaml").write_text("version: 0.0.5-alpha.4\n", encoding="utf-8")
-            failure_output = (
-                "npm ERR! Bearer must-not-reach-npm\n"
-                "https://user:password@example.com/pkg?authId=private-id\n"
-                f"target: {hermes_home}/plugins/inline\n"
-            )
-            failure = await update_handler("")
-            assert "exit code 1" in failure
-            assert "[inline-update]" in failure
-            assert len(error_logs) == 1
-            assert "stage=install failed" in error_logs[0]
-            assert "must-not-reach-npm" not in error_logs[0]
-            assert "user:password" not in error_logs[0]
-            assert "private-id" not in error_logs[0]
-            assert str(hermes_home) not in error_logs[0]
-            assert "$HERMES_HOME/plugins/inline" in error_logs[0]
-            assert "[REDACTED]" in error_logs[0]
-            failure_output = None
-
-            usage = await update_handler("unexpected")
-            assert "/inline_update" in usage
-            inline_adapter_module._INLINE_UPDATE_LOCK.acquire()
-            try:
-                assert await update_handler("") == "An Inline plugin update is already running."
-            finally:
-                inline_adapter_module._INLINE_UPDATE_LOCK.release()
-        finally:
-            inline_adapter_module.__file__ = saved_adapter_file
-            inline_adapter_module.shutil.which = original_which
-            inline_adapter_module.subprocess.run = original_run
-            inline_adapter_module.logger.error = original_log_error
-            if saved_home is None:
-                os.environ.pop("HERMES_HOME", None)
-            else:
-                os.environ["HERMES_HOME"] = saved_home
-            if saved_token is None:
-                os.environ.pop("INLINE_TOKEN", None)
-            else:
-                os.environ["INLINE_TOKEN"] = saved_token
-            hermes_cli.__version__ = saved_hermes_version
-
-asyncio.run(assert_inline_update_command())
 assert ctx.cli["name"] == "inline"
 assert ctx.tool["name"] == "inline"
 assert ctx.tool["toolset"] == "inline"
@@ -1335,7 +1204,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.18",
+    "pluginVersion": "0.0.19",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1385,7 +1254,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.18"
+assert probe_payload["pluginVersion"] == "0.0.19"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1400,7 +1269,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.19"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1433,7 +1302,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.18"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.19"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -1769,20 +1638,19 @@ async def assert_bot_command_sync():
 
     adapter._http_client = FakeBotClient()
     command_status = await adapter._sync_bot_commands()
-    assert command_status == {"state": "synced", "count": 10, "hidden": 0}
+    assert command_status == {"state": "synced", "count": 9, "hidden": 0}
     assert calls[0][0] == "https://api.inline.chat/bot/setMyCommands"
     assert calls[0][2]["Authorization"] == "Bearer fake"
     assert calls[0][2]["Content-Type"] == "application/json"
     assert calls[0][3] == 10.0
     names = [entry["command"] for entry in calls[0][1]["commands"]]
-    assert names == ["threads", "follow", "unfollow", "inline_update", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
+    assert names == ["threads", "follow", "unfollow", "inline_sync", "inline_version", "help", "model", "update", "bad_name"]
     assert calls[0][1]["commands"][0]["description"] == "Configure Inline reply-thread routing"
     assert calls[0][1]["commands"][1]["description"] == "Explicitly follow this Inline chat or thread"
     assert calls[0][1]["commands"][2]["description"] == "Explicitly unfollow this Inline chat or thread"
-    assert calls[0][1]["commands"][3]["description"] == "Update the Inline Hermes plugin"
-    assert calls[0][1]["commands"][4]["description"] == "Resync Inline commands and skills"
-    assert calls[0][1]["commands"][5]["description"] == "Show Inline plugin and sync information"
-    assert calls[0][1]["commands"][8]["description"] == "Update Hermes"
+    assert calls[0][1]["commands"][3]["description"] == "Resync Inline commands and skills"
+    assert calls[0][1]["commands"][4]["description"] == "Show Inline plugin and sync information"
+    assert calls[0][1]["commands"][7]["description"] == "Update Hermes"
     skill_status = await adapter._sync_bot_skills()
     assert skill_status == {"state": "synced", "count": 2}
     assert calls[1][0] == "https://api.inline.chat/bot/setMySkills"
@@ -1815,7 +1683,7 @@ async def assert_bot_command_sync():
         thread_id=None,
     )
     assert handled is True
-    assert "Plugin version: 0.0.18" in sent[-1][1]
+    assert "Plugin version: 0.0.19" in sent[-1][1]
     assert "Last catalog sync:" in sent[-1][1]
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))

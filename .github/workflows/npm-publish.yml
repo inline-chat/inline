@@ -228,6 +228,12 @@ jobs:
           HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT" "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Validate native Hermes source installation
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
 
       - name: Pack and install exact public artifact
         if: inputs.package != 'hermes-agent'

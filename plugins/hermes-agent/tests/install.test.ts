@@ -69,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.18",
-      "@inline-chat/hermes-agent-adapter@0.0.18",
-      "@inline-chat/hermes-agent-adapter@0.0.18",
+      "@inline-chat/hermes-agent-adapter@0.0.19",
+      "@inline-chat/hermes-agent-adapter@0.0.19",
+      "@inline-chat/hermes-agent-adapter@0.0.19",
     ])
   })
 
@@ -115,7 +115,7 @@ describe("inline-hermes installer", () => {
     expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
     const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
     expect(payload.activation.installOwnershipAligned).toBe(true)
-    expect(payload.warnings.join("\n")).not.toContain("internal /inline_update may fail")
+    expect(payload.warnings.join("\n")).not.toContain("manual updates may fail")
   })
 
   it("routes new installs into the guided Hermes setup", async () => {

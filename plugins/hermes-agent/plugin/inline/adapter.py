@@ -22,7 +22,6 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -107,15 +106,8 @@ _INLINE_THREADS_COMMAND_DESCRIPTION = "Configure Inline reply-thread routing"
 _INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
 _INLINE_FOLLOW_COMMAND_DESCRIPTION = "Explicitly follow this Inline chat or thread"
 _INLINE_UNFOLLOW_COMMAND_DESCRIPTION = "Explicitly unfollow this Inline chat or thread"
-_INLINE_UPDATE_COMMAND_DESCRIPTION = "Update the Inline Hermes plugin"
 _INLINE_SYNC_COMMAND_DESCRIPTION = "Resync Inline commands and skills"
 _INLINE_VERSION_COMMAND_DESCRIPTION = "Show Inline plugin and sync information"
-_INLINE_UPDATE_PACKAGE_NAME = "@inline-chat/hermes-agent-adapter"
-_INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS = 30
-_INLINE_UPDATE_TIMEOUT_SECONDS = 5 * 60
-_INLINE_UPDATE_LOG_MAX_LINES = 80
-_INLINE_UPDATE_LOG_MAX_CHARS = 8_000
-_INLINE_UPDATE_LOCK = threading.Lock()
 _INLINE_THREADS_ACTION_PREFIX = "th:"
 _INLINE_THREADS_ACTION_TTL_SECONDS = 15 * 60
 _INLINE_THREAD_COMMAND_RE = re.compile(r"^/(?:thread|threads)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
@@ -5317,65 +5309,6 @@ def _inline_unfollow_command_handler(raw_args: str = "") -> str:
     return _inline_follow_command_fallback("unfollow", raw_args)
 
 
-def _inline_update_environment() -> Dict[str, str]:
-    try:
-        from tools.environments.local import _sanitize_subprocess_env
-        env = _sanitize_subprocess_env(os.environ.copy())
-    except Exception:
-        env = os.environ.copy()
-    # Hermes cannot know the secret names introduced by every external plugin.
-    sensitive_names = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTHORIZATION")
-    for key in list(env):
-        if any(name in key.upper() for name in sensitive_names):
-            env.pop(key, None)
-    return env
-
-
-def _inline_update_log_text(raw: Any, hermes_home: Optional[Path] = None) -> str:
-    text = str(raw or "")
-    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
-    text = re.sub(r"(?i)\b(Bearer\s+)[^\s]+", r"\1[REDACTED]", text)
-    text = re.sub(r"(?i)(https?://)[^/\s:@]+:[^@\s/]+@", r"\1[REDACTED]@", text)
-    text = re.sub(r"([?&][^=\s&]+)=([^&\s]+)", r"\1=[REDACTED]", text)
-    text = re.sub(
-        r"(?i)\b([A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key|authorization)[A-Za-z0-9_-]*)\s*([=:])\s*[^\s]+",
-        r"\1\2[REDACTED]",
-        text,
-    )
-    sensitive_names = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTHORIZATION")
-    for key, value in os.environ.items():
-        if len(value) >= 8 and any(name in key.upper() for name in sensitive_names):
-            text = text.replace(value, "[REDACTED]")
-    private_paths = []
-    if hermes_home:
-        private_paths.append((str(hermes_home), "$HERMES_HOME"))
-    private_paths.append((str(Path.home()), "~"))
-    for path_text, replacement in private_paths:
-        if len(path_text) > 1:
-            text = text.replace(path_text, replacement)
-    text = "".join(char if char in "\n\t" or ord(char) >= 32 else "?" for char in text)
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-    text = "\n".join(lines[-_INLINE_UPDATE_LOG_MAX_LINES:])
-    if len(text) > _INLINE_UPDATE_LOG_MAX_CHARS:
-        text = "[earlier output truncated]\n" + text[-_INLINE_UPDATE_LOG_MAX_CHARS:]
-    return text or "(no subprocess output)"
-
-
-def _log_inline_update_failure(
-    stage: str,
-    detail: str,
-    *,
-    output: Any = None,
-    hermes_home: Optional[Path] = None,
-) -> None:
-    diagnostic = f"{detail}\n{output or ''}".strip()
-    logger.error(
-        "[inline-update] stage=%s failed\n%s",
-        stage,
-        _inline_update_log_text(diagnostic, hermes_home),
-    )
-
-
 def _installed_inline_plugin_version() -> Optional[str]:
     manifest = Path(__file__).resolve().with_name("plugin.yaml")
     try:
@@ -5429,178 +5362,6 @@ def _inline_version_text(last_sync: Optional[Dict[str, Any]] = None) -> str:
     ])
 
 
-def _inline_update_lane(version: Optional[str]) -> Optional[str]:
-    if not version:
-        return None
-    match = re.fullmatch(r"\d+\.\d+\.\d+(?:-([A-Za-z][A-Za-z0-9-]*)(?:\.[0-9A-Za-z-]+)*)?", version)
-    if not match:
-        return None
-    return match.group(1) or "latest"
-
-
-def _semver_core(version: Any) -> Optional[tuple[int, int, int]]:
-    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", str(version or "").strip())
-    if not match:
-        return None
-    return tuple(int(part) for part in match.groups())
-
-
-def _run_inline_update() -> str:
-    if not _INLINE_UPDATE_LOCK.acquire(blocking=False):
-        return "An Inline plugin update is already running."
-    try:
-        return _run_inline_update_locked()
-    finally:
-        _INLINE_UPDATE_LOCK.release()
-
-
-def _run_inline_update_locked() -> str:
-    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
-    npm_bin = shutil.which("npm")
-    if not npm_bin:
-        _log_inline_update_failure("precheck", "npm was not found on PATH", hermes_home=hermes_home)
-        return "Inline plugin update is unavailable because npm was not found on PATH. Details were written to Hermes logs under `[inline-update]`."
-
-    target = hermes_home / "plugins" / "inline"
-    if target.is_symlink():
-        return (
-            "Inline is installed as a development symlink, so automatic update was skipped. "
-            "Update the linked source checkout and restart Hermes instead."
-        )
-
-    installed_version = _installed_inline_plugin_version()
-    lane = _inline_update_lane(installed_version)
-    if not lane:
-        return (
-            "Inline plugin update could not determine the installed release channel. "
-            "Update it manually with the package version or npm dist-tag you want to follow."
-        )
-    package_spec = f"{_INLINE_UPDATE_PACKAGE_NAME}@{lane}"
-    precheck_command = [npm_bin, "view", package_spec, "--json"]
-    try:
-        precheck = subprocess.run(
-            precheck_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=_INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS,
-            check=False,
-            env=_inline_update_environment(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        _log_inline_update_failure(
-            "precheck",
-            "npm view timed out",
-            output=f"{exc.stdout or ''}\n{exc.stderr or ''}",
-            hermes_home=hermes_home,
-        )
-        return "Inline plugin compatibility precheck timed out; no update was applied. Details were written to Hermes logs under `[inline-update]`."
-    except OSError as exc:
-        _log_inline_update_failure("precheck", f"npm view could not start: {exc}", hermes_home=hermes_home)
-        return "Inline plugin compatibility precheck could not start; no update was applied. Details were written to Hermes logs under `[inline-update]`."
-    if precheck.returncode != 0:
-        _log_inline_update_failure(
-            "precheck",
-            f"npm view exited with code {precheck.returncode} for {package_spec}",
-            output=f"{precheck.stdout or ''}\n{precheck.stderr or ''}",
-            hermes_home=hermes_home,
-        )
-        return (
-            f"Inline plugin compatibility precheck failed with exit code {precheck.returncode}; "
-            "no update was applied. Details were written to Hermes logs under `[inline-update]`."
-        )
-    try:
-        package_metadata = json.loads(precheck.stdout or "{}")
-    except (TypeError, json.JSONDecodeError):
-        package_metadata = None
-    inline_metadata = package_metadata.get("inlineHermes") if isinstance(package_metadata, dict) else None
-    candidate_version = package_metadata.get("version") if isinstance(package_metadata, dict) else None
-    minimum_hermes = inline_metadata.get("minHermesVersion") if isinstance(inline_metadata, dict) else None
-    try:
-        from hermes_cli import __version__ as current_hermes
-    except Exception:
-        current_hermes = None
-    current_core = _semver_core(current_hermes)
-    minimum_core = _semver_core(minimum_hermes)
-    if not candidate_version or not current_core or not minimum_core:
-        _log_inline_update_failure(
-            "precheck",
-            f"invalid compatibility metadata for {package_spec}; current Hermes version={current_hermes!r}",
-            output=precheck.stdout,
-            hermes_home=hermes_home,
-        )
-        return (
-            "Inline plugin compatibility metadata could not be verified; "
-            "no update was applied. Details were written to Hermes logs under `[inline-update]`."
-        )
-    if current_core < minimum_core:
-        return (
-            f"Inline plugin `{candidate_version}` requires Hermes `{minimum_hermes}` or newer, "
-            f"but this agent is running `{current_hermes}`. Update Hermes first; no plugin update was applied."
-        )
-
-    command = [
-        npm_bin,
-        "exec",
-        "--yes",
-        f"--package={package_spec}",
-        "--",
-        "inline-hermes",
-        "install",
-        "--force",
-        "--hermes-home",
-        str(hermes_home),
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=_INLINE_UPDATE_TIMEOUT_SECONDS,
-            check=False,
-            env=_inline_update_environment(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        _log_inline_update_failure(
-            "install",
-            f"npm exec timed out for {package_spec}",
-            output=exc.stdout,
-            hermes_home=hermes_home,
-        )
-        return (
-            "Inline plugin update timed out. Run "
-            f"`npm exec --yes --package={package_spec} -- "
-            "inline-hermes install --force` on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
-        )
-    except OSError as exc:
-        _log_inline_update_failure("install", f"npm exec could not start: {exc}", hermes_home=hermes_home)
-        return "Inline plugin update could not start. Check that npm is installed and usable on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
-
-    if result.returncode != 0:
-        _log_inline_update_failure(
-            "install",
-            f"npm exec exited with code {result.returncode} for {package_spec}",
-            output=result.stdout,
-            hermes_home=hermes_home,
-        )
-        return (
-            f"Inline plugin update failed with exit code {result.returncode}. Run "
-            f"`npm exec --yes --package={package_spec} -- "
-            "inline-hermes install --force` on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
-        )
-
-    version = _installed_inline_plugin_version()
-    version_text = f" to `{version}`" if version else ""
-    return f"Inline plugin updated{version_text} from the `{lane}` channel. Run `/restart` to load the new version."
-
-
-async def _inline_update_command_handler(raw_args: str = "") -> str:
-    if str(raw_args or "").strip():
-        return "Usage: `/inline_update`"
-    return await asyncio.to_thread(_run_inline_update)
-
-
 async def _inline_sync_command_handler(raw_args: str = "") -> str:
     if str(raw_args or "").strip():
         return "Usage: `/inline_sync`"
@@ -5630,11 +5391,6 @@ def _inline_command_specs() -> tuple[_InlineCommandSpec, ...]:
             name="unfollow",
             handler=_inline_unfollow_command_handler,
             description=_INLINE_UNFOLLOW_COMMAND_DESCRIPTION,
-        ),
-        _InlineCommandSpec(
-            name="inline-update",
-            handler=_inline_update_command_handler,
-            description=_INLINE_UPDATE_COMMAND_DESCRIPTION,
         ),
         _InlineCommandSpec(
             name="inline-sync",

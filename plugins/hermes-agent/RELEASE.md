@@ -130,7 +130,7 @@ the trusted-publishing workflow through the repository wrapper:
 
 ```sh
 cd ..
-bun run release:npm hermes-agent --version 0.0.18 --tag latest
+bun run release:npm hermes-agent --version 0.0.19 --tag latest
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```
