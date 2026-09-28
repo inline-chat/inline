@@ -97,6 +97,11 @@ try {
   assert.ok(connected, `installed source sidecar did not connect to offline mock: ${output}`)
   assert.equal(health.result.version, expectedVersion, "source sidecar lost plugin version metadata")
   assert.equal((await post("/healthz", {}, false)).status, 401)
+  assert.equal((await post("/inbound/ack", { deliveryId: "offline-receipt" }, false)).status, 401)
+  // ACK retries are harmless even after the original receipt has been retired.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal((await post("/inbound/ack", { deliveryId: "offline-receipt" })).status, 200)
+  }
   const sent = await (await post("/send", { target: { chatId: "123" }, text: "source catalog smoke", parseMarkdown: false })).json()
   assert.equal(sent.ok, true)
   assert.ok(sent.result.messageId)

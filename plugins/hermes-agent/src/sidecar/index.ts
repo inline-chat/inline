@@ -261,6 +261,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  // Receipt completion must remain available while the upstream SDK is offline.
+  if (url.pathname === "/inbound/ack") {
+    const body = asRecord(await readJsonBody(req))
+    const deliveryId = readRequiredString(body, "deliveryId")
+    inboundStream.acknowledge(deliveryId)
+    writeJson(res, 200, { ok: true, result: {} })
+    return
+  }
+
   if (!connected && url.pathname !== "/shutdown") {
     writeJson(res, 503, {
       ok: false,

@@ -322,7 +322,7 @@ base_extra = {"token": "fake", "context_history_limit": 0}
 # Behavioral fixtures explicitly trust their actors; authorization cases use base_extra.
 trusted_extra = {**base_extra, "allow_all": True}
 
-async def root_chat_info(chat_id):
+async def root_chat_info(chat_id, **kwargs):
     return {"id": chat_id, "peer": {"type": {"oneofKind": "chat"}}}
 
 assert resolve_inline_message_action_ownership("agent:1:2").owner == "agent"
@@ -1818,7 +1818,7 @@ async def assert_reply_thread_chat_metadata():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         if chat_id == "456":
             return {
                 "chatId": "456",
@@ -1868,7 +1868,7 @@ async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         assert chat_id == "10"
         return {"chatId": "10", "title": "New thread", "lastMsgId": "9001"}
 
@@ -1909,7 +1909,7 @@ async def assert_mentioned_agent_projection():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "title": "Planning"}
 
     async def fake_sidecar_call(path, body):
@@ -2036,7 +2036,7 @@ async def assert_activated_agent_avoids_lookup():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "title": "Planning"}
 
     async def fake_sidecar_call(path, body):
@@ -2087,7 +2087,7 @@ async def assert_forced_reply_thread_creation():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         assert chat_id == "10"
         return {"chatId": "10", "title": "Parent room"}
 
@@ -2101,7 +2101,7 @@ async def assert_forced_reply_thread_creation():
             return {"ok": True, "result": {}}
         raise AssertionError(f"unexpected sidecar path {path}")
 
-    async def fake_fetch_message(chat_id, msg_id):
+    async def fake_fetch_message(chat_id, msg_id, **kwargs):
         assert chat_id == "10"
         assert msg_id == "6"
         return {"id": "6", "chatId": "10", "fromId": "u2", "message": "parent quote"}
@@ -2243,7 +2243,7 @@ async def assert_reply_threads_disabled_preserves_existing_threads():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "title": f"Chat {chat_id}"}
 
     async def fake_sidecar_call(path, body):
@@ -2295,7 +2295,7 @@ async def assert_inline_entity_context():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "title": f"Chat {chat_id}"}
 
     adapter.handle_message = fake_handle_message
@@ -2365,7 +2365,7 @@ async def assert_inline_thread_context_history():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         if chat_id == "456":
             return {
                 "chatId": "456",
@@ -2469,12 +2469,12 @@ async def assert_inline_reply_context_window():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         assert chat_id == "10"
         assert message_id == "50"
         return {"id": "50", "chatId": "10", "fromId": "u2", "message": "Can we ship this?"}
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"id": chat_id}
 
     async def fake_sidecar_call(path, body):
@@ -2584,10 +2584,10 @@ async def assert_explicit_addressing_precedence():
     async def fake_handle_message(event):
         events.append(event)
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "dialogFollowMode": 1}
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         return {"id": message_id, "chatId": chat_id, "fromId": "999", "message": "bot reply"}
 
     async def fake_send(chat_id, content, reply_to=None, metadata=None, actions=None):
@@ -2740,12 +2740,12 @@ async def assert_reply_thread_slash_command():
             sidecar_calls.append((path, body))
             return {"ok": True, "result": {}}
 
-        async def fake_get_chat_info(chat_id):
+        async def fake_get_chat_info(chat_id, **kwargs):
             if chat_id == "99":
                 return {"chatId": "99", "title": "Child thread", "parentChatId": "10"}
             return {"chatId": chat_id, "title": f"Chat {chat_id}"}
 
-        async def fake_fetch_message(chat_id, message_id):
+        async def fake_fetch_message(chat_id, message_id, **kwargs):
             if chat_id == "20":
                 return {"peerId": {"type": {"oneofKind": "user", "user": {"userId": chat_id}}}}
             return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
@@ -3027,7 +3027,7 @@ async def assert_group_room_controls():
         async def capture(event):
             events.append(event)
 
-        async def fetch_message(chat_id, message_id):
+        async def fetch_message(chat_id, message_id, **kwargs):
             return reply
 
         adapter.handle_message = capture
@@ -3056,7 +3056,7 @@ async def assert_group_room_controls():
     thread_msg = {**base_msg, "replies": {"chatId": "99"}}
     assert len(await run(thread_allowed, thread_msg)) == 1
 
-    async def child_thread_info(chat_id):
+    async def child_thread_info(chat_id, **kwargs):
         if chat_id == "456":
             return {"chatId": "456", "title": "Child thread", "parentChatId": "10"}
         if chat_id == "10":
@@ -3074,7 +3074,7 @@ async def assert_group_room_controls():
     free._get_chat_info = root_chat_info
     assert len(await run(free, base_msg)) == 1
 
-    async def followed_info(chat_id):
+    async def followed_info(chat_id, **kwargs):
         return {
             "chatId": chat_id,
             "title": f"Followed {chat_id}",
@@ -3088,7 +3088,7 @@ async def assert_group_room_controls():
     assert len(followed_events) == 1
     assert followed_events[0].source.chat_id == "10"
 
-    async def followed_large_info(chat_id):
+    async def followed_large_info(chat_id, **kwargs):
         return {
             "chatId": chat_id,
             "title": f"Large followed {chat_id}",
@@ -3447,7 +3447,7 @@ async def assert_choice_picker_flow():
         calls.append((path, body))
         return SendResult(success=True, message_id=body.get("messageId") or "choice-message", raw_response=body)
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
 
     async def fake_answer_action(interaction_id, toast):
@@ -3679,7 +3679,7 @@ async def assert_update_prompt_flow():
         calls.append((path, body))
         return SendResult(success=True, message_id=body.get("messageId") or "update-message", raw_response=body)
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
 
     async def fake_answer_action(interaction_id, toast):
@@ -4251,9 +4251,9 @@ async def assert_host_authorization_boundaries():
             events.append(event)
         async def forbidden(*args, **kwargs):
             raise AssertionError("unauthorized enrichment or mutation")
-        async def chat_info(chat_id):
+        async def chat_info(chat_id, **kwargs):
             return {"id": chat_id, "parentChatId": "parent", "peer": {"type": {"oneofKind": "chat"}}}
-        async def target(chat_id, message_id):
+        async def target(chat_id, message_id, **kwargs):
             return {"id": message_id, "fromId": "bot", "peerId": {"peer": {"oneofKind": "chat"}}}
         async def answer(interaction_id, text):
             answers.append(text)
@@ -4311,7 +4311,7 @@ async def assert_host_authorization_boundaries():
             chat_type="group", thread_id="10", parent_chat_id="parent")
         assert await adapter._handle_action({"chatId": "10", "messageId": "20", "actorUserId": "paired",
             "interactionId": "child-only", "actionId": f"th:{session_id}:off"})
-        assert answers[-1] == "Parent chat thread settings are not authorized"
+        assert answers[-1] == "Parent chat access could not be confirmed. Check access and try again."
         try:
             await adapter._apply_bot_setting({"itemId": "reply-threads", "value": {"value": {
                 "oneofKind": "stringValue", "stringValue": "off",
@@ -4343,7 +4343,7 @@ async def assert_host_authorization_boundaries():
         assert events[-1].source.parent_chat_id == "parent"
         adapter._group_policy = "open"
         # Opted-in reactions survive an unavailable target; core decides admission.
-        async def missing_target(*args):
+        async def missing_target(*args, **kwargs):
             return None
         adapter._fetch_message = missing_target
         await adapter._dispatch_reaction({"chatId": "10", "messageId": "gone", "userId": "paired", "emoji": "ok"}, added=True)
@@ -4351,7 +4351,7 @@ async def assert_host_authorization_boundaries():
         adapter._fetch_message = target
         # Parent resolution is bounded and never grants access after timeout.
         original_timeout = inline_adapter_module._CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS
-        async def slow_chat(*args):
+        async def slow_chat(*args, **kwargs):
             await asyncio.sleep(1)
         adapter._get_chat_info = slow_chat
         try:
@@ -4360,15 +4360,20 @@ async def assert_host_authorization_boundaries():
         finally:
             inline_adapter_module._CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS = original_timeout
             adapter._get_chat_info = chat_info
-        async def missing_chat(*args):
+        async def missing_chat(*args, **kwargs):
             return {}
         adapter._get_chat_info = missing_chat
         assert not await adapter._action_allowed(button)
         before = len(events)
-        await adapter._dispatch_message({"seq": 999, "chatId": "10", "message": {
-            "id": "unknown-parent", "fromId": "paired", "message": "/follow",
-            "peerId": {"peer": {"oneofKind": "chat"}},
-        }})
+        try:
+            await adapter._dispatch_message({"seq": 999, "chatId": "10", "message": {
+                "id": "unknown-parent", "fromId": "paired", "message": "/follow",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            }})
+        except inline_adapter_module.InlineInboundDeferred:
+            pass
+        else:
+            raise AssertionError("missing routing metadata was not deferred")
         assert len(events) == before
         adapter._get_chat_info = chat_info
         accepted.clear()
@@ -4378,16 +4383,218 @@ async def assert_host_authorization_boundaries():
 
 asyncio.run(assert_host_authorization_boundaries())
 
+async def assert_inbound_receipt_recovery():
+    original_delay = inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS
+    original_timeout = inline_adapter_module._INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS
+    inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = 0.001
+    inline_adapter_module._INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = 0.01
+    def event(chat, seq, delivery):
+        return {"kind": "message.new", "chatId": chat, "seq": seq, "_inlineDeliveryId": delivery,
+            "message": {"id": str(seq), "fromId": "paired", "message": "hello", "mentioned": True,
+                "peerId": {"type": {"oneofKind": "chat"}},
+                "media": {"media": {"oneofKind": "photo", "photo": {}}}}}
+    try:
+        adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+            "reply_threads": "off", "context_backfill": "off"}))
+        available = asyncio.Event()
+        delivered, normalized, acknowledgements = [], [], []
+        ack_failed = False
+        async def sidecar(path, body):
+            nonlocal ack_failed
+            if path == "/chat":
+                chat = body["target"]["chatId"]
+                if chat == "10" and not available.is_set():
+                    await available.wait()
+                return {"ok": True, "result": {"id": chat}}
+            assert path == "/inbound/ack", path
+            acknowledgements.append(body["deliveryId"])
+            if body["deliveryId"] == "held" and not ack_failed:
+                ack_failed = True
+                raise RuntimeError("ACK response lost")
+            return {"ok": True}
+        async def media(msg):
+            normalized.append(msg["id"])
+            return ("[photo]", ["/tmp/receipt-test-photo"], ["image/jpeg"], MessageType.PHOTO)
+        async def capture(ev):
+            delivered.append(ev)
+        adapter._sidecar_call = sidecar
+        adapter._normalize_media = media
+        adapter.handle_message = capture
+        held = event("10", 100, "held")
+        await adapter._on_inbound(json.dumps(held))
+        first = adapter._inbound_deliveries["held"]
+        await adapter._on_inbound(json.dumps(held))
+        assert adapter._inbound_deliveries["held"] is first
+        await adapter._on_inbound(json.dumps(event("20", 200, "healthy")))
+        await asyncio.wait_for(adapter._inbound_deliveries["healthy"], 1)
+        await asyncio.sleep(0.015)
+        assert [e.source.chat_id for e in delivered] == ["20"]
+        assert normalized == ["200"]
+        assert "held" not in acknowledgements
+        assert not any("10:" in key for key in adapter._seen_messages)
+        available.set()
+        await asyncio.wait_for(first, 1)
+        assert [e.source.chat_id for e in delivered] == ["20", "10"]
+        assert delivered[-1].media_urls == ["/tmp/receipt-test-photo"]
+        assert delivered[-1].message_id == "100"
+        assert normalized == ["200", "100"]
+        assert acknowledgements.count("held") == 2
+        # A fresh receipt for the same update still deduplicates completed work.
+        held["_inlineDeliveryId"] = "replayed"
+        await adapter._on_inbound(json.dumps(held))
+        await asyncio.wait_for(adapter._inbound_deliveries["replayed"], 1)
+        assert len(delivered) == 2
+        # Cancellation before authorization does not burn either dedup identity.
+        available.clear()
+        cancelled = event("10", 101, "cancelled")
+        await adapter._on_inbound(json.dumps(cancelled))
+        task = adapter._inbound_deliveries["cancelled"]
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+        assert "cancelled" not in acknowledgements
+        available.set()
+        await adapter._on_inbound(json.dumps(cancelled))
+        await asyncio.wait_for(adapter._inbound_deliveries["cancelled"], 1)
+        assert [e.message_id for e in delivered] == ["200", "100", "101"]
+        # Native unknown is temporary, not a denial that strips incoming media.
+        verdicts = iter([None, True])
+        adapter.set_authorization_check(lambda *a, **kw: next(verdicts))
+        await adapter._on_inbound(json.dumps(event("30", 300, "auth-recovery")))
+        await asyncio.wait_for(adapter._inbound_deliveries["auth-recovery"], 1)
+        assert delivered[-1].media_urls == ["/tmp/receipt-test-photo"]
+        assert normalized.count("300") == 1
+        # Host exceptions preserve a local command instead of sending it to the model.
+        auth_calls, commands_seen = [], []
+        def interrupted_auth(*args, **kwargs):
+            auth_calls.append(True)
+            if len(auth_calls) == 1:
+                raise RuntimeError("temporary host outage")
+            return True
+        async def text_only(msg):
+            return ("", [], [], MessageType.TEXT)
+        async def command(**kwargs):
+            commands_seen.append(kwargs["text"])
+            return True
+        adapter.set_authorization_check(interrupted_auth)
+        adapter._normalize_media = text_only
+        original_command = adapter._handle_thread_command
+        adapter._handle_thread_command = command
+        local_command = event("30", 301, "command-recovery")
+        local_command["message"]["message"] = "/threads on"
+        await adapter._on_inbound(json.dumps(local_command))
+        await asyncio.wait_for(adapter._inbound_deliveries["command-recovery"], 1)
+        assert commands_seen == ["/threads on"]
+        assert len(delivered) == 4
+        adapter._handle_thread_command = original_command
+        # A transient callback-target fetch must not consume the button press.
+        adapter.set_authorization_check(lambda *a, **kw: True)
+        target_calls, action_answers = [], []
+        async def action_sidecar(path, body):
+            if path == "/messages":
+                target_calls.append(True)
+                if len(target_calls) == 1:
+                    raise RuntimeError("target lookup offline")
+                return {"ok": True, "result": {"messages": [{"id": "20", "fromId": "bot",
+                    "message": "choose", "peerId": {"type": {"oneofKind": "user"}}}]}}
+            if path == "/answer-action":
+                action_answers.append(body)
+            elif path == "/inbound/ack":
+                acknowledgements.append(body["deliveryId"])
+            else:
+                raise AssertionError(path)
+            return {"ok": True}
+        adapter._sidecar_call = action_sidecar
+        await adapter._on_inbound(json.dumps({"kind": "message.action.invoke", "chatId": "60",
+            "messageId": "20", "actorUserId": "paired", "interactionId": "click",
+            "actionId": "agent:1:1", "_inlineDeliveryId": "callback-recovery"}))
+        await asyncio.wait_for(adapter._inbound_deliveries["callback-recovery"], 1)
+        assert len(target_calls) >= 2
+        assert len(action_answers) == 1
+        assert delivered[-1].message_id == "inline-agent-action:20:click"
+        assert delivered[-1].allow_gateway_control is False
+        assert acknowledgements.count("callback-recovery") == 1
+        # A persistently unavailable button must release the SDK user barrier.
+        blocked = InlineAdapter(PlatformConfig(extra=trusted_extra))
+        retries, toasts, retired = [], [], []
+        async def always_unavailable(event):
+            retries.append(event)
+            raise inline_adapter_module.InlineInboundDeferred("offline")
+        async def toast(interaction, text):
+            toasts.append((interaction, text))
+        async def retire(path, body):
+            assert path == "/inbound/ack"
+            retired.append(body["deliveryId"])
+        blocked._dispatch_inbound = always_unavailable
+        blocked._answer_action = toast
+        blocked._sidecar_call = retire
+        await blocked._on_inbound(json.dumps({"kind": "message.action.invoke", "interactionId": "blocked",
+            "_inlineDeliveryId": "blocked"}))
+        await asyncio.wait_for(blocked._inbound_deliveries["blocked"], 1)
+        assert len(retries) == 2
+        assert toasts == [("blocked", "Temporarily unavailable. Please try again.")]
+        assert retired == ["blocked"]
+        # Lost ACK responses can outlive SDK slots; Python admission is bounded.
+        bounded = InlineAdapter(PlatformConfig(extra=trusted_extra))
+        ack_response = asyncio.Event()
+        async def handled(event):
+            pass
+        async def lost_response(path, body):
+            await ack_response.wait()
+        bounded._dispatch_inbound = handled
+        bounded._sidecar_call = lost_response
+        old_limit = inline_adapter_module._MAX_INBOUND_DELIVERIES
+        inline_adapter_module._MAX_INBOUND_DELIVERIES = 2
+        try:
+            for receipt in ("one", "two"):
+                await bounded._on_inbound(json.dumps({"_inlineDeliveryId": receipt}))
+            third = asyncio.create_task(bounded._on_inbound(json.dumps({"_inlineDeliveryId": "three"})))
+            await asyncio.sleep(0)
+            assert not third.done()
+            assert len(bounded._inbound_deliveries) == 2
+            await bounded._on_inbound(json.dumps({"_inlineDeliveryId": "one"}))
+            ack_response.set()
+            await asyncio.wait_for(third, 1)
+            await asyncio.gather(*list(bounded._inbound_deliveries.values()))
+        finally:
+            inline_adapter_module._MAX_INBOUND_DELIVERIES = old_limit
+        # Empty/mismatched successful responses must not poison the cache.
+        responses = iter([{}, {"id": "wrong"}, {"id": "40"}])
+        async def snapshots(path, body):
+            return {"ok": True, "result": next(responses)}
+        adapter._sidecar_call = snapshots
+        assert await adapter._get_chat_info("40") == {}
+        assert await adapter._get_chat_info("40") == {}
+        assert await adapter._get_chat_info("40") == {"id": "40"}
+        # Permanent loss of chat access must not poison the same-chat queue.
+        adapter.set_authorization_check(lambda *a, **kw: True)
+        async def inaccessible(path, body):
+            if path == "/chat":
+                raise inline_adapter_module.InlineSidecarError(path, 403, "forbidden", "forbidden")
+            acknowledgements.append(body["deliveryId"])
+            return {"ok": True}
+        adapter._sidecar_call = inaccessible
+        await adapter._on_inbound(json.dumps(event("50", 500, "removed")))
+        await asyncio.wait_for(adapter._inbound_deliveries["removed"], 1)
+        assert "removed" in acknowledgements
+        assert "500" not in normalized
+    finally:
+        inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = original_delay
+        inline_adapter_module._INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = original_timeout
+
+asyncio.run(assert_inbound_receipt_recovery())
+
 async def assert_action_authorization():
     os.environ.pop("GATEWAY_ALLOWED_USERS", None)
     os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)
     adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "group_policy": "allowlist", "group_allow_from": "u1"}))
     answers = []
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
 
-    async def fake_chat_info(chat_id):
+    async def fake_chat_info(chat_id, **kwargs):
         return {"id": chat_id}
 
     async def fake_answer_action(interaction_id, toast):
@@ -4426,7 +4633,7 @@ async def assert_action_authorization():
         "actionId": "appr:approval-1:approve",
     })
     assert not unknown_context
-    assert answers[-1] == ("interaction-3", "Not authorized")
+    assert answers[-1] == ("interaction-3", "Access check temporarily unavailable. Try again.")
 
     open_adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     open_answers = []
@@ -4579,7 +4786,7 @@ async def assert_agent_action_turn_and_same_message_response():
         order.append("ack")
         answers.append((interaction_id, toast))
 
-    async def fake_fetch_message(chat_id, message_id):
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
         return {
             "id": message_id,
             "chatId": chat_id,
@@ -4626,7 +4833,7 @@ async def assert_agent_action_turn_and_same_message_response():
     }))
 
     assert answers == [("30", "")]
-    assert order == ["ack", "turn"]
+    assert order == ["turn", "ack"]
     assert len(events) == 1
     action_turn = events[0]
     assert action_turn.text.startswith("Inline action button pressed on message 20.")
@@ -4693,7 +4900,7 @@ async def assert_inline_lifecycle_events():
     async def capture(event):
         events.append(event)
 
-    async def own_message(chat_id, message_id):
+    async def own_message(chat_id, message_id, **kwargs):
         return {
             "id": message_id,
             "fromId": "bot",
@@ -4720,7 +4927,7 @@ async def assert_inline_lifecycle_events():
     assert events[0].source.chat_id == "10"
     assert events[0].source.user_id == "u1"
 
-    async def human_message(chat_id, message_id):
+    async def human_message(chat_id, message_id, **kwargs):
         return {
             "id": message_id,
             "fromId": "u2",
@@ -4833,7 +5040,7 @@ async def assert_join_mention_recovery():
             return {"ok": True, "result": {"messages": [recent, boundary, too_old]}}
         return {"ok": True, "result": {}}
 
-    async def fake_get_chat_info(chat_id):
+    async def fake_get_chat_info(chat_id, **kwargs):
         return {"chatId": chat_id, "title": "Project Room"}
 
     adapter.handle_message = capture
@@ -5312,7 +5519,7 @@ asyncio.run(assert_bot_settings_document_and_mutation())
 async def assert_bot_settings_fail_closed_and_serialized():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
 
-    async def slow_chat_info(chat_id):
+    async def slow_chat_info(chat_id, **kwargs):
         await asyncio.sleep(30)
         return {"id": chat_id}
 
@@ -5328,7 +5535,7 @@ async def assert_bot_settings_fail_closed_and_serialized():
     finally:
         inline_adapter_module._CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS = original_timeout
 
-    async def missing_chat_info(chat_id):
+    async def missing_chat_info(chat_id, **kwargs):
         return {}
 
     adapter._get_chat_info = missing_chat_info
@@ -5338,7 +5545,7 @@ async def assert_bot_settings_fail_closed_and_serialized():
     guide = adapter._bot_settings_document(context)
     assert "could not verify this chat" in guide["sections"][0]["items"][0]["control"]["info"]["text"]
 
-    async def allowed_chat_info(chat_id):
+    async def allowed_chat_info(chat_id, **kwargs):
         return {"id": chat_id, "peer": {"type": {"oneofKind": "chat"}}}
 
     adapter._get_chat_info = allowed_chat_info

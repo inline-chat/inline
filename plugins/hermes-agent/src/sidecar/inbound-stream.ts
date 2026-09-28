@@ -1,12 +1,15 @@
+import { randomUUID } from "node:crypto"
 import type { Writable } from "node:stream"
 
-/** Retains a pending line across consumer replacement. A close after write is
- * uncertain, so replay keeps the original event identity for downstream dedup.
+/** Holds the SDK receipt until Python acknowledges handling. Consumer replacement
+ * replays the same delivery identity; this is an at-least-once process handoff,
+ * not a durable exactly-once transaction with the gateway's effects.
  */
 export class InboundStream {
   private consumer: Writable | null = null
   private stopped = false
   private readonly changed = new Set<() => void>()
+  private readonly pending = new Map<string, { acknowledged: boolean }>()
 
   attach(consumer: Writable): void {
     if (this.stopped) {
@@ -27,6 +30,16 @@ export class InboundStream {
     previous?.end()
   }
 
+  /** Repeated/unknown acknowledgements are harmless, including a retry after the
+   * first acknowledgement succeeded but its HTTP response was lost.
+   */
+  acknowledge(deliveryId: string): void {
+    const receipt = this.pending.get(deliveryId)
+    if (!receipt) return
+    receipt.acknowledged = true
+    this.wake()
+  }
+
   close(): void {
     this.stopped = true
     const previous = this.consumer
@@ -36,48 +49,40 @@ export class InboundStream {
   }
 
   async deliver(event: unknown): Promise<void> {
-    const line = JSON.stringify(event) + "\n"
-    while (!this.stopped) {
-      const owner = this.consumer
-      if (!owner) {
-        await new Promise<void>((resolve) => this.changed.add(resolve))
-        continue
-      }
-      let cleanup = () => {}
-      const drained = new Promise<boolean>((resolve) => {
-        const finish = (ok: boolean) => {
-          cleanup()
-          resolve(ok)
-        }
-        const onDrain = () => finish(true)
-        const onChange = () => finish(false)
-        cleanup = () => {
-          owner.off("drain", onDrain)
-          owner.off("close", onChange)
-          owner.off("error", onChange)
-          this.changed.delete(onChange)
-        }
-        owner.once("drain", onDrain)
-        owner.once("close", onChange)
-        owner.once("error", onChange)
-        this.changed.add(onChange)
-      })
-      try {
-        if (owner.destroyed || owner.writableEnded) {
-          if (this.consumer === owner) this.consumer = null
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("Inbound delivery requires an event object")
+    }
+    const deliveryId = randomUUID()
+    const line = JSON.stringify({ ...event, _inlineDeliveryId: deliveryId }) + "\n"
+    const receipt = { acknowledged: false }
+    this.pending.set(deliveryId, receipt)
+    let writtenTo: Writable | null = null
+    try {
+      while (!this.stopped) {
+        if (receipt.acknowledged) return
+        const owner = this.consumer
+        if (owner && owner !== writtenTo) {
+          try {
+            if (owner.destroyed || owner.writableEnded) {
+              if (this.consumer === owner) this.consumer = null
+              continue
+            }
+            // Socket acceptance/drain is not handling acknowledgement. Each
+            // SDK-owned pending delivery writes only once per consumer, and the
+            // SDK bounds concurrent receipts/backpressure upstream.
+            writtenTo = owner
+            owner.write(line)
+          } catch {
+            if (this.consumer === owner) this.consumer = null
+          }
           continue
         }
-        const accepted = owner.write(line)
-        if (this.consumer !== owner || this.stopped) continue
-        if (accepted) return
-        if ((await drained) && this.consumer === owner && !this.stopped) return
-      } catch {
-        if (this.consumer === owner) this.consumer = null
-      } finally {
-        cleanup()
+        await new Promise<void>((resolve) => this.changed.add(resolve))
       }
+      throw new Error("Inbound stream closed before delivery completed")
+    } finally {
+      this.pending.delete(deliveryId)
     }
-    throw new Error("Inbound stream closed before delivery completed")
   }
 
   private wake(): void {

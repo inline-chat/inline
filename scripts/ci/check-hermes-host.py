@@ -295,7 +295,7 @@ async def exercise_authorization():
 
         # Missing child metadata must not turn a routed thread into a default
         # profile chat and use that profile's otherwise valid pairing grant.
-        async def missing_info(chat_id):
+        async def missing_info(chat_id, **kwargs):
             return {}
 
         async def child_message(chat_id, message_id):
@@ -308,14 +308,123 @@ async def exercise_authorization():
 
         with patch.object(adapter, "_get_chat_info", missing_info), patch.object(adapter, "_fetch_message", child_message), patch.object(adapter, "_answer_action", answer), patch.object(adapter, "handle_message", receive):
             assert not await adapter._action_allowed({"chatId": "701", "messageId": "1", "actorUserId": "44", "interactionId": "missing-route"})
-            assert answers == ["Not authorized"]
+            assert answers == ["Access check temporarily unavailable. Try again."]
             delivered.clear()
-            await adapter._dispatch_message({"kind": "message.new", "seq": 2001, "chatId": "701", "message": {
-                "id": "2001", "fromId": "44", "message": "@bot hello", "mentioned": True,
-                "peerId": {"type": {"oneofKind": "chat"}},
-            }})
+            try:
+                await adapter._dispatch_message({"kind": "message.new", "seq": 2001, "chatId": "701", "message": {
+                    "id": "2001", "fromId": "44", "message": "@bot hello", "mentioned": True,
+                    "peerId": {"type": {"oneofKind": "chat"}},
+                }})
+            except RuntimeError as exc:
+                assert type(exc).__name__ == "InlineInboundDeferred"
+            else:
+                raise AssertionError("missing routing metadata was not deferred")
             assert not delivered, "missing routing metadata borrowed default pairing approval"
 
 
 asyncio.run(exercise_authorization())
-print("Real Hermes admission, registration, authorization/pairing, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")
+async def exercise_receipt_recovery():
+    from gateway.run import GatewayRunner
+    from gateway.pairing import PairingStore
+
+    recovered = platform_registry.create_adapter("inline", PlatformConfig(
+        enabled=True, token="offline-test-token", extra={
+            "dm_policy": "open", "reply_threads": "off", "context_backfill": "off",
+            "sync_commands": False, "text_debounce_seconds": 0,
+        },
+    ))
+    assert recovered is not None
+    module = sys.modules[type(recovered).__module__]
+    runner = GatewayRunner.__new__(GatewayRunner)
+    runner.config = SimpleNamespace(multiplex_profiles=False)
+    runner.adapters = {recovered.platform: recovered}
+    runner._profile_adapters = {}
+    runner._primary_profile_name = "default"
+    runner.pairing_store = PairingStore()
+    runner.pairing_stores = {}
+    recovered.set_authorization_check(runner._make_adapter_auth_check(recovered.platform))
+    acknowledgements, received = [], []
+    model_started, release_model, replied = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    def transport(request):
+        body = json.loads(request.content)
+        if request.url.path == "/inbound/ack":
+            acknowledgements.append(body["deliveryId"])
+        elif request.url.path == "/send":
+            replied.set()
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": "9002"}})
+
+    async def model(event):
+        received.append(event)
+        model_started.set()
+        await release_model.wait()
+        return "Recovered native turn"
+
+    recovered._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    recovered.set_message_handler(model)
+    event = {"kind": "message.new", "seq": 9001, "chatId": "901", "meId": "999",
+        "_inlineDeliveryId": "native-recovery", "message": {
+            "id": "9001", "chatId": "901", "fromId": "46", "message": "recover native admission",
+            "peerId": {"peer": {"oneofKind": "user", "user": {"userId": "46"}}},
+        }}
+    auth_env = {key: "" for key in (
+        "INLINE_ALLOWED_USERS", "INLINE_ALLOW_ALL_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
+    )}
+    try:
+        with patch.dict(os.environ, auth_env), patch("gateway.pairing._sync_allowlist_add"), patch("gateway.pairing._sync_allowlist_remove"):
+            code = runner.pairing_store.generate_code("inline", "46", "Receipt recovery fixture")
+            assert code is not None
+            assert runner.pairing_store.approve_code("inline", code) is not None
+            native_authorize = runner._is_user_authorized
+            attempts = 0
+
+            def transient_authorize(source):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise RuntimeError("offline injected authorization outage")
+                return native_authorize(source)
+
+            with patch.object(runner, "_is_user_authorized", side_effect=transient_authorize), patch.object(module, "_INBOUND_RETRY_INITIAL_SECONDS", 0.001):
+                await recovered._on_inbound(json.dumps(event))
+                receipt = recovered._inbound_deliveries["native-recovery"]
+                await asyncio.wait_for(receipt, timeout=10)
+                await asyncio.wait_for(model_started.wait(), timeout=10)
+            assert attempts == 2, "native unknown authorization was not retried"
+            assert acknowledgements == ["native-recovery"]
+            assert len(received) == 1 and received[0].source.user_id == "46"
+            assert not release_model.is_set() and not replied.is_set(), "receipt waited for model completion"
+            assert recovered._active_sessions, "real host did not retain the background turn"
+            release_model.set()
+            await asyncio.wait_for(replied.wait(), timeout=10)
+
+        # Exercise the actual native shielded notification. Teardown cancels its
+        # carrier delivery task, but the detached fatal handler must still finish.
+        notified, teardown_finished = asyncio.Event(), asyncio.Event()
+
+        async def fatal_handler(failed):
+            assert failed is recovered
+            notified.set()
+            await failed.disconnect()
+            await asyncio.sleep(0)
+            teardown_finished.set()
+
+        async def unexpected_failure(_event):
+            raise RuntimeError("offline injected dispatch failure")
+
+        recovered.set_fatal_error_handler(fatal_handler)
+        with patch.object(recovered, "_dispatch_inbound", side_effect=unexpected_failure):
+            await recovered._on_inbound(json.dumps({**event, "_inlineDeliveryId": "native-fatal"}))
+            await asyncio.wait_for(notified.wait(), timeout=10)
+            await asyncio.wait_for(teardown_finished.wait(), timeout=10)
+        assert recovered.has_fatal_error and recovered.fatal_error_retryable
+        assert recovered.fatal_error_code == "INBOUND_FAILED"
+        assert acknowledgements == ["native-recovery"], "unexpected failure acknowledged its SDK receipt"
+        assert not recovered._inbound_deliveries, "fatal teardown leaked delivery tasks"
+    finally:
+        release_model.set()
+        await recovered.disconnect()
+
+
+asyncio.run(exercise_receipt_recovery())
+print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")
