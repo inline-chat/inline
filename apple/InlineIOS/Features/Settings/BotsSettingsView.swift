@@ -51,7 +51,7 @@ struct BotsSettingsView: View {
       } header: {
         Text("Create Bot")
       } footer: {
-        Text("Bot usernames must end with “bot”. You can create up to five bots.")
+        Text("Bot usernames must end with “bot”.")
       }
 
       if let errorMessage {
@@ -146,7 +146,6 @@ struct BotsSettingsView: View {
     !isCreating
       && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && sanitizedUsername.hasSuffix("bot")
-      && bots.count < 5
   }
 
   private func loadBots() async {

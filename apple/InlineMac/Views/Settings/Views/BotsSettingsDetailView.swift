@@ -91,7 +91,7 @@ struct BotsSettingsDetailView: View {
       } header: {
         SettingsSectionHeader(
           "Create Bot",
-          subtitle: "Create up to five bots for integrations and automated workflows."
+          subtitle: "Create bots for integrations and automated workflows."
         )
       } footer: {
         Text("Usernames must end with “bot” and are not case-sensitive.")
@@ -280,7 +280,6 @@ struct BotsSettingsDetailView: View {
     let trimmedUsername = sanitizedUsername(username)
     guard !trimmedName.isEmpty, !trimmedUsername.isEmpty else { return false }
     guard trimmedUsername.lowercased().hasSuffix("bot") else { return false }
-    guard viewModel.bots.count < viewModel.maxBots else { return false }
     return !viewModel.isCreating
   }
 
@@ -385,8 +384,6 @@ final class BotsSettingsViewModel: ObservableObject {
   @Published private(set) var rotateError: String?
   @Published private(set) var deletingBots: Set<Int64> = []
   @Published private(set) var deleteError: String?
-
-  let maxBots = 5
 
   private var hasLoaded = false
   private var lastLoadedUserId: Int64?

@@ -20,7 +20,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { addSpaceMember } from "@in/server/functions/space.addMember.shared"
 
 const log = new Log("createBot")
-export const MAX_BOTS_PER_USER = 25
+export const MAX_BOTS_PER_USER = 30
 
 export const createBot = async (input: CreateBotInput, context: FunctionContext): Promise<CreateBotResult> => {
   // Validate input

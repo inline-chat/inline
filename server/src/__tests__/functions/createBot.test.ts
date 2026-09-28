@@ -179,8 +179,9 @@ describe("createBot", () => {
     }
   })
 
-  test("should enforce bot limit per creator", async () => {
-    const inputs = Array.from({ length: MAX_BOTS_PER_USER }, (_, index) => ({
+  test("should allow 30 bots per creator and reject the 31st", async () => {
+    expect(MAX_BOTS_PER_USER).toBe(30)
+    const inputs = Array.from({ length: 30 }, (_, index) => ({
       name: `Bot ${index + 1}`,
       username: `limitbot${index + 1}bot`,
     }))

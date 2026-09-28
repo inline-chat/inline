@@ -14,7 +14,7 @@ Use either the macOS app or the CLI to create a bot and get its token.
 6. Copy the `New Token` shown after creation.
 
 Notes:
-- You can create up to 5 bots.
+- You can create up to 30 bots per account.
 - In `Your Bots`, you can reveal or rotate tokens later.
 
 ## Option B: Inline CLI
