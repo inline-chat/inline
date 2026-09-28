@@ -334,6 +334,22 @@ Access control follows Hermes' native platform model:
 
 Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
 
+`open` controls intake; it does not grant permission to use the bot. After
+Inline's sender and group/thread restrictions pass, the adapter asks Hermes'
+registered authorization callback before executing local commands, creating
+reply threads, downloading media, collecting context, or exposing runtime
+settings. This uses the same pairing and profile-aware authorization as native
+Hermes adapters. An unapproved sender reaches Hermes' pairing or rejection
+flow with a minimal text event and no preceding adapter mutations or media work.
+Pairing approval does not override an explicit Inline allowlist, disabled
+policy, or excluded group. DMs remain exempt from `allowed_chats`.
+Child-thread authorization preserves both the child and parent chat IDs so
+Hermes can select the correct profile. If required group metadata is unavailable,
+the adapter denies the operation instead of guessing a profile. Controls that
+change the parent's reply-thread mode also require access to that parent;
+thread-local model and following settings remain available to an authorized
+child-thread user.
+
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
@@ -361,11 +377,14 @@ platforms:
         skills: ["support-triage", "incident-report"]
 ```
 
-Inline-native button callbacks, such as approvals and clarify choices, require
-the clicking actor to pass an explicit Inline or global Hermes allowlist, or
-`INLINE_ALLOW_ALL_USERS=true` / `GATEWAY_ALLOW_ALL_USERS=true`. This includes
-model-picker callbacks. The stricter callback gate prevents group-visible
-buttons from becoming a bypass when message intake is otherwise `open`.
+Inline-native button callbacks, including approvals, clarify choices,
+model pickers, and thread controls, use the same local restrictions and Hermes
+authorization callback. Pairing-approved users can use them without a second
+Inline allowlist. A denial, error, or unknown result from a registered callback
+blocks the action. Only standalone adapters without a registered callback use
+explicit Inline/global allowlists or allow-all settings as a fallback; `open`
+alone never authorizes controls. Settings requests from unauthorized users show
+an access guide without runtime or model information.
 Adapter-owned controls use `system:` action IDs and stay in these deterministic
 handlers. Agent-authored callbacks use `agent:` IDs and follow the ordinary
 message intake policy because they are conversational input, not approval or

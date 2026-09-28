@@ -11,6 +11,7 @@ import socket
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
@@ -81,6 +82,7 @@ async def exercise():
 
     adapter._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
     adapter.set_message_handler(reply)
+    adapter.set_authorization_check(lambda *_args, **_kwargs: True)
     event = {"kind": "message.new", "seq": 1, "chatId": "101", "meId": "999", "message": {
         "id": "201", "chatId": "101", "fromId": "42", "message": "hello Hermes",
         "peerId": {"peer": {"oneofKind": "user", "user": {"userId": "42"}}},
@@ -124,4 +126,196 @@ async def exercise():
         await adapter._http_client.aclose()
 
 asyncio.run(exercise())
-print("Real Hermes admission, registration, inbound/reply delivery, deduplication and media safety passed (offline transport).")
+
+
+async def exercise_authorization():
+    from gateway.run import GatewayRunner
+    from gateway.pairing import PairingStore
+
+    # Construct only the runner state required by its real authorization callback;
+    # starting a gateway would introduce credentials, networking and provider work.
+    runner = GatewayRunner.__new__(GatewayRunner)
+    runner.config = SimpleNamespace(multiplex_profiles=False)
+    runner.adapters = {adapter.platform: adapter}
+    runner._profile_adapters = {}
+    runner._primary_profile_name = "default"
+    runner.pairing_store = PairingStore()
+    runner.pairing_stores = {}
+    adapter.set_authorization_check(runner._make_adapter_auth_check(adapter.platform))
+
+    def authorized(user="42", chat="101", chat_type="dm"):
+        return adapter._actor_authorized(chat_type, user, chat)
+
+    # Pairing's allowlist mirroring is intentionally disabled: exercise the real
+    # persisted pairing grant in isolation without reading or writing env files.
+    auth_env = {key: "" for key in (
+        "INLINE_ALLOWED_USERS", "INLINE_ALLOW_ALL_USERS", "GATEWAY_ALLOWED_USERS",
+        "GATEWAY_ALLOW_ALL_USERS",
+    )}
+    with patch.dict(os.environ, auth_env), patch("gateway.pairing._sync_allowlist_add"), patch("gateway.pairing._sync_allowlist_remove"):
+        assert authorized() is False, "unknown sender bypassed real host default deny"
+        code = runner.pairing_store.generate_code("inline", "42", "Offline fixture")
+        assert code is not None
+        assert runner.pairing_store.approve_code("inline", code) is not None
+        assert authorized() is True, "host pairing grant did not reach local authorization"
+        assert authorized("43") is False
+
+        secondary_store = PairingStore(profile="secondary")
+        runner.pairing_stores["secondary"] = secondary_store
+        runner._profile_adapters["secondary"] = {adapter.platform: adapter}
+        adapter.set_authorization_check(runner._make_adapter_auth_check(adapter.platform, "secondary"))
+        assert authorized() is False, "primary pairing grant leaked into secondary profile"
+        secondary_code = secondary_store.generate_code("inline", "42", "Secondary fixture")
+        assert secondary_code is not None
+        assert secondary_store.approve_code("inline", secondary_code) is not None
+        assert authorized() is True, "profile-bound callback missed its pairing grant"
+        assert secondary_store.revoke("inline", "42")
+        assert authorized() is False, "secondary pairing revocation was not observed"
+        adapter.set_authorization_check(runner._make_adapter_auth_check(adapter.platform))
+        assert authorized() is True, "secondary revocation removed primary grant"
+
+        # The callback executes the actual runner predicate, which may consult
+        # adapter policy. A recursion here must fail this positive pairing check.
+        adapter._dm_policy = "disabled"
+        assert authorized() is False, "host grant overrode disabled DM policy"
+        adapter._dm_policy = "open"
+        adapter._allowed_chats = {"102"}
+        assert authorized(chat_type="group") is False, "host grant overrode allowed chats"
+        adapter._allowed_chats = set()
+        adapter._dm_policy = "allowlist"
+        adapter._allow_from = {"43"}
+        assert authorized() is False, "pairing bypassed explicit local sender restriction"
+        adapter._allow_from = {"42"}
+        assert authorized() is True
+        adapter._dm_policy = "open"
+        adapter._allow_from = set()
+
+        # Exercise local mutations through ingress, with host-approved and unknown
+        # actors. HTTP and final message delivery stay offline; no LLM is invoked.
+        delivered, mutations = [], []
+
+        async def receive(event):
+            delivered.append(event)
+
+        async def status(**kwargs):
+            pass
+
+        async def create_thread(*args):
+            mutations.append(args)
+            return "301"
+
+        async def dispatch(user, message, seq):
+            await adapter._dispatch_message({"kind": "message.new", "seq": seq, "chatId": "101", "message": {
+                "id": str(seq), "chatId": "101", "fromId": user, "message": message,
+                "peerId": {"peer": {"oneofKind": "user", "user": {"userId": user}}},
+            }})
+
+        with patch.object(adapter, "handle_message", receive), patch.object(adapter, "_send_thread_status", status), patch.object(adapter, "_create_reply_thread", create_thread):
+            await dispatch("43", "/threads off", 1001)
+            assert "101" not in adapter._reply_thread_overrides
+            assert delivered[-1].text == "/threads off", "unknown DM lost host pairing ingress"
+            assert delivered[-1].source.user_id == "43"
+            await dispatch("42", "/threads off", 1002)
+            assert adapter._reply_thread_overrides["101"] == "off"
+            adapter._set_reply_threads_for_chat("101", "on")
+            await dispatch("43", "ordinary unknown message", 1003)
+            assert not mutations, "unknown sender created a reply thread before host authorization"
+            await dispatch("42", "ordinary paired message", 1004)
+            assert len(mutations) == 1, "paired sender lost automatic threads"
+
+        assert runner.pairing_store.revoke("inline", "42")
+        assert authorized() is False, "revocation was hidden by cached adapter authorization"
+        adapter._dm_policy = "allowlist"
+        adapter._allow_from = {"42"}
+        assert authorized() is True, "real host adapter-policy delegation recursed or lost allowlist grant"
+        adapter._dm_policy = "open"
+        adapter._allow_from = set()
+
+        # A real host denial must outrank an adapter-local allow-all setting.
+        adapter._allow_all = True
+        assert authorized() is False
+        adapter._allow_all = False
+        with patch.dict(os.environ, {"GATEWAY_ALLOW_ALL_USERS": "true"}):
+            assert authorized() is True
+            adapter._dm_policy = "disabled"
+            assert authorized() is False
+            adapter._dm_policy = "open"
+            adapter._allowed_chats = {"102"}
+            assert authorized(chat_type="group") is False
+            adapter._allowed_chats = set()
+
+        from gateway.profile_routing import ProfileRoute
+
+        # Parent-routed Inline threads need the full source: the standard host
+        # callback carries a child/thread ID but cannot carry parent_chat_id.
+        runner.config.multiplex_profiles = True
+        runner.config.profile_routes = [
+            ProfileRoute(name="parent-work", platform="inline", profile="work", chat_id="700"),
+        ]
+        adapter.gateway_runner = runner
+        for profile in ("work", "child"):
+            (home / "profiles" / profile).mkdir(parents=True, exist_ok=True)
+            (home / "profiles" / profile / "config.yaml").write_text("{}\n")
+            runner.pairing_stores[profile] = PairingStore(profile=profile)
+
+        def approve(store, user):
+            code = store.generate_code("inline", user, "Route fixture")
+            assert code is not None
+            assert store.approve_code("inline", code) is not None
+
+        approve(runner.pairing_stores["work"], "44")
+        adapter.set_authorization_check(runner._make_adapter_auth_check(adapter.platform))
+        assert adapter._is_sender_authorized("44", "group", "701", thread_id="701") is False
+        with patch.object(runner, "_is_user_authorized_for_source", wraps=runner._is_user_authorized_for_source) as host_authorize:
+            assert adapter._actor_authorized("group", "44", "701", thread_id="701", parent_chat_id="700") is True
+            admitted = host_authorize.call_args.args[0]
+            assert (admitted.chat_id, admitted.thread_id, admitted.parent_chat_id, admitted.profile) == ("701", "701", "700", "work")
+
+        # A more specific child route wins; replacing the child ID with its
+        # parent to authorize would accidentally admit the parent-profile user.
+        runner.config.profile_routes.append(
+            ProfileRoute(name="child-only", platform="inline", profile="child", thread_id="701"),
+        )
+        # GatewayConfig normally receives this order from parse_profile_routes.
+        runner.config.profile_routes.sort(key=lambda route: route.specificity, reverse=True)
+        approve(runner.pairing_stores["child"], "45")
+        assert adapter._actor_authorized("group", "44", "701", thread_id="701", parent_chat_id="700") is False
+        with patch.object(runner, "_is_user_authorized_for_source", wraps=runner._is_user_authorized_for_source) as host_authorize:
+            assert adapter._actor_authorized("group", "45", "701", thread_id="701", parent_chat_id="700") is True
+            admitted = host_authorize.call_args.args[0]
+            assert (admitted.chat_id, admitted.thread_id, admitted.profile) == ("701", "701", "child")
+
+        approve(runner.pairing_store, "44")
+        runner.config.profile_routes = [
+            ProfileRoute(name="unserved", platform="inline", profile="missing", chat_id="700"),
+        ]
+        rejected = adapter.build_source(chat_id="701", chat_type="group", user_id="44", thread_id="701", parent_chat_id="700")
+        assert rejected.profile_route_rejected is True
+        assert adapter._actor_authorized("group", "44", "701", thread_id="701", parent_chat_id="700") is False
+
+        # Missing child metadata must not turn a routed thread into a default
+        # profile chat and use that profile's otherwise valid pairing grant.
+        async def missing_info(chat_id):
+            return {}
+
+        async def child_message(chat_id, message_id):
+            return {"id": message_id, "peerId": {"type": {"oneofKind": "chat"}}}
+
+        answers = []
+
+        async def answer(interaction_id, message):
+            answers.append(message)
+
+        with patch.object(adapter, "_get_chat_info", missing_info), patch.object(adapter, "_fetch_message", child_message), patch.object(adapter, "_answer_action", answer), patch.object(adapter, "handle_message", receive):
+            assert not await adapter._action_allowed({"chatId": "701", "messageId": "1", "actorUserId": "44", "interactionId": "missing-route"})
+            assert answers == ["Not authorized"]
+            delivered.clear()
+            await adapter._dispatch_message({"kind": "message.new", "seq": 2001, "chatId": "701", "message": {
+                "id": "2001", "fromId": "44", "message": "@bot hello", "mentioned": True,
+                "peerId": {"type": {"oneofKind": "chat"}},
+            }})
+            assert not delivered, "missing routing metadata borrowed default pairing approval"
+
+
+asyncio.run(exercise_authorization())
+print("Real Hermes admission, registration, authorization/pairing, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")
