@@ -1153,6 +1153,17 @@ impl AgentDriver for ProviderDriver {
         }
     }
 
+    fn set_session_permissions<'a>(
+        &'a self,
+        session_id: &'a ProviderSessionId,
+        mode: &'a str,
+    ) -> DriverFuture<'a, ()> {
+        match self {
+            Self::Codex(driver) => driver.set_session_permissions(session_id, mode),
+            Self::Acp(driver) => driver.set_session_permissions(session_id, mode),
+        }
+    }
+
     fn steer_turn<'a>(
         &'a self,
         session_id: &'a ProviderSessionId,

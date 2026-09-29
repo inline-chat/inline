@@ -731,6 +731,14 @@ async fn prewarms_claude_shaped_settings_and_applies_supported_selections() {
             .expect("mode selection capture poisoned"),
         vec!["plan".to_string()]
     );
+    driver
+        .set_session_permissions(&session, "default")
+        .await
+        .expect("apply explicit native mode on idle session");
+    driver
+        .set_session_permissions(&session, "default")
+        .await
+        .expect("same-value explicit mode remains valid");
     let mut repeated = driver
         .start_turn(
             &session,
@@ -751,14 +759,84 @@ async fn prewarms_claude_shaped_settings_and_applies_supported_selections() {
         AgentEvent::TurnCompleted { .. }
     ) {}
     assert_eq!(
-        mode_selections
+        *mode_selections
             .lock()
-            .expect("mode selection capture poisoned")
-            .len(),
-        1,
-        "an already-active mode must not trigger another session/set_mode request"
+            .expect("mode selection capture poisoned"),
+        ["plan".to_string(), "default".to_string()],
+        "saved turn settings must not undo an explicit native mode change"
     );
     driver.shutdown().await.expect("shutdown settings fixture");
+}
+
+#[tokio::test]
+async fn ambiguous_native_mode_error_stops_the_provider_epoch() {
+    let applied = Arc::new(AtomicUsize::new(0));
+    let observed_applied = Arc::clone(&applied);
+    let prompts = Arc::new(AtomicUsize::new(0));
+    let observed_prompts = Arc::clone(&prompts);
+    let agent = Agent
+        .builder()
+        .on_receive_request(
+            async move |request: acp::InitializeRequest, responder, _connection| {
+                responder.respond(acp::InitializeResponse::new(request.protocol_version))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: acp::NewSessionRequest, responder, _connection| {
+                responder.respond(
+                    acp::NewSessionResponse::new("ambiguous-mode").modes(session_modes("default")),
+                )
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: acp::SetSessionModeRequest, responder, _connection| {
+                observed_applied.fetch_add(1, Ordering::Relaxed);
+                responder.respond_with_error(agent_client_protocol::Error::new(
+                    i32::from(acp::ErrorCode::InternalError),
+                    "response lost after applying mode",
+                ))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: acp::PromptRequest, responder, _connection| {
+                observed_prompts.fetch_add(1, Ordering::Relaxed);
+                responder.respond(acp::PromptResponse::new(acp::StopReason::EndTurn))
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+    let driver = AcpDriver::connect_transport(agent, "test")
+        .await
+        .expect("connect mode fixture");
+    let session = driver
+        .start_session(SessionSpec {
+            cwd: PathBuf::from("/tmp/ambiguous-mode"),
+        })
+        .await
+        .expect("create mode session");
+    assert!(matches!(
+        driver.set_session_permissions(&session, "plan").await,
+        Err(DriverError::ProcessExited(message))
+            if message.contains("outcome is unknown")
+    ));
+    assert_eq!(applied.load(Ordering::Relaxed), 1);
+    assert!(matches!(
+        driver
+            .start_turn(
+                &session,
+                TurnInput {
+                    text: "must not run after uncertain mode".to_string(),
+                    attachments: Vec::new(),
+                    client_message_id: None,
+                },
+                TurnOptions::default(),
+            )
+            .await,
+        Err(DriverError::ProcessExited(_))
+    ));
+    assert_eq!(prompts.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]

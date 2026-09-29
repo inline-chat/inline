@@ -114,30 +114,57 @@ impl BridgeStore {
         installation_id: &InstallationId,
         limit: usize,
     ) -> StoreResult<Vec<BindingKey>> {
+        Ok(self
+            .pending_inbound_bindings_after(installation_id, None, limit)?
+            .into_iter()
+            .map(|(_, binding)| binding)
+            .collect())
+    }
+
+    /// Pages by the first accepted ingest order for each binding. The cursor
+    /// belongs after grouping: filtering rows before grouping could return a
+    /// busy binding again for its second queued direction.
+    pub fn pending_inbound_bindings_after(
+        &self,
+        installation_id: &InstallationId,
+        after_ingest_order: Option<i64>,
+        limit: usize,
+    ) -> StoreResult<Vec<(i64, BindingKey)>> {
         let connection = self.connection.lock().expect("bridge store poisoned");
         let mut statement = connection.prepare(
             "SELECT chat_id, workspace_id, MIN(ingest_order) AS first_ingest
              FROM inbound_directions
              WHERE installation_id = ?1 AND state = 'accepted'
              GROUP BY chat_id, workspace_id
+             HAVING first_ingest > ?2
              ORDER BY first_ingest ASC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
         statement
             .query_map(
                 params![
                     installation_id.as_str(),
+                    after_ingest_order.unwrap_or(0),
                     i64::try_from(limit).unwrap_or(i64::MAX)
                 ],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )?
             .map(|row| {
-                let (chat_id, workspace_id) = row?;
-                Ok(BindingKey {
-                    installation_id: installation_id.clone(),
-                    chat_id,
-                    workspace_id: parse_workspace_id(workspace_id)?,
-                })
+                let (chat_id, workspace_id, first_ingest) = row?;
+                Ok((
+                    first_ingest,
+                    BindingKey {
+                        installation_id: installation_id.clone(),
+                        chat_id,
+                        workspace_id: parse_workspace_id(workspace_id)?,
+                    },
+                ))
             })
             .collect()
     }
@@ -292,6 +319,31 @@ mod tests {
                 .expect("bindings"),
             vec![binding(20), binding(10)]
         );
+    }
+
+    #[test]
+    fn paged_scan_reaches_work_after_more_than_sixty_four_blocked_bindings() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        for chat_id in 1..=70 {
+            store
+                .accept_inbound(&inbound(&format!("first-{chat_id}"), chat_id, 10))
+                .expect("first direction");
+        }
+        store
+            .accept_inbound(&inbound("second-on-first-binding", 1, 11))
+            .expect("second direction");
+
+        let first_page = store
+            .pending_inbound_bindings_after(&installation(), None, 64)
+            .expect("first page");
+        assert_eq!(first_page.len(), 64);
+        assert_eq!(first_page[0].1, binding(1));
+        let next_page = store
+            .pending_inbound_bindings_after(&installation(), Some(first_page[63].0), 64)
+            .expect("next page");
+        assert_eq!(next_page.len(), 6);
+        assert_eq!(next_page[0].1, binding(65));
+        assert_eq!(next_page[5].1, binding(70));
     }
 
     #[test]

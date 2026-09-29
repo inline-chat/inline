@@ -27,7 +27,7 @@ pub(super) async fn handle_follow_command(
     if !route.store.claim_event(&record.event_id, now_seconds())? {
         return Ok(true);
     }
-    let reply = if !command.arguments.is_empty() {
+    let reply = if !command.arguments.trim().is_empty() {
         format!("Usage: /{}", command.name)
     } else if record.sender_user_id != route.owner_user_id {
         "Only the bot owner can change follow mode.".to_string()
@@ -83,13 +83,13 @@ async fn handle_provider_unavailable_command(
         return Ok(false);
     }
     let message = match command.name.as_str() {
-        "help" if command.arguments.is_empty() => static_command_help(&route.provider_id),
-        "status" if command.arguments.is_empty() => {
+        "help" if command.arguments.trim().is_empty() => static_command_help(&route.provider_id),
+        "status" if command.arguments.trim().is_empty() => {
             "Agent is connected to Inline, but its local provider is restarting. New work will remain queued."
                 .to_string()
         }
         "stop" if is_linked_codex_stop(route, record)? => return Ok(false),
-        "stop" if command.arguments.is_empty() => "Nothing is running.".to_string(),
+        "stop" if command.arguments.trim().is_empty() => "Nothing is running.".to_string(),
         "queue" => return Ok(false),
         "follow" | "unfollow" | "allowlist" => return Ok(false),
         "help" | "status" | "stop" => format!("/{} doesn’t take arguments. Try /help.", command.name),

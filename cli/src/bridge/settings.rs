@@ -53,53 +53,6 @@ pub(super) struct SettingsCommandChoice {
     pub label: String,
 }
 
-pub(super) fn provider_command_choices<D: AgentDriver + 'static>(
-    runtime: &SettingsRuntime<'_, D>,
-    command: &inline_agent_bridge::DriverCommand,
-    actor_user_id: i64,
-) -> Option<SettingsCommandChoices> {
-    let inline_agent_bridge::DriverCommandInput::SingleChoice {
-        options,
-        catalog_generation,
-        ..
-    } = command.input_shape()
-    else {
-        return None;
-    };
-    let options = options
-        .into_iter()
-        .filter(|option| !option.disabled)
-        .take(MAX_COMMAND_CHOICES)
-        .map(|option| SettingsCommandChoice {
-            value: option.value,
-            label: option.label,
-        })
-        .collect::<Vec<_>>();
-    if options.is_empty() {
-        return None;
-    }
-    let item_id = format!("{PROVIDER_COMMAND_ITEM_PREFIX}{}", command.name);
-    let document_revision = catalog_generation
-        .map(|generation| format!("provider-command-v1-{generation}"))
-        .unwrap_or_else(|| "provider-command-v1-session".to_string());
-    let catalog_fingerprint = command_choice_catalog_fingerprint(
-        runtime.sessions.provider_id(),
-        &item_id,
-        &document_revision,
-        &options,
-    );
-    Some(SettingsCommandChoices {
-        provider_id: runtime.sessions.provider_id().clone(),
-        bot_user_id: runtime.identity.bot_user_id,
-        actor_user_id,
-        requires_owner: false,
-        item_id,
-        document_revision,
-        catalog_fingerprint,
-        options,
-    })
-}
-
 pub(super) enum SettingsEventOutcome {
     NotHandled,
     Handled { provider_epoch_ended: bool },
@@ -572,10 +525,8 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
         return handle_provider_command_choice_action(
             bot,
             runtime,
-            &snapshot,
             &request,
             &callback.token,
-            &action,
             *interaction_id,
             actor_user_id.get(),
             actor_still_authorized,
@@ -680,6 +631,32 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
             now,
         ),
     )?;
+    if let CommandChoiceClaimOutcome::Resumable(request) = &outcome
+        && request.item_id == ITEM_PERMISSIONS
+    {
+        // A previous callback may have reached the provider before this
+        // process lost its result. The same value is not a dedup token.
+        runtime
+            .store
+            .finish_command_choice_request(&callback.token, false, now_seconds())?;
+        bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+            interaction_id: *interaction_id,
+            toast: Some(
+                "Permission outcome unconfirmed. Reconnect before choosing again.".to_string(),
+            ),
+        })
+        .await?;
+        clear_approval(
+            bot,
+            chat_id.get(),
+            *message_id,
+            "Permission outcome unconfirmed. Reconnect before choosing a mode again.",
+        )
+        .await?;
+        return Ok(SettingsCommandActionOutcome::Handled {
+            provider_epoch_ended: false,
+        });
+    }
     match outcome {
         CommandChoiceClaimOutcome::Navigated(request) => {
             edit_command_choice_page(bot, &request, &current_choices.options).await?;
@@ -852,10 +829,8 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
 async fn handle_provider_command_choice_action<D: AgentDriver + 'static>(
     bot: &InlineClient,
     runtime: &SettingsRuntime<'_, D>,
-    snapshot: &ConversationSnapshot,
     request: &CommandChoiceRequest,
     callback_token: &str,
-    action: &CommandChoiceAction,
     interaction_id: InlineId,
     actor_user_id: i64,
     actor_still_authorized: bool,
@@ -863,263 +838,26 @@ async fn handle_provider_command_choice_action<D: AgentDriver + 'static>(
     action_message_id: InlineId,
     now: i64,
 ) -> Result<SettingsCommandActionOutcome, Box<dyn std::error::Error>> {
-    let command_name = request
-        .item_id
-        .strip_prefix(PROVIDER_COMMAND_ITEM_PREFIX)
-        .unwrap_or_default();
-    if runtime.sessions.provider_id().as_str() == "codex"
-        && runtime
-            .store
-            .session_thread_binding_for_chat(
-                &snapshot.binding.installation_id,
-                snapshot.binding.chat_id,
-            )?
-            .is_some()
-        && !runtime
-            .sessions
-            .session_history_is_ready(&snapshot.binding)
-            .await
-    {
+    // Old cards dispatched native command choices as new prompts. Their
+    // selection no longer has a sound provider-native meaning.
+    if !actor_still_authorized || actor_user_id != request.actor_user_id {
         bot.answer_message_action(inline_client::AnswerMessageActionRequest {
             interaction_id,
-            toast: Some(
-                "Use /resume to sync recent history before sending provider commands.".to_string(),
-            ),
+            toast: Some("This command choice is no longer available.".to_string()),
         })
         .await?;
-        return Ok(SettingsCommandActionOutcome::Handled {
-            provider_epoch_ended: false,
-        });
-    }
-    let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
-        Ok(Some(lease)) => lease,
-        Ok(None) => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some(
-                    "Inline is releasing the agent connection. Try again in a moment.".to_string(),
-                ),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended: false,
-            });
-        }
-        Err(error) => {
-            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("The agent connection restarted. Try again.".to_string()),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended,
-            });
-        }
-    };
-    let commands = match provider_commands(runtime.sessions, &snapshot.binding).await {
-        Ok(commands) => commands,
-        Err(error) => {
-            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("Provider command choices are temporarily unavailable.".to_string()),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended,
-            });
-        }
-    };
-    let Some(command) = commands.iter().find(|command| command.name == command_name) else {
+    } else {
+        runtime
+            .store
+            .finish_command_choice_request(callback_token, false, now)?;
         terminalize_inactive_command_choice(
             bot,
             interaction_id,
             action_chat_id,
             action_message_id,
-            "That provider command is no longer available.",
+            "This command choice is no longer available. Use the provider’s own client for this native command.",
         )
         .await?;
-        return Ok(SettingsCommandActionOutcome::Handled {
-            provider_epoch_ended: false,
-        });
-    };
-    let Some(current_choices) = provider_command_choices(runtime, command, request.actor_user_id)
-    else {
-        terminalize_inactive_command_choice(
-            bot,
-            interaction_id,
-            action_chat_id,
-            action_message_id,
-            "That provider command has no available choices.",
-        )
-        .await?;
-        return Ok(SettingsCommandActionOutcome::Handled {
-            provider_epoch_ended: false,
-        });
-    };
-    let legal_values = current_choices
-        .options
-        .iter()
-        .map(|option| option.value.clone())
-        .collect::<Vec<_>>();
-    let page_count = command_choice_page_count(current_choices.options.len());
-    let outcome = runtime.store.claim_command_choice_request(
-        callback_token,
-        action,
-        &legal_values,
-        &command_choice_context(
-            runtime,
-            snapshot,
-            interaction_id.get(),
-            actor_user_id,
-            actor_still_authorized,
-            action_chat_id,
-            action_message_id.get(),
-            current_choices.catalog_fingerprint.clone(),
-            current_choices.document_revision.clone(),
-            page_count,
-            now,
-        ),
-    )?;
-    match outcome {
-        CommandChoiceClaimOutcome::Navigated(request) => {
-            edit_command_choice_page(bot, &request, &current_choices.options).await?;
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some(format!(
-                    "Page {} of {}",
-                    request.page + 1,
-                    request.page_count
-                )),
-            })
-            .await?;
-        }
-        CommandChoiceClaimOutcome::Cancelled(_) => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("Cancelled".to_string()),
-            })
-            .await?;
-            clear_approval(bot, action_chat_id, action_message_id, "Cancelled.").await?;
-        }
-        CommandChoiceClaimOutcome::Claimed(request)
-        | CommandChoiceClaimOutcome::Resumable(request) => {
-            let selected = request.selected_value.as_deref().unwrap_or_default();
-            let Some(option) = current_choices
-                .options
-                .iter()
-                .find(|option| option.value == selected)
-            else {
-                runtime.store.finish_command_choice_request(
-                    callback_token,
-                    false,
-                    now_seconds(),
-                )?;
-                terminalize_inactive_command_choice(
-                    bot,
-                    interaction_id,
-                    action_chat_id,
-                    action_message_id,
-                    "That provider command choice is no longer available.",
-                )
-                .await?;
-                return Ok(SettingsCommandActionOutcome::Handled {
-                    provider_epoch_ended: false,
-                });
-            };
-            let event_id = format!("command-choice-{callback_token}");
-            let direction_text = format!("/{command_name} {}", option.value);
-            let inbound = InboundRecord {
-                event_id: event_id.clone(),
-                binding: snapshot.binding.clone(),
-                message_id: request.origin_message_id,
-                delivery_chat_id: snapshot.binding.chat_id,
-                sender_user_id: request.actor_user_id,
-                direction: Direction::new(DirectionId::new(event_id.clone())?, direction_text),
-                state: InboundState::Accepted,
-                accepted_at: request.created_at,
-                started_at: None,
-                lease_expires_at: None,
-                attempt_count: 0,
-                provider_turn_id: None,
-                stream_message_id: None,
-                failure: None,
-            };
-            let accepted = runtime.store.accept_inbound(&inbound)?;
-            let same_durable_direction =
-                runtime
-                    .store
-                    .get_inbound(&event_id)?
-                    .is_some_and(|existing| {
-                        existing.binding == inbound.binding
-                            && existing.sender_user_id == inbound.sender_user_id
-                            && existing.direction == inbound.direction
-                    });
-            if !accepted && !same_durable_direction {
-                runtime.store.finish_command_choice_request(
-                    callback_token,
-                    false,
-                    now_seconds(),
-                )?;
-                return Err(io::Error::other(
-                    "provider command choice collided with another durable direction",
-                )
-                .into());
-            }
-            runtime
-                .store
-                .finish_command_choice_request(callback_token, true, now_seconds())?;
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("Sent to agent".to_string()),
-            })
-            .await?;
-            clear_approval(
-                bot,
-                action_chat_id,
-                action_message_id,
-                &format!(
-                    "{} selected for /{command_name}. Sent to the agent.",
-                    truncate(&option.label, 80)
-                ),
-            )
-            .await?;
-        }
-        CommandChoiceClaimOutcome::Unauthorized => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("Only the bot owner can run this command.".to_string()),
-            })
-            .await?;
-        }
-        CommandChoiceClaimOutcome::Unknown | CommandChoiceClaimOutcome::WrongContext => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("This request is no longer active.".to_string()),
-            })
-            .await?;
-        }
-        CommandChoiceClaimOutcome::Refreshed(request) => {
-            edit_command_choice_page(bot, &request, &current_choices.options).await?;
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id,
-                toast: Some("Choices changed. Review the latest options.".to_string()),
-            })
-            .await?;
-        }
-        CommandChoiceClaimOutcome::InvalidChoice
-        | CommandChoiceClaimOutcome::Expired(_)
-        | CommandChoiceClaimOutcome::NotPending(_) => {
-            terminalize_inactive_command_choice(
-                bot,
-                interaction_id,
-                action_chat_id,
-                action_message_id,
-                "Provider command choices changed. Run the command again.",
-            )
-            .await?;
-        }
     }
     Ok(SettingsCommandActionOutcome::Handled {
         provider_epoch_ended: false,
@@ -1321,7 +1059,9 @@ async fn command_choice_already_applied<D: AgentDriver + 'static>(
                 && settings.reasoning.is_none()
         }
         ITEM_REASONING => settings.reasoning.as_deref() == setting_value(selected).as_deref(),
-        ITEM_PERMISSIONS => settings.permissions.as_deref() == setting_value(selected).as_deref(),
+        // A repeated permission selection is an explicit mode action. The
+        // durable choice state guards callback replay separately.
+        ITEM_PERMISSIONS => false,
         ITEM_FOLDER => snapshot.binding.workspace_id.as_str() == selected,
         ITEM_REPLY_THREADS => resolve_reply_thread_policy(
             runtime.store,
@@ -1365,7 +1105,7 @@ fn settings_choice_terminal_text(
     match item_id {
         ITEM_MODEL => format!("Model set to {label}. Reasoning reset to provider default.{timing}"),
         ITEM_REASONING => format!("Reasoning set to {label}.{timing}"),
-        ITEM_PERMISSIONS => format!("Permissions set to {label}.{timing}"),
+        ITEM_PERMISSIONS => format!("Permission preference saved as {label}."),
         ITEM_FOLDER => format!("Project set to {label}."),
         ITEM_REPLY_THREADS if label == "Reset" => {
             "Reply in threads reset to the configured default.".to_string()
@@ -2461,7 +2201,7 @@ fn command_value<D: AgentDriver + 'static>(
                 Some(BotSettingsValue::String(
                     value.unwrap_or_else(|| DEFAULT_VALUE.to_string()),
                 )),
-                format!("Permissions set to {label}. Applies to the next turn."),
+                format!("Permission preference saved as {label}."),
             ))
         }
         "verbose" => {
@@ -2496,10 +2236,21 @@ fn resolve_select_argument<'a>(
     options: impl Iterator<Item = (&'a str, &'a str, bool)>,
     kind: &str,
 ) -> Result<Option<String>, String> {
+    let options = options.collect::<Vec<_>>();
     if argument.eq_ignore_ascii_case("default") {
+        // `default` is a provider mode ID when the live catalog advertises
+        // it. The unset bridge launch preference has its own settings row.
+        if kind == "permission profile"
+            && let Some((value, _, _)) = options
+                .iter()
+                .find(|(value, _, disabled)| !*disabled && *value == "default")
+        {
+            return Ok(Some((*value).to_string()));
+        }
         return Ok(None);
     }
     let matches = options
+        .into_iter()
         .filter(|(value, label, disabled)| {
             !*disabled
                 && (value.eq_ignore_ascii_case(argument) || label.eq_ignore_ascii_case(argument))
@@ -2599,8 +2350,8 @@ pub(super) fn permission_selection_label(
                 .find(|option| option.value == default)
         })
         .map_or_else(
-            || "provider default".to_string(),
-            |option| format!("{} (default)", option.label),
+            || "bridge launch default".to_string(),
+            |option| format!("{} (bridge launch default)", option.label),
         )
 }
 
@@ -3205,13 +2956,88 @@ async fn apply_invocation<D: AgentDriver + 'static>(
         _ => return Err(invalid_value("That setting is no longer available.").into()),
     }
 
-    match runtime
+    let field = match item_id {
+        ITEM_MODEL => ChatSettingsField::Model,
+        ITEM_REASONING => ChatSettingsField::Reasoning,
+        ITEM_PERMISSIONS => ChatSettingsField::Permissions,
+        ITEM_VERBOSE => ChatSettingsField::Verbose,
+        _ => unreachable!("only a selected setting reaches the settings update"),
+    };
+    let mut live_permission_applied = false;
+    if field == ChatSettingsField::Permissions {
+        if runtime.turn_active
+            && settings.permissions.is_some()
+            && runtime.sessions.provider_id().as_str() != "codex"
+        {
+            return Err(SettingsInvocationFailure::normal(problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Wait for this agent turn to finish or stop it before changing permissions.",
+                None,
+            )));
+        }
+        if let Some(mode) = settings.permissions.as_deref() {
+            match tokio::time::timeout(
+                SETTINGS_DEADLINE,
+                runtime
+                    .sessions
+                    .set_active_session_permissions(&snapshot.binding, mode),
+            )
+            .await
+            {
+                Ok(Ok(applied)) => live_permission_applied = applied,
+                // A driver without an explicit idle-session setter retains
+                // its next-turn preference behavior (currently Codex).
+                Ok(Err(SessionManagerError::Driver(DriverError::Unsupported(_)))) => {}
+                Ok(Err(error)) => {
+                    let uncertain = session_error_ends_provider_epoch(&error);
+                    return Err(operation_failed(
+                        if uncertain {
+                            "Permission change outcome is unconfirmed. The preference was not saved; reconnect before sending more work."
+                        } else {
+                            "Couldn’t apply that permission mode. The preference was not saved."
+                        },
+                        error,
+                        uncertain,
+                    ));
+                }
+                Err(_) => {
+                    runtime.sessions.seal_provider_epoch();
+                    return Err(SettingsInvocationFailure {
+                        response: problem(
+                            BotChatSettingsProblemCode::Unavailable,
+                            "Permission change outcome is unconfirmed. The preference was not saved; reconnect before sending more work.",
+                            None,
+                        ),
+                        provider_epoch_ended: true,
+                    });
+                }
+            }
+        }
+    }
+    let update = runtime
         .store
-        .update_chat_settings(settings.revision, &settings, now_seconds())
-        .map_err(|error| operation_failed("Couldn’t save that setting.", error, false))?
-    {
+        .update_chat_settings(settings.revision, &settings, field, now_seconds())
+        .map_err(|error| {
+            operation_failed(
+                if live_permission_applied {
+                    "The provider changed modes, but the launch preference was not saved. New sessions retain the previous preference."
+                } else {
+                    "Couldn’t save that setting."
+                },
+                error,
+                false,
+            )
+        })?;
+    match update {
         SettingsUpdateOutcome::Applied(_) => Ok(snapshot.clone()),
         SettingsUpdateOutcome::Stale(current) => {
+            if live_permission_applied {
+                return Err(SettingsInvocationFailure::normal(problem(
+                    BotChatSettingsProblemCode::Stale,
+                    "The provider changed modes, but the launch preference was not saved because settings changed. New sessions retain the previous preference.",
+                    None,
+                )));
+            }
             let document = build_settings_document(runtime, snapshot, &current, catalog)
                 .await
                 .map_err(|error| operation_failed("Couldn’t refresh settings.", error, false))?;
@@ -3483,8 +3309,8 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             })
         })
         .map_or_else(
-            || "Provider default".to_string(),
-            |option| format!("{} (default)", option.label),
+            || "Bridge launch default".to_string(),
+            |option| format!("{} (bridge launch default)", option.label),
         );
     let permission_options = select_options(
         catalog.map(|catalog| {
@@ -3528,7 +3354,7 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             BotChatSettingsSection {
                 id: "agent".to_string(),
                 title: Some("Agent".to_string()),
-                description: Some("Changes apply to the next turn.".to_string()),
+                description: Some("Model and reasoning apply to the next turn. Permissions save a launch preference and update an open idle session when supported.".to_string()),
                 items: vec![
                     select_item(
                         ITEM_MODEL,

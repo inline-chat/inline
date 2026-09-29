@@ -1054,7 +1054,7 @@ async fn catalog_timeout_keeps_safe_controls_available_and_disables_provider_opt
 }
 
 #[tokio::test]
-async fn unset_permission_selection_names_the_effective_default() {
+async fn unset_permission_selection_names_the_bridge_launch_default() {
     let fixture = Fixture::new(CatalogBehavior::Ready, false);
     let request = BotInteractionEvent::ChatSettingsRequested {
         request_id: 1,
@@ -1085,7 +1085,7 @@ async fn unset_permission_selection_names_the_effective_default() {
     };
     assert_eq!(value, DEFAULT_VALUE);
     assert_eq!(options[0].value, DEFAULT_VALUE);
-    assert_eq!(options[0].label, "Workspace (default)");
+    assert_eq!(options[0].label, "Workspace (bridge launch default)");
     assert!(
         options
             .iter()
@@ -1189,7 +1189,7 @@ async fn invalid_saved_catalog_does_not_disable_folder_recovery() {
 }
 
 #[test]
-fn permission_status_and_reset_copy_name_the_effective_default() {
+fn permission_status_names_the_bridge_launch_preference() {
     let catalog = DriverSettingsCatalog {
         models: Vec::new(),
         permissions: vec![DriverSettingOption {
@@ -1202,11 +1202,31 @@ fn permission_status_and_reset_copy_name_the_effective_default() {
     };
     assert_eq!(
         permission_selection_label(None, Some(&catalog)),
-        "Bypass Permissions (default)"
+        "Bypass Permissions (bridge launch default)"
     );
     assert_eq!(
         permission_selection_label(Some("bypassPermissions"), Some(&catalog)),
         "Bypass Permissions"
+    );
+}
+
+#[test]
+fn slash_permissions_default_preserves_advertised_native_mode() {
+    let options = [
+        ("bypassPermissions", "Bypass Permissions", false),
+        ("default", "Default", false),
+    ];
+    assert_eq!(
+        resolve_select_argument("default", options.into_iter(), "permission profile"),
+        Ok(Some("default".to_string()))
+    );
+    assert_eq!(
+        resolve_select_argument(
+            "default",
+            [("bypassPermissions", "Bypass Permissions", false)].into_iter(),
+            "permission profile",
+        ),
+        Ok(None)
     );
 }
 

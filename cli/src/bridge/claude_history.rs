@@ -1038,7 +1038,7 @@ async fn handle_claude_history_command_inner(
     route: &InboundRoute,
     command: &CommandInvocation,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if !command.arguments.is_empty() {
+    if !command.arguments.trim().is_empty() {
         return send_history_reply(
             bot,
             record,
@@ -2148,8 +2148,18 @@ export async function getSessionMessages(_sessionId, options) {
         settings.permissions = Some("default".to_string());
         settings.verbose = true;
         store
-            .update_chat_settings(settings.revision, &settings, 2)
+            .update_chat_settings(
+                settings.revision,
+                &settings,
+                ChatSettingsField::Permissions,
+                2,
+            )
             .expect("update settings");
+        let mut settings = store.chat_settings(&source, 2).expect("updated settings");
+        settings.verbose = true;
+        store
+            .update_chat_settings(settings.revision, &settings, ChatSettingsField::Verbose, 3)
+            .expect("update verbose");
         let import = ClaudeHistoryImport {
             token: "opaque".to_string(),
             installation_id: installation_id.clone(),

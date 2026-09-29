@@ -6,9 +6,10 @@ use agent_client_protocol::schema::v1::{
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use inline_agent_bridge::{
-    ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent, ApprovalOption,
-    DriverCommand, DriverModelOption, DriverSettingOption, DriverSettingsCatalog, FileChange,
-    PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity, sanitize_visible_command,
+    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent,
+    ApprovalOption, DriverCommand, DriverModelOption, DriverSettingOption, DriverSettingsCatalog,
+    FileChange, PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity,
+    sanitize_visible_command,
 };
 
 const MAX_PLAN_STEPS: usize = 32;
@@ -392,9 +393,25 @@ fn activity_upsert(call: &ToolCall) -> Option<ActivityUpsert> {
             match command_preview(call.raw_input.as_ref())
                 .or_else(|| command_title_preview(&call.title))
             {
-                Some(command) => activity.with_detail(command),
+                Some(command) => activity
+                    .with_detail(&command)
+                    .with_details([ActivityDetail::code("Ran", command)]),
                 None => activity,
             }
+        } else if presentation.kind == ActivitySemanticKind::Edit {
+            let details = call
+                .locations
+                .iter()
+                .filter(|location| {
+                    location.path.is_absolute()
+                        && location.path.as_os_str().as_encoded_bytes().len()
+                            <= MAX_RETAINED_TOOL_PATH_BYTES
+                })
+                .take(MAX_RETAINED_TOOL_LOCATIONS)
+                .map(|location| {
+                    ActivityDetail::code("File", location.path.to_string_lossy().into_owned())
+                });
+            activity.with_details(details)
         } else {
             activity
         };
@@ -429,9 +446,9 @@ fn activity_status(status: ToolCallStatus) -> ActivityStatus {
 
 pub(crate) fn turn_outcome(reason: StopReason) -> TurnOutcome {
     match reason {
-        StopReason::EndTurn | StopReason::MaxTokens | StopReason::MaxTurnRequests => {
-            TurnOutcome::Completed
-        }
+        StopReason::EndTurn => TurnOutcome::Completed,
+        StopReason::MaxTokens => TurnOutcome::TokenLimit,
+        StopReason::MaxTurnRequests => TurnOutcome::TurnLimit,
         StopReason::Cancelled => TurnOutcome::Interrupted,
         StopReason::Refusal => TurnOutcome::Failed,
         _ => TurnOutcome::Failed,
@@ -653,7 +670,7 @@ mod tests {
             AvailableCommand::new("research_codebase", "Research the selected project").input(
                 AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("topic")),
             ),
-            AvailableCommand::new("Bad-Command", "Unsafe name"),
+            AvailableCommand::new("Bad Command", "Unsafe name"),
             AvailableCommand::new("research_codebase", "Duplicate"),
         ]);
         assert_eq!(commands.len(), 1);
@@ -721,6 +738,7 @@ mod tests {
             [AgentEvent::ActivityUpsert { activity, .. }]
                 if activity.kind == ActivitySemanticKind::Edit
                     && activity.status == ActivityStatus::Pending
+                    && activity.details == [ActivityDetail::code("File", "/tmp/edit.rs")]
         ));
 
         let events = session_update_events(
@@ -835,6 +853,10 @@ mod tests {
             [AgentEvent::ActivityUpsert { activity, .. }]
                 if activity.detail.as_deref()
                     == Some("TOKEN=[redacted] deploy --api-key [redacted] src/main.rs")
+                    && activity.details == [ActivityDetail::code(
+                        "Ran",
+                        "TOKEN=[redacted] deploy --api-key [redacted] src/main.rs"
+                    )]
         ));
         let retained = tool_calls["tool-1"]
             .raw_input
@@ -1057,6 +1079,16 @@ mod tests {
                     },
                 ],
             }]
+        );
+    }
+
+    #[test]
+    fn distinguishes_token_and_turn_limits_from_completion() {
+        assert_eq!(turn_outcome(StopReason::EndTurn), TurnOutcome::Completed);
+        assert_eq!(turn_outcome(StopReason::MaxTokens), TurnOutcome::TokenLimit);
+        assert_eq!(
+            turn_outcome(StopReason::MaxTurnRequests),
+            TurnOutcome::TurnLimit
         );
     }
 }

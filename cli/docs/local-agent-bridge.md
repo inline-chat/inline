@@ -231,6 +231,16 @@ catalog advertised it. An explicit bot permission setting always wins for
 either provider. Codex managed requirements remain authoritative; when they
 disallow full access, choose an allowed profile in the bot settings. Native
 Claude session continuation is not enabled yet.
+
+Claude's bypass preference is an Inline bridge launch default, applied once to
+a new native session. Follow-up turns preserve native permission-mode changes,
+including plan mode. An explicit permission choice updates an open idle ACP
+session before saving the preference; Codex retains its next-turn behavior.
+Settings display the saved launch preference, which may differ from the current
+native mode. Choosing the provider's literal `default` mode does not mean
+bypass. Model-dependent reasoning defaults propagate only to the same model;
+changing a model clears its previous reasoning selection.
+
 `/history` is the intentionally separate, owner-only local history importer: it
 opens a bounded six-row picker, imports the visible
 You/Claude branch into a private Inline reply thread, omits tool and attachment
@@ -341,16 +351,19 @@ catalog fingerprint, page, and ten-minute expiry. Every click rechecks the live
 operator policy and current catalog before the same settings mutation used by
 typed slash arguments. Stale catalogs refresh the card without selecting a
 fallback; restart recovery clears open cards. Explicit values such as
-`/model <value>` remain supported for accessibility, automation, and older
-clients. These settings remain owner-only even when another user is allowed to
-drive the agent.
+`/model <value>` remain available when they do not collide with a provider-native
+command. Native meanings take precedence; use Agent Settings when a native
+command needs an interaction the bridge does not yet support. These settings
+remain owner-only even when another user is allowed to drive the agent.
 
-Provider-native commands now declare their input as no input, freeform input,
+Provider-native command catalogs declare their input as no input, freeform input,
 or a typed single-choice catalog while retaining the legacy freeform hint for a
-compatibility window. A provider-declared single-choice command uses the same
-durable card renderer. A successful click creates one replay-safe durable
-inbound direction, so duplicate callbacks cannot start the provider command
-twice. Freeform commands retain their usage hint and never fabricate buttons.
+compatibility window. Native provider commands are not converted into ordinary
+prompts. Native commands without a verified dispatch path report that they are unavailable;
+legacy command cards cannot start a prompt instead. Catalog command names can
+contain colons and hyphens, and freeform hints are descriptive rather than an
+implicit requirement for arguments. Existing typed settings/actions remain
+available. No extra provider-command namespace is introduced.
 
 `/threads` controls where the next top-level turn is delivered. Bare
 `/threads` shows the effective value and silent **Auto**, **On**, **Off**, and,
@@ -378,16 +391,20 @@ to stay in the main chat wins. The bridge records the delivery child before
 `Working...` or provider startup; progress, questions, tools, `/stop`, final
 delivery, and restart recovery then use that child identity.
 
-Approvals are Inline action buttons in the owner's DM, and only the owner can
-resolve them. A thread receives only a generic waiting status; sensitive
-approval details remain in the owner DM.
+Approvals appear as Inline action buttons in the conversation where the turn
+is running, including its reply thread. Only the owner can resolve them.
 Mid-turn owner directions steer when the provider supports steering; `/queue`
-always queues explicitly and provides Undo until work starts.
+always queues explicitly and provides Undo until work starts. An uncertain
+steering response is never automatically retried as another prompt: Inline
+reports the uncertainty and resets the provider connection. ACP steering stays
+unavailable until its delivery contract is qualified.
 
 `/stop` stops the typing indicator immediately and invokes the driver's
-idempotent cancellation barrier. A successful barrier is terminal even when a
-provider races or omits its final event. If it has not completed within five
-seconds, Inline shuts down that provider epoch and restarts it instead of
+idempotent cancellation barrier. For qualified drivers a successful barrier is
+terminal even when a provider races or omits its final event. At the current Claude adapter version,
+a cancelled prompt does not prove its SDK process is quiescent; strong
+per-session stop/release and native resumption remain unqualified. If the cancel
+operation has not completed within five seconds, Inline shuts down that provider epoch and restarts it instead of
 leaving the turn visibly or durably active. For Codex, cancellation also starts
 thread-wide managed-terminal cleanup immediately, repeats it after interruption
 settles to catch late registration, and verifies that Codex's terminal registry
@@ -478,9 +495,11 @@ does not block other messages, chats, provider output, or `/stop`. If the edit
 arrives first, its transcript and voice resource become one initial direction.
 If the timer wins, the original audio resource is durably queued. A later edit
 to the exact source message of an active steer-capable turn is sent as a native
-steer with a revision-scoped deduplication identity; edits to other or completed
-messages do not become new agent directions. `/stop` cancels any voice messages
-still held in that chat's transcription window, so delayed audio cannot start
+steer with a revision-scoped identity claimed durably before dispatch. Replaying
+the same edit after a lost response or restart cannot submit it again; a crash
+between the claim and dispatch can leave the edit unsent. Edits to other or
+completed messages do not become new agent directions. `/stop` cancels any voice
+messages still held in that chat's transcription window, so delayed audio cannot start
 after the stop acknowledgement.
 
 ## Inline tools for agents
@@ -607,8 +626,10 @@ report whether linger is enabled when `loginctl` is available; setup never
 enables linger or requires headless pre-login operation.
 
 One account service supervises all configured providers. A provider restart
-does not stop its siblings, and at most four independent agent turns run across
-the whole account at once.
+does not stop other providers. Independent sessions are admitted without an
+account-wide four-run ceiling; one native session still runs one turn at a
+time. The scheduler pages pending chats so blocked older work cannot hide
+runnable work behind the first batch. Transport and event buffers remain bounded.
 
 Before upgrading an existing on-disk bridge database, Inline creates a
 permission-restricted sibling backup as the rollback point. If an older backup

@@ -64,6 +64,42 @@ pub(super) fn is_workspace_recovery_command(text: &str, bot_username: &str) -> b
         && (!command.explicit_target || command.targets_this_bot)
 }
 
+/// Checks the catalog on the already-owned session during a running turn.
+/// This read must never open a session or turn a native command into steering.
+pub(super) async fn active_native_command_notice<D: AgentDriver + 'static>(
+    sessions: &ProviderSessionManager<D>,
+    session_id: &inline_agent_bridge::ProviderSessionId,
+    text: &str,
+    bot_username: &str,
+    actor_user_id: i64,
+    owner_user_id: i64,
+) -> Result<Option<String>, DriverError> {
+    let Ok(Some(command)) = parse_command(text, bot_username) else {
+        return Ok(None);
+    };
+    if command.explicit_target && !command.targets_this_bot {
+        return Ok(None);
+    }
+    if !sessions.driver().capabilities().session_commands {
+        return Ok(None);
+    }
+    let commands = sessions.driver().session_commands(session_id).await?;
+    if !commands
+        .iter()
+        .any(|available| available.name == command.name)
+    {
+        return Ok(None);
+    }
+    Ok(Some(if actor_user_id != owner_user_id {
+        "Only the bot owner can run provider commands.".to_string()
+    } else {
+        format!(
+            "/{} is available in this provider session, but Inline cannot run this native command yet. Use the provider’s own client.",
+            command.name
+        )
+    }))
+}
+
 fn unsupported_close_message(provider_id: &str) -> Option<&'static str> {
     (provider_id != "codex")
         .then_some("This provider does not support /close. Use /new to start a fresh session.")
@@ -90,13 +126,11 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     }
     let name = invocation.name.as_str();
     let arguments = invocation.arguments.trim();
-    if name == "close"
-        && let Some(message) = unsupported_close_message(sessions.provider_id().as_str())
-    {
-        return handled(message);
-    }
     if actor_user_id != settings.identity.owner_user_id && name == "close" {
         return handled("Only the bot owner can release the provider connection.");
+    }
+    if actor_user_id != settings.identity.owner_user_id && name == "compact" {
+        return handled("Only the bot owner can compact a provider session.");
     }
     if actor_user_id != settings.identity.owner_user_id
         && matches!(
@@ -105,22 +139,6 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         )
     {
         return handled("Only the bot owner can change agent settings.");
-    }
-    if !arguments.is_empty()
-        && matches!(
-            name,
-            "help"
-                | "status"
-                | "new"
-                | "clear"
-                | "compact"
-                | "close"
-                | "stop"
-                | "follow"
-                | "unfollow"
-        )
-    {
-        return handled(format!("/{name} doesn’t take arguments. Try /help."));
     }
     let linked_codex_session = if sessions.provider_id().as_str() == "codex" {
         match store.session_thread_binding_for_chat(&binding.installation_id, binding.chat_id) {
@@ -131,11 +149,93 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         false
     };
     let needs_resume = linked_codex_session && !sessions.session_history_is_ready(binding).await;
+    let session_active = sessions.session_is_active(binding).await;
+    // A provider catalog is scoped to the exact native session. Its names win
+    // collisions with bridge aliases, but catalog metadata is not an execution
+    // route. Until native dispatch has a durable, authorized input path, never
+    // turn one of these commands into a normal model prompt or setting change.
+    let provider_catalog = if !needs_resume
+        && sessions.driver().capabilities().session_commands
+        && (session_active
+            || !matches!(
+                name,
+                "help"
+                    | "status"
+                    | "new"
+                    | "clear"
+                    | "folder"
+                    | "projects"
+                    | "queue"
+                    | "stop"
+                    | "close"
+                    | "model"
+                    | "reasoning"
+                    | "permissions"
+                    | "verbose"
+                    | "threads"
+                    | "follow"
+                    | "unfollow"
+                    | "allowlist"
+            )) {
+        if !session_active {
+            match store.get_binding(binding) {
+                Ok(Some(_)) => {
+                    return handled(
+                        "This provider session is not currently owned by Inline. Native commands are unavailable until this exact session is reconnected.",
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => return failed("I couldn’t read the current session.", error, false),
+            }
+        }
+        match provider_commands(sessions, binding).await {
+            Ok(commands) => Some(commands),
+            Err(_) if matches!(name, "help" | "status" | "folder" | "projects") => None,
+            Err(error) => {
+                let fatal = session_error_ends_epoch(&error);
+                return failed(
+                    "I couldn’t verify the current provider commands.",
+                    error,
+                    fatal,
+                );
+            }
+        }
+    } else {
+        None
+    };
+    if provider_catalog
+        .as_ref()
+        .is_some_and(|commands| commands.iter().any(|command| command.name == name))
+    {
+        if actor_user_id != settings.identity.owner_user_id {
+            return handled("Only the bot owner can run provider commands.");
+        }
+        if name != "compact"
+            || !arguments.is_empty()
+            || !sessions.driver().capabilities().compact_session
+        {
+            return handled(format!(
+                "/{name} is available in this provider session, but Inline cannot run this native command yet. Use the provider’s own client."
+            ));
+        }
+    }
+    if name == "close"
+        && let Some(message) = unsupported_close_message(sessions.provider_id().as_str())
+    {
+        return handled(message);
+    }
+    if !arguments.is_empty()
+        && matches!(
+            name,
+            "help" | "status" | "new" | "clear" | "close" | "stop" | "follow" | "unfollow"
+        )
+    {
+        return handled(format!("/{name} doesn’t take arguments. Try /help."));
+    }
     match name {
         "help" => {
             let mut message = static_command_help(sessions.provider_id());
-            if !needs_resume
-                && let Ok(commands) = provider_commands(sessions, binding).await
+            if let Some(commands) = provider_catalog.as_ref()
                 && !commands.is_empty()
             {
                 let names = commands
@@ -145,7 +245,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                     .collect::<Vec<_>>()
                     .join(", ");
                 let remaining = commands.len().saturating_sub(8);
-                message.push_str(&format!(" Provider commands: {names}"));
+                message.push_str(&format!(
+                    " Provider commands (native execution unavailable in Inline): {names}"
+                ));
                 if remaining > 0 {
                     message.push_str(&format!(" and {remaining} more"));
                 }
@@ -313,6 +415,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 }
             }
         }
+        "compact" if !arguments.is_empty() => handled(
+            "Inline cannot pass arguments to this provider’s compact operation yet. Use the provider’s own client for /compact with arguments.",
+        ),
         "compact" if settings.turn_active => {
             handled("Wait for the current turn to finish, or stop it first.")
         }
@@ -371,79 +476,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         _ if needs_resume => {
             handled("Use /resume to sync recent history before sending provider commands.")
         }
-        _ => match provider_commands(sessions, binding).await {
-            Ok(commands) => {
-                let Some(command) = commands.iter().find(|command| command.name == name) else {
-                    return handled("Unknown command. Try /help.");
-                };
-                let canonical_arguments = match command.input_shape() {
-                    inline_agent_bridge::DriverCommandInput::None => {
-                        if !arguments.is_empty() {
-                            return handled(format!("/{name} doesn’t take arguments. Try /help."));
-                        }
-                        String::new()
-                    }
-                    inline_agent_bridge::DriverCommandInput::Freeform { hint, required } => {
-                        if required && arguments.is_empty() {
-                            return handled(format!("Usage: /{name} <{hint}>"));
-                        }
-                        arguments.to_string()
-                    }
-                    inline_agent_bridge::DriverCommandInput::SingleChoice { options, .. } => {
-                        if arguments.is_empty() {
-                            let Some(choices) =
-                                provider_command_choices(settings, command, actor_user_id)
-                            else {
-                                return handled("No choices are currently available.");
-                            };
-                            return IdleCommandResolution::Handled {
-                                message: format!("Choose an option for /{name}."),
-                                failure: None,
-                                provider_epoch_ended: false,
-                                choices: Some(choices),
-                            };
-                        }
-                        let matches = options
-                            .iter()
-                            .filter(|option| {
-                                !option.disabled
-                                    && (option.value == arguments
-                                        || option.label.eq_ignore_ascii_case(arguments))
-                            })
-                            .collect::<Vec<_>>();
-                        match matches.as_slice() {
-                            [option] => option.value.clone(),
-                            [] => {
-                                return handled(format!(
-                                    "That /{name} choice is not available. Run /{name} again."
-                                ));
-                            }
-                            _ => {
-                                return handled(format!(
-                                    "That /{name} choice is ambiguous. Use its exact value."
-                                ));
-                            }
-                        }
-                    }
-                };
-                IdleCommandResolution::StartDirection {
-                    instruction: if canonical_arguments.is_empty() {
-                        format!("/{name}")
-                    } else {
-                        format!("/{name} {canonical_arguments}")
-                    },
-                    acknowledgement: format!("Sent /{name} to the agent."),
-                }
-            }
-            Err(error) => {
-                let fatal = session_error_ends_epoch(&error);
-                failed(
-                    "I couldn’t read the provider command catalog.",
-                    error,
-                    fatal,
-                )
-            }
-        },
+        _ => handled("Unknown command. Try /help."),
     }
 }
 
@@ -1026,6 +1059,11 @@ mod tests {
             turn_active: false,
         };
 
+        manager
+            .ensure_session(&binding, now_seconds())
+            .await
+            .expect("active session for catalog help");
+
         let help = resolve_idle_command(
             &manager,
             &store,
@@ -1057,19 +1095,173 @@ mod tests {
             "/research_codebase bridge lifecycle",
         )
         .await;
-        let IdleCommandResolution::StartDirection {
-            instruction,
-            acknowledgement,
+        let IdleCommandResolution::Handled {
+            message,
+            choices: None,
+            ..
         } = invocation
         else {
-            panic!("expected provider direction");
+            panic!("expected explicit native-command unavailability");
         };
-        assert_eq!(instruction, "/research_codebase bridge lifecycle");
-        assert_eq!(acknowledgement, "Sent /research_codebase to the agent.");
+        assert!(message.contains("/research_codebase is available"));
+        assert!(message.contains("cannot run this native command"));
     }
 
     #[tokio::test]
-    async fn provider_single_choice_commands_render_buttons_and_keep_typed_compatibility() {
+    async fn help_does_not_create_a_provider_session_for_catalog_discovery() {
+        let (_directory, _driver, store, _manager, binding, workspace) = fixture(false);
+        let driver = Arc::new(FakeDriver {
+            commands: vec![
+                inline_agent_bridge::DriverCommand::new("mcp:server:tool", "Tool", None)
+                    .expect("command"),
+            ],
+            ..FakeDriver::default()
+        });
+        let manager = ProviderSessionManager::new(
+            Arc::clone(&driver),
+            Arc::clone(&store),
+            ProviderId::new("acp").expect("provider"),
+        );
+        let (active, identity) = settings_fixture(&binding, &workspace);
+        let result = resolve_idle_command(
+            &manager,
+            &store,
+            &binding,
+            &workspace,
+            &SettingsRuntime {
+                sessions: &manager,
+                store: &store,
+                active: &active,
+                identity: &identity,
+                turn_active: false,
+            },
+            identity.owner_user_id,
+            "mo_acp_bot",
+            "/help",
+        )
+        .await;
+        assert!(matches!(result, IdleCommandResolution::Handled { .. }));
+        assert!(driver.starts.lock().expect("starts").is_empty());
+    }
+
+    #[tokio::test]
+    async fn native_command_discovery_does_not_replace_an_inactive_durable_session() {
+        let (_directory, _driver, store, _manager, binding, workspace) = fixture(false);
+        let driver = Arc::new(FakeDriver {
+            commands: vec![
+                inline_agent_bridge::DriverCommand::new("mcp:server:tool", "Tool", None)
+                    .expect("command"),
+            ],
+            ..FakeDriver::default()
+        });
+        let provider_id = ProviderId::new("acp").expect("provider");
+        let native_id =
+            inline_agent_bridge::ProviderSessionId::new("prior-native-session").expect("native id");
+        store
+            .put_binding(&binding, &provider_id, &native_id, now_seconds())
+            .expect("durable binding");
+        let manager = ProviderSessionManager::new(
+            Arc::clone(&driver),
+            Arc::clone(&store),
+            provider_id.clone(),
+        );
+        let (active, identity) = settings_fixture(&binding, &workspace);
+        let result = resolve_idle_command(
+            &manager,
+            &store,
+            &binding,
+            &workspace,
+            &SettingsRuntime {
+                sessions: &manager,
+                store: &store,
+                active: &active,
+                identity: &identity,
+                turn_active: false,
+            },
+            identity.owner_user_id,
+            "mo_acp_bot",
+            "/mcp:server:tool",
+        )
+        .await;
+        assert!(
+            matches!(result, IdleCommandResolution::Handled { message, .. }
+            if message.contains("exact session is reconnected"))
+        );
+        assert!(driver.starts.lock().expect("starts").is_empty());
+        assert_eq!(
+            store.get_binding(&binding).expect("binding"),
+            Some((provider_id, native_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_catalog_collision_does_not_change_inline_settings() {
+        let (_directory, _driver, store, _manager, binding, workspace) = fixture(false);
+        let driver = Arc::new(FakeDriver {
+            commands: vec![
+                inline_agent_bridge::DriverCommand::new("model", "Provider model command", None)
+                    .expect("command"),
+            ],
+            resume_session: true,
+            ..FakeDriver::default()
+        });
+        let manager = ProviderSessionManager::new(
+            Arc::clone(&driver),
+            Arc::clone(&store),
+            ProviderId::new("acp").expect("provider"),
+        );
+        let session = manager
+            .ensure_session(&binding, now_seconds())
+            .await
+            .expect("session");
+        let (active, identity) = settings_fixture(&binding, &workspace);
+        let runtime = SettingsRuntime {
+            sessions: &manager,
+            store: &store,
+            active: &active,
+            identity: &identity,
+            turn_active: false,
+        };
+        let result = resolve_idle_command(
+            &manager,
+            &store,
+            &binding,
+            &workspace,
+            &runtime,
+            identity.owner_user_id,
+            "mo_acp_bot",
+            "/model gpt-test",
+        )
+        .await;
+        assert!(
+            matches!(result, IdleCommandResolution::Handled { message, .. }
+            if message.contains("cannot run this native command"))
+        );
+        assert_eq!(
+            store
+                .chat_settings(&binding, now_seconds())
+                .expect("settings")
+                .model,
+            None
+        );
+
+        let active_notice = active_native_command_notice(
+            &manager,
+            session.session_id(),
+            "/model gpt-test",
+            "mo_acp_bot",
+            identity.owner_user_id,
+            identity.owner_user_id,
+        )
+        .await
+        .expect("catalog");
+        assert!(
+            active_notice.is_some_and(|notice| notice.contains("cannot run this native command"))
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_single_choice_commands_do_not_offer_inert_buttons() {
         let (_directory, _driver, store, _manager, binding, workspace) = fixture(false);
         let command =
             inline_agent_bridge::DriverCommand::new("review_mode", "Choose a review mode", None)
@@ -1116,22 +1308,15 @@ mod tests {
         )
         .await;
         let IdleCommandResolution::Handled {
-            choices: Some(choices),
+            message,
+            choices: None,
             failure: None,
             ..
         } = prompt
         else {
-            panic!("expected provider choice card");
+            panic!("expected unsupported native command");
         };
-        assert_eq!(choices.item_id, "provider.command:review_mode");
-        assert_eq!(
-            choices
-                .options
-                .iter()
-                .map(|option| option.value.as_str())
-                .collect::<Vec<_>>(),
-            ["safe", "fast"]
-        );
+        assert!(message.contains("cannot run this native command"));
 
         let typed = resolve_idle_command(
             &manager,
@@ -1144,10 +1329,10 @@ mod tests {
             "/review_mode Fast",
         )
         .await;
-        let IdleCommandResolution::StartDirection { instruction, .. } = typed else {
-            panic!("expected typed provider direction");
+        let IdleCommandResolution::Handled { message, .. } = typed else {
+            panic!("expected unsupported native command");
         };
-        assert_eq!(instruction, "/review_mode fast");
+        assert!(message.contains("cannot run this native command"));
     }
 
     #[tokio::test]

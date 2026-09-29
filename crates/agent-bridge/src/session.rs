@@ -369,6 +369,34 @@ where
         slot.lock().await.is_some()
     }
 
+    /// Applies an explicit permission choice only to a session already owned
+    /// by this epoch. `false` means there is no active session and the choice
+    /// may be saved solely as a future-session preference. This never creates
+    /// or resumes a provider session to answer a settings action.
+    pub async fn set_active_session_permissions(
+        &self,
+        binding: &BindingKey,
+        mode: &str,
+    ) -> Result<bool, SessionManagerError> {
+        let slot = self.session_slot(binding).await;
+        let active = slot.lock().await;
+        let Some(active) = active.as_ref() else {
+            return Ok(false);
+        };
+        let _lease = self.begin_provider_work().await?;
+        match self
+            .driver
+            .set_session_permissions(&active.session_id, mode)
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                self.seal_epoch_if_needed(&error);
+                Err(error.into())
+            }
+        }
+    }
+
     /// Writer ownership alone does not mean the client finished importing
     /// history. Linked-session prompts require both in the current epoch.
     pub async fn session_history_is_ready(&self, binding: &BindingKey) -> bool {
@@ -717,6 +745,7 @@ mod tests {
         yield_on_resume: bool,
         resume_gate: Option<Arc<tokio::sync::Barrier>>,
         turns: StdMutex<Vec<(ProviderSessionId, TurnInput, TurnOptions)>>,
+        permission_changes: StdMutex<Vec<(ProviderSessionId, String)>>,
         shutdowns: StdMutex<usize>,
         shutdown_gate: Option<Arc<tokio::sync::Barrier>>,
     }
@@ -737,6 +766,7 @@ mod tests {
                 yield_on_resume: false,
                 resume_gate: None,
                 turns: StdMutex::default(),
+                permission_changes: StdMutex::default(),
                 shutdowns: StdMutex::default(),
                 shutdown_gate: None,
             }
@@ -806,6 +836,20 @@ mod tests {
                         .map_err(|error| DriverError::Protocol(error.to_string()))?,
                     events,
                 })
+            })
+        }
+
+        fn set_session_permissions<'a>(
+            &'a self,
+            session_id: &'a ProviderSessionId,
+            mode: &'a str,
+        ) -> DriverFuture<'a, ()> {
+            Box::pin(async move {
+                self.permission_changes
+                    .lock()
+                    .expect("permission changes")
+                    .push((session_id.clone(), mode.to_string()));
+                Ok(())
             })
         }
 
@@ -914,6 +958,47 @@ mod tests {
         assert_eq!(
             store.get_binding(&binding()).expect("binding"),
             Some((ProviderId::new("codex").unwrap(), first.into_session_id()))
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_permission_change_only_targets_an_active_exact_session() {
+        let provider = ProviderId::new("claude").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store, provider);
+        assert!(
+            !manager
+                .set_active_session_permissions(&binding(), "plan")
+                .await
+                .expect("no active session")
+        );
+        assert!(driver.starts.lock().expect("starts").is_empty());
+        assert!(
+            driver
+                .permission_changes
+                .lock()
+                .expect("permission changes")
+                .is_empty()
+        );
+
+        let session = manager
+            .ensure_session(&binding(), 10)
+            .await
+            .expect("create session");
+        assert!(
+            manager
+                .set_active_session_permissions(&binding(), "default")
+                .await
+                .expect("apply native default")
+        );
+        assert_eq!(
+            driver
+                .permission_changes
+                .lock()
+                .expect("permission changes")
+                .as_slice(),
+            &[(session.into_session_id(), "default".to_string())]
         );
     }
 

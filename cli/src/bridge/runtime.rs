@@ -5,6 +5,7 @@ use super::*;
 pub(super) struct TurnLanePromotion {
     pub source_chat_id: i64,
     pub delivery_chat_id: i64,
+    pub binding: BindingKey,
     pub sender: tokio::sync::mpsc::Sender<LosslessEventDelivery>,
     pub acknowledged: tokio::sync::oneshot::Sender<bool>,
 }
@@ -470,7 +471,6 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
     delivery: &LosslessEventDelivery,
     route: &InboundRoute,
     settings: &SettingsRuntime<'_, D>,
-    deferred_by_capacity: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if is_agent_session_projection_event(delivery.event()) {
         delivery.ack().await?;
@@ -588,19 +588,8 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
             delivery.ack().await?;
             return Ok(());
         }
-        if !handle_follow_command(bot, &record, route).await?
-            && accept_inbound_or_session_handoff(route, &record)?
-            && deferred_by_capacity
-        {
-            send_text_reply(
-                bot,
-                record.binding.chat_id,
-                record.message_id,
-                "Queued — four agent runs are active.",
-                &format!("{}-capacity-queued", record.event_id),
-                BridgeNotificationClass::RoutineStatus,
-            )
-            .await?;
+        if !handle_follow_command(bot, &record, route).await? {
+            accept_inbound_or_session_handoff(route, &record)?;
         }
     }
     delivery.ack().await?;
@@ -741,7 +730,7 @@ async fn inbound_from_message(
             arguments,
             targets_this_bot: true,
             ..
-        }) if name == "stop" && arguments.is_empty()
+        }) if name == "stop" && arguments.trim().is_empty()
     ) {
         let cancelled = route.cancel_pending_voices_in_chat(message.chat_id.get());
         if cancelled > 0 {
@@ -1070,6 +1059,7 @@ pub(super) fn should_wait_for_voice_transcript(message: &inline_client::MessageR
 }
 
 async fn steer_active_source_edit<D: AgentDriver + 'static>(
+    bot: &InlineClient,
     message: &inline_client::MessageRecord,
     sessions: &ProviderSessionManager<D>,
     session_id: &inline_agent_bridge::ProviderSessionId,
@@ -1112,12 +1102,24 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
         "inline-message-{}-{}-edit-{edit_version}",
         message.chat_id, message.message_id
     );
-    if store.event_processed(&event_id)? {
+    // Editing an already-dispatched prompt cannot become a native command.
+    // A command needs its own explicit, session-bound dispatch decision.
+    if matches!(
+        parse_command(&content.text, &route.bot_username),
+        Ok(Some(_))
+    ) {
+        if store.claim_event(&event_id, now_seconds())? {
+            let _ = send_text_reply(
+                bot, message.chat_id.get(), message.message_id.get(),
+                "This edit was not sent: slash commands cannot replace a running prompt. Send the command as a new message.",
+                &format!("{event_id}-command-edit-unavailable"),
+                BridgeNotificationClass::RoutineStatus,
+            ).await;
+        }
         return Ok(true);
     }
-    sessions
-        .driver()
-        .steer_turn(
+    if !dispatch_source_edit_once(store, &event_id, || {
+        sessions.driver().steer_turn(
             session_id,
             turn_id,
             TurnInput {
@@ -1126,8 +1128,12 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
                 client_message_id: Some(event_id.clone()),
             },
         )
-        .await?;
-    store.claim_event(&event_id, now_seconds())?;
+    })
+    .await
+    .inspect_err(|_| sessions.seal_provider_epoch())?
+    {
+        return Ok(true);
+    }
     log::trace!(
         target: "inline::bridge::media",
         "phase=source_edit_steered event_id={event_id:?} source_event_id={:?} revision={} attachment_count={}",
@@ -1135,6 +1141,32 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
         edit_version,
         source.direction.attachments.len()
     );
+    Ok(true)
+}
+
+// A claim precedes dispatch so reconnect/replay cannot submit an edit twice
+// after a lost provider reply. An uncertain edit ends this provider epoch.
+pub(super) async fn dispatch_source_edit_once<F, Fut>(
+    store: &BridgeStore,
+    event_id: &str,
+    dispatch: F,
+) -> Result<bool, Box<dyn std::error::Error>>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<(), DriverError>>,
+{
+    if !store.claim_event(event_id, now_seconds())? {
+        return Ok(false);
+    }
+    dispatch().await.map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            format!(
+                "Source edit delivery could not be confirmed and will not be retried: {}",
+                safe_diagnostic(&error.to_string())
+            ),
+        )
+    })?;
     Ok(true)
 }
 
@@ -1336,6 +1368,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             .send(TurnLanePromotion {
                 source_chat_id: source_binding.chat_id,
                 delivery_chat_id: binding.chat_id,
+                binding: binding.clone(),
                 sender: lane_sender,
                 acknowledged,
             })
@@ -2318,7 +2351,10 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         )
     };
     let final_state = match terminal.0 {
-        TurnOutcome::Completed | TurnOutcome::Interrupted => InboundState::Completed,
+        TurnOutcome::Completed
+        | TurnOutcome::TokenLimit
+        | TurnOutcome::TurnLimit
+        | TurnOutcome::Interrupted => InboundState::Completed,
         TurnOutcome::Failed | TurnOutcome::ConnectionLost | TurnOutcome::AuthenticationRequired => {
             InboundState::Failed
         }
@@ -2331,6 +2367,8 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let elapsed = format_elapsed_compact(turn_timing.resolve(turn_started_at.elapsed()));
     let progress_header = match terminal.0 {
         TurnOutcome::Completed => format!("Worked for {elapsed}"),
+        TurnOutcome::TokenLimit => format!("Token limit reached after {elapsed}"),
+        TurnOutcome::TurnLimit => format!("Turn limit reached after {elapsed}"),
         TurnOutcome::Interrupted => format!("Stopped after {elapsed}"),
         TurnOutcome::Failed | TurnOutcome::ConnectionLost | TurnOutcome::AuthenticationRequired => {
             format!("Failed after {elapsed}")
@@ -2804,8 +2842,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
         }
         ClientEvent::MessageStored { message } => {
             if steering != SteeringSupport::Unsupported
-                && steer_active_source_edit(message, sessions, session_id, turn_id, store, route)
-                    .await?
+                && steer_active_source_edit(
+                    bot, message, sessions, session_id, turn_id, store, route,
+                )
+                .await?
             {
                 delivery.ack().await?;
                 return Ok(());
@@ -2822,6 +2862,41 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                 if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
                     delivery.ack().await?;
                     return Ok(());
+                }
+                if record.binding == *binding {
+                    let native_notice = active_native_command_notice(
+                        sessions,
+                        session_id,
+                        &record.direction.text,
+                        &route.bot_username,
+                        record.sender_user_id,
+                        route.owner_user_id,
+                    )
+                    .await;
+                    let notice = match native_notice {
+                        Ok(notice) => notice,
+                        Err(error) if error.ends_epoch() => {
+                            sessions.seal_provider_epoch();
+                            return Err(io::Error::new(io::ErrorKind::ConnectionAborted,
+                                "provider command catalog connection ended").into());
+                        }
+                        Err(_) => Some("I couldn’t verify this command in the current provider session. Nothing was sent; use Agent Settings or try again when the session is available.".to_string()),
+                    };
+                    if let Some(notice) = notice {
+                        if store.claim_event(&record.event_id, now_seconds())? {
+                            send_text_reply(
+                                bot,
+                                binding.chat_id,
+                                record.message_id,
+                                &notice,
+                                &format!("{}-native-command-unavailable", record.event_id),
+                                BridgeNotificationClass::RoutineStatus,
+                            )
+                            .await?;
+                        }
+                        delivery.ack().await?;
+                        return Ok(());
+                    }
                 }
                 if handle_session_browser_command(
                     bot,
@@ -3011,7 +3086,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                 if matches!(
                     &command,
                     Ok(Some(CommandInvocation { name, arguments, .. }))
-                        if name == "stop" && arguments.is_empty()
+                        if name == "stop" && arguments.trim().is_empty()
                 ) {
                     log::trace!(
                         target: "inline::bridge::turn",
@@ -3181,7 +3256,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                 })) = &command
                     && name == "queue"
                 {
-                    if arguments.is_empty() {
+                    if arguments.trim().is_empty() {
                         if store.claim_event(&record.event_id, now_seconds())? {
                             send_text_reply(
                                 bot,
@@ -3440,21 +3515,30 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     store.complete_inbound(&record.event_id)?;
                                 }
                                 Err(error) => {
-                                    if error.ends_epoch() {
+                                    if !matches!(error, DriverError::Unsupported(_)) {
+                                        // Fence admission before any reporting that can fail.
+                                        sessions.seal_provider_epoch();
                                         let diagnostic = safe_diagnostic(&error.to_string());
-                                        store.fail_inbound(&record.event_id, &diagnostic)?;
-                                        send_text_reply(
+                                        if let Err(error) =
+                                            store.fail_inbound(&record.event_id, &diagnostic)
+                                        {
+                                            eprintln!(
+                                                "Could not persist uncertain steering: {}",
+                                                safe_diagnostic(&error.to_string())
+                                            );
+                                        }
+                                        let _ = send_text_reply(
                                             bot,
                                             binding.chat_id,
                                             record.message_id,
-                                            BridgeNotice::AgentConnectionLost.message(),
+                                            "I couldn’t confirm whether the agent received this direction. It won’t be sent again automatically. The connection is being reset before more work runs.",
                                             &format!("{}-steer-failed", record.event_id),
                                             BridgeNotificationClass::ImportantFailure,
                                         )
-                                        .await?;
+                                        .await;
                                         return Err(io::Error::new(
                                             io::ErrorKind::ConnectionAborted,
-                                            "local agent connection epoch ended during steering",
+                                            "steering delivery is uncertain; the provider connection must be stopped",
                                         )
                                         .into());
                                     }

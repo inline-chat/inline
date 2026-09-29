@@ -27,9 +27,6 @@ pub async fn run_codex_dev(
             shared_owner_control: None,
             owner_control_managed: false,
             shared_manifest_write: None,
-            shared_turn_capacity: Arc::new(tokio::sync::Semaphore::new(
-                MAX_ACCOUNT_CONCURRENT_TURNS,
-            )),
             shared_probe_capacity: Arc::new(tokio::sync::Semaphore::new(1)),
             shared_provider_readiness: None,
             workspace_picker: None,

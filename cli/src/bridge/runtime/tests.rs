@@ -2337,3 +2337,110 @@ async fn recovery_progress_failure_does_not_suppress_the_staged_final() {
         InboundState::Completed
     );
 }
+
+#[test]
+fn provider_limits_preserve_partial_output_and_never_report_done() {
+    for (outcome, reason) in [
+        (TurnOutcome::TokenLimit, "token limit"),
+        (TurnOutcome::TurnLimit, "turn limit"),
+    ] {
+        for content in ["", "Completed the first file."] {
+            let rendered =
+                final_turn_text(content, outcome, &[], Path::new("/repo"), false, None, None);
+            assert!(rendered.contains(reason), "{rendered}");
+            assert!(!rendered.contains("Done."), "{rendered}");
+            if !content.is_empty() {
+                assert!(rendered.starts_with(content), "{rendered}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn source_edit_lost_reply_is_not_dispatched_again_after_restart() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("bridge.sqlite");
+    let calls = AtomicUsize::new(0);
+    let store = BridgeStore::open(&path).expect("store");
+    let result = dispatch_source_edit_once(&store, "edit-42-2", || async {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Err(DriverError::Protocol(
+            "response lost after provider accepted input".into(),
+        ))
+    })
+    .await;
+    let error = result.expect_err("uncertain delivery");
+    assert!(crate::telemetry::bridge_error_requires_provider_restart(
+        error.as_ref()
+    ));
+    drop(store);
+    let reopened = BridgeStore::open(&path).expect("reopen");
+    assert!(
+        !dispatch_source_edit_once(&reopened, "edit-42-2", || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+        .await
+        .expect("replay")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(
+        dispatch_source_edit_once(&reopened, "edit-42-3", || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+        .await
+        .expect("new revision")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn provider_limit_reason_survives_final_delivery_restart() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("bridge.sqlite");
+    let binding = BindingKey {
+        installation_id: InstallationId::new("claude").unwrap(),
+        chat_id: 42,
+        workspace_id: WorkspaceId::new("workspace").unwrap(),
+    };
+    let store = BridgeStore::open(&path).expect("store");
+    let record = InboundRecord {
+        event_id: "limit-1".into(),
+        binding: binding.clone(),
+        message_id: 10,
+        delivery_chat_id: 42,
+        sender_user_id: 1,
+        direction: Direction::new(DirectionId::new("direction-1").unwrap(), "work"),
+        state: InboundState::Accepted,
+        accepted_at: 1,
+        started_at: None,
+        lease_expires_at: None,
+        attempt_count: 0,
+        provider_turn_id: None,
+        stream_message_id: None,
+        failure: None,
+    };
+    store.accept_inbound(&record).unwrap();
+    store.start_inbound(&record.event_id, 2).unwrap();
+    let text = final_turn_text(
+        "Partial work.",
+        TurnOutcome::TokenLimit,
+        &[],
+        Path::new("/repo"),
+        false,
+        None,
+        None,
+    );
+    store
+        .stage_inbound_final_send(&record.event_id, InboundState::Completed, &text, None)
+        .unwrap();
+    drop(store);
+    let reopened = BridgeStore::open(&path).unwrap();
+    let pending = reopened
+        .pending_inbound_final_sends(&binding.installation_id)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].final_text, text);
+    assert!(pending[0].final_text.contains("token limit"));
+}

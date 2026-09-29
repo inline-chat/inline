@@ -1448,7 +1448,7 @@ where
 {
     let invocation = parse_command(&record.direction.text, &route.bot_username)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing session command"))?;
-    if !invocation.arguments.is_empty() {
+    if !invocation.arguments.trim().is_empty() {
         return send_session_reply(
             bot,
             record,

@@ -30,7 +30,6 @@ const MAX_ACTIVITY_PATH_BYTES: usize = 1024;
 const MAX_FILE_CHANGES: usize = 64;
 const MAX_FILE_CHANGE_PATH_BYTES: usize = 1024;
 const MAX_DRIVER_COMMANDS: usize = 64;
-const MAX_DRIVER_COMMAND_NAME_BYTES: usize = 64;
 const MAX_DRIVER_COMMAND_DESCRIPTION_CHARS: usize = 160;
 const MAX_DRIVER_COMMAND_HINT_CHARS: usize = 80;
 const MAX_DRIVER_COMMAND_CHOICES: usize = 60;
@@ -255,11 +254,11 @@ pub struct DriverCapabilities {
 /// change per session and workspace.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriverCommand {
-    /// Lowercase command name without the leading slash.
+    /// Provider command name without the leading slash.
     pub name: String,
     /// Concise human-readable provider description.
     pub description: String,
-    /// Optional hint for required unstructured text after the command.
+    /// Optional descriptive hint for unstructured text after the command.
     ///
     /// This compatibility field remains populated for older bridge consumers.
     /// New code should use [`Self::input_shape`].
@@ -360,12 +359,7 @@ impl DriverCommand {
         input_hint: Option<&str>,
     ) -> Option<Self> {
         let name = name.as_ref().trim();
-        if name.is_empty()
-            || name.len() > MAX_DRIVER_COMMAND_NAME_BYTES
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-        {
+        if !crate::command::valid_command_name(name) {
             return None;
         }
         let description = bounded_driver_command_text(
@@ -383,7 +377,7 @@ impl DriverCommand {
                 .as_ref()
                 .map(|hint| DriverCommandInput::Freeform {
                     hint: hint.clone(),
-                    required: true,
+                    required: false,
                 })
                 .unwrap_or_default(),
             input_hint,
@@ -433,7 +427,7 @@ impl DriverCommand {
         match (&self.input, &self.input_hint) {
             (DriverCommandInput::None, Some(hint)) => DriverCommandInput::Freeform {
                 hint: hint.clone(),
-                required: true,
+                required: false,
             },
             (input, _) => input.clone(),
         }
@@ -976,8 +970,12 @@ pub struct PlanStep {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnOutcome {
-    /// The provider completed the requested work.
+    /// The provider ended the turn normally.
     Completed,
+    /// The provider stopped at its output token limit.
+    TokenLimit,
+    /// The provider stopped at its turn/request limit.
+    TurnLimit,
     /// The turn stopped before completing, usually after cancellation.
     Interrupted,
     /// The turn terminated with an error.
@@ -1576,6 +1574,17 @@ pub trait AgentDriver: Send + Sync {
         options: TurnOptions,
     ) -> DriverFuture<'a, StartedTurn>;
 
+    /// Applies one explicit owner-selected provider permission mode to an
+    /// already active, idle session. The ID is native to the provider; a
+    /// saved launch preference is not itself an action on this session.
+    fn set_session_permissions<'a>(
+        &'a self,
+        _session_id: &'a ProviderSessionId,
+        _mode: &'a str,
+    ) -> DriverFuture<'a, ()> {
+        Box::pin(async { Err(DriverError::Unsupported("session permission selection")) })
+    }
+
     /// Applies operator direction to a running turn.
     ///
     /// Callers invoke this only when [`DriverCapabilities::steering`] is not
@@ -2016,10 +2025,11 @@ mod tests {
         assert_eq!(command.input_hint.as_deref(), Some("topic to investigate"));
         assert!(matches!(
             command.input_shape(),
-            DriverCommandInput::Freeform { ref hint, required: true }
+            DriverCommandInput::Freeform { ref hint, required: false }
                 if hint == "topic to investigate"
         ));
-        assert!(DriverCommand::new("Bad-Command", "Description", None).is_none());
+        assert!(DriverCommand::new("mcp:server:run-tool", "Description", None).is_some());
+        assert!(DriverCommand::new("mcp::tool", "Description", None).is_none());
         assert!(DriverCommand::new("", "Description", None).is_none());
         assert!(DriverCommand::new("safe", "private\u{1b}[31m", None).is_none());
         assert_eq!(

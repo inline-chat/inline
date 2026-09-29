@@ -63,7 +63,7 @@ pub use session_thread::{
     SessionThreadBindOutcome, SessionThreadBinding, SessionThreadOpening,
     SessionThreadPrepareOutcome,
 };
-pub use settings::{ChatSettingsRecord, SettingsUpdateOutcome};
+pub use settings::{ChatSettingsField, ChatSettingsRecord, SettingsUpdateOutcome};
 pub use workspace::{
     InstallationRecord, MAX_RECENT_WORKSPACES, WorkspaceChoice, WorkspaceFilesystemIdentity,
     WorkspaceRecord,

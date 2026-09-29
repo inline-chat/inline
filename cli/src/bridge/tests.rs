@@ -66,6 +66,105 @@ fn provider_restart_backoff_is_bounded_and_starts_promptly() {
 }
 
 #[test]
+fn scheduler_admits_more_than_four_independent_sessions_and_blocks_aliases() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let installation_id = InstallationId::new("install").expect("installation");
+    let workspace_id = WorkspaceId::new("workspace").expect("workspace");
+    let provider_id = ProviderId::new("codex").expect("provider");
+    let binding = |chat_id| BindingKey {
+        installation_id: installation_id.clone(),
+        chat_id,
+        workspace_id: workspace_id.clone(),
+    };
+    let mut active_turns = HashMap::new();
+    let mut active_bindings = HashMap::new();
+    for chat_id in 1..=5 {
+        store
+            .put_binding(
+                &binding(chat_id),
+                &provider_id,
+                &inline_agent_bridge::ProviderSessionId::new(format!("session-{chat_id}"))
+                    .expect("session"),
+                1,
+            )
+            .expect("binding");
+        let (sender, _) = tokio::sync::mpsc::channel::<LosslessEventDelivery>(1);
+        active_turns.insert(chat_id, sender);
+        active_bindings.insert(chat_id, binding(chat_id));
+    }
+    let active_sessions = active_bound_sessions(&store, &active_bindings).expect("active sessions");
+    assert_eq!(active_sessions.len(), 5);
+    assert!(
+        pending_binding_has_free_lane(&store, &binding(6), &active_turns, &active_sessions)
+            .expect("independent sixth session")
+    );
+
+    store
+        .put_binding(
+            &binding(7),
+            &provider_id,
+            &inline_agent_bridge::ProviderSessionId::new("session-1").expect("session"),
+            1,
+        )
+        .expect("alias binding");
+    assert!(
+        !pending_binding_has_free_lane(&store, &binding(7), &active_turns, &active_sessions)
+            .expect("native-session alias")
+    );
+}
+
+#[test]
+fn promotion_moves_active_binding_and_old_completion_preserves_reused_source_lane() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let installation_id = InstallationId::new("install").expect("installation");
+    let workspace_id = WorkspaceId::new("workspace").expect("workspace");
+    let provider_id = ProviderId::new("codex").expect("provider");
+    let session_id =
+        inline_agent_bridge::ProviderSessionId::new("promoted-session").expect("session");
+    let binding = |chat_id| BindingKey {
+        installation_id: installation_id.clone(),
+        chat_id,
+        workspace_id: workspace_id.clone(),
+    };
+    let (old_sender, _) = tokio::sync::mpsc::channel::<LosslessEventDelivery>(1);
+    let (new_sender, _) = tokio::sync::mpsc::channel::<LosslessEventDelivery>(1);
+    let mut active_turns = HashMap::from([(10, old_sender.clone())]);
+    let mut active_bindings = HashMap::from([(10, binding(10))]);
+
+    assert!(promote_turn_lane(
+        &mut active_turns,
+        &mut active_bindings,
+        10,
+        binding(20),
+        old_sender.clone(),
+    ));
+    assert_eq!(active_bindings.get(&20), Some(&binding(20)));
+    assert!(!active_bindings.contains_key(&10));
+    for chat_id in [20, 30] {
+        store
+            .put_binding(&binding(chat_id), &provider_id, &session_id, 1)
+            .expect("binding");
+    }
+    let active_sessions = active_bound_sessions(&store, &active_bindings).expect("active sessions");
+    assert!(
+        !pending_binding_has_free_lane(&store, &binding(30), &active_turns, &active_sessions)
+            .expect("alias after promotion")
+    );
+
+    active_turns.insert(10, new_sender.clone());
+    active_bindings.insert(10, binding(10));
+    release_turn_lane(&mut active_turns, &mut active_bindings, 10, &old_sender);
+    release_turn_lane(&mut active_turns, &mut active_bindings, 20, &old_sender);
+    assert!(
+        active_turns
+            .get(&10)
+            .is_some_and(|sender| sender.same_channel(&new_sender))
+    );
+    assert_eq!(active_bindings.get(&10), Some(&binding(10)));
+    assert!(!active_turns.contains_key(&20));
+}
+
+#[test]
 fn inline_message_retry_backoff_is_jittered_and_bounded() {
     assert_eq!(
         message_retry_delay_with_entropy(0, 0),

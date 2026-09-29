@@ -2526,6 +2526,8 @@ pub(super) fn final_turn_text(
     } else {
         match outcome {
             TurnOutcome::Completed => "Done.".to_string(),
+            TurnOutcome::TokenLimit => "Stopped at the provider’s token limit.".to_string(),
+            TurnOutcome::TurnLimit => "Stopped at the provider’s turn limit.".to_string(),
             TurnOutcome::Interrupted => unreachable!("interrupted turns return above"),
             TurnOutcome::Failed => failure_message(BridgeNotice::AgentTurnFailed, diagnostic),
             TurnOutcome::ConnectionLost => {
@@ -2539,6 +2541,12 @@ pub(super) fn final_turn_text(
     if !content.trim().is_empty() {
         match outcome {
             TurnOutcome::Completed => {}
+            TurnOutcome::TokenLimit => {
+                text.push_str("\n\nStopped at the provider’s token limit.");
+            }
+            TurnOutcome::TurnLimit => {
+                text.push_str("\n\nStopped at the provider’s turn limit.");
+            }
             TurnOutcome::Interrupted => unreachable!("interrupted turns return above"),
             TurnOutcome::Failed => {
                 text.push_str("\n\n");

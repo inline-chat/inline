@@ -12,8 +12,8 @@ use inline_agent_bridge::{
     Acknowledgement, ActivityDetail, ActivityDetailStyle, ActivitySemanticKind, ActivityStatus,
     ActivityTextStream, ActivityUpsert, AddressSignals, Addressing, AgentDriver, AgentEvent,
     AgentMessagePhase, AgentMessageUpdate, ApprovalClaimContext, ApprovalClaimOutcome,
-    ApprovalDecision, ApprovalOption, ApprovalRecord, BindingKey, BridgeStore, ChatSettingsRecord,
-    CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
+    ApprovalDecision, ApprovalOption, ApprovalRecord, BindingKey, BridgeStore, ChatSettingsField,
+    ChatSettingsRecord, CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
     CommandChoiceRequest, CommandInvocation, CoordinatorEffect, Direction, DirectionDisposition,
     DirectionId, DriverError, DriverSettingsCatalog, FileChange, HistoryImportState, HostToolCall,
     HostToolCallClaim, HostToolCallRecord, HostToolConfiguration, HostToolHandler, HostToolResult,
@@ -105,7 +105,8 @@ const PROVIDER_ID: &str = "codex";
 const LEGACY_CONFIG_VERSION: u32 = 3;
 const ACCOUNT_CONFIG_VERSION: u32 = 4;
 const ACCOUNT_SECRETS_VERSION: u32 = 2;
-const MAX_ACCOUNT_CONCURRENT_TURNS: usize = 4;
+const SCHEDULING_SCAN_BATCH_SIZE: usize = 64;
+const TURN_LANE_PROMOTION_QUEUE_CAPACITY: usize = 32;
 // Interactive settings should fail fast, but a cold Claude session can need
 // longer than that to publish the model catalog during service startup.
 const INITIAL_PROVIDER_CATALOG_DEADLINE: Duration = Duration::from_secs(15);
@@ -546,7 +547,6 @@ pub async fn run_service(
     let mut control_shutdown = Some(control_server.shutdown_receiver());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let manifest_write = Arc::new(tokio::sync::Mutex::new(()));
-    let turn_capacity = Arc::new(tokio::sync::Semaphore::new(MAX_ACCOUNT_CONCURRENT_TURNS));
     let provider_probe_capacity = Arc::new(tokio::sync::Semaphore::new(1));
     let mut termination = Box::pin(wait_for_termination());
     let mut providers = futures_util::stream::FuturesUnordered::new();
@@ -565,7 +565,6 @@ pub async fn run_service(
         let provider_shutdown = shutdown_rx.clone();
         let provider_owner_control = owner_control.clone();
         let provider_manifest_write = manifest_write.clone();
-        let provider_turn_capacity = turn_capacity.clone();
         let provider_probe_capacity = provider_probe_capacity.clone();
         let provider_readiness = provider_readiness.clone();
         let provider_workspace_picker = workspace_picker.clone();
@@ -589,7 +588,6 @@ pub async fn run_service(
                         shared_owner_control: provider_owner_control.clone(),
                         owner_control_managed: true,
                         shared_manifest_write: Some(provider_manifest_write.clone()),
-                        shared_turn_capacity: provider_turn_capacity.clone(),
                         shared_probe_capacity: provider_probe_capacity.clone(),
                         shared_provider_readiness: Some(provider_readiness.clone()),
                         workspace_picker: provider_workspace_picker.clone(),
@@ -1228,7 +1226,6 @@ struct ProviderRuntimeContext {
     shared_owner_control: Option<Arc<OwnerControl>>,
     owner_control_managed: bool,
     shared_manifest_write: Option<Arc<tokio::sync::Mutex<()>>>,
-    shared_turn_capacity: Arc<tokio::sync::Semaphore>,
     shared_probe_capacity: Arc<tokio::sync::Semaphore>,
     shared_provider_readiness: Option<ProviderReadiness>,
     workspace_picker: Option<WorkspacePickerEndpoint>,
@@ -1305,6 +1302,69 @@ async fn settle_nonfatal_turn_error(
     }
 }
 
+fn active_bound_sessions(
+    store: &BridgeStore,
+    bindings: &HashMap<i64, BindingKey>,
+) -> Result<HashSet<(ProviderId, inline_agent_bridge::ProviderSessionId)>, StoreError> {
+    let mut sessions = HashSet::new();
+    for binding in bindings.values() {
+        if let Some(session) = store.get_binding(binding)? {
+            sessions.insert(session);
+        }
+    }
+    Ok(sessions)
+}
+
+fn pending_binding_has_free_lane(
+    store: &BridgeStore,
+    binding: &BindingKey,
+    lanes: &HashMap<i64, tokio::sync::mpsc::Sender<LosslessEventDelivery>>,
+    active_sessions: &HashSet<(ProviderId, inline_agent_bridge::ProviderSessionId)>,
+) -> Result<bool, StoreError> {
+    if lanes.contains_key(&binding.chat_id) {
+        return Ok(false);
+    }
+    Ok(!store
+        .get_binding(binding)?
+        .is_some_and(|session| active_sessions.contains(&session)))
+}
+
+fn promote_turn_lane(
+    lanes: &mut HashMap<i64, tokio::sync::mpsc::Sender<LosslessEventDelivery>>,
+    bindings: &mut HashMap<i64, BindingKey>,
+    source_chat_id: i64,
+    target: BindingKey,
+    sender: tokio::sync::mpsc::Sender<LosslessEventDelivery>,
+) -> bool {
+    if !lanes
+        .get(&source_chat_id)
+        .is_some_and(|current| current.same_channel(&sender))
+        || lanes.contains_key(&target.chat_id)
+    {
+        return false;
+    }
+    lanes.remove(&source_chat_id);
+    lanes.insert(target.chat_id, sender);
+    bindings.remove(&source_chat_id);
+    bindings.insert(target.chat_id, target);
+    true
+}
+
+fn release_turn_lane(
+    lanes: &mut HashMap<i64, tokio::sync::mpsc::Sender<LosslessEventDelivery>>,
+    bindings: &mut HashMap<i64, BindingKey>,
+    chat_id: i64,
+    sender: &tokio::sync::mpsc::Sender<LosslessEventDelivery>,
+) {
+    if lanes
+        .get(&chat_id)
+        .is_some_and(|current| current.same_channel(sender))
+    {
+        lanes.remove(&chat_id);
+        bindings.remove(&chat_id);
+    }
+}
+
 async fn run_provider_installation(
     config: &Config,
     mut installation: ProviderInstallationConfig,
@@ -1319,7 +1379,6 @@ async fn run_provider_installation(
         shared_owner_control,
         owner_control_managed,
         shared_manifest_write,
-        shared_turn_capacity,
         shared_probe_capacity,
         shared_provider_readiness,
         workspace_picker,
@@ -1714,68 +1773,69 @@ async fn run_provider_installation(
         let mut conversations = HashMap::from([(dm_chat_id.get(), active.clone())]);
         let mut active_turns =
             HashMap::<i64, tokio::sync::mpsc::Sender<LosslessEventDelivery>>::new();
+        let mut active_turn_bindings = HashMap::<i64, BindingKey>::new();
         let (lane_promotion_tx, mut lane_promotions) =
-            tokio::sync::mpsc::channel::<TurnLanePromotion>(MAX_ACCOUNT_CONCURRENT_TURNS);
+            tokio::sync::mpsc::channel::<TurnLanePromotion>(TURN_LANE_PROMOTION_QUEUE_CAPACITY);
         let mut turns = futures_util::stream::FuturesUnordered::new();
         let mut catalog_refresh: Option<tokio::task::JoinHandle<()>> = None;
+        let mut scan_cursor = None;
 
         let loop_result: Result<(), Box<dyn std::error::Error>> = 'runtime: loop {
-            while active_turns.len() < MAX_ACCOUNT_CONCURRENT_TURNS {
-                let mut pending_binding = None;
-                let mut incomplete_session_binding = None;
-                for candidate in
-                    bridge_store.pending_inbound_bindings(&binding.installation_id, 64)?
-                {
-                    if active_turns.contains_key(&candidate.chat_id) {
-                        continue;
-                    }
-                    match bridge_store.session_picker_thread_gate(
-                            &candidate.installation_id,
-                            candidate.chat_id,
-                            now_seconds(),
-                        )? {
-                        SessionPickerThreadGate::Ready => {
-                            pending_binding = Some(candidate);
-                            break;
-                        }
-                        SessionPickerThreadGate::Opening => continue,
-                        SessionPickerThreadGate::Failed => {
-                            incomplete_session_binding = Some(candidate);
-                            break;
-                        }
-                    }
-                }
-                if let Some(binding) = incomplete_session_binding {
-                    if let Some(record) =
-                        bridge_store.take_next_inbound(&binding, now_seconds())?
-                    {
-                        publish_inbound_final_send(
-                            &bot,
-                            &bridge_store,
-                            &record.event_id,
-                            record.binding.chat_id,
-                            record.stream_message_id.map(InlineId::new),
-                            "Failed.",
-                            "This Codex session did not finish opening. Send /sessions in the bot's private DM and open it again before sending more messages here.",
-                            InboundState::Failed,
-                            Some("session thread setup is incomplete"),
-                        )
-                        .await?;
-                    }
+            let candidates = bridge_store.pending_inbound_bindings_after(
+                &binding.installation_id,
+                scan_cursor,
+                SCHEDULING_SCAN_BATCH_SIZE,
+            )?;
+            let scan_has_more = candidates.len() == SCHEDULING_SCAN_BATCH_SIZE;
+            scan_cursor = if scan_has_more {
+                candidates.last().map(|(ingest_order, _)| *ingest_order)
+            } else {
+                None
+            };
+            let mut active_sessions = active_bound_sessions(&bridge_store, &active_turn_bindings)?;
+            let mut provider_release_started = false;
+            let mut provider_admission_blocked = false;
+            for (_, pending_binding) in candidates {
+                if !pending_binding_has_free_lane(
+                    &bridge_store,
+                    &pending_binding,
+                    &active_turns,
+                    &active_sessions,
+                )? {
                     continue;
                 }
-                let Some(pending_binding) = pending_binding else {
-                    break;
-                };
-                let Ok(turn_capacity_permit) =
-                    shared_turn_capacity.clone().try_acquire_owned()
-                else {
-                    break;
-                };
+                match bridge_store.session_picker_thread_gate(
+                    &pending_binding.installation_id,
+                    pending_binding.chat_id,
+                    now_seconds(),
+                )? {
+                    SessionPickerThreadGate::Opening => continue,
+                    SessionPickerThreadGate::Failed => {
+                        if let Some(record) =
+                            bridge_store.take_next_inbound(&pending_binding, now_seconds())?
+                        {
+                            publish_inbound_final_send(
+                                &bot,
+                                &bridge_store,
+                                &record.event_id,
+                                record.binding.chat_id,
+                                record.stream_message_id.map(InlineId::new),
+                                "Failed.",
+                                "This Codex session did not finish opening. Send /sessions in the bot's private DM and open it again before sending more messages here.",
+                                InboundState::Failed,
+                                Some("session thread setup is incomplete"),
+                            )
+                            .await?;
+                        }
+                        continue;
+                    }
+                    SessionPickerThreadGate::Ready => {}
+                }
                 // Do not claim durable work while an epoch-wide `/close` owns
                 // the provider. Admission must be nonblocking here because
                 // the close future is polled by this same supervisor loop.
                 let Some(provider_admission_lease) = sessions.try_begin_provider_work()? else {
+                    provider_admission_blocked = true;
                     break;
                 };
                 let Some(record) =
@@ -1844,9 +1904,13 @@ async fn run_provider_installation(
                 let task_identity = settings_identity.clone();
                 let task_chat_id = pending_binding.chat_id;
                 let task_event_id = record.event_id.clone();
+                active_turn_bindings.insert(task_chat_id, pending_binding.clone());
+                if let Some(session) = bridge_store.get_binding(&pending_binding)? {
+                    active_sessions.insert(session);
+                }
+                let task_lane_sender = event_tx.clone();
                 let task_lane_promotions = lane_promotion_tx.clone();
                 turns.push(Box::pin(async move {
-                    let _turn_capacity_permit = turn_capacity_permit;
                     let result = run_inbound_turn(
                         &task_bot,
                         &mut event_rx,
@@ -1864,14 +1928,19 @@ async fn run_provider_installation(
                     )
                     .await;
                     let final_chat_id = conversation.snapshot().binding.chat_id;
-                    (task_chat_id, final_chat_id, task_event_id, result)
+                    (task_chat_id, final_chat_id, task_event_id, task_lane_sender, result)
                 }));
                 // Give an owner `/close` the first chance to acquire the
                 // epoch-wide writer. Continuing this batch could reserve a
                 // later lane and make an otherwise-idle release report busy.
                 if provider_epoch_release {
+                    provider_release_started = true;
                     break;
                 }
+            }
+
+            if provider_release_started || provider_admission_blocked {
+                scan_cursor = None;
             }
 
             tokio::select! {
@@ -1895,8 +1964,13 @@ async fn run_provider_installation(
                             promotion.delivery_chat_id,
                         ) {
                             Ok(()) => {
-                                active_turns.remove(&promotion.source_chat_id);
-                                active_turns.insert(promotion.delivery_chat_id, promotion.sender);
+                                accepted = promote_turn_lane(
+                                    &mut active_turns,
+                                    &mut active_turn_bindings,
+                                    promotion.source_chat_id,
+                                    promotion.binding,
+                                    promotion.sender,
+                                );
                             }
                             Err(error) => {
                                 accepted = false;
@@ -1916,9 +1990,9 @@ async fn run_provider_installation(
                     let _ = promotion.acknowledged.send(accepted);
                 }
                 completed = turns.next(), if !turns.is_empty() => {
-                    if let Some((source_chat_id, final_chat_id, event_id, result)) = completed {
-                        active_turns.remove(&source_chat_id);
-                        active_turns.remove(&final_chat_id);
+                    if let Some((source_chat_id, final_chat_id, event_id, sender, result)) = completed {
+                        release_turn_lane(&mut active_turns, &mut active_turn_bindings, source_chat_id, &sender);
+                        release_turn_lane(&mut active_turns, &mut active_turn_bindings, final_chat_id, &sender);
                         if let Err(error) = result {
                             crate::telemetry::report_bridge_runtime_error(
                                 provider_id.as_str(),
@@ -1947,6 +2021,7 @@ async fn run_provider_installation(
                         }
                     }
                 }
+                _ = tokio::task::yield_now(), if scan_has_more && !provider_release_started && !provider_admission_blocked => {}
                 deferred = deferred_inbound_rx.recv() => {
                     let Some(record) = deferred else {
                         break 'runtime Err(io::Error::new(
@@ -2152,7 +2227,6 @@ async fn run_provider_installation(
                             identity: &settings_identity,
                             turn_active: false,
                         },
-                        shared_turn_capacity.available_permits() == 0,
                     )
                     .await
                     {
@@ -2201,8 +2275,9 @@ async fn run_provider_installation(
                         safe_diagnostic(&description)
                     );
                     active_turns.clear();
+                    active_turn_bindings.clear();
                     if tokio::time::timeout(Duration::from_secs(10), async {
-                        while let Some((source_chat_id, delivery_chat_id, _event_id, result)) = turns.next().await {
+                        while let Some((source_chat_id, delivery_chat_id, _event_id, _sender, result)) = turns.next().await {
                             if let Err(error) = result {
                                 eprintln!(
                                     "Turn cleanup failed for source chat {source_chat_id}, delivery chat {delivery_chat_id}: {}",
@@ -2417,8 +2492,9 @@ async fn run_provider_installation(
         }
 
         active_turns.clear();
+        active_turn_bindings.clear();
         if tokio::time::timeout(Duration::from_secs(10), async {
-            while let Some((source_chat_id, delivery_chat_id, _event_id, result)) = turns.next().await {
+            while let Some((source_chat_id, delivery_chat_id, _event_id, _sender, result)) = turns.next().await {
                 if let Err(error) = result {
                     eprintln!(
                         "Turn cleanup failed for source chat {source_chat_id}, delivery chat {delivery_chat_id}: {}",

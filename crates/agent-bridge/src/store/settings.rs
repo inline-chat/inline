@@ -24,6 +24,17 @@ pub enum SettingsUpdateOutcome {
     Stale(ChatSettingsRecord),
 }
 
+/// The setting explicitly selected by the owner. A model change also resets
+/// this conversation's reasoning selection. Future conversations also
+/// clear the old model's reasoning selection when model changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatSettingsField {
+    Model,
+    Reasoning,
+    Permissions,
+    Verbose,
+}
+
 impl BridgeStore {
     /// Loads conversation settings, seeding a new workspace/session from the
     /// provider installation's most recently selected defaults.
@@ -159,17 +170,26 @@ impl BridgeStore {
         Ok(record)
     }
 
-    /// Compare-and-swap one full settings record and copy its values to the
-    /// installation defaults for future, previously unbound conversations.
+    /// Compare-and-swap one explicitly selected setting. Inherited or
+    /// provider-changed values on this conversation cannot overwrite the
+    /// installation defaults for unrelated fields.
     pub fn update_chat_settings(
         &self,
         expected_revision: i64,
         next: &ChatSettingsRecord,
+        field: ChatSettingsField,
         now: i64,
     ) -> StoreResult<SettingsUpdateOutcome> {
-        validate_setting("model", next.model.as_deref())?;
-        validate_setting("reasoning", next.reasoning.as_deref())?;
-        validate_setting("permissions", next.permissions.as_deref())?;
+        match field {
+            ChatSettingsField::Model => validate_setting("model", next.model.as_deref())?,
+            ChatSettingsField::Reasoning => {
+                validate_setting("reasoning", next.reasoning.as_deref())?
+            }
+            ChatSettingsField::Permissions => {
+                validate_setting("permissions", next.permissions.as_deref())?
+            }
+            ChatSettingsField::Verbose => {}
+        }
         let connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.unchecked_transaction()?;
         ensure_defaults(&transaction, &next.binding.installation_id, now)?;
@@ -189,29 +209,82 @@ impl BridgeStore {
                 revision: expected_revision,
             }
         })?;
-        let changed = transaction.execute(
-            "UPDATE chat_settings SET
-                model = ?4,
-                reasoning = ?5,
-                permissions = ?6,
-                verbose = ?7,
-                revision = ?8,
-                updated_at = ?9
-             WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
-               AND revision = ?10",
-            params![
-                next.binding.installation_id.as_str(),
-                next.binding.chat_id,
-                next.binding.workspace_id.as_str(),
-                next.model,
-                next.reasoning,
-                next.permissions,
-                next.verbose,
-                revision,
-                now,
-                expected_revision,
-            ],
-        )?;
+        let update_chat = match field {
+            ChatSettingsField::Model => {
+                "UPDATE chat_settings SET model = ?4, reasoning = NULL,
+                    revision = ?5, updated_at = ?6
+                 WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                   AND revision = ?7"
+            }
+            ChatSettingsField::Reasoning => {
+                "UPDATE chat_settings SET reasoning = ?4,
+                    revision = ?5, updated_at = ?6
+                 WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                   AND revision = ?7"
+            }
+            ChatSettingsField::Permissions => {
+                "UPDATE chat_settings SET permissions = ?4,
+                    revision = ?5, updated_at = ?6
+                 WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                   AND revision = ?7"
+            }
+            ChatSettingsField::Verbose => {
+                "UPDATE chat_settings SET verbose = ?4,
+                    revision = ?5, updated_at = ?6
+                 WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                   AND revision = ?7"
+            }
+        };
+        let changed = match field {
+            ChatSettingsField::Model => transaction.execute(
+                update_chat,
+                params![
+                    next.binding.installation_id.as_str(),
+                    next.binding.chat_id,
+                    next.binding.workspace_id.as_str(),
+                    next.model,
+                    revision,
+                    now,
+                    expected_revision
+                ],
+            )?,
+            ChatSettingsField::Reasoning => transaction.execute(
+                update_chat,
+                params![
+                    next.binding.installation_id.as_str(),
+                    next.binding.chat_id,
+                    next.binding.workspace_id.as_str(),
+                    next.reasoning,
+                    revision,
+                    now,
+                    expected_revision
+                ],
+            )?,
+            ChatSettingsField::Permissions => transaction.execute(
+                update_chat,
+                params![
+                    next.binding.installation_id.as_str(),
+                    next.binding.chat_id,
+                    next.binding.workspace_id.as_str(),
+                    next.permissions,
+                    revision,
+                    now,
+                    expected_revision
+                ],
+            )?,
+            ChatSettingsField::Verbose => transaction.execute(
+                update_chat,
+                params![
+                    next.binding.installation_id.as_str(),
+                    next.binding.chat_id,
+                    next.binding.workspace_id.as_str(),
+                    next.verbose,
+                    revision,
+                    now,
+                    expected_revision
+                ],
+            )?,
+        };
         if changed != 1 {
             let current = load_settings(&transaction, &next.binding)?.ok_or_else(|| {
                 StoreError::MissingSettings {
@@ -223,32 +296,42 @@ impl BridgeStore {
             transaction.commit()?;
             return Ok(SettingsUpdateOutcome::Stale(current));
         }
-        transaction.execute(
-            "UPDATE installation_settings_defaults SET
-                model = ?2,
-                reasoning = ?3,
-                permissions = ?4,
-                verbose = ?5,
-                updated_at = ?6
-             WHERE installation_id = ?1",
-            params![
-                next.binding.installation_id.as_str(),
-                next.model,
-                next.reasoning,
-                next.permissions,
-                next.verbose,
-                now,
-            ],
-        )?;
-        let applied = ChatSettingsRecord {
-            binding: next.binding.clone(),
-            model: next.model.clone(),
-            reasoning: next.reasoning.clone(),
-            permissions: next.permissions.clone(),
-            verbose: next.verbose,
-            revision,
-            updated_at: now,
+        match field {
+            ChatSettingsField::Model => transaction.execute(
+                "UPDATE installation_settings_defaults SET model = ?2, reasoning = NULL,
+                    updated_at = ?3 WHERE installation_id = ?1",
+                params![next.binding.installation_id.as_str(), next.model, now],
+            )?,
+            // Reasoning IDs belong to a model. An older chat can still use a
+            // different model after another chat changes the launch default.
+            ChatSettingsField::Reasoning => transaction.execute(
+                "UPDATE installation_settings_defaults SET reasoning = ?2,
+                    updated_at = ?3 WHERE installation_id = ?1 AND model IS ?4",
+                params![
+                    next.binding.installation_id.as_str(),
+                    next.reasoning,
+                    now,
+                    current.model
+                ],
+            )?,
+            ChatSettingsField::Permissions => transaction.execute(
+                "UPDATE installation_settings_defaults SET permissions = ?2,
+                    updated_at = ?3 WHERE installation_id = ?1",
+                params![next.binding.installation_id.as_str(), next.permissions, now],
+            )?,
+            ChatSettingsField::Verbose => transaction.execute(
+                "UPDATE installation_settings_defaults SET verbose = ?2,
+                    updated_at = ?3 WHERE installation_id = ?1",
+                params![next.binding.installation_id.as_str(), next.verbose, now],
+            )?,
         };
+        let applied = load_settings(&transaction, &next.binding)?.ok_or_else(|| {
+            StoreError::MissingSettings {
+                installation_id: next.binding.installation_id.to_string(),
+                chat_id: next.binding.chat_id,
+                workspace_id: next.binding.workspace_id.to_string(),
+            }
+        })?;
         transaction.commit()?;
         Ok(SettingsUpdateOutcome::Applied(applied))
     }
@@ -396,9 +479,9 @@ mod tests {
         assert!(!current.verbose);
         let mut next = current.clone();
         next.model = Some("gpt-5.4".to_string());
-        next.reasoning = Some("high".to_string());
-        next.verbose = true;
-        let applied = store.update_chat_settings(1, &next, 2).expect("update");
+        let applied = store
+            .update_chat_settings(1, &next, ChatSettingsField::Model, 2)
+            .expect("update");
         let SettingsUpdateOutcome::Applied(applied) = applied else {
             panic!("expected applied settings");
         };
@@ -406,7 +489,7 @@ mod tests {
         assert_eq!(applied.model.as_deref(), Some("gpt-5.4"));
 
         let stale = store
-            .update_chat_settings(1, &next, 3)
+            .update_chat_settings(1, &next, ChatSettingsField::Model, 3)
             .expect("stale update");
         assert_eq!(stale, SettingsUpdateOutcome::Stale(applied));
     }
@@ -416,10 +499,19 @@ mod tests {
         let (store, binding) = fixture();
         let mut current = store.chat_settings(&binding, 1).expect("settings");
         current.permissions = Some(":workspace".to_string());
+        store
+            .update_chat_settings(
+                current.revision,
+                &current,
+                ChatSettingsField::Permissions,
+                2,
+            )
+            .expect("update");
+        let mut current = store.chat_settings(&binding, 2).expect("updated settings");
         current.verbose = true;
         store
-            .update_chat_settings(current.revision, &current, 2)
-            .expect("update");
+            .update_chat_settings(current.revision, &current, ChatSettingsField::Verbose, 3)
+            .expect("update verbose");
 
         let mut next_binding = binding.clone();
         next_binding.chat_id = 99;
@@ -436,12 +528,29 @@ mod tests {
         let (store, binding) = fixture();
         let mut current = store.chat_settings(&binding, 1).expect("settings");
         current.model = Some("installation-model".to_string());
+        store
+            .update_chat_settings(current.revision, &current, ChatSettingsField::Model, 2)
+            .expect("update defaults");
+        let mut current = store.chat_settings(&binding, 2).expect("updated settings");
         current.reasoning = Some("high".to_string());
+        store
+            .update_chat_settings(current.revision, &current, ChatSettingsField::Reasoning, 3)
+            .expect("update reasoning");
+        let mut current = store.chat_settings(&binding, 3).expect("updated settings");
         current.permissions = Some(":workspace".to_string());
+        store
+            .update_chat_settings(
+                current.revision,
+                &current,
+                ChatSettingsField::Permissions,
+                4,
+            )
+            .expect("update permissions");
+        let mut current = store.chat_settings(&binding, 4).expect("updated settings");
         current.verbose = true;
         store
-            .update_chat_settings(current.revision, &current, 2)
-            .expect("update defaults");
+            .update_chat_settings(current.revision, &current, ChatSettingsField::Verbose, 5)
+            .expect("update verbose");
 
         let mut bound_chat = binding.clone();
         bound_chat.chat_id = 99;
@@ -460,10 +569,24 @@ mod tests {
         let (store, source) = fixture();
         let mut source_settings = store.chat_settings(&source, 1).expect("source settings");
         source_settings.model = Some("source-model".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Model,
+                2,
+            )
+            .expect("source update");
+        let mut source_settings = store.chat_settings(&source, 2).expect("source settings");
         source_settings.verbose = true;
         store
-            .update_chat_settings(source_settings.revision, &source_settings, 2)
-            .expect("source update");
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Verbose,
+                3,
+            )
+            .expect("source verbose update");
         let mut child = source.clone();
         child.chat_id = 99;
         let inherited = store
@@ -475,7 +598,12 @@ mod tests {
         let mut child_settings = inherited;
         child_settings.model = Some("child-model".to_string());
         let applied = store
-            .update_chat_settings(child_settings.revision, &child_settings, 4)
+            .update_chat_settings(
+                child_settings.revision,
+                &child_settings,
+                ChatSettingsField::Model,
+                4,
+            )
             .expect("child update");
         assert!(matches!(applied, SettingsUpdateOutcome::Applied(_)));
         let preserved = store
@@ -485,12 +613,199 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_defaults_follow_only_the_matching_model() {
+        let (store, chat_a) = fixture();
+        let mut a = store.chat_settings(&chat_a, 1).unwrap();
+        a.model = Some("model-a".into());
+        store
+            .update_chat_settings(a.revision, &a, ChatSettingsField::Model, 2)
+            .unwrap();
+        let mut chat_b = chat_a.clone();
+        chat_b.chat_id = 98;
+        let mut b = store.chat_settings(&chat_b, 3).unwrap();
+        b.model = Some("model-b".into());
+        store
+            .update_chat_settings(b.revision, &b, ChatSettingsField::Model, 4)
+            .unwrap();
+        let mut b = store.chat_settings(&chat_b, 5).unwrap();
+        b.reasoning = Some("b-only".into());
+        store
+            .update_chat_settings(b.revision, &b, ChatSettingsField::Reasoning, 6)
+            .unwrap();
+
+        let mut a = store.chat_settings(&chat_a, 7).unwrap();
+        a.reasoning = Some("a-only".into());
+        // Unselected record fields cannot influence default propagation.
+        a.model = Some("model-b".into());
+        store
+            .update_chat_settings(a.revision, &a, ChatSettingsField::Reasoning, 8)
+            .unwrap();
+        let a = store.chat_settings(&chat_a, 9).unwrap();
+        assert_eq!(a.model.as_deref(), Some("model-a"));
+        assert_eq!(a.reasoning.as_deref(), Some("a-only"));
+        let mut future = chat_a.clone();
+        future.chat_id = 99;
+        let defaults = store.chat_settings(&future, 10).unwrap();
+        assert_eq!(defaults.model.as_deref(), Some("model-b"));
+        assert_eq!(defaults.reasoning.as_deref(), Some("b-only"));
+
+        // An unset model is also a legitimate match, using NULL-safe SQL.
+        let mut b = store.chat_settings(&chat_b, 11).unwrap();
+        b.model = None;
+        store
+            .update_chat_settings(b.revision, &b, ChatSettingsField::Model, 12)
+            .unwrap();
+        let mut b = store.chat_settings(&chat_b, 13).unwrap();
+        b.reasoning = Some("provider-default-effort".into());
+        store
+            .update_chat_settings(b.revision, &b, ChatSettingsField::Reasoning, 14)
+            .unwrap();
+        future.chat_id = 100;
+        let defaults = store.chat_settings(&future, 15).unwrap();
+        assert_eq!(defaults.model, None);
+        assert_eq!(
+            defaults.reasoning.as_deref(),
+            Some("provider-default-effort")
+        );
+    }
+
+    #[test]
+    fn selected_field_updates_do_not_copy_child_configuration_into_installation_defaults() {
+        let (store, source) = fixture();
+        let mut source_settings = store.chat_settings(&source, 1).expect("source settings");
+        source_settings.model = Some("model-a".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Model,
+                2,
+            )
+            .expect("select model");
+        let mut source_settings = store.chat_settings(&source, 2).expect("source settings");
+        source_settings.reasoning = Some("high".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Reasoning,
+                3,
+            )
+            .expect("select reasoning");
+        let mut source_settings = store.chat_settings(&source, 3).expect("source settings");
+        source_settings.permissions = Some("bypassPermissions".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Permissions,
+                4,
+            )
+            .expect("select permissions");
+
+        let mut child = source.clone();
+        child.chat_id = 99;
+        store
+            .apply_agent_thread_configuration(&child, Some("model-b"), Some("low"), 5)
+            .expect("materialize child Agent context");
+        let mut child_settings = store.chat_settings(&child, 5).expect("child settings");
+        child_settings.verbose = true;
+        store
+            .update_chat_settings(
+                child_settings.revision,
+                &child_settings,
+                ChatSettingsField::Verbose,
+                6,
+            )
+            .expect("select verbose");
+
+        let mut future = source.clone();
+        future.chat_id = 100;
+        let seeded = store.chat_settings(&future, 7).expect("future settings");
+        assert_eq!(seeded.model.as_deref(), Some("model-a"));
+        assert_eq!(seeded.reasoning.as_deref(), Some("high"));
+        assert_eq!(seeded.permissions.as_deref(), Some("bypassPermissions"));
+        assert!(seeded.verbose);
+
+        let mut child_settings = store.chat_settings(&child, 7).expect("child settings");
+        child_settings.model = Some("model-c".to_string());
+        store
+            .update_chat_settings(
+                child_settings.revision,
+                &child_settings,
+                ChatSettingsField::Model,
+                8,
+            )
+            .expect("select a new model");
+        let mut later = source.clone();
+        later.chat_id = 101;
+        let seeded = store.chat_settings(&later, 9).expect("later settings");
+        assert_eq!(seeded.model.as_deref(), Some("model-c"));
+        assert_eq!(
+            seeded.reasoning, None,
+            "old-model reasoning must not seed a new model"
+        );
+        assert_eq!(seeded.permissions.as_deref(), Some("bypassPermissions"));
+        assert!(seeded.verbose);
+    }
+
+    #[test]
+    fn same_value_permission_reselection_updates_future_launch_preference() {
+        let (store, source) = fixture();
+        let mut source_settings = store.chat_settings(&source, 1).expect("source settings");
+        source_settings.permissions = Some("bypassPermissions".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Permissions,
+                2,
+            )
+            .expect("first selection");
+        let mut child = source.clone();
+        child.chat_id = 99;
+        let inherited = store
+            .inherit_chat_settings(&source, &child, 3)
+            .expect("child snapshot");
+
+        source_settings = store.chat_settings(&source, 3).expect("source settings");
+        source_settings.permissions = Some("default".to_string());
+        store
+            .update_chat_settings(
+                source_settings.revision,
+                &source_settings,
+                ChatSettingsField::Permissions,
+                4,
+            )
+            .expect("change launch preference");
+        assert_eq!(inherited.permissions.as_deref(), Some("bypassPermissions"));
+        store
+            .update_chat_settings(
+                inherited.revision,
+                &inherited,
+                ChatSettingsField::Permissions,
+                5,
+            )
+            .expect("reselect same child value");
+        let mut future = source.clone();
+        future.chat_id = 100;
+        assert_eq!(
+            store
+                .chat_settings(&future, 6)
+                .expect("future settings")
+                .permissions
+                .as_deref(),
+            Some("bypassPermissions")
+        );
+    }
+
+    #[test]
     fn invalid_values_are_rejected_before_write() {
         let (store, binding) = fixture();
         let mut current = store.chat_settings(&binding, 1).expect("settings");
         current.model = Some("bad\nmodel".to_string());
         assert!(matches!(
-            store.update_chat_settings(current.revision, &current, 2),
+            store.update_chat_settings(current.revision, &current, ChatSettingsField::Model, 2),
             Err(StoreError::InvalidSettingValue { kind: "model" })
         ));
     }
