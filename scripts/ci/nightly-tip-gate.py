@@ -201,7 +201,11 @@ def output(**values):
 def main():
     github = GitHub(os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN"))
     mode = sys.argv[1] if len(sys.argv) > 1 else "select"
-    if mode == "select":
+    if mode == "select-green":
+        sha, problem = inspect_main(github)
+        print(f"Latest main: {sha}; gate: {problem or 'green'}")
+        output(sha=sha, should_release=str(problem is None).lower())
+    elif mode == "select":
         sha, problem = inspect_main(github)
         if problem:
             print(f"Skipping nightly tip: {problem} ({sha})")

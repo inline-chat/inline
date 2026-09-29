@@ -280,7 +280,7 @@ jobs:
       - name: Validate active workflows
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
-          bun test scripts/ci/workflow-policy.test.ts
+          bun test scripts/ci/workflow-policy.test.ts scripts/ci/ios-early-testers.test.ts
           python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
         run: |
