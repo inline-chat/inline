@@ -27,11 +27,15 @@ plugin = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else home / "plugins" 
 manifest = yaml.safe_load((plugin / "plugin.yaml").read_text())
 assert "inline" in manifest.get("provides_tools", []), "inline tool missing from plugin.yaml"
 
-# Scan even before the removal deadline: deprecated facade imports are future failures.
+# Older hosts retain the deprecated-import scanner. After the compat layer's
+# removal, plugin_compat remains only as updater stubs; real loading below is
+# the authoritative import check on those hosts.
 if importlib.util.find_spec("hermes_cli.plugin_compat"):
-    from hermes_cli.plugin_compat import scan_plugin
-    hits = scan_plugin(plugin)
-    assert not hits, f"deprecated Hermes imports: {hits}"
+    from hermes_cli import plugin_compat
+    scan_plugin = getattr(plugin_compat, "scan_plugin", None)
+    if scan_plugin is not None:
+        hits = scan_plugin(plugin)
+        assert not hits, f"deprecated Hermes imports: {hits}"
 if importlib.util.find_spec("hermes_cli.plugin_validate"):
     from hermes_cli.plugin_validate import validate_plugin_dir
     report = validate_plugin_dir(plugin)
