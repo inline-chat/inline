@@ -5599,10 +5599,13 @@ var require_websocket_server = __commonJS(function(exports, module) {
 import http from "node:http";
 
 // src/sidecar/inbound-stream.ts
+import { randomUUID } from "node:crypto";
+
 class InboundStream {
   consumer = null;
   stopped = false;
   changed = new Set;
+  pending = new Map;
   attach(consumer) {
     if (this.stopped) {
       consumer.end();
@@ -5621,6 +5624,13 @@ class InboundStream {
     this.wake();
     previous?.end();
   }
+  acknowledge(deliveryId) {
+    const receipt = this.pending.get(deliveryId);
+    if (!receipt)
+      return;
+    receipt.acknowledged = true;
+    this.wake();
+  }
   close() {
     this.stopped = true;
     const previous = this.consumer;
@@ -5629,54 +5639,41 @@ class InboundStream {
     previous?.end();
   }
   async deliver(event) {
-    const line = JSON.stringify(event) + `
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("Inbound delivery requires an event object");
+    }
+    const deliveryId = randomUUID();
+    const line = JSON.stringify({ ...event, _inlineDeliveryId: deliveryId }) + `
 `;
-    while (!this.stopped) {
-      const owner = this.consumer;
-      if (!owner) {
-        await new Promise((resolve) => this.changed.add(resolve));
-        continue;
-      }
-      let cleanup = () => {};
-      const drained = new Promise((resolve) => {
-        const finish = (ok) => {
-          cleanup();
-          resolve(ok);
-        };
-        const onDrain = () => finish(true);
-        const onChange = () => finish(false);
-        cleanup = () => {
-          owner.off("drain", onDrain);
-          owner.off("close", onChange);
-          owner.off("error", onChange);
-          this.changed.delete(onChange);
-        };
-        owner.once("drain", onDrain);
-        owner.once("close", onChange);
-        owner.once("error", onChange);
-        this.changed.add(onChange);
-      });
-      try {
-        if (owner.destroyed || owner.writableEnded) {
-          if (this.consumer === owner)
-            this.consumer = null;
+    const receipt = { acknowledged: false };
+    this.pending.set(deliveryId, receipt);
+    let writtenTo = null;
+    try {
+      while (!this.stopped) {
+        if (receipt.acknowledged)
+          return;
+        const owner = this.consumer;
+        if (owner && owner !== writtenTo) {
+          try {
+            if (owner.destroyed || owner.writableEnded) {
+              if (this.consumer === owner)
+                this.consumer = null;
+              continue;
+            }
+            writtenTo = owner;
+            owner.write(line);
+          } catch {
+            if (this.consumer === owner)
+              this.consumer = null;
+          }
           continue;
         }
-        const accepted = owner.write(line);
-        if (this.consumer !== owner || this.stopped)
-          continue;
-        if (accepted)
-          return;
-        if (await drained && this.consumer === owner && !this.stopped)
-          return;
-      } catch {
-        if (this.consumer === owner)
-          this.consumer = null;
-      } finally {
-        cleanup();
+        await new Promise((resolve) => this.changed.add(resolve));
       }
+      throw new Error("Inbound stream closed before delivery completed");
+    } finally {
+      this.pending.delete(deliveryId);
     }
-    throw new Error("Inbound stream closed before delivery completed");
   }
   wake() {
     for (const resolve of this.changed)
@@ -46757,7 +46754,7 @@ function readUsers(result, kind) {
 }
 
 // src/sidecar/telemetry.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 var TELEMETRY_TIMEOUT_MS = 2000;
 var TELEMETRY_DEDUP_MS = 5 * 60000;
@@ -46818,7 +46815,7 @@ function buildHermesTelemetryEvent(operation, error, options = {}) {
   const exception = error instanceof Error ? error : new Error(String(error ?? "Unknown error"));
   const frames = parseStack(exception, env);
   return {
-    event_id: randomUUID().replaceAll("-", ""),
+    event_id: randomUUID2().replaceAll("-", ""),
     timestamp: new Date().toISOString(),
     platform: "javascript",
     level: "error",
@@ -47088,6 +47085,13 @@ async function handleRequest(req, res) {
   }
   if (req.method !== "POST") {
     writeJson(res, 405, { ok: false, error: "method not allowed", errorKind: "bad_format" });
+    return;
+  }
+  if (url.pathname === "/inbound/ack") {
+    const body2 = asRecord(await readJsonBody(req));
+    const deliveryId = readRequiredString(body2, "deliveryId");
+    inboundStream.acknowledge(deliveryId);
+    writeJson(res, 200, { ok: true, result: {} });
     return;
   }
   if (!connected && url.pathname !== "/shutdown") {

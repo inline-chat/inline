@@ -514,15 +514,17 @@ def _compatibility_status() -> dict:
             return {"ok": False, "reason": "plugin_load_failed"}
         if "inline" not in loaded.tools_registered:
             return {"ok": False, "reason": "tool_not_registered"}
-        # Older supported Hermes releases predate the moved-import scanner.
-        # Their loader still checks real imports and plugin registration above.
+        # The moved-import scanner is optional: hosts may predate it or retain
+        # only updater stubs after removing the compat layer. Actual loading and
+        # this installation's tool registration above remain mandatory.
         try:
-            from hermes_cli.plugin_compat import plugin_hits
+            import hermes_cli.plugin_compat as plugin_compat
         except ModuleNotFoundError as error:
             if error.name != "hermes_cli.plugin_compat":
                 raise
         else:
-            if plugin_hits(loaded.manifest):
+            plugin_hits = getattr(plugin_compat, "plugin_hits", None)
+            if plugin_hits is not None and plugin_hits(loaded.manifest):
                 return {"ok": False, "reason": "deprecated_imports"}
         return {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
     except Exception:

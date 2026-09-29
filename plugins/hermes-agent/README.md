@@ -25,6 +25,7 @@ Supported:
 - `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, and `inline.token` auth paths, including simple `${ENV_NAME}` config references.
 - Supervised loopback Node sidecar using the Inline realtime SDK.
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
+- Inbound SDK receipts remain pending until Python handles the event. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Agent-button preflight retries are bounded, then show a retry prompt so an unavailable button cannot indefinitely block the shared action cursor. Shutdown leaves unresolved receipts available for catch-up; this is an at-least-once handoff, not a durable exactly-once guarantee for model turns or external effects.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
@@ -33,7 +34,7 @@ Supported:
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
 - Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
-- Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged immediately and becomes a normal Hermes turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
+- Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged after its target and access checks succeed, then enters Hermes as a normal turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
 - Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
@@ -334,6 +335,22 @@ Access control follows Hermes' native platform model:
 
 Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
 
+`open` controls intake; it does not grant permission to use the bot. After
+Inline's sender and group/thread restrictions pass, the adapter asks Hermes'
+registered authorization callback before executing local commands, creating
+reply threads, downloading media, collecting context, or exposing runtime
+settings. This uses the same pairing and profile-aware authorization as native
+Hermes adapters. An unapproved sender reaches Hermes' pairing or rejection
+flow with a minimal text event and no preceding adapter mutations or media work.
+Pairing approval does not override an explicit Inline allowlist, disabled
+policy, or excluded group. DMs remain exempt from `allowed_chats`.
+Child-thread authorization preserves both the child and parent chat IDs so
+Hermes can select the correct profile. If required group metadata is unavailable,
+the adapter denies the operation instead of guessing a profile. Controls that
+change the parent's reply-thread mode also require access to that parent;
+thread-local model and following settings remain available to an authorized
+child-thread user.
+
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
@@ -361,11 +378,14 @@ platforms:
         skills: ["support-triage", "incident-report"]
 ```
 
-Inline-native button callbacks, such as approvals and clarify choices, require
-the clicking actor to pass an explicit Inline or global Hermes allowlist, or
-`INLINE_ALLOW_ALL_USERS=true` / `GATEWAY_ALLOW_ALL_USERS=true`. This includes
-model-picker callbacks. The stricter callback gate prevents group-visible
-buttons from becoming a bypass when message intake is otherwise `open`.
+Inline-native button callbacks, including approvals, clarify choices,
+model pickers, and thread controls, use the same local restrictions and Hermes
+authorization callback. Pairing-approved users can use them without a second
+Inline allowlist. A denial, error, or unknown result from a registered callback
+blocks the action. Only standalone adapters without a registered callback use
+explicit Inline/global allowlists or allow-all settings as a fallback; `open`
+alone never authorizes controls. Settings requests from unauthorized users show
+an access guide without runtime or model information.
 Adapter-owned controls use `system:` action IDs and stay in these deterministic
 handlers. Agent-authored callbacks use `agent:` IDs and follow the ordinary
 message intake policy because they are conversational input, not approval or

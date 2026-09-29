@@ -70,7 +70,10 @@ _DEDUP_MAX_SIZE = 5000
 _DEDUP_WINDOW_SECONDS = 48 * 3600
 _CHAT_INFO_CACHE_SECONDS = 10 * 60
 _CHAT_INFO_CACHE_MAX_SIZE = 512
-_BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS = 2.0
+_CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS = 2.0
+_INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = 30.0
+_INBOUND_RETRY_INITIAL_SECONDS = 1.0
+_MAX_INBOUND_DELIVERIES = 16
 # Provider discovery may invoke host CLIs. Keep repeated panel opens and
 # unrelated mutations off that slow path while always injecting the live
 # current/default model into the document below.
@@ -189,6 +192,10 @@ _INLINE_DISPLAY_DEFAULTS = {
     "busy_ack_detail": False,
     "long_running_notifications": True,
 }
+
+
+class InlineInboundDeferred(RuntimeError):
+    """Pre-effect dependency unavailable; keep the SDK delivery unacknowledged."""
 
 
 class InlineSidecarError(RuntimeError):
@@ -973,6 +980,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._last_catalog_sync: Optional[Dict[str, Any]] = None
         self._inbound_task: Optional[asyncio.Task] = None
         self._bot_settings_tasks: set[asyncio.Task] = set()
+        self._inbound_deliveries: Dict[str, asyncio.Task] = {}
         self._bot_settings_locks: Dict[str, asyncio.Lock] = {}
         self._bot_settings_lock_users: Dict[str, int] = {}
         self._bot_settings_model_catalog_cache: Optional[tuple[float, List[Dict[str, Any]]]] = None
@@ -1147,7 +1155,7 @@ class InlineAdapter(BasePlatformAdapter):
         try:
             info = await asyncio.wait_for(
                 self._get_chat_info(chat_id),
-                timeout=_BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS,
+                timeout=_CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
             logger.warning("[inline] agent settings chat metadata timed out")
@@ -1163,13 +1171,15 @@ class InlineAdapter(BasePlatformAdapter):
         scope_chat_id = parent_chat_id or chat_id
         is_reply_thread = bool(parent_chat_id)
         chat_type = self._bot_settings_chat_type(info)
-        can_inspect = self._allowed(chat_type, actor_id) and self._chat_allowed(
-            chat_id,
-            chat_id if is_reply_thread else None,
-            parent_chat_id,
+        can_inspect = self._actor_authorization(
+            chat_type, actor_id, chat_id,
+            thread_id=chat_id if is_reply_thread else None,
+            parent_chat_id=parent_chat_id,
+            is_bot=_inline_sender_profile(event).get("bot") is True,
         )
-        if not can_inspect:
-            return {"access": "guideOnly", "scope_id": scope_chat_id, "reply_threads": "auto"}
+        if can_inspect is not True:
+            return {"access": "guideOnly", "scope_id": scope_chat_id, "reply_threads": "auto",
+                    **({"unavailable_reason": "authorization"} if can_inspect is None else {})}
 
         source = self.build_source(
             chat_id=chat_id,
@@ -1180,7 +1190,8 @@ class InlineAdapter(BasePlatformAdapter):
             parent_chat_id=parent_chat_id,
         )
         runner = self._bot_settings_runner()
-        can_modify = self._actor_authorized(chat_type, actor_id)
+        can_modify = can_inspect
+        can_set_reply_threads = not is_reply_thread or await self._chat_actor_authorized(scope_chat_id, actor_id)
         context: Dict[str, Any] = {
             "access": "full" if can_modify else "readOnly",
             "scope_id": scope_chat_id,
@@ -1189,7 +1200,8 @@ class InlineAdapter(BasePlatformAdapter):
             "chat_type": chat_type,
             "is_reply_thread": is_reply_thread,
             "following": None if chat_type == "dm" else self._chat_follow_mode_following(info),
-            "reply_threads": self._reply_thread_mode_for_chat(scope_chat_id),
+            "reply_threads": self._reply_thread_mode_for_chat(scope_chat_id) if can_set_reply_threads else None,
+            "can_set_reply_threads": can_set_reply_threads,
             "can_set_default_model": can_modify,
             "source": source,
             "runner": runner,
@@ -1323,7 +1335,7 @@ class InlineAdapter(BasePlatformAdapter):
         if context.get("access") == "guideOnly":
             unavailable_text = (
                 "Hermes could not verify this chat. Try again when the bot is reachable."
-                if context.get("unavailable_reason") == "chat_metadata"
+                if context.get("unavailable_reason") in {"chat_metadata", "authorization"}
                 else "This chat is not allowed by Hermes' access policy."
             )
             return {
@@ -1386,15 +1398,26 @@ class InlineAdapter(BasePlatformAdapter):
                 "id": "following", "label": "Following", "description": "Wake on eligible activity.", **common,
                 "control": {"oneofKind": "toggle", "toggle": {"value": bool(context.get("following"))}},
             }]})
-        sections.append({"id": "replies", "items": [{
-                "id": "reply-threads", "label": "Reply in threads", **common,
-                "control": {"oneofKind": "select", "select": {
-                    "value": context.get("reply_threads") or "auto",
-                    "options": [
-                        {"value": "auto", "label": "Auto", "description": "Agent decides.", "disabled": False},
-                        {"value": "on", "label": "On", "description": "Always use threads.", "disabled": False},
-                        {"value": "off", "label": "Off", "description": "Stay in chat.", "disabled": False},
-                    ],
+        if context.get("can_set_reply_threads"):
+            sections.append({"id": "replies", "items": [{
+                    "id": "reply-threads", "label": "Reply in threads", **common,
+                    "control": {"oneofKind": "select", "select": {
+                        "value": context.get("reply_threads") or "auto",
+                        "options": [
+                            {"value": "auto", "label": "Auto", "description": "Agent decides.", "disabled": False},
+                            {"value": "on", "label": "On", "description": "Always use threads.", "disabled": False},
+                            {"value": "off", "label": "Off", "description": "Stay in chat.", "disabled": False},
+                        ],
+                    }},
+                }]})
+        else:
+            sections.append({"id": "replies", "items": [{
+                "id": "reply-threads-access", "label": "Reply in threads", "disabled": False,
+                "control": {"oneofKind": "info", "info": {
+                    "text": ("Parent chat access is temporarily unavailable. Try again."
+                             if context.get("can_set_reply_threads") is None
+                             else "Changing reply mode requires access to the parent chat."),
+                    "tone": _INLINE_BOT_SETTINGS_TONE_WARNING,
                 }},
             }]})
         if disabled:
@@ -1492,6 +1515,8 @@ class InlineAdapter(BasePlatformAdapter):
             self._invalidate_chat_info(context["chat_id"])
             return
         if item_id == "reply-threads" and value_body.get("oneofKind") == "stringValue":
+            if not context.get("can_set_reply_threads"):
+                raise ValueError("parent chat thread settings are not authorized")
             mode = str(value_body.get("stringValue") or "")
             if mode not in {"auto", "on", "off"}:
                 raise ValueError("invalid reply mode")
@@ -1768,6 +1793,7 @@ class InlineAdapter(BasePlatformAdapter):
         *,
         chat_id: str,
         msg_id: str,
+        from_id: str,
         text: str,
         chat_type: str,
         thread_id: Optional[str],
@@ -1779,6 +1805,9 @@ class InlineAdapter(BasePlatformAdapter):
 
         metadata = {"thread_id": thread_id} if thread_id else None
         target_chat_id = parent_chat_id or chat_id
+        if target_chat_id != chat_id and not await self._chat_actor_authorized(target_chat_id, from_id):
+            await self.send(chat_id, "Parent chat access could not be confirmed. Check access and try again.", reply_to=msg_id, metadata=metadata)
+            return True
         if action == "on":
             self._set_reply_threads_for_chat(target_chat_id, "on")
         elif action == "off":
@@ -1935,6 +1964,12 @@ class InlineAdapter(BasePlatformAdapter):
             except Exception:
                 pass
             self._inbound_task = None
+        deliveries = list(self._inbound_deliveries.values())
+        for task in deliveries:
+            task.cancel()
+        if deliveries:
+            await asyncio.gather(*deliveries, return_exceptions=True)
+        self._inbound_deliveries.clear()
         for task in list(self._bot_settings_tasks):
             task.cancel()
         if self._bot_settings_tasks:
@@ -2247,6 +2282,78 @@ class InlineAdapter(BasePlatformAdapter):
             event = json.loads(line)
         except json.JSONDecodeError:
             return
+        delivery_id = event.get("_inlineDeliveryId")
+        if not isinstance(delivery_id, str) or not delivery_id:
+            await self._dispatch_inbound(event)
+            return
+        # The SDK bounds outstanding receipts and orders each chat. Retain only
+        # their active coroutines; reconnect replay must not run one twice.
+        if delivery_id in self._inbound_deliveries:
+            return
+        # An ACK may reach the sidecar while its response is lost, releasing an
+        # SDK slot before this coroutine finishes. Bound those extra ACK waiters
+        # too, using stream backpressure rather than another event queue.
+        while len(self._inbound_deliveries) >= _MAX_INBOUND_DELIVERIES:
+            await asyncio.wait(tuple(self._inbound_deliveries.values()), return_when=asyncio.FIRST_COMPLETED)
+        task = asyncio.create_task(self._consume_inbound_delivery(delivery_id, event))
+        self._inbound_deliveries[delivery_id] = task
+
+        def finished(completed: asyncio.Task) -> None:
+            self._inbound_deliveries.pop(delivery_id, None)
+            if not completed.cancelled():
+                try:
+                    completed.result()
+                except Exception as exc:
+                    self._report_error("inbound.delivery", exc)
+        task.add_done_callback(finished)
+
+    async def _consume_inbound_delivery(self, delivery_id: str, event: Dict[str, Any]) -> None:
+        try:
+            await self._handle_inbound_delivery(delivery_id, event)
+        except Exception as exc:
+            # Do not ACK an unexpected failure or silently pin its chat forever.
+            # Native notification shields runner teardown/reconnect from the
+            # cancellation of this task during adapter.disconnect().
+            self._report_error("inbound.delivery", exc)
+            self._set_fatal_error("INBOUND_FAILED", str(exc), retryable=True)
+            await self._notify_fatal_error()
+
+    async def _handle_inbound_delivery(self, delivery_id: str, event: Dict[str, Any]) -> None:
+        delay = _INBOUND_RETRY_INITIAL_SECONDS
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                await self._dispatch_inbound(event)
+                break
+            except InlineSidecarError as exc:
+                if exc.error_kind not in {"forbidden", "not_found"}:
+                    raise
+                logger.info("[inline] inbound target is no longer accessible; retiring delivery")
+                break
+            except InlineInboundDeferred as exc:
+                # Action events share the SDK's user-cursor barrier. A persistent
+                # outage must not hold every chat behind a stale button press.
+                if event.get("kind") == "message.action.invoke" and attempts >= 2:
+                    await self._answer_action(str(event.get("interactionId") or ""),
+                                              "Temporarily unavailable. Please try again.")
+                    break
+                logger.warning("[inline] inbound preflight unavailable; retrying in %.1fs: %s", delay, exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+        # A lost ACK response must retry only the ACK, never local commands or
+        # model delivery. The endpoint is idempotent, including after reconnect.
+        delay = _INBOUND_RETRY_INITIAL_SECONDS
+        while True:
+            try:
+                await self._sidecar_call("/inbound/ack", {"deliveryId": delivery_id})
+                return
+            except Exception:
+                logger.warning("[inline] inbound acknowledgement unavailable; retrying in %.1fs", delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+
+    async def _dispatch_inbound(self, event: Dict[str, Any]) -> None:
         self._me_id = str(event.get("meId") or self._me_id or "") or None
         self._me_username = _normalize_inline_username(event.get("meUsername") or self._me_username)
         # Chat snapshots include mutable dialog and routing fields such as
@@ -2257,10 +2364,16 @@ class InlineAdapter(BasePlatformAdapter):
         self._invalidate_chat_info(event.get("chatId"))
         kind = event.get("kind")
         if kind == "bot.chatSettings.request":
-            self._schedule_bot_settings_task(self._handle_bot_settings_request(event))
+            if event.get("_inlineDeliveryId"):
+                await self._handle_bot_settings_request(event)
+            else:
+                self._schedule_bot_settings_task(self._handle_bot_settings_request(event))
             return
         if kind == "bot.chatSettings.item.invoke":
-            self._schedule_bot_settings_task(self._handle_bot_settings_item(event))
+            if event.get("_inlineDeliveryId"):
+                await self._handle_bot_settings_item(event)
+            else:
+                self._schedule_bot_settings_task(self._handle_bot_settings_item(event))
             return
         if kind == "message.action.invoke":
             if await self._handle_action(event):
@@ -2349,10 +2462,6 @@ class InlineAdapter(BasePlatformAdapter):
                 dedup_key = f"new:{chat_id}:msg:{msg_id}:date:{message_date}"
             else:
                 dedup_key = f"new:{chat_id}:msg:{msg_id}"
-        if self._is_duplicate(dedup_key):
-            return
-        if not edit and self._is_duplicate_message_instance(chat_id, msg, event):
-            return
         from_id = str(msg.get("fromId") or "")
         if msg.get("out") or (self._me_id and from_id == self._me_id):
             return
@@ -2361,18 +2470,7 @@ class InlineAdapter(BasePlatformAdapter):
 
         raw_message_text = str(msg.get("message") or "")
         text = raw_message_text.strip()
-        media_text, media_urls, media_types, message_type = await self._normalize_media(msg)
-        if media_text:
-            text = f"{text}\n{media_text}".strip() if text else media_text
-        if not text and not media_urls:
-            text = "[Inline message with no text]"
         explicitly_mentions_me = self._message_entity_mentions_me(msg)
-        if event.get("_inlineSenderProvenanceVerified") is False and not explicitly_mentions_me:
-            self._remember_observed_context(chat_id, msg, text)
-            return
-        if sender_profile.get("bot") is True and not explicitly_mentions_me:
-            self._remember_observed_context(chat_id, msg, text)
-            return
 
         chat_type = self._chat_type_from_message(msg)
         thread_id = self._thread_id_from_message(msg)
@@ -2381,7 +2479,20 @@ class InlineAdapter(BasePlatformAdapter):
         chat_name = chat_id
         chat_info: Dict[str, Any] = {}
         if chat_type == "group":
-            chat_info = await self._get_chat_info(chat_id)
+            try:
+                chat_info = await asyncio.wait_for(
+                    self._get_chat_info(chat_id, required=True),
+                    timeout=_CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS if agent_action else _INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise InlineInboundDeferred("chat metadata timed out") from exc
+            except InlineSidecarError as exc:
+                if exc.error_kind in {"forbidden", "not_found"}:
+                    logger.info("[inline] chat is no longer accessible; retiring inbound delivery")
+                    return
+                raise
+            if not chat_info:
+                raise InlineInboundDeferred("chat metadata unavailable")
             chat_name = self._chat_title_from_info(chat_info) or chat_id
             info_parent_chat_id = self._chat_info_id(chat_info, "parentChatId")
             info_parent_message_id = self._chat_info_id(chat_info, "parentMessageId")
@@ -2402,9 +2513,52 @@ class InlineAdapter(BasePlatformAdapter):
         )
         if has_command_target and not command_addressed_to_me:
             return
+        actor_authorized = self._actor_authorization(
+            chat_type, from_id, chat_id, thread_id=thread_id,
+            parent_chat_id=parent_chat_id, is_bot=sender_profile.get("bot") is True,
+        )
+        if actor_authorized is None:
+            raise InlineInboundDeferred("host authorization unavailable")
+        if self._is_duplicate(dedup_key):
+            return
+        if not edit and self._is_duplicate_message_instance(chat_id, msg, event):
+            return
+        context_only = not explicitly_mentions_me and (
+            event.get("_inlineSenderProvenanceVerified") is False or sender_profile.get("bot") is True
+        )
+        if not actor_authorized:
+            if context_only:
+                return
+            # Let Hermes pair/ignore/decline the sender, without first downloading
+            # media, collecting context, changing settings, or creating a thread.
+            source = self.build_source(
+                chat_id=chat_id, chat_name=chat_name, chat_type=chat_type,
+                user_id=from_id, user_name=sender_name or None,
+                thread_id=thread_id, parent_chat_id=parent_chat_id, message_id=msg_id,
+                is_bot=sender_profile.get("bot") is True,
+            )
+            await self.handle_message(MessageEvent(
+                text=text or "[Inline message with no text]", message_type=MessageType.TEXT,
+                source=source, raw_message=event,
+                message_id=build_inline_agent_action_turn_id(
+                    agent_action.get("messageId"), agent_action.get("interactionId"),
+                ) if agent_action else msg_id,
+                timestamp=self._timestamp(event.get("date") or msg.get("date")),
+                allow_gateway_control=not bool(agent_action),
+            ))
+            return
+        media_text, media_urls, media_types, message_type = await self._normalize_media(msg)
+        if media_text:
+            text = f"{text}\n{media_text}".strip() if text else media_text
+        if not text and not media_urls:
+            text = "[Inline message with no text]"
+        if context_only:
+            self._remember_observed_context(chat_id, msg, text)
+            return
         if not agent_action and await self._handle_thread_command(
             chat_id=chat_id,
             msg_id=msg_id,
+            from_id=from_id,
             text=text,
             chat_type=chat_type,
             thread_id=thread_id,
@@ -2584,6 +2738,7 @@ class InlineAdapter(BasePlatformAdapter):
             chat_type=chat_type,
             user_id=from_id,
             user_name=sender_name or None,
+            is_bot=sender_profile.get("bot") is True,
             thread_id=thread_id,
             parent_chat_id=parent_chat_id,
             message_id=msg_id,
@@ -2618,7 +2773,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def _dispatch_agent_action(self, event: Dict[str, Any]) -> None:
         interaction_id = str(event.get("interactionId") or "")
-        await self._answer_action(interaction_id, "")
 
         chat_id = str(event.get("chatId") or "")
         message_id = str(event.get("messageId") or "")
@@ -2626,13 +2780,19 @@ class InlineAdapter(BasePlatformAdapter):
         if not chat_id or not message_id or not interaction_id or not actor_user_id:
             logger.warning("[inline] ignored incomplete agent action event")
             return
-        target = await self._fetch_message(chat_id, message_id)
+        try:
+            target = await asyncio.wait_for(
+                self._fetch_message(chat_id, message_id, required=True),
+                timeout=_CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise InlineInboundDeferred("action target lookup timed out") from exc
         if not target:
-            logger.info("[inline] ignored agent action for unavailable message %s", message_id)
+            await self._answer_action(interaction_id, "Action expired or no longer accessible.")
             return
 
         synthetic_message = dict(target)
-        for stale_key in ("actions", "attachments", "entities", "media", "reactions", "replies"):
+        for stale_key in ("actions", "attachments", "entities", "media", "reactions", "replies", "sender"):
             synthetic_message.pop(stale_key, None)
         synthetic_message.update({
             "id": message_id,
@@ -2653,6 +2813,7 @@ class InlineAdapter(BasePlatformAdapter):
             "message": synthetic_message,
             "_inlineAgentAction": dict(event),
         })
+        await self._answer_action(interaction_id, "")
 
     def _message_explicitly_mentions_me(self, msg: Dict[str, Any]) -> bool:
         if not self._me_id:
@@ -2758,12 +2919,18 @@ class InlineAdapter(BasePlatformAdapter):
         if self._me_id and user_id == self._me_id:
             return
         key = f"{event.get('kind')}:{chat_id}:{message_id}:{user_id}:{emoji}:{event.get('seq') or ''}"
-        if self._is_duplicate(key):
-            return
 
         target = await self._fetch_message(chat_id, message_id)
         chat_type = self._chat_type_from_message(target or {"peerId": {"type": {"oneofKind": "chat"}}})
         if not self._allowed(chat_type, user_id):
+            return
+        scope = await self._message_scope(chat_id, target or {}, required=True)
+        if scope is None:
+            return
+        chat_type, thread_id, parent_chat_id = scope
+        if chat_type == "group" and not self._chat_allowed(chat_id, thread_id, parent_chat_id):
+            return
+        if self._is_duplicate(key):
             return
         target_text = str((target or {}).get("message") or "") or None
         target_author = str((target or {}).get("fromId") or "") or None
@@ -2777,6 +2944,8 @@ class InlineAdapter(BasePlatformAdapter):
             chat_type=chat_type,
             user_id=user_id,
             user_name=_inline_sender_identity(_inline_sender_profile(event))[0] or None,
+            thread_id=thread_id,
+            parent_chat_id=parent_chat_id,
             message_id=key,
         )
         await self.handle_message(MessageEvent(
@@ -2813,7 +2982,13 @@ class InlineAdapter(BasePlatformAdapter):
             text = "message:history_cleared"
         if not chat_id or not text:
             return
-        if self._group_policy == "disabled":
+        if self._group_policy == "disabled" or (user_id and not self._allowed("group", user_id)):
+            return
+        scope = await self._message_scope(chat_id, {}, required=True)
+        if scope is None:
+            return
+        _, thread_id, parent_chat_id = scope
+        if not self._chat_allowed(chat_id, thread_id, parent_chat_id):
             return
         key = f"{kind}:{chat_id}:{user_id}:{event.get('seq') or ''}:{text}"
         if self._is_duplicate(key):
@@ -2824,8 +2999,12 @@ class InlineAdapter(BasePlatformAdapter):
             chat_type="group",
             user_id=user_id or None,
             user_name=_inline_sender_identity(_inline_sender_profile(event))[0] or None,
+            thread_id=thread_id,
+            parent_chat_id=parent_chat_id,
             message_id=key,
         )
+        # Delete/history events may have no actor. Preserve the host's own
+        # authorization of these events rather than inventing a sender grant.
         await self.handle_message(MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
@@ -3665,7 +3844,7 @@ class InlineAdapter(BasePlatformAdapter):
                 return None
         return str(reply_to)
 
-    async def _get_chat_info(self, chat_id: str) -> Dict[str, Any]:
+    async def _get_chat_info(self, chat_id: str, *, required: bool = False) -> Dict[str, Any]:
         target = _target_from_chat_id(chat_id)
         normalized = str(target.get("chatId") or "").strip()
         if not normalized:
@@ -3679,7 +3858,16 @@ class InlineAdapter(BasePlatformAdapter):
             data = await self._sidecar_call("/chat", {"target": {"chatId": normalized}})
             result = data.get("result") if isinstance(data, dict) else None
             info = result if isinstance(result, dict) else {}
-        except Exception:
+        except Exception as exc:
+            if required:
+                if isinstance(exc, InlineSidecarError) and exc.error_kind in {"forbidden", "not_found"}:
+                    raise
+                raise InlineInboundDeferred("chat metadata request failed") from exc
+            return {}
+        resolved_id = self._chat_info_id(info, "id")
+        if not info or (resolved_id is not None and resolved_id != normalized):
+            if required:
+                raise InlineInboundDeferred("chat metadata unavailable or mismatched")
             return {}
         self._chat_info_cache[normalized] = (now, info)
         self._chat_info_cache.move_to_end(normalized)
@@ -3779,12 +3967,14 @@ class InlineAdapter(BasePlatformAdapter):
             return self._id_allowed(self._group_allow_from, from_id)
         return True
 
-    async def _fetch_message(self, chat_id: str, message_id: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_message(self, chat_id: str, message_id: str, *, required: bool = False) -> Optional[Dict[str, Any]]:
         try:
             data = await self._sidecar_call("/messages", {"target": _target_from_chat_id(chat_id), "messageIds": [message_id]})
             messages = (data.get("result") or {}).get("messages") or []
             return messages[0] if messages else None
-        except Exception:
+        except Exception as exc:
+            if required and not (isinstance(exc, InlineSidecarError) and exc.error_kind in {"forbidden", "not_found"}):
+                raise InlineInboundDeferred("action target temporarily unavailable") from exc
             return None
 
     async def _handle_action(self, event: Dict[str, Any]) -> bool:
@@ -3825,43 +4015,117 @@ class InlineAdapter(BasePlatformAdapter):
     async def _action_allowed(self, event: Dict[str, Any]) -> bool:
         actor_id = str(event.get("actorUserId") or "").strip()
         interaction_id = str(event.get("interactionId") or "")
-        chat_type = await self._action_chat_type(event)
-        if self._actor_authorized(chat_type, actor_id):
-            return True
-        await self._answer_action(interaction_id, "Not authorized")
-        logger.info("[inline] blocked action actor=%s chat_type=%s action=%s", actor_id or "unknown", chat_type or "unknown", event.get("actionId") or "")
+        chat_id = str(event.get("chatId") or "")
+        message_id = str(event.get("messageId") or "")
+        msg = await self._fetch_message(chat_id, message_id) if chat_id and message_id else None
+        scope = await self._message_scope(chat_id, msg) if msg else None
+        verdict = None
+        if scope is not None:
+            chat_type, thread_id, parent_chat_id = scope
+            verdict = self._actor_authorization(
+                chat_type, actor_id, chat_id, thread_id=thread_id, parent_chat_id=parent_chat_id,
+                is_bot=_inline_sender_profile(event).get("bot") is True,
+            )
+            if verdict is True:
+                return True
+        await self._answer_action(interaction_id, "Access check temporarily unavailable. Try again." if verdict is None else "Not authorized")
+        logger.info("[inline] blocked action actor=%s chat=%s action=%s", actor_id or "unknown", chat_id or "unknown", event.get("actionId") or "")
         return False
 
-    def _actor_authorized(self, chat_type: Optional[str], actor_id: str) -> bool:
-        if not actor_id or not chat_type:
+    async def _message_scope(
+        self, chat_id: str, msg: Dict[str, Any], *, required: bool = False,
+    ) -> Optional[tuple[str, Optional[str], Optional[str]]]:
+        """Resolve the same parent/thread identity used by normal message intake."""
+        chat_type = self._chat_type_from_message(msg)
+        thread_id = self._thread_id_from_message(msg)
+        parent_chat_id = self._parent_chat_id_from_message(msg)
+        if chat_type == "group" and not thread_id:
+            if not parent_chat_id:
+                try:
+                    info = await asyncio.wait_for(
+                        self._get_chat_info(chat_id, required=required),
+                        timeout=_INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS if required else _CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError as exc:
+                    if required:
+                        raise InlineInboundDeferred("chat metadata timed out") from exc
+                    return None
+                if not info:
+                    if required:
+                        raise InlineInboundDeferred("chat metadata unavailable")
+                    return None
+                parent_chat_id = self._chat_info_id(info, "parentChatId")
+            if parent_chat_id:
+                thread_id = chat_id
+        return chat_type, thread_id, parent_chat_id
+
+    async def _chat_actor_authorized(self, chat_id: str, actor_id: str) -> Optional[bool]:
+        """Check the actual target when a child control changes parent-wide state."""
+        try:
+            info = await asyncio.wait_for(
+                self._get_chat_info(chat_id), timeout=_CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return None
+        if not info:
+            return None
+        parent_chat_id = self._chat_info_id(info, "parentChatId")
+        return self._actor_authorization(
+            self._bot_settings_chat_type(info), actor_id, chat_id,
+            thread_id=chat_id if parent_chat_id else None, parent_chat_id=parent_chat_id,
+        )
+
+    def _actor_authorized(
+        self, chat_type: Optional[str], actor_id: str, chat_id: Optional[str] = None, *,
+        thread_id: Optional[str] = None, parent_chat_id: Optional[str] = None, is_bot: bool = False,
+    ) -> bool:
+        return self._actor_authorization(
+            chat_type, actor_id, chat_id, thread_id=thread_id,
+            parent_chat_id=parent_chat_id, is_bot=is_bot,
+        ) is True
+
+    def _actor_authorization(
+        self, chat_type: Optional[str], actor_id: str, chat_id: Optional[str] = None, *,
+        thread_id: Optional[str] = None, parent_chat_id: Optional[str] = None, is_bot: bool = False,
+    ) -> Optional[bool]:
+        # The host may trust an adapter's allowlist policy on the assumption that
+        # intake already checked it. Always enforce our restrictions before asking.
+        if not actor_id or chat_type not in {"dm", "group"} or not self._allowed(chat_type, actor_id):
             return False
+        if chat_type == "group" and not self._chat_allowed(chat_id or "", thread_id, parent_chat_id):
+            return False
+        if getattr(self, "_authorization_check", None) is not None:
+            # Hermes owns pairing, profile routing, and runtime authorization.
+            # Unknown/error is unavailable, never a reason to bypass a wired checker.
+            runner = getattr(self, "gateway_runner", None)
+            if parent_chat_id and runner is not None:
+                # The three-argument native callback drops parent_chat_id. Inline
+                # child chats need it for parent-routed profiles, so ask the same
+                # host predicate with the complete source, retaining transport identity.
+                try:
+                    source = self.build_source(
+                        chat_id=chat_id or "", chat_type=chat_type, user_id=actor_id,
+                        thread_id=thread_id, parent_chat_id=parent_chat_id, is_bot=is_bot,
+                    )
+                    if getattr(source, "profile_route_rejected", False):
+                        return False
+                    verdict = runner._is_user_authorized_for_source(source)
+                    return verdict if isinstance(verdict, bool) else None
+                except Exception:
+                    logger.warning("[inline] thread authorization unavailable", exc_info=True)
+                    return None
+            return self._is_sender_authorized(
+                actor_id, chat_type, chat_id, is_bot=is_bot, thread_id=thread_id,
+            )
+        # Standalone adapters have no runner. Only explicit grants are usable;
+        # an open intake policy alone must not authorize credentialed side effects.
         if self._allow_all or _truthy(os.getenv("GATEWAY_ALLOW_ALL_USERS"), False):
             return True
         if self._id_allowed(self._parse_id_set(os.getenv("GATEWAY_ALLOWED_USERS")), actor_id):
             return True
-        if chat_type == "dm":
-            if self._dm_policy == "disabled":
-                return False
-            if self._dm_policy == "allowlist" or self._allow_from:
-                return self._id_allowed(self._allow_from, actor_id)
-            return False
-        if self._group_policy == "disabled":
-            return False
-        if self._id_allowed(self._group_allow_from, actor_id):
-            return True
-        if self._id_allowed(self._allow_from, actor_id):
-            return True
-        return False
-
-    async def _action_chat_type(self, event: Dict[str, Any]) -> Optional[str]:
-        chat_id = str(event.get("chatId") or "")
-        message_id = str(event.get("messageId") or "")
-        if not chat_id or not message_id:
-            return None
-        msg = await self._fetch_message(chat_id, message_id)
-        if not msg:
-            return None
-        return self._chat_type_from_message(msg)
+        return self._id_allowed(self._allow_from, actor_id) or (
+            chat_type == "group" and self._id_allowed(self._group_allow_from, actor_id)
+        )
 
     async def _handle_clarify_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
@@ -3990,7 +4254,12 @@ class InlineAdapter(BasePlatformAdapter):
         if not target_chat_id:
             await self._answer_action(interaction_id, "Thread controls expired")
             return True
-        if not await self._thread_action_allowed(event, state):
+        if not await self._action_allowed(event):
+            return True
+        if target_chat_id != chat_id and not await self._chat_actor_authorized(
+            target_chat_id, str(event.get("actorUserId") or ""),
+        ):
+            await self._answer_action(interaction_id, "Parent chat access could not be confirmed. Check access and try again.")
             return True
         try:
             if choice == "reset":
@@ -4011,24 +4280,6 @@ class InlineAdapter(BasePlatformAdapter):
             logger.exception("[inline] thread action failed")
             await self._answer_action(interaction_id, "Thread setting failed")
             return True
-
-    async def _thread_action_allowed(self, event: Dict[str, Any], state: Dict[str, Any]) -> bool:
-        actor_id = str(event.get("actorUserId") or "").strip()
-        interaction_id = str(event.get("interactionId") or "")
-        chat_type = await self._action_chat_type(event)
-        if self._actor_authorized(chat_type, actor_id):
-            return True
-        display_chat_id = self._chat_key(state.get("display_chat_id"))
-        target_chat_id = self._chat_key(state.get("target_chat_id"))
-        if chat_type and actor_id and self._allowed(chat_type, actor_id):
-            if chat_type == "dm":
-                return True
-            thread_id = display_chat_id if target_chat_id and display_chat_id != target_chat_id else None
-            if self._chat_allowed(display_chat_id or str(event.get("chatId") or ""), thread_id, target_chat_id):
-                return True
-        await self._answer_action(interaction_id, "Not authorized")
-        logger.info("[inline] blocked thread action actor=%s chat_type=%s action=%s", actor_id or "unknown", chat_type or "unknown", event.get("actionId") or "")
-        return False
 
     @staticmethod
     def _is_model_picker_action(action_id: str) -> bool:
