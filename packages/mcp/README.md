@@ -66,6 +66,8 @@ Both MCP endpoints also accept stateless MCP `2026-07-28` POST requests, with `s
 
 Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scoped tool uses the stable `chatId`, including DMs. The legacy `/mcp` endpoint retains the earlier `chatId | userId` and selector shapes during the migration window; it is not intended for new integrations or ChatGPT submission scanning.
 
+Legacy reads using `userId` resolve an existing approved DM from conversation metadata and fail when none exists. They do not create a DM. Explicit legacy sends using `userId` retain the backend's ability to create a destination DM.
+
 - `account.me` (read-only): inspect current MCP authorization, scopes, and allowed chat context.
   - Input: `{}`
   - Output: `{ user, session, allowed, hints[] }`
@@ -75,37 +77,56 @@ Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scop
 - `people.search` (read-only): resolve people by name, username, or user ID in allowed contexts.
   - Input: `{ query?, limit? }`
   - Output: `{ query, bestMatch, items[] }`
+  - Requires both `messages:read` and `spaces:read`. Use `userId` for participant and sender selection; use `dmChatId` or `conversations.list` for DM tools.
 - `conversations.list` (read-only): list recent conversations or find by name/title/id.
-  - Input: `{ query?, limit?, unreadOnly?, sort? }`
-  - Output: `{ query, sort, bestMatch, unreadOnly, items[] }`
+  - Input: `{ query?, limit?, spaceId?, kind?, unreadOnly?, sort? }`
+  - Output: `{ query, sort, bestMatch, unreadOnly, spaceId, kind, items[] }`
+  - `kind` is `"dm"`, `"home_thread"`, or `"space_chat"`. `spaceId` restricts to one approved space and cannot be combined with a DM/home kind. Filtering and sorting happen before the result limit.
 - `conversations.mentions` (read-only, app-visible): search approved conversation metadata for the desktop composer picker.
   - Input: `{ query }`, including an empty string for recent conversations.
   - Output: `{ items: ResourceLink[] }` in structured content, with empty text content, as required by the mention-search extension. At most 20 links; no message bodies are fetched by search.
   - Each `inline://chat/{chatId}` resource read checks authorization independently and returns a recent-text JSON snapshot of at most 20 messages / 32 KiB, including coverage, capture time, shortening flags, and older-history continuation. Selection does not grant access, mark messages read, or launch the native app.
-- `conversations.get` (read-only): inspect one resolved chat/DM, including participants and pinned message IDs.
+- `conversations.get` (read-only): inspect one resolved chat/DM, including direct participants, explicit group-grant count, and pinned message IDs.
   - Input: `{ chatId }`
   - Output: `{ chat, details, participants[] }`
+  - `participants[]` contains direct users only. `details.groupParticipantCount` counts explicit group grants, not their members. Neither enumerates inherited root-chat access or the complete effective audience.
 - `conversations.open` (read-only): open the focused Inline thread UI. `{ chatId }` reads fresh recent history and confirmed monitoring; `{}` opens only the small picker of threads already viewed in this app. The returned `capabilities.canSend` follows the current write scope.
 - `conversations.ask` (read and write): create a private consultation with the connected user and resolved teammates, capture a replay cursor, then send one question. Input: `{ title, question, participantUserIds, spaceId? }`. Output includes the confirmed chat, `questionStatus`, optional confirmed `messageId`, and `{ name, arguments, cursor }` for `events/subscribe`. Subscribe from that exact cursor before waiting, then read the current reply and continue. Preserve partial receipts and inspect uncertain writes before retrying.
 - `conversations.create` (write): create a new thread/chat in an allowed space or home threads.
   - Input: `{ title, spaceId?, description?, emoji?, isPublic?, participantUserIds? }`
   - Output: `{ chat }`
+- `conversations.create_subthread` (write): create a child of an allowed parent conversation.
+  - Input: `{ parentChatId, parentMessageId?, title?, description?, emoji?, participantUserIds? }`
+  - Output: `{ chat, parentChatId, parentMessageId, anchorMessageId }`
+  - The child inherits root-chat access plus its own direct/group grants. `participantUserIds` adds direct access to a new child; it cannot restrict root-chat access. Participants added only to an intermediate child are not automatically inherited by its descendants. Direct participant rows are not an exhaustive audience list. Newly created private children include the creator directly.
+  - Supplying `parentMessageId` creates or reuses that message's reply thread. On reuse, title, description, emoji, and participants remain unchanged; creation inputs apply only to a new child, and older creator membership is not repaired. Omitting `parentMessageId` creates an independent child each time.
+  - A child outside a space is a home thread, including children of DMs, and requires home thread access as well as access to the parent.
+- `messages.get` (read-only): read known message IDs from one chat.
+  - Input: `{ chatId, messageIds }` (one to one hundred IDs)
+  - Output: `{ chat, messageIds, missingMessageIds, messages[] }`
+  - Results follow request order, repeated read IDs are collapsed, and unavailable IDs are explicit.
+- `messages.forward` (read and write): forward selected messages between two allowed chats.
+  - Input: `{ sourceChatId, destinationChatId, messageIds, shareForwardHeader? }` (one to one hundred IDs)
+  - Output: `{ ok, sourceChat, destinationChat, messages: [{ sourceMessageId, destinationMessageId, uri }] }`
+  - Input order and repeated source IDs are preserved. Headers default to requested, subject to server policy.
+  - A failed call can follow partial delivery. Inspect the destination before retrying; automatic retries can duplicate messages.
 - `files.upload` (write): secure media upload helper (base64 or HTTPS URL source) that returns Inline media IDs.
   - Input: `{ sourceType: "base64" | "url", source, kind?, fileName?, contentType?, width?, height?, duration? }`
   - Output: `{ ok, source, sourceRef, sizeBytes, upload: { fileUniqueId, media, uploadKind, fileName, contentType } }`
 - `files.get` (read-only): extract file/media metadata from one or more known message IDs.
   - Input: `{ chatId, messageIds, includeUrlPreviews? }`
   - Output: `{ chat, source, messageIds, includeUrlPreviews, items[] }`
-- `messages.list` (read-only): list messages from a chat or DM with useful filters.
-  - Input: `{ chatId, limit?, offsetId?, since?, until?, content? }`
-  - Output: `{ chat, nextOffsetId, since, until, content, messages[] }`
+- `messages.list` (read-only): list newest messages from a chat or DM with useful filters.
+  - Input: `{ chatId, limit?, offsetId?, senderUserId?, since?, until?, content? }`
+  - Output: `{ chat, nextOffsetId, scannedCount, senderUserId, since, until, content, messages[] }`
+  - Filters inspect at most 500 source messages per call. Continue with `nextOffsetId` as `offsetId`, even when a filtered page is empty. A null cursor means that this scan reached its history/time boundary.
 - `messages.context` (read-only): fetch a before/after window around a known message ID.
   - Input: `{ chatId, anchorMessageId, before?, after?, includeAnchor?, content? }`
   - Output: `{ chat, anchorMessageId, before, after, includeAnchor, content, messages[] }`
 - `messages.search` (read-only): query messages in one chat/DM only (no global message search).
-  - Input: `{ chatId, query, limit?, since?, until?, content? }`
-  - Output: `{ query, content, since, until, nextOffsetId, chat, messages[] }`
-  - When present, `nextOffsetId` identifies an older `messages.list` read. It does not add pagination to search or prove older matching messages exist.
+  - Input: `{ chatId, query, limit?, offsetId?, senderUserId?, since?, until?, content? }`
+  - Output: `{ query, content, since, until, chat, nextOffsetId, scannedCount, senderUserId, messages[] }`
+  - Space-separated search terms are ANDed. The server returns a newest-first page of at most `limit` text/content matches; sender and time filters then narrow that page. Continue with `nextOffsetId` as `offsetId`, including after an empty filtered page, until the cursor is null.
 - `messages.unread` (read-only): list unread messages across all approved conversations.
   - Input: `{ limit?, since?, until?, content? }`
   - Output: `{ scannedChats, since, until, content, items[] }`
@@ -133,6 +154,18 @@ Common workflows:
 8. Create a thread and dump content into it:
    - `conversations.create` with `title`, optional `spaceId`, and `participantUserIds`
    - then `messages.send_batch` with mixed text/media items.
+9. Forward selected material from a DM into a child thread:
+   - Resolve the source DM and destination parent separately with `conversations.list` and inspect them with `conversations.get`.
+   - Use `account.me` for your sender ID, then `messages.search` or `messages.list` with `senderUserId` and a time window. Continue cursors until the selected range is covered.
+   - Inspect the chosen source IDs with `messages.get`.
+   - Create the destination with `conversations.create_subthread`, understanding that it inherits root-chat access and does not inherit participants added only to an intermediate child.
+   - Use `messages.forward` with source IDs in the desired order and the returned child chat ID as destination. Keep the ordered delivery receipts.
+
+IDs are positive decimal strings within the signed 64-bit protocol range. Message IDs belong to their chat; a user ID is not a DM chat ID. Resolve DMs before calling the current tools. `senderUserId` matches the message's sender, rather than the author named in a forwarding header.
+
+Time bounds are inclusive. `today`, `yesterday`, and `YYYY-MM-DD` use UTC calendar days; `2d ago` is a rolling duration. For a local calendar window, pass epoch seconds or ISO timestamps with an explicit UTC offset. Invalid calendar dates and reversed ranges are rejected.
+
+Reads require `messages:read`; creation, sending, and uploads require `messages:write`; forwarding requires both. Space listing requires `spaces:read`, and people search requires both read scopes. Resource context checks still apply after scopes are granted. Inspect `account.me` to see allowed spaces, DM access, and home thread access.
 
 Legacy tools `search` and `fetch` are removed.
 

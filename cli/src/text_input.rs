@@ -17,7 +17,7 @@ pub(crate) fn read_text_file(path: &Path) -> Result<String, Box<dyn std::error::
             }
             .into());
         }
-        return read_text(io::stdin().lock());
+        return read_text(io::stdin().lock(), "--text-file");
     }
     // Reject directories/devices/FIFOs before opening: a FIFO can block forever.
     let metadata = std::fs::metadata(path)
@@ -28,19 +28,24 @@ pub(crate) fn read_text_file(path: &Path) -> Result<String, Box<dyn std::error::
     read_text(
         File::open(path)
             .map_err(|error| CliError::invalid_args(format!("Cannot read --text-file: {error}")))?,
+        "--text-file",
     )
 }
 
-fn read_text(reader: impl Read) -> Result<String, Box<dyn std::error::Error>> {
+pub(crate) fn read_stdin() -> Result<String, Box<dyn std::error::Error>> {
+    read_text(io::stdin().lock(), "--stdin")
+}
+
+fn read_text(reader: impl Read, source: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
     reader.take(MAX_TEXT_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_TEXT_BYTES {
-        return Err(CliError::invalid_args("--text-file exceeds the 1 MiB limit").into());
+        return Err(CliError::invalid_args(format!("{source} exceeds the 1 MiB limit")).into());
     }
     let text = String::from_utf8(bytes)
-        .map_err(|_| CliError::invalid_args("--text-file must contain UTF-8 text"))?;
+        .map_err(|_| CliError::invalid_args(format!("{source} must contain UTF-8 text")))?;
     if text.trim().is_empty() {
-        return Err(CliError::invalid_args("--text-file was empty").into());
+        return Err(CliError::invalid_args(format!("{source} was empty")).into());
     }
     // Preserve indentation and newlines for Markdown and explicit mention offsets.
     Ok(text)
@@ -53,7 +58,7 @@ mod tests {
     #[test]
     fn preserves_code_indentation_and_mention_offsets() {
         let input = "  @Sam\n    code();\n";
-        assert_eq!(read_text(input.as_bytes()).unwrap(), input);
+        assert_eq!(read_text(input.as_bytes(), "--text-file").unwrap(), input);
     }
 
     #[test]
@@ -63,13 +68,13 @@ mod tests {
             vec![0xff],
             vec![b'x'; MAX_TEXT_BYTES as usize + 1],
         ] {
-            let error = read_text(input.as_slice()).unwrap_err();
+            let error = read_text(input.as_slice(), "--text-file").unwrap_err();
             assert_eq!(
                 error.downcast_ref::<CliError>().unwrap().code,
                 "invalid_args"
             );
         }
-        assert!(read_text(vec![b'x'; MAX_TEXT_BYTES as usize].as_slice()).is_ok());
+        assert!(read_text(vec![b'x'; MAX_TEXT_BYTES as usize].as_slice(), "--stdin").is_ok());
     }
 
     #[test]

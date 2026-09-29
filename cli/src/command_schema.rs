@@ -14,7 +14,9 @@ struct CommandSchema {
     about: Option<String>,
     aliases: Vec<String>,
     usage: String,
+    after_help: Option<String>,
     arguments: Vec<ArgumentSchema>,
+    groups: Vec<GroupSchema>,
     subcommands: Vec<SubcommandSchema>,
 }
 
@@ -34,6 +36,16 @@ struct ArgumentSchema {
     max_values: Option<usize>,
     possible_values: Vec<String>,
     default_values: Vec<String>,
+    conflicts_with: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GroupSchema {
+    id: String,
+    arguments: Vec<String>,
+    required: bool,
+    multiple: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,10 +115,38 @@ fn command_schema(command: &Command, path: Vec<String>) -> CommandSchema {
         about: command_about(command),
         aliases: command.get_visible_aliases().map(str::to_string).collect(),
         usage: usage.trim().to_string(),
+        after_help: command
+            .get_after_long_help()
+            .or_else(|| command.get_after_help())
+            .map(ToString::to_string),
         arguments: command
             .get_arguments()
             .filter(|argument| !argument.is_hide_set())
-            .map(argument_schema)
+            .map(|argument| argument_schema(command, argument))
+            .collect(),
+        groups: command
+            .get_groups()
+            .filter_map(|group| {
+                let arguments: Vec<_> = group
+                    .get_args()
+                    .filter(|id| {
+                        command
+                            .get_arguments()
+                            .any(|arg| arg.get_id() == *id && !arg.is_hide_set())
+                    })
+                    .map(ToString::to_string)
+                    .collect();
+                if arguments.len() < 2 {
+                    return None;
+                }
+                let mut group_copy = group.clone();
+                Some(GroupSchema {
+                    id: group.get_id().to_string(),
+                    arguments,
+                    required: group.is_required_set(),
+                    multiple: group_copy.is_multiple(),
+                })
+            })
             .collect(),
         subcommands: command
             .get_subcommands()
@@ -130,7 +170,7 @@ fn command_about(command: &Command) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn argument_schema(argument: &Arg) -> ArgumentSchema {
+fn argument_schema(command: &Command, argument: &Arg) -> ArgumentSchema {
     let values = argument.get_num_args().unwrap_or_default();
     let max_values = values.max_values();
     ArgumentSchema {
@@ -138,7 +178,7 @@ fn argument_schema(argument: &Arg) -> ArgumentSchema {
         long: argument.get_long().map(str::to_string),
         short: argument.get_short(),
         aliases: argument
-            .get_visible_aliases()
+            .get_all_aliases()
             .unwrap_or_default()
             .into_iter()
             .map(str::to_string)
@@ -168,6 +208,12 @@ fn argument_schema(argument: &Arg) -> ArgumentSchema {
             .get_default_values()
             .iter()
             .map(|value| value.to_string_lossy().into_owned())
+            .collect(),
+        conflicts_with: command
+            .get_arg_conflicts_with(argument)
+            .into_iter()
+            .filter(|arg| !arg.is_hide_set())
+            .map(|arg| arg.get_id().to_string())
             .collect(),
     }
 }

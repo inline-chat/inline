@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { readFileSync } from "node:fs"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
@@ -374,6 +375,8 @@ function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
         query: null,
         content: "all",
         mode: "scan",
+        scannedCount: 0,
+        nextOffsetId: null,
         messages: [],
       }
     },
@@ -407,6 +410,12 @@ function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
         fileUniqueId: "file_1",
         media: { kind: "document", id: 99n },
       }
+    },
+    async createSubthread({ parentChatId, parentMessageId }) {
+      return { chat: defaultEligibleChat({ chatId: 9n }), parentChatId, parentMessageId: parentMessageId ?? null, anchorMessageId: 100n }
+    },
+    async forwardMessages({ messageIds }) {
+      return { sourceChat: defaultEligibleChat(), destinationChat: defaultEligibleChat({ chatId: 9n }), messages: messageIds.map((sourceMessageId, index) => ({ sourceMessageId, destinationMessageId: BigInt(100 + index) })) }
     },
     async sendMessage() {
       return { messageId: null, spaceId: null }
@@ -477,6 +486,9 @@ describe("mcp tool server", () => {
       "conversations.list",
       "conversations.get",
       "conversations.create",
+      "conversations.create_subthread",
+      "messages.get",
+      "messages.forward",
       "files.upload",
       "files.get",
       "messages.send_media",
@@ -499,6 +511,9 @@ describe("mcp tool server", () => {
       "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.create": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+      "conversations.create_subthread": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+      "messages.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.forward": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
       "files.upload": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
       "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.send_media": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
@@ -541,6 +556,18 @@ describe("mcp tool server", () => {
 
     const conversation = tools.find((tool) => tool.name === "conversations.get")
     expect(conversation.inputSchema.properties).toHaveProperty("userId")
+    expect(conversation.description).toContain("not a complete audience list")
+    expect(conversation.outputSchema.properties.details.properties.groupParticipantCount.description).toContain("not group-member or effective-audience count")
+    expect(conversation.outputSchema.properties.participants.description).toContain("Direct user participants only")
+    const subthread = tools.find((tool) => tool.name === "conversations.create_subthread")
+    expect(subthread.description).toContain("An existing reply thread is returned without changing")
+    expect(subthread.description).toContain("reuse does not repair older creator membership")
+    expect(subthread.description).toContain("inherits root-chat access plus its own direct/group grants")
+    expect(subthread.description).toContain("Participants added only to an intermediate child are not automatically inherited by descendants")
+    expect(subthread.inputSchema.properties.parentMessageId.description).toContain("without changing metadata or participants")
+    for (const field of ["title", "description", "emoji", "participantUserIds"]) {
+      expect(subthread.inputSchema.properties[field].description).toContain("ignored on reuse")
+    }
     const upload = tools.find((tool) => tool.name === "files.upload")
     expect(upload.inputSchema.properties).toHaveProperty("base64")
     expect(upload.inputSchema.properties).toHaveProperty("url")
@@ -588,6 +615,9 @@ describe("mcp tool server", () => {
       "conversations.list": [],
       "conversations.get": ["chatId"],
       "conversations.create": ["title"],
+      "conversations.create_subthread": ["parentChatId"],
+      "messages.get": ["chatId", "messageIds"],
+      "messages.forward": ["sourceChatId", "destinationChatId", "messageIds"],
       "files.upload": ["sourceType", "source"],
       "files.get": ["chatId", "messageIds"],
       "messages.send_media": ["chatId", "mediaKind", "mediaId"],
@@ -654,6 +684,17 @@ describe("mcp tool server", () => {
     expect(batchItem.properties.type.enum).toEqual(["text", "photo", "video", "document"])
     expect(Object.keys(batchItem.properties)).toEqual(["type", "content"])
     expect(batchItem.additionalProperties).toBe(false)
+  })
+
+  it("keeps the ChatGPT submission inventory and annotations aligned with current tools", async () => {
+    const submission = JSON.parse(readFileSync(new URL("../../../chatgpt-app-submission.json", import.meta.url), "utf8"))
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read", "messages:write", "spaces:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } as any, { authInfo })
+    const tools = (await waitForResponse(sent, 2)).result.tools
+    expect(Object.keys(submission.tools).sort()).toEqual(tools.map((tool: any) => tool.name).sort())
+    for (const tool of tools) expect(tool.annotations).toMatchObject(submission.tools[tool.name].annotations)
   })
 
   it("submission-v2 rejects legacy and incomplete argument shapes before handlers run", async () => {
@@ -1379,6 +1420,8 @@ describe("mcp tool server", () => {
           query: query ?? null,
           content: "documents",
           mode: "search",
+          scannedCount: 1,
+          nextOffsetId: null,
           messages: [{ id: 14n, fromId: 2n, chatId: resolvedChatId, message: "invoice is sent", out: false, date: 999n } as any],
           senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
@@ -2084,6 +2127,121 @@ describe("mcp tool server", () => {
     expect(audit).not.toHaveProperty("text")
     expect(audit).not.toHaveProperty("token")
     expect(JSON.stringify(audit)).not.toContain("hi")
+  })
+
+  it.each(["legacy", "submission-v2"] as const)("%s executes exact reads, child creation, and ordered forwarding with schemas", async (contractVersion) => {
+    const createSubthread = vi.fn<InlineApi["createSubthread"]>().mockResolvedValue({ chat: defaultEligibleChat({ chatId: 9n }), parentChatId: 7n, parentMessageId: 44n, anchorMessageId: 44n })
+    const forwardMessages = vi.fn<InlineApi["forwardMessages"]>().mockResolvedValue({ sourceChat: defaultEligibleChat(), destinationChat: defaultEligibleChat({ chatId: 9n }), messages: [{ sourceMessageId: 44n, destinationMessageId: 101n }, { sourceMessageId: 44n, destinationMessageId: 102n }] })
+    const getMessages = vi.fn<InlineApi["getMessages"]>().mockResolvedValue({ chat: defaultEligibleChat(), messages: [{ id: 43n, chatId: 7n, fromId: 2n, message: "second", out: false, date: 1n }, { id: 44n, chatId: 7n, fromId: 2n, message: "first", out: false, date: 1n }] })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createSubthread, forwardMessages, getMessages }), contractVersion })
+    const authInfo = createAuthInfo(["messages:read", "messages:write"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    const calls = [
+      { name: "messages.get", arguments: { chatId: "7", messageIds: ["44", "43", "44", "42"] } },
+      { name: "conversations.create_subthread", arguments: { parentChatId: "7", parentMessageId: "44", title: "Review", participantUserIds: ["2"] } },
+      { name: "messages.forward", arguments: { sourceChatId: "7", destinationChatId: "9", messageIds: ["44", "44"], shareForwardHeader: false } },
+    ]
+    for (const [index, params] of calls.entries()) {
+      await sendRequest(transport, { jsonrpc: "2.0", id: index + 2, method: "tools/call", params } as any, { authInfo })
+      const response = await waitForResponse(sent, index + 2)
+      expect(response.error).toBeUndefined()
+      expect(response.result.isError).not.toBe(true)
+      expect(response.result.structuredContent).toEqual(JSON.parse(response.result.content[0].text))
+    }
+    const read = (await waitForResponse(sent, 2)).result.structuredContent
+    expect(read.messageIds).toEqual(["44", "43", "42"])
+    expect(read.messages.map((message: any) => message.id)).toEqual(["44", "43"])
+    expect(read.missingMessageIds).toEqual(["42"])
+    expect(getMessages).toHaveBeenCalledWith({ chatId: 7n, messageIds: [44n, 43n, 42n] })
+    expect(createSubthread).toHaveBeenCalledWith({ parentChatId: 7n, parentMessageId: 44n, title: "Review", participantUserIds: [2n] })
+    expect(forwardMessages).toHaveBeenCalledWith({ sourceChatId: 7n, destinationChatId: 9n, messageIds: [44n, 44n], shareForwardHeader: false })
+    expect((await waitForResponse(sent, 4)).result.structuredContent.messages).toEqual([
+      { sourceMessageId: "44", destinationMessageId: "101", uri: "inline://chat/9/message/101" },
+      { sourceMessageId: "44", destinationMessageId: "102", uri: "inline://chat/9/message/102" },
+    ])
+  })
+
+  it.each([0, 2])("conversations.get propagates %s group grants without claiming direct users", async (groupParticipantCount) => {
+    const defaults = createInlineStub({})
+    const inline = createInlineStub({
+      async getConversation(target) {
+        return { ...await defaults.getConversation(target), groupParticipantCount, participants: [] }
+      },
+    })
+    const server = createInlineMcpServer({ grant, inline })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "conversations.get", arguments: { chatId: "7" } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.isError).not.toBe(true)
+    expect(response.result.structuredContent.details.groupParticipantCount).toBe(groupParticipantCount)
+    expect(response.result.structuredContent.participants).toEqual([])
+  })
+
+  it.each(["messages:read", "messages:write"])("forwarding refuses missing %s with a reauthorization challenge", async (missingScope) => {
+    const forwardMessages = vi.fn<InlineApi["forwardMessages"]>()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ forwardMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read", "messages:write"].filter((scope) => scope !== missingScope))
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.forward", arguments: { sourceChatId: "7", destinationChatId: "9", messageIds: ["44"] } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.isError).toBe(true)
+    expect(response.result._meta["mcp/www_authenticate"][0]).toContain(`scope="${missingScope}"`)
+    expect(forwardMessages).not.toHaveBeenCalled()
+  })
+
+  it.each(["0", "0x7", " 7 ", "+7", "9223372036854775808"])("rejects invalid decimal IDs %s before new read handlers", async (chatId) => {
+    const getMessages = vi.fn<InlineApi["getMessages"]>()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.get", arguments: { chatId, messageIds: ["44"] } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result?.isError || response.error).toBeTruthy()
+    expect(getMessages).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { since: "2026-02-31", until: undefined, error: "calendar date does not exist" },
+    { since: "2026-02-31T00:00:00Z", until: undefined, error: "calendar date does not exist" },
+    { since: "2026-02-29T12:00:00+03:30", until: undefined, error: "calendar date does not exist" },
+    { since: "200", until: "100", error: "since must be earlier" },
+  ])("rejects invalid time ranges before searching: $since / $until", async ({ since, until, error }) => {
+    const searchMessages = vi.fn<InlineApi["searchMessages"]>()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ searchMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.search", arguments: { chatId: "7", query: "topic", since, ...(until ? { until } : {}) } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.isError).toBe(true)
+    expect(response.result.content[0].text).toContain(error)
+    expect(searchMessages).not.toHaveBeenCalled()
+  })
+
+  it("parses UTC calendar bounds and sender/cursor selections before searching", async () => {
+    const searchMessages = vi.fn<InlineApi["searchMessages"]>().mockResolvedValue({ chat: defaultEligibleChat(), query: "topic", content: "all", mode: "search", messages: [], nextOffsetId: 40n, scannedCount: 20 })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ searchMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.search", arguments: { chatId: "7", query: "topic", since: "2026-09-29", until: "2026-09-29", senderUserId: "2", offsetId: "60" } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.isError).not.toBe(true)
+    expect(searchMessages).toHaveBeenCalledWith({ chatId: 7n, query: "topic", senderUserId: 2n, offsetId: 60n, limit: 20, content: "all", since: BigInt(Date.parse("2026-09-29T00:00:00Z") / 1000), until: BigInt(Date.parse("2026-09-29T23:59:59Z") / 1000) })
+    expect(response.result.structuredContent).toMatchObject({ nextOffsetId: "40", scannedCount: 20, senderUserId: "2", messages: [] })
+  })
+
+  it.each([
+    { timestamp: "2024-02-29T00:00:00+03:30", epochSeconds: BigInt(Date.UTC(2024, 1, 28, 20, 30) / 1000) },
+    { timestamp: "2026-09-29T12:00:00+03:30", epochSeconds: BigInt(Date.UTC(2026, 8, 29, 8, 30) / 1000) },
+  ])("preserves the valid written date and offset in $timestamp", async ({ timestamp, epochSeconds }) => {
+    const searchMessages = vi.fn<InlineApi["searchMessages"]>().mockResolvedValue({ chat: defaultEligibleChat(), query: "topic", content: "all", mode: "search", messages: [], nextOffsetId: null, scannedCount: 0 })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ searchMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.search", arguments: { chatId: "7", query: "topic", since: timestamp, until: timestamp } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.isError).not.toBe(true)
+    expect(searchMessages).toHaveBeenCalledWith(expect.objectContaining({ since: epochSeconds, until: epochSeconds }))
   })
 
   it("messages.send succeeds with messages:write", async () => {

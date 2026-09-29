@@ -6,6 +6,7 @@ import { createChat } from "@in/server/functions/messages.createChat"
 import { createSubthread } from "@in/server/functions/messages.createSubthread"
 import { getChat } from "@in/server/functions/messages.getChat"
 import { getChats } from "@in/server/functions/messages.getChats"
+import { getChatParticipants } from "@in/server/functions/messages.getChatParticipants"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
@@ -55,6 +56,72 @@ afterAll(() => { for (const spy of backgroundSpies) spy.mockRestore() })
 describe("messages.createSubthread", () => {
   setupTestLifecycle()
 
+  test.each([
+    { scope: "home", participants: "omitted" },
+    { scope: "home", participants: "other" },
+    { scope: "home", participants: "duplicates" },
+    { scope: "dm", participants: "omitted" },
+    { scope: "dm", participants: "other" },
+    { scope: "dm", participants: "duplicates" },
+    { scope: "space", participants: "omitted" },
+    { scope: "space", participants: "other" },
+    { scope: "space", participants: "duplicates" },
+  ] as const)("includes the creator once in a private $scope child with $participants participants", async ({ scope, participants }) => {
+    const creator = await testUtils.createUser("subthread-membership-creator@example.com")
+    const recipient = await testUtils.createUser("subthread-membership-recipient@example.com")
+    const space = scope === "space" ? await testUtils.createSpace("Subthread Membership") : undefined
+    if (scope === "space") {
+      if (!space) throw new Error("Space not created")
+      await db.insert(schema.members).values([
+        { spaceId: space.id, userId: creator.id, role: "member" },
+        { spaceId: space.id, userId: recipient.id, role: "member" },
+      ])
+    }
+    const parentChat = scope === "dm"
+      ? await testUtils.createPrivateChat(creator, recipient)
+      : await testUtils.createChat(space?.id ?? null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+    if (scope !== "dm") {
+      await testUtils.addParticipant(parentChat.id, creator.id)
+      await testUtils.addParticipant(parentChat.id, recipient.id)
+    }
+
+    const participantIds = participants === "omitted"
+      ? undefined
+      : participants === "other" ? [recipient.id] : [recipient.id, creator.id, recipient.id, creator.id]
+    const context = testUtils.functionContext({ userId: creator.id })
+    const created = await createSubthread({
+      parentChatId: BigInt(parentChat.id),
+      participants: participantIds?.map((userId) => ({ userId: BigInt(userId) })),
+    }, context)
+    const result = await getChatParticipants({ chatId: Number(created.chat.id) }, context)
+    const expectedIds = participantIds ? [creator.id, recipient.id] : [creator.id]
+
+    expect(result.participants.map((participant) => Number(participant.userId)).sort((a, b) => a - b))
+      .toEqual(expectedIds.sort((a, b) => a - b))
+    expect(result.users.map((user) => Number(user.id)).sort((a, b) => a - b)).toEqual(expectedIds)
+  })
+
+  test("does not add a direct creator grant for a public space child", async () => {
+    const { space, users: [creator, member] } = await testUtils.createSpaceWithMembers(
+      "Public Subthread Membership",
+      ["public-subthread-creator@example.com", "public-subthread-member@example.com"],
+    )
+    const parentChat = await testUtils.createChat(space.id, "Public Parent", "thread", true, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    const created = await createSubthread({ parentChatId: BigInt(parentChat.id) }, testUtils.functionContext({ userId: creator.id }))
+    const result = await getChatParticipants({ chatId: Number(created.chat.id) }, testUtils.functionContext({ userId: creator.id }))
+
+    expect(created.chat.isPublic).toBe(true)
+    expect(result.participants).toEqual([])
+    expect(result.users).toEqual([])
+    const accessible = await getChat({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: created.chat.id } } },
+    }, testUtils.functionContext({ userId: member.id }))
+    expect(accessible.chat.id).toBe(created.chat.id)
+  })
+
   test("creates a reply-thread subthread with anchor metadata and a hidden dialog for the opener", async () => {
     const creator = await testUtils.createUser("subthread-creator@example.com")
     const anchorAuthor = await testUtils.createUser("subthread-anchor-author@example.com")
@@ -91,6 +158,9 @@ describe("messages.createSubthread", () => {
     expect(result.dialog?.followMode).toBe(DialogFollowMode.FOLLOWING)
 
     const childChatId = Number(result.chat.id)
+    const childParticipants = await getChatParticipants({ chatId: childChatId }, testUtils.functionContext({ userId: creator.id }))
+    expect(childParticipants.participants.map((participant) => Number(participant.userId)).sort((a, b) => a - b))
+      .toEqual([creator.id, anchorAuthor.id].sort((a, b) => a - b))
     const childChat = await db
       .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled, threadNumber: schema.chats.threadNumber })
       .from(schema.chats)

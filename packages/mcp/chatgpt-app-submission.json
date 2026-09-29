@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Inline",
     "subtitle": "Work chats in ChatGPT",
-    "description": "Inline helps users find people and conversations, read scoped work chats, ask teammates in private threads, monitor authorized events in supported hosts, inspect a focused thread UI, upload files, and send messages.",
+    "description": "Inline helps users find people and conversations, read and search scoped work chats, create threads and subthreads, ask teammates in private threads, monitor authorized events in supported hosts, inspect a focused thread UI, upload files, send messages, and forward selected messages.",
     "category": "COLLABORATION"
   },
   "tools": {
@@ -188,6 +188,42 @@
         "destructive_justification": "Sends a recipient-visible message that cannot be withdrawn through this tool after delivery."
       }
     },
+    "conversations.create_subthread": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates or reuses a child thread under one approved Inline conversation. The child inherits root-chat access plus its own grants; intermediate-child additions are not inherited. New creation may grant additional participants direct access. Reuse does not change metadata or participants or repair older creator membership.",
+        "open_world_justification": "Creates a child that inherits root-chat access, which can include an internet-accessible public Inline space. An approved context does not guarantee a private audience.",
+        "destructive_justification": "Does not delete, overwrite, or revoke existing data or access."
+      }
+    },
+    "messages.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads explicitly selected message IDs in one approved Inline conversation.",
+        "open_world_justification": "Does not publish content or write to public internet or third-party systems.",
+        "destructive_justification": "Does not mark, edit, send, or delete messages."
+      }
+    },
+    "messages.forward": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Sends selected source messages to a separately resolved, approved Inline destination, requiring both read and write scopes.",
+        "open_world_justification": "Delivers selected content to independently controlled recipients, including potentially public threads in allowed Inline spaces. Authorization does not guarantee a private audience.",
+        "destructive_justification": "Sends recipient-visible messages that cannot be withdrawn through this tool, and failed calls can follow partial delivery."
+      }
+    },
     "conversations.mentions": {
       "annotations": {
         "readOnlyHint": true,
@@ -267,6 +303,30 @@
       "expected_output_url": null
     },
     {
+      "description": "Read an explicit message selection before forwarding.",
+      "user_prompt": "Show me messages 44 and 43 from Inline chat 12345 before I forward them.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.get",
+      "expected_output": "Returns the selected messages in request order and identifies any unavailable message IDs.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a child with inherited root-chat access and additional direct participants.",
+      "user_prompt": "Create a child thread under Inline chat 12345 titled Launch Notes and add the selected participants.",
+      "file_attachment_urls": null,
+      "tools_triggered": "conversations.create_subthread",
+      "expected_output": "Creates the child in the approved parent context and returns its chat ID; root-chat access is retained, while participants added only to an intermediate child are not inherited.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Forward selected source messages to a separately identified destination.",
+      "user_prompt": "Forward messages 44 and 43 from Inline chat 12345 to Inline chat 67890 in that order.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.forward",
+      "expected_output": "Checks approval of both chats, forwards in request order, and returns source/destination delivery receipts. An error explains potential partial delivery and inspection before retry.",
+      "expected_output_url": null
+    },
+    {
       "description": "Select a conversation through the desktop composer mention picker; validate the resource read as well as search.",
       "user_prompt": "Use the Inline composer picker to find Project Atlas, select the approved conversation, then summarize its recent text.",
       "file_attachment_urls": null,
@@ -279,7 +339,7 @@
       "user_prompt": "Search Inline chat 12345 for launch blockers and show the matching messages.",
       "file_attachment_urls": null,
       "tools_triggered": "messages.search",
-      "expected_output": "Returns the scoped message page and passive card. Active query/filters are visible. A limited or filtered empty page does not claim complete search coverage, and the card suggests refining the search.",
+      "expected_output": "Returns the scoped message page and passive card. Active query/filters and available older continuation are visible, including when a filtered page is empty.",
       "expected_output_url": null
     }
   ],

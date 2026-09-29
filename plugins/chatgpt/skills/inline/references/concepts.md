@@ -9,6 +9,7 @@ Inline organizes work around conversations that can remain focused and shareable
 - **Space:** A team or workspace context containing members and conversations. A grant may expose only selected spaces.
 - **Conversation:** The general MCP term for an Inline chat. It has a stable `chatId`.
 - **Thread:** A focused Inline conversation, often titled and optionally created inside a space. Home threads can exist without a parent space when the grant permits them.
+- **Subthread:** A child of a conversation, optionally anchored to a parent message. It inherits root-chat access plus its own direct/group grants; participants added only to an intermediate child are not automatically inherited by its descendants. A direct participant list is not an exhaustive audience list. Creation inputs apply only to a new child; reusing an existing anchored reply thread does not edit metadata or participants or repair older creator membership.
 - **DM:** A direct conversation with a person. Like every other conversation, MCP tools address it by its stable `chatId`; person results may expose that value as `dmChatId`.
 - **Message:** A conversation item with a stable message ID. Replies may reference `replyToMsgId`.
 - **Reply context:** Messages surrounding an anchor. Use `messages.context` rather than interpreting a reply or search result alone.

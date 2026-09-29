@@ -85,6 +85,9 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   }
 
   const directParticipantUserIds = uniquePositiveUserIds(input.participants ?? [])
+  if (parentChat.publicThread !== true && !directParticipantUserIds.includes(context.currentUserId)) {
+    directParticipantUserIds.push(context.currentUserId)
+  }
   await ensureUsersExist(directParticipantUserIds)
 
   const agentContext = input.agentContext

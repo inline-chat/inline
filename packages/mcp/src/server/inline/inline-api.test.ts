@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Method } from "@inline-chat/protocol/core"
+import { CreateSubthreadResult, ForwardMessagesResult, GetChatParticipantsResult, Method, RpcResult, Update } from "@inline-chat/protocol/core"
 import type { Chat, GetChatsResult, GetSpaceMembersResult, Message, Space, User } from "@inline-chat/protocol/core"
 import { createInlineApi } from "./inline-api"
 
@@ -9,6 +9,7 @@ const realtimeSdk = vi.hoisted(() => {
     connect: vi.fn(),
     events: vi.fn(),
     invoke: vi.fn(),
+    invokeRaw: vi.fn(),
     sendMessage: vi.fn(),
   }
   return {
@@ -48,6 +49,7 @@ describe("createInlineApi", () => {
       async *[Symbol.asyncIterator]() {},
     })
     realtimeSdk.client.invoke.mockReset()
+    realtimeSdk.client.invokeRaw.mockReset()
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
   })
 
@@ -196,6 +198,70 @@ describe("createInlineApi", () => {
     expect(requestedSpaceIds).toEqual([10n])
   })
 
+  function fixtureApi(allowed = { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false }) {
+    const chats = [spaceChat(7n, "Source", 10n, 100n), spaceChat(8n, "Destination", 10n, 90n)]
+    realtimeSdk.client.invoke.mockImplementation(async (method: Method, input: any) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats, dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: chats.find((chat) => chat.id === input.getChat.peerId.type.chat.chatId) } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    return { chats, api: createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed }) }
+  }
+
+  it.each(["conversation", "history", "context", "messages", "search"] as const)("legacy %s reads refuse missing DMs without invoking mutation-capable user-peer RPCs", async (operation) => {
+    const { api } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
+    const read = {
+      conversation: () => api.getConversation({ userId: 2n }),
+      history: () => api.recentMessages({ userId: 2n }),
+      context: () => api.messageContext({ userId: 2n, anchorMessageId: 100n }),
+      messages: () => api.getMessages({ userId: 2n, messageIds: [100n] }),
+      search: () => api.searchMessages({ userId: 2n, query: "topic" }),
+    }
+    try {
+      await expect(read[operation]()).rejects.toThrow("no existing approved DM conversation")
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHATS])
+      expect(realtimeSdk.client.sendMessage).not.toHaveBeenCalled()
+    } finally { await api.close() }
+  })
+
+  it.each(["conversation", "history", "context", "messages", "search"] as const)("legacy %s reads resolve approved existing DMs to a stable chat peer", async (operation) => {
+    const { api, chats } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
+    chats[0] = { ...chats[0]!, spaceId: undefined, peerId: { type: { oneofKind: "user", user: { userId: 2n } } } }
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHAT_PARTICIPANTS) return { getChatParticipants: GetChatParticipantsResult.create() }
+      if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: [] } }
+      if (method === Method.GET_MESSAGES) return { getMessages: { messages: [] } }
+      if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages: [] } }
+      return invokeContext(method, input)
+    })
+    const read = {
+      conversation: () => api.getConversation({ userId: 2n }),
+      history: () => api.recentMessages({ userId: 2n }),
+      context: () => api.messageContext({ userId: 2n, anchorMessageId: 100n }),
+      messages: () => api.getMessages({ userId: 2n, messageIds: [100n] }),
+      search: () => api.searchMessages({ userId: 2n, query: "topic" }),
+    }
+    try {
+      expect(await read[operation]()).toMatchObject({ chat: { chatId: 7n, peerUserId: 2n } })
+      const reads = realtimeSdk.client.invoke.mock.calls.filter(([method]) => method !== Method.GET_CHATS && method !== Method.GET_CHAT_PARTICIPANTS)
+      expect(reads.length).toBeGreaterThan(0)
+      for (const [, input] of reads) expect(input[input.oneofKind].peerId).toEqual({ type: { oneofKind: "chat", chat: { chatId: 7n } } })
+    } finally { await api.close() }
+  })
+
+  it("refreshes existing-DM metadata rather than rejecting a DM created after the discovery cache warmed", async () => {
+    const { api, chats } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => method === Method.GET_CHAT_HISTORY ? { getChatHistory: { messages: [] } } : invokeContext(method, input))
+    try {
+      expect(await api.getEligibleChats()).toEqual([])
+      chats[0] = { ...chats[0]!, spaceId: undefined, peerId: { type: { oneofKind: "user", user: { userId: 2n } } } }
+      expect(await api.recentMessages({ userId: 2n })).toMatchObject({ chat: { chatId: 7n } })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(2)
+    } finally { await api.close() }
+  })
+
   it.each(["recent", "search", "filter-only search"])("%s includes names and avatar URLs only for returned authors without profile RPCs", async (operation) => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     const invokeContext = async (method: Method) => {
@@ -225,6 +291,176 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
+  it("continues recent history after the last consumed row without skipping the rest of a fetched page", async () => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    const history = Array.from({ length: 100 }, (_, index) => message(BigInt(100 - index), 7n, index % 2 === 0 ? 2n : 3n, "text"))
+    realtimeSdk.client.invoke.mockImplementation(async (method, input: any) => {
+      if (method !== Method.GET_CHAT_HISTORY) return invokeContext(method, input)
+      return { getChatHistory: { messages: history.filter((item) => input.getChatHistory.offsetId == null || item.id < input.getChatHistory.offsetId).slice(0, input.getChatHistory.limit) } }
+    })
+    try {
+      const first = await api.recentMessages({ chatId: 7n, limit: 2, senderUserId: 2n })
+      expect(first.messages.map((item) => item.id)).toEqual([100n, 98n])
+      expect(first.nextOffsetId).toBe(98n)
+      expect(first.scannedCount).toBe(3)
+      const second = await api.recentMessages({ chatId: 7n, limit: 2, senderUserId: 2n, offsetId: first.nextOffsetId! })
+      expect(second.messages.map((item) => item.id)).toEqual([96n, 94n])
+      const last = await api.recentMessages({ chatId: 7n, offsetId: 4n, limit: 20 })
+      expect(last.messages.map((item) => item.id)).toEqual([3n, 2n, 1n])
+      expect(last.nextOffsetId).toBeNull()
+    } finally { await api.close() }
+  })
+
+  it("filters and sorts conversation candidates before applying the requested limit", async () => {
+    const { api, chats } = fixtureApi({ allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: true })
+    chats[0]!.title = "Alpha"
+    chats[1]!.title = "Alpha Roadmap"
+    chats.push({ id: 9n, title: "Alpha", peerId: { type: { oneofKind: "chat", chat: { chatId: 9n } } }, date: 1n })
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      const result = await invokeContext(method, input)
+      if (method === Method.GET_CHATS) {
+        result.getChats.dialogs = [{ chatId: 8n, unreadCount: 2 }, { chatId: 9n, unreadCount: 2 }]
+        result.getChats.messages = [message(100n, 7n, 1n, "read"), message(90n, 8n, 1n, "unread"), message(110n, 9n, 1n, "home")]
+      }
+      return result
+    })
+    try {
+      const unread = await api.resolveConversation("Alpha", 1, { unreadOnly: true, spaceId: 10n, kind: "space_chat" })
+      expect(unread.candidates.map((chat) => chat.chatId)).toEqual([8n])
+      const recent = await api.resolveConversation("Alpha", 1, { sort: "recent" })
+      expect(recent.candidates.map((chat) => chat.chatId)).toEqual([9n])
+    } finally { await api.close() }
+  })
+
+  it("honors conversation limits above twenty within the advertised bound", async () => {
+    const { api, chats } = fixtureApi()
+    for (let index = 0; index < 30; index++) chats.push(spaceChat(BigInt(100 + index), "Alpha", 10n, 1n))
+    try { expect((await api.resolveConversation("Alpha", 30)).candidates).toHaveLength(30) }
+    finally { await api.close() }
+  })
+
+  it.each(["recent", "unread", "relevance"] as const)("keeps %s query order stable across limits with equal date and unread count", async (sort) => {
+    const { api, chats } = fixtureApi({ allowedSpaceIds: [10n], allowDms: true, allowHomeThreads: false })
+    chats[0] = { ...chats[0]!, title: "Alpha", spaceId: undefined, peerId: { type: { oneofKind: "user", user: { userId: 2n } } } }
+    chats[1]!.title = "Alpha Roadmap"
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      const result = await invokeContext(method, input)
+      if (method === Method.GET_CHATS) {
+        result.getChats.dialogs = [{ chatId: 7n, unreadCount: 2 }, { chatId: 8n, unreadCount: 2 }]
+        result.getChats.messages = [
+          { ...message(100n, 7n, 2n, "exact DM match"), date: 1700000000n },
+          { ...message(90n, 8n, 2n, "partial thread match"), date: 1700000000n },
+        ]
+      }
+      return result
+    })
+    try {
+      const one = await api.resolveConversation("Alpha", 1, { sort })
+      const two = await api.resolveConversation("Alpha", 2, { sort })
+      const expected = sort === "relevance" ? [7n, 8n] : [8n, 7n]
+      expect(two.candidates.map((chat) => chat.chatId)).toEqual(expected)
+      expect(one.selected?.chatId).toBe(expected[0])
+      expect(two.selected?.chatId).toBe(one.selected?.chatId)
+      expect(two.candidates.find((chat) => chat.chatId === 7n)!.score).toBeGreaterThan(two.candidates.find((chat) => chat.chatId === 8n)!.score)
+    } finally { await api.close() }
+  })
+
+  it.each([{ name: "zero", groupIds: [] }, { name: "two", groupIds: [20n, 21n] }])("counts $name explicit group grants without expanding them into direct participants", async ({ groupIds }) => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method !== Method.GET_CHAT_PARTICIPANTS) return invokeContext(method, input)
+      return { getChatParticipants: GetChatParticipantsResult.create({
+        groupParticipants: groupIds.map((groupId) => ({ groupId, date: 1n })),
+        users: [user(2n, "Group", "Member", "member")],
+      }) }
+    })
+    try {
+      const details = await api.getConversation({ chatId: 7n })
+      expect(details.groupParticipantCount).toBe(groupIds.length)
+      expect(details.participants).toEqual([])
+    } finally { await api.close() }
+  })
+
+  it("keeps a search cursor on an empty page filtered by sender/time and forwards it to the next request", async () => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input: any) => {
+      if (method !== Method.SEARCH_MESSAGES) return invokeContext(method, input)
+      return { searchMessages: { messages: input.searchMessages.offsetId == null
+        ? [message(100n, 7n, 3n, "topic"), message(99n, 7n, 3n, "topic")]
+        : [message(98n, 7n, 2n, "topic")] } }
+    })
+    try {
+      const first = await api.searchMessages({ chatId: 7n, query: "topic", limit: 2, senderUserId: 2n, until: 98n })
+      expect(first.messages).toEqual([])
+      expect(first.nextOffsetId).toBe(99n)
+      expect(first.scannedCount).toBe(2)
+      const second = await api.searchMessages({ chatId: 7n, query: "topic", limit: 2, senderUserId: 2n, until: 98n, offsetId: first.nextOffsetId! })
+      expect(second.messages.map((item) => item.id)).toEqual([98n])
+      expect(second.nextOffsetId).toBeNull()
+      expect(realtimeSdk.client.invoke).toHaveBeenLastCalledWith(Method.SEARCH_MESSAGES, expect.objectContaining({ searchMessages: expect.objectContaining({ offsetId: 99n }) }))
+    } finally { await api.close() }
+  })
+
+  it("creates a subthread through its actual wire result and preserves inherited context", async () => {
+    const { api, chats } = fixtureApi()
+    const child = { ...spaceChat(9n, "Child", 10n, 1n), parentChatId: 7n, parentMessageId: 100n }
+    const wireResult = RpcResult.fromBinary(RpcResult.toBinary(RpcResult.create({ result: { oneofKind: "createSubthread", createSubthread: CreateSubthreadResult.create({ chat: child, anchorMessage: message(100n, 7n, 1n, "anchor") }) } }))).result
+    realtimeSdk.client.invokeRaw.mockImplementation(async () => { chats.push(child); return wireResult })
+    try {
+      expect(await api.createSubthread({ parentChatId: 7n, parentMessageId: 100n, title: " Child ", participantUserIds: [2n, 2n] })).toMatchObject({ chat: { chatId: 9n, spaceId: 10n }, parentChatId: 7n, parentMessageId: 100n, anchorMessageId: 100n })
+      expect(realtimeSdk.client.invokeRaw).toHaveBeenCalledWith(Method.CREATE_SUBTHREAD, expect.objectContaining({ createSubthread: expect.objectContaining({ parentChatId: 7n, parentMessageId: 100n, title: "Child", participants: [{ userId: 2n }] }) }))
+    } finally { await api.close() }
+  })
+
+  it("rejects DM child creation without home access before invoking a mutation", async () => {
+    const { api, chats } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
+    chats[0] = { ...chats[0]!, spaceId: undefined, peerId: { type: { oneofKind: "user", user: { userId: 2n } } } }
+    try {
+      await expect(api.createSubthread({ parentChatId: 7n })).rejects.toThrow("requires home thread access")
+      expect(realtimeSdk.client.invokeRaw).not.toHaveBeenCalled()
+    } finally { await api.close() }
+  })
+
+  it("maps ordered forwarding receipts from protobuf updates, preserving repeated source IDs", async () => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    const updates = [501n, 502n, 503n].map((messageId) => Update.create({ update: { oneofKind: "updateMessageId", updateMessageId: { messageId, randomId: 0n } } }))
+    const wireResult = ForwardMessagesResult.fromBinary(ForwardMessagesResult.toBinary(ForwardMessagesResult.create({ updates })))
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => method === Method.FORWARD_MESSAGES ? { forwardMessages: wireResult } : invokeContext(method, input))
+    try {
+      const result = await api.forwardMessages({ sourceChatId: 7n, destinationChatId: 8n, messageIds: [100n, 90n, 100n], shareForwardHeader: false })
+      expect(result.messages).toEqual([{ sourceMessageId: 100n, destinationMessageId: 501n }, { sourceMessageId: 90n, destinationMessageId: 502n }, { sourceMessageId: 100n, destinationMessageId: 503n }])
+      expect(realtimeSdk.client.invoke).toHaveBeenLastCalledWith(Method.FORWARD_MESSAGES, expect.objectContaining({ forwardMessages: expect.objectContaining({ messageIds: [100n, 90n, 100n], shareForwardHeader: false }) }))
+    } finally { await api.close() }
+  })
+
+  it.each(["source", "destination"])("checks %s forwarding context before invoking a mutation", async (disallowed) => {
+    const { api, chats } = fixtureApi()
+    chats[disallowed === "source" ? 0 : 1]!.spaceId = 20n
+    try {
+      await expect(api.forwardMessages({ sourceChatId: 7n, destinationChatId: 8n, messageIds: [100n] })).rejects.toThrow("allowed context")
+      expect(realtimeSdk.client.invoke.mock.calls.some(([method]) => method === Method.FORWARD_MESSAGES)).toBe(false)
+    } finally { await api.close() }
+  })
+
+  it.each(["rpc error", "incomplete receipts"])("reports possible partial delivery after %s", async (failure) => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method !== Method.FORWARD_MESSAGES) return invokeContext(method, input)
+      if (failure === "rpc error") throw new Error("MESSAGE_ID_INVALID")
+      return { forwardMessages: ForwardMessagesResult.create({ updates: [] }) }
+    })
+    try {
+      await expect(api.forwardMessages({ sourceChatId: 7n, destinationChatId: 8n, messageIds: [100n, 99n] })).rejects.toThrow("Some messages may already have been delivered")
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.FORWARD_MESSAGES)).toHaveLength(1)
+    } finally { await api.close() }
+  })
 
   it.each([
     "https://example.com/file?id=avatar&exp=1999999999&sig=fixture",

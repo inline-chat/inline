@@ -1,7 +1,7 @@
 {
   "name": "inline",
   "version": "0.2.0",
-  "description": "Find scoped work chats, ask teammates in private threads, monitor Inline events in supported ChatGPT hosts, and inspect a focused thread UI.",
+  "description": "Find scoped work chats, ask teammates in private threads, monitor Inline events in supported ChatGPT hosts, inspect a focused thread UI, create child threads, and forward selected messages.",
   "author": {
     "name": "Inline",
     "url": "https://inline.chat"
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "Inline",
     "shortDescription": "Work with Inline chats, threads, and messages",
-    "longDescription": "Inline brings scoped work chat into ChatGPT and Codex. Find people and conversations, search history, ask teammates in private threads, monitor replies with MCP Events where supported, inspect a minimal thread view, upload files, and send messages with explicit write intent.",
+    "longDescription": "Inline brings scoped work chat into ChatGPT and Codex. Find people and conversations, search history, ask teammates in private threads, monitor replies with MCP Events where supported, inspect a minimal thread view, create child threads, forward selected messages, upload files, and send messages with explicit write intent.",
     "developerName": "Inline",
     "category": "Communication",
     "capabilities": [

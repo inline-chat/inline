@@ -1,6 +1,8 @@
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import {
   CreateChatInput,
+  CreateSubthreadInput,
+  ForwardMessagesInput,
   GetChatHistoryMode,
   GetChatHistoryInput,
   GetChatParticipantsInput,
@@ -56,6 +58,13 @@ export type InlineConversationResolution = {
   query: string
   selected: InlineConversationCandidate | null
   candidates: InlineConversationCandidate[]
+}
+
+export type InlineConversationFilters = {
+  spaceId?: bigint
+  kind?: InlineEligibleChat["kind"]
+  unreadOnly?: boolean
+  sort?: "relevance" | "recent" | "unread"
 }
 
 export type InlineSpaceSummary = {
@@ -118,11 +127,18 @@ export type InlineSearchMessagesResult = {
   query: string | null
   content: InlineMessageContentFilter
   mode: "search" | "scan"
-  nextOffsetId?: bigint | null
+  scannedCount: number
+  nextOffsetId: bigint | null
   messages: Message[]
   senderDisplayNames?: Record<string, string>
   /** Signed profile images for UI-only tool metadata, never message text. */
   senderAvatarUrls?: Record<string, string>
+}
+
+export type InlineForwardMessagesResult = {
+  sourceChat: InlineEligibleChat
+  destinationChat: InlineEligibleChat
+  messages: Array<{ sourceMessageId: bigint; destinationMessageId: bigint }>
 }
 
 export type InlineUnreadMessagesResult = {
@@ -165,7 +181,7 @@ export type InlineApi = {
   listSpaces(params: { query?: string; limit?: number }): Promise<InlineSpaceSummary[]>
   searchPeople(params: { query?: string; limit?: number }): Promise<{ query: string | null; bestMatch: InlinePersonCandidate | null; items: InlinePersonCandidate[] }>
   getEligibleChats(): Promise<InlineEligibleChat[]>
-  resolveConversation(query: string, limit: number): Promise<InlineConversationResolution>
+  resolveConversation(query: string, limit: number, filters?: InlineConversationFilters): Promise<InlineConversationResolution>
   getConversation(params: { chatId?: bigint; userId?: bigint }): Promise<InlineConversationDetails>
   messageContext(params: {
     chatId?: bigint
@@ -191,6 +207,7 @@ export type InlineApi = {
     until?: bigint
     unreadOnly?: boolean
     content?: InlineMessageContentFilter
+    senderUserId?: bigint
     /** Recheck the target's current grant context without trusting discovery metadata. */
     freshChatAuthorization?: boolean
   }): Promise<InlineRecentMessagesResult>
@@ -199,6 +216,8 @@ export type InlineApi = {
     userId?: bigint
     query?: string
     limit?: number
+    offsetId?: bigint
+    senderUserId?: bigint
     since?: bigint
     until?: bigint
     content?: InlineMessageContentFilter
@@ -217,6 +236,20 @@ export type InlineApi = {
     isPublic?: boolean
     participantUserIds?: bigint[]
   }): Promise<InlineEligibleChat>
+  createSubthread(params: {
+    parentChatId: bigint
+    parentMessageId?: bigint
+    title?: string
+    description?: string
+    emoji?: string
+    participantUserIds?: bigint[]
+  }): Promise<{ chat: InlineEligibleChat; parentChatId: bigint; parentMessageId: bigint | null; anchorMessageId: bigint | null }>
+  forwardMessages(params: {
+    sourceChatId: bigint
+    destinationChatId: bigint
+    messageIds: bigint[]
+    shareForwardHeader?: boolean
+  }): Promise<InlineForwardMessagesResult>
   uploadFile(params: {
     type: InlineUploadedMediaKind
     file: Uint8Array | ArrayBuffer | SharedArrayBuffer | Blob
@@ -318,7 +351,6 @@ export function createInlineApi(params: {
   }
 
   const buildChatPeer = (chatId: bigint) => InputPeer.create({ type: { oneofKind: "chat", chat: { chatId } } })
-  const buildUserPeer = (userId: bigint) => InputPeer.create({ type: { oneofKind: "user", user: { userId } } })
 
   const normalizeContentFilter = (content?: InlineMessageContentFilter): InlineMessageContentFilter => {
     if (!content) return "all"
@@ -420,14 +452,6 @@ export function createInlineApi(params: {
     await ensureConnected()
     const result = await client.invoke(Method.GET_CHAT, { oneofKind: "getChat", getChat: GetChatInput.create({ peerId }) })
     return result.getChat
-  }
-
-  const getChatByUserId = async (userId: bigint): Promise<Chat> => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_CHAT, { oneofKind: "getChat", getChat: GetChatInput.create({ peerId: buildUserPeer(userId) }) })
-    const chat = result.getChat.chat
-    if (!chat) throw new Error("missing chat")
-    return chat
   }
 
   const getSpaceMembers = async (spaceId: bigint) => {
@@ -672,9 +696,9 @@ export function createInlineApi(params: {
     }
   }
 
-  const getEligibleChatContext = async (): Promise<EligibleChatContext> => {
+  const getEligibleChatContext = async (refresh = false): Promise<EligibleChatContext> => {
     const now = Date.now()
-    if (eligibleChatsCache && eligibleChatsCache.expiresAtMs > now) {
+    if (!refresh && eligibleChatsCache && eligibleChatsCache.expiresAtMs > now) {
       return eligibleChatsCache
     }
     if (eligibleChatsInFlight) {
@@ -717,21 +741,22 @@ export function createInlineApi(params: {
 
   const getAllowedChat = async (target: { chatId?: bigint; userId?: bigint }, freshChatAuthorization = false): Promise<InlineEligibleChat> => {
     const resolved = resolveTarget(target, "target")
+    if (resolved.kind === "user" && !allowDms) throw new InlineAccessDeniedError("DM access is not allowed for this grant")
+    // The legacy user-ID read shape must resolve an existing DM. Backend read
+    // RPCs using a user peer can auto-create one, violating readOnlyHint.
     const context = freshChatAuthorization && resolved.kind === "chat"
       ? eligibleChatsCache
-      : await getEligibleChatContext()
+      : await getEligibleChatContext(resolved.kind === "user")
     if (resolved.kind === "chat") {
       const fromCache = context?.byChatId.get(resolved.chatId.toString())
       if (fromCache && !freshChatAuthorization) return fromCache
     } else {
-      const dmFromCache = context?.chats.find((chat) => chat.peerUserId === resolved.userId)
+      const dmFromCache = context?.chats.find((chat) => chat.kind === "dm" && chat.peerUserId === resolved.userId)
       if (dmFromCache) return dmFromCache
-      if (!allowDms) {
-        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
-      }
+      throw new Error("no existing approved DM conversation found for this user; resolve an existing chat with conversations.list")
     }
 
-    const chat = resolved.kind === "chat" ? await getChatById(resolved.chatId) : await getChatByUserId(resolved.userId)
+    const chat = await getChatById(resolved.chatId)
     ensureChatAllowed(chat)
     const previous = context?.byChatId.get(chat.id.toString())
     const peerUserId = chat.peerId?.type.oneofKind === "user" ? chat.peerId.type.user.userId : null
@@ -775,6 +800,7 @@ export function createInlineApi(params: {
     until?: bigint
     unreadOnly?: boolean
     content?: InlineMessageContentFilter
+    senderUserId?: bigint
     freshChatAuthorization?: boolean
   }): Promise<InlineRecentMessagesResult> => {
     const safeDirection: "sent" | "all" = params.direction === "sent" ? "sent" : "all"
@@ -817,6 +843,7 @@ export function createInlineApi(params: {
           continue
         }
         if (safeDirection === "sent" && !message.out) continue
+        if (params.senderUserId != null && message.fromId !== params.senderUserId) continue
         if (!matchesContentFilter(message, safeContent)) continue
         if (!matchesTimeFilter(message, params.since, params.until)) continue
 
@@ -829,8 +856,14 @@ export function createInlineApi(params: {
       if (nextOffsetId != null && oldestMessage.id >= nextOffsetId) break
       nextOffsetId = oldestMessage.id
 
-      if (safeUnreadOnly && (readBoundaryReached || (chat.readMaxId != null && oldestMessage.id <= chat.readMaxId))) break
-      if (params.since != null && oldestMessage.date < params.since) break
+      if (safeUnreadOnly && (readBoundaryReached || (chat.readMaxId != null && oldestMessage.id <= chat.readMaxId))) {
+        nextOffsetId = null
+        break
+      }
+      if (params.since != null && oldestMessage.date < params.since) {
+        nextOffsetId = null
+        break
+      }
       if (lastScannedMessage === historyPage[historyPage.length - 1] && historyPage.length < pageLimit) {
         nextOffsetId = null
         break
@@ -1002,7 +1035,7 @@ export function createInlineApi(params: {
       return context.chats
     },
 
-    async resolveConversation(query, limit) {
+    async resolveConversation(query, limit, filters) {
       const normalizedQuery = normalizeText(query)
       if (!normalizedQuery) {
         return {
@@ -1015,10 +1048,13 @@ export function createInlineApi(params: {
       const context = await getEligibleChatContext()
       const handleQuery = normalizedQuery.startsWith("@") ? normalizedQuery.slice(1) : normalizedQuery
       const isNumericQuery = /^\d+$/.test(normalizedQuery)
-      const maxCandidates = Math.max(1, Math.min(20, Math.trunc(limit || 1)))
+      const maxCandidates = Math.max(1, Math.min(50, Math.trunc(limit || 1)))
       const candidates: InlineConversationCandidate[] = []
 
       for (const chat of context.chats) {
+        if (filters?.spaceId != null && chat.spaceId !== filters.spaceId) continue
+        if (filters?.kind != null && chat.kind !== filters.kind) continue
+        if (filters?.unreadOnly && chat.unreadCount === 0) continue
         let score = 0
         const matchReasons: string[] = []
         const chatIdText = chat.chatId.toString()
@@ -1077,6 +1113,12 @@ export function createInlineApi(params: {
       }
 
       candidates.sort((a, b) => {
+        if (filters?.sort === "unread" && a.unreadCount !== b.unreadCount) return b.unreadCount - a.unreadCount
+        if (filters?.sort === "recent" || filters?.sort === "unread") {
+          const byDate = compareBigIntDesc(a.lastMessageDate, b.lastMessageDate)
+          if (byDate !== 0) return byDate
+          return compareBigIntDesc(a.chatId, b.chatId)
+        }
         if (a.score !== b.score) return b.score - a.score
         if (a.kind !== b.kind) {
           if (a.kind === "dm") return -1
@@ -1096,18 +1138,12 @@ export function createInlineApi(params: {
     },
 
     async getConversation({ chatId, userId }) {
-      const target = resolveTarget({ chatId, userId }, "getConversation")
-      if (target.kind === "user" && !allowDms) {
-        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
-      }
-      const peerId = target.kind === "chat" ? buildChatPeer(target.chatId) : buildUserPeer(target.userId)
-      const result = await getChatResultByPeer(peerId)
+      const chat = await getAllowedChat({ chatId, userId })
+      const result = await getChatResultByPeer(buildChatPeer(chat.chatId))
       const rawChat = result.chat
       if (!rawChat) throw new Error("missing chat")
       ensureChatAllowed(rawChat)
 
-      const context = await getEligibleChatContext()
-      const chat = context.byChatId.get(rawChat.id.toString()) ?? (await getAllowedChat({ chatId: rawChat.id }))
       const participantResult = await getChatParticipants(rawChat.id)
       const participants = participantResult.participants
         .map((participant) => {
@@ -1133,7 +1169,7 @@ export function createInlineApi(params: {
         parentMessageId: rawChat.parentMessageId ?? null,
         number: rawChat.number ?? null,
         pinnedMessageIds: result.pinnedMessageIds ?? [],
-        groupParticipantCount: 0,
+        groupParticipantCount: participantResult.groupParticipants.length,
         participants,
       }
     },
@@ -1206,7 +1242,7 @@ export function createInlineApi(params: {
       return await listRecentMessages(params)
     },
 
-    async searchMessages({ chatId, userId, query, limit, since, until, content }) {
+    async searchMessages({ chatId, userId, query, limit, offsetId, senderUserId, since, until, content }) {
       const safeQuery = query?.trim()
       const safeContent = normalizeContentFilter(content)
       const maxMessages = Math.max(1, Math.min(50, Math.trunc(limit ?? 20)))
@@ -1217,6 +1253,8 @@ export function createInlineApi(params: {
           userId,
           direction: "all",
           limit: maxMessages,
+          offsetId,
+          senderUserId,
           since,
           until,
           content: safeContent,
@@ -1226,6 +1264,7 @@ export function createInlineApi(params: {
           query: null,
           content: safeContent,
           mode: "scan",
+          scannedCount: fallback.scannedCount,
           nextOffsetId: fallback.nextOffsetId,
           messages: fallback.messages,
           senderDisplayNames: fallback.senderDisplayNames,
@@ -1233,9 +1272,8 @@ export function createInlineApi(params: {
         }
       }
 
-      const target = resolveTarget({ chatId, userId }, "searchMessages")
       const chat = await getAllowedChat({ chatId, userId })
-      const peerId = target.kind === "chat" ? buildChatPeer(target.chatId) : buildUserPeer(target.userId)
+      const peerId = buildChatPeer(chat.chatId)
 
       await ensureConnected()
       const result = await client.invoke(Method.SEARCH_MESSAGES, {
@@ -1244,17 +1282,22 @@ export function createInlineApi(params: {
           peerId,
           queries: [safeQuery],
           limit: maxMessages,
+          ...(offsetId != null ? { offsetId } : {}),
           ...(toSearchFilter(safeContent) != null ? { filter: toSearchFilter(safeContent) } : {}),
         }),
       })
       const sourceMessages = result.searchMessages.messages
-      const messages = sourceMessages.filter((message) => matchesTimeFilter(message, since, until)).filter((message) => matchesContentFilter(message, safeContent))
+      const messages = sourceMessages
+        .filter((message) => senderUserId == null || message.fromId === senderUserId)
+        .filter((message) => matchesTimeFilter(message, since, until))
+        .filter((message) => matchesContentFilter(message, safeContent))
 
       return {
         chat,
         query: safeQuery,
         content: safeContent,
         mode: "search",
+        scannedCount: sourceMessages.length,
         nextOffsetId: sourceMessages.length >= maxMessages ? sourceMessages[sourceMessages.length - 1]!.id : null,
         messages,
         ...sendersForMessages(messages),
@@ -1333,6 +1376,73 @@ export function createInlineApi(params: {
         userById: new Map(),
         lastMessageByChatId: new Map(),
       })
+    },
+
+    async createSubthread({ parentChatId, parentMessageId, title, description, emoji, participantUserIds }) {
+      const parent = await getAllowedChat({ chatId: parentChatId })
+      // A child of a DM is a home thread. Do not create it and discover only
+      // afterward that the grant cannot inspect or send to the result.
+      if (parent.spaceId == null && !allowHomeThreads) {
+        throw new Error("subthread creation outside spaces requires home thread access for this grant")
+      }
+      await ensureConnected()
+      const result = await client.invokeRaw(Method.CREATE_SUBTHREAD, {
+        oneofKind: "createSubthread",
+        createSubthread: CreateSubthreadInput.create({
+          parentChatId,
+          ...(parentMessageId != null ? { parentMessageId } : {}),
+          ...(title?.trim() ? { title: title.trim() } : {}),
+          ...(description?.trim() ? { description: description.trim() } : {}),
+          ...(emoji?.trim() ? { emoji: emoji.trim() } : {}),
+          participants: sanitizeParticipantUserIds(participantUserIds).map((userId) => InputChatParticipant.create({ userId })),
+        }),
+      })
+      if (result.oneofKind !== "createSubthread" || !result.createSubthread.chat) {
+        throw new Error("createSubthread returned no chat; inspect the parent before retrying because the child may have been created")
+      }
+      eligibleChatsCache = null
+      return {
+        chat: await getAllowedChat({ chatId: result.createSubthread.chat.id }),
+        parentChatId,
+        parentMessageId: parentMessageId ?? null,
+        anchorMessageId: result.createSubthread.anchorMessage?.id ?? null,
+      }
+    },
+
+    async forwardMessages({ sourceChatId, destinationChatId, messageIds, shareForwardHeader }) {
+      const sourceChat = await getAllowedChat({ chatId: sourceChatId })
+      const destinationChat = await getAllowedChat({ chatId: destinationChatId })
+      if (messageIds.length === 0 || messageIds.length > 100 || messageIds.some((id) => id <= 0n)) {
+        throw new Error("forwardMessages requires one to one hundred positive message IDs")
+      }
+      await ensureConnected()
+      try {
+        const result = await client.invoke(Method.FORWARD_MESSAGES, {
+          oneofKind: "forwardMessages",
+          forwardMessages: ForwardMessagesInput.create({
+            fromPeerId: buildChatPeer(sourceChatId),
+            toPeerId: buildChatPeer(destinationChatId),
+            messageIds,
+            shareForwardHeader: shareForwardHeader !== false,
+          }),
+        })
+        // The RPC contains ordered send updates, not a source/destination map.
+        // Its one receipt per source input is the server's send contract.
+        const destinationIds = result.forwardMessages.updates.flatMap(({ update }) =>
+          update.oneofKind === "updateMessageId" ? [update.updateMessageId.messageId] : [],
+        )
+        if (destinationIds.length !== messageIds.length || destinationIds.some((id) => id <= 0n)) {
+          throw new Error("forwardMessages returned incomplete delivery receipts")
+        }
+        return {
+          sourceChat,
+          destinationChat,
+          messages: messageIds.map((sourceMessageId, index) => ({ sourceMessageId, destinationMessageId: destinationIds[index]! })),
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new Error(`Forwarding failed: ${detail}. Some messages may already have been delivered. Inspect the destination before retrying; retrying can create duplicates.`)
+      }
     },
 
     async uploadFile({ type, file, fileName, contentType, thumbnail, thumbnailFileName, thumbnailContentType, width, height, duration }) {

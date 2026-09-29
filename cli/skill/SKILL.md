@@ -7,7 +7,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ## Global flags
 
-- `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
+- `--json`: Output command JSON to stdout; existing RPC fields are preserved with command-specific metadata.
   - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr and exits non-zero. Common fields are `code`, `message`, `status`, `apiError`, `apiErrorCode`, `body`, `hint`, and `examples`.
   - Table-only convenience flags are disabled in `--json` mode. Specifically: `inline users list --ids/--id`, `inline bots list --ids/--id`, and `inline chats list --ids/--id`.
   - `inline chats list --json` supports `--filter`, `--limit`, and `--offset` for pre-filtered/paginated payloads. `inline users list --json --filter ...` and `inline bots list --json --filter ...` also return pre-filtered payloads.
@@ -33,9 +33,9 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - On macOS, a compatible signed-in Inline app is offered first; approval creates a separate revocable CLI session over an ephemeral loopback handoff.
   - If code is wrong, prompt to try again or edit email/phone (no hard exit).
 - `inline login --email you@x.com --send-code --json --compact`
-  - Start a non-interactive login. Email JSON may include a `challengeToken` needed for verification.
-- `inline login --email you@x.com --code 123456 [--challenge-token TOKEN] --json --compact`
-  - Finish non-interactive login, save the token, and return structured success without printing the token.
+  - Start a non-interactive V3 login and save its challenge locally for completion.
+- `inline login --email you@x.com --code 123456 --json --compact`
+  - Finish non-interactive login using the saved challenge, save the credential, and return structured success without printing it. V3 does not accept `--challenge-token`.
   - Use `--code-stdin` instead of `--code` to read the code from piped stdin.
 - `inline login --phone +15551234567 --send-code --json --compact`
   - Start phone login; finish it with the same `--phone` and `--code`/`--code-stdin`.
@@ -86,7 +86,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats get [--chat-id 123 | --user-id 42]`
   - Fetch a chat (thread or DM) by id.
 - `inline chats participants --chat-id 123`
-  - List participants for a chat, including join date.
+  - List direct/group participants, including join date. Child threads inherit root-chat access; these rows are not an exhaustive audience list. Participants added only to an intermediate child are not automatically inherited by its descendants.
 - `inline chats add-participant --chat-id 123 --user-id 42`
   - Add a user to a chat.
 - `inline chats remove-participant --chat-id 123 --user-id 42`
@@ -154,7 +154,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline notifications get`
   - Show current notification settings.
-- `inline notifications set [--mode all|none|mentions|only-mentions|important] [--silent | --sound]`
+- `inline notifications set [--mode all|none|mentions|only-mentions] [--silent | --sound]`
   - Update notification settings.
 
 ### update
@@ -183,7 +183,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 ### messages
 
 - `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--has-media] [--empty-text] [--forwarded] [--translate en] [--since "yesterday"] [--until "today"]`
-  - List chat history for a chat or DM.
+  - List chat history for a chat or DM. `--sender-id USER_ID` filters authors, independently of the DM target. Time/sender/content filters apply to the fetched page; JSON `page.nextOffsetId` continues even an empty filtered result. Named days use UTC.
   - `--has-media`, `--empty-text`, and `--forwarded` can be combined and work in table or JSON mode.
   - `--translate <lang>` fetches translations and includes them in output.
 - `inline messages transcript [--chat-id 123 | --user-id 42] [--limit 500] [--offset-id 456 | --from-msg-id 456 | --message-id SELECTOR ...] [--output PATH]`
@@ -488,3 +488,19 @@ Message list (GetChatHistoryResult, truncated to essential fields):
   ]
 }
 ```
+
+## Selection and forwarding contract
+
+Use `inline capabilities COMMAND... --compact` to read the installed command metadata, conflicts, groups, and examples offline. Resolve the source conversation, chosen authors/messages, and destination independently; a person in “my messages to X” can identify the source DM depending on the full request.
+
+```bash
+inline messages search --chat-id SOURCE --query 'TOPIC' --sender-id AUTHOR --limit 50 --json --compact
+inline messages get --chat-id SOURCE --message-id 91,92,100 --json --compact
+inline messages forward --from-chat-id SOURCE --to-chat-id DESTINATION --message-id 91,92,100 --json --receipt --compact
+```
+
+List/search JSON includes a `page` with raw fetched count, filtered returned count, and `nextOffsetId`; use that cursor with `--offset-id` even if local filters return zero matches. `--compact` changes whitespace, not which fields are included. User/space lookups retain protocol keys but clear all unrelated entity lists.
+
+Batch `--message-id` selectors use IDs, comma lists, ascending ranges, or repeated flags, up to 1000 expanded IDs. Forwarding preserves input order and duplicates; read/export/download/delete selectors deduplicate IDs. Forward JSON preserves `updates` and adds ordered `forwarded` source/destination ID pairs; `--receipt` returns only the successful receipt. Failed forwarding can already have delivered messages; inspect before retrying. It does not preserve reactions or reply relationships.
+
+Text inputs are exclusive: `--text`, `--stdin`, or `--text-file PATH` (use `-` for stdin). File/stdin input is bounded to 1 MiB, nonblank UTF-8, and preserves whitespace. `--force-file` requires attachments. Children inherit root-chat access plus their own direct/group grants; participants added only to an intermediate child are not automatically inherited by its descendants. Newly created private children include their creator directly. With `chats subthread --message-id`, an existing reply thread is reused without changing its title, description, emoji, or participants; creation inputs apply only to a new child and reuse does not repair older creator membership.

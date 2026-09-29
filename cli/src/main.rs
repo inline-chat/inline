@@ -12,12 +12,14 @@ mod diagnostics;
 mod doctor;
 mod downloads;
 mod errors;
+mod forward_output;
 mod identity;
 mod intro;
 mod mac_app_auth;
 mod media;
 mod message_export;
 mod message_output;
+mod message_page;
 mod message_selectors;
 mod notifications;
 mod output;
@@ -73,7 +75,8 @@ use crate::message_export::{
 use crate::message_output::{
     build_message_list, build_message_list_from_messages, message_summary,
 };
-use crate::message_selectors::parse_message_id_selectors;
+use crate::message_page::{MessagePage, MessagePageOutput};
+use crate::message_selectors::{parse_forward_message_id_selectors, parse_message_id_selectors};
 use crate::notifications::{
     NotificationModeArg, notification_mode_from_arg, notification_settings_values,
     print_notification_settings,
@@ -301,13 +304,13 @@ Aliases and shortcuts:
   Short flags: -c chat ID, -u DM user ID, -L limit, -q query, -f filter, -m text.
 
 JSON mode:
-  --json prints raw RPC payloads; --pretty is the default; --compact removes whitespace.
+  --json prints command results; --pretty is the default; --compact removes whitespace.
   --filter and chat scope filters work with JSON. --ids/--id are table-only.
   Destructive commands never prompt in --json mode; pass --yes.
 
 Tips:
   Chat scope: --space-id ID | --home; --type dm|thread; --unread; --pinned.
-  Search pagination: --offset-id ID. Time filters apply to the fetched page.
+  Search pagination: --offset-id ID. Time and sender filters apply to the fetched page; JSON page.nextOffsetId continues it.
   Use --text-file - for piped text with whitespace preserved.
   Mentions use UTF-16 offsets: --mention USER_ID:OFFSET:LENGTH.
   inline completion bash|zsh|fish|powershell|elvish generates shell completions.
@@ -358,7 +361,7 @@ const SEARCH_HELP: &str = "Examples:
   inline search -u 42 --filter documents --ids
 
 Words within one query are ANDed; repeated queries are ORed.
-Media filters run before the server limit. Time filters apply to the fetched page.
+Media filters run before the server limit. Time and sender filters apply to the fetched page; JSON page.nextOffsetId continues it.
 Use -- before a positional query beginning with a hyphen.";
 
 #[derive(Subcommand)]
@@ -876,7 +879,7 @@ enum ChatsCommand {
     List(ChatsListArgs),
     #[command(about = "Fetch a chat by id or user", visible_alias = "view")]
     Get(ChatsGetArgs),
-    #[command(about = "List participants in a chat")]
+    #[command(about = "List direct/group participants (excludes inherited root-chat access)")]
     Participants(ChatsParticipantsArgs),
     #[command(about = "Add a participant to a chat")]
     AddParticipant(ChatsParticipantArgs),
@@ -886,6 +889,7 @@ enum ChatsCommand {
     Create(ChatsCreateArgs),
     #[command(
         about = "Create a child or reply thread",
+        after_help = "Children inherit root-chat access, plus their own direct/group grants. Participants added only to an intermediate child are not automatically inherited by its descendants. With --message-id, an existing reply thread is reused without changing its title, description, emoji, or participants. Metadata and participants apply only to a new child; reuse does not repair older creator membership.",
         visible_aliases = ["create-reply", "reply-thread", "create-subthread"]
     )]
     Subthread(ChatsCreateSubthreadArgs),
@@ -947,13 +951,17 @@ struct ChatsListArgs {
     #[arg(long, short = 'f', help = "Filter chats by name, space, or id")]
     filter: Option<String>,
 
-    #[arg(long, help = "Print only chat ids (one per line)")]
+    #[arg(
+        long,
+        conflicts_with = "json",
+        help = "Print only chat ids (one per line)"
+    )]
     ids: bool,
 
     #[arg(
         long,
         help = "Require exactly one match and print only its chat id",
-        conflicts_with_all = ["ids", "limit", "offset"],
+        conflicts_with_all = ["ids", "limit", "offset", "json"],
         requires = "filter"
     )]
     id: bool,
@@ -967,7 +975,7 @@ struct ChatsGetArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1008,7 +1016,12 @@ struct ChatsCreateArgs {
     #[arg(long, help = "Optional emoji for the chat icon")]
     emoji: Option<String>,
 
-    #[arg(long, help = "Create a public chat (participants must be empty)")]
+    #[arg(
+        long,
+        conflicts_with = "participants",
+        help = "Create a public chat (requires --space-id)",
+        requires = "space_id"
+    )]
     public: bool,
 
     #[arg(
@@ -1026,16 +1039,16 @@ struct ChatsCreateSubthreadArgs {
     #[arg(long, help = "Parent chat id")]
     parent_chat_id: i64,
 
-    #[arg(long, help = "Parent message id (creates a reply thread)")]
+    #[arg(long, help = "Parent message id (creates or reuses its reply thread)")]
     message_id: Option<i64>,
 
-    #[arg(long, help = "Optional child thread title")]
+    #[arg(long, help = "Optional title for a new child (ignored on reuse)")]
     title: Option<String>,
 
-    #[arg(long, help = "Optional child thread description")]
+    #[arg(long, help = "Optional description for a new child (ignored on reuse)")]
     description: Option<String>,
 
-    #[arg(long, help = "Optional emoji for the child thread")]
+    #[arg(long, help = "Optional emoji for a new child (ignored on reuse)")]
     emoji: Option<String>,
 
     #[arg(
@@ -1043,7 +1056,7 @@ struct ChatsCreateSubthreadArgs {
         value_name = "USER_ID",
         num_args = 1..,
         action = ArgAction::Append,
-        help = "Direct participant user id (repeatable)"
+        help = "Additional direct participant for a new child (repeatable; ignored on reuse); root-chat access is retained"
     )]
     participants: Vec<i64>,
 }
@@ -1107,11 +1120,12 @@ impl ChatsMoveArgs {
 }
 
 #[derive(Args)]
+#[command(group(clap::ArgGroup::new("visibility").required(true).args(["public", "private"])))]
 struct ChatsUpdateVisibilityArgs {
     #[arg(long, help = "Chat id (space thread)")]
     chat_id: i64,
 
-    #[arg(long, help = "Make the chat public", conflicts_with = "private")]
+    #[arg(long, help = "Make the chat public", conflicts_with_all = ["private", "participants"])]
     public: bool,
 
     #[arg(long, help = "Make the chat private", conflicts_with = "public")]
@@ -1147,7 +1161,7 @@ struct ChatsMarkUnreadArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1161,7 +1175,7 @@ struct ChatsMarkReadArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1202,13 +1216,17 @@ struct UsersListArgs {
     )]
     filter: Option<String>,
 
-    #[arg(long, help = "Print only user ids (one per line)")]
+    #[arg(
+        long,
+        conflicts_with = "json",
+        help = "Print only user ids (one per line)"
+    )]
     ids: bool,
 
     #[arg(
         long,
         help = "Require exactly one match and print only its user id",
-        conflicts_with = "ids",
+        conflicts_with_all = ["ids", "json"],
         requires = "filter"
     )]
     id: bool,
@@ -1225,13 +1243,17 @@ struct BotsListArgs {
     #[arg(long, short = 'f', help = "Filter bots by name or username")]
     filter: Option<String>,
 
-    #[arg(long, help = "Print only bot user ids (one per line)")]
+    #[arg(
+        long,
+        conflicts_with = "json",
+        help = "Print only bot user ids (one per line)"
+    )]
     ids: bool,
 
     #[arg(
         long,
         help = "Require exactly one match and print only its user id",
-        conflicts_with = "ids",
+        conflicts_with_all = ["ids", "json"],
         requires = "filter"
     )]
     id: bool,
@@ -1263,7 +1285,7 @@ struct TypingArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1287,7 +1309,10 @@ enum MessagesCommand {
     Get(MessagesGetArgs),
     #[command(about = "Send a Markdown message to a chat or user", after_help = MESSAGE_SEND_HELP)]
     Send(MessagesSendArgs),
-    #[command(about = "Forward messages between chats or DMs")]
+    #[command(
+        about = "Forward messages between chats or DMs",
+        after_help = "Examples:\n  inline messages forward --from-user-id 42 --to-chat-id 123 --message-id 91,92,100 --json --receipt\n  inline messages forward --from-chat-id 123 --to-user-id 42 --message-id 91-100\n\nPreserves selector order and duplicates. Failures may leave delivered messages; inspect the destination before retrying. --receipt omits raw updates from successful JSON output."
+    )]
     Forward(MessagesForwardArgs),
     #[command(
         about = "Export messages as json, jsonl, markdown, or csv",
@@ -1357,12 +1382,16 @@ struct MessagesListArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
 
-    #[arg(long, short = 'L', help = "Maximum number of messages to return")]
+    #[arg(
+        long,
+        short = 'L',
+        help = "Maximum messages to fetch before local page filters"
+    )]
     limit: Option<i32>,
 
     #[arg(long, help = "Offset message id for pagination")]
@@ -1387,16 +1416,22 @@ struct MessagesListArgs {
     #[arg(
         long,
         value_name = "TIME",
-        help = "Filter messages since time (e.g., yesterday, 2h ago, 2024-01-15)"
+        help = "Filter this fetched page since time (e.g., yesterday, 2h ago, 2024-01-15)"
     )]
     since: Option<String>,
 
     #[arg(
         long,
         value_name = "TIME",
-        help = "Filter messages until time (e.g., today, 1d ago, 2024-01-20)"
+        help = "Filter this fetched page until time (e.g., today, 1d ago, 2024-01-20)"
     )]
     until: Option<String>,
+
+    #[arg(
+        long,
+        help = "Only this author user ID within the fetched page (not the DM target)"
+    )]
+    sender_id: Option<i64>,
 
     #[arg(long, conflicts_with_all = ["json", "translate"], help = "Print only message ids (one per line; skips name lookups)")]
     ids: bool,
@@ -1410,7 +1445,7 @@ struct MessagesSearchArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1433,7 +1468,11 @@ struct MessagesSearchArgs {
     #[arg(long, help = "Offset message id for search pagination")]
     offset_id: Option<i64>,
 
-    #[arg(long, short = 'L', help = "Maximum number of results to return")]
+    #[arg(
+        long,
+        short = 'L',
+        help = "Maximum search matches to fetch before local page filters"
+    )]
     limit: Option<i32>,
 
     #[arg(
@@ -1446,16 +1485,22 @@ struct MessagesSearchArgs {
     #[arg(
         long,
         value_name = "TIME",
-        help = "Filter results since time (e.g., yesterday, 2h ago)"
+        help = "Filter this fetched page since time (e.g., yesterday, 2h ago)"
     )]
     since: Option<String>,
 
     #[arg(
         long,
         value_name = "TIME",
-        help = "Filter results until time (e.g., today, 1d ago)"
+        help = "Filter this fetched page until time (e.g., today, 1d ago)"
     )]
     until: Option<String>,
+
+    #[arg(
+        long,
+        help = "Only this author user ID within the fetched page (not the DM target)"
+    )]
+    sender_id: Option<i64>,
 
     #[arg(long, conflicts_with_all = ["json", "translate"], help = "Print only message ids (one per line; skips name lookups)")]
     ids: bool,
@@ -1525,7 +1570,7 @@ struct MessagesGetArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1555,7 +1600,7 @@ struct MessagesPinArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1616,7 +1661,7 @@ struct MessagesSendArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1642,7 +1687,11 @@ struct MessagesSendArgs {
     )]
     mentions: Vec<String>,
 
-    #[arg(long, help = "Force image attachments to upload as files (documents)")]
+    #[arg(
+        long,
+        requires = "attachments",
+        help = "Force image attachments to upload as files (requires --attach)"
+    )]
     force_file: bool,
 
     #[arg(
@@ -1657,7 +1706,8 @@ struct MessagesSendArgs {
 
     #[arg(
         long,
-        help = "Read Markdown text/caption from stdin (preserves whitespace)"
+        conflicts_with = "text",
+        help = "Read UTF-8 Markdown text/caption from stdin (preserves whitespace; max 1 MiB)"
     )]
     stdin: bool,
 
@@ -1673,7 +1723,7 @@ struct MessagesForwardArgs {
 
     #[arg(
         long,
-        help = "Source user id (for DMs)",
+        help = "Source DM counterpart user id (not the message author)",
         conflicts_with = "from_chat_id"
     )]
     from_user_id: Option<i64>,
@@ -1683,22 +1733,29 @@ struct MessagesForwardArgs {
         value_name = "ID",
         num_args = 1..,
         action = ArgAction::Append,
-        help = "Message id to forward (repeatable)"
+        help = "Message IDs, comma lists, or ascending ranges (repeatable; preserves order and duplicates; max 1000)"
     )]
-    message_ids: Vec<i64>,
+    message_ids: Vec<String>,
 
     #[arg(long, help = "Destination chat id", conflicts_with = "to_user_id")]
     to_chat_id: Option<i64>,
 
     #[arg(
         long,
-        help = "Destination user id (for DMs)",
+        help = "Destination DM counterpart user id",
         conflicts_with = "to_chat_id"
     )]
     to_user_id: Option<i64>,
 
     #[arg(long, help = "Do not include forward header")]
     no_header: bool,
+
+    #[arg(
+        long,
+        requires = "json",
+        help = "Return only the forwarding receipt, without raw updates (requires --json)"
+    )]
+    receipt: bool,
 }
 
 #[derive(Args)]
@@ -1709,7 +1766,7 @@ struct MessagesExportArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1792,7 +1849,7 @@ struct MessagesTranscriptArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1890,7 +1947,7 @@ struct MessagesDownloadArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1949,7 +2006,7 @@ struct MessagesDeleteArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1959,9 +2016,9 @@ struct MessagesDeleteArgs {
         value_name = "ID",
         num_args = 1..,
         action = ArgAction::Append,
-        help = "Message id to delete (repeatable)"
+        help = "Message IDs, comma lists, or ascending ranges (repeatable; max 1000)"
     )]
-    message_ids: Vec<i64>,
+    message_ids: Vec<String>,
 
     #[arg(long, short = 'y', help = "Skip confirmation prompt")]
     yes: bool,
@@ -1975,7 +2032,7 @@ struct MessagesEditArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -1992,7 +2049,11 @@ struct MessagesEditArgs {
     )]
     text: Option<String>,
 
-    #[arg(long, help = "Read message text from stdin")]
+    #[arg(
+        long,
+        conflicts_with = "text",
+        help = "Read UTF-8 message text from stdin (preserves whitespace; max 1 MiB)"
+    )]
     stdin: bool,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"], value_hint = clap::ValueHint::FilePath,
@@ -2008,7 +2069,7 @@ struct MessagesReactionArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -2082,6 +2143,7 @@ struct TranslatedChatHistoryOutput {
     #[serde(flatten)]
     payload: proto::GetChatHistoryResult,
     translations: Vec<proto::MessageTranslation>,
+    page: MessagePage,
 }
 
 #[derive(Serialize)]
@@ -2090,6 +2152,7 @@ struct TranslatedSearchMessagesOutput {
     #[serde(flatten)]
     payload: proto::SearchMessagesResult,
     translations: Vec<proto::MessageTranslation>,
+    page: MessagePage,
 }
 
 #[derive(Serialize)]
@@ -2166,7 +2229,7 @@ struct NotificationsSetChatArgs {
     #[arg(
         long,
         short = 'u',
-        help = "User id (for DMs)",
+        help = "DM counterpart user id (may initialize a missing DM)",
         conflicts_with = "chat_id"
     )]
     user_id: Option<i64>,
@@ -3241,7 +3304,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         output::print_json(&payload, json_format)?;
                     } else if let Some(chat) = payload.chat.as_ref() {
                         if payload.anchor_message.is_some() {
-                            println!("Created reply thread {}.", chat.id);
+                            println!("Reply thread {} is ready.", chat.id);
                         } else {
                             println!("Created child thread {}.", chat.id);
                         }
@@ -3554,6 +3617,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 MessagesCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, false)?;
                     let limit = validate_message_limit(args.limit)?;
+                    validate_optional_positive_id_arg("--sender-id", args.sender_id)?;
                     let offset_id = validate_optional_message_id_arg("--offset-id", args.offset_id)?;
                     let (since_ts, until_ts) =
                         parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
@@ -3575,9 +3639,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     };
 
                     let mut payload = realtime.call(input).await?;
+                    let mut page = MessagePage::new(&payload.messages, since_ts.is_some() || until_ts.is_some() || args.sender_id.is_some() || args.has_media || args.empty_text || args.forwarded);
 
                     filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
                     filter_messages_by_list_options(&mut payload.messages, &args);
+                    page.returned_count = payload.messages.len();
 
                     if args.ids {
                         for message in &payload.messages {
@@ -3595,6 +3661,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             .await?;
                             let output = TranslatedChatHistoryOutput {
                                 payload,
+                                page,
                                 translations: translations_in_message_order(
                                     &message_ids,
                                     &translations_by_id,
@@ -3602,7 +3669,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             };
                             output::print_json(&output, json_format)?;
                         } else {
-                            output::print_json(&payload, json_format)?;
+                            output::print_json(&MessagePageOutput { payload, page }, json_format)?;
                         }
                     } else {
                         let translations_by_id =
@@ -3850,11 +3917,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         to_chat_id,
                         to_user_id,
                         no_header,
+                        receipt,
                     } = args;
 
-                    if message_ids.is_empty() {
-                        return Err(CliError::missing_message_ids().into());
-                    }
+                    let message_ids = parse_forward_message_id_selectors("--message-id", &message_ids)?;
                     validate_message_ids_arg("--message-id", &message_ids)?;
 
                     let from_peer = match (from_chat_id, from_user_id) {
@@ -3917,14 +3983,19 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::ForwardMessagesInput {
-                        from_peer_id: Some(from_peer),
-                        message_ids,
-                        to_peer_id: Some(to_peer),
+                        from_peer_id: Some(from_peer.clone()),
+                        message_ids: message_ids.clone(),
+                        to_peer_id: Some(to_peer.clone()),
                         share_forward_header,
                     };
-                    let payload = realtime.call(input).await?;
+                    let payload = realtime.call(input).await.map_err(errors::ForwardAttemptFailed)?;
+                    let mapping = forward_output::build_forward_receipt(from_peer, to_peer, &message_ids, &payload)?;
                     if cli.json {
-                        output::print_json(&payload, json_format)?;
+                        if receipt {
+                            output::print_json(&mapping, json_format)?;
+                        } else {
+                            output::print_json(&forward_output::ForwardOutput { payload: &payload, receipt: &mapping }, json_format)?;
+                        }
                     } else {
                         println!(
                             "Forwarded {} message(s) from {} to {} (updates: {}).",
@@ -4043,12 +4114,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
                 MessagesCommand::Delete(args) => {
-                    if args.message_ids.is_empty() {
-                        return Err(CliError::missing_message_ids().into());
-                    }
-                    validate_message_ids_arg("--message-id", &args.message_ids)?;
+                    let message_ids = parse_message_id_selectors("--message-id", &args.message_ids)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let message_count = args.message_ids.len();
+                    let message_count = message_ids.len();
                     let prompt = format!(
                         "Delete {} message(s) from {}?",
                         message_count,
@@ -4064,7 +4132,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::DeleteMessagesInput {
-                        message_ids: args.message_ids,
+                        message_ids,
                         peer_id: Some(peer),
                     };
                     let payload = realtime.call(input).await?;
@@ -4162,9 +4230,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 SpacesCommand::List => {
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let mut payload = realtime.call(proto::GetChatsInput {}).await?;
 
                     if cli.json {
+                        let spaces = std::mem::take(&mut payload.spaces);
+                        payload = proto::GetChatsResult { spaces, ..Default::default() };
                         output::print_json(&payload, json_format)?;
                     } else {
                         let output = build_space_list(&payload);
@@ -4457,6 +4527,7 @@ async fn handle_messages_search(
     json_format: output::JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let input = args.input()?;
+    validate_optional_positive_id_arg("--sender-id", args.sender_id)?;
     validate_table_only_list_flags(json, args.ids, false)?;
     let (since_ts, until_ts) =
         parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
@@ -4470,7 +4541,17 @@ async fn handle_messages_search(
     let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
 
     let mut payload = realtime.call(input).await?;
+    let mut page = MessagePage::new(
+        &payload.messages,
+        since_ts.is_some() || until_ts.is_some() || args.sender_id.is_some(),
+    );
     filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+    if let Some(sender_id) = args.sender_id {
+        payload
+            .messages
+            .retain(|message| message.from_id == sender_id);
+    }
+    page.returned_count = payload.messages.len();
     if args.ids {
         for message in &payload.messages {
             println!("{}", message.id);
@@ -4482,11 +4563,12 @@ async fn handle_messages_search(
                 fetch_message_translations(&mut realtime, &peer, &message_ids, language).await?;
             let output = TranslatedSearchMessagesOutput {
                 payload,
+                page,
                 translations: translations_in_message_order(&message_ids, &translations_by_id),
             };
             output::print_json(&output, json_format)?;
         } else {
-            output::print_json(&payload, json_format)?;
+            output::print_json(&MessagePageOutput { payload, page }, json_format)?;
         }
     } else {
         let translations_by_id = if let Some(language) = translation_language.as_deref() {
@@ -4559,13 +4641,7 @@ fn resolve_message_caption(
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     if stdin {
         require_stdin_pipe(std::io::stdin().is_terminal())?;
-        use std::io::Read;
-        let mut buffer = String::new();
-        std::io::stdin().read_to_string(&mut buffer)?;
-        if buffer.trim().is_empty() {
-            return Err(CliError::invalid_args("stdin was empty").into());
-        }
-        return Ok(Some(buffer));
+        return text_input::read_stdin().map(Some);
     }
 
     if let Some(text) = text {
@@ -5561,12 +5637,13 @@ fn filter_messages_by_time(
 }
 
 fn filter_messages_by_list_options(messages: &mut Vec<proto::Message>, args: &MessagesListArgs) {
-    if !args.has_media && !args.empty_text && !args.forwarded {
+    if !args.has_media && !args.empty_text && !args.forwarded && args.sender_id.is_none() {
         return;
     }
 
     messages.retain(|message| {
-        (!args.has_media || message_has_any_media(message))
+        args.sender_id.is_none_or(|id| message.from_id == id)
+            && (!args.has_media || message_has_any_media(message))
             && (!args.empty_text || message_has_empty_text(message))
             && (!args.forwarded || message.fwd_from.is_some())
     });
@@ -5866,6 +5943,11 @@ fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
 }
 
 fn filter_users_payload(payload: &mut proto::GetChatsResult, filter: Option<&str>) {
+    let users = std::mem::take(&mut payload.users);
+    *payload = proto::GetChatsResult {
+        users,
+        ..Default::default()
+    };
     let Some(needle) = normalized_filter(filter) else {
         return;
     };
@@ -6097,6 +6179,33 @@ mod cli_parsing_tests {
     use super::*;
 
     #[test]
+    fn sender_filter_is_independent_of_dm_target_and_runs_with_other_filters() {
+        let cli =
+            Cli::try_parse_from(["inline", "messages", "list", "-u", "42", "--sender-id", "7"])
+                .unwrap();
+        let Command::Messages {
+            command: MessagesCommand::List(args),
+        } = cli.command
+        else {
+            panic!("expected message list")
+        };
+        let mut messages = vec![
+            proto::Message {
+                id: 1,
+                from_id: 42,
+                ..Default::default()
+            },
+            proto::Message {
+                id: 2,
+                from_id: 7,
+                ..Default::default()
+            },
+        ];
+        filter_messages_by_list_options(&mut messages, &args);
+        assert_eq!(messages.iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
     fn update_defaults_to_install_and_check_is_explicit() {
         let cli = Cli::try_parse_from(["inline", "update"]).unwrap();
         assert!(matches!(cli.command, Command::Update { check: false }));
@@ -6225,20 +6334,13 @@ mod cli_parsing_tests {
     }
 
     #[test]
-    fn new_file_input_preserves_legacy_text_and_stdin_precedence() {
-        let cli = Cli::try_parse_from([
-            "inline", "message", "send", "-c", "1", "--stdin", "-m", "legacy",
-        ])
-        .unwrap();
-        let Command::Messages {
-            command: MessagesCommand::Send(args),
-        } = cli.command
-        else {
-            panic!("expected send")
-        };
-        assert!(args.stdin);
-        assert_eq!(args.text.as_deref(), Some("legacy"));
-        assert!(args.text_file.is_none());
+    fn text_sources_are_exclusive_and_preserve_whitespace() {
+        assert!(
+            Cli::try_parse_from([
+                "inline", "message", "send", "-c", "1", "--stdin", "-m", "ignored",
+            ])
+            .is_err()
+        );
         assert_eq!(
             resolve_message_source(Some("  legacy\n".into()), false, None)
                 .unwrap()
@@ -6816,6 +6918,7 @@ mod cli_parsing_tests {
             translate: None,
             since: None,
             until: None,
+            sender_id: None,
         };
 
         filter_messages_by_list_options(&mut messages, &args);
@@ -6907,6 +7010,7 @@ mod cli_parsing_tests {
     #[test]
     fn translated_history_json_keeps_raw_history_fields() {
         let output = TranslatedChatHistoryOutput {
+            page: MessagePage::new(&[], false),
             payload: proto::GetChatHistoryResult {
                 messages: vec![proto::Message {
                     id: 7,
@@ -6933,6 +7037,7 @@ mod cli_parsing_tests {
     #[test]
     fn translated_search_json_keeps_raw_search_fields() {
         let output = TranslatedSearchMessagesOutput {
+            page: MessagePage::new(&[], false),
             payload: proto::SearchMessagesResult {
                 messages: vec![proto::Message {
                     id: 8,
@@ -7246,7 +7351,7 @@ mod cli_parsing_tests {
             } => {
                 assert_eq!(args.from_chat_id, Some(1));
                 assert_eq!(args.from_user_id, None);
-                assert_eq!(args.message_ids, vec![10, 11]);
+                assert_eq!(args.message_ids, vec!["10", "11"]);
                 assert_eq!(args.to_chat_id, Some(2));
                 assert_eq!(args.to_user_id, None);
                 assert!(args.no_header);
@@ -7275,7 +7380,7 @@ mod cli_parsing_tests {
             } => {
                 assert_eq!(args.from_chat_id, None);
                 assert_eq!(args.from_user_id, Some(42));
-                assert_eq!(args.message_ids, vec![10]);
+                assert_eq!(args.message_ids, vec!["10"]);
                 assert_eq!(args.to_chat_id, None);
                 assert_eq!(args.to_user_id, Some(84));
                 assert!(!args.no_header);
@@ -8198,6 +8303,22 @@ mod cli_parsing_tests {
     #[test]
     fn user_json_filter_trims_get_chats_payload_users() {
         let mut payload = proto::GetChatsResult {
+            chats: vec![proto::Chat {
+                id: 7,
+                title: "unrelated-private-topic".into(),
+                ..Default::default()
+            }],
+            messages: vec![proto::Message {
+                id: 8,
+                message: Some("unrelated-private-message".into()),
+                ..Default::default()
+            }],
+            spaces: vec![proto::Space {
+                id: 9,
+                ..Default::default()
+            }],
+            dialogs: vec![proto::Dialog::default()],
+            folders: vec![proto::DialogFolder::default()],
             users: vec![
                 proto::User {
                     id: 1,
@@ -8212,13 +8333,26 @@ mod cli_parsing_tests {
                     ..Default::default()
                 },
             ],
-            ..Default::default()
         };
 
         filter_users_payload(&mut payload, Some("mo"));
 
         let ids: Vec<i64> = payload.users.iter().map(|user| user.id).collect();
         assert_eq!(ids, vec![1]);
+        assert!(
+            payload.chats.is_empty()
+                && payload.messages.is_empty()
+                && payload.dialogs.is_empty()
+                && payload.spaces.is_empty()
+                && payload.folders.is_empty()
+        );
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(!json.contains("unrelated-private"));
+        // An unfiltered lookup is still only a people lookup.
+        payload.chats.push(proto::Chat::default());
+        filter_users_payload(&mut payload, None);
+        assert!(payload.chats.is_empty());
+        assert_eq!(payload.users.len(), 1);
     }
 
     #[test]

@@ -8,6 +8,22 @@ pub(crate) fn parse_message_id_selectors(
     name: &str,
     selectors: &[String],
 ) -> Result<Vec<i64>, Box<dyn std::error::Error>> {
+    parse_selectors(name, selectors, true)
+}
+
+/// Forwarding is an ordered write: repeating an ID deliberately delivers it again.
+pub(crate) fn parse_forward_message_id_selectors(
+    name: &str,
+    selectors: &[String],
+) -> Result<Vec<i64>, Box<dyn std::error::Error>> {
+    parse_selectors(name, selectors, false)
+}
+
+fn parse_selectors(
+    name: &str,
+    selectors: &[String],
+    deduplicate: bool,
+) -> Result<Vec<i64>, Box<dyn std::error::Error>> {
     if selectors.is_empty() {
         return Err(CliError::missing_message_ids().into());
     }
@@ -32,11 +48,11 @@ pub(crate) fn parse_message_id_selectors(
                     .into());
                 }
                 for id in start..=end {
-                    push_unique_id(name, id, &mut ids, &mut seen)?;
+                    push_id(name, id, &mut ids, &mut seen, deduplicate)?;
                 }
             } else {
                 let id = parse_positive_id(name, part)?;
-                push_unique_id(name, id, &mut ids, &mut seen)?;
+                push_id(name, id, &mut ids, &mut seen, deduplicate)?;
             }
         }
     }
@@ -58,13 +74,14 @@ fn parse_positive_id(name: &str, value: &str) -> Result<i64, CliError> {
     Ok(id)
 }
 
-fn push_unique_id(
+fn push_id(
     name: &str,
     id: i64,
     ids: &mut Vec<i64>,
     seen: &mut HashSet<i64>,
+    deduplicate: bool,
 ) -> Result<(), CliError> {
-    if seen.insert(id) {
+    if !deduplicate || seen.insert(id) {
         ids.push(id);
         if ids.len() > MAX_EXPANDED_MESSAGE_IDS {
             return Err(CliError::invalid_args(format!(
@@ -93,6 +110,21 @@ mod tests {
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn forward_selectors_preserve_each_occurrence_and_bound_expansion() {
+        let selectors = vec!["9,3,9".into(), "7-9".into()];
+        assert_eq!(
+            parse_forward_message_id_selectors("--message-id", &selectors).unwrap(),
+            [9, 3, 9, 7, 8, 9]
+        );
+        assert_eq!(
+            parse_message_id_selectors("--message-id", &selectors).unwrap(),
+            [9, 3, 7, 8]
+        );
+        assert!(parse_forward_message_id_selectors("--message-id", &["1-1001".into()]).is_err());
+        assert!(parse_forward_message_id_selectors("--message-id", &["9-3".into()]).is_err());
     }
 
     #[test]

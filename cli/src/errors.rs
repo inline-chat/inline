@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, IsTerminal};
 
 use inline_agent_bridge::ProcessHostError;
+use inline_sdk::InlineProtocolV3Error;
 use inline_sdk::api::ApiError;
 use inline_sdk::realtime::RealtimeError;
 
@@ -367,6 +368,10 @@ impl std::fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct ForwardAttemptFailed(#[source] pub(crate) Box<dyn std::error::Error>);
+
 #[derive(Debug)]
 pub(crate) struct HttpStatusCliError {
     pub(crate) code: &'static str,
@@ -409,6 +414,15 @@ impl std::fmt::Display for HttpStatusCliError {
 impl std::error::Error for HttpStatusCliError {}
 
 pub(crate) fn json_cli_error_from_error(error: &(dyn std::error::Error + 'static)) -> JsonCliError {
+    if let Some(error) = error.downcast_ref::<ForwardAttemptFailed>() {
+        let mut payload = json_cli_error_from_error(error.0.as_ref());
+        let warning = "Forwarding may have delivered some or all messages. Inspect the destination before retrying; forwarding is not idempotent.";
+        payload.hint = Some(match payload.hint {
+            Some(hint) => format!("{hint} {warning}"),
+            None => warning.into(),
+        });
+        return payload;
+    }
     if let Some(cli_error) = error.downcast_ref::<CliError>() {
         let mut payload = JsonCliError::new(cli_error.code, cli_error.message.clone());
         payload.hint = cli_error.hint.clone();
@@ -446,6 +460,10 @@ pub(crate) fn json_cli_error_from_error(error: &(dyn std::error::Error + 'static
 
     if let Some(realtime_error) = error.downcast_ref::<RealtimeError>() {
         return json_cli_error_from_realtime_error(realtime_error);
+    }
+
+    if let Some(realtime_error) = error.downcast_ref::<InlineProtocolV3Error>() {
+        return json_cli_error_from_v3_error(realtime_error);
     }
 
     if let Some(http_error) = error.downcast_ref::<reqwest::Error>() {
@@ -640,6 +658,66 @@ fn json_cli_error_from_api_error(error: &ApiError) -> JsonCliError {
     }
 }
 
+fn json_cli_error_from_v3_error(error: &InlineProtocolV3Error) -> JsonCliError {
+    use InlineProtocolV3Error as V3;
+    if let V3::Rpc {
+        status,
+        error_code,
+        message,
+    } = error
+    {
+        let mut payload = JsonCliError::new("rpc_error", message.clone());
+        payload.status = (100..=599).contains(status).then_some(*status as u16);
+        payload.api_error_code = Some(*error_code);
+        payload.api_error = inline_protocol::proto::rpc_error::Code::try_from(*error_code)
+            .ok()
+            .map(|code| code.as_str_name().to_string());
+        return payload;
+    }
+    let (code, hint) = match error {
+        V3::AuthorizationInvalidated => (
+            "authentication_invalidated",
+            Some("Sign in again to refresh the revoked Inline session."),
+        ),
+        V3::CommitOutcomeUnknown => (
+            "commit_outcome_unknown",
+            Some("Refresh authoritative state before retrying this action."),
+        ),
+        V3::Closed => (
+            "realtime_connection_closed",
+            Some("Check network connectivity and INLINE_REALTIME_URL."),
+        ),
+        V3::Timeout => (
+            "realtime_timeout",
+            Some("Check network connectivity and INLINE_REALTIME_URL."),
+        ),
+        V3::WebSocket(_) => (
+            "websocket_error",
+            Some("Check network connectivity and INLINE_REALTIME_URL."),
+        ),
+        V3::UnexpectedResponse => (
+            "unexpected_rpc_result",
+            Some(
+                "The realtime server returned a result shape that does not match the requested method.",
+            ),
+        ),
+        V3::Schema(_) | V3::Protocol => ("protocol_decode_error", None),
+        V3::InvalidKey => ("invalid_realtime_key", None),
+        V3::UpdateBufferOverflow => (
+            "realtime_update_buffer_overflow",
+            Some("Reconnect and refresh authoritative state before continuing."),
+        ),
+        V3::Rpc { .. } => unreachable!("RPC error handled above"),
+        _ => (
+            "realtime_error",
+            Some("Refresh authoritative state and check network connectivity before continuing."),
+        ),
+    };
+    let mut payload = JsonCliError::new(code, error.to_string());
+    payload.hint = hint.map(str::to_string);
+    payload
+}
+
 fn json_cli_error_from_realtime_error(error: &RealtimeError) -> JsonCliError {
     match error {
         RealtimeError::InvalidUrl { message, .. } => {
@@ -759,6 +837,46 @@ mod tests {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             Some(&self.source)
         }
+    }
+
+    #[test]
+    fn v3_errors_keep_machine_readable_rpc_auth_and_uncertain_commit_details() {
+        let payload = json_cli_error_from_error(&InlineProtocolV3Error::Rpc {
+            status: 403,
+            error_code: 1,
+            message: "access denied".into(),
+        });
+        assert_eq!(payload.code, "rpc_error");
+        assert_eq!(payload.status, Some(403));
+        assert_eq!(payload.api_error_code, Some(1));
+        for (error, code, recovery) in [
+            (
+                InlineProtocolV3Error::AuthorizationInvalidated,
+                "authentication_invalidated",
+                "Sign in again",
+            ),
+            (
+                InlineProtocolV3Error::CommitOutcomeUnknown,
+                "commit_outcome_unknown",
+                "Refresh authoritative state",
+            ),
+        ] {
+            let payload = json_cli_error_from_error(&ForwardAttemptFailed(Box::new(error)));
+            assert_eq!(payload.code, code);
+            let hint = payload.hint.unwrap();
+            assert!(hint.contains(recovery));
+            assert!(hint.contains("Inspect the destination before retrying"));
+        }
+    }
+
+    #[test]
+    fn failed_forward_keeps_auth_recovery_and_adds_delivery_guidance() {
+        let error = ForwardAttemptFailed(Box::new(RealtimeError::AuthenticationInvalidated));
+        let payload = json_cli_error_from_error(&error);
+        assert_eq!(payload.code, "authentication_invalidated");
+        let hint = payload.hint.unwrap();
+        assert!(hint.contains("Sign in again"));
+        assert!(hint.contains("Inspect the destination before retrying"));
     }
 
     #[test]

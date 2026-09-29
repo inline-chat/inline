@@ -49,8 +49,10 @@ Use `inline.create_subthread` when the user asks for delegated work or a bounded
 - Never expose authorization tokens, private file contents, or data outside the granted Inline contexts.
 - Assume a public or shared Inline space can be widely visible. Share the minimum necessary member and message data.
 - Do not send, create, upload, or otherwise write while merely researching, summarizing, drafting, or planning.
+- Resolve the source conversation, selected authors/messages, and destination independently. A person mentioned in “my messages to X” can identify the source DM; use the full request and context to decide.
 - Before a write, verify the target and preserve the user's intended wording, reply relationship, and delivery mode.
 - Draft first when wording, audience, or target is ambiguous. Send only after the user clearly requests delivery.
+- Subthreads inherit root-chat access plus their own direct/group grants. Participants added only to an intermediate child are not automatically inherited by its descendants. Specifying participants adds access to a new child and cannot restrict root-chat access. Newly created private children include their creator directly, while participant rows do not enumerate all inherited access. Reusing an existing anchored reply thread leaves its title, description, emoji, and participants unchanged; creation inputs do not edit it or repair older creator membership.
 - Use string IDs exactly as returned. Do not infer IDs from names.
 - Use `chatId` for every conversation-scoped tool, including DMs. Resolve a person's `dmChatId` with `people.search` or `conversations.list` before reading or writing.
 - Prefer canonical Inline URIs returned by tools when referring to people, chats, or messages.
@@ -58,7 +60,8 @@ Use `inline.create_subthread` when the user asks for delegated work or a bounded
 - Use ordinary Markdown tables for genuinely tabular output; never put a table in a fenced code block.
 - For collapsible work, use `<details open>`, then `<summary>Title</summary>`, body Markdown, and `</details>`. Add `kind="progress"` to the summary only while work is in progress.
 - Use `<footer>Attribution or brief metadata</footer>` for a short message footer.
-- Report partial coverage when limits, time windows, authorization, or search scope prevent a complete answer.
+- Report partial coverage when limits, time windows, authorization, or search scope prevent a complete answer. Continue from the returned cursor even after an empty filtered page; an empty page is not proof that no older matches exist.
+- Forwarding preserves selected input order and duplicates. Use receipts to verify delivered IDs. A failed call may already have delivered a prefix or the whole batch; inspect the destination before retrying. Reactions and reply-thread relationships are not copied to the destination.
 
 ## Workflow map
 
@@ -67,13 +70,15 @@ Use only columns for access paths the environment actually provides. MCP entries
 | Goal | MCP path | CLI path |
 | --- | --- | --- |
 | Understand access | `account.me` | `inline me --json --compact` |
-| Find a person or DM | `people.search` → `conversations.list` | `inline users list --filter NAME --json --compact`, then `inline chats get --user-id USER_ID --json --compact` |
-| Find a thread or chat | `spaces.list` when useful → `conversations.list` → `conversations.get` | `inline chats list --filter QUERY --json --compact`, then `inline chats get --chat-id CHAT_ID --json --compact` |
+| Find a person or DM | `people.search` → `conversations.list` | `inline users list --filter NAME --json --compact`, then `inline chats list --type dm --filter NAME --json --compact` and verify the stable `chatId` |
+| Find a thread or chat | `spaces.list` when useful → `conversations.list` with `spaceId`/`kind` when useful → `conversations.get` | `inline chats list --filter QUERY --json --compact`, then `inline chats get --chat-id CHAT_ID --json --compact` |
 | Triage unread work | `messages.unread` → `messages.context` | `inline chats list --json --compact`, then `inline messages list --chat-id CHAT_ID --limit 50 --json --compact` |
 | Read or summarize | `messages.list` with a bounded time window | `inline messages list --chat-id CHAT_ID --since TIME --limit 50 --json --compact` |
 | Search and inspect context | `messages.search` → `messages.context` | `inline messages search --chat-id CHAT_ID --query QUERY --json --compact`, then `inline messages get --chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
 | Create a thread or chat | Resolve the parent and participants → `conversations.create` | Resolve IDs, then `inline chats create --title TITLE --json --compact` with the required space, visibility, and participant flags |
-| Create a reply thread | Use the CLI; MCP does not expose reply-thread creation | `inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title TITLE --json --compact` |
+| Create a child or reply thread | `conversations.create_subthread` with optional `parentMessageId` | `inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title TITLE --json --compact` |
+| Forward selected messages | Resolve source and destination → `messages.get` → `messages.forward` | `inline messages forward --from-chat-id SOURCE --to-chat-id DESTINATION --message-id 91,92,100 --json --receipt` |
+| Read exact selected IDs | `messages.get` | `inline messages get --chat-id CHAT_ID --message-id 91,92,100 --json --compact` |
 | Send text or a reply | Verify target → `messages.send` | `inline messages send --chat-id CHAT_ID --text TEXT` with `--reply-to MESSAGE_ID` when needed |
 | Ask teammates and wait for their replies | Resolve participants → `conversations.ask` → `events/subscribe` from the returned cursor → read context on a reply | Use supported MCP Events in the originating host; the CLI message send alone does not install background continuation |
 | Inspect a focused thread UI | `conversations.open` with a resolved `chatId` | Open the returned canonical Inline thread link in an Inline client |

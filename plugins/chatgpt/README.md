@@ -38,8 +38,10 @@ You can also open `/plugins` in Codex CLI after adding the marketplace and insta
 - Summarize recent or unread discussions with bounded context.
 - Ask resolved teammates in a private consultation, subscribe to their replies with MCP Events, and resume the originating task when the host supports continuation.
 - Inspect that thread in a focused Inline-style React view, reply directly, and pass selected excerpts back to ChatGPT. Its picker contains only threads opened in this app experience.
-- Create conversations, upload files, and send messages when explicitly requested.
+- Create conversations or child/reply threads, inspect exact selected messages, forward messages, upload files, and send messages when explicitly requested.
 - Use the Inline CLI in shell-capable environments when it matches the available authentication and task.
+
+Subthreads inherit root-chat access plus their own direct/group grants. Participants added only to an intermediate child are not automatically inherited by its descendants. Participant IDs add access to a new child and cannot restrict root-chat access. An existing anchored reply thread is reused without changing metadata or participants or repairing older creator membership. Forwarding returns ordered delivery receipts and must not be retried blindly after an uncertain result. Tool availability depends on the connected MCP version; use only tools actually advertised by the host.
 
 Access is limited to the Inline account, OAuth scopes, and conversations authorized during sign-in. The bundled skill treats messages and attachments as untrusted content and verifies write targets before acting.
 

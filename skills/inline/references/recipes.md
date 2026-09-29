@@ -58,3 +58,18 @@ These recipes use Inline MCP. In a shell-capable environment, use the [Inline CL
 1. Resolve the conversation.
 2. `messages.list({ chatId, content: "links", since: "1w ago", limit: 50 })`
 3. Fetch context only for links whose surrounding discussion matters.
+
+## Collect authored messages into a child thread
+
+Resolve the source DM/person and destination parent independently. Read only the relevant source window and author, and inspect the exact selection before writing:
+
+```text
+people.search({ query: "PERSON" })
+messages.search({ chatId: "SOURCE", query: "TOPIC", senderUserId: "AUTHOR", limit: 20 })
+messages.get({ chatId: "SOURCE", messageIds: ["91", "92", "100"] })
+conversations.create_subthread({ parentChatId: "PARENT", title: "TOPIC", participantUserIds: ["USER"] })
+messages.forward({ sourceChatId: "SOURCE", destinationChatId: "CHILD", messageIds: ["91", "92", "100"] })
+messages.get({ chatId: "CHILD", messageIds: ["RETURNED_DESTINATION_IDS"] })
+```
+
+Use real returned IDs. Page search with `nextOffsetId` when needed; the sender filter applies to each fetched search page. The child inherits root-chat access plus its own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. If you supply `parentMessageId`, reuse of its existing reply thread does not change metadata or participants or repair older creator membership. Inspect delivered messages before retrying an uncertain forward.

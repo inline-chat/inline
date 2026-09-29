@@ -87,7 +87,7 @@ inline messages send --help
 inline capabilities messages send --compact
 ```
 
-`inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]` emit the live public command metadata as JSON without loading authentication, checking for updates, or connecting to Inline. Query the narrowest relevant command instead of loading the entire protobuf schema. Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
+`inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]` emit the live public command metadata, conflicts, argument groups, and command examples as JSON without loading authentication, checking for updates, or connecting to Inline. Query the narrowest relevant command instead of loading the entire protobuf schema. Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
 
 ```bash
 inline chats list --filter "launch" --json --compact
@@ -111,6 +111,23 @@ inline notifications set-chat --chat-id CHAT_ID --mode mentions
 Destructive commands never prompt in JSON mode and require `--yes`. Pass it only for the exact user-approved target. After an uncertain write result, inspect the target before retrying to avoid duplicates.
 
 Send text and attachment captions support [rich Markdown](message-formatting.md), including tables, code, images, disclosures, inline styles, and math. Use `--text-file report.md` or `--stdin` for multiline content, or single-quote `--text` to protect backticks and dollar signs from the shell. `inline messages send --help` lists the syntax. Explicit `--mention` ranges disable Markdown parsing; use Markdown mention links when combining mentions with formatting.
+
+## Select and forward messages
+
+`--user-id` chooses a DM with a person; `--sender-id` selects an author inside that conversation. Message IDs belong to the source chat, so resolve source and destination separately. List/search time and sender filters apply to the fetched page after its limit, not to all history. JSON includes `page.fetchedCount`, `page.returnedCount`, `page.nextOffsetId`, and `page.filtersAppliedToPage`; continue with `--offset-id` even after an empty filtered page. Named days and date-only boundaries use UTC.
+
+```bash
+inline messages search --chat-id SOURCE --query 'TOPIC' --sender-id AUTHOR --limit 50 --json --compact
+inline messages get --chat-id SOURCE --message-id 91,92,100 --json --compact
+inline chats subthread --parent-chat-id PARENT --title 'TOPIC' --participant USER --json --compact
+inline messages forward --from-chat-id SOURCE --to-chat-id CHILD --message-id 91,92,100 --json --receipt --compact
+```
+
+Use returned IDs in those placeholders. The child inherits root-chat access plus its own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. Direct participant rows do not enumerate all effective access. Newly created private children include their creator directly. With `--message-id`, an existing reply thread is reused without changing its title, description, emoji, or participants; creation inputs apply only to a new child and reuse does not repair older creator membership. Forwarding preserves input order and duplicate occurrences. Successful JSON retains protocol `updates` and adds `forwarded` source/destination ID pairs; `--receipt` returns only the operation receipt. Verify destination IDs with `messages get`. A failure can leave delivered messages, so inspect before retrying. `--compact` changes whitespace only.
+
+All `--message-id` batch selectors accept single IDs, comma lists, ascending ranges, and repeated flags, up to 1000 expanded IDs. Get/export/download/delete deduplicate IDs; forwarding deliberately preserves duplicates. Choose exactly one text source: `--text`, `--stdin`, or `--text-file PATH` (`-` reads stdin). File/stdin content must be nonblank UTF-8, at most 1 MiB, and preserves indentation/newlines. Explicit mention ranges use UTF-16 offsets in literal input and disable Markdown parsing.
+
+User/space lookup JSON retains the existing protocol keys but returns only the requested entity list, leaving unrelated lists empty. `--user-id` read targets may initialize a missing DM through the backend. For read-only research, find an existing DM with `chats list --type dm` and use its `--chat-id`. Create a DM explicitly only when the user asks to start/contact a conversation. These lookups cover entities present in your chat catalog; they do not establish exhaustive space membership or discover every account.
 
 ## Install the Codex plugin
 

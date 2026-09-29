@@ -53,7 +53,7 @@ describe("/mcp", () => {
       close, listSpaces: unused, searchPeople: unused, getEligibleChats: unused,
       resolveConversation: unused, getConversation: unused, messageContext: unused,
       getMessages: unused, recentMessages: unused, searchMessages: unused,
-      unreadMessages: unused, createChat: unused, uploadFile: unused,
+      unreadMessages: unused, createChat: unused, createSubthread: unused, forwardMessages: unused, uploadFile: unused,
       sendMessage: unused, sendMediaMessage: unused,
     })
     if (failure === "connect failure") {

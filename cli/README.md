@@ -255,7 +255,10 @@ inline auth revoke-session --session-id 42
 ```
 
 `chats subthread` is also available as `create-reply`, `reply-thread`, and
-`create-subthread`. `follow-default` removes an explicit follow preference.
+`create-subthread`. With `--message-id`, an existing anchored reply thread is
+reused without changing its title, description, emoji, or participants. Those
+inputs apply only to new creation; reuse does not repair older creator membership.
+`follow-default` removes an explicit follow preference.
 Per-chat notification modes are `all`, `mentions`, `none`, and `inherit`.
 Session revocation asks for confirmation; JSON automation must pass `--yes`.
 Use `inline logout` to end the current session; `auth revoke-session` ends
@@ -272,17 +275,27 @@ the two forms cannot be mixed. `--offset-id` uses the existing search cursor.
 Words within one query are ANDed; repeated queries are ORed. Search also accepts
 `--filter photos|videos|photo-video|documents|links|voice-memos`, with optional
 query text. Media filtering runs on the server before its result limit.
-Time/media filters on message lists, and time filters on search, apply to the
+Time/sender/media filters on message lists, and time/sender filters on search, apply to the
 fetched page; they do not scan all history. `--ids` on message lists and search
 prints peer-local message IDs without fetching the chat catalog for names.
-It cannot be combined with `--json` or `--translate`.
+It cannot be combined with `--json` or `--translate`. `--sender-id` selects an
+author inside the chosen conversation; `--user-id` selects a DM target. JSON
+includes `page.fetchedCount`, `page.returnedCount`, `page.nextOffsetId`, and
+`page.filtersAppliedToPage`. Continue with `--offset-id` even when local filters
+remove every message. Date-only and named day boundaries use UTC. The backend can initialize a
+missing DM when a read targets `--user-id`; use an existing `--chat-id` for
+read-only lookup.
 
 ### Agent discovery and Codex plugin
 
 `inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]`
-emit the actual public Clap command metadata as JSON. They run before config,
+emit the actual public Clap command metadata as JSON, including flag conflicts,
+argument groups, and command examples. They run before config,
 telemetry, update checks, or auth, so agents can inspect one narrow command
-without network access or stale embedded docs:
+without network access or stale embedded docs. Dependencies described by help
+(such as `--force-file` requiring `--attach`) are still enforced by the parser;
+the metadata does not serialize every conditional requirement. Use the command
+usage and examples with the structured fields:
 
 ```bash
 inline capabilities --compact
@@ -337,10 +350,36 @@ inline messages download --chat-id 123 --from-msg-id 600 --limit 50 --dir ./medi
 ```
 
 Selectors support single IDs (`91`), comma lists (`91,92,100`), ranges
-(`91-100`), and repeated `--message-id` flags. Batch downloads skip messages
+(`91-100`), and repeated `--message-id` flags, up to 1000 expanded IDs.
+Get/export/download/delete deduplicate IDs; forwarding preserves duplicate
+occurrences and their input order. Batch downloads skip messages
 without media, report skipped/missing/failed counts, and prefix local filenames
 with the message date, `MSG` ID, media type, and media ID. For contiguous
 windows, use `--from-msg-id ID --limit N` with export/transcript/download.
+
+Resolve the source and destination independently when forwarding:
+
+```bash
+inline messages search -c 123 -q 'topic' --sender-id 42 -L 50 --json --compact
+inline messages forward --from-chat-id 123 --to-chat-id 456 --message-id 91,92,100 --json --receipt --compact
+```
+
+Successful forward JSON retains `updates` and adds `fromPeer`, `toPeer`,
+`completed`, and ordered `forwarded` source/destination ID pairs. `--receipt`
+returns only that receipt. A failed forward can leave a delivered prefix, or
+all messages if the response was lost; inspect the destination before retrying.
+Reactions and reply-thread relationships are not copied. A child inherits
+root-chat access plus its own direct/group grants. Participants added only to an
+intermediate child are not automatically inherited by its descendants. Direct
+participant rows do not enumerate all effective access. Newly created private
+children include their creator directly.
+
+User and space lookup JSON retains protocol keys, with unrelated chats,
+messages, dialogs, and folders empty. `--compact` changes whitespace only.
+
+Choose one text source: `--text`, `--stdin`, or `--text-file PATH`. Piped/file
+input preserves whitespace and must be nonblank UTF-8, at most 1 MiB.
+`--force-file` requires at least one attachment.
 
 For reviewable conversation bundles, prefer transcript/export:
 

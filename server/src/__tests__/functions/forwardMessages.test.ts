@@ -6,6 +6,7 @@ import type { DbUser } from "@in/server/db/schema"
 import { MessageModel } from "@in/server/db/models/messages"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import { forwardMessages } from "@in/server/functions/messages.forwardMessages"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -244,5 +245,61 @@ describe("forwardMessages DM -> private thread", () => {
     const forwarded = await forwardedMessageFromDestination(scenario.destinationThreadId)
     expect(forwarded.text).toBe("# Forwarded heading")
     expect(forwarded.blockContent?.blocks[0]?.kind.oneofKind).toBe("heading")
+  })
+
+  test("returns one destination ID per source occurrence in request order", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: false })
+    await testUtils.createTestMessage({
+      messageId: 2,
+      chatId: scenario.sourceChatId,
+      fromId: scenario.dmPeerUser.id,
+      text: "second source message",
+    })
+
+    const result = await forwardMessages({
+      fromPeerId: scenario.fromPeerId,
+      toPeerId: scenario.toPeerId,
+      messageIds: [2n, scenario.sourceMessageId, 2n],
+    }, testUtils.functionContext({ userId: scenario.currentUser.id }))
+
+    const returnedUpdateIds = result.updates.flatMap((update) =>
+      update.update.oneofKind === "updateMessageId" ? [Number(update.update.updateMessageId.messageId)] : [],
+    )
+    expect(returnedUpdateIds).toEqual(result.messageIds)
+    expect(new Set(result.messageIds).size).toBe(3)
+    const forwarded = await Promise.all(result.messageIds.map((id) => MessageModel.getMessage(id, scenario.destinationThreadId)))
+    expect(forwarded.map((message) => message.text)).toEqual(["second source message", "forward me", "second source message"])
+    expect(forwarded.map((message) => message.fwdFromMessageId)).toEqual([2, 1, 2])
+  })
+
+  test("retains the delivered prefix when a later source message is missing", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: false })
+
+    await expect(forwardMessages({
+      fromPeerId: scenario.fromPeerId,
+      toPeerId: scenario.toPeerId,
+      messageIds: [scenario.sourceMessageId, 999_999n],
+    }, testUtils.functionContext({ userId: scenario.currentUser.id })))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.MESSAGE_ID_INVALID })
+
+    const forwarded = await MessageModel.getMessagesByIds(scenario.destinationThreadId, [1n, 2n])
+    expect(forwarded).toHaveLength(1)
+    expect(forwarded[0]?.text).toBe("forward me")
+    expect(forwarded[0]?.fwdFromMessageId).toBe(Number(scenario.sourceMessageId))
+  })
+
+  test("rejects an inaccessible destination before forwarding any source message", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: false })
+    await db.delete(chatParticipants).where(eq(chatParticipants.userId, scenario.currentUser.id))
+
+    await expect(forwardMessages({
+      fromPeerId: scenario.fromPeerId,
+      toPeerId: scenario.toPeerId,
+      messageIds: [scenario.sourceMessageId],
+    }, testUtils.functionContext({ userId: scenario.currentUser.id })))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
+
+    const forwarded = await db.select().from(messages).where(eq(messages.chatId, scenario.destinationThreadId))
+    expect(forwarded).toEqual([])
   })
 })

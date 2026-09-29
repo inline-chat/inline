@@ -50,6 +50,25 @@ fn explicit_help_keeps_the_complete_command_reference() {
 }
 
 #[test]
+fn subthread_help_explains_root_access_and_reuse_without_metadata_edits() {
+    let output = run(&["chats", "subthread", "--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(help.contains("creates or reuses its reply thread"));
+    assert!(help.contains("ignored on reuse"));
+    assert!(help.contains("without changing its title, description, emoji, or participants"));
+    assert!(help.contains("reuse does not repair older creator membership"));
+    assert!(help.contains("Children inherit root-chat access, plus their own direct/group grants"));
+    assert!(help.contains(
+        "Participants added only to an intermediate child are not automatically inherited"
+    ));
+}
+
+#[test]
 fn capabilities_describe_public_commands_without_account_or_network_access() {
     let output = run(&["capabilities", "message", "send", "--compact"]);
     assert!(output.status.success(), "{:?}", output.stderr);
@@ -361,4 +380,152 @@ fn empty_text_file_is_rejected_before_auth_for_send_and_edit() {
         assert_eq!(error["error"]["code"], "invalid_args");
         assert_eq!(error["error"]["message"], "--text-file was empty");
     }
+}
+
+#[test]
+fn contradictory_or_ignored_inputs_fail_before_account_access() {
+    for args in [
+        vec!["messages", "send", "-c", "1", "--text", "hello", "--stdin"],
+        vec![
+            "messages",
+            "edit",
+            "-c",
+            "1",
+            "--message-id",
+            "1",
+            "--text",
+            "hello",
+            "--stdin",
+        ],
+        vec![
+            "messages",
+            "send",
+            "-c",
+            "1",
+            "--text",
+            "hello",
+            "--force-file",
+        ],
+        vec!["chats", "create", "--title", "topic", "--public"],
+        vec![
+            "chats",
+            "create",
+            "--title",
+            "topic",
+            "--public",
+            "--space-id",
+            "1",
+            "--participant",
+            "2",
+        ],
+        vec!["chats", "update-visibility", "--chat-id", "1"],
+        vec![
+            "chats",
+            "update-visibility",
+            "--chat-id",
+            "1",
+            "--public",
+            "--participant",
+            "2",
+        ],
+        vec!["messages", "list", "-c", "1", "--sender-id", "0"],
+        vec![
+            "messages",
+            "search",
+            "-c",
+            "1",
+            "-q",
+            "topic",
+            "--sender-id",
+            "0",
+        ],
+        vec![
+            "messages",
+            "forward",
+            "--from-chat-id",
+            "1",
+            "--to-chat-id",
+            "2",
+            "--message-id",
+            "9-3",
+        ],
+        vec![
+            "messages",
+            "delete",
+            "-c",
+            "1",
+            "--message-id",
+            "1-1001",
+            "--yes",
+        ],
+    ] {
+        let mut flags = vec!["--json", "--compact"];
+        flags.extend(args);
+        let output = run(&flags);
+        assert!(!output.status.success(), "{flags:?}");
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "invalid_args", "{flags:?}: {error}");
+    }
+}
+
+#[test]
+fn capability_metadata_exposes_conflicts_and_workflow_examples() {
+    let output = run(&["capabilities", "messages", "send", "--compact"]);
+    assert!(output.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let text = schema["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "text")
+        .unwrap();
+    assert!(
+        text["aliases"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("message"))
+    );
+    let stdin = schema["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "stdin")
+        .unwrap();
+    assert!(
+        stdin["conflictsWith"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("text"))
+    );
+    assert!(
+        schema["afterHelp"]
+            .as_str()
+            .unwrap()
+            .contains("Whitespace is preserved")
+    );
+    assert!(!schema["groups"].as_array().unwrap().is_empty());
+    let output = run(&["capabilities", "messages", "forward", "--compact"]);
+    assert!(output.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(schema["afterHelp"].as_str().unwrap().contains("--receipt"));
+}
+
+#[test]
+fn visibility_capabilities_express_exactly_one_required_mode() {
+    let output = run(&["capabilities", "chats", "update-visibility", "--compact"]);
+    assert!(output.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let visibility = schema["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| group["id"] == "visibility")
+        .unwrap();
+    assert_eq!(visibility["required"], true);
+    assert_eq!(visibility["multiple"], false);
+    assert_eq!(
+        visibility["arguments"],
+        serde_json::json!(["public", "private"])
+    );
 }

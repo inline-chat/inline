@@ -36,7 +36,7 @@ const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "i
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
 export const INLINE_MCP_INSTRUCTIONS =
-  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.list/search/context/unread; send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
+  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.get/list/search/context/unread; send only after the target is clear. For forwarding, resolve the source and destination separately, select source messages, then use messages.forward. Subthreads inherit root-chat access plus their own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. Creation inputs do not edit existing anchored reply threads. IDs are positive decimal strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds; calendar days use UTC. Use account.me to inspect scopes and allowed chat contexts."
 
 const INLINE_MARKDOWN_HELP =
   'Parsed as supported Inline Markdown: **bold**, *italic*, <u>underline</u>, ~~strikethrough~~, ==highlight==, `code`, fenced code (optional language), four-space indented code, [label](https://example.com), [Name](inline://user?id=42), [[Title]](inline://chat?id=123), # headings, - bullets, 1. numbered lists, - [ ] / - [x] checklists, > quotes, pipe tables with a header separator row, --- separators, and ![alt](https://example.com/image.png). Math uses $TeX$ inline or $$TeX$$ on separate lines for display. Disclosures use <details open> / <summary>Title</summary> / body / </details> on separate lines; omit open to start collapsed and use <summary kind="progress"> only while working. Use <footer>metadata</footer> on its own line. Preserve indentation/newlines; use backslash escapes or code for literal syntax. Do not fence the whole message or tables unless literal code is intended. Footnotes and arbitrary HTML are unsupported. Rich formatting and math rendering depend on the recipient client.'
@@ -177,8 +177,9 @@ function messageUri(chatId: bigint, messageId: bigint): string {
 
 function parseInlineId(input: string, field: string): bigint {
   try {
+    if (!/^[1-9]\d*$/.test(input)) throw new Error(`invalid ${field}`)
     const id = BigInt(input)
-    if (id <= 0n) throw new Error(`invalid ${field}`)
+    if (id > 9_223_372_036_854_775_807n) throw new Error(`invalid ${field}`)
     return id
   } catch {
     throw new Error(`invalid ${field}`)
@@ -202,12 +203,12 @@ function parseIntegerSeconds(input: string): bigint | null {
   }
 }
 
-function startOfLocalDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0))
 }
 
-function endOfLocalDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
+function endOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999))
 }
 
 function parseRelativeAgo(raw: string): bigint | null {
@@ -234,13 +235,13 @@ function parseTimeInput(raw: string | undefined, kind: "since" | "until"): bigin
 
   const now = new Date()
   if (value === "today") {
-    const date = kind === "since" ? startOfLocalDay(now) : endOfLocalDay(now)
+    const date = kind === "since" ? startOfUtcDay(now) : endOfUtcDay(now)
     return BigInt(Math.floor(date.getTime() / 1000))
   }
   if (value === "yesterday") {
     const base = new Date(now)
-    base.setDate(base.getDate() - 1)
-    const date = kind === "since" ? startOfLocalDay(base) : endOfLocalDay(base)
+    base.setUTCDate(base.getUTCDate() - 1)
+    const date = kind === "since" ? startOfUtcDay(base) : endOfUtcDay(base)
     return BigInt(Math.floor(date.getTime() / 1000))
   }
 
@@ -248,16 +249,35 @@ function parseTimeInput(raw: string | undefined, kind: "since" | "until"): bigin
   if (relative != null) return relative
 
   const integerSeconds = parseIntegerSeconds(value)
-  if (integerSeconds != null) return integerSeconds
+  if (integerSeconds != null) {
+    if (integerSeconds > 9_223_372_036_854_775_807n) throw new Error(`invalid ${kind} value: epoch seconds exceed the protocol range`)
+    return integerSeconds
+  }
 
   const dayOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (dayOnlyMatch) {
     const year = Number(dayOnlyMatch[1])
     const month = Number(dayOnlyMatch[2]) - 1
     const day = Number(dayOnlyMatch[3])
-    const date = kind === "since" ? new Date(year, month, day, 0, 0, 0, 0) : new Date(year, month, day, 23, 59, 59, 999)
-    if (!Number.isNaN(date.getTime())) {
+    const date = new Date(Date.UTC(year, month, day, 0, 0, 0, 0))
+    if (date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day) {
+      if (kind === "until") date.setUTCHours(23, 59, 59, 999)
       return BigInt(Math.floor(date.getTime() / 1000))
+    }
+    throw new Error(`invalid ${kind} value: calendar date does not exist`)
+  }
+
+  const timestampDatePrefix = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (timestampDatePrefix) {
+    const year = Number(timestampDatePrefix[1])
+    const month = Number(timestampDatePrefix[2]) - 1
+    const day = Number(timestampDatePrefix[3])
+    // Date parsing normalizes impossible days even in ISO timestamps. Validate
+    // the written calendar date before its explicit offset shifts the instant.
+    const calendarDate = new Date(0)
+    calendarDate.setUTCFullYear(year, month, day)
+    if (calendarDate.getUTCFullYear() !== year || calendarDate.getUTCMonth() !== month || calendarDate.getUTCDate() !== day) {
+      throw new Error(`invalid ${kind} value: calendar date does not exist`)
     }
   }
 
@@ -267,6 +287,15 @@ function parseTimeInput(raw: string | undefined, kind: "since" | "until"): bigin
   }
 
   throw new Error(`invalid ${kind} value`)
+}
+
+function parseTimeRange(since?: string, until?: string): { parsedSince?: bigint; parsedUntil?: bigint } {
+  const parsedSince = parseTimeInput(since, "since")
+  const parsedUntil = parseTimeInput(until, "until")
+  if (parsedSince != null && parsedUntil != null && parsedSince > parsedUntil) {
+    throw new Error("since must be earlier than or equal to until")
+  }
+  return { parsedSince, parsedUntil }
 }
 
 function parseContentFilter(raw: string | undefined): InlineMessageContentFilter {
@@ -316,11 +345,7 @@ function parseTarget(args: { chatId?: string; userId?: string }, context: string
 function coerceBigIntArray(values: string[] | undefined, field: string): bigint[] {
   const out: bigint[] = []
   for (const value of values ?? []) {
-    try {
-      out.push(BigInt(value))
-    } catch {
-      throw new Error(`invalid ${field}`)
-    }
+    out.push(parseInlineId(value, field))
   }
   return out
 }
@@ -1484,6 +1509,8 @@ const conversationsListOutputSchema = z.object({
   sort: z.enum(["relevance", "recent", "unread"]),
   bestMatch: conversationListItemOutputSchema.nullable(),
   unreadOnly: z.boolean(),
+  spaceId: z.string().nullable(),
+  kind: z.enum(["dm", "home_thread", "space_chat"]).nullable(),
   items: z.array(conversationListItemOutputSchema),
 })
 
@@ -1499,9 +1526,9 @@ const conversationGetOutputSchema = z.object({
     parentMessageId: z.string().nullable(),
     number: z.number().nullable(),
     pinnedMessageIds: z.array(z.string()),
-    groupParticipantCount: z.number(),
+    groupParticipantCount: z.number().int().nonnegative().describe("Number of explicit group grants on this chat, not group-member or effective-audience count"),
   }),
-  participants: z.array(personOutputSchema),
+  participants: z.array(personOutputSchema).describe("Direct user participants only; group members and inherited root-chat access are not enumerated"),
 })
 
 const conversationCreatedOutputSchema = z.object({
@@ -1644,6 +1671,8 @@ const legacySendBatchOutputSchema = z.object({
 const messagesListOutputSchema = z.object({
   chat: chatMetadataOutputSchema,
   nextOffsetId: z.string().nullable(),
+  scannedCount: z.number().describe("History messages examined before sender/time/content filters; at most 500 per call"),
+  senderUserId: z.string().nullable(),
   since: z.string().nullable(),
   until: z.string().nullable(),
   content: contentFilterOutputSchema,
@@ -1661,13 +1690,36 @@ const messagesContextOutputSchema = z.object({
 })
 
 const messagesSearchOutputSchema = z.object({
-  nextOffsetId: z.string().nullable(),
   query: z.string().nullable(),
   content: contentFilterOutputSchema,
   since: z.string().nullable(),
   until: z.string().nullable(),
   chat: chatMetadataOutputSchema,
+  nextOffsetId: z.string().nullable(),
+  scannedCount: z.number().describe("Server search matches examined before sender/time filters; excludes the server's underlying text scan"),
+  senderUserId: z.string().nullable(),
   messages: z.array(messageOutputSchema),
+})
+
+const messagesGetOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  messageIds: z.array(z.string()),
+  missingMessageIds: z.array(z.string()),
+  messages: z.array(messageOutputSchema),
+})
+
+const subthreadCreatedOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  parentChatId: z.string(),
+  parentMessageId: z.string().nullable(),
+  anchorMessageId: z.string().nullable(),
+})
+
+const messagesForwardOutputSchema = z.object({
+  ok: z.literal(true),
+  sourceChat: chatMetadataOutputSchema,
+  destinationChat: chatMetadataOutputSchema,
+  messages: z.array(z.object({ sourceMessageId: z.string(), destinationMessageId: z.string(), uri: z.string() })),
 })
 
 const messagesUnreadOutputSchema = z.object({
@@ -1792,7 +1844,7 @@ export function createInlineMcpServer(params: {
         hints: [
           "Use people.search, spaces.list, and conversations.list to resolve users, spaces, DMs, thread titles, or chat IDs before reading or sending.",
           "Use messages.context around search or unread results when a single message needs surrounding context.",
-          "Message reads require messages:read; space listing and people search require spaces:read; sends and uploads require messages:write.",
+          "Message reads require messages:read; space listing requires spaces:read; people search requires both read scopes; creation, sends, and uploads require messages:write; forwarding requires messages:read and messages:write.",
         ],
       }
       return {
@@ -1960,7 +2012,7 @@ export function createInlineMcpServer(params: {
     {
       title: "Search Inline People",
       description:
-        "Use this tool to resolve a person by name, @username, or user ID across allowed DMs and spaces. It returns userId for DMs and participant selection without exposing phone or email.",
+        "Resolve a person by name, @username, or user ID across allowed DMs and spaces without exposing phone or email. Use userId for sender filters and participant selection; use dmChatId or conversations.list to resolve the chat ID required by current DM tools.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Name, @username, or user ID. Omit to list known people in allowed contexts."),
         limit: submissionV2
@@ -2004,9 +2056,11 @@ export function createInlineMcpServer(params: {
     {
       title: "List Inline Conversations",
       description:
-        "Use this tool to find the chatId for a person, DM, thread, or space chat before listing messages or sending. Query can be a contact name, @username, chat title, or chat ID; omit query for recent approved conversations.",
+        "Find the chatId for a person, DM, thread, or space chat before reading or sending. Query can be a contact name, @username, chat title, or chat ID. Use kind to distinguish a DM source from a similarly named thread, or spaceId to narrow to an approved workspace. Filters and sort apply before the result limit. Omit query for recent approved conversations.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional contact name, chat title, or chat ID"),
+        spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only conversations in this approved space; incompatible with dm or home_thread kind"),
+        kind: z.enum(["dm", "home_thread", "space_chat"]).optional().describe("Restrict the result to DMs, home threads, or space chats"),
         limit: submissionV2
           ? z.number().int().min(1).max(50).optional().describe("Maximum conversations to return; defaults to 20")
           : z.number().int().min(1).max(50).default(20).describe("Maximum conversations to return"),
@@ -2028,7 +2082,7 @@ export function createInlineMcpServer(params: {
       _meta: toolMeta(["messages:read"], "Listing Inline conversations...", "Conversations listed"),
     },
     async (
-      { query, limit, unreadOnly, sort }: { query?: string; limit?: number; unreadOnly?: boolean; sort?: ConversationSort },
+      { query, limit, unreadOnly, sort, spaceId, kind }: { query?: string; limit?: number; unreadOnly?: boolean; sort?: ConversationSort; spaceId?: string; kind?: InlineEligibleChat["kind"] },
       extra: { authInfo?: AuthInfo },
     ) => {
       const auth = extra.authInfo
@@ -2039,10 +2093,15 @@ export function createInlineMcpServer(params: {
       const safeQuery = query?.trim()
       const onlyUnread = unreadOnly === true
       const safeSort = parseConversationSort(sort, !!safeQuery)
+      const parsedSpaceId = spaceId ? parseInlineId(spaceId, "spaceId") : undefined
+      if (parsedSpaceId != null && !params.grant.spaceIds.includes(parsedSpaceId)) throw new Error("space is not in allowed context")
+      if (parsedSpaceId != null && kind != null && kind !== "space_chat") throw new Error("spaceId requires kind space_chat or no kind filter")
+      const matchesFilters = (chat: InlineEligibleChat): boolean =>
+        (!onlyUnread || chat.unreadCount > 0) && (parsedSpaceId == null || chat.spaceId === parsedSpaceId) && (kind == null || chat.kind === kind)
 
       if (!safeQuery) {
         const chats = await params.inline.getEligibleChats()
-        const filtered = onlyUnread ? chats.filter((chat) => chat.unreadCount > 0) : chats
+        const filtered = chats.filter(matchesFilters)
         const items = sortedConversations(filtered, safeSort)
           .slice(0, safeLimit)
           .map((chat, index) => conversationListItem(chat, index + 1))
@@ -2051,6 +2110,8 @@ export function createInlineMcpServer(params: {
           sort: safeSort,
           bestMatch: null,
           unreadOnly: onlyUnread,
+          spaceId: parsedSpaceId?.toString() ?? null,
+          kind: kind ?? null,
           items,
         }
         return {
@@ -2059,8 +2120,8 @@ export function createInlineMcpServer(params: {
         }
       }
 
-      const resolved = await params.inline.resolveConversation(safeQuery, safeLimit)
-      const filtered = onlyUnread ? resolved.candidates.filter((candidate) => candidate.unreadCount > 0) : resolved.candidates
+      const resolved = await params.inline.resolveConversation(safeQuery, safeLimit, { spaceId: parsedSpaceId, kind, unreadOnly: onlyUnread, sort: safeSort })
+      const filtered = resolved.candidates.filter(matchesFilters)
       const sorted = sortedConversations(filtered, safeSort)
       const items = sorted.map((candidate: InlineConversationCandidate, index: number) =>
         conversationListItem(candidate, index + 1, {
@@ -2079,6 +2140,8 @@ export function createInlineMcpServer(params: {
         sort: safeSort,
         bestMatch,
         unreadOnly: onlyUnread,
+        spaceId: parsedSpaceId?.toString() ?? null,
+        kind: kind ?? null,
         items,
       }
       return {
@@ -2095,8 +2158,8 @@ export function createInlineMcpServer(params: {
     {
       title: "Get Inline Conversation",
       description: submissionV2
-        ? "Use this tool after resolving a chatId to inspect conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending. DMs also use chatId."
-        : "Use this tool after resolving a chatId or DM userId to inspect the conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending.",
+        ? "Use this tool after resolving a chatId to inspect conversation metadata, direct participants, explicit group-grant count, pinned message IDs, and parent/thread details before reading or sending. DMs also use chatId. Direct participants and group-grant count do not enumerate group members or inherited root-chat access and are not a complete audience list."
+        : "Use this tool after resolving a chatId or DM userId to inspect conversation metadata, direct participants, explicit group-grant count, pinned message IDs, and parent/thread details before reading or sending. Direct participants and group-grant count do not enumerate group members or inherited root-chat access and are not a complete audience list.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
@@ -2192,6 +2255,117 @@ export function createInlineMcpServer(params: {
         structuredContent: payload,
         content: [jsonText(payload)],
       }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "conversations.create_subthread",
+    {
+      title: "Create Inline Subthread",
+      description: "Create a child of one resolved parent chat. The child inherits root-chat access plus its own direct/group grants. Participants added only to an intermediate child are not automatically inherited by descendants. participantUserIds adds access to a new child and cannot restrict root-chat access. Omit parentMessageId for an independent child, or supply it to create or reuse the reply thread for that message. An existing reply thread is returned without changing its title, description, emoji, or participants; these inputs apply only to new creation. Newly created private children include the creator directly; reuse does not repair older creator membership. Children outside spaces require home thread access. Use the returned chat.chatId for reading, sending, or forwarding.",
+      inputSchema: {
+        parentChatId: z.string().regex(/^[1-9]\d*$/).describe("Parent Inline chat ID, including a DM chat ID"),
+        parentMessageId: z.string().regex(/^[1-9]\d*$/).optional().describe("Optional message ID in the parent; an existing reply thread is reused without changing metadata or participants"),
+        title: z.string().min(1).max(200).optional().describe("Optional title for a new child; omit to use the server's default; ignored on reuse"),
+        description: z.string().max(1000).optional().describe("Optional description for a new child; ignored on reuse"),
+        emoji: z.string().max(16).optional().describe("Optional emoji icon for a new child; ignored on reuse"),
+        participantUserIds: z.array(z.string().regex(/^[1-9]\d*$/)).max(50).optional().describe("Additional direct participants for a new child; ignored on reuse; root-chat access is retained and intermediate-child additions are not inherited"),
+      },
+      outputSchema: subthreadCreatedOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: toolMeta(["messages:write"], "Creating subthread...", "Subthread ready"),
+    },
+    async (args: { parentChatId: string; parentMessageId?: string; title?: string; description?: string; emoji?: string; participantUserIds?: string[] }, extra) => {
+      requireScope(extra.authInfo?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean), "messages:write")
+      const created = await params.inline.createSubthread({
+        parentChatId: parseInlineId(args.parentChatId, "parentChatId"),
+        ...(args.parentMessageId ? { parentMessageId: parseInlineId(args.parentMessageId, "parentMessageId") } : {}),
+        ...(args.title != null ? { title: args.title } : {}),
+        ...(args.description != null ? { description: args.description } : {}),
+        ...(args.emoji != null ? { emoji: args.emoji } : {}),
+        participantUserIds: coerceBigIntArray(args.participantUserIds, "participantUserIds"),
+      })
+      const payload = {
+        chat: chatMetadata(created.chat),
+        parentChatId: created.parentChatId.toString(),
+        parentMessageId: created.parentMessageId?.toString() ?? null,
+        anchorMessageId: created.anchorMessageId?.toString() ?? null,
+      }
+      return { structuredContent: payload, content: [jsonText(payload)] }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "messages.get",
+    {
+      title: "Get Inline Messages By ID",
+      description: "Read exact message IDs from one resolved chat, including a DM. Results follow the requested order, with duplicate requests collapsed and unavailable IDs listed in missingMessageIds. Use this to inspect a selection before forwarding or verify known delivery receipts; use messages.context for surrounding discussion.",
+      inputSchema: {
+        chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID"),
+        messageIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(100).describe("One to one hundred IDs scoped to this chat"),
+      },
+      outputSchema: messagesGetOutputSchema,
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: toolMeta(["messages:read"], "Getting selected messages...", "Selected messages loaded"),
+    },
+    async (args: { chatId: string; messageIds: string[] }, extra) => {
+      requireScope(extra.authInfo?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean), "messages:read")
+      const messageIds = [...new Set(coerceBigIntArray(args.messageIds, "messageIds"))]
+      const found = await params.inline.getMessages({ chatId: parseChatId(args.chatId), messageIds })
+      const byId = new Map(found.messages.map((message) => [message.id, message]))
+      const payload = {
+        chat: chatMetadata(found.chat),
+        messageIds: messageIds.map(String),
+        missingMessageIds: messageIds.filter((id) => !byId.has(id)).map(String),
+        messages: messageIds.flatMap((id) => byId.has(id) ? [messagePayload(byId.get(id)!)] : []),
+      }
+      return { structuredContent: payload, content: [jsonText(payload)] }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "messages.forward",
+    {
+      title: "Forward Inline Messages",
+      description: "Forward selected messages from a resolved source chat to a separately resolved destination chat, preserving the input order and media. Both chats must be approved by this grant. Resolve source and destination independently and inspect selected messages before forwarding. Returns ordered source/destination message ID pairs. Sending is not atomic or idempotent: an error may follow partial delivery, so inspect the destination before retrying to avoid duplicates. Forwarding headers follow server policy even when requested.",
+      inputSchema: {
+        sourceChatId: z.string().regex(/^[1-9]\d*$/).describe("Chat containing the messages, including a DM"),
+        destinationChatId: z.string().regex(/^[1-9]\d*$/).describe("Chat receiving the forwarded messages, including a DM"),
+        messageIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(100).describe("Source message IDs in the desired delivery order; repeated IDs are forwarded repeatedly"),
+        shareForwardHeader: z.boolean().optional().describe("Request the original attribution header; defaults to true, subject to server policy"),
+      },
+      outputSchema: messagesForwardOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      _meta: toolMeta(["messages:read", "messages:write"], "Forwarding selected messages...", "Messages forwarded"),
+    },
+    async (args: { sourceChatId: string; destinationChatId: string; messageIds: string[]; shareForwardHeader?: boolean }, extra) => {
+      const scopes = extra.authInfo?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+      requireScope(scopes, "messages:write")
+      const messageIds = coerceBigIntArray(args.messageIds, "messageIds")
+      const forwarded = await params.inline.forwardMessages({
+        sourceChatId: parseInlineId(args.sourceChatId, "sourceChatId"),
+        destinationChatId: parseInlineId(args.destinationChatId, "destinationChatId"),
+        messageIds,
+        ...(args.shareForwardHeader != null ? { shareForwardHeader: args.shareForwardHeader } : {}),
+      })
+      const payload = {
+        ok: true as const,
+        sourceChat: chatMetadata(forwarded.sourceChat),
+        destinationChat: chatMetadata(forwarded.destinationChat),
+        messages: forwarded.messages.map(({ sourceMessageId, destinationMessageId }) => ({
+          sourceMessageId: sourceMessageId.toString(),
+          destinationMessageId: destinationMessageId.toString(),
+          uri: messageUri(forwarded.destinationChat.chatId, destinationMessageId),
+        })),
+      }
+      return { structuredContent: payload, content: [jsonText(payload)] }
     },
   )
 
@@ -2694,13 +2868,14 @@ export function createInlineMcpServer(params: {
     {
       title: "List Inline Messages",
       description: submissionV2
-        ? "Use this tool to read recent context from one resolved chatId for summarization, answering questions, or preparing a reply. DMs also use chatId. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds."
-        : "Use this tool to read recent context from one resolved chatId or DM userId for summarization, answering questions, or preparing a reply. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds.",
+        ? "Read recent context from one resolved chatId, including DMs. Results are newest first. Optional time, content, and sender filters scan at most 500 source messages. Continue with nextOffsetId as offsetId, including after an empty filtered page. Calendar days use UTC."
+        : "Read recent context from one resolved chatId or DM userId. Results are newest first. Optional time, content, and sender filters scan at most 500 source messages. Continue with nextOffsetId as offsetId, including after an empty filtered page. Calendar days use UTC.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
             limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return; defaults to 20"),
             offsetId: z.string().regex(/^[1-9]\d*$/).optional().describe("Fetch messages older than this message ID"),
+            senderUserId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only messages sent by this user ID; use account.me for your ID or people.search to resolve another sender"),
             since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
             until: z.string().min(1).optional().describe("Upper time bound"),
             content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).optional().describe("Content type filter; defaults to all"),
@@ -2710,6 +2885,7 @@ export function createInlineMcpServer(params: {
             userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
             limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
             offsetId: z.string().min(1).optional().describe("Fetch messages older than this message ID"),
+            senderUserId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only messages sent by this user ID"),
             since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
             until: z.string().min(1).optional().describe("Upper time bound"),
             content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
@@ -2732,6 +2908,7 @@ export function createInlineMcpServer(params: {
         userId,
         limit,
         offsetId,
+        senderUserId,
         since,
         until,
         content,
@@ -2740,6 +2917,7 @@ export function createInlineMcpServer(params: {
         userId?: string
         limit?: number
         offsetId?: string
+        senderUserId?: string
         since?: string
         until?: string
         content?: InlineMessageContentFilter
@@ -2754,13 +2932,13 @@ export function createInlineMcpServer(params: {
         ? { chatId: parseChatId(chatId!) }
         : parseTarget({ chatId, userId }, "messages.list")
       const parsedOffsetId = offsetId ? parseChatId(offsetId) : undefined
-      const parsedSince = parseTimeInput(since, "since")
-      const parsedUntil = parseTimeInput(until, "until")
+      const { parsedSince, parsedUntil } = parseTimeRange(since, until)
       const safeContent = parseContentFilter(content)
       const recent = await params.inline.recentMessages({
         ...target,
         limit: limit ?? 20,
         offsetId: parsedOffsetId,
+        ...(senderUserId ? { senderUserId: parseUserId(senderUserId) } : {}),
         since: parsedSince,
         until: parsedUntil,
         content: safeContent,
@@ -2770,6 +2948,8 @@ export function createInlineMcpServer(params: {
       const payload = {
         chat: chatMetadata(recent.chat),
         nextOffsetId: recent.nextOffsetId?.toString() ?? null,
+        scannedCount: recent.scannedCount,
+        senderUserId: senderUserId ?? null,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
         content: safeContent,
@@ -2879,12 +3059,14 @@ export function createInlineMcpServer(params: {
     {
       title: "Search Inline Messages In Chat",
       description: submissionV2
-        ? "Use this tool to search for required text within one resolved chatId. DMs also use chatId. Use conversations.list first when the target is unclear, or messages.list when filtering only by time/content without search text."
-        : "Use this tool to search within one resolved chatId or DM userId. This is intentionally scoped to a single conversation; use conversations.list first when the target is unclear.",
+        ? "Search text within one resolved chatId, including DMs. Space-separated terms are ANDed. Results are newest first. Time and sender filters apply after the server's bounded search page, so an empty filtered page may have older matches: continue with nextOffsetId as offsetId until it is null. Calendar days use UTC. Use messages.list for filters without search text."
+        : "Search within one resolved chatId or DM userId. Space-separated terms are ANDed. Time and sender filters apply after the server's bounded search page; continue with nextOffsetId as offsetId even when a filtered page is empty. Calendar days use UTC. Use conversations.list when the target is unclear.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
             query: z.string().min(1).describe("Text to search for in this conversation"),
+            offsetId: z.string().regex(/^[1-9]\d*$/).optional().describe("Continue search older than this message ID, using nextOffsetId from the previous result"),
+            senderUserId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only messages sent by this user ID; applied after the search page limit"),
             limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return; defaults to 20"),
             since: z.string().min(1).optional().describe("Lower time bound"),
             until: z.string().min(1).optional().describe("Upper time bound"),
@@ -2894,6 +3076,8 @@ export function createInlineMcpServer(params: {
             chatId: z.string().min(1).optional().describe("Inline chat ID"),
             userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
             query: z.string().min(1).optional().describe("Optional search query"),
+            offsetId: z.string().regex(/^[1-9]\d*$/).optional().describe("Continue search older than this message ID"),
+            senderUserId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only messages sent by this user ID; applied after the search page limit"),
             limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
             since: z.string().min(1).optional().describe("Lower time bound"),
             until: z.string().min(1).optional().describe("Upper time bound"),
@@ -2916,6 +3100,8 @@ export function createInlineMcpServer(params: {
         chatId,
         userId,
         query,
+        offsetId,
+        senderUserId,
         limit,
         since,
         until,
@@ -2924,6 +3110,8 @@ export function createInlineMcpServer(params: {
         chatId?: string
         userId?: string
         query?: string
+        offsetId?: string
+        senderUserId?: string
         limit?: number
         since?: string
         until?: string
@@ -2938,12 +3126,14 @@ export function createInlineMcpServer(params: {
       const target = submissionV2
         ? { chatId: parseChatId(chatId!) }
         : parseTarget({ chatId, userId }, "messages.search")
-      const parsedSince = parseTimeInput(since, "since")
-      const parsedUntil = parseTimeInput(until, "until")
+      if (submissionV2 && !query?.trim()) throw new Error("query must contain non-whitespace text; use messages.list for filter-only reads")
+      const { parsedSince, parsedUntil } = parseTimeRange(since, until)
       const safeContent = parseContentFilter(content)
       const found: InlineSearchMessagesResult = await params.inline.searchMessages({
         ...target,
         query,
+        ...(offsetId ? { offsetId: parseInlineId(offsetId, "offsetId") } : {}),
+        ...(senderUserId ? { senderUserId: parseUserId(senderUserId) } : {}),
         limit: limit ?? 20,
         since: parsedSince,
         until: parsedUntil,
@@ -2954,11 +3144,13 @@ export function createInlineMcpServer(params: {
 
       const payload = {
         query: found.query,
-        nextOffsetId: found.nextOffsetId?.toString() ?? null,
         content: found.content,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
         chat: chatMetadata(found.chat),
+        nextOffsetId: found.nextOffsetId?.toString() ?? null,
+        scannedCount: found.scannedCount,
+        senderUserId: senderUserId ?? null,
         messages,
       }
 
@@ -3005,8 +3197,7 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const parsedSince = parseTimeInput(since, "since")
-      const parsedUntil = parseTimeInput(until, "until")
+      const { parsedSince, parsedUntil } = parseTimeRange(since, until)
       const safeContent = parseContentFilter(content)
       const unread = await params.inline.unreadMessages({
         limit: limit ?? 50,
