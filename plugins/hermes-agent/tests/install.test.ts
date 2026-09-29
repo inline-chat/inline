@@ -409,7 +409,9 @@ compat.plugin_hits = lambda _manifest: []
 assert cli._compatibility_status() == {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
 compat.plugin_hits = lambda _manifest: [object()]
 assert cli._compatibility_status()["reason"] == "deprecated_imports"
-compat.plugin_hits = lambda _manifest: []
+# Upstream main keeps updater stubs but has removed the scanner exports.
+del compat.plugin_hits
+assert cli._compatibility_status() == {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
 loaded.tools_registered = []
 assert cli._compatibility_status()["reason"] == "tool_not_registered"
 loaded.tools_registered = ["inline"]
