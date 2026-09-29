@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { APP, GROUP, WORKFLOW, appleClient, makeToken, publish, reusableRun } from "./ios-early-testers.mjs"
+import { APP, GROUP, WORKFLOW, appleClient, ensureSourceTag, makeToken, publish, reusableRun } from "./ios-early-testers.mjs"
 
 const sha = "a".repeat(40)
 const run = { id: "run", attributes: { sourceCommit: { commitSha: sha }, executionProgress: "COMPLETE", completionStatus: "SUCCEEDED" } }
@@ -79,6 +79,33 @@ describe("internal iOS release boundary", () => {
     expect(reusableRun([{ ...run, attributes: { ...run.attributes, completionStatus: "FAILED" } }], sha)).toBeUndefined()
     expect(reusableRun([run], "b".repeat(40))).toBeUndefined()
     expect(reusableRun([{ ...run, attributes: { ...run.attributes, executionProgress: "RUNNING" } }], sha)).toBeDefined()
+  })
+  it("creates an immutable source tag and refuses to move an existing tag", async () => {
+    const env = { GITHUB_REPOSITORY: "inline-chat/inline", GH_TOKEN: "test-token" }
+    const calls: Array<{ url: string; body?: string }> = []
+    const fetcher = async (url: string, options: { body?: string }) => {
+      calls.push({ url, body: options.body })
+      return calls.length === 1 ? new Response("", { status: 404 })
+        : Response.json({ object: { sha, type: "commit" } }, { status: 201 })
+    }
+    expect(await ensureSourceTag(sha, env, fetcher)).toBe(`refs/tags/ios-early-testers/${sha}`)
+    expect(JSON.parse(calls[1].body!)).toEqual({ ref: `refs/tags/ios-early-testers/${sha}`, sha })
+    await expect(ensureSourceTag(sha, env, async () => Response.json({ object: { sha: "b".repeat(40), type: "commit" } }))).rejects.toThrow("Existing source tag differs")
+  })
+  it("starts Apple from the immutable tag and resumes until the exact archive is ready", async () => {
+    const f = fixture({ [`/v1/ciWorkflows/${WORKFLOW}/buildRuns?sort=-number&limit=100`]: [] })
+    const mutations: unknown[] = []
+    const api = async (path: string, data?: unknown) => {
+      if (path.includes("/gitReferences?")) return { data: [{ id: "tag-ref", attributes: { canonicalName: `refs/tags/ios-early-testers/${sha}` } }] }
+      if (path === "/v1/ciBuildRuns" && data) { mutations.push(data); return { data: run } }
+      return f.api(path, data)
+    }
+    await publish({ api, sha, qualify: () => {}, sourceTag: async () => `refs/tags/ios-early-testers/${sha}`, log: () => {} })
+    expect(mutations).toEqual([{ data: { type: "ciBuildRuns", relationships: {
+      workflow: { data: { type: "ciWorkflows", id: WORKFLOW } },
+      sourceBranchOrTag: { data: { type: "scmGitReferences", id: "tag-ref" } },
+    } } }])
+    expect(f.mutations.length).toBe(1)
   })
   it("signs short lived Apple JWTs without disclosing credentials to pagination hosts", async () => {
     const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })

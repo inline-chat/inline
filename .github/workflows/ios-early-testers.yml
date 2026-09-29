@@ -1,21 +1,52 @@
-name: iOS Early Testers credential preflight
+name: iOS Early Testers
+
 on:
-  push:
-    branches: [codex/ios-early-testers]
+  workflow_run:
+    workflows: [CI, Apple Validation, Server Tests, CodeQL, CLI Build]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '43 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-early-testers
+  cancel-in-progress: false
+
 permissions:
+  actions: read
+  checks: read
   contents: read
+
 jobs:
-  preflight:
+  release:
+    permissions:
+      actions: read
+      checks: read
+      contents: write # Create immutable source tags; never move an existing tag.
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 90
     steps:
+      # Always use trusted default-branch scripts, never workflow_run artifacts.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-      - name: Check Apple credentials and internal group without mutations
+      - name: Select latest green main using the macOS tip gate
+        id: gate
         env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/nightly-tip-gate.py select-green
+      - name: Build and distribute to internal Early Testers
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.sha }}
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
           ASC_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
-        run: node scripts/ci/ios-early-testers.mjs --preflight
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: node scripts/ci/ios-early-testers.mjs
