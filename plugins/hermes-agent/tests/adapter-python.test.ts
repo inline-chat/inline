@@ -420,7 +420,7 @@ version_text = _inline_version_text({
     "skills": {"state": "synced", "count": 2},
 })
 assert "Inline Hermes plugin" in version_text
-assert "Plugin version: 0.0.20" in version_text
+assert "Plugin version: 0.0.21" in version_text
 assert "Hermes version: 0.18.2" in version_text
 assert "Installed or updated at:" in version_text
 assert "commands 10 published" in version_text
@@ -435,7 +435,7 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
     legacy_dir.mkdir(parents=True)
     catalog_dir.mkdir(parents=True)
     (legacy_dir / "plugin.yaml").write_text("version: 0.0.1\n", encoding="utf-8")
-    (catalog_dir / "plugin.yaml").write_text("version: 0.0.20\n", encoding="utf-8")
+    (catalog_dir / "plugin.yaml").write_text("version: 0.0.21\n", encoding="utf-8")
     saved_adapter_file = inline_adapter_module.__file__
     saved_cli_file = inline_cli.__file__
     saved_catalog_home = os.environ.get("HERMES_HOME")
@@ -444,13 +444,13 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
         inline_adapter_module.__file__ = str(catalog_dir / "adapter.py")
         inline_cli.__file__ = str(catalog_dir / "cli.py")
         os.environ["HERMES_HOME"] = str(catalog_home)
-        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.20"
-        assert inline_cli._plugin_version() == "0.0.20"
+        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.21"
+        assert inline_cli._plugin_version() == "0.0.21"
         # Distinct directory timestamps ensure the test catches the legacy path.
         Path.lstat = lambda self: types.SimpleNamespace(st_ctime=100 if self == catalog_dir else 200)
         assert inline_adapter_module._inline_install_timestamp() == "1970-01-01T00:01:40Z"
         catalog_text = _inline_version_text()
-        assert "Plugin version: 0.0.20" in catalog_text
+        assert "Plugin version: 0.0.21" in catalog_text
         assert "1970-01-01T00:01:40Z" in catalog_text
         assert "Plugin version: 0.0.1\n" not in catalog_text
     finally:
@@ -1223,7 +1223,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.20",
+    "pluginVersion": "0.0.21",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1273,7 +1273,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.20"
+assert probe_payload["pluginVersion"] == "0.0.21"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1288,7 +1288,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.20"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.21"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1321,7 +1321,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.20"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.21"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -1702,7 +1702,7 @@ async def assert_bot_command_sync():
         thread_id=None,
     )
     assert handled is True
-    assert "Plugin version: 0.0.20" in sent[-1][1]
+    assert "Plugin version: 0.0.21" in sent[-1][1]
     assert "Last catalog sync:" in sent[-1][1]
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))

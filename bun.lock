@@ -226,7 +226,7 @@
     },
     "plugins/hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.20",
+      "version": "0.0.21",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
