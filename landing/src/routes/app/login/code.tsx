@@ -92,7 +92,7 @@ function RouteComponent() {
         return
       }
 
-      login({ token: result.token, userId: userId(result.userId) })
+      await login({ token: result.token, userId: userId(result.userId) })
       ApiClient.setToken(result.token)
       await navigate({ to: "/app" })
     } catch (error) {

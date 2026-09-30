@@ -45,6 +45,20 @@ jobs:
           for package in auth ids log protocol; do
             bun run --cwd "landing/packages/$package" test
           done
+      - name: Install Chromium for browser acceptance
+        working-directory: landing
+        run: bun x playwright install --with-deps chromium
+      - name: Test built browser login and persisted session
+        run: bun run --cwd landing test:e2e
+      - name: Upload browser report and failure traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-report
+          path: |
+            landing/playwright-report/
+            landing/test-results/
+          retention-days: 7
 
   codex-plugin:
     name: Codex plugin
@@ -96,8 +110,18 @@ jobs:
       - name: Lint MCP
         run: bun run --cwd packages/mcp lint
 
-      - name: Test MCP
-        run: bun run --cwd packages/mcp test
+      - name: Test MCP and report coverage (threshold gate pending)
+        env:
+          MCP_COVERAGE_REPORT_ONLY: '1'
+        run: bun run --cwd packages/mcp test --coverage
+
+      - name: Upload MCP coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-coverage
+          path: packages/mcp/coverage/
+          retention-days: 7
 
       - name: Initialize compiled MCP app with local OAuth introspection
         run: bun --no-env-file scripts/ci/check-mcp-assembled.mjs

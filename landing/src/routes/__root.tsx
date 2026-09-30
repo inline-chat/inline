@@ -6,6 +6,7 @@ import { type ReactNode, useState } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
 import {
   AuthStore,
+  BrowserAuthSessionPersistence,
   Db,
   InlineClientProvider,
   RealtimeClient,
@@ -68,7 +69,11 @@ function RootComponent() {
 
 function AppRoot() {
   const [client] = useState(() => {
-    const auth = new AuthStore()
+    const auth = new AuthStore(
+      typeof window === "undefined" ? undefined : {
+        storage: new BrowserAuthSessionPersistence("auth-store"),
+      },
+    )
     const db = new Db()
     return {
       auth,

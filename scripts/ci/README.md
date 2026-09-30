@@ -9,8 +9,9 @@ as universal required checks.
 
 Apple runs all five lanes on main and manual dispatches. On PRs, only changes
 entirely within known unrelated directories may skip the Apple lanes. Changes to
-Apple, canonical protocol and trust roots, scripts, workflows, root JS manifests, unknown paths, or unavailable
-diffs select all five. The selector writes its decision to the Actions summary.
+Apple, canonical protocol and trust roots, scripts, workflows, root JS manifests,
+unknown paths, or unavailable diffs select all five. The selector writes its
+decision to the Actions summary.
 
 Rust workspace CI owns formatting, all-target compilation, tests, and Clippy. CLI
 Build adds AMD64/ARM64 musl executable and installer checks, plus native ARM64 CLI
@@ -41,7 +42,17 @@ and correct message identity after optimistic-to-confirmed reconciliation. Recor
 the build SHA and test outcome. Do not substitute simulator or unsigned build
 success for this acceptance.
 
-MCP's existing 95% line/function coverage thresholds remain unchanged. They are
-currently unmet; enabling coverage as a merge gate requires further focused tests,
-especially remote-file transport branches. The regular suite now also verifies
-every v2 tool's missing-scope boundary and failed-send reporting.
+Chromium tests run against the built browser app: logged-out routing, email code
+challenge handling, persisted login across a reload with realtime offline, and
+legacy-session migration and missing login details. API responses are controlled,
+all external HTTP is blocked, and WebSockets are intercepted. These qualify browser UI/auth persistence rather
+than server authentication or a chat composer, which the current shell lacks.
+Failure traces/screenshots and the HTML report are retained for seven days.
+
+MCP coverage is collected and published on every CI run. Assertions remain a merge
+gate; coverage percentages are explicitly informational through
+`MCP_COVERAGE_REPORT_ONLY=1`. The default coverage command still enforces the
+existing 95% line/function thresholds. They are currently unmet; enabling that
+threshold gate in CI requires further focused tests, especially remote-file
+transport branches. The suite now also verifies every v2 tool's missing-scope
+boundary and failed-send reporting.
