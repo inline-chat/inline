@@ -1,0 +1,76 @@
+name: ChatGPT plugin
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/chatgpt-plugin.yml'
+      - '.agents/plugins/**'
+      - 'plugins/chatgpt/**'
+      - 'skills/inline/**'
+      - 'packages/mcp/**'
+      - 'packages/oauth-core/**'
+      - 'packages/protocol/**'
+      - 'packages/sdk/**'
+      - 'scripts/check-codex-plugin.mjs'
+      - 'scripts/ci/check-chatgpt-plugin.mjs'
+      - 'package.json'
+      - 'bun.lock'
+      - 'bunfig.toml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chatgpt-plugin.yml'
+      - '.agents/plugins/**'
+      - 'plugins/chatgpt/**'
+      - 'skills/inline/**'
+      - 'packages/mcp/**'
+      - 'packages/oauth-core/**'
+      - 'packages/protocol/**'
+      - 'packages/sdk/**'
+      - 'scripts/check-codex-plugin.mjs'
+      - 'scripts/ci/check-chatgpt-plugin.mjs'
+      - 'package.json'
+      - 'bun.lock'
+      - 'bunfig.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: ChatGPT packaged contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - name: Validate plugin manifest, assets, and canonical skill mirror
+        run: bun --no-env-file scripts/check-codex-plugin.mjs
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Build MCP dependencies and packaged UI
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/sdk build
+          bun run --cwd packages/mcp build
+      - name: Check MCP types, lint, and behavior fixtures
+        run: |
+          bun run --cwd packages/mcp typecheck
+          bun run --cwd packages/mcp lint
+          bun run --cwd packages/mcp test
+      - name: Validate compiled HTTP contract and submission metadata
+        run: bun --no-env-file scripts/ci/check-chatgpt-plugin.mjs "$RUNNER_TEMP/chatgpt-plugin-contract.json"
+      - name: Save synthetic contract evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-plugin-contract
+          path: ${{ runner.temp }}/chatgpt-plugin-contract.json
+          if-no-files-found: error

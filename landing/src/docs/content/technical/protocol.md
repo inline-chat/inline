@@ -45,3 +45,10 @@ For endpoint selection and connection recovery, continue to [Realtime](/docs/tec
 ## Summary
 
 Use the SDK unless you need wire interoperability. A conforming transport validates records before dispatch and passes exact protobuf payloads to the application layer. Continue with [request outcomes](/docs/technical/realtime#outcomes) to distinguish record delivery from application completion.
+
+## Source
+
+- [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [TypeScript handshake](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/secure/handshake.ts)
+- [record](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/secure/record.ts)
+- [carrier](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/secure/carrier.ts)

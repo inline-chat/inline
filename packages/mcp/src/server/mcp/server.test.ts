@@ -310,6 +310,7 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const tools = res.result.tools as Array<any>
     expect(tools.map((tool) => tool.name)).toEqual([
+      "conversations.mentions",
       "account.me",
       "spaces.list",
       "people.search",
@@ -331,21 +332,22 @@ describe("mcp tool server", () => {
       string,
       { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }
     > = {
+      "conversations.mentions": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "conversations.create": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
-      "files.upload": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+      "conversations.create": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+      "files.upload": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
       "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send_media": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
-      "messages.send_batch": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send_media": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
+      "messages.send_batch": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
       "messages.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.context": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.unread": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
     }
 
     for (const tool of tools) {
@@ -394,6 +396,10 @@ describe("mcp tool server", () => {
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
     expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
+    expect(list._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v1.html" })
+    const search = tools.find((tool) => tool.name === "messages.search")
+    expect(search._meta.ui).toEqual(list._meta.ui)
+    expect(search._meta.securitySchemes[0].scopes).toEqual(["messages:read"])
     expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
 
     const spaces = tools.find((tool) => tool.name === "spaces.list")
@@ -453,6 +459,14 @@ describe("mcp tool server", () => {
       expect(tool.inputSchema.required ?? []).toEqual(required)
       assertPlainSchema(tool.inputSchema)
     }
+
+    // These operations support public audiences or arbitrary URL sources, even
+    // when a particular grant contains only private spaces.
+    for (const name of ["conversations.create", "files.upload", "messages.send_media", "messages.send_batch", "messages.send"]) {
+      expect(byName.get(name).annotations.openWorldHint, name).toBe(true)
+    }
+    expect(byName.get("conversations.create").inputSchema.properties.isPublic.description).toContain("public space")
+    expect(byName.get("files.upload").inputSchema.properties.source.description).toContain("public HTTPS URL")
 
     expect(byName.get("conversations.get").inputSchema.properties.userId).toBeUndefined()
     expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("base64")
@@ -1118,6 +1132,8 @@ describe("mcp tool server", () => {
           scannedCount: 3,
           nextOffsetId: 8n,
           messages: [{ id: 9n, fromId: 2n, chatId: resolvedChatId, message: "hello from me", out: true, date: 5n } as any],
+          senderDisplayNames: { "2": "Dena Example", "3": "Unrelated Person" },
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1163,6 +1179,11 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("9")
     expect(payload.messages[0].text).toBe("hello from me")
+    expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
     expect(payload.messages[0].urlPreviews).toEqual([])
@@ -1199,6 +1220,7 @@ describe("mcp tool server", () => {
           content: "documents",
           mode: "search",
           messages: [{ id: 14n, fromId: 2n, chatId: resolvedChatId, message: "invoice is sent", out: false, date: 999n } as any],
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1241,6 +1263,8 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("14")
     expect(payload.messages[0].text).toBe("invoice is sent")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
   })
 
   it("messages.list includes media download metadata when present", async () => {
@@ -1961,5 +1985,62 @@ describe("mcp tool server", () => {
     expect(audit).not.toHaveProperty("text")
     expect(audit).not.toHaveProperty("token")
     expect(JSON.stringify(audit)).not.toContain("hi")
+  })
+})
+
+describe("submission-v2 authorization boundary", () => {
+  const calls = [
+    ["spaces.list", {}],
+    ["people.search", {}],
+    ["conversations.list", {}],
+    ["conversations.get", { chatId: "7" }],
+    ["conversations.create", { title: "Test", spaceId: "10" }],
+    ["files.upload", { sourceType: "base64", source: "aGVsbG8=", fileName: "hello.txt", contentType: "text/plain" }],
+    ["files.get", { chatId: "7", messageIds: ["44"] }],
+    ["messages.list", { chatId: "7" }],
+    ["messages.search", { chatId: "7", query: "invoice" }],
+    ["messages.context", { chatId: "7", anchorMessageId: "44" }],
+    ["messages.unread", {}],
+    ["messages.send", { chatId: "7", text: "hello" }],
+    ["messages.send_media", { chatId: "7", mediaKind: "photo", mediaId: "501" }],
+    ["messages.send_batch", { chatId: "7", items: [{ type: "text", content: "hello" }] }],
+  ] as const
+
+  it.each(calls)("%s rejects missing scopes before accessing Inline", async (name, args) => {
+    const inline = createInlineStub({})
+    const accesses = Object.entries(inline).filter(([method]) => method !== "close")
+      .map(([method]) => vi.spyOn(inline, method as keyof InlineApi))
+    const server = createInlineMcpServer({ inline, grant, contractVersion: "submission-v2" })
+    try {
+      const authInfo = createAuthInfo([])
+      const { transport, sent } = await connectAndInitialize(server, authInfo)
+      await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } } as any, { authInfo })
+      const response = await waitForResponse(sent, 2)
+      expect(response.result.isError).toBe(true)
+      expect(response.result.content[0].text).toMatch(/scope/i)
+      for (const access of accesses) expect(access).not.toHaveBeenCalled()
+    } finally {
+      await server.close()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it("surfaces a transport failure and audits it without reporting a successful send", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const sendMessage = vi.fn().mockRejectedValue(new Error("Inline transport unavailable"))
+    const server = createInlineMcpServer({ inline: createInlineStub({ sendMessage }), grant, contractVersion: "submission-v2" })
+    try {
+      const authInfo = createAuthInfo(["messages:write"])
+      const { transport, sent } = await connectAndInitialize(server, authInfo)
+      await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.send", arguments: { chatId: "7", text: "hello" } } } as any, { authInfo })
+      const response = await waitForResponse(sent, 2)
+      expect(response.result.isError).toBe(true)
+      expect(response.result.content[0].text).toContain("Inline transport unavailable")
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(lastMessagesSendAuditRecord(info)).toMatchObject({ outcome: "failure", chatId: "7", messageId: null })
+    } finally {
+      await server.close()
+      vi.restoreAllMocks()
+    }
   })
 })

@@ -9,10 +9,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: integrations-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   landing:
     name: Landing and browser client
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,10 +42,28 @@ jobs:
           bun run --cwd landing lint
           bun run --cwd landing test
           bun run --cwd landing/packages/client test
+          for package in auth ids log protocol; do
+            bun run --cwd "landing/packages/$package" test
+          done
+      - name: Install Chromium for browser acceptance
+        working-directory: landing
+        run: bun x playwright install --with-deps chromium
+      - name: Test built browser login and persisted session
+        run: bun run --cwd landing test:e2e
+      - name: Upload browser report and failure traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-report
+          path: |
+            landing/playwright-report/
+            landing/test-results/
+          retention-days: 7
 
   codex-plugin:
     name: Codex plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,35 +79,10 @@ jobs:
       - name: Check plugin bundle
         run: bun run check:codex-plugin
 
-  cli:
-    name: CLI
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          components: clippy, rustfmt
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler systemd
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Check CLI, including generated systemd units
-        run: bun run --cwd cli ci
-
   mcp:
     name: MCP
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,8 +110,18 @@ jobs:
       - name: Lint MCP
         run: bun run --cwd packages/mcp lint
 
-      - name: Test MCP
-        run: bun run --cwd packages/mcp test
+      - name: Test MCP and report coverage (threshold gate pending)
+        env:
+          MCP_COVERAGE_REPORT_ONLY: '1'
+        run: bun run --cwd packages/mcp test --coverage
+
+      - name: Upload MCP coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-coverage
+          path: packages/mcp/coverage/
+          retention-days: 7
 
       - name: Initialize compiled MCP app with local OAuth introspection
         run: bun --no-env-file scripts/ci/check-mcp-assembled.mjs
@@ -121,6 +129,7 @@ jobs:
   openclaw:
     name: OpenClaw (${{ matrix.host }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: ${{ matrix.host == 'latest' }}
     strategy:
       fail-fast: false
@@ -165,6 +174,7 @@ jobs:
   openclaw-source:
     name: OpenClaw source, tests, and bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -180,36 +190,27 @@ jobs:
       - run: bun run --cwd plugins/openclaw check
 
   hermes:
-    name: Hermes adapter and generated sidecar
+    name: Hermes source catalog and npm bundle parity
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Bun
+      - name: Setup release Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Setup release Bun runtime
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build Hermes dependencies
-        run: |
-          bun run --cwd packages/protocol build
-          bun run --cwd packages/oauth-core build
-          bun run --cwd packages/bot-api-types build
-          bun run --cwd packages/sdk build
-
-      - name: Check Hermes adapter
-        run: bun run --cwd plugins/hermes-agent check
-
-      - name: Verify generated sidecar is committed
-        run: git diff --exit-code -- plugins/hermes-agent/plugin/inline/sidecar/index.mjs
+          bun-version: '1.4.0'
+      - name: Check isolated release and verify tracked source sidecar
+        run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle
 
   chat-sdk:
     name: Vercel Chat SDK adapter
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -281,6 +282,7 @@ jobs:
   workflow-and-release-contracts:
     name: Workflow and release contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -290,7 +292,7 @@ jobs:
       - name: Validate active workflows
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
-          bun test scripts/ci/workflow-policy.test.ts
+          cd scripts && bun --no-env-file test ci && cd ..
           python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
         run: |
@@ -382,7 +384,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['0.17.0', '0.19.0']
+        host: ['v2026.9.14', 'v2026.9.21', latest, main]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -397,15 +399,22 @@ jobs:
         with:
           name: candidate-npm-packages
           path: ${{ runner.temp }}/inline-packages
-      - name: Install pinned native host
+      - name: Install official Hermes source
+        id: host
         env:
-          HERMES_VERSION: ${{ matrix.host }}
-        run: |
-          python -m venv "$RUNNER_TEMP/hermes-host"
-          "$RUNNER_TEMP/hermes-host/bin/pip" install "hermes-agent==$HERMES_VERSION"
-          "$RUNNER_TEMP/hermes-host/bin/hermes" --version
-      - name: Load packed adapter through Hermes plugin discovery
-        run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$RUNNER_TEMP/hermes-host/bin/hermes" "$RUNNER_TEMP/hermes-host/bin/python"
+          GH_TOKEN: ${{ github.token }}
+          HERMES_REF: ${{ matrix.host }}
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" "$HERMES_REF"
+      - name: Validate packed adapter and message flow through real Hermes
+        env:
+          HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Validate native catalog source installation
+        env:
+          HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
 
   local-integration:
     name: Packed adapters with local Inline server
@@ -448,8 +457,45 @@ jobs:
         with:
           name: candidate-npm-packages
           path: ${{ runner.temp }}/inline-packages
-      - name: Run packed Bot Client, Chat SDK, and realtime SDK against source server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install stable Hermes for local transport end-to-end test
+        id: hermes-host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
+      - name: Build compiled MCP app for real transport checks
+        run: |
+          for package in protocol oauth-core sdk mcp; do
+            bun run --cwd "packages/$package" build
+          done
+      - name: Run packed adapters and Hermes against source server
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test_db
           INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
         run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"
+      - name: Upload scenario receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-integration-receipts
+          path: |
+            ${{ runner.temp }}/inline-packages/*receipt.json
+            ${{ runner.temp }}/inline-packages/manifest.json
+          retention-days: 7
+
+  required:
+    name: Integrations required
+    if: ${{ always() }}
+    needs: [landing, codex-plugin, mcp, openclaw, openclaw-source, hermes, chat-sdk, shared-packages, rust-workspace, workflow-and-release-contracts, candidate-packages, packed-consumers, openclaw-admission, hermes-admission, local-integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected job to pass
+        env:
+          RESULTS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci/validation-gates.mjs integrations

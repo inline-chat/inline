@@ -1,0 +1,34 @@
+name: OpenClaw stable compatibility
+
+on:
+  schedule:
+    - cron: '43 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-stable-compatibility
+  cancel-in-progress: false
+
+jobs:
+  stable:
+    name: npm latest / OpenClaw latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Resolve published plugin and its SDK dependencies
+        run: node scripts/ci/pack-published-openclaw.mjs "$RUNNER_TEMP/published-inline"
+      - name: Test published package through current real OpenClaw CLI
+        run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/published-inline" latest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: published-openclaw-manifest
+          path: ${{ runner.temp }}/published-inline/manifest.json
+          retention-days: 7

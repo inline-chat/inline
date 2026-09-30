@@ -199,7 +199,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/hermes-release-artifact"
           mkdir -p "$artifact_dir"
           stage_log="$(mktemp)"
-          node plugins/hermes-agent/scripts/release-stage.mjs --dry-run --output-dir "$artifact_dir" | tee "$stage_log"
+          node plugins/hermes-agent/scripts/release-stage.mjs --dry-run --verify-source-bundle --output-dir "$artifact_dir" | tee "$stage_log"
           artifact="$(sed -n 's/^Hermes release artifact: //p' "$stage_log" | tail -1)"
           artifact_sha256="$(sed -n 's/^Hermes release artifact sha256: //p' "$stage_log" | tail -1)"
           if [[ -z "$artifact" || -z "$artifact_sha256" || ! -f "$artifact" ]]; then
@@ -208,6 +208,38 @@ jobs:
           fi
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "artifact-sha256=$artifact_sha256" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: inputs.package == 'hermes-agent'
+        with:
+          python-version: '3.13'
+
+      - name: Install latest stable Hermes for release gate
+        if: inputs.package == 'hermes-agent'
+        id: hermes-host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
+
+      - name: Validate exact Hermes release artifact against real host
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT" "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Validate native Hermes source installation
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
+        run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
+
+      - name: Validate exact Hermes release artifact in the Umbrel app image
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
+        run: bash scripts/ci/check-umbrel-hermes.sh --plugin-only
 
       - name: Pack and install exact public artifact
         if: inputs.package != 'hermes-agent'

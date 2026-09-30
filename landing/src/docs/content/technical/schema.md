@@ -43,3 +43,7 @@ Do not convert arbitrary 64-bit IDs through a JavaScript `number`; values outsid
 ## Summary
 
 Preserve the identity domain across API and storage boundaries. Use decimal text for JSON storage of realtime IDs and keep chat/message IDs together. Continue to the [HTTP reference index](/docs/technical/api-schema) or [protobuf reference index](/docs/technical/protocol-schema) for your chosen interface.
+
+## Source
+
+- [`proto/core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)

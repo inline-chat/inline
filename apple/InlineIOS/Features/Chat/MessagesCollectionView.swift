@@ -105,6 +105,28 @@ final class MessagesCollectionView: UICollectionView {
     super.init(frame: .zero, collectionViewLayout: layout)
 
     setupCollectionView()
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MessagesCollectionView, _: UITraitCollection) in
+      let wasAtBottom = view.visualBottomDistance <= 1
+      let layout = view.collectionViewLayout as? AnimatedCompositionalLayout
+      if !wasAtBottom {
+        layout?.preserveVisibleMessageForHistoryUpdate()
+      }
+      // Reconfigure after descendants inherit the new category; unchanged messages
+      // must also rebuild their inline/stacked metadata layout.
+      DispatchQueue.main.async { [weak view] in
+        guard let view else { return }
+        UIView.performWithoutAnimation {
+          view.coordinator.clearSizeCache()
+          view.coordinator.reconfigureVisibleItemsForCurrentWidth()
+          view.collectionViewLayout.invalidateLayout()
+          view.layoutIfNeeded()
+          if wasAtBottom {
+            view.contentOffset.y = -view.contentInset.top
+          }
+          layout?.finishHistoryUpdate()
+        }
+      }
+    }
   }
 
   var highestPositiveMessageId: Int64? {

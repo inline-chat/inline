@@ -56,3 +56,10 @@ For carrier and record details, see [Protocol](/docs/technical/protocol). For re
 ## Summary
 
 A handshake creates a key; login grants permanent authority; binding admits temporary-key traffic. Persist replacements before use. Report local erasure separately from remote revocation, and use [RPC outcome rules](/docs/technical/rpc) when logout completion is uncertain.
+
+## Source
+
+- [login request and result messages](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [V3 client](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/v3-client.ts)
+- [server auth operations](https://github.com/inline-chat/inline/blob/main/server/src/modules/inlineProtocol/auth.ts)
+- [SDK credential options](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts)

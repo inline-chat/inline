@@ -44,6 +44,10 @@ Sign in if needed:
 inline login --browser --no-open
 ```
 
+For an existing remote Hermes, follow [Hermes on Umbrel or a server](/docs/hermes)
+first. Run the CLI in the same container, service user, and profile as the
+existing agent. Discovery does not search remote machines or other containers.
+
 Find installed agents:
 
 ```bash
@@ -104,3 +108,8 @@ openclaw channels status --channel inline --probe --json
 ---
 
 [OpenClaw](/docs/openclaw) · [Hermes Agent](/docs/hermes) · [Local-agent boundaries (Technical)](/docs/technical/local-agents)
+
+## Source
+
+- [CLI agent discovery and setup](https://github.com/inline-chat/inline/tree/main/cli/src/agents)
+- [Coding-agent bridge reference](https://github.com/inline-chat/inline/blob/main/cli/docs/local-agent-bridge.md)

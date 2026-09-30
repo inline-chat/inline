@@ -24,3 +24,8 @@ More details soon. Feel free to ask us questions directly in the meantime.
 
 - Email [hey@inline.chat](mailto:hey@inline.chat). Use the subject **Security**.
 - You can also DM @mo inside Inline to have a friendly chat!
+
+## Source
+
+- [Server secure protocol](https://github.com/inline-chat/inline/tree/main/server/src/modules/inlineProtocol)
+- [Apple credential storage](https://github.com/inline-chat/inline/tree/main/apple/InlineKit/Sources/Auth)

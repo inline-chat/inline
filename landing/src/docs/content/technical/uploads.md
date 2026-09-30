@@ -135,3 +135,9 @@ All methods require the upload owner. Invalid input, ownership mismatch, part co
 ## Summary
 
 Verify two separate outcomes: `uploadFile()` returns completed media; `sendMessage()` returns a message result. Retain the upload identity and source bytes for recovery, and use [RPC retry rules](/docs/technical/rpc#stable-identities) before repeating the send.
+
+## Source
+
+- [`CreateUploadInput`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [`NativeUploadClient`](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/uploads.ts)
+- [Rust native upload helper](https://github.com/inline-chat/inline/blob/main/crates/sdk/src/native_upload.rs)

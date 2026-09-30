@@ -93,15 +93,15 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
         deliver: (event) => stream.deliver(event),
       })
     )
-    const message = (chatId: bigint, mention: boolean) =>
+    const message = (chatId: bigint, mention: boolean, seq = 2) =>
       Update.create({
-        seq: 2,
+        seq,
         date: 100n,
         update: {
           oneofKind: "newMessage",
           newMessage: {
             message: {
-              id: 2n,
+              id: BigInt(seq),
               chatId,
               fromId: 42n,
               peerId: { type: { oneofKind: "chat", chat: { chatId } } },
@@ -119,13 +119,18 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
         body: {
           oneofKind: "message",
           message: {
-            payload: { oneofKind: "update", update: { updates: [message(10n, false), message(20n, true)] } },
+            payload: { oneofKind: "update", update: { updates: [message(10n, false), message(20n, true), message(10n, false, 3)] } },
           },
         },
       })
     )
     await flush()
     expect(lines.map((line) => JSON.parse(line).chatId)).toEqual(["20"])
+    // Bytes reaching Python are not application completion. A healthy chat can
+    // acknowledge while the other chat's sender/preflight is still pending.
+    expect(client.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 1 })
+    stream.acknowledge(JSON.parse(lines[0]!)._inlineDeliveryId)
+    await flush()
     expect(client.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 2 })
     if (action === "abort") {
       abort.abort()
@@ -145,7 +150,15 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
     })
     await flush()
     expect(lines.map((line) => JSON.parse(line).chatId)).toEqual(["20", "10"])
+    expect(client.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 2 })
+    stream.acknowledge(JSON.parse(lines[1]!)._inlineDeliveryId)
+    await flush()
     expect(client.exportState().lastSeqByChatId).toEqual({ "10": 2, "20": 2 })
+    expect(lines.map((line) => JSON.parse(line).chatId)).toEqual(["20", "10", "10"])
+    expect(JSON.parse(lines[2]!).seq).toBe(3)
+    stream.acknowledge(JSON.parse(lines[2]!)._inlineDeliveryId)
+    await flush()
+    expect(client.exportState().lastSeqByChatId).toEqual({ "10": 3, "20": 2 })
   } finally {
     abort.abort()
     stream.close()

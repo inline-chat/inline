@@ -71,24 +71,24 @@
     "conversations.create": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Creates a new thread or chat in an allowed Inline space or home context.",
-        "open_world_justification": "The new conversation remains inside the user's bounded Inline workspace rather than publishing to the public internet or a third party.",
+        "open_world_justification": "Can create a public thread in an allowed public Inline space, where anyone permitted to join the space can read it. Grants constrain space IDs but do not require private spaces; private creation remains the default.",
         "destructive_justification": "Creates a new conversation without deleting, overwriting, or revoking existing data."
       }
     },
     "files.upload": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Uploads provided bytes or content fetched from an HTTPS URL into the user's scoped Inline account.",
-        "open_world_justification": "Only reads an optional source URL and stores the resulting file in Inline without changing public or third-party state.",
+        "open_world_justification": "URL mode fetches a caller-selected public HTTPS URL, including validated redirects, before storing the file in Inline. Arbitrary public sources make this tool open-world even though base64 mode does not fetch them.",
         "destructive_justification": "Creates a new uploaded file and does not delete or overwrite existing content."
       }
     },
@@ -107,24 +107,24 @@
     "messages.send_media": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Sends an uploaded photo, video, or document with an optional caption to an allowed Inline chat or DM.",
-        "open_world_justification": "The message is delivered only within Inline rather than to the public internet or a third-party system.",
+        "open_world_justification": "Can deliver content to a public thread in an allowed public Inline space, where anyone permitted to join the space can read it. Authorization restricts the selected contexts but does not guarantee a private recipient audience.",
         "destructive_justification": "Sends recipient-visible content that cannot be withdrawn through this tool after delivery."
       }
     },
     "messages.send_batch": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Sends an ordered batch of text and media items to an allowed Inline chat or DM.",
-        "open_world_justification": "The batch is delivered only within Inline rather than to the public internet or a third-party system.",
+        "open_world_justification": "Can deliver content to a public thread in an allowed public Inline space, where anyone permitted to join the space can read it. Authorization restricts the selected contexts but does not guarantee a private recipient audience.",
         "destructive_justification": "Can send multiple recipient-visible messages, including partial batches, that cannot be withdrawn through this tool."
       }
     },
@@ -179,13 +179,25 @@
     "messages.send": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Sends text to an allowed Inline chat or DM and records the send in the MCP audit log.",
-        "open_world_justification": "The message is delivered only within Inline rather than to the public internet or a third-party system.",
+        "open_world_justification": "Can deliver content to a public thread in an allowed public Inline space, where anyone permitted to join the space can read it. Authorization restricts the selected contexts but does not guarantee a private recipient audience.",
         "destructive_justification": "Sends a recipient-visible message that cannot be withdrawn through this tool after delivery."
+      }
+    },
+    "conversations.mentions": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Searches metadata of approved conversations for the desktop composer picker without fetching message bodies or changing state.",
+        "open_world_justification": "Returns scoped Inline resource links, without publishing content or contacting arbitrary external destinations.",
+        "destructive_justification": "Does not send, edit, delete, or mark messages read. Selecting a result performs a separately authorized bounded resource read."
       }
     }
   },
@@ -211,7 +223,7 @@
       "user_prompt": "List the latest 20 messages from Inline chat 12345 so I can summarize the discussion.",
       "file_attachment_urls": null,
       "tools_triggered": "messages.list",
-      "expected_output": "Returns up to 20 recent messages from the allowed chat with structured message details.",
+      "expected_output": "Returns up to 20 recent messages from the allowed chat with structured message details and a passive message card in UI-capable hosts. Expanding text uses only returned content; ordinary MCP clients retain the JSON text result.",
       "expected_output_url": null
     },
     {
@@ -228,6 +240,22 @@
       "file_attachment_urls": null,
       "tools_triggered": "messages.send",
       "expected_output": "Sends the text to the specified allowed conversation and returns the resulting message identifier.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Select a conversation through the desktop composer mention picker; validate the resource read as well as search.",
+      "user_prompt": "Use the Inline composer picker to find Project Atlas, select the approved conversation, then summarize its recent text.",
+      "file_attachment_urls": null,
+      "tools_triggered": "conversations.mentions",
+      "expected_output": "The picker distinguishes eligible conversations by title and context. Selection resolves an authorized recent snapshot, with explicit shortening and older-context continuation. This is a host-driven manual case, not a model tool-selection expectation.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Search within one conversation and inspect bounded results without claiming global search.",
+      "user_prompt": "Search Inline chat 12345 for launch blockers and show the matching messages.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.search",
+      "expected_output": "Returns the scoped message page and passive card. Active query/filters are visible. A limited or filtered empty page does not claim complete search coverage, and the card suggests refining the search.",
       "expected_output_url": null
     }
   ],

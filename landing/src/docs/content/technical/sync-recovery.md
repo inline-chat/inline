@@ -67,3 +67,10 @@ An update cursor certifies delivery or accounted skipping of update records. It 
 ## Summary
 
 Verify that the repaired projection and cursor survive restart, that a duplicate page does not repeat effects, and that a failed apply leaves the prior cursor intact. Resume only the covered bucket. Use [history continuity](#history-continuity) to assess older messages independently.
+
+## Source
+
+- [Server replay and `TOO_LONG` behavior](https://github.com/inline-chat/inline/blob/main/server/src/functions/updates.getUpdates.ts)
+- [Server discovery behavior](https://github.com/inline-chat/inline/blob/main/server/src/functions/updates.getUpdatesState.ts)
+- [TypeScript SDK repair contract](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/types.ts)
+- [TypeScript SDK catch-up implementation](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/inline-sdk-client.ts)

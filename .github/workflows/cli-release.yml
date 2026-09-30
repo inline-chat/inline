@@ -288,6 +288,7 @@ jobs:
           INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
         run: |
           set -euo pipefail
+          python3 scripts/ci/test-cli-installer.py
           bun test scripts/release-cli.test.ts
           bun run scripts/release-cli.ts validate-homebrew
           node scripts/check-agent-release-group.mjs --source-only
@@ -301,7 +302,7 @@ jobs:
 
   build-linux:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(matrix.target, 'aarch64-') && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -375,8 +376,6 @@ jobs:
         run: |
           set -euo pipefail
           rustup target add "${{ matrix.target }}"
-          sudo apt-get update
-          sudo apt-get install -y qemu-user libc6-arm64-cross
           cargo install cargo-zigbuild --version 0.21.8 --locked
 
       - name: Build Target
@@ -400,17 +399,11 @@ jobs:
           test -x "${binary}"
           python3 -c 'import os, pathlib; dsn = os.environ["INLINE_CLI_SENTRY_DSN"]; binary = pathlib.Path("target") / os.environ["TARGET"] / "release/inline"; assert dsn and dsn.encode() in binary.read_bytes(), "Release binary is missing its Sentry DSN"'
           file "${binary}"
-          case "${TARGET}" in
-            aarch64-unknown-linux-gnu)
-              qemu-aarch64 -L /usr/aarch64-linux-gnu "${binary}" --version
-              ;;
-            aarch64-unknown-linux-musl)
-              qemu-aarch64 "${binary}" --version
-              ;;
-            x86_64-unknown-linux-*)
-              "${binary}" --version
-              ;;
-          esac
+          "${binary}" --version
+
+      - name: Verify candidate CLI in the official Umbrel Hermes image
+        if: steps.target.outputs.selected == 'true'
+        run: bash scripts/ci/check-umbrel-hermes.sh "target/${{ matrix.target }}/release/inline"
 
       - name: Package Target Artifact
         if: steps.target.outputs.selected == 'true'

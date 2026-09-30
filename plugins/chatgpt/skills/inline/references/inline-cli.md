@@ -49,7 +49,17 @@ inline login
 
 On macOS, this first offers a compatible signed-in Inline app when available. The user must approve a matching verification code in the app; approval creates a separate revocable CLI session and returns its credential over an ephemeral loopback connection. Email or phone remains available as the alternative.
 
-For an agent or another non-interactive session, use the explicit two-step flow:
+For a remote host, prefer browser approval without launching a local browser:
+
+```bash
+inline login --browser --no-open
+```
+
+Give the user the returned approval URL and wait for completion; then run
+`inline me --json --compact` in that same environment. Do not copy session
+files or expose tokens.
+
+For email or phone authentication in a non-interactive session, use the explicit two-step flow:
 
 ```bash
 inline login --email USER_EMAIL --send-code --json --compact
@@ -147,3 +157,44 @@ inline bridge logs --lines 100
 ```
 
 Use `inline <command> --help` for complete command coverage and current flags. User-facing documentation is available at `https://inline.chat/docs/cli`.
+
+## Connect an existing Hermes on a server
+
+When the user asks to bring their existing Hermes into Inline, follow the
+[Hermes guide](https://inline.chat/docs/hermes.md). Discover its existing
+container, service user, persisted `HERMES_HOME`, and profile before installing.
+Run the CLI inside that same environment; host-side `agents discover` cannot
+see across SSH or Docker boundaries. Preserve model settings, memory, skills,
+and other channels. Use a persistent CLI directory and npm prefix on Umbrel.
+An interactive container shell may omit Hermes from PATH; the official app
+needs `/opt/data/.local/bin:/opt/hermes/bin:/opt/hermes/.venv/bin` prepended,
+with the supervisor wrapper before the Python virtual environment. Restore
+owner sign-in and reuse a previously created bot with `--bot-id ID` when
+resuming setup; do not create a duplicate bot or reset the Hermes home.
+
+After authenticating the owner, preview and run:
+
+```bash
+inline agents setup --target hermes --dry-run --non-interactive --json
+inline agents setup --target hermes --non-interactive --json
+```
+
+Use `--profile NAME` only for a named existing profile and `--bot-id ID` to
+reuse a known bot. Do not pass `--replace` without explicit authorization to
+replace the conflicting credential. Current official Umbrel Hermes images
+support gateway management through s6. For a host without gateway management,
+`--no-restart` only configures the integration; restart with its existing
+process manager and verify separately.
+
+Check `npm exec --yes --package=@inline-chat/hermes-agent-adapter -- inline-hermes doctor --json`,
+`hermes inline status --json --probe`,
+and `hermes gateway status` in the same profile. Inspect gateway readiness,
+then ask the user to message the bot and verify a final reply. Installation,
+credential validity, and live response delivery are separate checks.
+Never read or print `.env` files or tokens during setup.
+
+## Source
+
+- [CLI source and command reference](https://github.com/inline-chat/inline/tree/main/cli)
+- [Agent setup implementation](https://github.com/inline-chat/inline/tree/main/cli/src/agents)
+- [Hermes adapter](https://github.com/inline-chat/inline/tree/main/plugins/hermes-agent)

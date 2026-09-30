@@ -1131,29 +1131,30 @@ struct GridRTCEngineTests {
       microphoneEnabled: false,
       screenCaptureSource: source
     ))
-    try await eventuallyRTC {
-      await rtc.currentSnapshot().screenShareState == .published
+    // Published/reconnecting snapshots expire after only 50 ms in this test.
+    // Observe durable provider state so runner scheduling cannot miss them.
+    try await eventuallyRTC(timeout: .seconds(4)) {
+      await driver.isScreenShareActive(roomID: 33)
     }
     let oldRoom = try #require(await driver.currentRoom())
-    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
-    try await eventuallyRTC {
-      await rtc.currentSnapshot().state == .reconnecting(target)
+    await driver.emit(.reconnecting(mode: .full), to: oldRoom)
+
+    // No reconnected event or local publication snapshot arrives. A new room
+    // proves the watchdog started before completion despite that lagging state.
+    try await eventuallyRTC(timeout: .seconds(4)) {
+      await driver.operations().filter { $0 == "connect:33" }.count == 2
     }
+    #expect(await driver.currentRoom() != oldRoom)
     await rtc.setDemand(demand(
       target: target,
       microphoneEnabled: false
     ))
-
-    // No reconnected event or local publication snapshot arrives. The bound
-    // still fences the old room because applied provider state proves a local
-    // track was in flight when reconnecting began.
-    try await eventuallyRTC {
-      await driver.operations().filter { $0 == "connect:33" }.count == 2
-    }
-    try await eventuallyRTC {
+    try await eventuallyRTC(timeout: .seconds(4)) {
       let snapshot = await rtc.currentSnapshot()
+      let isActive = await driver.isScreenShareActive(roomID: 33)
       return snapshot.state == .connected(target)
         && snapshot.screenShareState == .off
+        && !isActive
     }
     await driver.emit(
       .screenSharesChanged(revision: 1, shares: []),

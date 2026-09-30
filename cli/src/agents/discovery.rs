@@ -32,9 +32,16 @@ pub(crate) fn installed_target(target: AgentTarget) -> Option<InstalledTarget> {
 
 fn find_target_executable(descriptor: &'static TargetDescriptor) -> Option<PathBuf> {
     find_executable(descriptor.executable).or_else(|| {
-        (descriptor.target == AgentTarget::Codex)
-            .then(find_chatgpt_codex_executable)
-            .flatten()
+        match descriptor.target {
+            AgentTarget::Codex => find_chatgpt_codex_executable(),
+            // `docker exec` may omit Umbrel's Hermes directories from PATH.
+            // Prefer its supervisor wrapper over the raw virtualenv entry point.
+            AgentTarget::Hermes => find_executable_in(
+                descriptor.executable,
+                ["/opt/hermes/bin", "/opt/hermes/.venv/bin"].map(PathBuf::from),
+            ),
+            _ => None,
+        }
     })
 }
 

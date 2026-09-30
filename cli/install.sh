@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Also supports the documented `curl ... | sh` entry point (Debian dash).
+set -eu
 
 BASE_URL="${INLINE_RELEASE_BASE_URL:-https://public-assets.inline.chat/cli}"
 MANIFEST_URL="${INLINE_RELEASE_MANIFEST_URL:-${BASE_URL%/}/manifest.json}"
@@ -79,7 +80,10 @@ can_write_dir() {
 
   local parent
   parent="$(dirname "$dir")"
-  [ -d "$parent" ] && [ -w "$parent" ]
+  while [ ! -d "$parent" ]; do
+    parent="$(dirname "$parent")"
+  done
+  [ -w "$parent" ]
 }
 
 install_user_writable() {

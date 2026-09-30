@@ -31,3 +31,10 @@ Changing the endpoint or copying a V2 frame to V3 does not migrate credentials o
 ## Summary
 
 Keep bearer-token clients on the V2 endpoint and wait for authenticated connection completion. A V3 migration requires [new key authority and binding](/docs/technical/authentication), not just a URL change.
+
+## Source
+
+- [`core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [server connection handler](https://github.com/inline-chat/inline/blob/main/server/src/realtime/handlers/_connectionInit.ts)
+- [V2 WebSocket host](https://github.com/inline-chat/inline/blob/main/server/src/core/http/realtimeHost.ts)
+- [Rust V2 client](https://github.com/inline-chat/inline/blob/main/crates/sdk/src/realtime.rs)

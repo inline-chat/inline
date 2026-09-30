@@ -25,15 +25,16 @@ Supported:
 - `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, and `inline.token` auth paths, including simple `${ENV_NAME}` config references.
 - Supervised loopback Node sidecar using the Inline realtime SDK.
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
+- Inbound SDK receipts remain pending until Python handles the event. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Agent-button preflight retries are bounded, then show a retry prompt so an unavailable button cannot indefinitely block the shared action cursor. Shutdown leaves unresolved receipts available for catch-up; this is an at-least-once handoff, not a durable exactly-once guarantee for model turns or external effects.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
-- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_update`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
-- Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged immediately and becomes a normal Hermes turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
+- Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged after its target and access checks succeed, then enters Hermes as a normal turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
 - Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
@@ -61,9 +62,8 @@ hermes gateway setup
 
 When installation runs as root but the Hermes home belongs to its service user,
 the installer automatically aligns the plugin directory ownership with that
-service user. Subsequent `/inline_update` commands replace the durable plugin
-directly; users do not need to maintain a second npm prefix or repeat the
-host-side install commands for routine updates.
+service user. Use the same service user and Hermes home when applying manual
+npm updates.
 
 Select Inline in the messaging-platform picker. The default path is: go to
 **Inline → Settings → Bots → Create a new bot**, then paste its token. See the
@@ -73,25 +73,24 @@ the terminal. Both paths securely save the token and configure access.
 
 ## Coding Agent Setup Prompt
 
-Use this with Codex, Claude Code, or another local coding agent when you want a
-one-shot setup:
+For an existing server or Umbrel installation, follow the
+[remote Hermes setup guide](https://inline.chat/docs/hermes.md). Run setup in
+the existing container as its service user with the same persisted Hermes home
+and profile. The guide includes a copyable coding-agent prompt, persistent
+installation paths, browser approval over SSH, and live verification.
 
-```text
-Set up the Inline Hermes Agent adapter on this machine.
+After signing in with `inline login --browser --no-open`, the CLI can configure
+the channel without putting tokens in command arguments:
 
-Constraints:
-- Do not read, print, or edit .env files.
-- Do not print Inline tokens or other secrets.
-- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN when already available; otherwise use Hermes's guided setup without exposing the token.
-
-Tasks:
-1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
-2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
-3. Run inline-hermes install and hermes plugins enable inline-platform.
-4. Run hermes gateway setup and select Inline. Prefer its guided bot-creation path; if no Inline token is available, let this interactive wizard ask the user to sign in or paste one.
-5. Run inline-hermes doctor --json and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
-6. Report the exact commands run and any remaining manual steps, without revealing secrets.
+```bash
+inline agents setup --target hermes --dry-run --non-interactive --json
+inline agents setup --target hermes --non-interactive --json
 ```
+
+Add `--profile NAME` for an existing named profile. Preserve the existing
+models, memory, skills, and channels. Do not read or print `.env` files or
+secrets. A dry-run or credential probe is not proof of a live reply; verify
+the running gateway and a final response in Inline.
 
 For local development:
 
@@ -157,7 +156,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.18-alpha.0   inline-platform
+enabled      user     0.0.21   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -179,13 +178,17 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 ## Compatibility
 
 - Hermes Agent: requires the external user plugin registry and native platform
-  plugin loader available in Hermes Agent `>=0.17.0`. This package was validated
-  against Hermes Agent `0.21.0` from source commit `29112bef` (tag
-  `v2026.8.31`).
+  plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
+  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
+  `v2026.9.24`).
+- CI checks the minimum supported Hermes release, newest stable source, and upstream
+  `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
+  `inline-hermes doctor` requires successful host loading and compatibility validation;
+  unavailable Hermes diagnostics no longer count as healthy.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.19-alpha.0` and is
+- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.18` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
@@ -332,6 +335,22 @@ Access control follows Hermes' native platform model:
 
 Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
 
+`open` controls intake; it does not grant permission to use the bot. After
+Inline's sender and group/thread restrictions pass, the adapter asks Hermes'
+registered authorization callback before executing local commands, creating
+reply threads, downloading media, collecting context, or exposing runtime
+settings. This uses the same pairing and profile-aware authorization as native
+Hermes adapters. An unapproved sender reaches Hermes' pairing or rejection
+flow with a minimal text event and no preceding adapter mutations or media work.
+Pairing approval does not override an explicit Inline allowlist, disabled
+policy, or excluded group. DMs remain exempt from `allowed_chats`.
+Child-thread authorization preserves both the child and parent chat IDs so
+Hermes can select the correct profile. If required group metadata is unavailable,
+the adapter denies the operation instead of guessing a profile. Controls that
+change the parent's reply-thread mode also require access to that parent;
+thread-local model and following settings remain available to an authorized
+child-thread user.
+
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
@@ -359,11 +378,14 @@ platforms:
         skills: ["support-triage", "incident-report"]
 ```
 
-Inline-native button callbacks, such as approvals and clarify choices, require
-the clicking actor to pass an explicit Inline or global Hermes allowlist, or
-`INLINE_ALLOW_ALL_USERS=true` / `GATEWAY_ALLOW_ALL_USERS=true`. This includes
-model-picker callbacks. The stricter callback gate prevents group-visible
-buttons from becoming a bypass when message intake is otherwise `open`.
+Inline-native button callbacks, including approvals, clarify choices,
+model pickers, and thread controls, use the same local restrictions and Hermes
+authorization callback. Pairing-approved users can use them without a second
+Inline allowlist. A denial, error, or unknown result from a registered callback
+blocks the action. Only standalone adapters without a registered callback use
+explicit Inline/global allowlists or allow-all settings as a fallback; `open`
+alone never authorizes controls. Settings requests from unauthorized users show
+an access guide without runtime or model information.
 Adapter-owned controls use `system:` action IDs and stay in these deterministic
 handlers. Agent-authored callbacks use `agent:` IDs and follow the ordinary
 message intake policy because they are conversational input, not approval or
@@ -382,17 +404,18 @@ choice. Hermes accepts that form only when the suffix matches its own username,
 then removes the suffix before command dispatch; commands addressed to another
 bot are ignored.
 
-Run `/inline_update` to install the newest adapter from the plugin's current
-npm release channel. Stable installs continue following `latest`, while
-prerelease installs continue following their existing channel such as `alpha`
-or `beta`. Before changing files, the command checks the selected release's
-minimum Hermes version against the running agent and refuses incompatible or
-unverifiable updates. The update runs in the background without exposing the
-Inline token to npm, then asks you to run `/restart` so Hermes loads the
-installed version. Development symlink installs are left untouched.
-Unexpected precheck or installer failures write bounded, credential-redacted
-diagnostics to the standard Hermes log stream under the `[inline-update]`
-marker, so `hermes logs` and Hermes debug reports can surface the root cause.
+Plugin updates are managed on the Hermes host. For a catalog installation, use
+`hermes plugins update inline-platform` after a new reviewed catalog pin is
+available, then restart the gateway. For an npm installation:
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@latest
+inline-hermes install --force
+```
+
+Restart the gateway after refreshing the plugin. Version 0.0.19 removes the
+in-chat updater so the same plugin can comply with the catalog's exact-commit
+trust policy. Hermes's own `/update` command is unchanged.
 
 Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
 eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt

@@ -39,3 +39,10 @@ The repository sources are [`packages/bot-api-types/src/index.ts`](https://githu
 ## Summary
 
 Look up the method in OpenAPI, use its generated input/result types, and check the HTTP envelope before reading its result. For a working call and retry behavior, use [Bot API responses](/docs/bot-api#responses).
+
+## Source
+
+- [`@inline-chat/bot-client`](https://github.com/inline-chat/inline/tree/main/packages/bot-client)
+- [`@inline-chat/bot-api-types`](https://github.com/inline-chat/inline/tree/main/packages/bot-api-types)
+- [`packages/bot-api-types/src/index.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-api-types/src/index.ts)
+- [`packages/bot-client/src/inline-bot-client.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-client/src/inline-bot-client.ts)

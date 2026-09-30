@@ -36,7 +36,7 @@ describe("public CI contracts", () => {
 
   it("keeps all selected package and app gates visible", () => {
     const apple = workflow("apple-validation.yml")
-    expect(Object.keys(apple.jobs).sort()).toEqual(["contracts", "ios-app", "macos-app", "swift-main", "swift-utilities"])
+    expect(Object.keys(apple.jobs).sort()).toEqual(["changes", "contracts", "ios-app", "macos-app", "required", "swift-main", "swift-utilities"])
     const source = read(".github/workflows/apple-validation.yml")
     for (const pkg of ["InlineKit", "InlineUI", "InlineIOSUI", "InlineMacUI", "InlineRealtimeCore",
       "InlineMacSidebarModel", "InlineThumbnailing", "InlineSyntaxHighlighting", "InlineMacScripting",
@@ -50,8 +50,18 @@ describe("public CI contracts", () => {
     }
   })
 
+  it("retains ARM64 native CLI tests while the workspace owns AMD64 tests", () => {
+    const cli = read(".github/workflows/cli-check.yml")
+    expect(cli).toContain("dtolnay/rust-toolchain@1.96.0")
+    expect(cli).toContain(". -> target")
+    expect(cli).toContain("if: matrix.target == 'aarch64-unknown-linux-musl'")
+    expect(cli).toContain("cargo test --locked --profile ci-test")
+    expect(read(".github/workflows/integrations.yml")).toContain("cargo test --workspace --all-targets --locked --profile ci-test")
+    expect(workflow("integrations.yml").jobs.cli).toBeUndefined()
+  })
+
   it("does not expose publication workflows to pull requests", () => {
-    for (const name of ["npm-publish.yml", "cli-release.yml", "server-deploy.yml", "macos-tip-nightly.yml"]) {
+    for (const name of ["npm-publish.yml", "cli-release.yml", "server-deploy.yml", "macos-tip-nightly.yml", "ios-early-testers.yml"]) {
       expect(workflow(name).on.pull_request, name).toBeUndefined()
     }
   })
@@ -66,4 +76,38 @@ describe("public CI contracts", () => {
     expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
     expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
   })
+
+  it("gates automatic internal iOS releases with trusted main scripts", () => {
+    const ios = workflow("ios-early-testers.yml")
+    expect(ios.on.schedule).toBeDefined()
+    expect(ios.on.workflow_run).toEqual({ workflows: ["CI", "Apple Validation", "Server Tests", "CodeQL", "CLI Build"], types: ["completed"], branches: ["main"] })
+    expect(ios.permissions.contents).toBe("read")
+    const source = read(".github/workflows/ios-early-testers.yml")
+    expect(source).toContain("github.ref == 'refs/heads/main'")
+    expect(source).toContain("ref: main")
+    expect(source).toContain("scripts/ci/nightly-tip-gate.py select-green")
+    expect(source).toContain("EXPECTED_SHA: ${{ steps.gate.outputs.sha }}")
+    expect(source).not.toContain("download-artifact")
+    expect(read("scripts/ci/ios-early-testers.mjs")).not.toContain("betaAppReviewSubmissions")
+  })
+
+  it("tests published Hermes compatibility regularly and gates the exact release artifact", () => {
+    const scheduled = workflow("hermes-compatibility.yml")
+    expect(scheduled.on.schedule).toBeDefined()
+    expect(scheduled.on.workflow_dispatch).toBeDefined()
+    expect(scheduled.permissions.contents).toBe("read")
+    const monitor = read(".github/workflows/hermes-compatibility.yml")
+    expect(monitor).toContain("host: [latest, main]")
+    expect(monitor).toContain("check-hermes-admission.mjs --latest")
+    expect(monitor).not.toContain("continue-on-error: true")
+    const integration = read(".github/workflows/integrations.yml")
+    expect(integration).toContain("host: ['v2026.9.14', 'v2026.9.21', latest, main]")
+    expect(integration).not.toContain('pip" install "hermes-agent==')
+    const publish = read(".github/workflows/npm-publish.yml")
+    expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
+    expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
+      publish.indexOf("HERMES_ARTIFACT_SHA256:"),
+    )
+  })
+
 })

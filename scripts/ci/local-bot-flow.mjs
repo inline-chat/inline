@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { randomUUID } from "node:crypto"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
@@ -14,6 +14,9 @@ const postgresModule = createRequire(path.join(serverRoot, "package.json"))("pos
 const postgres = postgresModule.default ?? postgresModule
 const artifactDir = path.resolve(process.argv[2] ?? "")
 if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
+const hermesBin = process.env.HERMES_BIN
+const hermesPython = process.env.HERMES_PYTHON_BIN
+if (!hermesBin || !hermesPython) throw new Error("HERMES_BIN and HERMES_PYTHON_BIN are required for the real Hermes transport test")
 const provisioningUrl = process.env.TEST_DATABASE_URL
 if (!provisioningUrl) throw new Error("TEST_DATABASE_URL is required")
 assertLocalTestDatabaseUrl(provisioningUrl)
@@ -71,6 +74,9 @@ try {
   const { token } = await generateToken(bot.id)
   await SessionsModel.create({ userId: bot.id, tokenHash: hashToken(token), personalData: {}, clientType: "api" })
 
+  const { token: humanToken } = await generateToken(human.id)
+  await SessionsModel.create({ userId: human.id, tokenHash: hashToken(humanToken), personalData: {}, clientType: "api" })
+
   let ready
   const readyPromise = new Promise((resolve) => { ready = resolve })
   child = Bun.spawn({
@@ -97,8 +103,14 @@ try {
   assert.equal(health.status, 200, `server readiness ${health.status}`)
 
   const manifest = JSON.parse(await readFile(path.join(artifactDir, "manifest.json"), "utf8"))
-  const names = ["@inline-chat/protocol", "@inline-chat/bot-api-types", "@inline-chat/bot-client", "@inline-chat/realtime-sdk", "@inline-chat/chat-sdk"]
-  const dependencies = { chat: "4.40.0" }
+  assert.equal(manifest.sourceSha, execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim(), "candidate source SHA")
+  assert.equal(manifest.packages.length, 7, "candidate inventory")
+  for (const pkg of manifest.packages) {
+    assert.equal(path.basename(pkg.file), pkg.file, "artifact filename must stay within candidate directory")
+    assert.equal(createHash("sha256").update(await readFile(path.join(artifactDir, pkg.file))).digest("hex"), pkg.sha256, `${pkg.name} candidate hash`)
+  }
+  const names = ["@inline-chat/protocol", "@inline-chat/bot-api-types", "@inline-chat/bot-client", "@inline-chat/realtime-sdk", "@inline-chat/chat-sdk", "@inline-chat/hermes-agent-adapter"]
+  const dependencies = { chat: "4.40.0", "@chat-adapter/state-memory": "4.40.0" }
   for (const name of names) {
     const pkg = manifest.packages.find((entry) => entry.name === name)
     assert.ok(pkg, `missing ${name} candidate`)
@@ -110,39 +122,40 @@ try {
     cwd: consumer, stdio: "inherit", timeout: 180_000,
   })
   const flow = path.join(consumer, "flow.mjs")
-  await writeFile(flow, `
-import assert from 'node:assert/strict'
-import { InlineBotClient } from '@inline-chat/bot-client'
-import { InlineSdkClient } from '@inline-chat/realtime-sdk'
-import { InlineAdapter } from '@inline-chat/chat-sdk'
-const bot = new InlineBotClient({ token: process.env.INLINE_E2E_TOKEN, baseUrl: process.env.INLINE_E2E_BASE_URL })
-const me = await bot.getMe()
-assert.equal(me.ok, true)
-assert.equal(me.result.user.is_bot, true)
-const target = { user_id: Number(process.env.INLINE_E2E_HUMAN_ID) }
-const chat = await bot.getChat(target)
-assert.equal(chat.ok, true)
-const sent = await bot.sendMessage({ ...target, text: 'ci-packed-bot-round-trip' })
-assert.equal(sent.ok, true)
-assert.ok(sent.result.message.message_id > 0)
-const history = await bot.getMessages({ chat_id: chat.result.chat.chat_id, message_ids: [sent.result.message.message_id] })
-assert.equal(history.ok, true)
-assert.equal(history.result.messages[0].message_id, sent.result.message.message_id)
-const adapter = new InlineAdapter({ token: process.env.INLINE_E2E_TOKEN, webhookSecret: 'ci-secret', baseUrl: process.env.INLINE_E2E_BASE_URL })
-await adapter.initialize({ getUserName: () => 'ci-bot' })
-assert.equal(adapter.botUserId, String(me.result.user.id))
-const sdk = new InlineSdkClient({ token: process.env.INLINE_E2E_TOKEN, baseUrl: process.env.INLINE_E2E_BASE_URL })
-try {
-  await sdk.connect()
-  const sdkMe = await sdk.getMe()
-  assert.equal(sdkMe.userId, BigInt(me.result.user.id))
-} finally { await sdk.close() }
-console.log('Packed Bot Client, Chat SDK adapter, and realtime SDK reached the local Inline server')
-`)
+  await writeFile(flow, await readFile(path.join(repoRoot, "scripts/ci/local-packed-flow.mjs")))
   execFileSync("bun", ["--no-env-file", flow], {
     cwd: consumer, stdio: "inherit", timeout: 60_000,
-    env: { ...process.env, INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_TOKEN: token, INLINE_E2E_HUMAN_ID: String(human.id) },
+    env: { ...process.env, INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_TOKEN: token, INLINE_E2E_HUMAN_ID: String(human.id),
+      INLINE_E2E_BOT_ID: String(bot.id), INLINE_E2E_HUMAN_TOKEN: humanToken,
+      INLINE_E2E_RECEIPT: path.join(artifactDir, "local-flow-receipt.json"), INLINE_E2E_SOURCE_SHA: manifest.sourceSha },
   })
+  const flowReceipt = JSON.parse(await readFile(path.join(artifactDir, "local-flow-receipt.json"), "utf8"))
+  execFileSync("bun", ["--no-env-file", path.join(repoRoot, "scripts/ci/check-mcp-assembled.mjs")], {
+    cwd: repoRoot, stdio: "inherit", timeout: 60_000,
+    env: { ...process.env, INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_TOKEN: token,
+      INLINE_E2E_BOT_ID: String(bot.id), INLINE_E2E_CHAT_ID: String(flowReceipt.chatId),
+      INLINE_E2E_RECEIPT: path.join(artifactDir, "mcp-flow-receipt.json") },
+  })
+  const hermesHome = path.join(consumer, "hermes-home")
+  await mkdir(hermesHome)
+  const hermesEnv = {
+    ...process.env, HERMES_HOME: hermesHome, HOME: consumer,
+    INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
+    INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
+    INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
+    INLINE_E2E_CONSUMER: consumer,
+  }
+  // Never allow the mock sidecar transport to make this lane pass accidentally.
+  delete hermesEnv.INLINE_SIDECAR_TEST_MOCK
+  const runHermes = (bin, args) => execFileSync(bin, args, {
+    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout: 90_000,
+  })
+  runHermes(path.join(consumer, "node_modules/.bin/inline-hermes"), ["install", "--hermes-home", hermesHome, "--force", "--json"])
+  runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
+  await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
+  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
+  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify({ sourceSha: manifest.sourceSha,
+    scenarios: [{ scenario: "hermes-real-host-inbound-and-persisted-reply", status: "passed" }] }, null, 2) + "\n")
   await closeDb()
   closeDb = undefined
   await stopServer()

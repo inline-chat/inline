@@ -63,3 +63,9 @@ For state reconciliation after a lost update, see [Sync recovery](/docs/technica
 ## Summary
 
 Classify the response before choosing a retry. Retain stable identities for repeat-safe operations and reconcile creations without one. If updates cannot establish the result, use [bucket recovery](/docs/technical/sync-recovery) before declaring the local projection current.
+
+## Source
+
+- [Protocol RPC envelopes and methods](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [TypeScript SDK policy](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/sdk/inline-sdk-client.ts)
+- [TypeScript RPC client](https://github.com/inline-chat/inline/blob/main/packages/sdk/src/realtime/protocol-client.ts)

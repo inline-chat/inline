@@ -1,4 +1,5 @@
-import { join } from "node:path"
+import { existsSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { createDocsPages } from "../src/docs/catalog"
@@ -15,5 +16,31 @@ resolveDocsSidebar(sidebarConfig, pages, true)
 resolveDocsSidebar(technicalSidebarConfig, pages, true)
 const publishedPages = docsPublicationOrder([sidebarConfig, technicalSidebarConfig], pages)
 const draftCount = pages.filter((page) => page.draft).length
+
+// Keep source references useful in both HTML and the Markdown served to agents.
+const repositoryRoot = resolve(landingRoot, "..")
+// Production builds use a pruned workspace without Apple, CLI, or server source.
+// Resolve source paths in a full Git checkout (including CI), not that bundle.
+const sourceCheckout = existsSync(join(repositoryRoot, ".git"))
+for (const page of publishedPages) {
+  const sourceLinks = [
+    ...page.markdown.matchAll(/https:\/\/github\.com\/inline-chat\/inline\/(?:blob|tree)\/main\/([^\s)#]+)/g),
+  ]
+  for (const [, sourcePath] of sourceLinks) {
+    if (sourceCheckout && !existsSync(join(repositoryRoot, sourcePath))) {
+      throw new Error(`${page.slug}: GitHub source path does not exist: ${sourcePath}`)
+    }
+  }
+  if (page.slug !== "changelog") {
+    const footer = page.markdown.split("\n## Source\n").at(-1) ?? ""
+    if (
+      !page.markdown.includes("\n## Source\n") ||
+      !footer.includes("https://github.com/inline-chat/inline/") ||
+      /\n## /.test(footer)
+    ) {
+      throw new Error(`${page.slug}: end the guide with a Source section linking its implementation`)
+    }
+  }
+}
 
 console.log(`Docs valid: ${publishedPages.length} published, ${draftCount} draft`)

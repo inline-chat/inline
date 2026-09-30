@@ -106,6 +106,9 @@ export type InlineRecentMessagesResult = {
   scannedCount: number
   nextOffsetId: bigint | null
   messages: Message[]
+  senderDisplayNames?: Record<string, string>
+  /** Signed profile images for UI-only tool metadata, never message text. */
+  senderAvatarUrls?: Record<string, string>
 }
 
 export type InlineSearchMessagesResult = {
@@ -113,7 +116,11 @@ export type InlineSearchMessagesResult = {
   query: string | null
   content: InlineMessageContentFilter
   mode: "search" | "scan"
+  nextOffsetId?: bigint | null
   messages: Message[]
+  senderDisplayNames?: Record<string, string>
+  /** Signed profile images for UI-only tool metadata, never message text. */
+  senderAvatarUrls?: Record<string, string>
 }
 
 export type InlineUnreadMessagesResult = {
@@ -182,6 +189,8 @@ export type InlineApi = {
     until?: bigint
     unreadOnly?: boolean
     content?: InlineMessageContentFilter
+    /** Recheck the target's current grant context without trusting discovery metadata. */
+    freshChatAuthorization?: boolean
   }): Promise<InlineRecentMessagesResult>
   searchMessages(params: {
     chatId?: bigint
@@ -254,17 +263,14 @@ export function createInlineApi(params: {
   const allowedSpaceIdList = params.allowed.allowedSpaceIds
   const allowedSpaceIds = new Set(params.allowed.allowedSpaceIds.map((id) => id.toString()))
   let connected: Promise<void> | null = null
-  let eligibleChatsCache:
-    | {
-        expiresAtMs: number
-        chats: InlineEligibleChat[]
-        byChatId: Map<string, InlineEligibleChat>
-      }
-    | null = null
-  let eligibleChatsInFlight: Promise<{
+  type EligibleChatContext = {
     chats: InlineEligibleChat[]
     byChatId: Map<string, InlineEligibleChat>
-  }> | null = null
+    senderDisplayNames: Map<string, string>
+    senderAvatarUrls: Map<string, string>
+  }
+  let eligibleChatsCache: (EligibleChatContext & { expiresAtMs: number }) | null = null
+  let eligibleChatsInFlight: Promise<EligibleChatContext> | null = null
 
   const ensureConnected = async () => {
     if (!connected) {
@@ -288,6 +294,18 @@ export function createInlineApi(params: {
     const username = user.username?.trim()
     if (username) return `@${username}`
     return null
+  }
+
+  // Production profile photos use Inline's signed media route. Do not widen
+  // the card CSP or pass arbitrary catalog URLs through to the browser.
+  const profileAvatarUrl = (value: string | undefined): string | undefined => {
+    if (!value || value.length > 4096) return undefined
+    try {
+      const url = new URL(value)
+      if (url.origin !== "https://api.inline.chat" || url.pathname !== "/file" || url.username || url.password || url.hash) return undefined
+      if (!["id", "exp", "sig"].every((key) => url.searchParams.get(key))) return undefined
+      return url.href
+    } catch { return undefined }
   }
 
   const compareBigIntDesc = (left: bigint | null | undefined, right: bigint | null | undefined): number => {
@@ -597,10 +615,7 @@ export function createInlineApi(params: {
     return left.userId === right.userId ? 0 : left.userId < right.userId ? -1 : 1
   }
 
-  const buildEligibleChatContext = async (): Promise<{
-    chats: InlineEligibleChat[]
-    byChatId: Map<string, InlineEligibleChat>
-  }> => {
+  const buildEligibleChatContext = async (): Promise<EligibleChatContext> => {
     const payload = await getChats()
     const dialogByChatId = new Map<string, Dialog>()
     for (const dialog of payload.dialogs) {
@@ -614,8 +629,14 @@ export function createInlineApi(params: {
     }
 
     const userById = new Map<string, User>()
+    const senderDisplayNames = new Map<string, string>()
+    const senderAvatarUrls = new Map<string, string>()
     for (const user of payload.users) {
       userById.set(user.id.toString(), user)
+      const name = userDisplayName(user)
+      if (name) senderDisplayNames.set(user.id.toString(), name)
+      const avatarUrl = profileAvatarUrl(user.profilePhoto?.cdnUrl)
+      if (avatarUrl) senderAvatarUrls.set(user.id.toString(), avatarUrl)
     }
 
     const lastMessageByChatId = new Map<string, Message>()
@@ -644,13 +665,12 @@ export function createInlineApi(params: {
     return {
       chats: eligible,
       byChatId: new Map(eligible.map((chat) => [chat.chatId.toString(), chat])),
+      senderDisplayNames,
+      senderAvatarUrls,
     }
   }
 
-  const getEligibleChatContext = async (): Promise<{
-    chats: InlineEligibleChat[]
-    byChatId: Map<string, InlineEligibleChat>
-  }> => {
+  const getEligibleChatContext = async (): Promise<EligibleChatContext> => {
     const now = Date.now()
     if (eligibleChatsCache && eligibleChatsCache.expiresAtMs > now) {
       return eligibleChatsCache
@@ -665,6 +685,8 @@ export function createInlineApi(params: {
           expiresAtMs: Date.now() + 15_000,
           chats: context.chats,
           byChatId: context.byChatId,
+          senderDisplayNames: context.senderDisplayNames,
+          senderAvatarUrls: context.senderAvatarUrls,
         }
         return context
       })
@@ -675,14 +697,32 @@ export function createInlineApi(params: {
     return await eligibleChatsInFlight
   }
 
-  const getAllowedChat = async (target: { chatId?: bigint; userId?: bigint }): Promise<InlineEligibleChat> => {
+  // Reuse authorized catalog metadata, limited to authors on this returned
+  // page. Profile URLs travel separately in UI metadata, not model content.
+  const sendersForMessages = (messages: Message[]) => {
+    const senderDisplayNames: Record<string, string> = {}
+    const senderAvatarUrls: Record<string, string> = {}
+    for (const message of messages) {
+      const fromId = message.fromId?.toString()
+      if (fromId == null) continue
+      const name = eligibleChatsCache?.senderDisplayNames.get(fromId)
+      const avatarUrl = eligibleChatsCache?.senderAvatarUrls.get(fromId)
+      if (name) senderDisplayNames[fromId] = name
+      if (avatarUrl) senderAvatarUrls[fromId] = avatarUrl
+    }
+    return { senderDisplayNames, senderAvatarUrls }
+  }
+
+  const getAllowedChat = async (target: { chatId?: bigint; userId?: bigint }, freshChatAuthorization = false): Promise<InlineEligibleChat> => {
     const resolved = resolveTarget(target, "target")
-    const context = await getEligibleChatContext()
+    const context = freshChatAuthorization && resolved.kind === "chat"
+      ? eligibleChatsCache
+      : await getEligibleChatContext()
     if (resolved.kind === "chat") {
-      const fromCache = context.byChatId.get(resolved.chatId.toString())
-      if (fromCache) return fromCache
+      const fromCache = context?.byChatId.get(resolved.chatId.toString())
+      if (fromCache && !freshChatAuthorization) return fromCache
     } else {
-      const dmFromCache = context.chats.find((chat) => chat.peerUserId === resolved.userId)
+      const dmFromCache = context?.chats.find((chat) => chat.peerUserId === resolved.userId)
       if (dmFromCache) return dmFromCache
       if (!allowDms) {
         throw new Error("DM access is not allowed for this grant")
@@ -691,6 +731,19 @@ export function createInlineApi(params: {
 
     const chat = resolved.kind === "chat" ? await getChatById(resolved.chatId) : await getChatByUserId(resolved.userId)
     ensureChatAllowed(chat)
+    const previous = context?.byChatId.get(chat.id.toString())
+    const peerUserId = chat.peerId?.type.oneofKind === "user" ? chat.peerId.type.user.userId : null
+    // Cached labels may enrich a freshly authorized target, but must match its
+    // current space, kind, and peer. They never establish read permission.
+    const sameContext = previous?.kind === chatKindOf(chat) && previous?.spaceId === (chat.spaceId ?? null) && previous?.peerUserId === peerUserId
+    if (previous && sameContext) {
+      return {
+        ...previous,
+        title: (previous.peerDisplayName ?? chat.title).trim() || `chat ${chat.id.toString()}`,
+        chatTitle: chat.title,
+        lastMessageId: chat.lastMsgId ?? null,
+      }
+    }
     return {
       chatId: chat.id,
       title: chat.title.trim() || `chat ${chat.id.toString()}`,
@@ -698,7 +751,7 @@ export function createInlineApi(params: {
       kind: chatKindOf(chat),
       spaceId: chat.spaceId ?? null,
       spaceName: null,
-      peerUserId: chat.peerId?.type.oneofKind === "user" ? chat.peerId.type.user.userId : null,
+      peerUserId,
       peerDisplayName: null,
       peerUsername: null,
       archived: false,
@@ -720,6 +773,7 @@ export function createInlineApi(params: {
     until?: bigint
     unreadOnly?: boolean
     content?: InlineMessageContentFilter
+    freshChatAuthorization?: boolean
   }): Promise<InlineRecentMessagesResult> => {
     const safeDirection: "sent" | "all" = params.direction === "sent" ? "sent" : "all"
     const safeContent = normalizeContentFilter(params.content)
@@ -727,7 +781,7 @@ export function createInlineApi(params: {
     const maxMessages = Math.max(1, Math.min(50, Math.trunc(params.limit ?? 20)))
     const maxScanned = 500
 
-    const chat = await getAllowedChat({ chatId: params.chatId, userId: params.userId })
+    const chat = await getAllowedChat({ chatId: params.chatId, userId: params.userId }, params.freshChatAuthorization)
     const messages: Message[] = []
     let scannedCount = 0
     let nextOffsetId: bigint | null | undefined = params.offsetId
@@ -750,10 +804,12 @@ export function createInlineApi(params: {
         break
       }
 
-      scannedCount += historyPage.length
       let readBoundaryReached = false
+      let lastScannedMessage: Message | undefined
 
       for (const message of historyPage) {
+        scannedCount += 1
+        lastScannedMessage = message
         if (safeUnreadOnly && chat.readMaxId != null && message.id <= chat.readMaxId) {
           readBoundaryReached = true
           continue
@@ -766,14 +822,14 @@ export function createInlineApi(params: {
         if (messages.length >= maxMessages) break
       }
 
-      const oldestMessage = historyPage[historyPage.length - 1]
+      const oldestMessage = lastScannedMessage
       if (!oldestMessage) break
       if (nextOffsetId != null && oldestMessage.id >= nextOffsetId) break
       nextOffsetId = oldestMessage.id
 
       if (safeUnreadOnly && (readBoundaryReached || (chat.readMaxId != null && oldestMessage.id <= chat.readMaxId))) break
       if (params.since != null && oldestMessage.date < params.since) break
-      if (historyPage.length < pageLimit) break
+      if (lastScannedMessage === historyPage[historyPage.length - 1] && historyPage.length < pageLimit) break
     }
 
     return {
@@ -782,6 +838,7 @@ export function createInlineApi(params: {
       scannedCount,
       nextOffsetId: nextOffsetId ?? null,
       messages,
+      ...sendersForMessages(messages),
     }
   }
 
@@ -1164,7 +1221,10 @@ export function createInlineApi(params: {
           query: null,
           content: safeContent,
           mode: "scan",
+          nextOffsetId: fallback.nextOffsetId,
           messages: fallback.messages,
+          senderDisplayNames: fallback.senderDisplayNames,
+          senderAvatarUrls: fallback.senderAvatarUrls,
         }
       }
 
@@ -1182,14 +1242,17 @@ export function createInlineApi(params: {
           ...(toSearchFilter(safeContent) != null ? { filter: toSearchFilter(safeContent) } : {}),
         }),
       })
-      const messages = result.searchMessages.messages.filter((message) => matchesTimeFilter(message, since, until)).filter((message) => matchesContentFilter(message, safeContent))
+      const sourceMessages = result.searchMessages.messages
+      const messages = sourceMessages.filter((message) => matchesTimeFilter(message, since, until)).filter((message) => matchesContentFilter(message, safeContent))
 
       return {
         chat,
         query: safeQuery,
         content: safeContent,
         mode: "search",
+        nextOffsetId: sourceMessages.length >= maxMessages ? sourceMessages[sourceMessages.length - 1]!.id : null,
         messages,
+        ...sendersForMessages(messages),
       }
     },
 

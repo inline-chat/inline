@@ -1,0 +1,55 @@
+name: Umbrel CLI and Hermes compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'cli/**'
+      - 'plugins/hermes-agent/**'
+      - 'scripts/ci/check-hermes-*'
+      - 'scripts/ci/check-umbrel-hermes.sh'
+      - '.github/workflows/umbrel-compatibility.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cli/**'
+      - 'plugins/hermes-agent/**'
+      - 'scripts/ci/check-hermes-*'
+      - 'scripts/ci/check-umbrel-hermes.sh'
+      - '.github/workflows/umbrel-compatibility.yml'
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  umbrel:
+    name: App-store image / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - name: Prepare and test exact candidate adapter
+        if: github.event_name != 'schedule'
+        run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle --output-dir "$RUNNER_TEMP/hermes-artifact"
+      - name: Test adapter candidate, or published CLI and adapter on schedule
+        run: |
+          if [[ "${{ github.event_name }}" != schedule ]]; then
+            HERMES_ARTIFACT="$(find "$RUNNER_TEMP/hermes-artifact" -maxdepth 1 -name '*.tgz' -print -quit)"
+            export HERMES_ARTIFACT
+            test -n "$HERMES_ARTIFACT"
+            bash scripts/ci/check-umbrel-hermes.sh --plugin-only
+          else
+            bash scripts/ci/check-umbrel-hermes.sh
+          fi

@@ -195,3 +195,9 @@ Check `ok` before reading `result`. The TypeScript client does not retry automat
 - `@inline-chat/bot-api-types`: generated request, response, entity, and method types.
 
 Use the [generated method reference](https://api.inline.chat/bot-api-reference) for exact contracts and the [update guide](/docs/bot-updates) when adding a durable consumer.
+
+## Source
+
+- [TypeScript bot client](https://github.com/inline-chat/inline/tree/main/packages/bot-client)
+- [Bot API types](https://github.com/inline-chat/inline/tree/main/packages/bot-api-types)
+- [Server HTTP API](https://github.com/inline-chat/inline/tree/main/server/src/controllers/bot)

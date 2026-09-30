@@ -15,3 +15,8 @@ More platforms coming soon, with web coming first, followed by Windows, Android 
 - [Install the CLI](/docs/cli#install)
 - [Changelog](/docs/changelog)
 - [View previous macOS versions](/docs/downloads/previous).
+
+## Source
+
+- [Native Apple clients](https://github.com/inline-chat/inline/tree/main/apple)
+- [CLI and installer](https://github.com/inline-chat/inline/tree/main/cli)

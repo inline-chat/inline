@@ -39,3 +39,10 @@ See the [database configuration](https://github.com/inline-chat/inline/blob/main
 ## Summary
 
 Choose a credential for the specific interface, protect it at rest, and check authorization for each operation. Treat server-visible transport encryption and local database encryption as separate boundaries. Use [authentication recovery](/docs/technical/authentication#revoke-and-recover) for revoked or uncertain sessions.
+
+## Source
+
+- [production trust roots](https://github.com/inline-chat/inline/blob/main/packages/protocol/trust-roots/inline-protocol-production.json)
+- [server application admission](https://github.com/inline-chat/inline/blob/main/server/src/modules/inlineProtocol/application.ts)
+- [database configuration](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Sources/InlineKit/Database.swift)
+- [database key store](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Sources/Auth/DatabaseKeyStore.swift)

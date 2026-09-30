@@ -13,3 +13,7 @@ description: "Inline documentation links."
 - [Install Hermes Agent](/docs/hermes)
 - [Developer Documentation](/docs/developers)
 - [Security](/docs/security)
+
+## Source
+
+- [Documentation pages and routing](https://github.com/inline-chat/inline/tree/main/landing/src/docs)

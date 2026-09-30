@@ -53,3 +53,10 @@ An authenticated V3 download also requires access to the file. For a file owned 
 ## Summary
 
 Pair each method with its input and result member. Preserve 64-bit values and unknown fields at serialization boundaries. For application behavior beyond the declaration, use [RPC semantics](/docs/technical/rpc), [Sync](/docs/technical/sync), and [Uploads](/docs/technical/uploads).
+
+## Source
+
+- [`proto/core.proto`](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [`@inline-chat/protocol/core`](https://github.com/inline-chat/inline/tree/main/packages/protocol)
+- [`@inline-chat/protocol/uploads`](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/uploads.ts)
+- [`/downloads`](https://github.com/inline-chat/inline/blob/main/packages/protocol/src/downloads.ts)

@@ -21,6 +21,8 @@ import type {
   InlineUploadedMediaKind,
 } from "../inline/inline-api"
 import { logMessagesSendAudit } from "./audit-log"
+import { MESSAGE_RESULTS_RESOURCE_URI, registerMessageResultsUi } from "./message-results-ui"
+import { registerConversationMentions } from "./conversation-mentions"
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 const MAX_UPLOAD_REDIRECTS = 3
@@ -1047,6 +1049,11 @@ function messagePayload(message: Message) {
   }
 }
 
+function namedMessagePayload(message: Message, senderDisplayNames?: Record<string, string>) {
+  const name = senderDisplayNames?.[message.fromId?.toString() ?? ""]
+  return { ...messagePayload(message), ...(name ? { senderDisplayName: name } : {}) }
+}
+
 function chatMetadata(chat: InlineEligibleChat): {
   chatId: string
   uri: string
@@ -1420,6 +1427,7 @@ const messageOutputSchema = z.object({
   out: z.boolean(),
   chatId: z.string(),
   fromId: z.string().nullable(),
+  senderDisplayName: z.string().optional(),
   date: z.string().nullable(),
   replyToMsgId: z.string().nullable(),
   editDate: z.string().nullable(),
@@ -1617,6 +1625,7 @@ const messagesContextOutputSchema = z.object({
 })
 
 const messagesSearchOutputSchema = z.object({
+  nextOffsetId: z.string().nullable(),
   query: z.string().nullable(),
   content: contentFilterOutputSchema,
   since: z.string().nullable(),
@@ -1706,6 +1715,8 @@ export function createInlineMcpServer(params: {
     },
   )
 
+  registerConversationMentions(server, { grant: params.grant, inline: params.inline, resourceMetadataUrl })
+
   registerInlineTool(
     server,
     resourceMetadataUrl,
@@ -1753,6 +1764,8 @@ export function createInlineMcpServer(params: {
       }
     },
   )
+
+  registerMessageResultsUi(server)
 
   registerInlineTool(
     server,
@@ -1980,15 +1993,15 @@ export function createInlineMcpServer(params: {
     {
       title: "Create Inline Conversation",
       description:
-        "Use this tool to create a new Inline thread/chat in an allowed space or home threads. Visibility remains within Inline. After creation, use messages.send or messages.send_batch with the returned chat.chatId.",
+        "Use this tool to create a new Inline thread/chat in an allowed space or home threads. The audience follows the selected context: public threads in public spaces can be visible to anyone who joins. After creation, use messages.send or messages.send_batch with the returned chat.chatId.",
       inputSchema: {
         title: z.string().min(1).max(200).describe("Conversation title"),
         spaceId: z.string().min(1).optional().describe("Parent space ID for a thread"),
         description: z.string().max(1000).optional().describe("Optional description"),
         emoji: z.string().max(16).optional().describe("Optional emoji icon"),
         isPublic: submissionV2
-          ? z.boolean().optional().describe("Whether the conversation is visible to members of its Inline context; defaults to false and does not publish it to the public internet")
-          : z.boolean().default(false).describe("Whether the conversation is visible to members of its Inline context; this does not publish it to the public internet"),
+          ? z.boolean().optional().describe("Whether the thread is visible to space members with public-thread access; defaults to false. In a public space, anyone permitted to join can see a public thread")
+          : z.boolean().default(false).describe("Whether the thread is visible to space members with public-thread access. In a public space, anyone permitted to join can see a public thread"),
         participantUserIds: submissionV2
           ? z.array(z.string().min(1)).max(50).optional().describe("Participant user IDs for private chats; defaults to an empty list")
           : z.array(z.string().min(1)).max(50).default([]).describe("Participant user IDs (for private chats)"),
@@ -1999,7 +2012,7 @@ export function createInlineMcpServer(params: {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Creating conversation...", "Conversation created"),
     },
@@ -2073,7 +2086,7 @@ export function createInlineMcpServer(params: {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Uploading file...", "File uploaded"),
     },
@@ -2256,8 +2269,8 @@ export function createInlineMcpServer(params: {
     {
       title: "Send Inline Media Message",
       description: submissionV2
-        ? "Use this tool to send an uploaded photo, video, or document to one chat. DMs also use chatId. Optional caption text is parsed as Inline Markdown. Delivery is recipient-visible and cannot be withdrawn through this tool. Call files.upload first unless you already have an Inline media ID."
-        : "Use this tool to send an uploaded photo, video, or document to one chat or DM. Optional caption text is parsed as Inline Markdown. Delivery is recipient-visible and cannot be withdrawn through this tool. Call files.upload first unless you already have an Inline media ID.",
+        ? "Use this tool to send an uploaded photo, video, or document to one chat. DMs also use chatId. Optional caption text is parsed as Inline Markdown. Delivery is recipient-visible and cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join. Call files.upload first unless you already have an Inline media ID."
+        : "Use this tool to send an uploaded photo, video, or document to one chat or DM. Optional caption text is parsed as Inline Markdown. Delivery is recipient-visible and cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join. Call files.upload first unless you already have an Inline media ID.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
@@ -2282,7 +2295,7 @@ export function createInlineMcpServer(params: {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Sending media message...", "Media message sent"),
     },
@@ -2357,8 +2370,8 @@ export function createInlineMcpServer(params: {
     {
       title: "Send Inline Message Batch",
       description: submissionV2
-        ? "Use this tool to send an ordered sequence of normal, non-reply text and uploaded media items to one chat. DMs also use chatId. Text items are parsed as Inline Markdown. Every item has exactly two fields: type and content. Content is message text for type text, or an uploaded media ID for photo, video, and document. Use messages.send or messages.send_media instead when a reply target or silent delivery is needed. Delivered items are recipient-visible and cannot be withdrawn through this tool."
-        : "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Text and caption content is parsed as Inline Markdown. Delivered items are recipient-visible and cannot be withdrawn through this tool. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
+        ? "Use this tool to send an ordered sequence of normal, non-reply text and uploaded media items to one chat. DMs also use chatId. Text items are parsed as Inline Markdown. Every item has exactly two fields: type and content. Content is message text for type text, or an uploaded media ID for photo, video, and document. Use messages.send or messages.send_media instead when a reply target or silent delivery is needed. Delivered items are recipient-visible and cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join."
+        : "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Text and caption content is parsed as Inline Markdown. Delivered items are recipient-visible and cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
@@ -2403,7 +2416,7 @@ export function createInlineMcpServer(params: {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Sending batch...", "Batch sent"),
     },
@@ -2563,7 +2576,10 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
+      _meta: {
+        ...toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+      },
     },
     async (
       {
@@ -2604,7 +2620,7 @@ export function createInlineMcpServer(params: {
         until: parsedUntil,
         content: safeContent,
       })
-      const messages = recent.messages.map(messagePayload)
+      const messages = recent.messages.map((message) => namedMessagePayload(message, recent.senderDisplayNames))
 
       const payload = {
         chat: chatMetadata(recent.chat),
@@ -2618,6 +2634,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
+        ...(Object.keys(recent.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: recent.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -2744,7 +2761,10 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
+      _meta: {
+        ...toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+      },
     },
     async (
       {
@@ -2785,10 +2805,11 @@ export function createInlineMcpServer(params: {
         content: safeContent,
       })
 
-      const messages = found.messages.map(messagePayload)
+      const messages = found.messages.map((message) => namedMessagePayload(message, found.senderDisplayNames))
 
       const payload = {
         query: found.query,
+        nextOffsetId: found.nextOffsetId?.toString() ?? null,
         content: found.content,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
@@ -2799,6 +2820,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
+        ...(Object.keys(found.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: found.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -2874,8 +2896,8 @@ export function createInlineMcpServer(params: {
     {
       title: "Send Inline Message",
       description: submissionV2
-        ? "Use this tool to send one recipient-visible text message to one resolved chatId; DMs also use chatId. Text is parsed as Inline Markdown. It cannot be withdrawn through this tool. Use conversations.list first when resolving a person, DM, thread, or space chat."
-        : "Use this tool to send one recipient-visible text message after the target is clear; text is parsed as Inline Markdown and the message cannot be withdrawn through this tool. Provide exactly one of chatId or userId; use conversations.list first when resolving a person, DM, thread, or space chat.",
+        ? "Use this tool to send one recipient-visible text message to one resolved chatId; DMs also use chatId. Text is parsed as Inline Markdown. It cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join. Use conversations.list first when resolving a person, DM, thread, or space chat."
+        : "Use this tool to send one recipient-visible text message after the target is clear; text is parsed as Inline Markdown and the message cannot be withdrawn through this tool. A public thread in a public space can be read by anyone permitted to join. Provide exactly one of chatId or userId; use conversations.list first when resolving a person, DM, thread, or space chat.",
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
@@ -2896,7 +2918,7 @@ export function createInlineMcpServer(params: {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Sending Inline message...", "Message sent"),
     },

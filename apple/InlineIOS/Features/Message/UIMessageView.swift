@@ -344,7 +344,7 @@ class UIMessageView: UIView {
       !fullMessage.attachments.isEmpty
   }
 
-  private lazy var textMetadataLayoutMode: MessageTextLayoutMode = {
+  private var textMetadataLayoutMode: MessageTextLayoutMode {
     guard let text = fullMessage.displayText,
           !text.contains("\n"),
           !text.containsEmoji
@@ -352,12 +352,12 @@ class UIMessageView: UIView {
 
     return MessageTextLayoutPolicy.mode(
       textWidth: singleLineTextWidth,
-      metadataWidth: MessageTimeAndStatus.measuredWidth(for: fullMessage),
+      metadataWidth: MessageTimeAndStatus.measuredWidth(for: fullMessage, compatibleWith: traitCollection),
       maximumBubbleContentWidth: maximumBubbleContentWidth,
       horizontalPadding: StackPadding.leading,
       spacing: StackPadding.inlineTextMetadataSpacing
     )
-  }()
+  }
 
   private var usesPlainTextMultilineLayout: Bool {
     guard !requiresMultilineContentLayout,
@@ -491,6 +491,15 @@ class UIMessageView: UIView {
     handleLinkTap()
     if buildHierarchy {
       setupViews()
+      registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: UIMessageView, _: UITraitCollection) in
+        view.refreshMessageTypography()
+        if view.message.isServiceMessage {
+          view.serviceLabel.font = .preferredFont(forTextStyle: .caption1, compatibleWith: view.traitCollection)
+          view.serviceLabel.attributedText = view.serviceAttributedText()
+        }
+        view.invalidateIntrinsicContentSize()
+        view.setNeedsLayout()
+      }
     }
   }
 
@@ -1745,10 +1754,19 @@ class UIMessageView: UIView {
       } else {
         -18
       }
+      // Reserve extra footer height as the timestamp grows, keeping the original
+      // overlap with the emoji/sticker rather than covering more of the artwork.
+      // FloatingMetadataView adds 3 points above and below the timestamp.
+      let defaultMetadataHeight = ceil(UIFont.systemFont(ofSize: 11).lineHeight) + 6
       var constraints = [
-        floatingMetadataView.topAnchor.constraint(
-          equalTo: metadataContainer.topAnchor,
-          constant: floatingTopOffset
+        floatingMetadataView.leadingAnchor.constraint(greaterThanOrEqualTo: metadataContainer.leadingAnchor),
+        floatingMetadataView.bottomAnchor.constraint(
+          equalTo: metadataContainer.bottomAnchor,
+          constant: floatingTopOffset + defaultMetadataHeight
+        ),
+        metadataContainer.heightAnchor.constraint(
+          greaterThanOrEqualTo: floatingMetadataView.heightAnchor,
+          constant: -defaultMetadataHeight
         ),
       ]
       if hasAcknowledgement {
@@ -2567,6 +2585,27 @@ class UIMessageView: UIView {
     updateReactionBackgroundOverridesForCurrentMessage()
   }
 
+  private func refreshMessageTypography() {
+    updateMessageLabelText()
+    guard !message.isServiceMessage, !requiresMultilineContentLayout,
+          !isEmojiOnlyMessage else { return }
+    let wasMultiline = multiLineContainer.superview != nil
+    guard wasMultiline != isMultiline else { return }
+    let oldContainer = wasMultiline ? multiLineContainer : singleLineContainer
+    guard let index = containerStack.arrangedSubviews.firstIndex(of: oldContainer) else { return }
+    messageLabel.removeFromSuperview()
+    metadataView.removeFromSuperview()
+    for child in oldContainer.arrangedSubviews {
+      oldContainer.removeArrangedSubview(child)
+      child.removeFromSuperview()
+    }
+    oldContainer.removeFromSuperview()
+    setupMessageContainer()
+    let newContainer = isMultiline ? multiLineContainer : singleLineContainer
+    containerStack.removeArrangedSubview(newContainer)
+    containerStack.insertArrangedSubview(newContainer, at: index)
+  }
+
   func updateMessageLabelText() {
     messageLabel.attributedText = attributedMessageText()
   }
@@ -2578,7 +2617,7 @@ class UIMessageView: UIView {
     reactionsFlowView.reactionBackgroundSecondaryOverride = overrides?.secondary
   }
 
-  private lazy var singleLineTextWidth: CGFloat = {
+  private var singleLineTextWidth: CGFloat {
     guard let cacheKey = attributedMessageCacheKey,
           let attributedString = attributedMessageText(),
           attributedString.length > 0
@@ -2597,7 +2636,7 @@ class UIMessageView: UIView {
     ).width)
     Self.singleLineWidthCache.setObject(NSNumber(value: Double(width)), forKey: cacheKey)
     return width
-  }()
+  }
 
   private var attributedMessageCacheKey: NSString? {
     guard let text = fullMessage.displayText else { return nil }
@@ -2609,8 +2648,16 @@ class UIMessageView: UIView {
       text,
       theme.preset.rawValue,
       theme.variant.rawValue,
+      traitCollection.preferredContentSizeCategory.rawValue,
       outgoing ? "outgoing" : "incoming",
     ].joined(separator: "-") as NSString
+  }
+
+  var messageBodyFont: UIFont {
+    if isEmojiOnlyMessage {
+      return .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : 32)
+    }
+    return ChatTypography.font(17, compatibleWith: traitCollection)
   }
 
   func attributedMessageText() -> NSAttributedString? {
@@ -2624,8 +2671,7 @@ class UIMessageView: UIView {
     }
 
     let entities = fullMessage.translationEntities ?? fullMessage.message.entities
-    let font = UIFont
-      .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17)
+    let font = messageBodyFont
 
     let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
     let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)

@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -35,6 +36,7 @@
     "@inline/config": "workspace:*"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@stylexjs/unplugin": "0.19.1",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

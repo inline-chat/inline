@@ -79,3 +79,10 @@ Check the named provider and its selected workspace, then send a test request fr
 ## Summary
 
 Verify provider availability, operator admission, workspace binding, and response delivery separately. A running service proves only one part of that path. Resolve ignored input through [Verify and Diagnose](#verify-and-diagnose) before changing authority.
+
+## Source
+
+- [bridge reference](https://github.com/inline-chat/inline/blob/main/cli/docs/local-agent-bridge.md)
+- [Inbound admission](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/runtime.rs)
+- [activation routing](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/routing.rs)
+- [Operator configuration](https://github.com/inline-chat/inline/blob/main/cli/src/bridge/user_config.rs)

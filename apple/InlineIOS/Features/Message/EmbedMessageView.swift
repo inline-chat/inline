@@ -31,12 +31,22 @@ class EmbedMessageView: UIView {
     case compose
   }
 
-  static let height: CGFloat = {
-    let headerFont = UIFont.systemFont(ofSize: 14, weight: .medium)
-    let messageFont = UIFont.systemFont(ofSize: 14)
-    let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + messageFont.lineHeight
-    return ceil(totalHeight)
-  }()
+  // Existing header/compose consumers retain their own sizing policy.
+  static let height: CGFloat = ceil(Constants.verticalPadding * 2
+    + UIFont.systemFont(ofSize: 14, weight: .medium).lineHeight
+    + UIFont.systemFont(ofSize: 14).lineHeight)
+
+  static func height(compatibleWith traits: UITraitCollection) -> CGFloat {
+    let header = ChatTypography.font(14, weight: .medium, compatibleWith: traits)
+    let body = ChatTypography.font(14, compatibleWith: traits)
+    return ceil(Constants.verticalPadding * 2 + header.lineHeight + body.lineHeight)
+  }
+
+  override var intrinsicContentSize: CGSize {
+    guard kind == .replyInMessage else { return super.intrinsicContentSize }
+    return CGSize(width: UIView.noIntrinsicMetric, height: Self.height(compatibleWith: traitCollection))
+  }
+
   static let composeHeight: CGFloat = {
     let headerFont = UIFont.systemFont(ofSize: 17, weight: .medium)
     let messageFont = UIFont.systemFont(ofSize: 17)
@@ -276,6 +286,10 @@ private extension EmbedMessageView {
   }
 
   func setupViews() {
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: EmbedMessageView, _: UITraitCollection) in
+      view.applyAppearance()
+      view.invalidateIntrinsicContentSize()
+    }
     addSubview(glassView)
     addSubview(rectangleView)
     addSubview(thumbnailContainer)
@@ -566,6 +580,10 @@ private extension EmbedMessageView {
       ? .systemFont(ofSize: 14)
       : .systemFont(ofSize: 17)
 
+    if kind == .replyInMessage {
+      headerLabel.font = ChatTypography.font(14, weight: .medium, compatibleWith: traitCollection)
+      messageLabel.font = ChatTypography.font(14, compatibleWith: traitCollection)
+    }
     headerToMessageConstraint?.constant = style == .replyBubble ? 0 : 4
 
     layer.cornerRadius = cornerRadius

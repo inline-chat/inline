@@ -44,3 +44,10 @@ Bot API tokens and Realtime V3 authorization keys are different credentials. Che
 - [Realtime schema](https://github.com/inline-chat/inline/blob/main/proto/core.proto): canonical Protocol Buffers definitions.
 - [Technical documentation](/docs/technical): transport, authentication, sync, and retry contracts for client implementers.
 - [Source and packages](https://github.com/inline-chat/inline): implementations and package manifests.
+
+## Source
+
+- [Realtime schema](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [TypeScript SDK](https://github.com/inline-chat/inline/tree/main/packages/sdk)
+- [Bot API client](https://github.com/inline-chat/inline/tree/main/packages/bot-client)
+- [Rust SDK](https://github.com/inline-chat/inline/tree/main/crates/sdk)

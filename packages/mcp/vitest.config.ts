@@ -12,7 +12,8 @@ export default defineConfig({
       exclude: ["src/**/*.test.ts", "src/server/inline/inline-api.ts", "dist/**"],
       // Keep this reasonably high while the package is under heavy construction.
       // Tighten back toward 100% once the endpoint surface stabilizes.
-      thresholds: {
+      // CI publishes coverage now; the default coverage command retains the strict gate.
+      thresholds: process.env.MCP_COVERAGE_REPORT_ONLY === "1" ? undefined : {
         lines: 95,
         functions: 95,
         statements: 90,

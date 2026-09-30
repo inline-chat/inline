@@ -73,3 +73,8 @@ Use one sync owner. Start with [`inline-client`](https://github.com/inline-chat/
 - Errors are non-exhaustive.
 - Reconcile uncertain mutations before retrying.
 - [`inline-sdk`](https://github.com/inline-chat/inline/tree/main/crates/sdk)
+
+## Source
+
+- [`inline-client`](https://github.com/inline-chat/inline/tree/main/crates/client)
+- [`inline-sdk`](https://github.com/inline-chat/inline/tree/main/crates/sdk)

@@ -154,3 +154,8 @@ macOS Automation permission is required. Errors: `-1743` permission, `-10004` ac
 ---
 
 [Deep-link formats](/docs/technical/deep-links) · [Bot API](/docs/bot-api) · [CLI](/docs/cli)
+
+## Source
+
+- [AppleScript commands and dictionary](https://github.com/inline-chat/inline/tree/main/apple/InlineMacScripting)
+- [macOS scripting implementation](https://github.com/inline-chat/inline/blob/main/apple/InlineMac/Features/Scripting/MacScriptingAdapter.swift)

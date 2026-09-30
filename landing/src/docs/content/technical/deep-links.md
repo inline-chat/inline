@@ -84,3 +84,9 @@ Use `inline://user/{userId}` for this Markdown contract. For supported formattin
 ## Summary
 
 Generate canonical paths with lossless IDs; treat invitation tokens as opaque. Verify navigation in the receiving app with the intended account. To activate a bot through a message, use the [structured mention contract](#markdown-mentions).
+
+## Source
+
+- [Inline Markdown](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/markdown.md)
+- [App parser and link generator](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Sources/InlineKit/DeepLinks/InlineDeepLink.swift)
+- [Deep-link tests](https://github.com/inline-chat/inline/blob/main/apple/InlineKit/Tests/InlineKitTests/InlineDeepLinkTests.swift)
