@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url"
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const { createApp } = await import(path.join(root, "packages/mcp/dist/index.js"))
 const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatgpt-app-submission.json"), "utf8"))
-const uiUri = "ui://inline/message-results-v1.html"
+const { MESSAGE_RESULTS_RESOURCE_URI: uiUri } = await import(path.join(root, "packages/mcp/dist/server/mcp/message-results-ui.js"))
 const scenarios = []
 
 // Use compiled tool handlers and their packaged HTML together. Domain fixtures
@@ -22,10 +22,39 @@ async function checkCompiledMessageCards() {
     peerUserId: null, peerDisplayName: null, peerUsername: null, archived: false, pinned: false, unreadCount: 0,
     readMaxId: null, lastMessageId: 100n, lastMessageDate: 1790726400n,
   }
+  const secondChat = { ...chat, chatId: 8n, title: "Design", chatTitle: "Design" }
+  const avatar = "https://api.inline.chat/file?id=fixture_avatar&exp=1999999999&sig=fixture"
+  // Real encoder shape: non-photo originals are signed R2 URLs, not API
+  // image-proxy URLs. Synthetic credentials generate a URL without networking.
+  const documentUrl = new Bun.S3Client({
+    accessKeyId: "c".repeat(32), secretAccessKey: "synthetic-ci-secret", bucket: "inline-fixture",
+    endpoint: `https://${"a".repeat(32)}.r2.cloudflarestorage.com`, region: "auto",
+  }).file("files/doc_fixture/Review.pdf").presign({ acl: "public-read", expiresIn: 3600 })
   const message = { id: 100n, chatId: 7n, fromId: 2n, message: "Compiled card text ".repeat(30), out: false, date: 1790726400n }
+  const fileMessage = { id: 90n, chatId: 8n, fromId: 2n, message: "The revised design", out: false, date: 1790726300n,
+    media: { media: { oneofKind: "document", document: { document: { id: 500n, fileUniqueId: "doc_fixture", fileName: "Review.pdf", mimeType: "application/pdf", size: 2048, cdnUrl: documentUrl } } } },
+  }
+  const authorMetadata = { senderDisplayNames: { "2": "Dena Example" }, senderAvatarUrls: { "2": avatar } }
+  const resolve = (id) => {
+    if (id === 7n) return chat
+    if (id === 8n) return secondChat
+    throw new Error("Conversation is not in the allowed context")
+  }
   const inline = {
     close: async () => {},
-    recentMessages: async () => ({ chat, direction: "all", scannedCount: 1, nextOffsetId: 100n, messages: [message], senderDisplayNames: { "2": "Dena Example" }, senderAvatarUrls: { "2": "https://api.inline.chat/file?id=fixture_avatar&exp=1999999999&sig=fixture" } }),
+    getEligibleChats: async () => [chat, secondChat],
+    getConversation: async ({ chatId }) => ({ ...resolve(chatId), participants: [], pinnedMessageIds: [] }),
+    presentationChat: async ({ chatId }) => ({ chat: resolve(chatId), lastMessage: chatId === 7n ? message : fileMessage }),
+    getMessages: async ({ chatId, messageIds }) => ({ chat: resolve(chatId), ...authorMetadata,
+      messages: [message, fileMessage].filter((row) => row.chatId === chatId && messageIds.includes(row.id)),
+    }),
+    recentMessages: async ({ chatId, offsetId }) => ({ chat: resolve(chatId), direction: "all", scannedCount: 1,
+      nextOffsetId: offsetId ? null : 100n, messages: offsetId ? [] : [chatId === 7n ? message : fileMessage], ...authorMetadata,
+    }),
+    historyMessages: async ({ chatId, offsetId }) => ({ chat: resolve(chatId), kind: offsetId ? "older" : "latest",
+      nextOffsetId: offsetId ? null : 100n, nextAfterId: null, anchorMessageId: null, firstUnreadMessageId: null, note: null,
+      messages: offsetId ? [] : [chatId === 7n ? message : fileMessage], ...authorMetadata,
+    }),
     searchMessages: async ({ query }) => ({ chat, query, content: "all", mode: "search", nextOffsetId: 99n, messages: [], senderDisplayNames: {} }),
   }
   const server = createInlineMcpServer({
@@ -61,38 +90,74 @@ async function checkCompiledMessageCards() {
     const script = html.match(/<script>([\s\S]+)<\/script>/)?.[1]
     assert.ok(script, "compiled card must include its script")
     window = new Window({ url: "https://mcp.inline.chat", settings: { enableJavaScriptEvaluation: true } })
-    const parent = { postMessage: () => {} }
+    const sent = []
+    const parent = { postMessage: (value) => sent.push(value) }
     Object.defineProperty(window, "parent", { value: parent })
     Object.defineProperty(window, "fetch", { value: () => { throw new Error("card must not fetch") } })
     window.document.write(html.replace(/<script>[\s\S]+<\/script>/, ""))
     window.eval(script)
     const receive = (data) => window.dispatchEvent(new window.MessageEvent("message", { source: parent, data: { jsonrpc: "2.0", ...data } }))
-    receive({ id: 1, result: { protocolVersion: "2026-01-26", hostContext: { theme: "light" } } })
+    receive({ id: 1, result: { protocolVersion: "2026-01-26", hostCapabilities: { openLinks: {}, serverTools: {} }, hostContext: { theme: "light", displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } } })
     const listed = await request("tools/call", { name: "messages.list", arguments: { chatId: "7", limit: 20 } })
-    assert.equal(listed.structuredContent.senderUserId, undefined, "published list shape has no sender filter")
-    assert.deepEqual(JSON.parse(listed.content[0].text), listed.structuredContent, "text fallback retains the real result")
-    receive({ method: "ui/notifications/tool-result", params: listed })
-    assert.equal(window.document.querySelectorAll("li").length, 1, "real list result must render")
-    assert.equal(window.document.querySelector(".sender")?.textContent, "Dena Example")
-    assert.ok(window.document.querySelector(".incoming .bubble"), "incoming messages use a native bubble")
-    const photo = window.document.querySelector(".avatar img")
-    assert.equal(photo?.getAttribute("src"), listed._meta.inline.senderAvatarUrls["2"])
-    assert.equal(photo?.referrerPolicy, "no-referrer")
-    assert.doesNotMatch(JSON.stringify([listed.structuredContent, listed.content]), /sig=fixture/, "signed avatars stay out of model-visible content")
-    photo.dispatchEvent(new window.Event("error"))
-    assert.equal(photo.hidden, true, "unavailable photo reveals the native initials fallback")
-    assert.equal(window.document.querySelector(".avatar-initial")?.textContent, "D")
-    const disclosure = window.document.querySelector("button")
-    assert.ok(disclosure, "long returned text must have local disclosure")
-    disclosure.click()
-    assert.equal(window.document.querySelector(".message-text")?.textContent, message.message)
+    assert.deepEqual(JSON.parse(listed.content[0].text), listed.structuredContent, "data fallback retains the real result")
     const searched = await request("tools/call", { name: "messages.search", arguments: { chatId: "7", query: "blocked" } })
-    assert.equal(searched.structuredContent.senderUserId, undefined, "published search shape has no sender filter")
-    assert.equal(searched.structuredContent.nextOffsetId, "99")
-    receive({ method: "ui/notifications/tool-result", params: searched })
-    assert.equal(window.document.querySelectorAll("li").length, 0, "search replaces previous rows")
-    assert.match(window.document.querySelector("footer")?.textContent ?? "", /More matches may exist\. Try a narrower search\./)
-    assert.doesNotMatch(window.document.body.textContent, /No messages matched/)
+    assert.equal(searched.structuredContent.nextOffsetId, "99", "data search retains its history continuation")
+
+    const sources = await request("tools/call", { name: "messages.view", arguments: {
+      presentation: "sources", items: [{ chatId: "8", messageId: "90" }, { chatId: "7", messageId: "100" }, { chatId: "7", messageId: "101" }],
+    } })
+    assert.deepEqual(sources.structuredContent.items.map((item) => [item.chatId, item.messageId]), [["8", "90"], ["7", "100"], ["7", "101"]], "source order remains cross-chat, including unavailable selections")
+    assert.equal(sources.structuredContent.items[2].status, "unavailable")
+    assert.doesNotMatch(JSON.stringify([sources.structuredContent, sources.content]), /sig=fixture|X-Amz-Signature/i, "presentation credentials remain outside model-visible output")
+    receive({ method: "ui/notifications/tool-result", params: sources })
+    assert.match(window.document.body.textContent, /Design/)
+    assert.match(window.document.body.textContent, /Contract Chat/)
+    assert.match(window.document.body.textContent, /Review\.pdf/)
+    assert.match(window.document.body.textContent, /Dena Example/)
+    const fileOpen = [...window.document.querySelectorAll("button")].find((button) => button.textContent === "Open file")
+    assert.ok(fileOpen, "real-shaped signed R2 attachment offers a file action")
+    fileOpen.click()
+    const openRequest = sent.findLast((event) => event.method === "ui/open-link")
+    assert.equal(openRequest?.params.url, documentUrl, "original attachment opens through host without embedding R2")
+    receive({ id: openRequest.id, result: {} })
+
+    const catchUp = await request("tools/call", { name: "messages.view", arguments: {
+      presentation: "catch_up", chatIds: ["7", "8"], activeChatId: "7", startAt: "latest",
+    } })
+    assert.equal(catchUp.structuredContent.activeChatId, "7")
+    assert.equal(catchUp.structuredContent.page.nextOffsetId, "100")
+    receive({ method: "ui/notifications/tool-input", params: { arguments: { presentation: "catch_up" } } })
+    receive({ method: "ui/notifications/tool-result", params: catchUp })
+    assert.match(window.document.body.textContent, /Compiled card text/)
+    assert.equal(sent.some((event) => event.method === "tools/call"), false, "rendering alone must not make additional tool calls")
+
+    const expand = window.document.querySelector(".expand-reader")
+    assert.ok(expand, "capable host offers explicit expansion")
+    expand.click()
+    const displayRequest = sent.findLast((event) => event.method === "ui/request-display-mode")
+    assert.equal(displayRequest?.params.mode, "fullscreen", "expansion negotiates with the host")
+    receive({ id: displayRequest.id, result: { mode: "fullscreen" } })
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.ok(window.document.querySelector(".bubble"), "expanded real history uses native message bubbles")
+    const photo = window.document.querySelector(".avatar img")
+    assert.equal(photo?.getAttribute("src"), avatar, "compiled presentation metadata hydrates avatar")
+    assert.equal(photo?.referrerPolicy, "no-referrer")
+    const older = window.document.querySelector(".load-older")
+    assert.ok(older, "history cursor offers an older-page action")
+    older.click()
+    const pageRequest = sent.findLast((event) => event.method === "tools/call")
+    assert.equal(pageRequest?.params.name, "messages.view")
+    assert.equal(pageRequest?.params.arguments.offsetId, "100", "navigation uses the actual server cursor")
+    const olderResult = await request("tools/call", pageRequest.params)
+    // MCP Apps hosts may echo app-initiated calls through the same outer
+    // notifications used for model calls. This must still append one page.
+    receive({ method: "ui/notifications/tool-input", params: { arguments: pageRequest.params.arguments } })
+    receive({ method: "ui/notifications/tool-result", params: olderResult })
+    receive({ id: pageRequest.id, result: olderResult })
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.match(window.document.body.textContent, /Compiled card text/, "empty older page preserves already read history")
   } finally {
     await window?.happyDOM.close()
     await server.close()
@@ -184,12 +249,17 @@ try {
   assert.ok(mentions._meta?.securitySchemes?.some((scheme) => scheme.type === "oauth2" && scheme.scopes.includes("messages:read")))
   scenarios.push("mention-search-advertised-with-read-scope")
 
-  for (const name of ["messages.list", "messages.search"]) {
+  for (const name of ["messages.list", "messages.search", "messages.context", "messages.unread"]) {
     const tool = tools.find((tool) => tool.name === name)
-    assert.equal(tool?._meta?.ui?.resourceUri, uiUri, `${name} UI resource`)
+    assert.equal(tool?._meta?.ui?.resourceUri, undefined, `${name} must not open a card during analysis`)
     assert.equal(tool.annotations.readOnlyHint, true)
     assert.ok(tool.outputSchema, `${name} retains structured output schema`)
   }
+  const view = tools.find((tool) => tool.name === "messages.view")
+  assert.equal(view?._meta?.ui?.resourceUri, uiUri, "only explicit presentation opens the message view")
+  assert.equal(view?.annotations.readOnlyHint, true)
+  assert.ok(view?.outputSchema, "presentation has a structured contract")
+  scenarios.push("analysis-reads-are-independent-of-presentation")
   for (const tool of tools) {
     const declared = submission.tools[tool.name]
     assert.ok(declared, `submission annotations missing for ${tool.name}`)
@@ -213,14 +283,15 @@ try {
   assert.match(contents[0].text, /ui\/initialize/)
   assert.match(contents[0].text, /ui\/notifications\/tool-result/)
   const csp = contents[0]._meta?.ui?.csp
-  assert.deepEqual(csp?.connectDomains, [], "passive cards must not request network connections")
-  assert.deepEqual(csp?.resourceDomains, ["https://api.inline.chat"], "only Inline profile images may load remotely")
-  scenarios.push("compiled-ui-resource-served-with-passive-csp")
+  assert.deepEqual(csp?.connectDomains, [], "view requests use the authenticated host bridge")
+  assert.deepEqual(csp?.resourceDomains, ["https://api.inline.chat"], "only Inline media may load remotely")
+  scenarios.push("compiled-ui-resource-served-with-bridge-only-csp")
 
   // Scope-denial paths must fail before any request to the Inline server.
   scope = "spaces:read"
   for (const [method, params] of [
     ["tools/call", { name: "conversations.mentions", arguments: { query: "" } }],
+    ["tools/call", { name: "messages.view", arguments: { presentation: "sources", items: [{ chatId: "123", messageId: "456" }] } }],
     ["resources/read", { uri: "inline://chat/123" }],
   ]) {
     const result = await request(method, params)
@@ -230,14 +301,14 @@ try {
       `${method} must deny missing messages:read`)
     assert.ok(!result.message?.result?.contents, "denial must not expose snapshot content")
   }
-  scenarios.push("mention-search-and-direct-resource-require-read-scope")
+  scenarios.push("mentions-presentation-and-direct-resource-require-read-scope")
   active = false
   assert.equal((await request("resources/read", { uri: uiUri })).status, 401)
   scenarios.push("revoked-grant-denies-existing-session")
   assert.equal(upstreamRequests, 0, "metadata and scope-denial checks must not contact Inline")
 
   await checkCompiledMessageCards()
-  scenarios.push("compiled-list-and-search-results-render-in-packaged-card")
+  scenarios.push("compiled-multi-chat-sources-and-catch-up-render-in-packaged-view")
 
   const receipt = {
     sourceSha: process.env.GITHUB_SHA ?? null,

@@ -14,6 +14,7 @@ import type {
   InlineConversationDetails,
   InlineEligibleChat,
   InlineMessageContentFilter,
+  InlineMessagesResult,
   InlinePersonCandidate,
   InlinePersonSummary,
   InlineSpaceSummary,
@@ -32,7 +33,7 @@ const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "i
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
 const INLINE_MCP_INSTRUCTIONS =
-  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.list/search/context/unread; send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
+  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get. For summaries, analysis, comparisons, or drafting, silently read and page messages.list/search/context/unread, deduplicate IDs, and state actual returned coverage; these data tools do not display cards. Use messages.view only when original evidence or conversation browsing adds value or is requested: sources selects ordered canonical originals across chats; catch_up reads real paged history without marking read. A view's selected or loaded count does not certify how many messages were analyzed. Send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
 
 const INLINE_MARKDOWN_HELP =
   'Parsed as supported Inline Markdown: **bold**, *italic*, <u>underline</u>, ~~strikethrough~~, ==highlight==, `code`, fenced code (optional language), four-space indented code, [label](https://example.com), [Name](inline://user?id=42), [[Title]](inline://chat?id=123), # headings, - bullets, 1. numbered lists, - [ ] / - [x] checklists, > quotes, pipe tables with a header separator row, --- separators, and ![alt](https://example.com/image.png). Math uses $TeX$ inline or $$TeX$$ on separate lines for display. Disclosures use <details open> / <summary>Title</summary> / body / </details> on separate lines; omit open to start collapsed and use <summary kind="progress"> only while working. Use <footer>metadata</footer> on its own line. Preserve indentation/newlines; use backslash escapes or code for literal syntax. Do not fence the whole message or tables unless literal code is intended. Footnotes and arbitrary HTML are unsupported. Rich formatting and math rendering depend on the recipient client.'
@@ -1054,6 +1055,162 @@ function namedMessagePayload(message: Message, senderDisplayNames?: Record<strin
   return { ...messagePayload(message), ...(name ? { senderDisplayName: name } : {}) }
 }
 
+// Presentation requests accept identities only. Canonical text is freshly read,
+// bounded for display, and kept apart from expiring signed browser URLs.
+function presentationString(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(JSON.stringify(value)) <= maxBytes) return value
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (Buffer.byteLength(JSON.stringify(value.slice(0, middle))) <= maxBytes) low = middle
+    else high = middle - 1
+  }
+  if (low && /[\uD800-\uDBFF]/.test(value[low - 1]) && /[\uDC00-\uDFFF]/.test(value[low] ?? "")) low -= 1
+  return value.slice(0, low)
+}
+
+function signedPresentationUrl(value: string | null | undefined): string | null {
+  if (!value || value.length > 4096) return null
+  try {
+    const url = new URL(value)
+    if (url.origin !== "https://api.inline.chat" || url.pathname !== "/file" || url.username || url.password || url.hash) return null
+    if (!["id", "exp", "sig"].every((key) => url.searchParams.get(key))) return null
+    const expires = url.searchParams.get("exp")!
+    if (!/^\d+$/.test(expires) || !Number.isFinite(Number(expires)) || Number(expires) <= Date.now() / 1000) return null
+    return url.href
+  } catch { return null }
+}
+
+function signedOriginalPresentationUrl(value: string | null | undefined, fileUniqueId: string | undefined): string | null {
+  const proxy = signedPresentationUrl(value)
+  if (proxy) return proxy
+  if (!value || value.length > 4096 || !fileUniqueId || !/^[A-Za-z0-9_-]{6,128}$/.test(fileUniqueId)) return null
+  try {
+    const url = new URL(value)
+    // Documents, video and voice deliberately retain direct R2 capabilities in
+    // the realtime encoders. These originals are only opened by the host, never
+    // embedded or added to the widget CSP. R2 verifies the actual signature;
+    // here we validate the canonical provider, file identity and expiry shape.
+    if (url.protocol !== "https:" || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(url.hostname) || url.port || url.username || url.password || url.hash) return null
+    const path = url.pathname.split("/").map((part) => decodeURIComponent(part))
+    if (path.length !== 5 || !path[1] || path[2] !== "files" || path[3] !== fileUniqueId || !path[4] || path.some((part) => part.includes("/") || part === "." || part === "..")) return null
+    const keys = ["X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-SignedHeaders", "X-Amz-Signature"]
+    if (keys.some((key) => url.searchParams.getAll(key).length !== 1)) return null
+    if (url.searchParams.get("X-Amz-Algorithm") !== "AWS4-HMAC-SHA256" || url.searchParams.get("X-Amz-SignedHeaders") !== "host" || !/^[a-f0-9]{64}$/.test(url.searchParams.get("X-Amz-Signature")!)) return null
+    const date = url.searchParams.get("X-Amz-Date")!
+    if (!/^\d{8}T\d{6}Z$/.test(date)) return null
+    const credential = url.searchParams.get("X-Amz-Credential")!
+    if (!new RegExp(`^[A-Za-z0-9]+/${date.slice(0, 8)}/auto/s3/aws4_request$`).test(credential)) return null
+    const signedAt = Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${date.slice(9, 11)}:${date.slice(11, 13)}:${date.slice(13, 15)}Z`)
+    if (!Number.isFinite(signedAt) || signedAt > Date.now() + 15 * 60 * 1000 || new Date(signedAt).toISOString().replace(/[-:]/g, "").replace(".000", "") !== date) return null
+    const expires = url.searchParams.get("X-Amz-Expires")!
+    if (!/^\d+$/.test(expires) || Number(expires) < 1 || Number(expires) > 604800 || signedAt + Number(expires) * 1000 <= Date.now()) return null
+    return url.href
+  } catch { return null }
+}
+
+function presentationMedia(message: Message): { thumbnailUrl: string | null; originalUrl: string | null; originalFileUniqueId?: string } {
+  const media = message.media?.media
+  const value = media?.oneofKind === "photo" ? media.photo.photo
+    : media?.oneofKind === "video" ? media.video.video
+    : media?.oneofKind === "document" ? media.document.document
+    : media?.oneofKind === "voice" ? media.voice.voice : undefined
+  const photo = media?.oneofKind === "photo" ? media.photo.photo
+    : media?.oneofKind === "video" ? media.video.video?.photo
+    : media?.oneofKind === "document" ? media.document.document?.photo : undefined
+  const sizes = (photo?.sizes ?? []).filter((size) => signedPresentationUrl(size.cdnUrl))
+  const thumbnails = sizes.filter((size) => size.w > 0 && size.h > 0 && Math.max(size.w, size.h) <= 800)
+    .sort((left, right) => Math.abs(Math.max(left.w, left.h) - 320) - Math.abs(Math.max(right.w, right.h) - 320))
+  const original = media?.oneofKind === "photo" ? bestPhotoSize({ sizes }).cdnUrl
+    : value && "cdnUrl" in value ? value.cdnUrl : null
+  const candidateFileUniqueId = media?.oneofKind !== "photo" ? value?.fileUniqueId : undefined
+  const fileUniqueId = candidateFileUniqueId && /^[A-Za-z0-9_-]{6,128}$/.test(candidateFileUniqueId) ? candidateFileUniqueId : undefined
+  return {
+    thumbnailUrl: signedPresentationUrl(thumbnails[0]?.cdnUrl),
+    originalUrl: media?.oneofKind === "photo" ? signedPresentationUrl(original) : signedOriginalPresentationUrl(original, fileUniqueId),
+    ...(fileUniqueId ? { originalFileUniqueId: fileUniqueId } : {}),
+  }
+}
+
+function presentationMessage(message: Message, result: InlineMessagesResult) {
+  const base = namedMessagePayload(message, result.senderDisplayNames)
+  const original = base.text
+  const text = presentationString(original, 6000)
+  const entities = (message.entities?.entities ?? []).slice(0, 64).flatMap((entity) => {
+    const offset = Number(entity.offset)
+    const length = Number(entity.length)
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length <= 0 || offset + length > text.length) return []
+    const details = entity.entity
+    return [{ type: entity.type, offset, length,
+      ...(details.oneofKind === "textUrl" ? { url: presentationString(details.textUrl.url, 512) } : {}),
+      ...(details.oneofKind === "pre" ? { language: presentationString(details.pre.language, 64) } : {}),
+      ...(details.oneofKind === "mention" ? { userId: details.mention.userId.toString() } : {}),
+      ...(details.oneofKind === "thread" ? { chatId: details.thread.chatId.toString() } : {}),
+    }]
+  })
+  const reply = [...result.messages, ...result.replyMessages ?? []].find((candidate) => candidate.chatId === message.chatId && candidate.id === message.replyToMsgId)
+  const replyMedia = reply ? messageMediaSummary(reply) : null
+  const service = message.serviceMessage?.event
+  const serviceMessage = service?.oneofKind === "threadBacklink"
+    ? { kind: "thread_backlink" as const, ...(service.threadBacklink.sourceChatId != null ? { chatId: service.threadBacklink.sourceChatId.toString() } : {}), ...(service.threadBacklink.sourceTitle ? { title: presentationString(service.threadBacklink.sourceTitle, 512) } : {}) }
+    : service?.oneofKind === "pinnedMessage" ? { kind: "pinned_message" as const, ...(service.pinnedMessage.messageId != null ? { messageId: service.pinnedMessage.messageId.toString() } : {}) } : undefined
+  const payload = {
+    ...base, text, snippet: snippetOf(text),
+    ...(base.senderDisplayName ? { senderDisplayName: presentationString(base.senderDisplayName, 256) } : {}),
+    media: base.media ? { ...base.media, url: null, ...(base.media.fileName ? { fileName: presentationString(base.media.fileName, 512) } : {}), ...(base.media.mimeType ? { mimeType: presentationString(base.media.mimeType, 256) } : {}) } : null,
+    links: base.links.slice(0, 8).map((link) => presentationString(link, 512)).filter((link) => !signedPresentationUrl(link)),
+    // Rich preview metadata remains in data tools; the small reader uses the
+    // original link and media row without exposing additional signed URLs.
+    urlPreviews: [], externalTasks: [], entities,
+    ...(serviceMessage ? { serviceMessage } : {}),
+    ...(reply ? { replyToMessage: {
+      id: reply.id.toString(), text: presentationString(reply.message ?? "", 512),
+      fromId: reply.fromId?.toString() ?? null, out: reply.out === true,
+      ...(result.senderDisplayNames?.[reply.fromId?.toString() ?? ""] ? { senderDisplayName: presentationString(result.senderDisplayNames[reply.fromId!.toString()], 256) } : {}),
+      media: replyMedia ? { ...replyMedia, url: null, ...(replyMedia.fileName ? { fileName: presentationString(replyMedia.fileName, 512) } : {}), ...(replyMedia.mimeType ? { mimeType: presentationString(replyMedia.mimeType, 256) } : {}) } : null,
+    } } : {}),
+    ...(text !== original ? { textTruncated: true } : {}),
+  }
+  // Ranges and links can be large independently of text. Bound each row so a
+  // 50-message history page stays below the 512 KiB presentation budget.
+  if (Buffer.byteLength(JSON.stringify(payload)) > 8192) {
+    payload.entities = []
+    payload.links = []
+  }
+  return payload
+}
+
+function presentationReadAuth(grant: McpGrant, auth: AuthInfo | undefined): AuthInfo {
+  if (!auth || auth.clientId !== grant.clientId || (auth.expiresAt != null && auth.expiresAt <= Date.now() / 1000)
+    || (auth.extra?.grantId != null && auth.extra.grantId !== grant.id)
+    || (auth.extra?.inlineUserId != null && auth.extra.inlineUserId !== grant.inlineUserId.toString())) {
+    throw new Error("Inline MCP authorization is missing, expired, or belongs to another grant")
+  }
+  requireScope(auth.scopes, "messages:read")
+  requireScope(grant.scope.split(/\s+/), "messages:read")
+  return auth
+}
+
+function presentationChatAllowed(chat: InlineEligibleChat, grant: McpGrant, auth: AuthInfo): boolean {
+  if (chat.kind === "dm") return grant.allowDms && auth.extra?.allowDms !== false
+  if (chat.kind === "home_thread") return grant.allowHomeThreads && auth.extra?.allowHomeThreads !== false
+  if (chat.spaceId == null || !grant.spaceIds.includes(chat.spaceId)) return false
+  return !Array.isArray(auth.extra?.spaceIds) || auth.extra.spaceIds.includes(chat.spaceId.toString())
+}
+
+async function presentationMap<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = []
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await fn(items[index])
+    }
+  }))
+  return results
+}
+
 function chatMetadata(chat: InlineEligibleChat): {
   chatId: string
   uri: string
@@ -1438,6 +1595,32 @@ const messageOutputSchema = z.object({
   media: messageMediaOutputSchema,
   urlPreviews: z.array(urlPreviewOutputSchema),
   externalTasks: z.array(externalTaskOutputSchema),
+  entities: z.array(z.object({
+    type: z.number(), offset: z.number(), length: z.number(), url: z.string().optional(), language: z.string().optional(), userId: z.string().optional(), chatId: z.string().optional(),
+  })).optional(),
+  textTruncated: z.boolean().optional(),
+  replyToMessage: z.object({
+    id: z.string(), text: z.string(), fromId: z.string().nullable(), out: z.boolean(), senderDisplayName: z.string().optional(), media: messageMediaOutputSchema,
+  }).optional(),
+  serviceMessage: z.object({
+    kind: z.enum(["thread_backlink", "pinned_message"]), chatId: z.string().optional(), title: z.string().optional(), messageId: z.string().optional(),
+  }).optional(),
+})
+
+const messageViewOutputSchema = z.object({
+  presentation: z.enum(["sources", "catch_up"]),
+  chats: z.array(z.object({
+    chatId: z.string(), status: z.enum(["available", "unavailable"]),
+    chat: chatMetadataOutputSchema.extend({ lastMessagePreview: z.string().nullable().optional() }).nullable(),
+  })),
+  items: z.array(z.object({
+    chatId: z.string(), messageId: z.string(), status: z.enum(["available", "unavailable"]), message: messageOutputSchema.nullable(),
+  })),
+  activeChatId: z.string().nullable(),
+  page: z.object({
+    kind: z.enum(["selected", "latest", "older", "newer", "context", "unread"]), nextOffsetId: z.string().nullable(), nextAfterId: z.string().nullable(),
+    anchorMessageId: z.string().nullable(), firstUnreadMessageId: z.string().nullable(), note: z.string().nullable(),
+  }),
 })
 
 const contentFilterOutputSchema = z.enum(["all", "links", "media", "photos", "videos", "documents", "files"])
@@ -2545,6 +2728,125 @@ export function createInlineMcpServer(params: {
   registerInlineTool(
     server,
     resourceMetadataUrl,
+    "messages.view",
+    {
+      title: "View Inline Sources or Catch Up",
+      description: "Display original Inline evidence or browse actual conversation history only when requested or useful. For ordinary summaries or analysis, use the data-only messages.list/search/context tools and report actual coverage. sources accepts 1–20 ordered canonical message references from any allowed chats; it does not imply contiguous history. catch_up accepts 1–20 chat IDs and reads only the active chat's bounded history, without marking read. Use exactly one of startAt (latest or unread), offsetId (older), afterId (newer), or anchorMessageId (surrounding context); unread entry may show history since last read when an exact first-unread location cannot be verified. Never supply authored message text, names, quotations, URLs, or analyzed counts.",
+      inputSchema: {
+        presentation: z.enum(["sources", "catch_up"]),
+        items: z.array(z.object({ chatId: z.string().regex(/^[1-9]\d*$/).max(20), messageId: z.string().regex(/^[1-9]\d*$/).max(20) }).strict()).min(1).max(20).optional(),
+        chatIds: z.array(z.string().regex(/^[1-9]\d*$/).max(20)).min(1).max(20).optional(),
+        activeChatId: z.string().regex(/^[1-9]\d*$/).max(20).optional(),
+        startAt: z.enum(["latest", "unread"]).optional(),
+        offsetId: z.string().regex(/^[1-9]\d*$/).max(20).optional(),
+        afterId: z.string().regex(/^[1-9]\d*$/).max(20).optional(),
+        anchorMessageId: z.string().regex(/^[1-9]\d*$/).max(20).optional(),
+      },
+      outputSchema: messageViewOutputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      _meta: {
+        ...toolMeta(["messages:read"], "Loading Inline originals...", "Inline originals loaded"),
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, visibility: ["model", "app"] },
+      },
+    },
+    async (args: {
+      presentation: "sources" | "catch_up"; items?: Array<{ chatId: string; messageId: string }>; chatIds?: string[];
+      activeChatId?: string; startAt?: "latest" | "unread"; offsetId?: string; afterId?: string; anchorMessageId?: string;
+    }, extra) => {
+      const auth = presentationReadAuth(params.grant, extra.authInfo)
+      const cursors = [args.startAt, args.offsetId, args.afterId, args.anchorMessageId].filter((value) => value != null)
+      if (args.presentation === "sources" && (!args.items?.length || args.chatIds != null || args.activeChatId != null || cursors.length)) {
+        throw new Error("sources requires only ordered items; catch-up parameters are not accepted")
+      }
+      if (args.presentation === "catch_up" && (!args.chatIds?.length || args.items != null || cursors.length > 1)) {
+        throw new Error("catch_up requires chatIds and at most one history cursor")
+      }
+      const refs = [...new Map((args.items ?? []).map((item) => [`${item.chatId}:${item.messageId}`, item])).values()]
+      const chatIds = [...new Set(args.presentation === "sources" ? refs.map((ref) => ref.chatId) : args.chatIds)]
+      if (args.activeChatId && !chatIds.includes(args.activeChatId)) throw new Error("activeChatId must belong to chatIds")
+      const metadata = await presentationMap(chatIds, async (chatId) => {
+        try {
+          const result = await params.inline.presentationChat({ chatId: parseChatId(chatId), includeLastMessage: args.presentation === "catch_up" })
+          if (result.chat.chatId.toString() !== chatId || !presentationChatAllowed(result.chat, params.grant, auth)) return null
+          return result
+        } catch { return null }
+      })
+      const chatAvatarUrls: Record<string, string> = {}
+      const chats = chatIds.map((chatId, index) => {
+        const result = metadata[index]
+        const avatar = signedPresentationUrl(result?.chatAvatarUrl)
+        if (avatar) chatAvatarUrls[chatId] = avatar
+        return { chatId, status: result ? "available" as const : "unavailable" as const,
+          chat: result ? { ...chatMetadata(result.chat), title: presentationString(result.chat.title, 512), chatTitle: presentationString(result.chat.chatTitle, 512),
+            lastMessagePreview: snippetOf(result.lastMessage?.message, 120) ?? null } : null }
+      })
+      const senderAvatarUrls: Record<string, string> = {}
+      const messageMedia: Record<string, { thumbnailUrl: string | null; originalUrl: string | null; originalFileUniqueId?: string }> = {}
+      const row = (message: Message, result: InlineMessagesResult) => {
+        const key = `${message.chatId}:${message.id}`
+        const media = presentationMedia(message)
+        if (media.thumbnailUrl || media.originalUrl) messageMedia[key] = media
+        const senderId = message.fromId?.toString()
+        const avatar = senderId ? signedPresentationUrl(result.senderAvatarUrls?.[senderId]) : null
+        if (senderId && avatar) senderAvatarUrls[senderId] = avatar
+        return { chatId: message.chatId.toString(), messageId: message.id.toString(), status: "available" as const, message: presentationMessage(message, result) }
+      }
+      const unavailable = (ref: { chatId: string; messageId: string }) => ({ ...ref, status: "unavailable" as const, message: null })
+      let items: Array<ReturnType<typeof row> | ReturnType<typeof unavailable>> = []
+      let activeChatId: string | null = null
+      let page: z.infer<typeof messageViewOutputSchema>["page"] = {
+        kind: "selected", nextOffsetId: null, nextAfterId: null, anchorMessageId: null, firstUnreadMessageId: null,
+        note: "Selected original messages in the requested order; this selection does not establish continuous history or analyzed coverage.",
+      }
+      if (args.presentation === "sources") {
+        const fetched = await presentationMap(chatIds, async (chatId) => {
+          if (!metadata[chatIds.indexOf(chatId)]) return null
+          try {
+            const result = await params.inline.getMessages({ chatId: parseChatId(chatId), messageIds: refs.filter((ref) => ref.chatId === chatId).map((ref) => parseInlineId(ref.messageId, "messageId")), freshChatAuthorization: true })
+            return result.chat.chatId.toString() === chatId && presentationChatAllowed(result.chat, params.grant, auth) ? result : null
+          } catch { return null }
+        })
+        items = refs.map((ref) => {
+          const result = fetched[chatIds.indexOf(ref.chatId)]
+          const message = result?.messages.find((message) => message.chatId.toString() === ref.chatId && message.id.toString() === ref.messageId)
+          return result && message ? row(message, result) : unavailable(ref)
+        })
+        // An access change between metadata and source reads clears that chat's
+        // title/avatar too; stale discovery must never reveal a denied target.
+        chats.forEach((chat, index) => {
+          if (!fetched[index]) { chat.status = "unavailable"; chat.chat = null; delete chatAvatarUrls[chat.chatId] }
+        })
+      } else {
+        activeChatId = args.activeChatId ?? chats.find((chat) => chat.status === "available")?.chatId ?? chatIds[0] ?? null
+        page = { ...page, kind: "latest", note: "The selected conversation is unavailable. No message history was returned." }
+        if (activeChatId && metadata[chatIds.indexOf(activeChatId)]) {
+          try {
+            const history = await params.inline.historyMessages({ chatId: parseChatId(activeChatId),
+              ...(args.startAt ? { startAt: args.startAt } : {}), ...(args.offsetId ? { offsetId: parseInlineId(args.offsetId, "offsetId") } : {}),
+              ...(args.afterId ? { afterId: parseInlineId(args.afterId, "afterId") } : {}), ...(args.anchorMessageId ? { anchorMessageId: parseInlineId(args.anchorMessageId, "anchorMessageId") } : {}),
+            })
+            if (history.chat.chatId.toString() !== activeChatId || !presentationChatAllowed(history.chat, params.grant, auth)) throw new Error("Conversation is no longer in the allowed context")
+            items = history.messages.filter((message) => message.chatId.toString() === activeChatId).slice(0, 50).map((message) => row(message, history))
+            const active = chats.find((chat) => chat.chatId === activeChatId)!
+            active.chat = { ...chatMetadata(history.chat), lastMessagePreview: active.chat?.lastMessagePreview ?? null }
+            page = { kind: history.kind, nextOffsetId: history.nextOffsetId?.toString() ?? null, nextAfterId: history.nextAfterId?.toString() ?? null,
+              anchorMessageId: history.anchorMessageId?.toString() ?? null, firstUnreadMessageId: history.firstUnreadMessageId?.toString() ?? null, note: history.note }
+          } catch {
+            const active = chats.find((chat) => chat.chatId === activeChatId)!
+            active.status = "unavailable"; active.chat = null; delete chatAvatarUrls[activeChatId]
+          }
+        }
+      }
+      if (items.some((item) => item.message?.textTruncated)) page.note = [page.note, "Long messages are shortened in this view. Ask ChatGPT for the complete message."].filter(Boolean).join(" ")
+      const payload = { presentation: args.presentation, chats, items, activeChatId, page }
+      if (Buffer.byteLength(JSON.stringify(payload)) > 512 * 1024) throw new Error("The bounded presentation payload is too large; request fewer messages")
+      return { structuredContent: payload, content: [jsonText(payload)], _meta: { inline: { senderAvatarUrls, chatAvatarUrls, messageMedia } } }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.list",
     {
       title: "List Inline Messages",
@@ -2576,10 +2878,7 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: {
-        ...toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
-      },
+      _meta: toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
     },
     async (
       {
@@ -2634,7 +2933,6 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
-        ...(Object.keys(recent.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: recent.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -2740,6 +3038,7 @@ export function createInlineMcpServer(params: {
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
             query: z.string().min(1).describe("Text to search for in this conversation"),
+            offsetId: z.string().regex(/^[1-9]\d*$/).optional().describe("Continue matches older than the previous nextOffsetId"),
             limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return; defaults to 20"),
             since: z.string().min(1).optional().describe("Lower time bound"),
             until: z.string().min(1).optional().describe("Upper time bound"),
@@ -2749,6 +3048,7 @@ export function createInlineMcpServer(params: {
             chatId: z.string().min(1).optional().describe("Inline chat ID"),
             userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
             query: z.string().min(1).optional().describe("Optional search query"),
+            offsetId: z.string().min(1).optional().describe("Continue matches older than the previous nextOffsetId"),
             limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
             since: z.string().min(1).optional().describe("Lower time bound"),
             until: z.string().min(1).optional().describe("Upper time bound"),
@@ -2761,16 +3061,14 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: {
-        ...toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
-      },
+      _meta: toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
     },
     async (
       {
         chatId,
         userId,
         query,
+        offsetId,
         limit,
         since,
         until,
@@ -2779,6 +3077,7 @@ export function createInlineMcpServer(params: {
         chatId?: string
         userId?: string
         query?: string
+        offsetId?: string
         limit?: number
         since?: string
         until?: string
@@ -2799,6 +3098,7 @@ export function createInlineMcpServer(params: {
       const found: InlineSearchMessagesResult = await params.inline.searchMessages({
         ...target,
         query,
+        offsetId: offsetId ? parseInlineId(offsetId, "offsetId") : undefined,
         limit: limit ?? 20,
         since: parsedSince,
         until: parsedUntil,
@@ -2820,7 +3120,6 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
-        ...(Object.keys(found.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: found.senderAvatarUrls } } } : {}),
       }
     },
   )

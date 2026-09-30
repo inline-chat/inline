@@ -144,6 +144,24 @@ export type InlineMessageContextResult = {
 export type InlineMessagesResult = {
   chat: InlineEligibleChat
   messages: Message[]
+  replyMessages?: Message[]
+  senderDisplayNames?: Record<string, string>
+  senderAvatarUrls?: Record<string, string>
+}
+
+export type InlinePresentationChatResult = {
+  chat: InlineEligibleChat
+  lastMessage: Message | null
+  chatAvatarUrl?: string
+}
+
+export type InlineHistoryMessagesResult = InlineMessagesResult & {
+  kind: "latest" | "older" | "newer" | "context" | "unread"
+  nextOffsetId: bigint | null
+  nextAfterId: bigint | null
+  anchorMessageId: bigint | null
+  firstUnreadMessageId: bigint | null
+  note: string | null
 }
 
 export type InlineUploadedMediaKind = "photo" | "video" | "document"
@@ -178,7 +196,16 @@ export type InlineApi = {
     chatId?: bigint
     userId?: bigint
     messageIds: bigint[]
+    freshChatAuthorization?: boolean
   }): Promise<InlineMessagesResult>
+  presentationChat(params: { chatId: bigint; includeLastMessage?: boolean }): Promise<InlinePresentationChatResult>
+  historyMessages(params: {
+    chatId: bigint
+    startAt?: "latest" | "unread"
+    offsetId?: bigint
+    afterId?: bigint
+    anchorMessageId?: bigint
+  }): Promise<InlineHistoryMessagesResult>
   recentMessages(params: {
     chatId?: bigint
     userId?: bigint
@@ -197,6 +224,7 @@ export type InlineApi = {
     userId?: bigint
     query?: string
     limit?: number
+    offsetId?: bigint
     since?: bigint
     until?: bigint
     content?: InlineMessageContentFilter
@@ -729,8 +757,20 @@ export function createInlineApi(params: {
       }
     }
 
-    const chat = resolved.kind === "chat" ? await getChatById(resolved.chatId) : await getChatByUserId(resolved.userId)
+    const freshResult = freshChatAuthorization && resolved.kind === "chat"
+      ? await getChatResultByPeer(buildChatPeer(resolved.chatId))
+      : null
+    if (freshResult && !freshResult.chat) throw new Error("missing chat")
+    const chat = freshResult?.chat ?? (resolved.kind === "chat" ? await getChatById(resolved.chatId) : await getChatByUserId(resolved.userId))
     ensureChatAllowed(chat)
+    const freshUser = freshResult?.user
+    if (freshUser && eligibleChatsCache) {
+      const name = userDisplayName(freshUser)
+      if (name) eligibleChatsCache.senderDisplayNames.set(freshUser.id.toString(), name)
+      const avatar = profileAvatarUrl(freshUser.profilePhoto?.cdnUrl)
+      if (avatar) eligibleChatsCache.senderAvatarUrls.set(freshUser.id.toString(), avatar)
+      else eligibleChatsCache.senderAvatarUrls.delete(freshUser.id.toString())
+    }
     const previous = context?.byChatId.get(chat.id.toString())
     const peerUserId = chat.peerId?.type.oneofKind === "user" ? chat.peerId.type.user.userId : null
     // Cached labels may enrich a freshly authorized target, but must match its
@@ -739,28 +779,43 @@ export function createInlineApi(params: {
     if (previous && sameContext) {
       return {
         ...previous,
-        title: (previous.peerDisplayName ?? chat.title).trim() || `chat ${chat.id.toString()}`,
+        title: (userDisplayName(freshUser) ?? previous.peerDisplayName ?? chat.title).trim() || `chat ${chat.id.toString()}`,
         chatTitle: chat.title,
+        ...(freshUser ? { peerDisplayName: userDisplayName(freshUser), peerUsername: freshUser.username?.trim() || null } : {}),
         lastMessageId: chat.lastMsgId ?? null,
+        ...(freshResult ? {
+          archived: freshResult.dialog?.archived === true,
+          pinned: freshResult.dialog?.pinned === true,
+          unreadCount: freshResult.dialog?.unreadCount ?? 0,
+          readMaxId: freshResult.dialog?.readMaxId ?? null,
+        } : {}),
       }
     }
     return {
       chatId: chat.id,
-      title: chat.title.trim() || `chat ${chat.id.toString()}`,
+      title: (userDisplayName(freshUser) ?? chat.title).trim() || `chat ${chat.id.toString()}`,
       chatTitle: chat.title,
       kind: chatKindOf(chat),
       spaceId: chat.spaceId ?? null,
       spaceName: null,
       peerUserId,
-      peerDisplayName: null,
-      peerUsername: null,
-      archived: false,
-      pinned: false,
-      unreadCount: 0,
-      readMaxId: null,
+      peerDisplayName: userDisplayName(freshUser),
+      peerUsername: freshUser?.username?.trim() || null,
+      archived: freshResult?.dialog?.archived === true,
+      pinned: freshResult?.dialog?.pinned === true,
+      unreadCount: freshResult?.dialog?.unreadCount ?? 0,
+      readMaxId: freshResult?.dialog?.readMaxId ?? null,
       lastMessageId: chat.lastMsgId ?? null,
       lastMessageDate: null,
     }
+  }
+
+  const replyMessagesFor = async (chatId: bigint, messages: Message[]): Promise<Message[]> => {
+    const loaded = new Set(messages.map((message) => message.id.toString()))
+    const replyIds = [...new Set(messages.flatMap((message) => message.replyToMsgId != null && message.replyToMsgId > 0n && !loaded.has(message.replyToMsgId.toString())
+      ? [message.replyToMsgId.toString()] : []))].slice(0, 50).map(BigInt)
+    // A missing/deleted reply must not make an otherwise useful history page fail.
+    try { return replyIds.length ? await getMessagesByIds(chatId, replyIds) : [] } catch { return [] }
   }
 
   const listRecentMessages = async (params: {
@@ -1180,8 +1235,9 @@ export function createInlineApi(params: {
       }
     },
 
-    async getMessages({ chatId, userId, messageIds }) {
-      const chat = await getAllowedChat({ chatId, userId })
+    async getMessages({ chatId, userId, messageIds, freshChatAuthorization }) {
+      if (freshChatAuthorization) await getEligibleChatContext()
+      const chat = await getAllowedChat({ chatId, userId }, freshChatAuthorization)
       const uniqueIds: bigint[] = []
       const seen = new Set<string>()
       for (const messageId of messageIds) {
@@ -1191,9 +1247,79 @@ export function createInlineApi(params: {
         seen.add(key)
         uniqueIds.push(messageId)
       }
+      const messages = uniqueIds.length ? await getMessagesByIds(chat.chatId, uniqueIds) : []
+      const replyMessages = await replyMessagesFor(chat.chatId, messages)
+      return { chat, messages, replyMessages, ...sendersForMessages([...messages, ...replyMessages]) }
+    },
+
+    async presentationChat({ chatId, includeLastMessage }) {
+      await getEligibleChatContext()
+      const chat = await getAllowedChat({ chatId }, true)
+      let lastMessage: Message | null = null
+      if (includeLastMessage !== false && chat.lastMessageId != null) {
+        try {
+          lastMessage = (await getMessagesByIds(chatId, [chat.lastMessageId])).find((message) => message.chatId === chatId && message.id === chat.lastMessageId) ?? null
+        } catch { /* Metadata remains useful when the latest message disappeared. */ }
+      }
+      const chatAvatarUrl = chat.peerUserId != null ? eligibleChatsCache?.senderAvatarUrls.get(chat.peerUserId.toString()) : undefined
+      return { chat, lastMessage, ...(chatAvatarUrl ? { chatAvatarUrl } : {}) }
+    },
+
+    async historyMessages({ chatId, startAt, offsetId, afterId, anchorMessageId }) {
+      if ([startAt, offsetId, afterId, anchorMessageId].filter((value) => value != null).length > 1) throw new Error("History cursors are mutually exclusive")
+      await getEligibleChatContext()
+      const chat = await getAllowedChat({ chatId }, true)
+      let kind: InlineHistoryMessagesResult["kind"] = anchorMessageId != null ? "context" : offsetId != null ? "older" : afterId != null ? "newer" : startAt === "unread" ? "unread" : "latest"
+      let note: string | null = null
+      let boundary = afterId
+      if (kind === "unread") {
+        if (chat.readMaxId == null || chat.unreadCount <= 0) {
+          kind = "latest"
+          note = chat.readMaxId == null
+            ? "The current read boundary is unavailable; showing latest history. This does not establish unread coverage."
+            : "No unread messages are currently reported; showing latest history. Viewing does not mark messages read."
+        } else {
+          boundary = chat.readMaxId
+          note = "Messages since your last-read position. This may include messages that don't count as unread."
+        }
+      }
+      const mode = kind === "context" ? GetChatHistoryMode.HISTORY_MODE_AROUND
+        : kind === "older" ? GetChatHistoryMode.HISTORY_MODE_OLDER
+        : kind === "newer" || kind === "unread" ? GetChatHistoryMode.HISTORY_MODE_NEWER
+        : GetChatHistoryMode.HISTORY_MODE_LATEST
+      await ensureConnected()
+      const result = await client.invoke(Method.GET_CHAT_HISTORY, {
+        oneofKind: "getChatHistory",
+        getChatHistory: GetChatHistoryInput.create({
+          peerId: buildChatPeer(chatId), mode, limit: 51,
+          ...(offsetId != null ? { beforeId: offsetId } : {}),
+          ...(boundary != null ? { afterId: boundary } : {}),
+          ...(anchorMessageId != null ? { anchorId: anchorMessageId, beforeLimit: 20, afterLimit: 29, includeAnchor: true } : {}),
+        }),
+      })
+      const chronological = [...result.getChatHistory.messages]
+        .filter((message) => message.chatId === chatId && (offsetId == null || message.id < offsetId) && (boundary == null || message.id > boundary))
+        .sort((left, right) => left.id === right.id ? 0 : left.id < right.id ? -1 : 1)
+      const movingForward = kind === "unread" || kind === "newer"
+      const messages = movingForward ? chronological.slice(0, 50) : chronological.slice(-50)
+      const first = messages[0]?.id ?? null
+      const last = messages[messages.length - 1]?.id ?? null
+      const firstUnreadMessageId: bigint | null = null
+      if (kind === "unread") {
+        // The wire rows omit countsAsUnread, and metadata/history reads are not
+        // one snapshot. Even a matching total cannot certify the first unread
+        // row. Position at the real boundary without inventing an unread marker.
+        if (!messages.length) note = "No history was returned after the current read boundary; unread coverage could not be verified. Use latest or older history."
+      }
+      if (kind === "context" && !messages.some((message) => message.id === anchorMessageId)) note = "The selected message is unavailable; showing the available surrounding history."
+      const replyMessages = await replyMessagesFor(chatId, messages)
       return {
-        chat,
-        messages: await getMessagesByIds(chat.chatId, uniqueIds),
+        chat, messages, replyMessages, kind,
+        nextOffsetId: kind === "latest" || kind === "older" ? chronological.length > 50 ? first : null : first,
+        nextAfterId: movingForward ? chronological.length > 50 ? last : null : kind === "context" && last != null && (chat.lastMessageId == null || last < chat.lastMessageId) ? last : null,
+        anchorMessageId: anchorMessageId ?? null,
+        firstUnreadMessageId, note,
+        ...sendersForMessages([...messages, ...replyMessages]),
       }
     },
 
@@ -1201,7 +1327,7 @@ export function createInlineApi(params: {
       return await listRecentMessages(params)
     },
 
-    async searchMessages({ chatId, userId, query, limit, since, until, content }) {
+    async searchMessages({ chatId, userId, query, limit, offsetId, since, until, content }) {
       const safeQuery = query?.trim()
       const safeContent = normalizeContentFilter(content)
       const maxMessages = Math.max(1, Math.min(50, Math.trunc(limit ?? 20)))
@@ -1212,6 +1338,7 @@ export function createInlineApi(params: {
           userId,
           direction: "all",
           limit: maxMessages,
+          offsetId,
           since,
           until,
           content: safeContent,
@@ -1239,6 +1366,7 @@ export function createInlineApi(params: {
           peerId,
           queries: [safeQuery],
           limit: maxMessages,
+          ...(offsetId != null ? { offsetId } : {}),
           ...(toSearchFilter(safeContent) != null ? { filter: toSearchFilter(safeContent) } : {}),
         }),
       })
