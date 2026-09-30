@@ -35,19 +35,31 @@ function messageResultsComponent(): void {
   let data: Data | null = null, initialMetadata: R = {}, activeChatId: string | null = null, notice: string | null = null
   let capabilities: R = {}, host: R = {}, lastSize = ""
   const states = new Map<string, State>()
-  const ownToolInputs = new Map<number, { args: R; completed: boolean; resultEchoed: boolean }>()
+  const ownToolInputs = new Map<number, { args: R; completed: boolean; resultEchoed: boolean; fingerprint: Promise<string | null>; resolveFingerprint: (value: string | null | PromiseLike<string | null>) => void }>()
   let echoedToolCall: number | null = null
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: number }>()
   const send = (message: R): void => parent.postMessage({ jsonrpc: "2.0", ...message }, "*")
   const request = (method: string, params: R): Promise<unknown> => new Promise((resolve, reject) => {
     const callId = ++requestId
-    const timer = window.setTimeout(() => { pending.delete(callId); ownToolInputs.delete(callId); reject(new Error("Host timeout")) }, 15_000)
-    if (method === "tools/call" && record(params.arguments)) ownToolInputs.set(callId, { args: params.arguments, completed: false, resultEchoed: false })
+    const timer = window.setTimeout(() => { pending.delete(callId); ownToolInputs.get(callId)?.resolveFingerprint(null); ownToolInputs.delete(callId); reject(new Error("Host timeout")) }, 15_000)
+    if (method === "tools/call" && record(params.arguments)) {
+      let resolveFingerprint!: (value: string | null | PromiseLike<string | null>) => void
+      const fingerprint = new Promise<string | null>((complete) => { resolveFingerprint = complete })
+      ownToolInputs.set(callId, { args: params.arguments, completed: false, resultEchoed: false, fingerprint, resolveFingerprint })
+    }
     // Retain only a few completed calls for hosts delivering notification echoes
     // after the correlated response. No message text/URLs are kept here.
     if (ownToolInputs.size > 8) for (const [key, call] of ownToolInputs) { if (call.completed) { ownToolInputs.delete(key); break } }
     pending.set(callId, { resolve, reject, timer }); send({ id: callId, method, params })
   })
+  const resultFingerprint = async (result: unknown): Promise<string> => {
+    // Stable keys tolerate host serialization order; only a digest is retained.
+    const payload = record(result) ? { structuredContent: result.structuredContent, _meta: result._meta, isError: result.isError } : result
+    const serialized = JSON.stringify(payload, (_key, value: unknown) => record(value)
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value)
+    const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(serialized))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
   const sizeChanged = (): void => {
     if (!initialized || disposed) return
     const rect = root.getBoundingClientRect(), width = Math.ceil(rect.width), height = Math.ceil(rect.height)
@@ -348,9 +360,14 @@ function messageResultsComponent(): void {
           : options.offsetId ? Math.max(0, oldTop + updated.scrollHeight - oldHeight) : oldTop
         states.get(chatId)!.scrollTop = updated.scrollTop
       }
-    } catch {
+    } catch (error) {
       if (disposed || epoch !== generation || seq !== navigation) return
       loading = false
+      if (record(error) && error.authorization === true) {
+        authoritativeFailure = true; generation++; states.clear(); initialMetadata = {}
+        data.chats = data.chats.map((chat) => ({ chatId: chat.chatId, status: "unavailable", chat: null }))
+        data.items = []
+      }
       if (paging && previous && !authoritativeFailure) states.set(chatId, previous)
       else states.delete(chatId)
       notice = "Could not load this conversation. Try again or ask in chat."; render()
@@ -570,7 +587,7 @@ function messageResultsComponent(): void {
     if (message.method === "ping" && (typeof message.id === "string" || typeof message.id === "number")) send({ id: message.id, result: {} })
     else if (message.method === "ui/resource-teardown" && (typeof message.id === "string" || typeof message.id === "number")) {
       disposed = true; generation++; closePhoto?.(); window.clearTimeout(initializationTimeout); observer?.disconnect(); window.removeEventListener("message", onMessage); window.removeEventListener("resize", sizeChanged)
-      for (const call of pending.values()) { window.clearTimeout(call.timer); call.reject(new Error("Disposed")) }; pending.clear(); ownToolInputs.clear(); root.replaceChildren(); send({ id: message.id, result: {} })
+      for (const call of pending.values()) { window.clearTimeout(call.timer); call.reject(new Error("Disposed")) }; pending.clear(); for (const own of ownToolInputs.values()) own.resolveFingerprint(null); ownToolInputs.clear(); root.replaceChildren(); send({ id: message.id, result: {} })
     } else if (message.id === 1 && message.method === undefined && !initialized) {
       window.clearTimeout(initializationTimeout)
       if (!record(message.result) || message.error || message.result.protocolVersion !== "2026-01-26") { status("Inline could not connect this reader. Try again in chat.", true); return }
@@ -578,15 +595,30 @@ function messageResultsComponent(): void {
     } else if (typeof message.id === "number" && message.method === undefined && pending.has(message.id)) {
       const call = pending.get(message.id)!; pending.delete(message.id)
       const own = ownToolInputs.get(message.id)
-      if (own) { own.completed = true; if (own.resultEchoed) ownToolInputs.delete(message.id) }
+      if (own) { own.completed = true; own.resolveFingerprint(message.error ? null : resultFingerprint(message.result).catch(() => "")); if (own.resultEchoed) ownToolInputs.delete(message.id) }
       window.clearTimeout(call.timer)
-      if (message.error) call.reject(new Error("Host request failed")); else call.resolve(message.result)
+      if (message.error) call.reject(Object.assign(new Error("Host request failed"), { authorization: record(message.error) && [401, 403].includes(message.error.code as number) })); else call.resolve(message.result)
     } else if (initialized && message.method === "ui/notifications/tool-result") {
       // Widget tool calls return through correlated IDs; duplicate/stale outer
       // notifications cannot overwrite subsequent chat/page navigation.
       if (echoedToolCall !== null) {
         const own = ownToolInputs.get(echoedToolCall)
-        if (own) { own.resultEchoed = true; if (own.completed) ownToolInputs.delete(echoedToolCall) }
+        if (own) {
+          own.resultEchoed = true
+          if (own.completed) ownToolInputs.delete(echoedToolCall)
+          const epoch = generation, seq = navigation
+          const acceptDifferentResult = (): void => {
+            if (disposed || epoch !== generation || seq !== navigation) return
+            outerArguments = own.args
+            if (matchesOuterScope(message.params)) { awaitingResult = false; accept(message.params) }
+          }
+          // Identical args alone cannot distinguish an app echo from a new
+          // model refresh. Wait for the RPC and suppress only the same result.
+          void Promise.all([own.fingerprint, resultFingerprint(message.params)]).then(([before, after]) => {
+            if (before && before === after) return
+            acceptDifferentResult()
+          }).catch(acceptDifferentResult)
+        }
         echoedToolCall = null
       } else if (awaitingResult && matchesOuterScope(message.params)) { awaitingResult = false; accept(message.params) }
     } else if (initialized && message.method === "ui/notifications/tool-input-partial") {
@@ -602,7 +634,6 @@ function messageResultsComponent(): void {
       const echo = args ? [...ownToolInputs.entries()].find(([, own]) => sameArgs(own.args, args)) : null
       if (echo) { echoedToolCall = echo[0]; return }
       echoedToolCall = null
-      for (const [key, own] of ownToolInputs) if (own.completed) ownToolInputs.delete(key)
       outerArguments = args
       generation++; navigation++; awaitingResult = true; data = null; initialMetadata = {}; states.clear(); closePhoto?.(); status("Loading Inline messages…")
     } else if (initialized && message.method === "ui/notifications/tool-cancelled") {
