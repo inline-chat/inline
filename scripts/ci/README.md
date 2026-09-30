@@ -13,7 +13,8 @@ Apple, canonical protocol and trust roots, scripts, workflows, root JS manifests
 diffs select all five. The selector writes its decision to the Actions summary.
 
 Rust workspace CI owns formatting, all-target compilation, tests, and Clippy. CLI
-Build adds AMD64/ARM64 musl executable and installer checks. Server Tests owns the
+Build adds AMD64/ARM64 musl executable and installer checks, plus native ARM64 CLI
+tests to retain architecture coverage. Server Tests owns the
 TypeScript protocol drift check; the previous duplicate workflows are preserved
 under `.github/disabled-workflows`.
 

@@ -97,3 +97,8 @@ jobs:
 
       - name: Test installer with Debian sh
         run: python3 scripts/ci/test-cli-installer.py
+
+      - name: Test native ARM64 CLI
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        working-directory: cli
+        run: cargo test --locked --profile ci-test

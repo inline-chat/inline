@@ -50,6 +50,16 @@ describe("public CI contracts", () => {
     }
   })
 
+  it("retains ARM64 native CLI tests while the workspace owns AMD64 tests", () => {
+    const cli = read(".github/workflows/cli-check.yml")
+    expect(cli).toContain("dtolnay/rust-toolchain@1.96.0")
+    expect(cli).toContain(". -> target")
+    expect(cli).toContain("if: matrix.target == 'aarch64-unknown-linux-musl'")
+    expect(cli).toContain("cargo test --locked --profile ci-test")
+    expect(read(".github/workflows/integrations.yml")).toContain("cargo test --workspace --all-targets --locked --profile ci-test")
+    expect(workflow("integrations.yml").jobs.cli).toBeUndefined()
+  })
+
   it("does not expose publication workflows to pull requests", () => {
     for (const name of ["npm-publish.yml", "cli-release.yml", "server-deploy.yml", "macos-tip-nightly.yml", "ios-early-testers.yml"]) {
       expect(workflow(name).on.pull_request, name).toBeUndefined()
