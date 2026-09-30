@@ -107,6 +107,25 @@ describe("internal iOS release boundary", () => {
     } } }])
     expect(f.mutations.length).toBe(1)
   })
+  it("waits for a pending run's source to resolve and rejects unresolved completed runs", async () => {
+    const f = fixture()
+    let reads = 0
+    let pauses = 0
+    const api = async (path: string, data?: unknown) => {
+      if (path === "/v1/ciBuildRuns/run" && ++reads === 1) return { data: {
+        id: "run", attributes: { sourceCommit: {}, executionProgress: "PENDING" },
+      } }
+      return f.api(path, data)
+    }
+    await publish({ api, sha, qualify: () => {}, pause: async () => { pauses++ }, log: () => {} })
+    expect(pauses).toBe(1)
+    expect(f.mutations.length).toBe(1)
+    const unresolved = fixture({ "/v1/ciBuildRuns/run": { id: "run", attributes: {
+      sourceCommit: {}, executionProgress: "COMPLETE", completionStatus: "SUCCEEDED",
+    } } })
+    await expect(publish({ api: unresolved.api, sha, qualify: () => {}, log: () => {} })).rejects.toThrow("source differs")
+    expect(unresolved.mutations).toEqual([])
+  })
   it("signs short lived Apple JWTs without disclosing credentials to pagination hosts", async () => {
     const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
     const env = { ASC_KEY_ID: "id", ASC_ISSUER_ID: "issuer", ASC_PRIVATE_KEY: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString() }

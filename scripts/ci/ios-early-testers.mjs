@@ -169,7 +169,9 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   } else log(`Resuming Xcode Cloud run ${run.id} for ${sha}`)
   while (true) {
     run = (await api(`/v1/ciBuildRuns/${run.id}`)).data
-    if (run.attributes.sourceCommit) validateRun(run, sha)
+    // Apple may return an empty sourceCommit while a new run is pending.
+    // Reject a resolved mismatch immediately; require an exact SHA at completion.
+    if (run.attributes.sourceCommit?.commitSha) validateRun(run, sha)
     if (run.attributes.executionProgress === "COMPLETE") break
     await wait()
   }
