@@ -24,6 +24,7 @@ jobs:
       actions: read
       checks: read
       contents: write # Create immutable source tags; never move an existing tag.
+      statuses: write # Record verified internal distribution and symbol upload per source SHA.
     if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90

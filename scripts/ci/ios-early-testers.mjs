@@ -4,7 +4,7 @@ import { createPrivateKey, sign } from "node:crypto"
 import { execFileSync } from "node:child_process"
 import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
 export const APP = "6736995294"
@@ -53,6 +53,46 @@ export async function list(api, path) {
   return items
 }
 
+export async function buildGroups(api, buildId) {
+  const groups = await list(api, `/v1/apps/${APP}/betaGroups?limit=200`)
+  const members = []
+  for (const group of groups) {
+    // Apple's documented filter[builds] is rejected for some builds.
+    const builds = await list(api, `/v1/betaGroups/${group.id}/relationships/builds?limit=200`)
+    if (builds.some((build) => build.id === buildId)) members.push(group)
+  }
+  return members
+}
+
+export function publicationReceipt(env = process.env, fetcher = fetch) {
+  if (env.GITHUB_REPOSITORY !== "inline-chat/inline" || !env.GH_TOKEN) throw new Error("Trusted GitHub release token required")
+  const root = "https://api.github.com/repos/inline-chat/inline"
+  const request = async (path, data) => {
+    const response = await fetcher(`${root}/${path}`, {
+      method: data ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(30_000),
+      headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    })
+    if (!response.ok) throw new Error(`GitHub release receipt failed: ${response.status}`)
+    return response.json()
+  }
+  const context = "ios/early-testers"
+  const description = (build) => `Early Testers build ${build}`
+  return {
+    isPublished: async (sha, build) => {
+      // The combined-status endpoint omits creator; individual statuses retain it.
+      const statuses = await request(`commits/${sha}/statuses?per_page=100`)
+      const status = statuses.find((item) => item.context === context)
+      return status?.state === "success" && status.description === description(build)
+        && status.creator?.login === "github-actions[bot]"
+    },
+    markPublished: async (result) => request(`statuses/${result.sha}`, {
+      state: "success", context, description: description(result.build),
+      target_url: `https://github.com/inline-chat/inline/actions/runs/${env.GITHUB_RUN_ID}`,
+    }),
+  }
+}
+
 export function validateGroup(group, app) {
   if (group.id !== GROUP || group.attributes?.isInternalGroup !== true || app.id !== APP) {
     throw new Error("Refusing distribution outside Inline internal Early Testers")
@@ -73,8 +113,10 @@ export function validateBuild(build, app, version) {
   }
 }
 
-export function reusableRun(runs, sha) {
+export function reusableRun(runs, sha, now = Date.now()) {
   return runs.find((run) => run.attributes?.sourceCommit?.commitSha === sha
+    // Refresh before TestFlight's 90-day expiry even if main has been inactive.
+    && (!run.attributes.createdDate || Date.parse(run.attributes.createdDate) > now - 84 * 86_400_000)
     && (run.attributes.executionProgress !== "COMPLETE" || run.attributes.completionStatus === "SUCCEEDED"))
 }
 
@@ -132,13 +174,13 @@ async function uploadSymbols(api, runId) {
   const archive = join(mkdtempSync(join(tmpdir(), "inline-ios-symbols-")), "archive.zip")
   writeFileSync(archive, Buffer.from(await response.arrayBuffer()))
   execFileSync("npx", ["--yes", "--package", "@sentry/cli@3.8.0", "sentry-cli", "debug-files", "upload", "--wait", archive], {
-    stdio: "inherit", timeout: 600_000,
+    stdio: "inherit", timeout: 600_000, cwd: dirname(archive),
     env: { PATH: process.env.PATH, HOME: process.env.HOME, SENTRY_AUTH_TOKEN: process.env.SENTRY_AUTH_TOKEN,
       SENTRY_ORG: "usenoor", SENTRY_PROJECT: "inline-ios-macos", SENTRY_URL: "https://us.sentry.io" },
   })
 }
 
-export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, symbols = async () => {}, pause = sleep, now = Date.now, log = console.log }) {
+export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, symbols = async () => {}, isPublished = async () => false, markPublished = async () => {}, pause = sleep, now = Date.now, log = console.log }) {
   if (!/^[0-9a-f]{40}$/.test(sha || "")) throw new Error("Expected a full qualified main SHA")
   const deadline = now() + 75 * 60_000
   const wait = async () => {
@@ -150,7 +192,7 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   validateGroup(group, groupApp)
   await qualify()
   const runs = await list(api, `/v1/ciWorkflows/${WORKFLOW}/buildRuns?sort=-number&limit=100`)
-  let run = reusableRun(runs, sha)
+  let run = reusableRun(runs, sha, now())
   if (!run) {
     const canonicalName = await sourceTag(sha)
     let source
@@ -169,7 +211,9 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   } else log(`Resuming Xcode Cloud run ${run.id} for ${sha}`)
   while (true) {
     run = (await api(`/v1/ciBuildRuns/${run.id}`)).data
-    if (run.attributes.sourceCommit) validateRun(run, sha)
+    // Apple may return an empty sourceCommit while a new run is pending.
+    // Reject a resolved mismatch immediately; require an exact SHA at completion.
+    if (run.attributes.sourceCommit?.commitSha) validateRun(run, sha)
     if (run.attributes.executionProgress === "COMPLETE") break
     await wait()
   }
@@ -191,11 +235,11 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   const app = (await api(`/v1/builds/${build.id}/app`)).data
   const version = (await api(`/v1/builds/${build.id}/preReleaseVersion`)).data
   validateBuild(build, app, version)
-  const groupsPath = `/v1/betaGroups?filter[app]=${APP}&filter[builds]=${build.id}&limit=200`
-  const groups = await list(api, groupsPath)
-  if (groups.some((item) => item.id === GROUP)) {
+  const result = { sha, run: run.id, build: build.id, version: build.attributes.version }
+  const groups = await buildGroups(api, build.id)
+  if (groups.some((item) => item.id === GROUP) && await isPublished(sha, build.id)) {
     log(`Already available to internal Early Testers: ${sha}, build ${build.attributes.version}`)
-    return { sha, run: run.id, build: build.id, version: build.attributes.version }
+    return result
   }
   if (groups.some((item) => item.attributes.isInternalGroup !== true)) {
     throw new Error("Build already has external distribution; refusing automatic promotion")
@@ -207,12 +251,13 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   if (!groups.some((item) => item.id === GROUP)) {
     await api(`/v1/betaGroups/${GROUP}/relationships/builds`, { data: [{ type: "builds", id: build.id }] })
   }
-  const final = await list(api, groupsPath)
+  const final = await buildGroups(api, build.id)
   if (!final.some((item) => item.id === GROUP) || final.some((item) => !item.attributes.isInternalGroup)) {
     throw new Error("Internal distribution readback failed")
   }
+  await markPublished(result)
   log(`Verified iOS ${version.attributes.version} (${build.attributes.version}) for internal Early Testers: ${sha}`)
-  return { sha, run: run.id, build: build.id, version: build.attributes.version }
+  return result
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -225,6 +270,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const result = await publish({ api: appleClient(process.env), sha: process.env.EXPECTED_SHA,
       qualify: () => execFileSync("python3", ["scripts/ci/nightly-tip-gate.py", "qualify"], { stdio: "inherit" }),
       symbols: uploadSymbols,
+      ...publicationReceipt(),
     })
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
       `Internal Early Testers: build **${result.version}**, source \`${result.sha}\`, Xcode Cloud run \`${result.run}\`.\n`)
