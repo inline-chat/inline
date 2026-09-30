@@ -125,7 +125,7 @@ export function serializeRecentConversationSnapshot(result: InlineRecentMessages
   const snapshot: RecentConversationSnapshot = {
     chat: { chatId: result.chat.chatId.toString(), title: title.text, context: context.text },
     capturedAt,
-    coverage: "Recent text captured at capturedAt; not complete history or interpreted media. Use messages.list with nextOffsetId for older messages, or messages.context with anchorMessageId for shortened text. Reads may return a newer snapshot; no automatic refresh.",
+    coverage: "Recent text captured at capturedAt; not complete history or interpreted media. Use messages.list with nextOffsetId for older messages, or messages.get for shortened text. Reads may return a newer snapshot; no automatic refresh.",
     messages: [],
     truncated: omitted || title.shortened || context.shortened,
     nextOffsetId: result.nextOffsetId?.toString() ?? null,
@@ -180,7 +180,7 @@ export function registerConversationMentions(server: McpServer, params: MentionP
       const auth = requireReadAccess(params, extra.authInfo)
       const trimmedQuery = query.trim()
       const candidates = trimmedQuery
-        ? (await params.inline.resolveConversation(trimmedQuery, CONVERSATION_MENTION_LIMIT)).candidates
+        ? (await params.inline.resolveConversation(trimmedQuery, CONVERSATION_MENTION_LIMIT, { sort: "relevance" })).candidates
         : await params.inline.getEligibleChats()
       const items = candidates.filter((chat) => isInCurrentContext(chat, params.grant, auth)).slice(0, CONVERSATION_MENTION_LIMIT).map(resourceLink)
       return { content: [], structuredContent: { items } }

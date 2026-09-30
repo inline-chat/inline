@@ -263,7 +263,7 @@ function messageResultsComponent(): void {
     const footer = element("footer")
     if (nextOffsetId !== null) {
       if (!rows.length) footer.append(element("p", "No messages returned on this page."))
-      footer.append(element("p", hasQuery ? "More matches may exist. Try a narrower search." : "Older results may be available. Ask in chat to continue."))
+      footer.append(element("p", "Older results may be available. Ask in chat to continue."))
     } else if (!rows.length) {
       footer.append(element("p", filtered ? "No messages matched these filters on this page." : "No recent messages returned."))
     }

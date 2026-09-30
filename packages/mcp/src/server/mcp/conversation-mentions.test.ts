@@ -115,7 +115,7 @@ describe("conversation composer mentions", () => {
     const inline = inlineStub({ resolveConversation: vi.fn(async () => ({ query: "Launch", selected: candidate, candidates: [candidate] })) })
     const { request } = await harness(inline)
     const response = await request("tools/call", { name: "conversations.mentions", arguments: { query: " Launch " } })
-    expect(inline.resolveConversation).toHaveBeenCalledWith("Launch", 20)
+    expect(inline.resolveConversation).toHaveBeenCalledWith("Launch", 20, { sort: "relevance" })
     expect(response.result.structuredContent.items[0].uri).toBe("inline://chat/7")
     expect(inline.getEligibleChats).not.toHaveBeenCalled()
     expect(inline.recentMessages).not.toHaveBeenCalled()

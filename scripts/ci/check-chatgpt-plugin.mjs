@@ -62,7 +62,7 @@ async function checkCompiledMessageCards() {
   const inline = {
     close: async () => {},
     recentMessages: async () => ({ chat, direction: "all", scannedCount: 1, nextOffsetId: 100n, messages: [message], senderDisplayNames: { "2": "Dena Example" }, senderAvatarUrls: { "2": "https://api.inline.chat/file?id=fixture_avatar&exp=1999999999&sig=fixture" } }),
-    searchMessages: async ({ query }) => ({ chat, query, content: "all", mode: "search", nextOffsetId: 99n, messages: [], senderDisplayNames: {} }),
+    searchMessages: async ({ query }) => ({ chat, query, content: "all", mode: "search", scannedCount: 1, nextOffsetId: 99n, messages: [], senderDisplayNames: {} }),
   }
   const server = createInlineMcpServer({
     grant: { id: "card-contract", clientId: "card-client", inlineUserId: 1n, scope: "messages:read", spaceIds: [10n], allowDms: false, allowHomeThreads: false },
@@ -105,7 +105,7 @@ async function checkCompiledMessageCards() {
     const receive = (data) => window.dispatchEvent(new window.MessageEvent("message", { source: parent, data: { jsonrpc: "2.0", ...data } }))
     receive({ id: 1, result: { protocolVersion: "2026-01-26", hostContext: { theme: "light" } } })
     const listed = await request("tools/call", { name: "messages.list", arguments: { chatId: "7", limit: 20 } })
-    assert.equal(listed.structuredContent.senderUserId, undefined, "published list shape has no sender filter")
+    assert.equal(listed.structuredContent.senderUserId, null, "unfiltered list has no selected sender")
     assert.deepEqual(JSON.parse(listed.content[0].text), listed.structuredContent, "text fallback retains the real result")
     receive({ method: "ui/notifications/tool-result", params: listed })
     assert.equal(window.document.querySelectorAll("li").length, 1, "real list result must render")
@@ -123,11 +123,11 @@ async function checkCompiledMessageCards() {
     disclosure.click()
     assert.equal(window.document.querySelector(".message-text")?.textContent, message.message)
     const searched = await request("tools/call", { name: "messages.search", arguments: { chatId: "7", query: "blocked" } })
-    assert.equal(searched.structuredContent.senderUserId, undefined, "published search shape has no sender filter")
+    assert.equal(searched.structuredContent.senderUserId, null, "unfiltered search has no selected sender")
     assert.equal(searched.structuredContent.nextOffsetId, "99")
     receive({ method: "ui/notifications/tool-result", params: searched })
     assert.equal(window.document.querySelectorAll("li").length, 0, "search replaces previous rows")
-    assert.match(window.document.querySelector("footer")?.textContent ?? "", /More matches may exist\. Try a narrower search\./)
+    assert.match(window.document.querySelector("footer")?.textContent ?? "", /Older results may be available\. Ask in chat to continue\./)
     assert.doesNotMatch(window.document.body.textContent, /No messages matched/)
   } finally {
     await window?.happyDOM.close()

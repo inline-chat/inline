@@ -42,7 +42,7 @@ Exercise these cases with a test account and approved test conversations:
 
 1. Search/select a desktop mention, distinguish duplicate titles, and ask about its recent text. Confirm the resource is read and the answer respects snapshot coverage.
 2. Test empty chats, long Unicode messages, denied scope, and revoked conversation access. A denial must not return cached content.
-3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Only message-list results offer continuation; capped searches suggest refinement.
+3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Message-list and search results offer continuation when nextOffsetId is returned.
 4. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor card rendering should post messages or mark them read.
 5. In a supported Work/Cloud host, subscribe to an approved thread's `message.created`, receive a verified callback, read the actual reply and continue the waiting task. Renew before `refreshBefore`; qualify replay, restart, expiry, unsubscribe and revoked access. Do not equate a green proxy test with host continuation.
 6. With approved test recipients, call `conversations.ask`: check the private audience, one delivered question, pre-question replay cursor, subscription acknowledgement and resumed task. An uncertain create/send must retain its receipt and avoid an automatic duplicate.
