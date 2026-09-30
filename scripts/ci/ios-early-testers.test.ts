@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { APP, GROUP, WORKFLOW, appleClient, ensureSourceTag, makeToken, publish, reusableRun } from "./ios-early-testers.mjs"
+import { APP, GROUP, WORKFLOW, appleClient, ensureSourceTag, makeToken, publicationReceipt, publish, reusableRun } from "./ios-early-testers.mjs"
 
 const sha = "a".repeat(40)
 const run = { id: "run", attributes: { sourceCommit: { commitSha: sha }, executionProgress: "COMPLETE", completionStatus: "SUCCEEDED" } }
@@ -28,7 +28,11 @@ function fixture(overrides: Record<string, unknown> = {}) {
       groups = [group]
       return {}
     }
-    if (path.startsWith("/v1/betaGroups?")) return { data: groups }
+    if (path === `/v1/apps/${APP}/betaGroups?limit=200`) return { data: [group, ...groups.filter((item: any) => item.id !== GROUP)] }
+    if (path.includes("/relationships/builds?")) {
+      const id = path.split("/")[3]
+      return { data: groups.some((item: any) => item.id === id) ? [{ id: "build" }] : [] }
+    }
     if (!(path in routes)) throw new Error(`Unexpected request: ${path}`)
     return { data: routes[path] }
   }
@@ -47,8 +51,30 @@ describe("internal iOS release boundary", () => {
   it("is idempotent when the exact build is already internal", async () => {
     const f = fixture()
     f.setGroups([group])
-    await publish({ api: f.api, sha, qualify: () => {}, log: () => {} })
+    let uploads = 0
+    await publish({ api: f.api, sha, qualify: () => {}, isPublished: async () => true, symbols: async () => { uploads++ }, log: () => {} })
     expect(f.mutations).toEqual([])
+    expect(uploads).toBe(0)
+  })
+  it("uploads symbols even when all-build access precedes the first publication receipt", async () => {
+    const f = fixture()
+    f.setGroups([group])
+    const order: string[] = []
+    await publish({ api: f.api, sha, qualify: () => {}, symbols: async () => { order.push("symbols") }, markPublished: async () => { order.push("receipt") }, log: () => {} })
+    expect(order).toEqual(["symbols", "receipt"])
+    expect(f.mutations).toEqual([])
+  })
+  it("accepts only an exact-build receipt issued by GitHub Actions", async () => {
+    const env = { GITHUB_REPOSITORY: "inline-chat/inline", GH_TOKEN: "test-token", GITHUB_RUN_ID: "123" }
+    const bodies: unknown[] = []
+    const receipt = publicationReceipt(env, async (_url: string, options: { body?: string }) => {
+      if (options.body) { bodies.push(JSON.parse(options.body)); return Response.json({}) }
+      return Response.json({ statuses: [{ context: "ios/early-testers", state: "success", description: "Early Testers build build", creator: { login: "github-actions[bot]" } }] })
+    })
+    expect(await receipt.isPublished(sha, "build")).toBe(true)
+    expect(await receipt.isPublished(sha, "other")).toBe(false)
+    await receipt.markPublished({ sha, build: "build" })
+    expect(bodies).toEqual([{ context: "ios/early-testers", state: "success", description: "Early Testers build build", target_url: "https://github.com/inline-chat/inline/actions/runs/123" }])
   })
   it("rejects external groups, wrong app/platform/source, expired builds and individual assignments", async () => {
     const cases = [
