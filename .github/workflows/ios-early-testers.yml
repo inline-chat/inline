@@ -25,14 +25,14 @@ jobs:
       checks: read
       contents: write # Create immutable source tags; never move an existing tag.
       statuses: write # Record verified internal distribution and symbol upload per source SHA.
-    if: github.repository == 'inline-chat/inline' && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/ios-cloud-source-readiness'))
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       # Always use trusted default-branch scripts, never workflow_run artifacts.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/ios-cloud-source-readiness' && github.ref || 'main' }}
+          ref: main
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
