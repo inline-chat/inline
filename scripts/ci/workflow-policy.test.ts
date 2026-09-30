@@ -36,7 +36,7 @@ describe("public CI contracts", () => {
 
   it("keeps all selected package and app gates visible", () => {
     const apple = workflow("apple-validation.yml")
-    expect(Object.keys(apple.jobs).sort()).toEqual(["contracts", "ios-app", "macos-app", "swift-main", "swift-utilities"])
+    expect(Object.keys(apple.jobs).sort()).toEqual(["changes", "contracts", "ios-app", "macos-app", "required", "swift-main", "swift-utilities"])
     const source = read(".github/workflows/apple-validation.yml")
     for (const pkg of ["InlineKit", "InlineUI", "InlineIOSUI", "InlineMacUI", "InlineRealtimeCore",
       "InlineMacSidebarModel", "InlineThumbnailing", "InlineSyntaxHighlighting", "InlineMacScripting",
@@ -48,6 +48,16 @@ describe("public CI contracts", () => {
     for (const job of ["rust-workspace", "shared-packages", "candidate-packages", "packed-consumers", "workflow-and-release-contracts"]) {
       expect(integrations.jobs[job], job).toBeDefined()
     }
+  })
+
+  it("retains ARM64 native CLI tests while the workspace owns AMD64 tests", () => {
+    const cli = read(".github/workflows/cli-check.yml")
+    expect(cli).toContain("dtolnay/rust-toolchain@1.96.0")
+    expect(cli).toContain(". -> target")
+    expect(cli).toContain("if: matrix.target == 'aarch64-unknown-linux-musl'")
+    expect(cli).toContain("cargo test --locked --profile ci-test")
+    expect(read(".github/workflows/integrations.yml")).toContain("cargo test --workspace --all-targets --locked --profile ci-test")
+    expect(workflow("integrations.yml").jobs.cli).toBeUndefined()
   })
 
   it("does not expose publication workflows to pull requests", () => {

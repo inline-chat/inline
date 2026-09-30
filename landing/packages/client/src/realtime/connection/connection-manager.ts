@@ -1,4 +1,5 @@
 import { Log, type LogLevel } from "@inline/log"
+import { ConnectionError_Reason } from "@inline-chat/protocol/core"
 import { AsyncChannel } from "../../utils/async-channel"
 import type { ProtocolClient } from "../client/protocol-client"
 import type { ClientEvent } from "../types"
@@ -287,6 +288,14 @@ export class ConnectionManager {
         return
 
       case "connectionError":
+        // The server uses UNAUTHORIZED for transient authentication failures too.
+        if (
+          event.reason === ConnectionError_Reason.UNAUTHORIZED ||
+          event.reason === ConnectionError_Reason.REASON_UNSPECIFIED
+        ) {
+          await this.scheduleReconnect(`server-auth-${event.reason}`)
+          return
+        }
         this.authAvailable = false
         await this.handleConstraintLoss(
           `server-auth-${event.reason}`,

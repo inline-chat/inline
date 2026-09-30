@@ -8,6 +8,7 @@ import {
 import { chatId, dialogId, messageId, userId } from "@inline/ids"
 import {
   AuthStore,
+  MemoryAuthSessionPersistence,
   Db,
   DbObjectKind,
   DbQueryPlanType,
@@ -164,6 +165,42 @@ describe("realtime connection flow", () => {
 
     expect(client.connectionState).toBe("idle")
     expect(client.connection.state).toBe("stopped")
+  })
+
+  it.each([
+    ConnectionError_Reason.UNAUTHORIZED,
+    ConnectionError_Reason.REASON_UNSPECIFIED,
+    ConnectionError_Reason.INVALID_AUTH,
+  ])("preserves stored credentials for non-revocation connection errors (%s)", async (reason) => {
+    const transport = new MockTransport()
+    const storage = new MemoryAuthSessionPersistence()
+    const auth = new AuthStore({ storage })
+    const logout = vi.spyOn(auth, "logout")
+    const session = { token: "valid-token", userId: userId(1) }
+    const client = new RealtimeClient({
+      auth, db: new Db({ autoHydrate: false, persistence: false }), transport,
+      url: "ws://example.test", sync: false,
+      connection: { backoffDelayMs: () => 10 },
+    })
+    const starts = vi.spyOn(transport, "start")
+    try {
+      await client.startSession(session)
+      await transport.connect()
+      await transport.emitMessage(ServerProtocolMessage.create({ body: {
+        oneofKind: "connectionError", connectionError: { reason },
+      } }))
+      if (reason === ConnectionError_Reason.INVALID_AUTH) {
+        await waitFor(() => client.connection.state === "stopped")
+      } else {
+        await waitFor(() => starts.mock.calls.length === 2)
+      }
+      expect(logout).not.toHaveBeenCalled()
+      expect(auth.isLoggedIn()).toBe(true)
+      expect(await storage.load()).toEqual({ status: "ready", session })
+    } finally {
+      await client.stop()
+      auth.dispose()
+    }
   })
 
   it("executes getMe transaction and updates db", async () => {

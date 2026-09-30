@@ -1,4 +1,4 @@
-import type { ConnectionInit, RpcError, RpcResult } from "@inline-chat/protocol/core"
+import { ConnectionError_Reason, type ConnectionInit, type RpcError, type RpcResult } from "@inline-chat/protocol/core"
 import {
   parseInlineId,
   protocolId,
@@ -888,7 +888,9 @@ export class RealtimeClient {
         this.log.warn("realtime.auth.invalidated", {
           reason: event.reason,
         })
-        void this.stopSession().catch((error: unknown) => {
+        // Only the explicit revocation signal may discard durable credentials.
+        const stop = event.reason === ConnectionError_Reason.SESSION_REVOKED ? this.stopSession() : this.stop()
+        void stop.catch((error: unknown) => {
           this.log.error("realtime.auth.stop_failed", { error })
         })
         break

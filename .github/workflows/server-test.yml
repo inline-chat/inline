@@ -254,3 +254,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
+
+  required:
+    name: Server validation required
+    if: ${{ always() }}
+    needs: [container, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected job to pass
+        env:
+          RESULTS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci/validation-gates.mjs server

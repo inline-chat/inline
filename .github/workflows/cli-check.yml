@@ -65,7 +65,7 @@ jobs:
         run: bash scripts/ci/ensure-public-workspaces.sh
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.96.0
 
       - name: Install Linux musl Toolchain
         working-directory: cli
@@ -84,11 +84,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
-
-      - name: Build
-        working-directory: cli
-        run: cargo build --locked
+            . -> target
 
       - name: Build Linux musl
         working-directory: cli
@@ -102,6 +98,7 @@ jobs:
       - name: Test installer with Debian sh
         run: python3 scripts/ci/test-cli-installer.py
 
-      - name: Test
+      - name: Test native ARM64 CLI
+        if: matrix.target == 'aarch64-unknown-linux-musl'
         working-directory: cli
         run: cargo test --locked --profile ci-test

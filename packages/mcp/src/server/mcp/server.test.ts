@@ -1963,3 +1963,60 @@ describe("mcp tool server", () => {
     expect(JSON.stringify(audit)).not.toContain("hi")
   })
 })
+
+describe("submission-v2 authorization boundary", () => {
+  const calls = [
+    ["spaces.list", {}],
+    ["people.search", {}],
+    ["conversations.list", {}],
+    ["conversations.get", { chatId: "7" }],
+    ["conversations.create", { title: "Test", spaceId: "10" }],
+    ["files.upload", { sourceType: "base64", source: "aGVsbG8=", fileName: "hello.txt", contentType: "text/plain" }],
+    ["files.get", { chatId: "7", messageIds: ["44"] }],
+    ["messages.list", { chatId: "7" }],
+    ["messages.search", { chatId: "7", query: "invoice" }],
+    ["messages.context", { chatId: "7", anchorMessageId: "44" }],
+    ["messages.unread", {}],
+    ["messages.send", { chatId: "7", text: "hello" }],
+    ["messages.send_media", { chatId: "7", mediaKind: "photo", mediaId: "501" }],
+    ["messages.send_batch", { chatId: "7", items: [{ type: "text", content: "hello" }] }],
+  ] as const
+
+  it.each(calls)("%s rejects missing scopes before accessing Inline", async (name, args) => {
+    const inline = createInlineStub({})
+    const accesses = Object.entries(inline).filter(([method]) => method !== "close")
+      .map(([method]) => vi.spyOn(inline, method as keyof InlineApi))
+    const server = createInlineMcpServer({ inline, grant, contractVersion: "submission-v2" })
+    try {
+      const authInfo = createAuthInfo([])
+      const { transport, sent } = await connectAndInitialize(server, authInfo)
+      await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } } as any, { authInfo })
+      const response = await waitForResponse(sent, 2)
+      expect(response.result.isError).toBe(true)
+      expect(response.result.content[0].text).toMatch(/scope/i)
+      for (const access of accesses) expect(access).not.toHaveBeenCalled()
+    } finally {
+      await server.close()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it("surfaces a transport failure and audits it without reporting a successful send", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const sendMessage = vi.fn().mockRejectedValue(new Error("Inline transport unavailable"))
+    const server = createInlineMcpServer({ inline: createInlineStub({ sendMessage }), grant, contractVersion: "submission-v2" })
+    try {
+      const authInfo = createAuthInfo(["messages:write"])
+      const { transport, sent } = await connectAndInitialize(server, authInfo)
+      await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.send", arguments: { chatId: "7", text: "hello" } } } as any, { authInfo })
+      const response = await waitForResponse(sent, 2)
+      expect(response.result.isError).toBe(true)
+      expect(response.result.content[0].text).toContain("Inline transport unavailable")
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(lastMessagesSendAuditRecord(info)).toMatchObject({ outcome: "failure", chatId: "7", messageId: null })
+    } finally {
+      await server.close()
+      vi.restoreAllMocks()
+    }
+  })
+})
