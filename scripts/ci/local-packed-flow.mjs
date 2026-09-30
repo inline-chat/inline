@@ -29,6 +29,8 @@ try {
   assert.equal(me.ok, true)
   assert.equal(me.result.user.is_bot, true)
   assert.equal(me.result.user.id, botId)
+  // Projection begins when the bot creates its polling stream, before messages arrive.
+  assert.equal((await bot.getUpdates({ timeout: 0 })).ok, true)
   const conversation = await bot.getChat({ user_id: humanId })
   assert.equal(conversation.ok, true)
   chatId = conversation.result.chat.chat_id
