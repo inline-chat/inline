@@ -178,7 +178,7 @@ describe("createInlineApi", () => {
     expect(requestedSpaceIds).toEqual([10n])
   })
 
-  it.each(["recent", "search", "filter-only search"])("%s names only returned authors using the existing catalog without profile RPCs", async (operation) => {
+  it.each(["recent", "search", "filter-only search"])("%s includes names and avatar URLs only for returned authors without profile RPCs", async (operation) => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     const invokeContext = async (method: Method) => {
       if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [] as User[], spaces: [], messages: [], folders: [] } }
@@ -189,7 +189,10 @@ describe("createInlineApi", () => {
       if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages } }
       if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages } }
       const result = await invokeContext(method)
-      if (method === Method.GET_CHATS) result.getChats.users = [user(2n, "Dena", "Example", "dena"), user(3n, "Unrelated", "Person", "other")]
+      if (method === Method.GET_CHATS) result.getChats.users = [
+        { ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" } },
+        { ...user(3n, "Unrelated", "Person", "other"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_three&exp=1999999999&sig=fixture" } },
+      ]
       return result
     })
     try {
@@ -197,12 +200,35 @@ describe("createInlineApi", () => {
         ? await api.recentMessages({ chatId: 7n })
         : await api.searchMessages({ chatId: 7n, query: operation === "search" ? "author" : undefined })
       expect(result.senderDisplayNames).toEqual({ "2": "Dena Example" })
+      expect(result.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
       expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([
         Method.GET_CHATS, operation === "search" ? Method.SEARCH_MESSAGES : Method.GET_CHAT_HISTORY,
       ])
     } finally { await api.close() }
   })
 
+
+  it.each([
+    "https://example.com/file?id=avatar&exp=1999999999&sig=fixture",
+    "http://api.inline.chat/file?id=avatar&exp=1999999999&sig=fixture",
+    "https://api.inline.chat/other?id=avatar&exp=1999999999&sig=fixture",
+    "https://user:pass@api.inline.chat/file?id=avatar&exp=1999999999&sig=fixture",
+    "https://api.inline.chat/file?id=avatar&exp=1999999999&sig=fixture#fragment",
+    "https://api.inline.chat/file?id=avatar",
+    "data:image/svg+xml,<svg/>",
+  ])("omits unsupported profile image URL %s", async (cdnUrl) => {
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [{ ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl } }], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: [message(100n, 7n, 2n, "Hello")] } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    try {
+      const result = await api.recentMessages({ chatId: 7n })
+      expect(result.senderAvatarUrls).toEqual({})
+      expect(result.senderDisplayNames).toEqual({ "2": "Dena Example" })
+    } finally { await api.close() }
+  })
 
   it("continues after the last returned row when only 20 of 50 fetched rows fit", async () => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })

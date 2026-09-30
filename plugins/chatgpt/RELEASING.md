@@ -38,7 +38,7 @@ Exercise these cases with a test account and approved test conversations:
 
 1. Search/select a desktop mention, distinguish duplicate titles, and ask about its recent text. Confirm the resource is read and the answer respects snapshot coverage.
 2. Test empty chats, long Unicode messages, denied scope, and revoked conversation access. A denial must not return cached content.
-3. Read recent messages and search within a conversation. Verify cards, local text expansion, visible filters, and an empty filtered page with continuation.
+3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Only message-list results offer continuation; capped searches suggest refinement.
 4. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor card rendering should post messages or mark them read.
 
 Record host name/build, candidate SHA, deployment identity, case outcomes, and actual screenshots. Do not publish screenshots or capability claims before these paths work. Use the submission JSON as review material; the picker case is host-driven, not a promise that the model chooses an app-only search tool.

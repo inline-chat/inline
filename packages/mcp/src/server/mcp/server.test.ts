@@ -1125,6 +1125,7 @@ describe("mcp tool server", () => {
           nextOffsetId: 8n,
           messages: [{ id: 9n, fromId: 2n, chatId: resolvedChatId, message: "hello from me", out: true, date: 5n } as any],
           senderDisplayNames: { "2": "Dena Example", "3": "Unrelated Person" },
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1173,6 +1174,8 @@ describe("mcp tool server", () => {
     expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
     expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
     expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
     expect(payload.messages[0].urlPreviews).toEqual([])
@@ -1209,6 +1212,7 @@ describe("mcp tool server", () => {
           content: "documents",
           mode: "search",
           messages: [{ id: 14n, fromId: 2n, chatId: resolvedChatId, message: "invoice is sent", out: false, date: 999n } as any],
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1251,6 +1255,8 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("14")
     expect(payload.messages[0].text).toBe("invoice is sent")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
   })
 
   it("messages.list includes media download metadata when present", async () => {

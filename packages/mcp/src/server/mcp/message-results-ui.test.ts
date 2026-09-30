@@ -77,6 +77,68 @@ describe("message results card", () => {
     expect(card.sent.every((message) => ["ui/initialize", "ui/notifications/initialized", "ui/notifications/size-changed"].includes(message.method))).toBe(true)
   })
 
+  it("keeps sparse results independent with native avatars, names above bubbles, and dates inside", () => {
+    const card = mount()
+    card.notify("ui/notifications/tool-result", result({ query: "team", messages: [
+      message({ senderDisplayName: "Dena Sohrabi" }), message({ id: "9", senderDisplayName: "Dena Sohrabi" }),
+      message({ id: "8", out: true }),
+    ] }))
+    expect(card.document.querySelectorAll(".incoming .avatar")).toHaveLength(2)
+    expect(card.document.querySelectorAll(".outgoing .avatar")).toHaveLength(0)
+    expect(card.document.querySelectorAll(".bubble time")).toHaveLength(3)
+    expect(card.document.querySelectorAll(".message-content > .sender")).toHaveLength(3)
+    expect(card.document.querySelectorAll(".bubble .sender")).toHaveLength(0)
+    expect(Array.from(card.document.querySelectorAll(".avatar-initial"), (node) => node.textContent)).toEqual(["D", "D"])
+    expect(card.document.querySelector(".avatar")?.getAttribute("aria-hidden")).toBe("true")
+    expect(card.document.querySelector(".outgoing .sender")?.textContent).toBe("You")
+    expect(card.document.querySelector("ol")?.getAttribute("aria-label")).toBe("Returned messages, newest first")
+  })
+
+  it("uses one native grapheme initial and name-based colors with an honest unknown-person fallback", () => {
+    const card = mount()
+    card.notify("ui/notifications/tool-result", result({ messages: [
+      message({ senderDisplayName: "@morgan" }), message({ id: "9", fromId: "88", senderDisplayName: "morgan" }),
+      message({ id: "8", senderDisplayName: "👩🏽‍💻 Dev" }), message({ id: "7", senderDisplayName: "  " }),
+    ] }))
+    const rows = card.document.querySelectorAll("li")
+    expect(rows[0]?.style.getPropertyValue("--avatar-base")).toBe(rows[1]?.style.getPropertyValue("--avatar-base"))
+    expect(Array.from(card.document.querySelectorAll(".avatar-initial"), (node) => node.textContent)).toEqual(["M", "M", "👩🏽‍💻"])
+    expect(rows[3]?.querySelector(".avatar-person")).not.toBeNull()
+    expect(rows[3]?.querySelector(".avatar")?.textContent).toBe("")
+  })
+
+  it("uses only the author's signed photo from UI metadata and reveals its fallback on error", () => {
+    const card = mount()
+    const photoUrl = "https://api.inline.chat/file?id=avatar-fixture&exp=9999999999&sig=fixture"
+    card.notify("ui/notifications/tool-result", { ...result({ messages: [message({ senderDisplayName: "Dena" })] }),
+      _meta: { inline: { senderAvatarUrls: { "4": photoUrl, "88": photoUrl } } },
+    })
+    const photo = card.document.querySelector("img")!
+    expect(card.document.querySelectorAll("img")).toHaveLength(1)
+    expect(photo.src).toBe(photoUrl)
+    expect(photo.alt).toBe("")
+    expect(photo.referrerPolicy).toBe("no-referrer")
+    expect([photo.width, photo.height]).toEqual([28, 28])
+    expect(photo.parentElement?.querySelector(".avatar-initial")?.textContent).toBe("D")
+    photo.dispatchEvent(new card.window.Event("error"))
+    expect(photo.hidden).toBe(true)
+    expect(card.fetch).not.toHaveBeenCalled()
+    expect(card.document.querySelector("#root")?.textContent).not.toContain("sig=")
+  })
+
+  it.each([
+    "https://evil.example/file?id=1&exp=2&sig=3", "http://api.inline.chat/file?id=1&exp=2&sig=3",
+    "https://api.inline.chat/other?id=1&exp=2&sig=3", "https://api.inline.chat/file?id=1&exp=2",
+    "https://user:password@api.inline.chat/file?id=1&exp=2&sig=3", "https://api.inline.chat/file?id=1&exp=2&sig=3#track",
+    "data:image/png;base64,fixture", "https://api.inline.chat/file?id=1&exp=2&sig=" + "a".repeat(4096),
+  ])("ignores disallowed profile photo URLs (%s)", (url) => {
+    const card = mount()
+    card.notify("ui/notifications/tool-result", { ...result(), _meta: { inline: { senderAvatarUrls: { "4": url } } } })
+    expect(card.document.querySelector("img")).toBeNull()
+    expect(card.document.querySelector(".avatar-person")).not.toBeNull()
+    expect(card.document.querySelector("[role=alert]")).toBeNull()
+  })
+
   it("accepts released results that omit optional sender and continuation fields", () => {
     const card = mount()
     const released = result({ query: "team" })
@@ -254,7 +316,7 @@ describe("message results card", () => {
   })
 })
 
-it("registers one self-contained resource with no network/resource/frame allowances", async () => {
+it("registers a self-contained resource allowing only Inline profile photo resources", async () => {
   const registerResource = vi.fn()
   registerMessageResultsUi({ registerResource } as unknown as McpServer)
   expect(registerResource).toHaveBeenCalledOnce()
@@ -266,6 +328,6 @@ it("registers one self-contained resource with no network/resource/frame allowan
   expect(resource.uri).toBe(uri)
   expect(resource.mimeType).toBe("text/html;profile=mcp-app")
   expect(resource.text).toBe(createMessageResultsHtml())
-  expect(resource._meta.ui).toEqual({ prefersBorder: true, domain: "https://mcp.inline.chat", csp: { connectDomains: [], resourceDomains: [], frameDomains: [] } })
+  expect(resource._meta.ui).toEqual({ prefersBorder: true, domain: "https://mcp.inline.chat", csp: { connectDomains: [], resourceDomains: ["https://api.inline.chat"], frameDomains: [] } })
   expect(resource.text).not.toMatch(/\bsrc=|\bhref=|\bfetch\(|\bXMLHttpRequest\b|\bWebSocket\b/)
 })

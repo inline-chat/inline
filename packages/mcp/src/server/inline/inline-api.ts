@@ -107,6 +107,8 @@ export type InlineRecentMessagesResult = {
   nextOffsetId: bigint | null
   messages: Message[]
   senderDisplayNames?: Record<string, string>
+  /** Signed profile images for UI-only tool metadata, never message text. */
+  senderAvatarUrls?: Record<string, string>
 }
 
 export type InlineSearchMessagesResult = {
@@ -117,6 +119,8 @@ export type InlineSearchMessagesResult = {
   nextOffsetId?: bigint | null
   messages: Message[]
   senderDisplayNames?: Record<string, string>
+  /** Signed profile images for UI-only tool metadata, never message text. */
+  senderAvatarUrls?: Record<string, string>
 }
 
 export type InlineUnreadMessagesResult = {
@@ -263,6 +267,7 @@ export function createInlineApi(params: {
     chats: InlineEligibleChat[]
     byChatId: Map<string, InlineEligibleChat>
     senderDisplayNames: Map<string, string>
+    senderAvatarUrls: Map<string, string>
   }
   let eligibleChatsCache: (EligibleChatContext & { expiresAtMs: number }) | null = null
   let eligibleChatsInFlight: Promise<EligibleChatContext> | null = null
@@ -289,6 +294,18 @@ export function createInlineApi(params: {
     const username = user.username?.trim()
     if (username) return `@${username}`
     return null
+  }
+
+  // Production profile photos use Inline's signed media route. Do not widen
+  // the card CSP or pass arbitrary catalog URLs through to the browser.
+  const profileAvatarUrl = (value: string | undefined): string | undefined => {
+    if (!value || value.length > 4096) return undefined
+    try {
+      const url = new URL(value)
+      if (url.origin !== "https://api.inline.chat" || url.pathname !== "/file" || url.username || url.password || url.hash) return undefined
+      if (!["id", "exp", "sig"].every((key) => url.searchParams.get(key))) return undefined
+      return url.href
+    } catch { return undefined }
   }
 
   const compareBigIntDesc = (left: bigint | null | undefined, right: bigint | null | undefined): number => {
@@ -613,10 +630,13 @@ export function createInlineApi(params: {
 
     const userById = new Map<string, User>()
     const senderDisplayNames = new Map<string, string>()
+    const senderAvatarUrls = new Map<string, string>()
     for (const user of payload.users) {
       userById.set(user.id.toString(), user)
       const name = userDisplayName(user)
       if (name) senderDisplayNames.set(user.id.toString(), name)
+      const avatarUrl = profileAvatarUrl(user.profilePhoto?.cdnUrl)
+      if (avatarUrl) senderAvatarUrls.set(user.id.toString(), avatarUrl)
     }
 
     const lastMessageByChatId = new Map<string, Message>()
@@ -646,6 +666,7 @@ export function createInlineApi(params: {
       chats: eligible,
       byChatId: new Map(eligible.map((chat) => [chat.chatId.toString(), chat])),
       senderDisplayNames,
+      senderAvatarUrls,
     }
   }
 
@@ -665,6 +686,7 @@ export function createInlineApi(params: {
           chats: context.chats,
           byChatId: context.byChatId,
           senderDisplayNames: context.senderDisplayNames,
+          senderAvatarUrls: context.senderAvatarUrls,
         }
         return context
       })
@@ -675,16 +697,20 @@ export function createInlineApi(params: {
     return await eligibleChatsInFlight
   }
 
-  // Reuse names already fetched for the authorized catalog. Only disclose
-  // authors of this returned page; no profile requests or extra cache owner.
-  const namesForMessages = (messages: Message[]): Record<string, string> => {
-    const names: Record<string, string> = {}
+  // Reuse authorized catalog metadata, limited to authors on this returned
+  // page. Profile URLs travel separately in UI metadata, not model content.
+  const sendersForMessages = (messages: Message[]) => {
+    const senderDisplayNames: Record<string, string> = {}
+    const senderAvatarUrls: Record<string, string> = {}
     for (const message of messages) {
       const fromId = message.fromId?.toString()
-      const name = fromId == null ? undefined : eligibleChatsCache?.senderDisplayNames.get(fromId)
-      if (fromId != null && name) names[fromId] = name
+      if (fromId == null) continue
+      const name = eligibleChatsCache?.senderDisplayNames.get(fromId)
+      const avatarUrl = eligibleChatsCache?.senderAvatarUrls.get(fromId)
+      if (name) senderDisplayNames[fromId] = name
+      if (avatarUrl) senderAvatarUrls[fromId] = avatarUrl
     }
-    return names
+    return { senderDisplayNames, senderAvatarUrls }
   }
 
   const getAllowedChat = async (target: { chatId?: bigint; userId?: bigint }, freshChatAuthorization = false): Promise<InlineEligibleChat> => {
@@ -812,7 +838,7 @@ export function createInlineApi(params: {
       scannedCount,
       nextOffsetId: nextOffsetId ?? null,
       messages,
-      senderDisplayNames: namesForMessages(messages),
+      ...sendersForMessages(messages),
     }
   }
 
@@ -1198,6 +1224,7 @@ export function createInlineApi(params: {
           nextOffsetId: fallback.nextOffsetId,
           messages: fallback.messages,
           senderDisplayNames: fallback.senderDisplayNames,
+          senderAvatarUrls: fallback.senderAvatarUrls,
         }
       }
 
@@ -1225,7 +1252,7 @@ export function createInlineApi(params: {
         mode: "search",
         nextOffsetId: sourceMessages.length >= maxMessages ? sourceMessages[sourceMessages.length - 1]!.id : null,
         messages,
-        senderDisplayNames: namesForMessages(messages),
+        ...sendersForMessages(messages),
       }
     },
 

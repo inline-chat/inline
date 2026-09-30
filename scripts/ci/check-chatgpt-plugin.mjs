@@ -25,7 +25,7 @@ async function checkCompiledMessageCards() {
   const message = { id: 100n, chatId: 7n, fromId: 2n, message: "Compiled card text ".repeat(30), out: false, date: 1790726400n }
   const inline = {
     close: async () => {},
-    recentMessages: async () => ({ chat, direction: "all", scannedCount: 1, nextOffsetId: 100n, messages: [message], senderDisplayNames: { "2": "Dena Example" } }),
+    recentMessages: async () => ({ chat, direction: "all", scannedCount: 1, nextOffsetId: 100n, messages: [message], senderDisplayNames: { "2": "Dena Example" }, senderAvatarUrls: { "2": "https://api.inline.chat/file?id=fixture_avatar&exp=1999999999&sig=fixture" } }),
     searchMessages: async ({ query }) => ({ chat, query, content: "all", mode: "search", nextOffsetId: 99n, messages: [], senderDisplayNames: {} }),
   }
   const server = createInlineMcpServer({
@@ -74,6 +74,14 @@ async function checkCompiledMessageCards() {
     receive({ method: "ui/notifications/tool-result", params: listed })
     assert.equal(window.document.querySelectorAll("li").length, 1, "real list result must render")
     assert.equal(window.document.querySelector(".sender")?.textContent, "Dena Example")
+    assert.ok(window.document.querySelector(".incoming .bubble"), "incoming messages use a native bubble")
+    const photo = window.document.querySelector(".avatar img")
+    assert.equal(photo?.getAttribute("src"), listed._meta.inline.senderAvatarUrls["2"])
+    assert.equal(photo?.referrerPolicy, "no-referrer")
+    assert.doesNotMatch(JSON.stringify([listed.structuredContent, listed.content]), /sig=fixture/, "signed avatars stay out of model-visible content")
+    photo.dispatchEvent(new window.Event("error"))
+    assert.equal(photo.hidden, true, "unavailable photo reveals the native initials fallback")
+    assert.equal(window.document.querySelector(".avatar-initial")?.textContent, "D")
     const disclosure = window.document.querySelector("button")
     assert.ok(disclosure, "long returned text must have local disclosure")
     disclosure.click()
@@ -206,7 +214,7 @@ try {
   assert.match(contents[0].text, /ui\/notifications\/tool-result/)
   const csp = contents[0]._meta?.ui?.csp
   assert.deepEqual(csp?.connectDomains, [], "passive cards must not request network connections")
-  assert.deepEqual(csp?.resourceDomains, [], "card assets must be packaged")
+  assert.deepEqual(csp?.resourceDomains, ["https://api.inline.chat"], "only Inline profile images may load remotely")
   scenarios.push("compiled-ui-resource-served-with-passive-csp")
 
   // Scope-denial paths must fail before any request to the Inline server.

@@ -2634,6 +2634,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
+        ...(Object.keys(recent.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: recent.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -2819,6 +2820,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
+        ...(Object.keys(found.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: found.senderAvatarUrls } } } : {}),
       }
     },
   )
