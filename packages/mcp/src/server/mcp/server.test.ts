@@ -310,6 +310,7 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const tools = res.result.tools as Array<any>
     expect(tools.map((tool) => tool.name)).toEqual([
+      "conversations.mentions",
       "account.me",
       "spaces.list",
       "people.search",
@@ -331,6 +332,7 @@ describe("mcp tool server", () => {
       string,
       { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }
     > = {
+      "conversations.mentions": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -394,6 +396,10 @@ describe("mcp tool server", () => {
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
     expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
+    expect(list._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v1.html" })
+    const search = tools.find((tool) => tool.name === "messages.search")
+    expect(search._meta.ui).toEqual(list._meta.ui)
+    expect(search._meta.securitySchemes[0].scopes).toEqual(["messages:read"])
     expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
 
     const spaces = tools.find((tool) => tool.name === "spaces.list")
@@ -1118,6 +1124,7 @@ describe("mcp tool server", () => {
           scannedCount: 3,
           nextOffsetId: 8n,
           messages: [{ id: 9n, fromId: 2n, chatId: resolvedChatId, message: "hello from me", out: true, date: 5n } as any],
+          senderDisplayNames: { "2": "Dena Example", "3": "Unrelated Person" },
         }
       },
     })
@@ -1163,6 +1170,9 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("9")
     expect(payload.messages[0].text).toBe("hello from me")
+    expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
     expect(payload.messages[0].urlPreviews).toEqual([])

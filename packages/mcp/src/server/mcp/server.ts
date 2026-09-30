@@ -21,6 +21,8 @@ import type {
   InlineUploadedMediaKind,
 } from "../inline/inline-api"
 import { logMessagesSendAudit } from "./audit-log"
+import { MESSAGE_RESULTS_RESOURCE_URI, registerMessageResultsUi } from "./message-results-ui"
+import { registerConversationMentions } from "./conversation-mentions"
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 const MAX_UPLOAD_REDIRECTS = 3
@@ -1047,6 +1049,11 @@ function messagePayload(message: Message) {
   }
 }
 
+function namedMessagePayload(message: Message, senderDisplayNames?: Record<string, string>) {
+  const name = senderDisplayNames?.[message.fromId?.toString() ?? ""]
+  return { ...messagePayload(message), ...(name ? { senderDisplayName: name } : {}) }
+}
+
 function chatMetadata(chat: InlineEligibleChat): {
   chatId: string
   uri: string
@@ -1420,6 +1427,7 @@ const messageOutputSchema = z.object({
   out: z.boolean(),
   chatId: z.string(),
   fromId: z.string().nullable(),
+  senderDisplayName: z.string().optional(),
   date: z.string().nullable(),
   replyToMsgId: z.string().nullable(),
   editDate: z.string().nullable(),
@@ -1617,6 +1625,7 @@ const messagesContextOutputSchema = z.object({
 })
 
 const messagesSearchOutputSchema = z.object({
+  nextOffsetId: z.string().nullable(),
   query: z.string().nullable(),
   content: contentFilterOutputSchema,
   since: z.string().nullable(),
@@ -1706,6 +1715,8 @@ export function createInlineMcpServer(params: {
     },
   )
 
+  registerConversationMentions(server, { grant: params.grant, inline: params.inline, resourceMetadataUrl })
+
   registerInlineTool(
     server,
     resourceMetadataUrl,
@@ -1753,6 +1764,8 @@ export function createInlineMcpServer(params: {
       }
     },
   )
+
+  registerMessageResultsUi(server)
 
   registerInlineTool(
     server,
@@ -2563,7 +2576,10 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
+      _meta: {
+        ...toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+      },
     },
     async (
       {
@@ -2604,7 +2620,7 @@ export function createInlineMcpServer(params: {
         until: parsedUntil,
         content: safeContent,
       })
-      const messages = recent.messages.map(messagePayload)
+      const messages = recent.messages.map((message) => namedMessagePayload(message, recent.senderDisplayNames))
 
       const payload = {
         chat: chatMetadata(recent.chat),
@@ -2744,7 +2760,10 @@ export function createInlineMcpServer(params: {
         destructiveHint: false,
         openWorldHint: false,
       },
-      _meta: toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
+      _meta: {
+        ...toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+      },
     },
     async (
       {
@@ -2785,10 +2804,11 @@ export function createInlineMcpServer(params: {
         content: safeContent,
       })
 
-      const messages = found.messages.map(messagePayload)
+      const messages = found.messages.map((message) => namedMessagePayload(message, found.senderDisplayNames))
 
       const payload = {
         query: found.query,
+        nextOffsetId: found.nextOffsetId?.toString() ?? null,
         content: found.content,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
