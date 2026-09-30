@@ -6,18 +6,18 @@ warm API on the existing Hetzner host. A second Fly Machine can later join the
 same app without changing clients or adding another load-balancer pool.
 
 ```text
-api.inline.chat — Cloudflare DNS + proxied load balancer
-  priority 1: Fly app → one or two healthy API Machines
-  priority 2: existing Hetzner → Traefik → private API container
+api.inline.chat — Cloudflare DNS + optional proxy
+  normal: Fly app → one healthy API Machine (temporary deployment overlap)
+  manual fallback: existing Hetzner → Traefik → private API container
                    all APIs → same PostgreSQL, object storage and key rings
 
-Cloudflare proxy incident: same hostname, DNS-only LB → Hetzner directly
+Cloudflare proxy incident: same hostname, DNS-only A/AAAA → qualified origin
 ```
 
-The incremental infrastructure is a Cloudflare load balancer and a running
-container on the existing host. Do not create a new VM, Redis cluster, database
-replica, ingress daemon or failover controller as part of this deployment.
-Cloudflare Load Balancing billing/entitlement must be confirmed before activation.
+The minimum is a running container on the existing host and tested manual
+cutover. Automatic Cloudflare Load Balancing is optional after this gate passes;
+confirm billing/entitlement before enabling it. No new VM, Redis cluster,
+database replica, ingress daemon or failover controller is required.
 
 ## Shared-host boundary
 
@@ -45,9 +45,9 @@ resource if it harms host headroom or unrelated services.
 
 | Mode | Configuration | Behavior |
 | --- | --- | --- |
-| Standalone | No Redis/Valkey URL; omit `REALTIME_DISTRIBUTED` or set `0` | Local delivery, no recent-bucket publication/discovery overhead |
-| Multiple APIs with broker | `REALTIME_DISTRIBUTED=1`, same private Redis URL and encryption key | Immediate local delivery and encrypted remote fanout |
-| Multiple APIs without broker | `REALTIME_DISTRIBUTED=1`, Redis/Valkey URL absent | Local delivery plus bounded PostgreSQL discovery and client catch-up |
+| Standalone | No Redis/Valkey URL; omit `INLINE_REALTIME_DISTRIBUTED` or set `0` | Local delivery, no recent-bucket publication/discovery overhead |
+| Multiple APIs with broker | `INLINE_REALTIME_DISTRIBUTED=1`, same private Redis URL and encryption key | Immediate local delivery and encrypted remote fanout |
+| Multiple APIs without broker | `INLINE_REALTIME_DISTRIBUTED=1`, Redis/Valkey URL absent | Local delivery plus bounded PostgreSQL discovery and client catch-up |
 
 All writers must agree on distributed mode. The private Fly Redis endpoint is
 not reachable from Hetzner without a separately configured private network.
@@ -64,34 +64,41 @@ External side effects retain their existing delivery/idempotency contracts.
 
 ## Hetzner ingress
 
-Fly retains its Cloudflare-only ingress initially. Hetzner accepts either the
-existing Cloudflare origin proof or an independently authenticated local proxy.
+The source supports direct profiles on both origins without a provider admission
+secret. Keep
+application authentication and canonical Host enforcement. The optional
+Cloudflare secret authenticates client-IP attribution only.
 
 ```text
 INLINE_PROCESS_ROLE=all
-REALTIME_DISTRIBUTED=1
-INLINE_INGRESS_MODE=cloudflare-or-proxy
+INLINE_REALTIME_DISTRIBUTED=1
+INLINE_INGRESS_MODE=cloudflare-optional
 INLINE_INGRESS_HOST=api.inline.chat
-INLINE_TRUSTED_CLIENT_IP_HEADER=x-real-ip
-INLINE_ORIGIN_SECRET=<same managed Cloudflare origin secret as Fly>
-INLINE_PROXY_SECRET=<distinct managed random 32-byte lowercase hex secret>
+INLINE_TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip
+INLINE_INGRESS_DIRECT_IP_SOURCE=x-real-ip
 ```
 
-Both credentials must stay out of source, command arguments and logs. Traefik's
-API route overwrites `x-inline-proxy-secret` on every request. For this mode,
-verify the **running** entrypoint has `forwardedHeaders.insecure=false`, no
-untrusted `forwardedHeaders.trustedIPs`, and no untrusted PROXY-protocol support.
-Traefik must strip caller-supplied `x-real-ip` and derive it from the network
-peer. Keep the backend port unpublished and attach only through the private
-container network. Do not change the shared proxy's global settings blindly;
-other applications use that proxy too.
+Use `fly-client-ip` for the Fly profile and `x-real-ip` behind the qualified
+Hetzner reverse proxy. `socket` is safe without trusting forwarding headers,
+but behind a proxy it groups clients under that proxy's rate-limit identity.
+Existing strict `cloudflare` ingress remains compatible until the optional
+profile is qualified and deliberately deployed. Changing source does not
+update the running origin's configuration.
 
-The API always enforces the canonical Host. A valid Cloudflare secret plus a
-single valid CF client IP wins. Otherwise a valid proxy secret plus the proxy's
-single valid `x-real-ip` is required. The API strips both credentials and all
-competing IP headers, then retains only the selected canonical IP. This applies
-before HTTP, protocol verification and both WebSocket upgrades, while preserving
-Bun's original request. Only an ordinary GET/HEAD `/readyz` probe is exempt.
+For the Hetzner profile, verify the **running** entrypoint has
+`forwardedHeaders.insecure=false`, no untrusted `forwardedHeaders.trustedIPs`,
+and no untrusted PROXY-protocol support. Traefik must strip caller-supplied
+`x-real-ip` and derive it from the network peer. Keep the backend port unpublished
+and attach only through the private container network. Do not change the shared
+proxy's global settings blindly; other applications use that proxy too.
+
+A configured valid Cloudflare attribution proof wins; otherwise only the chosen
+proxy-owned IP is retained. Missing/invalid fallback identity uses the socket
+peer. The API strips admission credentials and competing IP headers before HTTP,
+protocol verification and both WebSocket upgrades, preserving Bun's original
+request. An ordinary GET/HEAD `/readyz` probe remains exempt from canonical Host
+checking. Real proxy header overwrite and port isolation are deployment gates,
+not facts established by a local listener test.
 
 Install and renew a public-trust certificate for **api.inline.chat** at Hetzner.
 A Cloudflare Origin CA certificate is insufficient for direct clients. Renewal
@@ -122,16 +129,16 @@ reaching Hetzner. Never use insecure TLS for the load-balancer monitor or client
 4. Set Coolify's health path to `/readyz` (not `/healthz`), five-second probes,
    a bounded timeout, and enough startup grace. Configure a stop grace longer
    than the API drain deadline. Verify source/image revision and worker role.
-5. Before adding the pool, test the real Hetzner route with public TLS/SNI and
+5. Before directing user traffic, test the real Hetzner route with public TLS/SNI and
    the canonical Host. Prove authenticated HTTP, V2/V3, upload/read-back,
    cross-origin message recovery, revocation, drain/reconnect and worker handoff.
-   Send forged CF/X-Real-IP/XFF/proxy-secret headers to prove the real proxy
+   Send forged CF/X-Real-IP/Fly-Client-IP/XFF headers to prove the real proxy
    boundary. A `200 /readyz` is insufficient evidence.
 6. Rehearse Fly origin removal from routing while keeping shared PostgreSQL.
    Measure detection, routing, socket reconnect/catch-up and job recovery. Never
    restore a database or stop the old writer just because a health check failed.
 
-## Cloudflare routing
+## Optional automatic Cloudflare routing
 
 Use two ordered pools, one direct origin address per provider, `minimum_origins=1`,
 `steering_policy=off`, and no geographic overrides or session affinity. The Fly
@@ -162,8 +169,16 @@ API or its workers.
 
 ## Bypass Cloudflare's proxy
 
-Keep the DNS zone at Cloudflare. Preselect Hetzner as the direct-capable target;
-the initial Fly ingress deliberately remains Cloudflare-only.
+Keep the DNS zone at Cloudflare. Qualify public TLS and ordinary authenticated
+traffic without an origin secret on Fly and Hetzner before selecting a bypass.
+
+Without a load balancer, capture the API A/AAAA records, replace them with the
+verified target origin's public addresses and set `proxied=false`. Check both
+address families so an old AAAA record cannot route clients to an unavailable
+origin. Verify DNS answers and a recovered authenticated client operation.
+Restore the captured records only after the normal path is healthy.
+
+If an optional load balancer exists, use the following LB-specific procedure.
 
 The load balancer takes precedence over an A/AAAA record with the same name.
 Editing only the old A record or its orange-cloud state does not bypass the LB.
@@ -189,8 +204,8 @@ configuration only after Cloudflare and Fly have stable health.
 
 This emergency operation requires Cloudflare's management API/dashboard and DNS
 updates to work. Healthy authoritative DNS alone does not guarantee that. The
-user accepts this dependency; this design adds no second DNS provider or client
-endpoint. Direct traffic also bypasses Cloudflare WAF/DDoS protection, so origin
+first slice retains Cloudflare DNS; independent registrar/nameserver recovery
+is a separate procedure. Direct traffic also bypasses Cloudflare WAF/DDoS protection, so application
 authentication, rate limits and resource bounds must remain effective.
 
 ## Remaining shared failure domains

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { makeIngressPolicy, ORIGIN_SECRET_HEADER, PROXY_SECRET_HEADER } from "./ingress"
+import { makeIngressPolicy, ORIGIN_SECRET_HEADER } from "./ingress"
 import { getIp } from "../../utils/ip"
 
 const secret = "ab".repeat(32)
@@ -29,6 +29,7 @@ describe("origin ingress configuration", () => {
   test("fails closed on partial configuration and incompatible trust modes", () => {
     for (const env of [
       { INLINE_ORIGIN_SECRET: secret },
+      { INLINE_INGRESS_DIRECT_IP_SOURCE: "fly-client-ip" },
       { ...configuration, INLINE_INGRESS_MODE: "disabled" },
       { ...configuration, INLINE_ORIGIN_SECRET: "too-short" },
       { ...configuration, INLINE_INGRESS_HOST: "*.example.test" },
@@ -41,75 +42,6 @@ describe("origin ingress configuration", () => {
     }
     expect(() => makeIngressPolicy(configuration, "x-real-ip")).toThrow()
     expect(() => makeIngressPolicy(configuration, "direct")).toThrow()
-  })
-})
-
-describe("Cloudflare or trusted origin proxy", () => {
-  const proxySecret = "cd".repeat(32)
-  const proxyConfiguration = {
-    ...configuration,
-    INLINE_INGRESS_MODE: "cloudflare-or-proxy",
-    INLINE_PROXY_SECRET: proxySecret,
-  }
-  const proxyPolicy = makeIngressPolicy(proxyConfiguration, "x-real-ip")!
-
-  test("requires a complete, distinct proxy credential and the canonical IP mode", () => {
-    for (const env of [
-      { INLINE_PROXY_SECRET: proxySecret },
-      { ...configuration, INLINE_PROXY_SECRET: proxySecret },
-      { ...proxyConfiguration, INLINE_PROXY_SECRET: undefined },
-      { ...proxyConfiguration, INLINE_PROXY_SECRET: secret },
-      { ...proxyConfiguration, INLINE_PROXY_SECRET: "invalid" },
-    ]) expect(() => makeIngressPolicy(env, "x-real-ip")).toThrow()
-    expect(() => makeIngressPolicy(proxyConfiguration, "cf-connecting-ip")).toThrow()
-    expect(() => makeIngressPolicy(proxyConfiguration, "direct")).toThrow()
-  })
-
-  test("prefers authenticated Cloudflare identity and otherwise uses only the authenticated proxy identity", () => {
-    for (const originSecret of [secret, "forged", ""]) {
-      const incoming = request({
-        [ORIGIN_SECRET_HEADER]: originSecret,
-        [PROXY_SECRET_HEADER]: proxySecret,
-        "cf-connecting-ip": "198.51.100.42",
-        "x-real-ip": "2001:db8::42",
-        "x-forwarded-for": "192.0.2.1",
-      })
-      expect(proxyPolicy(incoming)).toBeUndefined()
-      expect(getIp(incoming)).toBe(originSecret === secret ? "198.51.100.42" : "2001:db8::42")
-      for (const header of [ORIGIN_SECRET_HEADER, PROXY_SECRET_HEADER, "cf-connecting-ip", "x-forwarded-for"]) {
-        expect(incoming.headers.has(header)).toBe(false)
-      }
-    }
-  })
-
-  test("rejects forged, incomplete, ambiguous and wrong-host proxy requests", () => {
-    const cases: Record<string, string>[] = [
-      { [PROXY_SECRET_HEADER]: "forged" },
-      { [PROXY_SECRET_HEADER]: `${proxySecret}, ${proxySecret}` },
-      { "x-real-ip": "" },
-      { "x-real-ip": "198.51.100.42, 192.0.2.1" },
-      { "x-real-ip": "fe80::1%eth0" },
-      { "x-real-ip": "not-an-ip" },
-      { host: "other.example.test" },
-    ]
-    for (const overrides of cases) {
-      const incoming = request({
-        [ORIGIN_SECRET_HEADER]: "forged", [PROXY_SECRET_HEADER]: proxySecret,
-        "x-real-ip": "198.51.100.42", ...overrides,
-      })
-      expect(proxyPolicy(incoming)?.status).toBe(403)
-      for (const header of [ORIGIN_SECRET_HEADER, PROXY_SECRET_HEADER, "cf-connecting-ip", "x-real-ip"]) {
-        expect(incoming.headers.has(header)).toBe(false)
-      }
-    }
-  })
-
-  test("strips both credentials on the readiness exception", () => {
-    const incoming = request({ [PROXY_SECRET_HEADER]: proxySecret }, "/readyz")
-    expect(proxyPolicy(incoming)).toBeUndefined()
-    expect(incoming.headers.has(ORIGIN_SECRET_HEADER)).toBe(false)
-    expect(incoming.headers.has(PROXY_SECRET_HEADER)).toBe(false)
-    expect(getIp(incoming)).toBeUndefined()
   })
 })
 
@@ -173,6 +105,78 @@ describe("origin ingress authorization", () => {
       ["/.well-known/inline-protocol", "GET", {}],
     ] as const) {
       expect(policy(request({ [ORIGIN_SECRET_HEADER]: "", ...extra }, path, method))?.status).toBe(403)
+    }
+  })
+})
+
+describe("optional Cloudflare ingress", () => {
+  const optional = (source = "fly-client-ip", originSecret: string | undefined = secret) =>
+    makeIngressPolicy({
+      ...configuration,
+      INLINE_INGRESS_MODE: "cloudflare-optional",
+      INLINE_INGRESS_DIRECT_IP_SOURCE: source,
+      INLINE_ORIGIN_SECRET: originSecret,
+    }, "cf-connecting-ip")!
+
+  test("requires a deliberate direct identity source", () => {
+    for (const source of ["", "x-forwarded-for", "cf-connecting-ip"]) {
+      expect(() => optional(source)).toThrow()
+    }
+  })
+
+  test("direct HTTP and both realtime paths do not require the Cloudflare secret", () => {
+    for (const path of ["/v1/test", "/realtime", "/realtime/v3"]) {
+      const incoming = request({
+        [ORIGIN_SECRET_HEADER]: "",
+        "cf-connecting-ip": "192.0.2.99",
+        "fly-client-ip": "198.51.100.8",
+        "x-forwarded-for": "192.0.2.98",
+        authorization: "Bearer application-credential",
+      }, path)
+      expect(optional()(incoming)).toBeUndefined()
+      expect(getIp(incoming)).toBe("198.51.100.8")
+      expect(incoming.headers.get("authorization")).toBe("Bearer application-credential")
+      expect(incoming.headers.has(ORIGIN_SECRET_HEADER)).toBe(false)
+      expect(incoming.headers.has("x-forwarded-for")).toBe(false)
+      expect(incoming.headers.has("fly-client-ip")).toBe(false)
+    }
+  })
+
+  test("preserves authenticated Cloudflare client identity ahead of the proxy peer", () => {
+    const incoming = request({ "fly-client-ip": "198.51.100.8" })
+    expect(optional()(incoming)).toBeUndefined()
+    expect(getIp(incoming)).toBe("198.51.100.42")
+  })
+
+  test("a wrong secret cannot authenticate forged CF headers", () => {
+    const incoming = request({ [ORIGIN_SECRET_HEADER]: "cd".repeat(32), "fly-client-ip": "2001:db8::8" })
+    expect(optional()(incoming)).toBeUndefined()
+    expect(getIp(incoming)).toBe("2001:db8::8")
+  })
+
+  test("socket fallback discards all supplied forwarding identities", () => {
+    const incoming = request({ [ORIGIN_SECRET_HEADER]: "", "x-real-ip": "198.51.100.8" })
+    expect(optional("socket")(incoming)).toBeUndefined()
+    expect(getIp(incoming)).toBeUndefined()
+  })
+
+  test("optional ingress can run without a CF attribution credential", () => {
+    const policy = makeIngressPolicy({
+      INLINE_INGRESS_MODE: "cloudflare-optional",
+      INLINE_INGRESS_HOST: "api.example.test",
+      INLINE_INGRESS_DIRECT_IP_SOURCE: "x-real-ip",
+    }, "cf-connecting-ip")!
+    const incoming = request({ "x-real-ip": "198.51.100.7" })
+    expect(policy(incoming)).toBeUndefined()
+    expect(getIp(incoming)).toBe("198.51.100.7")
+  })
+
+  test("keeps the hostname boundary and rejects invalid fallback addresses", () => {
+    expect(optional()(request({ host: "other.example.test" }))?.status).toBe(403)
+    for (const ip of ["not-ip", "192.0.2.1, 192.0.2.2", "fe80::1%eth0"]) {
+      const incoming = request({ [ORIGIN_SECRET_HEADER]: "", "fly-client-ip": ip })
+      expect(optional()(incoming)).toBeUndefined()
+      expect(getIp(incoming)).toBeUndefined()
     }
   })
 })

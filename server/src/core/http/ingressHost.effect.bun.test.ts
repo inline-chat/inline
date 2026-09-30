@@ -3,28 +3,29 @@ import { generateKeyPairSync } from "node:crypto"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { startCoreProductionServer } from "./productionHost"
-import { makeIngressPolicy, ORIGIN_SECRET_HEADER, PROXY_SECRET_HEADER } from "./ingress"
+import { makeIngressPolicy, ORIGIN_SECRET_HEADER } from "./ingress"
 import { makeHttpKernelMiddlewareLayer } from "./middleware"
 
 // The server's DOM types mask Bun's documented client-header overload.
 const BunSocket = WebSocket as unknown as new (url: string, options: Bun.WebSocketOptions) => WebSocket
 
-for (const [mode, proof] of [
-  ["cloudflare", "cloudflare"],
-  ["cloudflare-or-proxy", "cloudflare"],
-  ["cloudflare-or-proxy", "proxy"],
+for (const [mode, proof, directIpSource, configureSecret] of [
+  ["cloudflare", "cloudflare", undefined, true],
+  ["cloudflare-optional", "cloudflare", "fly-client-ip", true],
+  ["cloudflare-optional", "direct", "fly-client-ip", true],
+  ["cloudflare-optional", "direct", "x-real-ip", false],
+  ["cloudflare-optional", "direct", "socket", false],
 ] as const) {
-test(`the ${mode} listener with ${proof} proof gates HTTP, verification and both WebSocket upgrades`, async () => {
+test(`the ${mode} listener with ${proof}/${directIpSource ?? "strict"} identity gates HTTP, verification and both WebSocket upgrades`, async () => {
   const secret = "ab".repeat(32)
-  const proxySecret = "cd".repeat(32)
-  const clientIpHeader = mode === "cloudflare" ? "cf-connecting-ip" : "x-real-ip"
-  const proofHeader = proof === "cloudflare" ? ORIGIN_SECRET_HEADER : PROXY_SECRET_HEADER
-  const suppliedIpHeader = proof === "cloudflare" ? "cf-connecting-ip" : "x-real-ip"
+  const clientIpHeader = "cf-connecting-ip"
+  const proofHeader = ORIGIN_SECRET_HEADER
+  const suppliedIpHeader = proof === "cloudflare" ? "cf-connecting-ip" : directIpSource
   const ingressPolicy = makeIngressPolicy({
     INLINE_INGRESS_MODE: mode,
     INLINE_INGRESS_HOST: "api.example.test",
-    INLINE_ORIGIN_SECRET: secret,
-    ...(mode === "cloudflare-or-proxy" ? { INLINE_PROXY_SECRET: proxySecret } : {}),
+    ...(configureSecret ? { INLINE_ORIGIN_SECRET: secret } : {}),
+    ...(directIpSource ? { INLINE_INGRESS_DIRECT_IP_SOURCE: directIpSource } : {}),
   }, clientIpHeader)!
   let ready = false
   let handled = 0
@@ -38,8 +39,8 @@ test(`the ${mode} listener with ${proof} proof gates HTTP, verification and both
           return HttpServerResponse.jsonUnsafe({
             body,
             ip: request.headers[clientIpHeader],
-            secretPresent: ORIGIN_SECRET_HEADER in request.headers || PROXY_SECRET_HEADER in request.headers,
-            conflictingIpPresent: (mode === "cloudflare" ? "x-real-ip" : "cf-connecting-ip") in request.headers,
+            secretPresent: ORIGIN_SECRET_HEADER in request.headers,
+            conflictingIpPresent: "x-real-ip" in request.headers,
           })
         })))),
     ]))).pipe(Layer.provideMerge(makeHttpKernelMiddlewareLayer({ clientIpHeader, isProduction: false })))
@@ -62,16 +63,18 @@ test(`the ${mode} listener with ${proof} proof gates HTTP, verification and both
   const base = `http://127.0.0.1:${handle.port}`
   const headers = {
     host: "api.example.test",
-    [proofHeader]: proof === "cloudflare" ? secret : proxySecret,
+    [proofHeader]: proof === "cloudflare" ? secret : "forged",
     "cf-connecting-ip": "192.0.2.1",
     "x-real-ip": "192.0.2.2",
-    [suppliedIpHeader]: "2001:db8::42",
+    ...(suppliedIpHeader ? { [suppliedIpHeader]: "2001:db8::42" } : {}),
   }
   try {
     expect((await fetch(`${base}/echo`, { method: "POST", body: "rejected" })).status).toBe(403)
     expect(handled).toBe(0)
     const accepted = await fetch(`${base}/echo`, { method: "POST", body: "preserved body", headers })
-    expect(await accepted.json()).toEqual({ body: "preserved body", ip: "2001:db8::42", secretPresent: false, conflictingIpPresent: false })
+    expect(await accepted.json()).toEqual({ body: "preserved body",
+      ...(directIpSource !== "socket" ? { ip: "2001:db8::42" } : {}),
+      secretPresent: false, conflictingIpPresent: false })
     expect(handled).toBe(1)
     expect((await fetch(`${base}/readyz`)).status).toBe(503)
     ready = true
@@ -85,7 +88,7 @@ test(`the ${mode} listener with ${proof} proof gates HTTP, verification and both
 
     for (const path of ["/realtime", "/realtime/v3"]) {
       const denied = await fetch(`${base}${path}`, { headers: {
-        ...headers, [proofHeader]: "wrong", upgrade: "websocket", connection: "Upgrade",
+        ...headers, host: "other.example.test", [proofHeader]: "wrong", upgrade: "websocket", connection: "Upgrade",
         "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
       } })
       expect(denied.status).toBe(403)

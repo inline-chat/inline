@@ -23,8 +23,8 @@ const bounded = async <T>(operation: Promise<T>, label: string, milliseconds = 8
 }
 
 test("a remote authenticated socket applies message/edit/delete and sidecars through GET_UPDATES after publication stops", async () => {
-  const previousMode = process.env["REALTIME_DISTRIBUTED"]
-  process.env["REALTIME_DISTRIBUTED"] = "1"
+  const previousMode = process.env["INLINE_REALTIME_DISTRIBUTED"]
+  process.env["INLINE_REALTIME_DISTRIBUTED"] = "1"
   // Fault injection removes both full-payload delivery and legacy hints. The
   // recipient must discover the committed frontier through PostgreSQL alone.
   await liveRealtimeDelivery.stop()
@@ -42,7 +42,7 @@ test("a remote authenticated socket applies message/edit/delete and sidecars thr
     cmd: [process.execPath, "--no-env-file", "src/modules/internalMessaging/socketRecovery.worker.ts"],
     cwd: import.meta.dir + "/../../..",
     env: { ...process.env, DATABASE_URL: databaseUrl.toString(), TEST_DATABASE_URL: databaseUrl.toString(),
-      REDIS_URL: "", VALKEY_URL: "", REALTIME_DISTRIBUTED: "1", PORT: "0" },
+      REDIS_URL: "", VALKEY_URL: "", INLINE_REALTIME_DISTRIBUTED: "1", PORT: "0" },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
   })
   const port = Promise.withResolvers<number>()
@@ -174,8 +174,8 @@ test("a remote authenticated socket applies message/edit/delete and sidecars thr
     finally {
       if (worker.exitCode === null) { worker.kill("SIGTERM"); await worker.exited }
       await readers
-      if (previousMode === undefined) delete process.env["REALTIME_DISTRIBUTED"]
-      else process.env["REALTIME_DISTRIBUTED"] = previousMode
+      if (previousMode === undefined) delete process.env["INLINE_REALTIME_DISTRIBUTED"]
+      else process.env["INLINE_REALTIME_DISTRIBUTED"] = previousMode
     }
   }
 }, 30_000)

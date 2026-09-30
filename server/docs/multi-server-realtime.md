@@ -11,13 +11,16 @@ No Apple, SDK or CLI update is required.
 
 | Deployment | Configuration | New coordination cost |
 | --- | --- | --- |
-| Single API, local development, Coolify | Omit Redis URLs and `REALTIME_DISTRIBUTED` | No publication, discovery writes or discovery timer |
-| Explicit single API with other Redis settings present | `REALTIME_DISTRIBUTED=0` | Also disables the existing internal Redis transport |
+| Single API, local development, Coolify | Omit Redis URLs and `INLINE_REALTIME_DISTRIBUTED` | No publication, discovery writes or discovery timer |
+| Explicit single API with other Redis settings present | `INLINE_REALTIME_DISTRIBUTED=0` | Also disables the existing internal Redis transport |
 | Multiple APIs | Same `REDIS_URL` (or `VALKEY_URL`) and encryption key on every API | Full live delivery plus temporary discovery metadata |
-| Multiple APIs during broker removal/outage | `REALTIME_DISTRIBUTED=1`, URL optional | Local delivery plus PostgreSQL discovery and existing client catch-up |
+| Multiple APIs during broker removal/outage | `INLINE_REALTIME_DISTRIBUTED=1`, URL optional | Local delivery plus PostgreSQL discovery and existing client catch-up |
 
-`REALTIME_DISTRIBUTED` accepts only `0` or `1`. By default a configured Redis URL
+`INLINE_REALTIME_DISTRIBUTED` accepts only `0` or `1`. By default a configured Redis URL
 enables it. Configure every writer consistently, including background API jobs.
+The earlier `REALTIME_DISTRIBUTED` name remains accepted for compatibility. Both
+names must contain `0` or `1` and agree when set together; prefer the `INLINE_`
+name in portable deployment profiles.
 There is no server registry, elected leader, required machine count, broker
 persistence, new daemon or provider-specific dependency. Change configuration
 when scaling back to one process; the system never guesses that a network

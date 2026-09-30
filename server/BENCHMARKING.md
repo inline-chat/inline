@@ -5,7 +5,7 @@ Use `test:backend` to protect behavior and database command budgets. Use
 scenarios, with real encryption, authorization, transactions and replay encoding.
 The benchmark runner accepts a sample only after its behavioral assertions pass.
 
-Timing reports explicitly use standalone realtime mode (`REALTIME_DISTRIBUTED=0`).
+Timing reports explicitly use standalone realtime mode (`INLINE_REALTIME_DISTRIBUTED=0`).
 The correctness suite tests both standalone and distributed mode, keeping the
 original standalone command budgets and adding only the fixture's expected
 recovery-index writes to distributed budgets. An optional test Redis endpoint

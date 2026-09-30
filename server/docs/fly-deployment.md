@@ -263,3 +263,33 @@ References: [Fly deployments](https://docs.fly.io/launch/deploy/),
 [Fly app secrets](https://fly.io/docs/apps/secrets/),
 [GitHub reusable workflows](https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations),
 and [Redis Sentinel](https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/).
+
+### Preparing optional Cloudflare ingress
+
+`INLINE_INGRESS_MODE=cloudflare-optional` permits direct requests for the configured
+`INLINE_INGRESS_HOST`. Application authentication remains in force. A valid
+`INLINE_ORIGIN_SECRET` authenticates Cloudflare client-IP attribution, but is no
+longer required to admit a normal request. Without a valid secret, all supplied
+Cloudflare and competing forwarding headers are discarded.
+
+This mode also requires `INLINE_INGRESS_DIRECT_IP_SOURCE`:
+
+- `fly-client-ip`: only behind Fly's HTTP proxy, with no alternate public path
+  to the application port. Fly supplies this header; with Cloudflare in front it
+  identifies Cloudflare's edge unless the origin attribution secret is valid.
+- `x-real-ip`: only behind a qualified reverse proxy that overwrites this header
+  and prevents direct public access to the application port.
+- `socket`: trust only the socket peer. This is safe from forwarding-header
+  spoofing but can group users behind a proxy into one rate-limit identity.
+
+Keep `INLINE_TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip`: the ingress policy
+normalizes the validated chosen address into that header for HTTP and realtime.
+Do not select a header fallback solely because a client can send it. Verify the
+proxy overwrite and port isolation using forged-header requests in the actual
+hosting environment before enabling the mode. Host validation still applies.
+
+The checked-in Fly configuration retains strict `cloudflare` mode. Optional-mode
+unit tests are not deployment proof. Before changing DNS, deploy the qualified
+image/config, verify canonical public TLS and renewal, test an ordinary route
+without the origin secret, then authenticate and reconnect real clients. A
+successful `/readyz` alone does not prove bypass readiness.

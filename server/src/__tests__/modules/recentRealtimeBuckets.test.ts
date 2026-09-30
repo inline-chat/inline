@@ -10,11 +10,11 @@ import { setupTestLifecycle, testUtils } from "../setup"
 
 setupTestLifecycle()
 
-const originalMode = process.env["REALTIME_DISTRIBUTED"]
+const originalMode = process.env["INLINE_REALTIME_DISTRIBUTED"]
 afterEach(async () => {
   await waitForPostCommitHooks()
-  if (originalMode === undefined) delete process.env["REALTIME_DISTRIBUTED"]
-  else process.env["REALTIME_DISTRIBUTED"] = originalMode
+  if (originalMode === undefined) delete process.env["INLINE_REALTIME_DISTRIBUTED"]
+  else process.env["INLINE_REALTIME_DISTRIBUTED"] = originalMode
 })
 
 const deferred = () => {
@@ -27,7 +27,7 @@ const record = (entityId: number, seq: number, bucket: UpdateBucket = UpdateBuck
   db.transaction((tx) => RecentRealtimeBuckets.record(tx, { bucket, entityId, seq }))
 
 test("distributed journal commits register chat, space and user frontiers atomically", async () => {
-  process.env["REALTIME_DISTRIBUTED"] = "1"
+  process.env["INLINE_REALTIME_DISTRIBUTED"] = "1"
   const user = await testUtils.createUser("recent-realtime@example.test")
   await db.transaction(async (tx) => {
     await UpdatesModel.insertUpdate(tx, {
@@ -60,7 +60,7 @@ test("distributed journal commits register chat, space and user frontiers atomic
 })
 
 test("rollback removes both the journal write and its discovery metadata", async () => {
-  process.env["REALTIME_DISTRIBUTED"] = "1"
+  process.env["INLINE_REALTIME_DISTRIBUTED"] = "1"
   await expect(db.transaction(async (tx) => {
     await UpdatesModel.insertUpdate(tx, {
       bucket: UpdateBucket.Chat, entity: { id: 501, updateSeq: 0 },
@@ -73,7 +73,7 @@ test("rollback removes both the journal write and its discovery metadata", async
 })
 
 test("explicit single-server mode adds no discovery rows for either journal writer", async () => {
-  process.env["REALTIME_DISTRIBUTED"] = "0"
+  process.env["INLINE_REALTIME_DISTRIBUTED"] = "0"
   const user = await testUtils.createUser("local-realtime@example.test")
   await db.transaction(async (tx) => {
     await UpdatesModel.insertUpdate(tx, {

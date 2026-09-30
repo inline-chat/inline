@@ -29,10 +29,17 @@ function fixture(enabled = true) {
 describe("local-first live fanout", () => {
   it("defaults to local-only, permits explicit brokerless coordination, and rejects ambiguous mode settings", () => {
     expect(distributedRealtimeConfig({})).toEqual({ enabled: false, url: undefined })
-    expect(distributedRealtimeConfig({ REALTIME_DISTRIBUTED: "1" }).enabled).toBe(true)
+    expect(distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "1" }).enabled).toBe(true)
     expect(distributedRealtimeConfig({ REDIS_URL: " ", VALKEY_URL: "redis://localhost" }).url).toBe("redis://localhost")
+    expect(distributedRealtimeConfig({ REDIS_URL: "redis://localhost", INLINE_REALTIME_DISTRIBUTED: "0" })).toEqual({ enabled: false, url: undefined })
+    expect(() => distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "auto" })).toThrow()
+  })
+  it("accepts the legacy mode name only when it agrees with the portable setting", () => {
+    expect(distributedRealtimeConfig({ REALTIME_DISTRIBUTED: "1" }).enabled).toBe(true)
     expect(distributedRealtimeConfig({ REDIS_URL: "redis://localhost", REALTIME_DISTRIBUTED: "0" })).toEqual({ enabled: false, url: undefined })
-    expect(() => distributedRealtimeConfig({ REALTIME_DISTRIBUTED: "auto" })).toThrow()
+    expect(distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "1", REALTIME_DISTRIBUTED: "1" }).enabled).toBe(true)
+    expect(() => distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "0", REALTIME_DISTRIBUTED: "1" })).toThrow("must agree")
+    expect(() => distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "0", REALTIME_DISTRIBUTED: "invalid" })).toThrow("must be 0 or 1")
   })
   it("orders Space profiles with recipient roster updates and keeps own removal in the user lane", () => {
     const profile: Update[] = [{ update: { oneofKind: "spaceProfile", spaceProfile: { spaceId: 9n, isPro: false } } }]

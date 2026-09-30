@@ -29,8 +29,8 @@ for (const mode of ["0", "1"] as const) {
     const name = `${spec.id} (${mode === "0" ? "standalone" : "distributed"})`
     test(`${name}: behavior and database command budget`, async () => {
       await background.drain()
-      const previousMode = process.env["REALTIME_DISTRIBUTED"]
-      process.env["REALTIME_DISTRIBUTED"] = mode
+      const previousMode = process.env["INLINE_REALTIME_DISTRIBUTED"]
+      process.env["INLINE_REALTIME_DISTRIBUTED"] = mode
       try {
         const operation = await prepareScenario(spec)
         await background.drain()
@@ -40,8 +40,8 @@ for (const mode of ["0", "1"] as const) {
         assertQueryBudget(name, sample, spec.maxCommands + (mode === "1" ? recoveryWrites(spec) : 0))
       } finally {
         try { await background.drain() } finally {
-          if (previousMode === undefined) delete process.env["REALTIME_DISTRIBUTED"]
-          else process.env["REALTIME_DISTRIBUTED"] = previousMode
+          if (previousMode === undefined) delete process.env["INLINE_REALTIME_DISTRIBUTED"]
+          else process.env["INLINE_REALTIME_DISTRIBUTED"] = previousMode
         }
       }
     })

@@ -41,7 +41,7 @@ describe("isolated writer and recipient process", () => {
     { name: "an unavailable broker", url: "redis://127.0.0.1:1", enabled: true, replicas: 1 },
   ]) {
     it.skipIf(!broker.enabled)(`delivers and repairs committed updates on another process with ${broker.name}`, async () => {
-      process.env["REALTIME_DISTRIBUTED"] = "1"
+      process.env["INLINE_REALTIME_DISTRIBUTED"] = "1"
       liveRealtimeDelivery.start()
       if (broker.url === redisUrl && redisUrl) await internalMessaging.start()
       else await internalMessaging.close()
@@ -60,7 +60,7 @@ describe("isolated writer and recipient process", () => {
       const workers = Array.from({ length: broker.replicas }, () => Bun.spawn({
         cmd: [process.execPath, "--no-env-file", "src/modules/internalMessaging/twoProcess.worker.ts"],
         cwd: import.meta.dir + "/../../..",
-        env: { ...process.env, DATABASE_URL: childDatabaseUrl.toString(), TEST_DATABASE_URL: childDatabaseUrl.toString(), REDIS_URL: broker.url, VALKEY_URL: "", REALTIME_DISTRIBUTED: "1", INLINE_TEST_RECIPIENT_ID: String(recipient.id),
+        env: { ...process.env, DATABASE_URL: childDatabaseUrl.toString(), TEST_DATABASE_URL: childDatabaseUrl.toString(), REDIS_URL: broker.url, VALKEY_URL: "", INLINE_REALTIME_DISTRIBUTED: "1", INLINE_TEST_RECIPIENT_ID: String(recipient.id),
           INLINE_TEST_RECIPIENT_SESSION_ID: String(recipientSession.session.id) },
         stdin: "pipe", stdout: "pipe", stderr: "pipe",
       }))
@@ -204,7 +204,7 @@ describe("isolated writer and recipient process", () => {
           await consumeErrors
           await liveRealtimeDelivery.stop()
           await internalMessaging.close()
-          delete process.env["REALTIME_DISTRIBUTED"]
+          delete process.env["INLINE_REALTIME_DISTRIBUTED"]
         }
       }
     }, 50_000)
