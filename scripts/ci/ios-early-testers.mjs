@@ -4,7 +4,7 @@ import { createPrivateKey, sign } from "node:crypto"
 import { execFileSync } from "node:child_process"
 import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
 export const APP = "6736995294"
@@ -111,8 +111,10 @@ export function validateBuild(build, app, version) {
   }
 }
 
-export function reusableRun(runs, sha) {
+export function reusableRun(runs, sha, now = Date.now()) {
   return runs.find((run) => run.attributes?.sourceCommit?.commitSha === sha
+    // Refresh before TestFlight's 90-day expiry even if main has been inactive.
+    && (!run.attributes.createdDate || Date.parse(run.attributes.createdDate) > now - 84 * 86_400_000)
     && (run.attributes.executionProgress !== "COMPLETE" || run.attributes.completionStatus === "SUCCEEDED"))
 }
 
@@ -170,7 +172,7 @@ async function uploadSymbols(api, runId) {
   const archive = join(mkdtempSync(join(tmpdir(), "inline-ios-symbols-")), "archive.zip")
   writeFileSync(archive, Buffer.from(await response.arrayBuffer()))
   execFileSync("npx", ["--yes", "--package", "@sentry/cli@3.8.0", "sentry-cli", "debug-files", "upload", "--wait", archive], {
-    stdio: "inherit", timeout: 600_000,
+    stdio: "inherit", timeout: 600_000, cwd: dirname(archive),
     env: { PATH: process.env.PATH, HOME: process.env.HOME, SENTRY_AUTH_TOKEN: process.env.SENTRY_AUTH_TOKEN,
       SENTRY_ORG: "usenoor", SENTRY_PROJECT: "inline-ios-macos", SENTRY_URL: "https://us.sentry.io" },
   })
@@ -188,7 +190,7 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   validateGroup(group, groupApp)
   await qualify()
   const runs = await list(api, `/v1/ciWorkflows/${WORKFLOW}/buildRuns?sort=-number&limit=100`)
-  let run = reusableRun(runs, sha)
+  let run = reusableRun(runs, sha, now())
   if (!run) {
     const canonicalName = await sourceTag(sha)
     let source

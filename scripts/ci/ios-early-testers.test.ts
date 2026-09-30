@@ -106,6 +106,13 @@ describe("internal iOS release boundary", () => {
     expect(reusableRun([run], "b".repeat(40))).toBeUndefined()
     expect(reusableRun([{ ...run, attributes: { ...run.attributes, executionProgress: "RUNNING" } }], sha)).toBeDefined()
   })
+  it("refreshes successful archives before their TestFlight expiry", () => {
+    const now = Date.parse("2026-09-30T00:00:00Z")
+    const old = { ...run, attributes: { ...run.attributes, createdDate: "2026-06-01T00:00:00Z" } }
+    const fresh = { ...run, attributes: { ...run.attributes, createdDate: "2026-09-29T00:00:00Z" } }
+    expect(reusableRun([old, fresh], sha, now)).toBe(fresh)
+    expect(reusableRun([old], sha, now)).toBeUndefined()
+  })
   it("creates an immutable source tag and refuses to move an existing tag", async () => {
     const env = { GITHUB_REPOSITORY: "inline-chat/inline", GH_TOKEN: "test-token" }
     const calls: Array<{ url: string; body?: string }> = []
