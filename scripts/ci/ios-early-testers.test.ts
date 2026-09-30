@@ -69,7 +69,7 @@ describe("internal iOS release boundary", () => {
     const bodies: unknown[] = []
     const receipt = publicationReceipt(env, async (_url: string, options: { body?: string }) => {
       if (options.body) { bodies.push(JSON.parse(options.body)); return Response.json({}) }
-      return Response.json({ statuses: [{ context: "ios/early-testers", state: "success", description: "Early Testers build build", creator: { login: "github-actions[bot]" } }] })
+      return Response.json([{ context: "ios/early-testers", state: "success", description: "Early Testers build build", creator: { login: "github-actions[bot]" } }])
     })
     expect(await receipt.isPublished(sha, "build")).toBe(true)
     expect(await receipt.isPublished(sha, "other")).toBe(false)

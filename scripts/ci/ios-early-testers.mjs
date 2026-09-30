@@ -80,9 +80,11 @@ export function publicationReceipt(env = process.env, fetcher = fetch) {
   const description = (build) => `Early Testers build ${build}`
   return {
     isPublished: async (sha, build) => {
-      const result = await request(`commits/${sha}/status`)
-      return result.statuses.some((status) => status.context === context && status.state === "success"
-        && status.description === description(build) && status.creator?.login === "github-actions[bot]")
+      // The combined-status endpoint omits creator; individual statuses retain it.
+      const statuses = await request(`commits/${sha}/statuses?per_page=100`)
+      const status = statuses.find((item) => item.context === context)
+      return status?.state === "success" && status.description === description(build)
+        && status.creator?.login === "github-actions[bot]"
     },
     markPublished: async (result) => request(`statuses/${result.sha}`, {
       state: "success", context, description: description(result.build),
