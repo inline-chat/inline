@@ -65,17 +65,8 @@ After an authorized deployment, check `/health`, OAuth discovery, anonymous-requ
 
 ## Publish or update the public plugin
 
-Current OpenAI update rules, checked September 30, 2026:
+For changes confined to hosted MCP tools/UI, deploy the reviewed revision, open the existing plugin in the [submission portal](https://platform.openai.com/plugins), select **MCPs → Inline → Rescan**, and inspect findings and live tool definitions. Repair scan-account authorization if requested. Eligible server updates pass automated checks without a new package release; held changes do not replace approved definitions. Keep approved schemas working. See [current submission and update instructions](https://developers.openai.com/plugins/deploy/submission).
 
-| Change | Release path |
-| --- | --- |
-| New/changed tools, security metadata, UI resource references or CSP | Deploy compatibly; published metadata becomes available after continuous checks pass. |
-| Compatible content at an existing UI URI, or compatible server result fixes | Deploy; UI content may remain cached for up to an hour. |
-| Listing information or imported skills | Create a draft version of the existing plugin, submit for review, then explicitly publish the approved update. |
-| MCP origin change | New plugin submission. Endpoint-path changes use a new version. |
+For listing, assets, skills, or packaged configuration changes, download the existing published release ZIP first. Preserve its package identity, components and version history; the repository marketplace package may have a different identity/version. Edit that package, increment its version, upload the complete ZIP to the existing plugin, resolve findings, submit for review, then publish after approval. Changing an existing MCP URL requires support.
 
-Keep previously published schemas and resource URIs working during review. Review approval and publication are separate. See [OpenAI maintenance rules](https://developers.openai.com/plugins/deploy/app-review).
-
-For a reviewed version, open the [plugin submission portal](https://platform.openai.com/plugins), select the existing Inline plugin, create its update draft, scan the remote `/mcp/v2` endpoint, and compare tools/UI/security metadata against the candidate. Supply accurate listing details, release notes, test cases, and test-account access through the portal. Submit for review; after approval, explicitly publish and verify the public install. An initial MCP-backed submission uses **With MCP**, supplying the endpoint rather than an existing integration ID. See [submission instructions](https://developers.openai.com/plugins/deploy/submission).
-
-Keep test credentials, OAuth secrets, verification/session exports, and private customer evidence out of Git and CI artifacts. `chatgpt-app-submission.json` is review material, not an uploader or evidence of publication. Update the package manifest version when releasing changed package contents; a version bump alone neither deploys MCP nor publishes the directory listing. Preserve canonical skill/mirror parity when updating bundled skills.
+An initial submission also starts with a ZIP declaring MCP configuration. Review requires a dedicated sample account, five positive and three negative tested cases, and a walkthrough video. Keep reviewer credentials outside Git, public ZIPs and CI artifacts. `chatgpt-app-submission.json` is supporting material, not proof of publication.
