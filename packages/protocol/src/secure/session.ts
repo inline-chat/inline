@@ -56,6 +56,7 @@ export class MessageIdGenerator {
     let candidate = (seconds << 32n) | ((millis << 32n) / 1000n) | (BigInt(randomLowBits) << 2n) | BigInt(modulo)
     candidate = (candidate & ~3n) | BigInt(modulo)
     if (candidate <= this.#last) candidate = ((this.#last + 4n) & ~3n) | BigInt(modulo)
+    if (modulo === 0 && (candidate & 0xffffffffn) === 0n) candidate += 4n
     this.#last = candidate
     return candidate
   }

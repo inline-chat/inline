@@ -82,6 +82,7 @@ import {
   validateDhParameters,
   validateDhPublicValue,
   verifyTemporaryKeyBindingProof,
+  validateInboundMessageId,
 } from "../src/secure/index.js"
 import { handshakeCoreV1Vector, portableCoreV1Vector } from "../src/vectors.js"
 
@@ -437,6 +438,22 @@ describe("encrypted records", () => {
 })
 
 describe("session counters", () => {
+  test("keeps client IDs valid at an exact second and after lower-word rollover", () => {
+    const exact = new MessageIdGenerator().next(1_700_000_000_000, 0, 0)
+    const ids = new MessageIdGenerator()
+    const before = ids.next(1_700_000_000_999, 0x3fffffff, 0)
+    const after = ids.next(1_700_000_000_999, 0, 0)
+    const next = ids.next(1_700_000_000_999, 0, 0)
+    expect(before & 0xffffffffn).toBe(0xfffffffcn)
+    expect(after).toBeGreaterThan(before)
+    expect(next).toBeGreaterThan(after)
+    for (const id of [exact, before, after, next]) {
+      expect(id & 3n).toBe(0n)
+      expect(id & 0xffffffffn).not.toBe(0n)
+      expect(validateInboundMessageId(id, "client", 1_700_000_000)).toEqual({ kind: "valid" })
+    }
+  })
+
   test("accepts unseen out-of-order IDs but rejects duplicates and IDs below the retained window", () => {
     const window = new ReceiveMessageWindow(3)
     expect(window.claim(8n)).toBeTrue()
