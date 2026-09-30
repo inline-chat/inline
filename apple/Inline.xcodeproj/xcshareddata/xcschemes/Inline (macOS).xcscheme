@@ -30,28 +30,6 @@
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CD2661742CA01E4000EB186F"
-               BuildableName = "InlineMacTests.xctest"
-               BlueprintName = "InlineMacTests"
-               ReferencedContainer = "container:Inline.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CD26617E2CA01E4000EB186F"
-               BuildableName = "InlineMacUITests.xctest"
-               BlueprintName = "InlineMacUITests"
-               ReferencedContainer = "container:Inline.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

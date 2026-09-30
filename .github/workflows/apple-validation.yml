@@ -15,7 +15,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Select Apple validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.plan.outputs.selected }}
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: plan
+        run: node scripts/ci/validation-gates.mjs select-apple
+
   contracts:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Apple source, scripts, and Swift protocol
     runs-on: xcode-27
     timeout-minutes: 30
@@ -42,6 +58,8 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard apple/InlineKit/Sources/InlineProtocol)"
 
   swift-main:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Swift packages (main)
     runs-on: xcode-27
     timeout-minutes: 75
@@ -65,6 +83,8 @@ jobs:
           retention-days: 7
 
   swift-utilities:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: Swift packages (utilities)
     runs-on: xcode-27
     timeout-minutes: 75
@@ -90,6 +110,8 @@ jobs:
           retention-days: 7
 
   macos-app:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: macOS app Debug and Release
     runs-on: xcode-27
     timeout-minutes: 75
@@ -108,6 +130,8 @@ jobs:
           retention-days: 7
 
   ios-app:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: iOS device app Debug and Release
     runs-on: xcode-27
     timeout-minutes: 75
@@ -124,3 +148,17 @@ jobs:
           name: ios-app-build-logs
           path: ${{ runner.temp }}/ios-app-reports/
           retention-days: 7
+
+  required:
+    name: Apple validation required
+    if: ${{ always() }}
+    needs: [changes, contracts, swift-main, swift-utilities, macos-app, ios-app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected job to pass
+        env:
+          RESULTS_JSON: ${{ toJSON(needs) }}
+          SELECTED_JOBS: ${{ needs.changes.outputs.selected }}
+        run: node scripts/ci/validation-gates.mjs apple

@@ -36,7 +36,7 @@ describe("public CI contracts", () => {
 
   it("keeps all selected package and app gates visible", () => {
     const apple = workflow("apple-validation.yml")
-    expect(Object.keys(apple.jobs).sort()).toEqual(["contracts", "ios-app", "macos-app", "swift-main", "swift-utilities"])
+    expect(Object.keys(apple.jobs).sort()).toEqual(["changes", "contracts", "ios-app", "macos-app", "required", "swift-main", "swift-utilities"])
     const source = read(".github/workflows/apple-validation.yml")
     for (const pkg of ["InlineKit", "InlineUI", "InlineIOSUI", "InlineMacUI", "InlineRealtimeCore",
       "InlineMacSidebarModel", "InlineThumbnailing", "InlineSyntaxHighlighting", "InlineMacScripting",
