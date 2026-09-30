@@ -334,7 +334,7 @@ jobs:
   required:
     name: Server validation required
     if: ${{ always() }}
-    needs: [container, test]
+    needs: [container, container-arm, test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
