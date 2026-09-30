@@ -338,16 +338,16 @@ describe("mcp tool server", () => {
       "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "conversations.create": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
-      "files.upload": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+      "conversations.create": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+      "files.upload": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
       "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send_media": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
-      "messages.send_batch": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send_media": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
+      "messages.send_batch": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
       "messages.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.context": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.unread": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
     }
 
     for (const tool of tools) {
@@ -459,6 +459,14 @@ describe("mcp tool server", () => {
       expect(tool.inputSchema.required ?? []).toEqual(required)
       assertPlainSchema(tool.inputSchema)
     }
+
+    // These operations support public audiences or arbitrary URL sources, even
+    // when a particular grant contains only private spaces.
+    for (const name of ["conversations.create", "files.upload", "messages.send_media", "messages.send_batch", "messages.send"]) {
+      expect(byName.get(name).annotations.openWorldHint, name).toBe(true)
+    }
+    expect(byName.get("conversations.create").inputSchema.properties.isPublic.description).toContain("public space")
+    expect(byName.get("files.upload").inputSchema.properties.source.description).toContain("public HTTPS URL")
 
     expect(byName.get("conversations.get").inputSchema.properties.userId).toBeUndefined()
     expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("base64")
