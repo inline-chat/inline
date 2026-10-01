@@ -4,10 +4,12 @@
     "NODE_ENV": "production",
     "PORT": "8000",
     "INLINE_PROCESS_ROLE": "api",
+    "INLINE_REALTIME_DISTRIBUTED": "1",
     "INLINE_DATABASE_QUERY_POOL_MAX": "3",
-    "INLINE_INGRESS_MODE": "cloudflare",
+    "INLINE_INGRESS_MODE": "cloudflare-optional",
     "INLINE_INGRESS_HOST": "api.inline.chat",
     "INLINE_TRUSTED_CLIENT_IP_HEADER": "cf-connecting-ip",
+    "INLINE_INGRESS_DIRECT_IP_SOURCE": "fly-client-ip",
     "SHUTDOWN_TIMEOUT_MS": "40000"
   },
   "guest": {

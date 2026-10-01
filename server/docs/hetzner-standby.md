@@ -72,6 +72,7 @@ Cloudflare secret authenticates client-IP attribution only.
 ```text
 INLINE_PROCESS_ROLE=all
 INLINE_REALTIME_DISTRIBUTED=1
+INLINE_DATABASE_QUERY_POOL_MAX=3
 INLINE_INGRESS_MODE=cloudflare-optional
 INLINE_INGRESS_HOST=api.inline.chat
 INLINE_TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip
