@@ -85,6 +85,54 @@ public struct AgentConfigurationCatalogSnapshot: Equatable, Sendable {
     return models?.first(where: { $0.id == modelID })?.defaultReasoningEffortID
   }
 
+  public func modelTitle(forModelID modelID: String?) -> String? {
+    if let modelID {
+      return models?.first(where: { $0.id == modelID })?.label ?? modelID
+    }
+    return models?.isEmpty == false ? String(localized: "Automatic") : nil
+  }
+
+  public var automaticModelTitle: String? {
+    guard models?.isEmpty == false else { return nil }
+    guard let defaultModelID,
+      let label = models?.first(where: { $0.id == defaultModelID })?.label
+    else { return String(localized: "Use default") }
+    return String(localized: "Use default — \(label)")
+  }
+
+  public func automaticReasoningTitle(forModelID modelID: String?) -> String? {
+    guard let reasoning else { return nil }
+    if let defaultID = defaultReasoningEffortID(forModelID: modelID),
+      let label = reasoning.first(where: { $0.id == defaultID })?.label
+    {
+      return String(localized: "Use default — \(label)")
+    }
+    return String(localized: "Use default")
+  }
+
+  public func compatibleReasoningEffortID(_ reasoningID: String?, forModelID modelID: String?) -> String? {
+    guard let reasoningID, let options = reasoningOptions(forModelID: modelID) else { return reasoningID }
+    return options.contains(where: { $0.id == reasoningID }) ? reasoningID : nil
+  }
+
+  public func reasoningOptions(forModelID modelID: String?) -> [AgentConfigurationOption]? {
+    guard let reasoning else { return nil }
+    guard let models else { return reasoning }
+    if let modelID {
+      guard let model = models.first(where: { $0.id == modelID }) else { return nil }
+      guard !model.reasoningEffortIDs.isEmpty else { return reasoning }
+      let supported = Set(model.reasoningEffortIDs)
+      return reasoning.filter { supported.contains($0.id) }
+    }
+    // A failed default lookup must not hide valid choices or guess a model.
+    // Offer only efforts compatible with every possible automatic model.
+    return reasoning.filter { option in
+      !models.isEmpty && models.allSatisfy {
+        $0.reasoningEffortIDs.isEmpty || $0.reasoningEffortIDs.contains(option.id)
+      }
+    }
+  }
+
   private static func projectOptions(
     _ options: [InlineProtocol.AgentProjectOption]?
   ) throws -> [AgentConfigurationOption]? {

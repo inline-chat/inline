@@ -305,6 +305,8 @@ fn inline_thread_config() -> BTreeMap<String, Value> {
 
 const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const DEFAULT_MODEL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+const DEFAULT_CONFIG_CATALOG_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+const DEFAULT_CONFIG_MIN_REQUEST_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
 const SESSION_CATALOG_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MUTATING_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const CONNECTION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(7);
@@ -815,6 +817,7 @@ where
         &self,
         cwd: &std::path::Path,
     ) -> DriverResult<DriverSettingsCatalog> {
+        let started_at = std::time::Instant::now();
         let workspace = cwd.to_path_buf();
         let mut models = Vec::new();
         let mut cursor = None;
@@ -926,16 +929,25 @@ where
         // model/list's isDefault is the catalog recommendation, which can
         // differ from the host/project default used when turn/start omits a
         // model. Resolve that default through Codex's existing config API.
-        let configuration = self
-            .peer
-            .request_with_timeout(
-                "config/read",
-                json!({ "includeLayers": false, "cwd": cwd }),
-                DEFAULT_MODEL_REQUEST_TIMEOUT,
-            )
-            .await;
+        // Interactive callers have a four-second catalog deadline. Optional
+        // default metadata must leave the discovered choices time to return.
+        let remaining = DEFAULT_CONFIG_CATALOG_BUDGET.saturating_sub(started_at.elapsed());
+        // A nearly spent budget can time out before the request is written,
+        // which closes the peer. Skip this optional read when time is short.
+        let configuration = if remaining < DEFAULT_CONFIG_MIN_REQUEST_BUDGET {
+            None
+        } else {
+            self.peer
+                .request_with_timeout(
+                    "config/read",
+                    json!({ "includeLayers": false, "cwd": cwd }),
+                    remaining,
+                )
+                .await
+                .ok()
+        };
         match configuration {
-            Ok(configuration) => {
+            Some(configuration) => {
                 if let Some(configured_model) = configuration
                     .pointer("/config/model")
                     .and_then(Value::as_str)
@@ -945,7 +957,7 @@ where
                     }
                 }
             }
-            Err(_) => {
+            None => {
                 // Default-label metadata must not hide an otherwise fresh
                 // model catalog. Use the generic provider-default label.
                 for model in &mut models {
@@ -3228,8 +3240,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_catalog_keeps_fresh_models_when_default_config_is_unavailable() {
-        for stalled in [false, true] {
+    async fn settings_catalog_keeps_fresh_models_when_default_config_is_slow_or_unavailable() {
+        for scenario in [
+            "rejected",
+            "stalled",
+            "slow",
+            "slow-catalog",
+            "almost-spent-catalog",
+            "spent-catalog",
+        ] {
             let (driver, mut server) = initialized_driver().await;
             let (release_server, keep_open) = tokio::sync::oneshot::channel::<()>();
             let server_task = tokio::spawn(async move {
@@ -3251,6 +3270,15 @@ mod tests {
                     let request: Value =
                         serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
                     assert_eq!(request["method"], method);
+                    if method == "model/list" {
+                        let delay_ms = match scenario {
+                            "slow-catalog" => 1_100,
+                            "almost-spent-catalog" => 2_100,
+                            "spent-catalog" => 3_100,
+                            _ => 0,
+                        };
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    }
                     let mut response = response;
                     response["id"] = request["id"].clone();
                     writer
@@ -3258,13 +3286,32 @@ mod tests {
                         .await
                         .unwrap();
                 }
+                if matches!(scenario, "almost-spent-catalog" | "spent-catalog") {
+                    tokio::select! {
+                        request = lines.next_line() => {
+                            panic!("optional config/read must be skipped when its budget is spent: {request:?}");
+                        }
+                        _ = keep_open => {}
+                    }
+                    return;
+                }
                 let request: Value =
                     serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
                 assert_eq!(request["method"], "config/read");
-                if stalled {
+                if matches!(scenario, "stalled" | "slow-catalog") {
                     // Keep the transport alive without replying to the metadata read.
                     // The driver must return the models it has already loaded.
                     let _ = keep_open.await;
+                } else if scenario == "slow" {
+                    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+                    let response = json!({
+                        "id": request["id"],
+                        "result": {"config": {"model": "gpt-6-astra"}}
+                    });
+                    writer
+                        .write_all(format!("{response}\n").as_bytes())
+                        .await
+                        .unwrap();
                 } else {
                     let response = json!({
                         "id": request["id"],
@@ -3276,14 +3323,18 @@ mod tests {
                         .unwrap();
                 }
             });
-            let catalog = driver
-                .settings_catalog(std::path::Path::new("/tmp"))
-                .await
-                .unwrap();
+            let catalog = tokio::time::timeout(
+                std::time::Duration::from_secs(4),
+                driver.settings_catalog(std::path::Path::new("/tmp")),
+            )
+            .await
+            .expect("fresh choices must survive the interactive catalog deadline")
+            .unwrap();
             assert_eq!(catalog.models[0].value, "gpt-6-astra");
-            assert!(
-                !catalog.models[0].is_default,
-                "an unavailable effective default must use generic copy"
+            assert_eq!(
+                catalog.models[0].is_default,
+                scenario == "slow",
+                "only a resolved effective default may name the automatic model"
             );
             let _ = release_server.send(());
             server_task.await.unwrap();

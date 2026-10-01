@@ -62,6 +62,7 @@ struct AgentConfigurationCatalogTests {
     #expect(snapshot.defaultProjectID == "workspace-1")
     #expect(snapshot.defaultModelID == "gpt-5.6-sol")
     #expect(snapshot.defaultReasoningEffortID(forModelID: "gpt-5.6-sol") == "high")
+    #expect(snapshot.automaticModelTitle == "Use default — 5.6 Sol")
     #expect(snapshot.canSelectFolder)
   }
 
@@ -85,6 +86,104 @@ struct AgentConfigurationCatalogTests {
     #expect(throws: AgentConfigurationCatalogError.self) {
       try AgentConfigurationCatalogSnapshot(protocolCatalog: catalog)
     }
+  }
+
+  @Test("missing default metadata keeps model and compatible reasoning choices available")
+  func missingDefaultMetadata() throws {
+    let catalog = InlineProtocol.AgentConfigurationCatalog.with {
+      $0.models = .with {
+        $0.options = [
+          .with {
+            $0.id = "gpt-6.1-sol"
+            $0.label = "GPT-6.1 Sol"
+            $0.reasoningEffortIds = ["high", "ultra"]
+          },
+          .with {
+            $0.id = "future-model"
+            $0.label = "Future model"
+            $0.reasoningEffortIds = ["high", "future-effort"]
+          },
+        ]
+      }
+      $0.reasoning = .with {
+        $0.options = [
+          .with {
+            $0.id = "high"
+            $0.label = "High"
+          },
+          .with {
+            $0.id = "ultra"
+            $0.label = "Ultra"
+          },
+          .with {
+            $0.id = "future-effort"
+            $0.label = "Future effort"
+          },
+        ]
+      }
+    }
+    let snapshot = try AgentConfigurationCatalogSnapshot(protocolCatalog: catalog)
+
+    #expect(snapshot.defaultModelID == nil)
+    #expect(snapshot.modelTitle(forModelID: nil) == "Automatic")
+    #expect(snapshot.automaticModelTitle == "Use default")
+    #expect(snapshot.reasoningOptions(forModelID: nil)?.map(\.id) == ["high"])
+    #expect(snapshot.modelTitle(forModelID: "gpt-6.1-sol") == "GPT-6.1 Sol")
+    #expect(snapshot.reasoningOptions(forModelID: "future-model")?.map(\.id) == ["high", "future-effort"])
+    #expect(snapshot.modelTitle(forModelID: "uncatalogued-model") == "uncatalogued-model")
+    #expect(snapshot.reasoningOptions(forModelID: "uncatalogued-model") == nil)
+    #expect(snapshot.automaticReasoningTitle(forModelID: "uncatalogued-model") == "Use default")
+    #expect(snapshot.compatibleReasoningEffortID("ultra", forModelID: nil) == nil)
+    #expect(snapshot.compatibleReasoningEffortID("high", forModelID: nil) == "high")
+    #expect(snapshot.compatibleReasoningEffortID(nil, forModelID: nil) == nil)
+    #expect(snapshot.compatibleReasoningEffortID("future-effort", forModelID: "future-model") == "future-effort")
+  }
+
+  @Test("missing default metadata does not invent choices for an empty catalog")
+  func emptyCatalogChoices() throws {
+    let snapshot = try AgentConfigurationCatalogSnapshot(
+      protocolCatalog: InlineProtocol.AgentConfigurationCatalog()
+    )
+    #expect(snapshot.modelTitle(forModelID: nil) == nil)
+    #expect(snapshot.automaticModelTitle == nil)
+    #expect(snapshot.reasoningOptions(forModelID: nil) == nil)
+    #expect(snapshot.automaticReasoningTitle(forModelID: nil) == nil)
+  }
+
+  @Test("reasoning reset remains available when automatic models share no choices")
+  func disjointReasoningChoices() throws {
+    let catalog = InlineProtocol.AgentConfigurationCatalog.with {
+      $0.models = .with {
+        $0.options = [
+          .with {
+            $0.id = "one"
+            $0.label = "One"
+            $0.reasoningEffortIds = ["high"]
+          },
+          .with {
+            $0.id = "two"
+            $0.label = "Two"
+            $0.reasoningEffortIds = ["low"]
+          },
+        ]
+      }
+      $0.reasoning = .with {
+        $0.options = [
+          .with {
+            $0.id = "high"
+            $0.label = "High"
+          },
+          .with {
+            $0.id = "low"
+            $0.label = "Low"
+          },
+        ]
+      }
+    }
+    let snapshot = try AgentConfigurationCatalogSnapshot(protocolCatalog: catalog)
+    #expect(snapshot.reasoningOptions(forModelID: nil)?.isEmpty == true)
+    #expect(snapshot.automaticReasoningTitle(forModelID: nil) == "Use default")
+    #expect(snapshot.compatibleReasoningEffortID("high", forModelID: nil) == nil)
   }
 
   @Test("default IDs must resolve to compatible typed choices")

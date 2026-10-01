@@ -126,9 +126,7 @@ final class AgentThreadToolbarModel: ObservableObject {
   }
 
   var modelTitle: String? {
-    guard let effectiveModelID else { return nil }
-    return catalog?.models?.first(where: { $0.id == effectiveModelID })?.label
-      ?? (explicitModelID == nil ? nil : "Unavailable")
+    catalog?.modelTitle(forModelID: effectiveModelID) ?? explicitModelID
   }
 
   var reasoningTitle: String? {
@@ -136,7 +134,7 @@ final class AgentThreadToolbarModel: ObservableObject {
       explicitID: explicitReasoningID,
       effectiveID: effectiveReasoningID,
       in: availableReasoningOptions
-    )
+    ) ?? (automaticReasoningTitle != nil ? String(localized: "Automatic") : nil)
   }
 
   var automaticProjectTitle: String? {
@@ -144,30 +142,16 @@ final class AgentThreadToolbarModel: ObservableObject {
   }
 
   var automaticModelTitle: String? {
-    guard let defaultModelID = catalog?.defaultModelID,
-          let label = catalog?.models?.first(where: { $0.id == defaultModelID })?.label
-    else { return nil }
-    return Self.automaticTitle(label)
+    catalog?.automaticModelTitle
   }
 
   var automaticReasoningTitle: String? {
-    automaticTitle(
-      catalog?.defaultReasoningEffortID(forModelID: effectiveModelID),
-      in: availableReasoningOptions
-    )
+    catalog?.automaticReasoningTitle(forModelID: effectiveModelID)
+      ?? (explicitReasoningID != nil ? String(localized: "Use default") : nil)
   }
 
   var availableReasoningOptions: [AgentConfigurationOption]? {
-    reasoningOptions(forModelID: effectiveModelID)
-  }
-
-  private func reasoningOptions(forModelID modelID: String?) -> [AgentConfigurationOption]? {
-    guard let reasoning = catalog?.reasoning else { return nil }
-    guard let models = catalog?.models else { return reasoning }
-    guard let model = models.first(where: { $0.id == modelID }) else { return nil }
-    guard !model.reasoningEffortIDs.isEmpty else { return reasoning }
-    let supported = Set(model.reasoningEffortIDs)
-    return reasoning.filter { supported.contains($0.id) }
+    catalog?.reasoningOptions(forModelID: effectiveModelID)
   }
 
   func contextSelectingProject(_ id: String?) -> InlineProtocol.AgentThreadContext? {
@@ -180,10 +164,9 @@ final class AgentThreadToolbarModel: ObservableObject {
       if let id { configuration.modelID = id } else { configuration.clearModelID() }
       let nextModelID = id ?? catalog?.defaultModelID
       if nextModelID != effectiveModelID,
-         let model = catalog?.models?.first(where: { $0.id == nextModelID }),
          configuration.hasReasoningEffortID,
-         !model.reasoningEffortIDs.isEmpty,
-         !model.reasoningEffortIDs.contains(configuration.reasoningEffortID)
+         let catalog,
+         catalog.compatibleReasoningEffortID(configuration.reasoningEffortID, forModelID: nextModelID) == nil
       {
         configuration.clearReasoningEffortID()
       }

@@ -343,12 +343,12 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   var modelTitle: String? {
-    guard let effectiveModelID else { return nil }
-    return agentCatalog?.models?.first(where: { $0.id == effectiveModelID })?.label ?? selectedModelID
+    agentCatalog?.modelTitle(forModelID: effectiveModelID) ?? selectedModelID
   }
 
   var reasoningTitle: String? {
     selectedLabel(effectiveReasoningID, in: availableReasoningOptions)
+      ?? (automaticReasoningTitle != nil ? String(localized: "Automatic") : nil)
   }
 
   var automaticProjectTitle: String? {
@@ -356,26 +356,16 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   var automaticModelTitle: String? {
-    guard let defaultModelID = agentCatalog?.defaultModelID,
-          let label = agentCatalog?.models?.first(where: { $0.id == defaultModelID })?.label
-    else { return nil }
-    return automaticTitle(label)
+    agentCatalog?.automaticModelTitle
   }
 
   var automaticReasoningTitle: String? {
-    automaticTitle(
-      agentCatalog?.defaultReasoningEffortID(forModelID: effectiveModelID),
-      in: availableReasoningOptions
-    )
+    agentCatalog?.automaticReasoningTitle(forModelID: effectiveModelID)
+      ?? (selectedReasoningID != nil ? String(localized: "Use default") : nil)
   }
 
   var availableReasoningOptions: [AgentConfigurationOption]? {
-    guard let reasoning = agentCatalog?.reasoning else { return nil }
-    guard let models = agentCatalog?.models else { return reasoning }
-    guard let model = models.first(where: { $0.id == effectiveModelID }) else { return nil }
-    guard !model.reasoningEffortIDs.isEmpty else { return reasoning }
-    let supported = Set(model.reasoningEffortIDs)
-    return reasoning.filter { supported.contains($0.id) }
+    agentCatalog?.reasoningOptions(forModelID: effectiveModelID)
   }
 
   var agentThreadContext: InlineProtocol.AgentThreadContext? {
@@ -491,10 +481,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   func selectModel(_ id: String?) {
     let nextModelID = id ?? agentCatalog?.defaultModelID
     if nextModelID != effectiveModelID,
-       let model = agentCatalog?.models?.first(where: { $0.id == nextModelID }),
        let reasoning = selectedReasoningID,
-       !model.reasoningEffortIDs.isEmpty,
-       !model.reasoningEffortIDs.contains(reasoning)
+       let agentCatalog,
+       agentCatalog.compatibleReasoningEffortID(reasoning, forModelID: nextModelID) == nil
     {
       // The user changed models; use the new model's default if necessary.
       selectedReasoningID = nil
@@ -1498,11 +1487,11 @@ private struct AllChatsComposeAccessoryView: View {
         )
       }
 
-      if let reasoning = model.availableReasoningOptions, let title = model.reasoningTitle {
+      if let title = model.reasoningTitle {
         AgentConfigurationMenu(
           title: title,
           automaticTitle: model.automaticReasoningTitle,
-          options: reasoning,
+          options: model.availableReasoningOptions ?? [],
           selection: model.selectedReasoningID,
           isDisabled: model.isSubmitting,
           tooltipTitle: "Reasoning",
