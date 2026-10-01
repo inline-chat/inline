@@ -123,9 +123,12 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
   expect(config.kill_signal).toBe("SIGTERM")
   expect(parseInt(config.kill_timeout) * 1000).toBeGreaterThan(20_000)
   expect(config.env.INLINE_PROCESS_ROLE).toBe("all")
-  expect(config.env.INLINE_INGRESS_MODE).toBe("cloudflare")
+  expect(config.env.INLINE_REALTIME_DISTRIBUTED).toBe("1")
+  expect(config.env.INLINE_DATABASE_QUERY_POOL_MAX).toBe("3")
+  expect(config.env.INLINE_INGRESS_MODE).toBe("cloudflare-optional")
   expect(config.env.INLINE_INGRESS_HOST).toBe("api.inline.chat")
   expect(config.env.INLINE_TRUSTED_CLIENT_IP_HEADER).toBe("cf-connecting-ip")
+  expect(config.env.INLINE_INGRESS_DIRECT_IP_SOURCE).toBe("fly-client-ip")
   expect(config.env.SHUTDOWN_TIMEOUT_MS).toBe("40000")
   expect(config.http_service.auto_stop_machines).toBe("off")
   expect(config.http_service.checks[0].path).toBe("/readyz")
@@ -144,9 +147,12 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
     NODE_ENV: "production",
     PORT: "8000",
     INLINE_PROCESS_ROLE: "api",
-    INLINE_INGRESS_MODE: "cloudflare",
+    INLINE_REALTIME_DISTRIBUTED: "1",
+    INLINE_DATABASE_QUERY_POOL_MAX: "3",
+    INLINE_INGRESS_MODE: "cloudflare-optional",
     INLINE_INGRESS_HOST: "api.inline.chat",
     INLINE_TRUSTED_CLIENT_IP_HEADER: "cf-connecting-ip",
+    INLINE_INGRESS_DIRECT_IP_SOURCE: "fly-client-ip",
     SHUTDOWN_TIMEOUT_MS: "40000",
   })
   expect(dark.services).toBeUndefined()

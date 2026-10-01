@@ -69,6 +69,14 @@ source revision label and immutable digest identify the candidate. The checked-i
 Fly config contains an image sentinel so an ordinary deploy cannot silently
 build or select an unqualified checkout.
 
+Before activation, verify the effective process configuration as well as the
+profile. Fly app secrets override same-named profile environment values. Require
+`INLINE_REALTIME_DISTRIBUTED=1`; the legacy `REALTIME_DISTRIBUTED` must be absent
+or `1`, because conflicting settings refuse startup. Also verify the effective
+ingress mode, direct-IP source and query-pool cap match the qualified profile.
+Keep credential values out of receipts and logs; a list of secret names alone
+does not establish these effective settings.
+
 ### Prepare an image for rehearsal or initial bootstrap
 
 When no healthy public fleet exists yet, or an exact-image rehearsal is needed,
@@ -211,6 +219,16 @@ Never remove a column or change its meaning while an old binary or rollback
 candidate still requires it. Test the chosen rollback image on the resulting
 schema before promotion.
 
+Retain each rollback image together with its compatible Machine configuration
+in the protected recovery capture. An image-only rollback is insufficient:
+binaries that predate optional ingress reject `cloudflare-optional`, so restore their strict
+`cloudflare` ingress configuration and preserve its origin-attribution secret
+alongside the old image. Those binaries also lack the query-pool cap and can use
+10 query plus one health connection each. Recalculate the whole fleet's budget
+and keep Hetzner stopped during the first rollback overlap; do not count the new
+cap as a limit on an old binary. Verify the resulting image, effective settings,
+schema compatibility and authenticated serving path before returning traffic.
+
 Preserve public `0150_space-profiles` and forward `0151_insights-query-indexes`.
 The current migrator wraps pending DDL in one transaction: locks from 0150 can
 remain held while 0151 builds indexes. Qualify pending DDL on representative
@@ -288,8 +306,11 @@ Do not select a header fallback solely because a client can send it. Verify the
 proxy overwrite and port isolation using forged-header requests in the actual
 hosting environment before enabling the mode. Host validation still applies.
 
-The checked-in Fly configuration retains strict `cloudflare` mode. Optional-mode
-unit tests are not deployment proof. Before changing DNS, deploy the qualified
-image/config, verify canonical public TLS and renewal, test an ordinary route
+The checked-in Fly profile enables `cloudflare-optional` ingress with the
+provider-owned `fly-client-ip` fallback and `INLINE_REALTIME_DISTRIBUTED=1` for
+deployment overlap. Existing strict origins keep their running configuration
+until this profile is deliberately deployed. Optional-mode unit tests are not
+deployment proof. Before changing DNS, deploy the qualified image/config,
+verify canonical public TLS and renewal, test an ordinary route
 without the origin secret, then authenticate and reconnect real clients. A
 successful `/readyz` alone does not prove bypass readiness.

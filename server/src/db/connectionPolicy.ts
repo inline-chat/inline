@@ -17,6 +17,7 @@ type DatabaseEnvironment = {
   DATABASE_URL?: string
   DATABASE_DIRECT_URL?: string
   DATABASE_CONNECTION_MODE?: string
+  INLINE_DATABASE_QUERY_POOL_MAX?: string
 }
 
 const parseDatabaseUrl = (value: string): URL => {
@@ -109,9 +110,13 @@ export const assertQueryTimeouts = (rows: readonly TimeoutRow[]): void => {
 }
 
 export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEnvironment = {}) => {
+  const queryPoolMax = environment.INLINE_DATABASE_QUERY_POOL_MAX ?? "10"
+  if (!/^(?:[1-9]|10)$/.test(queryPoolMax) || queryPoolMax.trim() !== queryPoolMax) {
+    throw new Error("INLINE_DATABASE_QUERY_POOL_MAX must be an integer from 1 through 10.")
+  }
   const policy = databaseConnectionPolicy(databaseUrl, environment)
   const queryClient = postgres(policy.queryUrl, {
-    max: 10, connect_timeout: 5, idle_timeout: 30,
+    max: Number(queryPoolMax), connect_timeout: 5, idle_timeout: 30,
     connection: {
       application_name: "inline-server",
       ...(policy.mode === "direct" ? QUERY_TIMEOUTS : {}),
