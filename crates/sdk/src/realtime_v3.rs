@@ -991,6 +991,9 @@ impl InlineProtocolV3Connection {
         if candidate <= self.last_message_id {
             candidate = (self.last_message_id + 4) & !3;
         }
+        if candidate as u32 == 0 {
+            candidate += 4;
+        }
         self.last_message_id = candidate;
         Ok(candidate)
     }
