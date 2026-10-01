@@ -123,6 +123,7 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
   expect(config.kill_signal).toBe("SIGTERM")
   expect(parseInt(config.kill_timeout) * 1000).toBeGreaterThan(20_000)
   expect(config.env.INLINE_PROCESS_ROLE).toBe("all")
+  expect(config.env.INLINE_DATABASE_QUERY_POOL_MAX).toBe("3")
   expect(config.env.INLINE_INGRESS_MODE).toBe("cloudflare")
   expect(config.env.INLINE_INGRESS_HOST).toBe("api.inline.chat")
   expect(config.env.INLINE_TRUSTED_CLIENT_IP_HEADER).toBe("cf-connecting-ip")
@@ -144,6 +145,7 @@ test("Fly configuration keeps a dark Machine private and reserves workers for th
     NODE_ENV: "production",
     PORT: "8000",
     INLINE_PROCESS_ROLE: "api",
+    INLINE_DATABASE_QUERY_POOL_MAX: "3",
     INLINE_INGRESS_MODE: "cloudflare",
     INLINE_INGRESS_HOST: "api.inline.chat",
     INLINE_TRUSTED_CLIENT_IP_HEADER: "cf-connecting-ip",
