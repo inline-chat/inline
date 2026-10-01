@@ -12,12 +12,6 @@ import {
   AuxiliaryRouteGroupLive,
 } from "../../controllers/auxiliaryLive.effect"
 import {
-  AdminApiGroup,
-} from "../../controllers/admin.effect"
-import {
-  AdminRouteGroupLive,
-} from "../../controllers/adminLive.effect"
-import {
   BotApiGroup,
 } from "../../controllers/bot/bot.effect"
 import {
@@ -37,9 +31,12 @@ import {
 } from "../../controllers/v1MessagingProvidersLive.effect"
 import {
   defineExecutableHttpApi,
-  makeHttpApplication,
+  makeHttpRoutes,
 } from "./application"
-import type { HttpKernelMiddlewareOptions } from "./middleware"
+import {
+  makeHttpKernelMiddlewareLayer,
+  type HttpKernelMiddlewareOptions,
+} from "./middleware"
 import {
   defineOpenApiDocument,
   makeBotApiBase,
@@ -57,20 +54,16 @@ export interface CandidateHttpApplicationOptions {
  * `server/src/index.ts` serves this graph in production. The retained
  * `legacyServer.ts` graph is differential-test evidence only.
  */
-export const makeCandidateHttpApplication = ({
-  apiBaseUrl = "https://api.inline.chat",
-  middleware,
-}: CandidateHttpApplicationOptions) => {
+export const makeCandidateHttpRoutes = (apiBaseUrl = "https://api.inline.chat") => {
   const platformApi = makePlatformApiBase(apiBaseUrl)
     .add(AuthApiGroup)
     .add(V1IdentitySpacesApiGroup)
     .add(V1MessagingProvidersApiGroup)
     .add(AuxiliaryApiGroup)
-    .add(AdminApiGroup)
   const botApi = makeBotApiBase(apiBaseUrl)
     .add(BotApiGroup)
 
-  return makeHttpApplication({
+  return makeHttpRoutes({
     platform: defineExecutableHttpApi({
       ...defineOpenApiDocument({
         api: platformApi,
@@ -82,7 +75,6 @@ export const makeCandidateHttpApplication = ({
         V1IdentitySpacesRouteGroupLive,
         V1MessagingProvidersRouteGroupLive,
         AuxiliaryRouteGroupLive,
-        AdminRouteGroupLive,
       ),
     }),
     bot: defineExecutableHttpApi({
@@ -93,6 +85,13 @@ export const makeCandidateHttpApplication = ({
       }),
       handlers: BotRouteGroupLive,
     }),
-    middleware,
   })
 }
+
+export const makeCandidateHttpApplication = ({
+  apiBaseUrl = "https://api.inline.chat",
+  middleware,
+}: CandidateHttpApplicationOptions) =>
+  makeCandidateHttpRoutes(apiBaseUrl).pipe(
+    Layer.provideMerge(makeHttpKernelMiddlewareLayer(middleware)),
+  )

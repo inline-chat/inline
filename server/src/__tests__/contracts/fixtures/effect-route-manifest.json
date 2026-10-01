@@ -1,19 +1,13 @@
 {
   "version": 1,
-  "count": 312,
+  "count": 275,
   "methodCounts": {
-    "DELETE": 1,
-    "GET": 153,
-    "POST": 156,
-    "PUT": 1,
+    "GET": 137,
+    "POST": 137,
     "WS": 1
   },
-  "sha256": "890f2deb0431b64383308b1c358ab11b6492eda4bdfbb3238286ab9d2fd7734f",
+  "sha256": "0739210510ec99ba0fa7ce90318e01602ace9cb41409b9d91e4f17564d4f9f90",
   "routes": [
-    {
-      "method": "DELETE",
-      "path": "/admin/reserved-usernames"
-    },
     {
       "method": "GET",
       "path": "/"
@@ -25,70 +19,6 @@
     {
       "method": "GET",
       "path": "//"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/auth/totp/setup"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/email-campaigns"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/email-provider-status"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/invites"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/me"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/active-users"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/app"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/overview"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/technical"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/reserved-usernames"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/server-config"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/spaces"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users/{id}"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users/{id}/avatar"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/waitlist"
     },
     {
       "method": "GET",
@@ -625,82 +555,6 @@
     {
       "method": "GET",
       "path": "/waitlist/super_secret_sub_count"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/dev-login"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/login"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/logout"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/send-email-code"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/set-password"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/step-up"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/totp/verify"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/verify-email-code"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-campaigns"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-campaigns/preview"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-campaigns/{id}/pause"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-campaigns/{id}/send"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-campaigns/{id}/test"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/email-provider-test"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/invites/generate"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/reserved-usernames"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/{id}/invites"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/{id}/sessions/{sessionId}/revoke"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/{id}/update"
     },
     {
       "method": "POST",
@@ -1249,10 +1103,6 @@
     {
       "method": "POST",
       "path": "/waitlist/verify"
-    },
-    {
-      "method": "PUT",
-      "path": "/admin/server-config"
     },
     {
       "method": "WS",

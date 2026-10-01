@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 263,
+  "count": 238,
   "methodCounts": {
     "ALL": 3,
-    "GET": 103,
-    "OPTIONS": 18,
-    "POST": 138,
+    "GET": 91,
+    "OPTIONS": 16,
+    "POST": 127,
     "WS": 1
   },
-  "sha256": "2c10f537ff021f882e4a7d7233ace164c256f4371d4aa094f41ab5662a268300",
+  "sha256": "2df2a51f51a3c9ab927160ea1ae42d6053f23418f7343442f4fce20dd5ac9ad4",
   "routes": [
     {
       "method": "ALL",
@@ -29,54 +29,6 @@
     {
       "method": "GET",
       "path": "//"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/auth/totp/setup"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/invites"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/me"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/active-users"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/app"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/overview"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/metrics/technical"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/spaces"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users/:id"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/users/:id/avatar"
-    },
-    {
-      "method": "GET",
-      "path": "/admin/waitlist"
     },
     {
       "method": "GET",
@@ -444,14 +396,6 @@
     },
     {
       "method": "OPTIONS",
-      "path": "/admin/"
-    },
-    {
-      "method": "OPTIONS",
-      "path": "/admin/*"
-    },
-    {
-      "method": "OPTIONS",
       "path": "/api/there/"
     },
     {
@@ -505,50 +449,6 @@
     {
       "method": "OPTIONS",
       "path": "/waitlist/*"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/login"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/logout"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/send-email-code"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/set-password"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/step-up"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/totp/verify"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/auth/verify-email-code"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/invites/generate"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/:id/invites"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/:id/sessions/:sessionId/revoke"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/users/:id/update"
     },
     {
       "method": "POST",

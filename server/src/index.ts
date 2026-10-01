@@ -99,6 +99,9 @@ if (NODE_ENV !== "development") {
 }
 
 export interface StartServerOptions {
+  readonly makeHttpApplication?:
+    | typeof makeCandidateHttpApplication
+    | undefined
   readonly inlineProtocolConfiguration?:
     | InlineProtocolConfiguration
     | undefined
@@ -155,7 +158,7 @@ const startServerWithProcessOwnership = (
       ],
     )
   const application =
-    makeCandidateHttpApplication({
+    (options.makeHttpApplication ?? makeCandidateHttpApplication)({
       apiBaseUrl: API_BASE_URL,
       middleware: {
         clientIpHeader,

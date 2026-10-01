@@ -475,7 +475,6 @@ const main = async (): Promise<void> => {
         "/oauth/token",
         "/v1/getMe",
         "/v1/sendMessage",
-        "/admin/me",
       ]
     ) {
       if (
@@ -486,6 +485,9 @@ const main = async (): Promise<void> => {
           `${target} platform OpenAPI omitted ${path}.`,
         )
       }
+    }
+    if (Object.keys(platformSpec.paths ?? {}).some((path) => path.startsWith("/admin"))) {
+      throw new Error(`${target} public OpenAPI exposed private admin routes.`)
     }
 
     const botSpecResponse =
@@ -528,7 +530,7 @@ const main = async (): Promise<void> => {
       ])
     if (
       v1.status !== 401 ||
-      admin.status !== 401 ||
+      admin.status !== 404 ||
       fallback.status !== 404
     ) {
       throw new Error(
@@ -540,9 +542,9 @@ const main = async (): Promise<void> => {
         await fetchBounded(
           `${baseUrl}/admin/me`,
         )
-      if (missingAdminOrigin.status !== 403) {
+      if (missingAdminOrigin.status !== 404) {
         throw new Error(
-          `${target} accepted an Admin request without an allowed origin.`,
+          `${target} exposed an Admin route without an origin.`,
         )
       }
     }

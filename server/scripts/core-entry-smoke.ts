@@ -253,7 +253,6 @@ const main = async (): Promise<void> => {
       "/v1/getMe",
       "/v1/sendMessage",
       "/v1/sendSmsCode",
-      "/admin/me",
       "/oauth/token",
     ]) {
       if (platformSpec.paths[path] === undefined) {
@@ -261,6 +260,9 @@ const main = async (): Promise<void> => {
           `The Effect platform contract omitted accepted route ${path}.`,
         )
       }
+    }
+    if (Object.keys(platformSpec.paths).some((path) => path.startsWith("/admin"))) {
+      throw new Error("The public platform contract exposed private admin routes.")
     }
 
     const [botDocsResponse, botSpecResponse] =
@@ -333,9 +335,9 @@ const main = async (): Promise<void> => {
         `The Effect /v1/sendMessage auth boundary returned ${replacementMessaging.status}, expected 401.`,
       )
     }
-    if (replacementAdmin.status !== 401) {
+    if (replacementAdmin.status !== 404) {
       throw new Error(
-        `The Effect /admin/me auth boundary returned ${replacementAdmin.status}, expected 401.`,
+        `The public Effect /admin/me returned ${replacementAdmin.status}, expected 404.`,
       )
     }
     if (replacementBot.status !== 401) {

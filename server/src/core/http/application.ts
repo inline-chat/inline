@@ -96,6 +96,34 @@ const makeExecutableHttpApiLayer = <
  * contract. Both the router and OpenAPI document are derived from the same API,
  * so served routes cannot be paired with an unrelated document.
  */
+export const makeHttpRoutes = <
+  PlatformId extends string,
+  PlatformGroups extends HttpApiGroup.Constraint,
+  PlatformHandlersError,
+  PlatformHandlersRequirements,
+  BotId extends string,
+  BotGroups extends HttpApiGroup.Constraint,
+  BotHandlersError,
+  BotHandlersRequirements,
+>(
+  options: Omit<HttpApplicationOptions<
+    PlatformId,
+    PlatformGroups,
+    PlatformHandlersError,
+    PlatformHandlersRequirements,
+    BotId,
+    BotGroups,
+    BotHandlersError,
+    BotHandlersRequirements
+  >, "middleware">,
+) =>
+  Layer.mergeAll(
+    makeExecutableHttpApiLayer(options.platform),
+    makeExecutableHttpApiLayer(options.bot),
+    makeOpenApiDocumentLayer(options.platform),
+    makeOpenApiDocumentLayer(options.bot),
+  )
+
 export const makeHttpApplication = <
   PlatformId extends string,
   PlatformGroups extends HttpApiGroup.Constraint,
@@ -117,12 +145,7 @@ export const makeHttpApplication = <
     BotHandlersRequirements
   >,
 ) =>
-  Layer.mergeAll(
-    makeExecutableHttpApiLayer(options.platform),
-    makeExecutableHttpApiLayer(options.bot),
-    makeOpenApiDocumentLayer(options.platform),
-    makeOpenApiDocumentLayer(options.bot),
-  ).pipe(
+  makeHttpRoutes(options).pipe(
     Layer.provideMerge(
       makeHttpKernelMiddlewareLayer(options.middleware),
     ),

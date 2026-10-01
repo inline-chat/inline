@@ -206,25 +206,12 @@ const comparableLegacyRoutes =
 
 const intentionalCandidateOnly =
   new Set([
-    "DELETE\t/admin/reserved-usernames",
     "GET\t/",
-    "GET\t/admin/email-campaigns",
-    "GET\t/admin/email-provider-status",
-    "GET\t/admin/reserved-usernames",
-    "GET\t/admin/server-config",
     "GET\t/email/unsubscribe/{token}",
     "GET\t/health",
     "GET\t/healthz",
     "GET\t/livez",
     "GET\t/readyz",
-    "POST\t/admin/auth/dev-login",
-    "POST\t/admin/email-campaigns",
-    "POST\t/admin/email-campaigns/preview",
-    "POST\t/admin/email-campaigns/{id}/pause",
-    "POST\t/admin/email-campaigns/{id}/send",
-    "POST\t/admin/email-campaigns/{id}/test",
-    "POST\t/admin/email-provider-test",
-    "POST\t/admin/reserved-usernames",
     "POST\t/bot/deleteMessages",
     "POST\t/bot/editMessageActions",
     "POST\t/bot/forwardMessages",
@@ -235,7 +222,6 @@ const intentionalCandidateOnly =
     "POST\t/bot{token}/getSpace",
     "POST\t/email/unsubscribe/{token}",
     "POST\t/v1/space-join/resolve",
-    "PUT\t/admin/server-config",
   ])
 
 let coreHandle:

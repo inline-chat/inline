@@ -93,7 +93,7 @@ describe("API Endpoints", () => {
       expect(await thereResponse.json()).toMatchObject({ ok: true })
     })
 
-    it("keeps admin auth JSON POST route reachable", async () => {
+    it("excludes private admin auth routes", async () => {
       const response = await testServer.handle(
         new Request("http://localhost/admin/auth/send-email-code", {
           method: "POST",
@@ -107,8 +107,7 @@ describe("API Endpoints", () => {
         }),
       )
 
-      expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({ ok: true })
+      expect(response.status).toBe(404)
     })
   })
 
