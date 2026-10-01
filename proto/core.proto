@@ -2969,7 +2969,11 @@ message DeleteDialogFolderResult {
   repeated Dialog dialogs = 2;
 }
 
-message GetChatsInput {}
+message GetChatsInput {
+  // Include every accessible linked subthread, regardless of dialog visibility.
+  // Omitted/false preserves the normal chat-list snapshot.
+  optional bool include_subthreads = 1;
+}
 
 message GetChatsResult {
   // Dialogs
@@ -2989,6 +2993,10 @@ message GetChatsResult {
 
   // Personal dialog folders. Dialogs remain present for unsupported clients.
   repeated DialogFolder folders = 6;
+
+  // True only when include_subthreads was honored with a complete accessible
+  // catalog. Older servers omit this field; archive clients must check it.
+  optional bool subthreads_included = 7;
 }
 
 message TranslateMessagesInput {

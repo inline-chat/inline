@@ -942,6 +942,12 @@ struct ChatsListArgs {
     #[command(flatten)]
     scope: ChatListScope,
 
+    #[arg(
+        long,
+        help = "Include all accessible linked subthreads, even without a visible dialog"
+    )]
+    include_subthreads: bool,
+
     #[arg(long, short = 'L', help = "Maximum number of chats to return")]
     limit: Option<usize>,
 
@@ -3116,7 +3122,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let payload = realtime
+                        .call(proto::GetChatsInput {
+                            include_subthreads: Some(args.include_subthreads),
+                        })
+                        .await?;
+                    validate_subthreads_catalog(args.include_subthreads, payload.subthreads_included)?;
                     let payload = apply_chat_list_scope(payload, &args.scope);
 
                     if cli.json {
@@ -3555,7 +3566,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let mut payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let mut payload = realtime.call(proto::GetChatsInput::default()).await?;
 
                     if cli.json {
                         filter_users_payload(&mut payload, args.filter.as_deref());
@@ -3587,7 +3598,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--id", args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let payload = realtime.call(proto::GetChatsInput::default()).await?;
 
                     if cli.json {
                         if let Some(user) = payload.users.iter().find(|user| user.id == user_id) {
@@ -3685,7 +3696,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             } else {
                                 HashMap::new()
                             };
-                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
                         let users_by_id = chats_payload
                             .users
                             .into_iter()
@@ -3762,7 +3773,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 } else {
                                     HashMap::new()
                                 };
-                            let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                            let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
                             let users_by_id = chats_payload
                                 .users
                                 .into_iter()
@@ -3812,7 +3823,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             } else {
                                 HashMap::new()
                             };
-                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
                         let users_by_id = chats_payload
                             .users
                             .into_iter()
@@ -4230,7 +4241,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 SpacesCommand::List => {
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let mut payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let mut payload = realtime.call(proto::GetChatsInput::default()).await?;
 
                     if cli.json {
                         let spaces = std::mem::take(&mut payload.spaces);
@@ -4577,7 +4588,7 @@ async fn handle_messages_search(
         } else {
             HashMap::new()
         };
-        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
         let users_by_id = chats_payload
             .users
             .into_iter()
@@ -5051,7 +5062,7 @@ async fn fetch_export_indexes(
     ),
     Box<dyn std::error::Error>,
 > {
-    let payload = realtime.call(proto::GetChatsInput {}).await?;
+    let payload = realtime.call(proto::GetChatsInput::default()).await?;
     let users = payload
         .users
         .into_iter()
@@ -5931,6 +5942,15 @@ async fn fetch_message_translations(
         .into_iter()
         .map(|translation| (translation.message_id, translation))
         .collect())
+}
+
+fn validate_subthreads_catalog(requested: bool, included: Option<bool>) -> Result<(), CliError> {
+    if requested && included != Some(true) {
+        return Err(CliError::invalid_args(
+            "This server does not support complete subthread discovery; upgrade the Inline server before using --include-subthreads",
+        ));
+    }
+    Ok(())
 }
 
 fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
@@ -7305,6 +7325,29 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn chats_list_subthread_discovery_is_opt_in_and_requires_server_support() {
+        for (argv, expected) in [
+            (vec!["inline", "chats", "list"], false),
+            (
+                vec!["inline", "chats", "list", "--include-subthreads", "--json"],
+                true,
+            ),
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            match cli.command {
+                Command::Chats {
+                    command: ChatsCommand::List(args),
+                } => assert_eq!(args.include_subthreads, expected),
+                _ => panic!("expected chats list"),
+            }
+        }
+        assert!(validate_subthreads_catalog(true, Some(true)).is_ok());
+        assert!(validate_subthreads_catalog(true, Some(false)).is_err());
+        assert!(validate_subthreads_catalog(true, None).is_err());
+        assert!(validate_subthreads_catalog(false, None).is_ok());
+    }
+
+    #[test]
     fn parses_chats_rename() {
         let cli = Cli::try_parse_from([
             "inline",
@@ -8333,6 +8376,7 @@ mod cli_parsing_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
 
         filter_users_payload(&mut payload, Some("mo"));

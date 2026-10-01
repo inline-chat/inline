@@ -3482,7 +3482,7 @@ mod tests {
             proto::Method::GetChats
         );
 
-        let input = proto::GetChatsInput {};
+        let input = proto::GetChatsInput::default();
         match input.into_rpc_input() {
             proto::rpc_call::Input::GetChats(_) => {}
             other => panic!("expected GetChats input, got {other:?}"),

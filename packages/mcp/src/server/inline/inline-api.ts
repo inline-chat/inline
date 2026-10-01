@@ -180,7 +180,7 @@ export type InlineApi = {
   close(): Promise<void>
   listSpaces(params: { query?: string; limit?: number }): Promise<InlineSpaceSummary[]>
   searchPeople(params: { query?: string; limit?: number }): Promise<{ query: string | null; bestMatch: InlinePersonCandidate | null; items: InlinePersonCandidate[] }>
-  getEligibleChats(): Promise<InlineEligibleChat[]>
+  getEligibleChats(params?: { includeSubthreads?: boolean }): Promise<InlineEligibleChat[]>
   resolveConversation(query: string, limit: number, filters?: InlineConversationFilters): Promise<InlineConversationResolution>
   getConversation(params: { chatId?: bigint; userId?: bigint }): Promise<InlineConversationDetails>
   messageContext(params: {
@@ -434,9 +434,15 @@ export function createInlineApi(params: {
     throw new InlineAccessDeniedError("chat is not in an allowed context")
   }
 
-  const getChats = async (): Promise<GetChatsResult> => {
+  const getChats = async (includeSubthreads = false): Promise<GetChatsResult> => {
     await ensureConnected()
-    const result = await client.invoke(Method.GET_CHATS, { oneofKind: "getChats", getChats: GetChatsInput.create({}) })
+    const result = await client.invoke(Method.GET_CHATS, {
+      oneofKind: "getChats",
+      getChats: GetChatsInput.create(includeSubthreads ? { includeSubthreads: true } : {}),
+    })
+    if (includeSubthreads && result.getChats.subthreadsIncluded !== true) {
+      throw new Error("Inline server upgrade required: complete conversation discovery was not confirmed")
+    }
     return result.getChats
   }
 
@@ -641,8 +647,8 @@ export function createInlineApi(params: {
     return left.userId === right.userId ? 0 : left.userId < right.userId ? -1 : 1
   }
 
-  const buildEligibleChatContext = async (): Promise<EligibleChatContext> => {
-    const payload = await getChats()
+  const buildEligibleChatContext = async (includeSubthreads = false): Promise<EligibleChatContext> => {
+    const payload = await getChats(includeSubthreads)
     const dialogByChatId = new Map<string, Dialog>()
     for (const dialog of payload.dialogs) {
       if (dialog.chatId == null) continue
@@ -1030,7 +1036,10 @@ export function createInlineApi(params: {
       }
     },
 
-    async getEligibleChats() {
+    async getEligibleChats(params) {
+      // Archive discovery is opt-in and must not expand the ordinary search
+      // and mentions cache. The backing server explicitly confirms completeness.
+      if (params?.includeSubthreads === true) return (await buildEligibleChatContext(true)).chats
       const context = await getEligibleChatContext()
       return context.chats
     },

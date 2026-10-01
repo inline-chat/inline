@@ -539,6 +539,35 @@ mod tests {
     }
 
     #[test]
+    fn unfiltered_json_catalog_preserves_unopened_subthreads_and_capability_marker() {
+        let mut payload = scope_fixture();
+        payload.subthreads_included = Some(true);
+        payload.chats.push(proto::Chat {
+            id: 500,
+            title: "Unopened child".into(),
+            peer_id: Some(proto::Peer {
+                r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 500 })),
+            }),
+            parent_chat_id: Some(42),
+            parent_message_id: Some(7),
+            ..Default::default()
+        });
+        // A child without a dialog must survive the same unfiltered JSON path
+        // used by complete archive discovery.
+        let scoped = apply_chat_list_scope(payload, &ChatListScope::default());
+        let result = apply_chat_list_filter(scoped, None);
+        assert!(result.chats.iter().any(|chat| chat.id == 500));
+        assert!(
+            !result
+                .dialogs
+                .iter()
+                .any(|dialog| dialog.chat_id == Some(500))
+        );
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["subthreads_included"], true);
+    }
+
+    #[test]
     fn scope_filters_combine_before_pagination_without_colliding_peer_ids() {
         let filtered = apply_chat_list_scope(
             scope_fixture(),

@@ -1,10 +1,10 @@
-import type { Chat, Dialog, DialogFolder, Message, Space, User } from "@inline-chat/protocol/core"
+import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
-import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import {
   chatParticipantGroups,
   chats,
@@ -29,7 +29,7 @@ import { getDialogFolders } from "@in/server/modules/dialogFolders"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { getMessageThreadProjectionsByParent } from "@in/server/modules/subthreads"
 
-type Input = {}
+type Input = GetChatsInput
 
 type Output = {
   chats: Chat[]
@@ -38,9 +38,54 @@ type Output = {
   users: User[]
   messages: Message[]
   folders: DialogFolder[]
+  subthreadsIncluded?: boolean
 }
 
 const log = new Log("functions.getChats")
+
+// Discover candidates through scoped roots or explicit target grants, never by
+// scanning every home subthread. The access projection below remains the sole
+// authority for what may be returned, including retained grants after revocation.
+async function getCompleteCatalogChatIds(currentUserId: number): Promise<number[]> {
+  const rows = await db.execute<{ chatId: number }>(sql`
+    with recursive seeds as (
+      select c.id
+      from chats c
+      where c.parent_chat_id is null
+        and (
+          (c.type = 'private' and (c.min_user_id = ${currentUserId} or c.max_user_id = ${currentUserId}))
+          or (c.type = 'thread' and exists (
+            select 1 from members m
+            where m.space_id = c.space_id and m.user_id = ${currentUserId}
+          ))
+        )
+
+      union
+
+      select cp.chat_id
+      from chat_participants cp
+      join chats c on c.id = cp.chat_id
+      where cp.user_id = ${currentUserId} and c.type = 'thread'
+
+      union
+
+      select cpg.chat_id
+      from chat_participant_groups cpg
+      join user_group_members ugm on ugm.group_id = cpg.group_id
+      join chats c on c.id = cpg.chat_id
+      where ugm.user_id = ${currentUserId} and c.type = 'thread'
+    ), catalog as (
+      select id from seeds
+
+      union
+
+      select child.id from chats child join catalog parent on child.parent_chat_id = parent.id
+      where child.type = 'thread'
+    )
+    select id as "chatId" from catalog order by id
+  `)
+  return rows.map((row) => row.chatId)
+}
 
 async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise<void> {
   try {
@@ -172,9 +217,13 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   })
   spacesList = userSpaces
 
+  const completeCatalogIds = input.includeSubthreads === true
+    ? await getCompleteCatalogChatIds(currentUserId)
+    : undefined
+
   // Fetch a list of public threads the user is a part of and don't have a dialog
   const candidates = await db.query.chats.findMany({
-    where: {
+    where: completeCatalogIds === undefined ? {
       OR: [
         // DMs
         {
@@ -308,7 +357,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
           },
         },
       ],
-    },
+    } : { id: { in: completeCatalogIds } },
 
     with: {
       // dialogs for this user
@@ -380,12 +429,14 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
   // A visible linked dialog is discovery state, not a current access grant. Reuse the same
   // direct/inherited authority as getChat before exposing metadata, previews, or senders.
-  const linkedChatIds = candidates.filter((chat) => chat.parentChatId != null).map((chat) => chat.id)
-  const linkedAccess = linkedChatIds.length === 0
+  const accessCheckedIds = candidates
+    .filter((chat) => input.includeSubthreads === true || chat.parentChatId != null)
+    .map((chat) => chat.id)
+  const chatAccess = accessCheckedIds.length === 0
     ? new Map<number, Set<number>>()
-    : await db.transaction((tx) => getEffectiveChatAccessUserIds(tx, linkedChatIds, { userIds: [currentUserId] }))
+    : await db.transaction((tx) => getEffectiveChatAccessUserIds(tx, accessCheckedIds, { userIds: [currentUserId] }))
   const chats = candidates.filter((chat) =>
-    chat.parentChatId == null || linkedAccess.get(chat.id)?.has(currentUserId) === true,
+    (input.includeSubthreads !== true && chat.parentChatId == null) || chatAccess.get(chat.id)?.has(currentUserId) === true,
   )
 
   // Create dialogs for all chats that don't have a dialog
@@ -549,6 +600,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     users: encodedUsers,
     messages: messagesList,
     folders: foldersList.map(Encoders.dialogFolder),
+    ...(input.includeSubthreads === true ? { subthreadsIncluded: true } : {}),
   }
 }
 

@@ -106,7 +106,8 @@ export async function getEffectiveChatAccessUserIds(
     access as (
       select cp.chat_id as "chatId", cp.user_id as "userId"
       from chat_participants cp
-      where cp.chat_id in (${chatIdList})
+      join chats target on target.id = cp.chat_id
+      where cp.chat_id in (${chatIdList}) and target.type = 'thread'
 
       union
 
@@ -115,7 +116,11 @@ export async function getEffectiveChatAccessUserIds(
       join user_groups ug on ug.id = cpg.group_id
       join user_group_members ugm on ugm.group_id = ug.id
       join members m on m.space_id = ug.space_id and m.user_id = ugm.user_id
+      join chats target on target.id = cpg.chat_id
       where cpg.chat_id in (${chatIdList})
+        and target.type = 'thread'
+        and target.public_thread is false
+        and target.space_id = ug.space_id
 
       union
 
@@ -162,7 +167,9 @@ export async function getEffectiveChatAccessUserIds(
       join user_groups ug on ug.id = cpg.group_id
       join user_group_members ugm on ugm.group_id = ug.id
       join members m on m.space_id = ug.space_id and m.user_id = ugm.user_id
-      where root.type = 'thread' and root.public_thread is distinct from true
+      where root.type = 'thread'
+        and root.public_thread is false
+        and root.space_id = ug.space_id
     )
     select distinct access."chatId", access."userId"
     from access

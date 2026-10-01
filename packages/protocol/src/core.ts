@@ -8284,6 +8284,13 @@ export interface DeleteDialogFolderResult {
  * @generated from protobuf message GetChatsInput
  */
 export interface GetChatsInput {
+    /**
+     * Include every accessible linked subthread, regardless of dialog visibility.
+     * Omitted/false preserves the normal chat-list snapshot.
+     *
+     * @generated from protobuf field: optional bool include_subthreads = 1;
+     */
+    includeSubthreads?: boolean;
 }
 /**
  * @generated from protobuf message GetChatsResult
@@ -8325,6 +8332,13 @@ export interface GetChatsResult {
      * @generated from protobuf field: repeated DialogFolder folders = 6;
      */
     folders: DialogFolder[];
+    /**
+     * True only when include_subthreads was honored with a complete accessible
+     * catalog. Older servers omit this field; archive clients must check it.
+     *
+     * @generated from protobuf field: optional bool subthreads_included = 7;
+     */
+    subthreadsIncluded?: boolean;
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -35863,7 +35877,9 @@ export const DeleteDialogFolderResult = new DeleteDialogFolderResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {
-        super("GetChatsInput", []);
+        super("GetChatsInput", [
+            { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
     }
     create(value?: PartialMessage<GetChatsInput>): GetChatsInput {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -35872,9 +35888,28 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatsInput): GetChatsInput {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional bool include_subthreads */ 1:
+                    message.includeSubthreads = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: GetChatsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional bool include_subthreads = 1; */
+        if (message.includeSubthreads !== undefined)
+            writer.tag(1, WireType.Varint).bool(message.includeSubthreads);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35894,7 +35929,8 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
             { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
             { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
             { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder }
+            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder },
+            { no: 7, name: "subthreads_included", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
@@ -35932,6 +35968,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
                 case /* repeated DialogFolder folders */ 6:
                     message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional bool subthreads_included */ 7:
+                    message.subthreadsIncluded = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35962,6 +36001,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         /* repeated DialogFolder folders = 6; */
         for (let i = 0; i < message.folders.length; i++)
             DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool subthreads_included = 7; */
+        if (message.subthreadsIncluded !== undefined)
+            writer.tag(7, WireType.Varint).bool(message.subthreadsIncluded);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

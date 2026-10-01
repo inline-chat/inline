@@ -9,12 +9,12 @@ import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { parseBlockContent } from "@in/server/modules/message/blockContent"
 import { prepareBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
+import type { FunctionContext } from "@in/server/functions/_types"
 
 // Helper to create a HandlerContext
-const makeHandlerContext = (userId: number): any => ({
+const makeHandlerContext = (userId: number): FunctionContext => ({
   currentUserId: userId,
   currentSessionId: defaultTestContext.sessionId,
-  ip: "127.0.0.1",
 })
 
 describe("getChats", () => {
@@ -47,6 +47,137 @@ describe("getChats", () => {
 
     const returnedChat = result.chats.find((c) => Number(c.id) === chat.id)
     expect(returnedChat?.spaceId).toBeUndefined()
+  })
+
+  test("complete catalog acknowledges an empty result without changing the default snapshot", async () => {
+    const user = await testUtils.createUser("empty-catalog@example.test")
+    const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(user.id))
+    expect(complete.subthreadsIncluded).toBe(true)
+    expect(complete.chats).toEqual([])
+    const normal = await getChats({ includeSubthreads: false }, makeHandlerContext(user.id))
+    expect(normal.subthreadsIncluded).toBeUndefined()
+  })
+
+  test("complete catalog includes hidden, unopened, archived and nested children without creating child dialogs", async () => {
+    const user = await testUtils.createUser("complete-catalog@example.test")
+    const parent = await testUtils.createChat(null, "Parent", "thread", false, user.id)
+    if (!parent) throw new Error("Parent not created")
+    await testUtils.addParticipant(parent.id, user.id)
+    const children = await db.insert(schema.chats).values([
+      { type: "thread", title: "Hidden", parentChatId: parent.id },
+      { type: "thread", title: "Unopened", parentChatId: parent.id },
+      { type: "thread", title: "Archived", parentChatId: parent.id },
+    ]).returning()
+    const [hidden, unopened, archived] = children
+    if (!hidden || !unopened || !archived) throw new Error("Children not created")
+    const [nested] = await db.insert(schema.chats).values({
+      type: "thread", title: "Nested", parentChatId: unopened.id,
+    }).returning()
+    if (!nested) throw new Error("Nested child not created")
+    await db.insert(schema.dialogs).values([
+      { chatId: hidden.id, userId: user.id, chatListHidden: true },
+      { chatId: archived.id, userId: user.id, archived: true, open: false, chatListHidden: true },
+    ])
+
+    const normal = await getChats({}, makeHandlerContext(user.id))
+    expect(normal.chats.map((chat) => Number(chat.id))).toEqual([parent.id])
+
+    const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(user.id))
+    expect(complete.subthreadsIncluded).toBe(true)
+    expect(complete.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual(
+      [parent.id, hidden.id, unopened.id, archived.id, nested.id].sort((a, b) => a - b),
+    )
+    const childDialogs = await db.select({ chatId: schema.dialogs.chatId }).from(schema.dialogs)
+      .where(and(eq(schema.dialogs.userId, user.id), eq(schema.dialogs.chatId, unopened.id)))
+    expect(childDialogs).toEqual([])
+    expect(complete.dialogs.find((dialog) => Number(dialog.chatId) === archived.id)?.archived).toBe(true)
+  })
+
+  test("complete catalog discovers direct and group child grants without exposing an unreadable parent", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Target-only grants", [
+      "target-catalog-owner@example.test", "target-catalog-reader@example.test",
+    ])
+    const [owner, reader] = users
+    const parent = await testUtils.createChat(space.id, "Unreadable parent", "thread", false, owner.id)
+    if (!parent) throw new Error("Parent not created")
+    await testUtils.addParticipant(parent.id, owner.id)
+    const [direct, grouped, denied] = await db.insert(schema.chats).values([
+      { type: "thread", title: "Direct grant", spaceId: space.id, parentChatId: parent.id },
+      { type: "thread", title: "Group grant", publicThread: false, spaceId: space.id, parentChatId: parent.id },
+      { type: "thread", title: "No grant", spaceId: space.id, parentChatId: parent.id },
+    ]).returning()
+    if (!direct || !grouped || !denied) throw new Error("Children not created")
+    await testUtils.addParticipant(direct.id, reader.id)
+    const [group] = await db.insert(schema.userGroups).values({
+      spaceId: space.id, name: "Child Readers", createdBy: owner.id,
+    }).returning()
+    if (!group) throw new Error("Group not created")
+    await db.insert(schema.userGroupMembers).values({ groupId: group.id, userId: reader.id })
+    await db.insert(schema.chatParticipantGroups).values({ groupId: group.id, chatId: grouped.id })
+    await db.insert(schema.messages).values({
+      chatId: parent.id, messageId: 1, fromId: owner.id, text: "private parent preview",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, parent.id))
+
+    const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(complete.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual([direct.id, grouped.id])
+    expect(complete.messages).toEqual([])
+    expect(complete.users).toEqual([])
+    expect(complete.dialogs).toEqual([])
+
+    // Stale grants remain, but current owning-Space authority must remove all
+    // child metadata, previews and senders after the reader leaves.
+    await db.insert(schema.messages).values({
+      chatId: direct.id, messageId: 1, fromId: owner.id, text: "private child preview",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, direct.id))
+    await db.delete(schema.members).where(and(
+      eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id),
+    ))
+    const revoked = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(revoked.chats).toEqual([])
+    expect(revoked.messages).toEqual([])
+    expect(revoked.users).toEqual([])
+  })
+
+  test("complete catalog discovers child-only home grants and excludes unrelated home trees", async () => {
+    const owner = await testUtils.createUser("home-tree-owner@example.test")
+    const reader = await testUtils.createUser("home-tree-reader@example.test")
+    const parent = await testUtils.createChat(null, "Other user's parent", "thread", false, owner.id)
+    if (!parent) throw new Error("Parent not created")
+    await testUtils.addParticipant(parent.id, owner.id)
+    const [granted, denied] = await db.insert(schema.chats).values([
+      { type: "thread", title: "Granted home child", parentChatId: parent.id },
+      { type: "thread", title: "Other home child", parentChatId: parent.id },
+    ]).returning()
+    if (!granted || !denied) throw new Error("Children not created")
+    await testUtils.addParticipant(granted.id, reader.id)
+    const result = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(result.chats.map((chat) => Number(chat.id))).toEqual([granted.id])
+  })
+
+  test("complete catalog uses current public access including legacy null permissions", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Legacy public access", [
+      "legacy-catalog-member@example.test",
+    ])
+    const reader = users[0]
+    const parent = await testUtils.createChat(space.id, "Public parent", "thread", true)
+    if (!parent) throw new Error("Parent not created")
+    const [child] = await db.insert(schema.chats).values({
+      type: "thread", title: "Inherited public child", spaceId: space.id, parentChatId: parent.id,
+    }).returning()
+    if (!child) throw new Error("Child not created")
+    await db.update(schema.members).set({ canAccessPublicChats: null }).where(and(
+      eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id),
+    ))
+    const legacy = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(legacy.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual([parent.id, child.id])
+    await db.update(schema.members).set({ canAccessPublicChats: false }).where(and(
+      eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id),
+    ))
+    const denied = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(denied.chats).toEqual([])
+    expect(denied.dialogs).toEqual([])
   })
 
   test("includes private space threads granted through a user group", async () => {

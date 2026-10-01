@@ -1307,7 +1307,7 @@ impl ClientBackend for SdkBackend {
         Box::pin(async move {
             let session = backend.require_session().await?;
             let result = backend
-                .call_realtime(&session, proto::GetChatsInput {})
+                .call_realtime(&session, proto::GetChatsInput::default())
                 .await?;
             backend.apply_get_chats_snapshot(result).await?;
             backend
@@ -2724,7 +2724,7 @@ impl SdkBackend {
             ));
         }
         let chats = self
-            .call_realtime(&session, proto::GetChatsInput {})
+            .call_realtime(&session, proto::GetChatsInput::default())
             .await?;
         let me = self.call_realtime(&session, proto::GetMeInput {}).await?;
         let settings = self

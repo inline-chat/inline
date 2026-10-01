@@ -14143,9 +14143,22 @@ public nonisolated struct GetChatsInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Include every accessible linked subthread, regardless of dialog visibility.
+  /// Omitted/false preserves the normal chat-list snapshot.
+  public var includeSubthreads: Bool {
+    get {_includeSubthreads ?? false}
+    set {_includeSubthreads = newValue}
+  }
+  /// Returns true if `includeSubthreads` has been explicitly set.
+  public var hasIncludeSubthreads: Bool {self._includeSubthreads != nil}
+  /// Clears the value of `includeSubthreads`. Subsequent reads from it will return its default value.
+  public mutating func clearIncludeSubthreads() {self._includeSubthreads = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _includeSubthreads: Bool? = nil
 }
 
 public nonisolated struct GetChatsResult: Sendable {
@@ -14171,9 +14184,22 @@ public nonisolated struct GetChatsResult: Sendable {
   /// Personal dialog folders. Dialogs remain present for unsupported clients.
   public var folders: [DialogFolder] = []
 
+  /// True only when include_subthreads was honored with a complete accessible
+  /// catalog. Older servers omit this field; archive clients must check it.
+  public var subthreadsIncluded: Bool {
+    get {_subthreadsIncluded ?? false}
+    set {_subthreadsIncluded = newValue}
+  }
+  /// Returns true if `subthreadsIncluded` has been explicitly set.
+  public var hasSubthreadsIncluded: Bool {self._subthreadsIncluded != nil}
+  /// Clears the value of `subthreadsIncluded`. Subsequent reads from it will return its default value.
+  public mutating func clearSubthreadsIncluded() {self._subthreadsIncluded = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _subthreadsIncluded: Bool? = nil
 }
 
 public nonisolated struct TranslateMessagesInput: Sendable {
@@ -41183,18 +41209,33 @@ nonisolated extension DeleteDialogFolderResult: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_subthreads\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self._includeSubthreads) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._includeSubthreads {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatsInput, rhs: GetChatsInput) -> Bool {
+    if lhs._includeSubthreads != rhs._includeSubthreads {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -41202,7 +41243,7 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0\u{3}subthreads_included\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -41216,12 +41257,17 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.folders) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self._subthreadsIncluded) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.dialogs.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 1)
     }
@@ -41240,6 +41286,9 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.folders.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.folders, fieldNumber: 6)
     }
+    try { if let v = self._subthreadsIncluded {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -41250,6 +41299,7 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.users != rhs.users {return false}
     if lhs.messages != rhs.messages {return false}
     if lhs.folders != rhs.folders {return false}
+    if lhs._subthreadsIncluded != rhs._subthreadsIncluded {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

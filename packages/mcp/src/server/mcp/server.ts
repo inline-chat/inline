@@ -52,7 +52,7 @@ type ResolvedUploadSource = {
 }
 
 type SendMode = "normal" | "silent"
-type ConversationSort = "relevance" | "recent" | "unread"
+type ConversationSort = "relevance" | "recent" | "unread" | "id"
 
 export type McpToolContract = "legacy" | "submission-v2"
 
@@ -327,6 +327,8 @@ function parseConversationSort(raw: string | undefined, hasQuery: boolean): Conv
       return "recent"
     case "unread":
       return "unread"
+    case "id":
+      return "id"
     default:
       throw new Error("invalid conversation sort")
   }
@@ -1175,6 +1177,7 @@ function compareRecentChats(left: InlineEligibleChat, right: InlineEligibleChat)
 function sortedConversations<T extends InlineEligibleChat>(items: T[], sort: ConversationSort): T[] {
   if (sort === "relevance") return items
   const copy = [...items]
+  if (sort === "id") return copy.sort((left, right) => left.chatId === right.chatId ? 0 : left.chatId < right.chatId ? -1 : 1)
   if (sort === "recent") return copy.sort(compareRecentChats)
   return copy.sort((left, right) => {
     if (left.unreadCount !== right.unreadCount) return right.unreadCount - left.unreadCount
@@ -1506,12 +1509,14 @@ const accountContextOutputSchema = z.object({
 
 const conversationsListOutputSchema = z.object({
   query: z.string().nullable(),
-  sort: z.enum(["relevance", "recent", "unread"]),
+  sort: z.enum(["relevance", "recent", "unread", "id"]),
   bestMatch: conversationListItemOutputSchema.nullable(),
   unreadOnly: z.boolean(),
   spaceId: z.string().nullable(),
   kind: z.enum(["dm", "home_thread", "space_chat"]).nullable(),
   items: z.array(conversationListItemOutputSchema),
+  nextAfterChatId: z.string().nullable(),
+  subthreadsIncluded: z.boolean().describe("True only when complete authorized subthread discovery was confirmed by the Inline server"),
 })
 
 const conversationGetOutputSchema = z.object({
@@ -2056,11 +2061,13 @@ export function createInlineMcpServer(params: {
     {
       title: "List Inline Conversations",
       description:
-        "Find the chatId for a person, DM, thread, or space chat before reading or sending. Query can be a contact name, @username, chat title, or chat ID. Use kind to distinguish a DM source from a similarly named thread, or spaceId to narrow to an approved workspace. Filters and sort apply before the result limit. Omit query for recent approved conversations.",
+        "Find the chatId for a person, DM, thread, or space chat before reading or sending. Query can be a contact name, @username, chat title, or chat ID. Use kind or spaceId to narrow approved conversations. For complete archive discovery, omit query, set includeSubthreads true and sort id, and continue with nextAfterChatId as afterChatId until null. This includes authorized hidden subthreads and requires server support; older servers fail explicitly. Filters apply before pagination.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional contact name, chat title, or chat ID"),
         spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only conversations in this approved space; incompatible with dm or home_thread kind"),
         kind: z.enum(["dm", "home_thread", "space_chat"]).optional().describe("Restrict the result to DMs, home threads, or space chats"),
+        includeSubthreads: z.boolean().optional().describe("Confirm a complete authorized catalog including hidden subthreads; requires id sort and no query"),
+        afterChatId: z.string().regex(/^[1-9]\d*$/).optional().describe("Exclusive ascending chat ID cursor; requires id sort and no query"),
         limit: submissionV2
           ? z.number().int().min(1).max(50).optional().describe("Maximum conversations to return; defaults to 20")
           : z.number().int().min(1).max(50).default(20).describe("Maximum conversations to return"),
@@ -2068,9 +2075,9 @@ export function createInlineMcpServer(params: {
           ? z.boolean().optional().describe("Only include conversations with unread messages; defaults to false")
           : z.boolean().default(false).describe("Only include conversations with unread messages"),
         sort: z
-          .enum(["relevance", "recent", "unread"])
+          .enum(["relevance", "recent", "unread", "id"])
           .optional()
-          .describe("Sort mode. Defaults to `relevance` for queries and `recent` when listing without a query."),
+          .describe("Sort mode. Defaults to relevance for queries, recent for ordinary lists, or ascending id for archive discovery/pagination."),
       },
       outputSchema: conversationsListOutputSchema,
       annotations: {
@@ -2082,7 +2089,7 @@ export function createInlineMcpServer(params: {
       _meta: toolMeta(["messages:read"], "Listing Inline conversations...", "Conversations listed"),
     },
     async (
-      { query, limit, unreadOnly, sort, spaceId, kind }: { query?: string; limit?: number; unreadOnly?: boolean; sort?: ConversationSort; spaceId?: string; kind?: InlineEligibleChat["kind"] },
+      { query, limit, unreadOnly, sort, spaceId, kind, includeSubthreads, afterChatId }: { query?: string; limit?: number; unreadOnly?: boolean; sort?: ConversationSort; spaceId?: string; kind?: InlineEligibleChat["kind"]; includeSubthreads?: boolean; afterChatId?: string },
       extra: { authInfo?: AuthInfo },
     ) => {
       const auth = extra.authInfo
@@ -2092,7 +2099,12 @@ export function createInlineMcpServer(params: {
       const safeLimit = Math.max(1, Math.min(50, limit ?? 20))
       const safeQuery = query?.trim()
       const onlyUnread = unreadOnly === true
-      const safeSort = parseConversationSort(sort, !!safeQuery)
+      const completeCatalog = includeSubthreads === true
+      const safeSort = parseConversationSort(sort ?? (completeCatalog || afterChatId ? "id" : undefined), !!safeQuery)
+      const parsedAfterChatId = afterChatId ? parseChatId(afterChatId) : undefined
+      if ((completeCatalog || parsedAfterChatId != null || safeSort === "id") && (safeQuery || safeSort !== "id")) {
+        throw new Error("archive discovery and afterChatId require id sort and no query")
+      }
       const parsedSpaceId = spaceId ? parseInlineId(spaceId, "spaceId") : undefined
       if (parsedSpaceId != null && !params.grant.spaceIds.includes(parsedSpaceId)) throw new Error("space is not in allowed context")
       if (parsedSpaceId != null && kind != null && kind !== "space_chat") throw new Error("spaceId requires kind space_chat or no kind filter")
@@ -2100,10 +2112,11 @@ export function createInlineMcpServer(params: {
         (!onlyUnread || chat.unreadCount > 0) && (parsedSpaceId == null || chat.spaceId === parsedSpaceId) && (kind == null || chat.kind === kind)
 
       if (!safeQuery) {
-        const chats = await params.inline.getEligibleChats()
+        const chats = completeCatalog ? await params.inline.getEligibleChats({ includeSubthreads: true }) : await params.inline.getEligibleChats()
         const filtered = chats.filter(matchesFilters)
-        const items = sortedConversations(filtered, safeSort)
-          .slice(0, safeLimit)
+        const ordered = sortedConversations(filtered, safeSort).filter((chat) => parsedAfterChatId == null || chat.chatId > parsedAfterChatId)
+        const selected = ordered.slice(0, safeLimit)
+        const items = selected
           .map((chat, index) => conversationListItem(chat, index + 1))
         const payload = {
           query: null,
@@ -2113,6 +2126,8 @@ export function createInlineMcpServer(params: {
           spaceId: parsedSpaceId?.toString() ?? null,
           kind: kind ?? null,
           items,
+          nextAfterChatId: safeSort === "id" && ordered.length > selected.length ? selected[selected.length - 1]!.chatId.toString() : null,
+          subthreadsIncluded: completeCatalog,
         }
         return {
           structuredContent: payload,
@@ -2120,7 +2135,7 @@ export function createInlineMcpServer(params: {
         }
       }
 
-      const resolved = await params.inline.resolveConversation(safeQuery, safeLimit, { spaceId: parsedSpaceId, kind, unreadOnly: onlyUnread, sort: safeSort })
+      const resolved = await params.inline.resolveConversation(safeQuery, safeLimit, { spaceId: parsedSpaceId, kind, unreadOnly: onlyUnread, sort: safeSort === "id" ? "recent" : safeSort })
       const filtered = resolved.candidates.filter(matchesFilters)
       const sorted = sortedConversations(filtered, safeSort)
       const items = sorted.map((candidate: InlineConversationCandidate, index: number) =>
@@ -2143,6 +2158,8 @@ export function createInlineMcpServer(params: {
         spaceId: parsedSpaceId?.toString() ?? null,
         kind: kind ?? null,
         items,
+        nextAfterChatId: null,
+        subthreadsIncluded: false,
       }
       return {
         structuredContent: payload,
