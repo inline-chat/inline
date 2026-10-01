@@ -199,6 +199,18 @@
         "open_world_justification": "Returns scoped Inline resource links, without publishing content or contacting arbitrary external destinations.",
         "destructive_justification": "Does not send, edit, delete, or mark messages read. Selecting a result performs a separately authorized bounded resource read."
       }
+    },
+    "messages.view": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Freshly authorizes and reads selected canonical message originals or bounded conversation history. Viewing does not mark messages read.",
+        "open_world_justification": "Displays scoped Inline content and signed Inline media URLs without publishing or changing external systems.",
+        "destructive_justification": "Does not send, edit, delete, react to, or mark messages read."
+      }
     }
   },
   "test_cases": [
@@ -223,7 +235,7 @@
       "user_prompt": "List the latest 20 messages from Inline chat 12345 so I can summarize the discussion.",
       "file_attachment_urls": null,
       "tools_triggered": "messages.list",
-      "expected_output": "Returns up to 20 recent messages from the allowed chat with structured message details and a passive message card in UI-capable hosts. Expanding text uses only returned content; ordinary MCP clients retain the JSON text result.",
+      "expected_output": "Returns up to 20 recent messages with canonical structured details and pagination, without displaying a widget. The assistant reports actual returned coverage when summarizing.",
       "expected_output_url": null
     },
     {
@@ -255,7 +267,23 @@
       "user_prompt": "Search Inline chat 12345 for launch blockers and show the matching messages.",
       "file_attachment_urls": null,
       "tools_triggered": "messages.search",
-      "expected_output": "Returns the scoped message page and passive card. Active query/filters are visible. A limited or filtered empty page does not claim complete search coverage, and the card suggests refining the search.",
+      "expected_output": "Returns the scoped matching message page as data without displaying a widget. A filtered or limited empty page does not claim complete search coverage.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Show ordered originals from several authorized chats.",
+      "user_prompt": "Show the original deadline message from chat 12345 beside the revised deadline from chat 67890.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.view",
+      "expected_output": "After resolving canonical message IDs with data tools, returns one source surface in requested order with chat provenance and useful attachments. Deleted or denied sources remain unavailable; no authored quotations are accepted.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Catch up with actual history in the selected chats.",
+      "user_prompt": "Open these two Inline chats so I can catch up since I last read them.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.view",
+      "expected_output": "Returns fresh authorized chat metadata and a real bounded history page for the active chat. The reader supports older and newer paging and context jumps without marking read. If first-unread status cannot be proven, labels history since last read and explains the coverage limit.",
       "expected_output_url": null
     }
   ],

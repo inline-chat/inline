@@ -38,8 +38,12 @@ Exercise these cases with a test account and approved test conversations:
 
 1. Search/select a desktop mention, distinguish duplicate titles, and ask about its recent text. Confirm the resource is read and the answer respects snapshot coverage.
 2. Test empty chats, long Unicode messages, denied scope, and revoked conversation access. A denial must not return cached content.
-3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Only message-list results offer continuation; capped searches suggest refinement.
-4. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor card rendering should post messages or mark them read.
+3. Ask for a summary of 200 messages. Verify data reads can paginate without opening repeated cards, and that the answer states actual coverage when fewer messages exist or a read fails.
+4. Request selected evidence from multiple chats. Verify source order, chat provenance, canonical author/text, unavailable selections, and no unintended fullscreen transition.
+5. Open the catch-up reader. Check single-chat and multi-chat layouts, chronological bubbles, reply context, per-chat reading position, and older/newer pages without skipping unread history. Where an exact first unread cannot be established from the API, require an explicit coverage note instead of a false marker or caught-up claim.
+6. Inspect real photo thumbnails, full-size opening, document filenames/sizes, and safe link actions. Exercise expired/missing media and narrow/light/dark layouts. A thumbnail is not evidence of model image analysis.
+7. Verify host capability fallbacks: no dead fullscreen/link controls, no direct iframe API requests, and useful compact output in hosts without expanded display support.
+8. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor reader navigation should send messages or mark them read.
 
 Record host name/build, candidate SHA, deployment identity, case outcomes, and actual screenshots. Do not publish screenshots or capability claims before these paths work. Use the submission JSON as review material; the picker case is host-driven, not a promise that the model chooses an app-only search tool.
 

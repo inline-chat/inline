@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Method } from "@inline-chat/protocol/core"
+import { GetChatHistoryMode, Method } from "@inline-chat/protocol/core"
 import type { Chat, GetChatsResult, GetSpaceMembersResult, Message, Space, User } from "@inline-chat/protocol/core"
 import { createInlineApi } from "./inline-api"
 
@@ -263,6 +263,121 @@ describe("createInlineApi", () => {
       const found = await api.searchMessages({ chatId: 7n, limit: 2, query: operation === "search" ? "Source" : undefined, until: 90n })
       expect(found.messages).toEqual([])
       expect(found.nextOffsetId).toBe(99n)
+    } finally { await api.close() }
+  })
+
+  it("freshly reauthorizes selected messages instead of trusting cached discovery", async () => {
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Previously allowed", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Moved outside scope", 20n, 100n), messages: [] } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    try {
+      await api.getEligibleChats()
+      await expect(api.getMessages({ chatId: 7n, messageIds: [100n], freshChatAuthorization: true })).rejects.toThrow("allowed context")
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHATS, Method.GET_CHAT])
+    } finally { await api.close() }
+  })
+
+  function historyFixture(rows: Message[], dialog: Record<string, unknown> = { readMaxId: 50n, unreadCount: 75 }) {
+    const calls: any[] = []
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 150n)], dialogs: [{ chatId: 7n, readMaxId: 999n, unreadCount: 0 }], users: [user(2n, "Dena", "Example", "dena")], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Source", 10n, 150n), dialog: { chatId: 7n, ...dialog }, messages: [] } }
+      if (method === Method.GET_MESSAGES) return { getMessages: { messages: rows.filter((row) => input.getMessages.messageIds.includes(row.id)) } }
+      if (method === Method.GET_CHAT_HISTORY) {
+        const request = input.getChatHistory
+        calls.push(request)
+        const sorted = [...rows].sort((left, right) => left.id < right.id ? -1 : 1)
+        const selected = request.mode === GetChatHistoryMode.HISTORY_MODE_NEWER
+          ? sorted.filter((row) => row.id > request.afterId).slice(0, request.limit)
+          : request.mode === GetChatHistoryMode.HISTORY_MODE_AROUND
+            ? [...sorted.filter((row) => row.id < request.anchorId).slice(-request.beforeLimit), ...sorted.filter((row) => row.id === request.anchorId), ...sorted.filter((row) => row.id > request.anchorId).slice(0, request.afterLimit)]
+            : sorted.filter((row) => request.beforeId == null || row.id < request.beforeId).slice(-request.limit)
+        return { getChatHistory: { messages: selected.reverse() } }
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+    return calls
+  }
+
+  it("starts after the fresh read boundary and pages forward through more than 50 unread messages", async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => ({ ...message(BigInt(index + 1), 7n, 2n, "History"), out: (index + 1) % 4 === 0 }))
+    const calls = historyFixture(rows)
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    try {
+      const first = await api.historyMessages({ chatId: 7n, startAt: "unread" })
+      expect(first.chat.readMaxId).toBe(50n)
+      expect(first.messages.map((row) => row.id)).toEqual(rows.slice(50, 100).map((row) => row.id))
+      expect(first.nextAfterId).toBe(100n)
+      expect(first.firstUnreadMessageId).toBeNull()
+      expect(first.note).toContain("may include messages that don't count as unread")
+      const next = await api.historyMessages({ chatId: 7n, afterId: first.nextAfterId! })
+      expect(next.messages.map((row) => row.id)).toEqual(rows.slice(100).map((row) => row.id))
+      expect(next.nextAfterId).toBeNull()
+      expect(calls.map((call) => call.afterId)).toEqual([50n, 100n])
+      expect(calls.every((call) => call.mode === GetChatHistoryMode.HISTORY_MODE_NEWER)).toBe(true)
+    } finally { await api.close() }
+  })
+
+  it.each([null, 5n])("does not require the last-read row %s to exist or invent first-unread identity from a matching count", async (readMaxId) => {
+    const rows = [message(7n, 7n, 2n, "Incoming"), { ...message(6n, 7n, 1n, "Outgoing"), out: true }, message(9n, 7n, 2n, "Incoming")]
+    historyFixture(rows, { readMaxId: readMaxId ?? undefined, unreadCount: 2 })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    try {
+      const result = await api.historyMessages({ chatId: 7n, startAt: "unread" })
+      expect(result.messages.map((row) => row.id)).toEqual([6n, 7n, 9n])
+      expect(result.firstUnreadMessageId).toBeNull()
+      expect(result.kind).toBe(readMaxId ? "unread" : "latest")
+      if (!readMaxId) expect(result.note).toContain("read boundary is unavailable")
+    } finally { await api.close() }
+  })
+
+  it("does not invent a first-unread message when incoming history contains replay rows", async () => {
+    historyFixture([message(6n, 7n, 2n, "Imported replay"), message(7n, 7n, 2n, "Live")], { readMaxId: 5n, unreadCount: 1 })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    try {
+      const result = await api.historyMessages({ chatId: 7n, startAt: "unread" })
+      expect(result.firstUnreadMessageId).toBeNull()
+      expect(result.messages.map((row) => row.id)).toEqual([6n, 7n])
+      expect(result.note).toContain("last-read position")
+    } finally { await api.close() }
+  })
+
+  it("uses strict older cursors without skipping the probe row and reports a missing context anchor", async () => {
+    const rows = Array.from({ length: 70 }, (_, index) => message(BigInt(index + 1), 7n, 2n, "History"))
+    const calls = historyFixture(rows)
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    try {
+      const latest = await api.historyMessages({ chatId: 7n })
+      expect(latest.messages.map((row) => row.id)).toEqual(rows.slice(20).map((row) => row.id))
+      expect(latest.nextOffsetId).toBe(21n)
+      const older = await api.historyMessages({ chatId: 7n, offsetId: latest.nextOffsetId! })
+      expect(older.messages.map((row) => row.id)).toEqual(rows.slice(0, 20).map((row) => row.id))
+      expect(older.nextOffsetId).toBeNull()
+      expect(calls[1].beforeId).toBe(21n)
+      const context = await api.historyMessages({ chatId: 7n, anchorMessageId: 75n })
+      expect(context.note).toContain("selected message is unavailable")
+      expect(context.anchorMessageId).toBe(75n)
+    } finally { await api.close() }
+  })
+
+  it("continues search with the returned server cursor even when local filters emptied the preceding page", async () => {
+    const rows = [message(100n, 7n, 2n, "Match"), message(99n, 7n, 2n, "Match"), message(90n, 7n, 2n, "Match")]
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages: rows.filter((row) => input.searchMessages.offsetId == null || row.id < input.searchMessages.offsetId).slice(0, input.searchMessages.limit) } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    try {
+      const first = await api.searchMessages({ chatId: 7n, query: "Match", limit: 2, until: 90n })
+      expect(first.messages).toEqual([])
+      expect(first.nextOffsetId).toBe(99n)
+      const second = await api.searchMessages({ chatId: 7n, query: "Match", limit: 2, until: 90n, offsetId: first.nextOffsetId! })
+      expect(second.messages.map((message) => message.id)).toEqual([90n])
+      expect(second.nextOffsetId).toBeNull()
     } finally { await api.close() }
   })
 })

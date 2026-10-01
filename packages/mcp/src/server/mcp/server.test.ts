@@ -120,6 +120,15 @@ function defaultEligibleChat(overrides: Partial<InlineEligibleChat> = {}): Inlin
   }
 }
 
+async function viewTool(inline: InlineApi, args: Record<string, unknown>, authInfo = createAuthInfo(["messages:read"])) {
+  const server = createInlineMcpServer({ grant, inline, contractVersion: "submission-v2" })
+  const { transport, sent } = await connectAndInitialize(server, authInfo)
+  await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.view", arguments: args } } as any, { authInfo })
+  const result = await waitForResponse(sent, 2)
+  await server.close()
+  return result
+}
+
 function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
   return {
     async close() {},
@@ -182,6 +191,12 @@ function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
         chat: defaultEligibleChat(),
         messages: [],
       }
+    },
+    async presentationChat({ chatId }) {
+      return { chat: defaultEligibleChat({ chatId }), lastMessage: null }
+    },
+    async historyMessages({ chatId }) {
+      return { chat: defaultEligibleChat({ chatId }), messages: [], kind: "latest", nextOffsetId: null, nextAfterId: null, anchorMessageId: null, firstUnreadMessageId: null, note: null }
     },
     async recentMessages(): Promise<InlineRecentMessagesResult> {
       return {
@@ -321,6 +336,7 @@ describe("mcp tool server", () => {
       "files.get",
       "messages.send_media",
       "messages.send_batch",
+      "messages.view",
       "messages.list",
       "messages.context",
       "messages.search",
@@ -343,6 +359,7 @@ describe("mcp tool server", () => {
       "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.send_media": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
       "messages.send_batch": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
+      "messages.view": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.context": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -396,9 +413,12 @@ describe("mcp tool server", () => {
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
     expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
-    expect(list._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v1.html" })
+    expect(list._meta.ui).toBeUndefined()
     const search = tools.find((tool) => tool.name === "messages.search")
-    expect(search._meta.ui).toEqual(list._meta.ui)
+    expect(search._meta.ui).toBeUndefined()
+    const view = tools.find((tool) => tool.name === "messages.view")
+    expect(view._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v2.html", visibility: ["model", "app"] })
+    expect(tools.filter((tool) => tool._meta.ui?.resourceUri).map((tool) => tool.name)).toEqual(["messages.view"])
     expect(search._meta.securitySchemes[0].scopes).toEqual(["messages:read"])
     expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
 
@@ -432,6 +452,7 @@ describe("mcp tool server", () => {
       "files.get": ["chatId", "messageIds"],
       "messages.send_media": ["chatId", "mediaKind", "mediaId"],
       "messages.send_batch": ["chatId", "items"],
+      "messages.view": ["presentation"],
       "messages.list": ["chatId"],
       "messages.context": ["chatId", "anchorMessageId"],
       "messages.search": ["chatId", "query"],
@@ -1182,7 +1203,7 @@ describe("mcp tool server", () => {
     expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
     expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
     expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
-    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(res.result._meta).toBeUndefined()
     expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
@@ -1263,7 +1284,7 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("14")
     expect(payload.messages[0].text).toBe("invoice is sent")
-    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(res.result._meta).toBeUndefined()
     expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
   })
 
@@ -2042,5 +2063,201 @@ describe("submission-v2 authorization boundary", () => {
       await server.close()
       vi.restoreAllMocks()
     }
+  })
+})
+
+describe("messages.view presentation boundary", () => {
+  const source = (chatId: bigint, id: bigint, text = "Original") => ({ chatId, id, fromId: 2n, date: id, message: text, out: false })
+
+  it("preserves cross-chat source order, deduplicates refs, and accepts five chats without a separate chat cap", async () => {
+    const getMessages = vi.fn(async ({ chatId, messageIds }: { chatId?: bigint; messageIds: bigint[] }) => ({
+      chat: defaultEligibleChat({ chatId: chatId! }), messages: [...messageIds].reverse().map((id) => source(chatId!, id)),
+    }))
+    const inline = createInlineStub({ getMessages })
+    const refs = [{ chatId: "7", messageId: "31" }, { chatId: "8", messageId: "22" }, { chatId: "7", messageId: "11" }, ...[9, 10, 11].map((id) => ({ chatId: String(id), messageId: "1" })), { chatId: "7", messageId: "31" }]
+    const response = await viewTool(inline, { presentation: "sources", items: refs })
+    expect(response.result.isError).toBeUndefined()
+    expect(response.result.structuredContent.items.map((item: any) => `${item.chatId}:${item.messageId}`)).toEqual(["7:31", "8:22", "7:11", "9:1", "10:1", "11:1"])
+    expect(response.result.structuredContent.chats).toHaveLength(5)
+    expect(response.result.structuredContent.page.note).toContain("does not establish continuous history")
+    expect(getMessages).toHaveBeenCalledTimes(5)
+    expect(getMessages.mock.calls.every(([args]) => (args as any).freshChatAuthorization === true)).toBe(true)
+  })
+
+  it("isolates denied and deleted sources and clears metadata if access changes during the source read", async () => {
+    const inline = createInlineStub({
+      async presentationChat({ chatId }) {
+        if (chatId === 8n) throw new Error("private title that must not escape")
+        return { chat: defaultEligibleChat({ chatId, title: chatId === 9n ? "Revoked title" : "Allowed" }), lastMessage: null }
+      },
+      async getMessages({ chatId }) {
+        if (chatId === 9n) return { chat: defaultEligibleChat({ chatId, spaceId: 20n, title: "Revoked title" }), messages: [source(9n, 1n, "Revoked body")] }
+        return { chat: defaultEligibleChat({ chatId: chatId! }), messages: [source(7n, 1n), source(999n, 2n, "Wrong chat body")] }
+      },
+    })
+    const response = await viewTool(inline, { presentation: "sources", items: [{ chatId: "7", messageId: "1" }, { chatId: "7", messageId: "2" }, { chatId: "8", messageId: "1" }, { chatId: "9", messageId: "1" }] })
+    const payload = response.result.structuredContent
+    expect(payload.items.map((item: any) => item.status)).toEqual(["available", "unavailable", "unavailable", "unavailable"])
+    expect(payload.chats.slice(1).every((chat: any) => chat.chat === null)).toBe(true)
+    expect(JSON.stringify(response)).not.toMatch(/private title|Revoked title|Revoked body|Wrong chat body/)
+  })
+
+  it("intersects the original grant with the current OAuth context before exposing titles, messages, or media", async () => {
+    const getMessages = vi.fn()
+    const response = await viewTool(createInlineStub({ getMessages }), { presentation: "sources", items: [{ chatId: "7", messageId: "1" }] }, {
+      ...createAuthInfo(["messages:read"]), extra: { grantId: "g1", inlineUserId: "1", spaceIds: [] },
+    })
+    expect(response.result.structuredContent.chats).toEqual([{ chatId: "7", status: "unavailable", chat: null }])
+    expect(response.result.structuredContent.items[0].message).toBeNull()
+    expect(getMessages).not.toHaveBeenCalled()
+    expect(JSON.stringify(response)).not.toContain("General")
+  })
+
+  it("keeps signed media and avatars in UI metadata and preserves genuine file/entity/reply metadata", async () => {
+    const signed = (id: string) => `https://api.inline.chat/file?id=${id}&exp=1999999999&sig=fixture`
+    const photo: any = { ...source(7n, 10n, "Read the link"), replyToMsgId: 9n,
+      entities: { entities: [{ type: 5, offset: 0n, length: 4n, entity: { oneofKind: undefined } }, { type: 3, offset: 9n, length: 4n, entity: { oneofKind: "textUrl", textUrl: { url: "https://inline.chat" } } }] },
+      media: { media: { oneofKind: "photo", photo: { photo: { id: 100n, date: 1n, format: 1, sizes: [
+        { type: "b", w: 140, h: 100, size: 100, cdnUrl: signed("small") }, { type: "c", w: 320, h: 200, size: 300, cdnUrl: signed("thumb") }, { type: "f", w: 2560, h: 1600, size: 30000, cdnUrl: signed("original") },
+      ] } } } },
+    }
+    const document: any = { ...source(7n, 11n, ""), media: { media: { oneofKind: "document", document: { document: { id: 101n, date: 1n, fileName: "launch-plan.pdf", mimeType: "application/pdf", size: 8000, cdnUrl: signed("document") } } } } }
+    const response = await viewTool(createInlineStub({
+      async getMessages() { return { chat: defaultEligibleChat(), messages: [document, photo], replyMessages: [source(7n, 9n, "Earlier original")], senderDisplayNames: { "2": "Dena" }, senderAvatarUrls: { "2": signed("avatar"), "3": signed("unrelated") } } },
+    }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }, { chatId: "7", messageId: "11" }] })
+    expect(response.result.isError).toBeUndefined()
+    const payload = response.result.structuredContent
+    expect(payload.items[0].message.entities).toEqual([{ type: 5, offset: 0, length: 4 }, { type: 3, offset: 9, length: 4, url: "https://inline.chat" }])
+    expect(payload.items[0].message.replyToMessage.text).toBe("Earlier original")
+    expect(payload.items[1].message.media).toMatchObject({ kind: "document", fileName: "launch-plan.pdf", sizeBytes: 8000, url: null })
+    expect(JSON.stringify([payload, response.result.content])).not.toContain("sig=fixture")
+    expect(response.result._meta.inline.messageMedia["7:10"]).toEqual({ thumbnailUrl: signed("thumb"), originalUrl: signed("original") })
+    expect(response.result._meta.inline.senderAvatarUrls).toEqual({ "2": signed("avatar") })
+  })
+
+  it("rejects external media URLs and bounds long Unicode originals with explicit shortening", async () => {
+    const message: any = { ...source(7n, 10n, '\ud83d\ude00\n"'.repeat(20000)), media: { media: { oneofKind: "photo", photo: { photo: { id: 100n, date: 1n, format: 1, sizes: [{ type: "c", w: 320, h: 200, size: 300, cdnUrl: "https://evil.example/media" }] } } } } }
+    const response = await viewTool(createInlineStub({ async getMessages() { return { chat: defaultEligibleChat(), messages: [message] } } }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }] })
+    expect(response.result.isError).toBeUndefined()
+    const row = response.result.structuredContent.items[0].message
+    expect(row.textTruncated).toBe(true)
+    const lastCodeUnit = row.text.charCodeAt(row.text.length - 1)
+    expect(lastCodeUnit < 0xd800 || lastCodeUnit > 0xdbff).toBe(true)
+    expect(response.result.structuredContent.page.note).toContain("shortened")
+    expect(response.result._meta.inline.messageMedia).toEqual({})
+    expect(JSON.stringify(response)).not.toContain("evil.example")
+    expect(Buffer.byteLength(JSON.stringify(response.result.structuredContent))).toBeLessThan(512 * 1024)
+  })
+
+  it("fetches only the active chat history and forwards explicit older/newer/context cursors", async () => {
+    const historyMessages = vi.fn(async (args) => ({ chat: defaultEligibleChat({ chatId: args.chatId }), messages: [source(args.chatId, 50n), source(args.chatId, 51n)], kind: "newer" as const, nextOffsetId: 50n, nextAfterId: 51n, anchorMessageId: null, firstUnreadMessageId: null, note: "A bounded history window" }))
+    const response = await viewTool(createInlineStub({ historyMessages }), { presentation: "catch_up", chatIds: ["7", "8"], activeChatId: "8", afterId: "49" })
+    expect(historyMessages).toHaveBeenCalledOnce()
+    expect(historyMessages).toHaveBeenCalledWith({ chatId: 8n, afterId: 49n })
+    expect(response.result.structuredContent.activeChatId).toBe("8")
+    expect(response.result.structuredContent.page).toMatchObject({ kind: "newer", nextAfterId: "51", nextOffsetId: "50" })
+    expect(response.result.structuredContent.items.every((item: any) => item.chatId === "8")).toBe(true)
+  })
+
+  it.each([
+    { presentation: "sources", items: [{ chatId: "7", messageId: "1" }], chatIds: ["7"] },
+    { presentation: "catch_up", chatIds: ["7"], offsetId: "1", startAt: "latest" },
+    { presentation: "catch_up", chatIds: ["7"], activeChatId: "8" },
+    { presentation: "sources", items: [{ chatId: "7", messageId: "1", text: "Invented quotation" }] },
+  ])("rejects inconsistent or authored presentation inputs %#", async (args) => {
+    const metadata = vi.fn()
+    const response = await viewTool(createInlineStub({ presentationChat: metadata }), args)
+    expect(response.result?.isError ?? Boolean(response.error)).toBe(true)
+    expect(metadata).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ...createAuthInfo(["messages:read"]), clientId: "another-client" },
+    { ...createAuthInfo(["messages:read"]), expiresAt: 1 },
+    createAuthInfo([]),
+  ])("rejects missing scope, expired or mismatched authorization before metadata reads %#", async (authInfo) => {
+    const metadata = vi.fn()
+    const response = await viewTool(createInlineStub({ presentationChat: metadata }), { presentation: "sources", items: [{ chatId: "7", messageId: "1" }] }, authInfo)
+    expect(response.result?.isError ?? Boolean(response.error)).toBe(true)
+    expect(metadata).not.toHaveBeenCalled()
+  })
+})
+
+describe("presentation service metadata and search continuation", () => {
+  it("preserves canonical service event identities without fabricating quoted message text", async () => {
+    const response = await viewTool(createInlineStub({ async getMessages() { return {
+      chat: defaultEligibleChat(), messages: [{ chatId: 7n, id: 10n, fromId: 2n, date: 10n, out: false,
+        serviceMessage: { event: { oneofKind: "pinnedMessage", pinnedMessage: { messageId: 5n } } } }],
+    } } }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }] })
+    expect(response.result.structuredContent.items[0].message.text).toBe("")
+    expect(response.result.structuredContent.items[0].message.serviceMessage).toEqual({ kind: "pinned_message", messageId: "5" })
+  })
+
+  it("passes the search continuation cursor to the existing API without adding UI metadata", async () => {
+    const searchMessages = vi.fn(async () => ({ chat: defaultEligibleChat(), messages: [], query: "Match", content: "all" as const, mode: "search" as const, nextOffsetId: null }))
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ searchMessages }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "messages.search", arguments: { chatId: "7", query: "Match", offsetId: "99" } } } as any, { authInfo })
+    const response = await waitForResponse(sent, 2)
+    expect(searchMessages).toHaveBeenCalledWith(expect.objectContaining({ chatId: 7n, query: "Match", offsetId: 99n }))
+    expect(response.result._meta).toBeUndefined()
+    await server.close()
+  })
+})
+
+describe("canonical R2 originals from realtime media encoders", () => {
+  const fileId = "IND_original"
+  function originalUrl(overrides: { fileId?: string; origin?: string; signedAt?: number } = {}) {
+    const date = new Date(overrides.signedAt ?? Date.now()).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
+    const url = new URL(`/inline-test/files/${overrides.fileId ?? fileId}/synthetic.pdf`, overrides.origin ?? `https://${"b".repeat(32)}.r2.cloudflarestorage.com`)
+    url.searchParams.set("X-Amz-Acl", "public-read")
+    url.searchParams.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+    url.searchParams.set("X-Amz-Credential", `${"a".repeat(32)}/${date.slice(0, 8)}/auto/s3/aws4_request`)
+    url.searchParams.set("X-Amz-Date", date)
+    url.searchParams.set("X-Amz-Expires", "3600")
+    url.searchParams.set("X-Amz-SignedHeaders", "host")
+    url.searchParams.set("X-Amz-Signature", "c".repeat(64))
+    return url.href
+  }
+  function canonicalMedia(kind: "document" | "video" | "voice", cdnUrl: string) {
+    const common = { id: 100n, fileUniqueId: fileId, date: 1n, size: 8000, cdnUrl }
+    const file = kind === "document" ? { ...common, fileName: "launch-plan.pdf", mimeType: "application/pdf" }
+      : kind === "video" ? { ...common, duration: 20, w: 640, h: 360 }
+      : { ...common, duration: 10, mimeType: "audio/ogg", waveform: new Uint8Array() }
+    return { chatId: 7n, id: 10n, fromId: 2n, date: 10n, out: false, media: { media: { oneofKind: kind, [kind]: { [kind]: file } } } } as any
+  }
+
+  it.each(["document", "video", "voice"] as const)("preserves %s original links only in UI metadata with their canonical file identity", async (kind) => {
+    const url = originalUrl()
+    const message = canonicalMedia(kind, url)
+    const response = await viewTool(createInlineStub({ async getMessages() { return { chat: defaultEligibleChat(), messages: [message] } } }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }] })
+    expect(response.result.isError).toBeUndefined()
+    expect(response.result._meta.inline.messageMedia["7:10"]).toEqual({ thumbnailUrl: null, originalUrl: url, originalFileUniqueId: fileId })
+    expect(response.result.structuredContent.items[0].message.media.url).toBeNull()
+    expect(JSON.stringify([response.result.content, response.result.structuredContent])).not.toMatch(/X-Amz-Signature|r2\.cloudflarestorage/)
+  })
+
+  it.each([
+    () => originalUrl({ origin: `https://${"b".repeat(32)}.r2.cloudflarestorage.com.evil.example` }),
+    () => originalUrl({ fileId: "IND_unrelated" }),
+    () => originalUrl({ signedAt: Date.now() - 2 * 60 * 60 * 1000 }),
+    () => { const url = new URL(originalUrl()); url.searchParams.set("X-Amz-Expires", "604801"); return url.href },
+    () => { const url = new URL(originalUrl()); url.searchParams.set("X-Amz-SignedHeaders", "host;authorization"); return url.href },
+    () => { const url = new URL(originalUrl()); url.searchParams.set("X-Amz-Signature", "unsigned"); return url.href },
+  ])("rejects lookalike origins, wrong file identity, expired or invalid R2 capabilities %#", async (url) => {
+    const message = canonicalMedia("document", url())
+    const response = await viewTool(createInlineStub({ async getMessages() { return { chat: defaultEligibleChat(), messages: [message] } } }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }] })
+    expect(response.result._meta.inline.messageMedia).toEqual({})
+    expect(response.result.structuredContent.items[0].message.media.fileName).toBe("launch-plan.pdf")
+  })
+
+  it("retains an API-origin poster while opening the canonical R2 video original", async () => {
+    const url = originalUrl()
+    const message = canonicalMedia("video", url)
+    const thumbnail = "https://api.inline.chat/file?id=video_poster&exp=1999999999&sig=fixture"
+    message.media.media.video.video.photo = { id: 101n, date: 1n, format: 1, sizes: [{ type: "c", w: 320, h: 180, size: 800, cdnUrl: thumbnail }] }
+    const response = await viewTool(createInlineStub({ async getMessages() { return { chat: defaultEligibleChat(), messages: [message] } } }), { presentation: "sources", items: [{ chatId: "7", messageId: "10" }] })
+    expect(response.result._meta.inline.messageMedia["7:10"]).toEqual({ thumbnailUrl: thumbnail, originalUrl: url, originalFileUniqueId: fileId })
   })
 })

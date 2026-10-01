@@ -52,7 +52,7 @@ describe("/mcp", () => {
     vi.spyOn(inlineApi, "createInlineApi").mockReturnValue({
       close, listSpaces: unused, searchPeople: unused, getEligibleChats: unused,
       resolveConversation: unused, getConversation: unused, messageContext: unused,
-      getMessages: unused, recentMessages: unused, searchMessages: unused,
+      getMessages: unused, presentationChat: unused, historyMessages: unused, recentMessages: unused, searchMessages: unused,
       unreadMessages: unused, createChat: unused, uploadFile: unused,
       sendMessage: unused, sendMediaMessage: unused,
     })
