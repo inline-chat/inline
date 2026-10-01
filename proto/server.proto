@@ -4,6 +4,22 @@ import "core.proto";
 
 package server;
 
+// Private, short-lived server fanout. The entire message is authenticated and
+// encrypted before publication. Updates are already projected for these exact
+// recipients; public client messages and durable journal formats are unchanged.
+message RealtimeDelivery {
+  uint32 version = 1;
+  string origin_boot_id = 2;
+  string event_id = 3;
+  int64 expires_at_ms = 4;
+  repeated int64 user_ids = 5;
+  optional int64 space_id = 6;
+  optional int64 skip_session_id = 7;
+  repeated Update updates = 8;
+  // Bounded ordered receiver lane. Included in the authenticated payload.
+  uint32 partition = 9;
+}
+
 message ServerUpdate {
   int64 date = 1;
   int32 seq = 2;

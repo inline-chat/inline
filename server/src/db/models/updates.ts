@@ -4,6 +4,8 @@ import type { Transaction } from "@in/server/db/types"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { acquireUpdateDiscoveryWriterFence } from "@in/server/modules/updates/updateDiscoveryBarrier"
+import { RecentRealtimeBuckets } from "@in/server/db/models/recentRealtimeBuckets"
+import { isDistributedRealtimeEnabled } from "@in/server/modules/internalMessaging/config"
 
 export const UpdatesModel = {
   build: buildServerUpdate,
@@ -80,6 +82,9 @@ async function insertUpdate(tx: Transaction, input: InsertUpdateInput): Promise<
     payload: updateRecord.encrypted,
     date: date,
   })
+  if (isDistributedRealtimeEnabled()) {
+    await RecentRealtimeBuckets.record(tx, { bucket, entityId: entity.id, seq })
+  }
 
   return { seq, date }
 }

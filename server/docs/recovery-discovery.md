@@ -6,6 +6,11 @@ Periodic discovery repairs a lost final hint even if the socket and broker stay
 connected. Changing its cadence changes the recovery delay; disabling it requires
 another authoritative recovery mechanism.
 
+Distributed deployments also use the bounded recent-bucket index described in
+[multi-server realtime](multi-server-realtime.md). It gives full-payload delivery
+a short grace and repairs recent missed publications. The broader discovery
+described here remains the safety net for old writers and retention gaps.
+
 ## Strategy boundary
 
 `modules/internalMessaging/repairDiscovery.ts` defines `RepairDiscovery`.

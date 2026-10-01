@@ -1282,6 +1282,7 @@ public actor InlineProtocolV3Connection {
       | (((milliseconds % 1_000) << 32) / 1_000) | low
     candidate &= ~3
     if candidate <= lastMessageID { candidate = (lastMessageID + 4) & ~3 }
+    if UInt32(truncatingIfNeeded: candidate) == 0 { candidate += 4 }
     lastMessageID = candidate
     return candidate
   }
@@ -1309,6 +1310,7 @@ public actor InlineProtocolV3Connection {
     var value = ((milliseconds / 1_000) << 32) | (((milliseconds % 1_000) << 32) / 1_000) | low
     value &= ~3
     if value <= last { value = (last + 4) & ~3 }
+    if UInt32(truncatingIfNeeded: value) == 0 { value += 4 }
     last = value
     return value
   }

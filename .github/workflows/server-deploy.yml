@@ -51,12 +51,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      STANDBY_IMAGE: ${{ needs.qualify.outputs.standby_image }}
     steps:
       - name: Record the exact image without accessing production
         run: |
           [[ "$RUNTIME_IMAGE" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]] || exit 1
+          [[ "$STANDBY_IMAGE" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]] || exit 1
           printf 'Prepared `%s` at `%s` for rehearsal or initial bootstrap. Production preflight, migrations, and deployment were skipped.\n' \
             "$GITHUB_SHA" "$RUNTIME_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          printf 'ARM64 Coolify image: `%s`. No Hetzner deployment was performed.\n' "$STANDBY_IMAGE" >> "$GITHUB_STEP_SUMMARY"
 
   preflight:
     name: Record a healthy public Machine baseline before DDL

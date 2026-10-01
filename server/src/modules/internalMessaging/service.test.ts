@@ -283,3 +283,50 @@ describe("inbound internal messaging ownership", () => {
     await service.close()
   })
 })
+
+it("serializes full payloads per origin without coalescing and bounds their queued bytes", async () => {
+  const service = new InternalMessagingService("")
+  const { receive } = await installReadyTransport(service)
+  const release = Promise.withResolvers<void>()
+  const started: string[] = []
+  service.on("RealtimeDelivery", async ({ event }) => {
+    started.push(event.payload.slice(0, 1))
+    if (started.length === 1) await release.promise
+  })
+  const frame = (value: string) => encodeEnvelope({
+    version: 1, eventId: randomUUID(), originBootId, target: { kind: "cluster" },
+    event: { kind: "RealtimeDelivery", partition: 0, payload: value },
+  })
+  receive(frame("a"), service.key("internal:v1:cluster"))
+  receive(frame("b"), service.key("internal:v1:cluster"))
+  receive(frame("c"), service.key("internal:v1:cluster"))
+  expect(started).toEqual(["a"])
+  for (let i = 0; i < 100; i++) receive(frame("x".repeat(256 * 1024)), service.key("internal:v1:cluster"))
+  expect(service.diagnostics.inboundBytes).toBeLessThanOrEqual(8 * 1024 * 1024)
+  expect(service.diagnostics.droppedInboundEvents).toBeGreaterThan(0)
+  release.resolve()
+  await service.waitForIncomingWork()
+  expect(started.slice(0, 3)).toEqual(["a", "b", "c"])
+  expect(service.diagnostics.inboundBytes).toBe(0)
+  await service.close()
+})
+
+it("allows an independent ordered lane to progress while another lane authorizes", async () => {
+  const service = new InternalMessagingService("")
+  const { receive } = await installReadyTransport(service)
+  const release = Promise.withResolvers<void>()
+  const seen: string[] = []
+  service.on("RealtimeDelivery", async ({ event }) => {
+    seen.push(event.payload)
+    if (event.payload === "blocked") await release.promise
+  })
+  for (const [partition, payload] of [[0, "blocked"], [0, "later"], [1, "independent"]] as const) {
+    receive(encodeEnvelope({ version: 1, eventId: randomUUID(), originBootId, target: { kind: "cluster" },
+      event: { kind: "RealtimeDelivery", partition, payload } }), service.key("internal:v1:cluster"))
+  }
+  expect(seen).toEqual(["blocked", "independent"])
+  release.resolve()
+  await service.waitForIncomingWork()
+  expect(seen).toEqual(["blocked", "independent", "later"])
+  await service.close()
+})

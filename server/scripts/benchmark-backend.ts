@@ -64,6 +64,10 @@ assertLocalTestDatabaseUrl(databaseUrl)
 mkdirSync(directory, { recursive: true })
 const candidate = resolve(directory, "worker.json")
 const environment = createTestEnvironment(process.env, databaseUrl)
+// Timing reports use the standalone catalog; an optional CI Redis endpoint
+// must not silently change the deployment mode or invalidate that baseline.
+environment["INLINE_REALTIME_DISTRIBUTED"] = "0"
+environment["REALTIME_DISTRIBUTED"] = "0"
 environment["INLINE_BACKEND_BENCH_CONFIG"] = JSON.stringify({ ids: selected.map((scenario) => scenario.id), samples, warmup, rtts, output: candidate })
 
 let template: Awaited<ReturnType<typeof prepareTestDatabaseTemplate>> | undefined

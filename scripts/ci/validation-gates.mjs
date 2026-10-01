@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url"
 export const validationJobs = {
   apple: ["contracts", "swift-main", "swift-utilities", "macos-app", "ios-app"],
   integrations: ["landing", "codex-plugin", "mcp", "openclaw", "openclaw-source", "hermes", "chat-sdk", "shared-packages", "rust-workspace", "workflow-and-release-contracts", "candidate-packages", "packed-consumers", "openclaw-admission", "hermes-admission", "local-integration"],
-  server: ["container", "test"],
+  server: ["container", "container-arm", "test"],
 }
 
 // Only known unrelated paths may skip Apple validation. Unknown inputs fail open

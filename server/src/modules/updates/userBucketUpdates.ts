@@ -9,6 +9,8 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { acquireUpdateDiscoveryWriterFence } from "@in/server/modules/updates/updateDiscoveryBarrier"
 import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import { registerPostCommitHook, type PostCommitHook } from "@in/server/db/commitHooks"
+import { RecentRealtimeBuckets } from "@in/server/db/models/recentRealtimeBuckets"
+import { isDistributedRealtimeEnabled } from "@in/server/modules/internalMessaging/config"
 
 type EnqueueUserUpdateInput = {
   userId: number
@@ -170,6 +172,9 @@ const insertUserUpdate = async (
     payload: updateRecord.encrypted,
     date,
   })
+  if (isDistributedRealtimeEnabled()) {
+    await RecentRealtimeBuckets.record(tx, { bucket: UpdateBucket.User, entityId: input.userId, seq: nextSeq })
+  }
   registerUserFrontierPublication(tx, input.userId, nextSeq, options)
 
   return { seq: nextSeq, date }
