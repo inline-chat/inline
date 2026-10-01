@@ -122,10 +122,18 @@ reaching Hetzner. Never use insecure TLS for the load-balancer monitor or client
    transport. Verify byte parity for encryption/session/native-protocol key rings
    and semantic parity for PostgreSQL/R2/provider endpoints without printing values.
    Use the DML-only database role; do not copy a migration/owner credential.
-3. Confirm independent Hetzner access to pooled and direct PostgreSQL endpoints,
-   object storage, keys and required providers. Query clients use PgBouncer, with
-   one direct health connection per process. Budget the shared pool and direct
-   connections for normal fleet plus temporary rolling-deploy overlap.
+3. Confirm independent Hetzner access to PostgreSQL, object storage, keys and
+   required providers. Set `INLINE_DATABASE_QUERY_POOL_MAX=3` on each Fly and Hetzner
+   process; the separate direct health pool remains capped at one connection.
+   Three overlapping processes therefore use at most 12 direct connections.
+   With 22 usable database slots, reserve at least four for administration,
+   exports, migrations and other clients, and inspect actual usage before
+   starting overlap. During the first upgrade, keep Hetzner stopped while the
+   legacy Fly process with 11 slots and new Fly process with four slots coexist.
+   Start standby only after the old process is stopped. Query clients may use the direct
+   endpoint within this budget; PgBouncer requires explicit mode and successful
+   role timeout qualification. The omitted query cap retains the historical
+   default 10; invalid values fail startup rather than silently changing it.
 4. Set Coolify's health path to `/readyz` (not `/healthz`), five-second probes,
    a bounded timeout, and enough startup grace. Configure a stop grace longer
    than the API drain deadline. Verify source/image revision and worker role.

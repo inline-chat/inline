@@ -28,6 +28,33 @@ describe("database connection safety", () => {
     } finally { await clients.close() }
   })
 
+  test("each connection mode honors the query cap and keeps one health connection", async () => {
+    for (const max of ["1", "3", "10"]) {
+      for (const [url, settings] of [[direct, {}], [pooled, environment]] as const) {
+        const clients = makeDatabaseClients(url, { ...settings, INLINE_DATABASE_QUERY_POOL_MAX: max })
+        try {
+          expect(clients.queryClient.options.max).toBe(Number(max))
+          expect(clients.healthClient.options.max).toBe(1)
+        } finally { await clients.close() }
+      }
+    }
+  })
+
+  test("URL options cannot override the configured query or health cap", async () => {
+    const clients = makeDatabaseClients(direct + "&max=200", { INLINE_DATABASE_QUERY_POOL_MAX: "3" })
+    try {
+      expect(clients.queryClient.options.max).toBe(3)
+      expect(clients.healthClient.options.max).toBe(1)
+    } finally { await clients.close() }
+  })
+
+  test("invalid query caps fail before constructing clients without echoing the value", () => {
+    for (const value of ["", "0", "11", "-1", "3.5", "3e0", "03", " 3", "3 ", "3\n", "NaN", "private-secret"]) {
+      expect(() => makeDatabaseClients(direct, { INLINE_DATABASE_QUERY_POOL_MAX: value }))
+        .toThrow("INLINE_DATABASE_QUERY_POOL_MAX must be an integer from 1 through 10.")
+    }
+  })
+
   test("pooled mode and a separate direct URL must be explicit", () => {
     expect(() => databaseConnectionPolicy(pooled)).toThrow("explicit PgBouncer mode")
     expect(() => databaseConnectionPolicy(pooled, { DATABASE_CONNECTION_MODE: "pgbouncer" })).toThrow("DATABASE_DIRECT_URL")

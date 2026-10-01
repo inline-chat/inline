@@ -21,6 +21,9 @@ kill_timeout = "45s"
   PORT = "8000"
   # The only traffic-serving role. It owns the shared workers and schedulers.
   INLINE_PROCESS_ROLE = "all"
+  # Three query slots plus one separate health slot per process. Budget the
+  # warm standby and temporary deployment overlap against the database limit.
+  INLINE_DATABASE_QUERY_POOL_MAX = "3"
   # The public route terminates at Cloudflare. The origin secret remains a Fly
   # secret and is deliberately absent from this version-controlled config.
   INLINE_INGRESS_MODE = "cloudflare"
