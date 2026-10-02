@@ -480,49 +480,62 @@ final class MediaHelpers: Sendable {
     mediaType: MediaType,
     id: Int64,
     isLocalId: Bool = true,
-    path: String
+    path: String,
+    publisher: MessagesPublisher? = nil
   ) throws {
     try database.dbWriter.write { db in
-      switch mediaType {
-        case .photo:
-          if isLocalId {
-            try Photo
-              .filter(Photo.Columns.id == id)
-              .updateAll(db, [Column("localPath").set(to: path)])
-          } else {
-            try Photo
-              .filter(Photo.Columns.photoId == id)
-              .updateAll(db, [Column("localPath").set(to: path)])
-          }
-
-        case .photoSize:
-          try PhotoSize
-            .filter(PhotoSize.Columns.id == id)
-            .updateAll(db, PhotoSize.Columns.localPath.set(to: path))
-
-        case .video:
-          if isLocalId {
-            try Video
-              .filter(Video.Columns.id == id)
-              .updateAll(db, Video.Columns.localPath.set(to: path))
-          } else {
-            try Video
-              .filter(Video.Columns.videoId == id)
-              .updateAll(db, Video.Columns.localPath.set(to: path))
-          }
-
-        case .document:
-          if isLocalId {
-            try Document
-              .filter(Document.Columns.id == id)
-              .updateAll(db, Document.Columns.localPath.set(to: path))
-          } else {
-            try Document
-              .filter(Document.Columns.documentId == id)
-              .updateAll(db, Document.Columns.localPath.set(to: path))
-          }
-      }
+      try Self.updateLocalPath(db, mediaType: mediaType, id: id, isLocalId: isLocalId, path: path, publisher: publisher)
     }
+  }
+
+  static func updateLocalPath(_ db: Database, mediaType: MediaType, id: Int64,
+                             isLocalId: Bool = true, path: String, publisher: MessagesPublisher? = nil) throws {
+    var changes = MessageProjectionDependencies()
+    switch mediaType {
+    case .photo:
+      if isLocalId {
+        try Photo
+          .filter(Photo.Columns.id == id)
+          .updateAll(db, [Column("localPath").set(to: path)])
+      } else {
+        try Photo
+          .filter(Photo.Columns.photoId == id)
+          .updateAll(db, [Column("localPath").set(to: path)])
+      }
+      changes.identities.insert(isLocalId ? .photo(id) : .serverPhoto(id))
+
+    case .photoSize:
+      let parent = try PhotoSize.fetchOne(db, id: id)?.photoId
+      try PhotoSize
+        .filter(PhotoSize.Columns.id == id)
+        .updateAll(db, PhotoSize.Columns.localPath.set(to: path))
+      if let parent { changes.identities.insert(.photo(parent)) }
+
+    case .video:
+      if isLocalId {
+        try Video
+          .filter(Video.Columns.id == id)
+          .updateAll(db, Video.Columns.localPath.set(to: path))
+      } else {
+        try Video
+          .filter(Video.Columns.videoId == id)
+          .updateAll(db, Video.Columns.localPath.set(to: path))
+      }
+      changes.identities.insert(isLocalId ? .video(id) : .serverVideo(id))
+
+    case .document:
+      if isLocalId {
+        try Document
+          .filter(Document.Columns.id == id)
+          .updateAll(db, Document.Columns.localPath.set(to: path))
+      } else {
+        try Document
+          .filter(Document.Columns.documentId == id)
+          .updateAll(db, Document.Columns.localPath.set(to: path))
+      }
+      changes.identities.insert(isLocalId ? .document(id) : .serverDocument(id))
+    }
+    changes.publishAfterCommit(db, publisher: publisher)
   }
 
   // MARK: - Private Helpers

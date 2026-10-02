@@ -180,7 +180,8 @@ public actor FileCache: Sendable {
   /// Rich block projections may carry protocol/server IDs in their detached
   /// `PhotoSize` values. Persist onto the existing local row instead of saving
   /// that detached value, because `PhotoSize.photoId` is a local foreign key.
-  static func persistDownloadedPhotoPath(_ localPath: String, for photo: PhotoInfo, in db: Database) throws {
+  static func persistDownloadedPhotoPath(_ localPath: String, for photo: PhotoInfo, in db: Database,
+                                         publisher: MessagesPublisher? = nil) throws {
     guard let selectedSize = photo.bestPhotoSize() else { throw FileCacheError.failedToSave }
     guard let localPhotoID = try Photo.filter(Photo.Columns.photoId == photo.photo.photoId).fetchOne(db)?.id
     else { throw FileCacheError.failedToSave }
@@ -189,6 +190,7 @@ public actor FileCache: Sendable {
       .filter(PhotoSize.Columns.type == selectedSize.type)
       .updateAll(db, [PhotoSize.Columns.localPath.set(to: localPath)])
     guard updated > 0 else { throw FileCacheError.failedToSave }
+    MessageProjectionDependencies(identities: [.photo(localPhotoID)]).publishAfterCommit(db, publisher: publisher)
   }
 
   // MARK: -  Fetches
@@ -426,11 +428,10 @@ public actor FileCache: Sendable {
   // MARK: - Download Helpers
 
   /// Save a downloaded document to the cache and update the database
-  public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message? = nil) async throws {
+  public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message? = nil,
+                                   publisher: MessagesPublisher? = nil) async throws {
     try await database.dbWriter.write { db in
-      let updated = try Document.filter(id: document.id)
-        .updateAll(db, [Document.Columns.localPath.set(to: localPath)])
-      guard updated == 1 else { throw FileCacheError.failedToSave }
+      try Self.persistDownloadedDocumentPath(localPath, for: document, in: db, publisher: publisher)
       self.log.debug("Updated document \(document.id) with local path \(localPath)")
     }
 
@@ -440,15 +441,34 @@ public actor FileCache: Sendable {
   }
 
   /// Save a downloaded video to the cache and update the database
-  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message) async throws {
+  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message,
+                                publisher: MessagesPublisher? = nil) async throws {
     try await database.dbWriter.write { db in
-      let updated = try Video.filter(id: video.id)
-        .updateAll(db, [Video.Columns.localPath.set(to: localPath)])
-      guard updated == 1 else { throw FileCacheError.failedToSave }
+      try Self.persistDownloadedVideoPath(localPath, for: video, in: db, publisher: publisher)
       self.log.debug("Updated video \(video.id) with local path \(localPath)")
     }
 
     await triggerMessageReload(message: message)
+  }
+
+  static func persistDownloadedDocumentPath(_ localPath: String, for document: DocumentInfo, in db: Database,
+                                            publisher: MessagesPublisher? = nil) throws {
+    let updated = try Document.filter(id: document.id)
+      .updateAll(db, [Document.Columns.localPath.set(to: localPath)])
+    guard updated == 1 else { throw FileCacheError.failedToSave }
+    var changes = MessageProjectionDependencies()
+    changes.include(document.document)
+    changes.publishAfterCommit(db, publisher: publisher)
+  }
+
+  static func persistDownloadedVideoPath(_ localPath: String, for video: VideoInfo, in db: Database,
+                                         publisher: MessagesPublisher? = nil) throws {
+    let updated = try Video.filter(id: video.id)
+      .updateAll(db, [Video.Columns.localPath.set(to: localPath)])
+    guard updated == 1 else { throw FileCacheError.failedToSave }
+    var changes = MessageProjectionDependencies()
+    changes.include(video.video)
+    changes.publishAfterCommit(db, publisher: publisher)
   }
 
   /// Save a downloaded voice message to the cache and update the message payload.
@@ -463,6 +483,9 @@ public actor FileCache: Sendable {
 
       storedMessage.setVoiceLocalRelativePath(localPath)
       try storedMessage.saveMessage(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(storedMessage)
+      changes.publishAfterCommit(db)
       self.log.debug("Updated voice message \(message.messageId) with local path \(localPath)")
     }
 
@@ -904,6 +927,9 @@ public actor FileCache: Sendable {
         _ = try PhotoSize.filter(PhotoSize.Columns.photoId == photoID).deleteAll(db)
         _ = try Photo.filter(Photo.Columns.id == photoID).deleteAll(db)
       }
+      var changes = MessageProjectionDependencies()
+      changes.include(documentInfo)
+      changes.publishAfterCommit(db)
     }
 
     if let localPath = documentInfo.document.localPath,
@@ -927,6 +953,9 @@ public actor FileCache: Sendable {
     try database.dbWriter.write { db in
       _ = try PhotoSize.filter(PhotoSize.Columns.photoId == photoID).deleteAll(db)
       _ = try Photo.filter(Photo.Columns.id == photoID).deleteAll(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(thumbnail)
+      changes.publishAfterCommit(db)
     }
     for size in thumbnail.sizes {
       if let localPath = size.localPath,
@@ -1061,7 +1090,13 @@ extension FileCache {
 
     // Step 3: Clear local paths in database
     _ = try await database.dbWriter.write { db in
-      try PhotoSize.updateAll(db, [PhotoSize.Columns.localPath.set(to: nil)])
+      let updated = try PhotoSize.updateAll(db, [PhotoSize.Columns.localPath.set(to: nil)])
+      if updated > 0 {
+        var changes = MessageProjectionDependencies()
+        changes.unknownSharedRows = true
+        changes.publishAfterCommit(db)
+      }
+      return updated
     }
 
     log.info("Photo cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
@@ -1101,7 +1136,13 @@ extension FileCache {
 
     // Step 3: Clear local paths in database
     _ = try await database.dbWriter.write { db in
-      try Document.updateAll(db, [Document.Columns.localPath.set(to: nil)])
+      let updated = try Document.updateAll(db, [Document.Columns.localPath.set(to: nil)])
+      if updated > 0 {
+        var changes = MessageProjectionDependencies()
+        changes.unknownSharedRows = true
+        changes.publishAfterCommit(db)
+      }
+      return updated
     }
 
     log.info("Document cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
@@ -1141,7 +1182,13 @@ extension FileCache {
 
     // Step 3: Clear local paths in database
     _ = try await database.dbWriter.write { db in
-      try Video.updateAll(db, [Video.Columns.localPath.set(to: nil)])
+      let updated = try Video.updateAll(db, [Video.Columns.localPath.set(to: nil)])
+      if updated > 0 {
+        var changes = MessageProjectionDependencies()
+        changes.unknownSharedRows = true
+        changes.publishAfterCommit(db)
+      }
+      return updated
     }
 
     log.info("Video cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
@@ -1196,6 +1243,9 @@ extension FileCache {
 
         message.setVoiceLocalRelativePath(nil)
         try message.saveMessage(db)
+        var changes = MessageProjectionDependencies()
+        changes.include(message)
+        changes.publishAfterCommit(db)
       }
     }
 

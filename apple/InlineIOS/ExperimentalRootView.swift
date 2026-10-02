@@ -1403,6 +1403,32 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
 
+  // Keep UIKit's presented menu alive through unrelated unread/history updates.
+  final class Coordinator {
+    var current: ExperimentalOverflowMenuButton
+    var signature: Signature?
+    init(_ current: ExperimentalOverflowMenuButton) { self.current = current }
+  }
+
+  struct Signature: Equatable {
+    let itemSize: ExperimentalHomeChatItemRenderMode
+    let sortMode: ExperimentalHomeSortMode
+    let allChatsFilter: ChatListFilter?
+    let homeSpaceExclusionMenu: ExperimentalHomeSpaceExclusionMenu?
+    let activeSpaceName: String?
+    let hasCleanup: Bool
+    let hasMembers: Bool
+    let hasManage: Bool
+  }
+
+  func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+  private var signature: Signature {
+    Signature(itemSize: itemSize, sortMode: sortMode, allChatsFilter: allChatsFilter,
+              homeSpaceExclusionMenu: homeSpaceExclusionMenu, activeSpaceName: activeSpaceName,
+              hasCleanup: onCleanup != nil, hasMembers: onMembers != nil, hasManage: onManage != nil)
+  }
+
   func makeUIView(context: Context) -> UIButton {
     let button = UIButton(type: .system)
     var configuration = UIButton.Configuration.plain()
@@ -1416,21 +1442,24 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   }
 
   func updateUIView(_ button: UIButton, context: Context) {
-    button.menu = makeMenu()
+    context.coordinator.current = self
+    guard context.coordinator.signature != signature else { return }
+    context.coordinator.signature = signature
+    button.menu = makeMenu(coordinator: context.coordinator)
   }
 
-  private func makeMenu() -> UIMenu {
+  private func makeMenu(coordinator: Coordinator) -> UIMenu {
     let archivedChats = UIAction(
       title: "Archived Chats",
       image: UIImage(systemName: "archivebox")
     ) { _ in
-      onArchive()
+      coordinator.current.onArchive()
     }
     let invite = UIAction(
       title: "Invite",
       image: UIImage(systemName: "person.badge.plus")
     ) { _ in
-      onInvite()
+      coordinator.current.onInvite()
     }
     let itemSizeMenu = UIMenu(
       title: "Item Size",
@@ -1439,7 +1468,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       options: .singleSelection,
       children: ExperimentalHomeChatItemRenderMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == itemSize ? .on : .off) { _ in
-          onSelectItemSize(mode)
+          coordinator.current.onSelectItemSize(mode)
         }
       }
     )
@@ -1450,7 +1479,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       options: .singleSelection,
       children: ExperimentalHomeSortMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == sortMode ? .on : .off) { _ in
-          onSelectSortMode(mode)
+          coordinator.current.onSelectSortMode(mode)
         }
       }
     )
@@ -1465,7 +1494,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
             title: filter == .unread ? "Unread" : "All Chats",
             state: filter == currentFilter ? .on : .off
           ) { _ in
-            onSelectAllChatsFilter(filter)
+            coordinator.current.onSelectAllChatsFilter(filter)
           }
         }
       )
@@ -1488,7 +1517,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
             title: space.title,
             state: configuration.excludedSpaceIDs.contains(space.id) ? .on : .off
           ) { _ in
-            onToggleHomeSpaceExclusion(space.id)
+            coordinator.current.onToggleHomeSpaceExclusion(space.id)
           }
         }
       )
@@ -1504,7 +1533,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       children: (filterMenu.map { [$0] } ?? []) + [viewOptions, archivedChats]
     )
 
-    let cleanupSection = onCleanup.map { onCleanup in
+    let cleanupSection = onCleanup.map { _ in
       UIMenu(
         options: .displayInline,
         children: [
@@ -1513,21 +1542,21 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
             subtitle: "Closes inactive chats; deletes empty folders",
             image: UIImage(systemName: "eraser.line.dashed")
           ) { _ in
-            onCleanup()
+            coordinator.current.onCleanup?()
           },
         ]
       )
     }
 
     let spaceSection: UIMenu
-    if let activeSpaceName, let onMembers, let onManage {
+    if let activeSpaceName, onMembers != nil, onManage != nil {
       spaceSection = UIMenu(
         title: activeSpaceName,
         options: .displayInline,
         children: [
           invite,
-          UIAction(title: "Members", image: UIImage(systemName: "person.2")) { _ in onMembers() },
-          UIAction(title: "Manage", image: UIImage(systemName: "gearshape.2")) { _ in onManage() },
+          UIAction(title: "Members", image: UIImage(systemName: "person.2")) { _ in coordinator.current.onMembers?() },
+          UIAction(title: "Manage", image: UIImage(systemName: "gearshape.2")) { _ in coordinator.current.onManage?() },
         ]
       )
     } else {

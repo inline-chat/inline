@@ -20,6 +20,7 @@ final class MessageSelectionCoordinator {
   private lazy var bar = ForwardMessageSelectionBar(
     surfaceStyle: compose?.surfaceStyle ?? .content,
     onForward: { [weak self] in self?.forward() },
+    onStartChat: { [weak self] in self?.startChat() },
     onDelete: { [weak self] in self?.confirmDelete() },
     onCancel: { [weak self] in self?.list?.clearMessageSelection() }
   )
@@ -53,6 +54,17 @@ final class MessageSelectionCoordinator {
       }
       ancestor = current.superview
     }
+  }
+
+  static func loadedDiscussion(from source: NSView) -> [FullMessage] {
+    var ancestor: NSView? = source
+    while let current = ancestor {
+      if let table = current as? NSTableView, let list = table.delegate as? any ChatMessageListController {
+        return list.viewModel.messages
+      }
+      ancestor = current.superview
+    }
+    return []
   }
 
   private func refresh() {
@@ -92,6 +104,13 @@ final class MessageSelectionCoordinator {
       reviewBeforeSending: true,
       onComplete: { [weak list] in list?.clearMessageSelection() }
     )
+  }
+
+  private func startChat() {
+    guard !isDeleting, let list, !list.selectedMessagesInLoadedOrder.isEmpty else { return }
+    dependencies.forwardMessages?.presentDiscussion(messages: list.selectedMessagesInLoadedOrder,
+      availableMessages: list.viewModel.messages,
+      onComplete: { [weak list] in list?.clearMessageSelection() })
   }
 
   private func confirmDelete() {

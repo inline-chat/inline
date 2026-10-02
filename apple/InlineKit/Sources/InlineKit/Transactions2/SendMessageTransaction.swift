@@ -30,6 +30,7 @@ public struct SendMessageTransaction: Transaction2 {
     public var sendMode: MessageSendMode?
     public var randomId: Int64
     public var temporaryMessageId: Int64
+    public var deferLocalMessage: Bool
 
     enum CodingKeys: String, CodingKey {
       case text
@@ -42,6 +43,7 @@ public struct SendMessageTransaction: Transaction2 {
       case sendMode
       case randomId
       case temporaryMessageId
+      case deferLocalMessage
     }
 
     public init(
@@ -54,7 +56,8 @@ public struct SendMessageTransaction: Transaction2 {
       entities: MessageEntities?,
       sendMode: MessageSendMode?,
       randomId: Int64,
-      temporaryMessageId: Int64
+      temporaryMessageId: Int64,
+      deferLocalMessage: Bool = false
     ) {
       self.text = text
       self.peerId = peerId
@@ -66,6 +69,7 @@ public struct SendMessageTransaction: Transaction2 {
       self.sendMode = sendMode
       self.randomId = randomId
       self.temporaryMessageId = temporaryMessageId
+      self.deferLocalMessage = deferLocalMessage
     }
 
     public init(from decoder: Decoder) throws {
@@ -84,6 +88,7 @@ public struct SendMessageTransaction: Transaction2 {
       }
       randomId = try container.decode(Int64.self, forKey: .randomId)
       temporaryMessageId = try container.decode(Int64.self, forKey: .temporaryMessageId)
+      deferLocalMessage = try container.decodeIfPresent(Bool.self, forKey: .deferLocalMessage) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -102,6 +107,7 @@ public struct SendMessageTransaction: Transaction2 {
       }
       try container.encode(randomId, forKey: .randomId)
       try container.encode(temporaryMessageId, forKey: .temporaryMessageId)
+      if deferLocalMessage { try container.encode(true, forKey: .deferLocalMessage) }
     }
   }
 
@@ -113,9 +119,11 @@ public struct SendMessageTransaction: Transaction2 {
     isSticker: Bool? = nil,
     isNudge: Bool = false,
     entities: MessageEntities? = nil,
-    sendMode: MessageSendMode? = nil
+    sendMode: MessageSendMode? = nil,
+    randomId: Int64? = nil,
+    deferLocalMessage: Bool = false
   ) {
-    let randomId = Int64.random(in: 1 ... Int64.max)
+    let randomId = randomId ?? Int64.random(in: 1 ... Int64.max)
     context = Context(
       text: text,
       peerId: peerId,
@@ -126,7 +134,8 @@ public struct SendMessageTransaction: Transaction2 {
       entities: entities,
       sendMode: sendMode,
       randomId: randomId,
-      temporaryMessageId: -1 * randomId
+      temporaryMessageId: -1 * randomId,
+      deferLocalMessage: deferLocalMessage
     )
   }
 
@@ -171,6 +180,9 @@ public struct SendMessageTransaction: Transaction2 {
 
   // Methods
   public func optimistic() async {
+    // A durable submission may already have committed under this random ID.
+    // Its receipt must decide presentation before constructing another row.
+    guard !context.deferLocalMessage else { return }
     log.debug("Optimistic send message")
 
     guard let fromId = Auth.shared.getCurrentUserId() else {
@@ -247,6 +259,7 @@ public struct SendMessageTransaction: Transaction2 {
   }
 
   public func validateOptimisticState() async -> Bool {
+    if context.deferLocalMessage { return true }
     do {
       return try await AppDatabase.shared.reader.read { db in
         try Message.fetchOne(
@@ -269,6 +282,7 @@ public struct SendMessageTransaction: Transaction2 {
   }
 
   public func failed(error: TransactionError2) async {
+    guard !context.deferLocalMessage else { return }
     log.error("Failed to send message", error: error)
 
     guard let currentUserId = Auth.getCurrentUserId() else {
@@ -307,6 +321,7 @@ public struct SendMessageTransaction: Transaction2 {
   }
 
   public func cancelled() async {
+    guard !context.deferLocalMessage else { return }
     log.debug("Cancelled send message")
 
     do {
@@ -336,7 +351,9 @@ public extension Transaction2 where Self == SendMessageTransaction {
     isSticker: Bool? = nil,
     isNudge: Bool = false,
     entities: MessageEntities? = nil,
-    sendMode: MessageSendMode? = nil
+    sendMode: MessageSendMode? = nil,
+    randomId: Int64? = nil,
+    deferLocalMessage: Bool = false
   ) -> SendMessageTransaction {
     SendMessageTransaction(
       text: text,
@@ -346,7 +363,9 @@ public extension Transaction2 where Self == SendMessageTransaction {
       isSticker: isSticker,
       isNudge: isNudge,
       entities: entities,
-      sendMode: sendMode
+      sendMode: sendMode,
+      randomId: randomId,
+      deferLocalMessage: deferLocalMessage
     )
   }
 }

@@ -104,16 +104,17 @@ public extension Reaction {
   @discardableResult
   static func save(
     _ db: Database,
-    protocolMessage: InlineProtocol.Reaction
+    protocolMessage: InlineProtocol.Reaction,
+    publisher: MessagesPublisher? = nil
 //    publishChanges: Bool = false,
 
   ) throws -> Bool {
     let reaction = Reaction(from: protocolMessage)
-    return try save(db, reaction: reaction)
+    return try save(db, reaction: reaction, publisher: publisher)
   }
 
   @discardableResult
-  static func save(_ db: Database, reaction: Reaction) throws -> Bool {
+  static func save(_ db: Database, reaction: Reaction, publisher: MessagesPublisher? = nil) throws -> Bool {
     guard try canSave(db, reaction: reaction) else { return false }
 
     let existingReaction = try? Reaction
@@ -125,6 +126,8 @@ public extension Reaction {
 
     if existingReaction == nil {
       try reaction.save(db, onConflict: .replace)
+      MessageProjectionDependencies(identities: [.message(chatId: reaction.chatId, messageId: reaction.messageId)])
+        .publishAfterCommit(db, publisher: publisher)
       return true
     }
 

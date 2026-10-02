@@ -3,6 +3,7 @@ import GRDB
 import InlineProtocol
 
 public enum Status: String, Codable, Sendable {
+  case unspecified
   case backlog
   case todo
   case inProgress = "in_progress"
@@ -68,7 +69,14 @@ public extension ExternalTask {
     id = externalTask.id
     application = externalTask.application
     taskId = externalTask.taskID
-    status = .todo
+    status = switch externalTask.status {
+    case .backlog: .backlog
+    case .todo: .todo
+    case .inProgress: .inProgress
+    case .done: .done
+    case .cancelled: .cancelled
+    case .unspecified, .UNRECOGNIZED: .unspecified
+    }
     assignedUserId = externalTask.assignedUserID
     url = externalTask.url
     title = externalTask.title
@@ -77,13 +85,16 @@ public extension ExternalTask {
 
   @discardableResult
   static func save(
-    _ db: Database, externalTask protocolExternalTask: InlineProtocol.MessageAttachmentExternalTask
+    _ db: Database, externalTask protocolExternalTask: InlineProtocol.MessageAttachmentExternalTask,
+    publisher: MessagesPublisher? = nil
   )
     throws -> ExternalTask
   {
     let externalTask = ExternalTask(from: protocolExternalTask)
     try externalTask.save(db)
-
+    if let id = externalTask.id {
+      MessageProjectionDependencies(identities: [.task(id)]).publishAfterCommit(db, publisher: publisher)
+    }
     return externalTask
   }
 }

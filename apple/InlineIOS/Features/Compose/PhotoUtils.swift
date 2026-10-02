@@ -1,3 +1,4 @@
+import Auth
 import AVFoundation
 import InlineKit
 import Photos
@@ -465,6 +466,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     dismissAttachmentPickerOnSuccess: Bool = true,
     sendImmediately: Bool = false
   ) {
+    guard let destinationPeer = peerId,
+          let account = try? Auth.shared.handle.beginAccountMutation() else { return }
     let pendingId = sendImmediately ? nil : addPendingVideoAttachment()
     Task {
       defer {
@@ -477,8 +480,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         let immediateThumbnail = immediateVideoThumbnail(from: url)
         if let immediateThumbnail {
           await MainActor.run { [weak self] in
+            guard let self, self.peerId == destinationPeer,
+                  (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
             if let pendingId {
-              self?.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
+              self.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
             }
           }
         }
@@ -487,7 +492,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         let mediaItem = FileMediaItem.video(videoInfo)
 
         await MainActor.run { [weak self] in
-          guard let self else { return }
+          guard let self, self.peerId == destinationPeer,
+                (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
 
           if let pendingId {
             let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
@@ -514,11 +520,13 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       } catch {
         Log.shared.error("Failed to save video", error: error)
         await MainActor.run { [weak self] in
-          self?.cancelQueuedPendingVideoSend()
+          guard let self, self.peerId == destinationPeer,
+                (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
+          self.cancelQueuedPendingVideoSend()
           if let pendingId {
-            self?.completePendingVideoAttachments([pendingId])
+            self.completePendingVideoAttachments([pendingId])
           }
-          self?.showVideoError(error)
+          self.showVideoError(error)
         }
       }
     }

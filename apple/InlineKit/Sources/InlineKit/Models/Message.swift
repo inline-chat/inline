@@ -48,6 +48,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case pinned
     case editDate
     case rev
+    case sourceSnapshot
     case fileId
     case status
     case repliedToMessageId
@@ -111,6 +112,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var pinned: Bool?
   public var editDate: Date?
   public var rev: Int64
+  /// Opaque server identity for the complete reviewed public payload.
+  public var sourceSnapshot: String?
   public var fileId: String?
   public var status: MessageSendingStatus?
   public var repliedToMessageId: Int64?
@@ -182,6 +185,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let pinned = Column(CodingKeys.pinned)
     public static let editDate = Column(CodingKeys.editDate)
     public static let rev = Column(CodingKeys.rev)
+    public static let sourceSnapshot = Column(CodingKeys.sourceSnapshot)
     public static let status = Column(CodingKeys.status)
     public static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
     public static let forwardFromPeerUserId = Column(CodingKeys.forwardFromPeerUserId)
@@ -353,7 +357,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    sourceSnapshot: String? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -364,6 +369,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.peerThreadId = peerThreadId
     self.editDate = editDate
     self.rev = rev
+    self.sourceSnapshot = sourceSnapshot
     self.chatId = chatId
     self.out = out
     self.mentioned = mentioned
@@ -451,7 +457,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
-      entities: from.hasEntities ? from.entities : nil
+      entities: from.hasEntities ? from.entities : nil,
+      sourceSnapshot: from.hasSourceSnapshot ? from.sourceSnapshot : nil
     )
   }
 
@@ -1036,12 +1043,87 @@ private extension Message {
 public extension Message {
   // todo create another one for fetching
 
+  internal mutating func preserveLocalSendingState(from pending: Message, db: Database,
+                                                  publisher: MessagesPublisher? = nil) throws {
+    var changedRows = MessageProjectionDependencies()
+    fileId = fileId ?? pending.fileId
+    transactionId = transactionId ?? pending.transactionId
+    // Voice payloads carry the local recording path alongside server metadata.
+    if let localVoice = pending.voiceContent, var voice = voiceContent,
+       voice.localRelativePath.isEmpty {
+      voice.localRelativePath = localVoice.localRelativePath
+      var payload = contentPayload ?? Client_MessageContentPayload()
+      payload.voice = voice
+      contentPayload = payload
+    }
+    func preservePhotoPaths(_ localId: Int64?, _ confirmedId: Int64?) throws {
+      guard let localId, let confirmedId else { return }
+      for localSize in try PhotoSize.filter(PhotoSize.Columns.photoId == localId).fetchAll(db) {
+        if var confirmedSize = try PhotoSize
+          .filter(PhotoSize.Columns.photoId == confirmedId && PhotoSize.Columns.type == localSize.type).fetchOne(db) {
+          confirmedSize.localPath = confirmedSize.localPath ?? localSize.localPath
+          try confirmedSize.update(db)
+          changedRows.identities.insert(.photo(confirmedId))
+        }
+      }
+    }
+    if let localId = pending.videoId, let confirmedId = videoId,
+       let local = try Video.filter(Video.Columns.videoId == localId).fetchOne(db),
+       var confirmed = try Video.filter(Video.Columns.videoId == confirmedId).fetchOne(db) {
+      confirmed.localPath = confirmed.localPath ?? local.localPath
+      try preservePhotoPaths(local.thumbnailPhotoId, confirmed.thumbnailPhotoId)
+      try confirmed.update(db)
+      changedRows.include(confirmed)
+    }
+    if let localId = pending.documentId, let confirmedId = documentId,
+       let local = try Document.filter(Document.Columns.documentId == localId).fetchOne(db),
+       var confirmed = try Document.filter(Document.Columns.documentId == confirmedId).fetchOne(db) {
+      confirmed.localPath = confirmed.localPath ?? local.localPath
+      try preservePhotoPaths(local.thumbnailPhotoId, confirmed.thumbnailPhotoId)
+      try confirmed.update(db)
+      changedRows.include(confirmed)
+    }
+    // Message.photoId is a server identity; PhotoSize.photoId and media
+    // thumbnail IDs reference the local photo row instead.
+    if let localId = pending.photoId, let confirmedId = photoId,
+       let local = try Photo.filter(Photo.Columns.photoId == localId).fetchOne(db),
+       let confirmed = try Photo.filter(Photo.Columns.photoId == confirmedId).fetchOne(db) {
+      try preservePhotoPaths(local.id, confirmed.id)
+    }
+    guard let pendingGlobalId = pending.globalId, let confirmedGlobalId = globalId else { return }
+    for var attachment in try Attachment.filter(Column("messageId") == pendingGlobalId).fetchAll(db) {
+      if let id = attachment.id { changedRows.identities.insert(.attachment(id)) }
+      let alreadyPresent = try Attachment.filter(Column("messageId") == confirmedGlobalId)
+        .filter(Column("externalTaskId") == attachment.externalTaskId && Column("urlPreviewId") == attachment.urlPreviewId)
+        .fetchCount(db) > 0
+      if !alreadyPresent {
+        attachment.messageId = confirmedGlobalId
+        try attachment.update(db)
+      }
+    }
+    changedRows.publishAfterCommit(db, publisher: publisher)
+  }
+
   @discardableResult
   mutating func saveMessage(
     _ db: Database,
     onConflict: Database.ConflictResolution = .abort,
     publishChanges: Bool = false,
-    preserveExistingBlockContentWhenMissing: Bool = true
+    preserveExistingBlockContentWhenMissing: Bool = true,
+    publisher: MessagesPublisher? = nil
+  ) throws -> Message {
+    try saveMessage(db, onConflict: onConflict, publishChanges: publishChanges,
+      preserveExistingBlockContentWhenMissing: preserveExistingBlockContentWhenMissing,
+      publisher: publisher, beforeAsyncNotification: nil)
+  }
+
+  internal mutating func saveMessage(
+    _ db: Database,
+    onConflict: Database.ConflictResolution = .abort,
+    publishChanges: Bool = false,
+    preserveExistingBlockContentWhenMissing: Bool = true,
+    publisher: MessagesPublisher? = nil,
+    beforeAsyncNotification: (@Sendable () async -> Void)?
   ) throws -> Message {
     var isExisting = false
 
@@ -1072,6 +1154,10 @@ public extension Message {
 
     // Save the message
     let savedMessage = try saveAndFetch(db, onConflict: .ignore)
+    // Silent history/catch-up writes must also invalidate an older held rich
+    // result before their eventual actor-side add/update/reload notification.
+    MessageProjectionDependencies(identities: [.message(chatId: savedMessage.chatId, messageId: savedMessage.messageId)])
+      .publishAfterCommit(db, publisher: publisher)
 
     // Publish changes if needed
     if publishChanges {
@@ -1081,10 +1167,12 @@ public extension Message {
 
       db.afterNextTransaction { _ in
         Task { @MainActor in
+          await beforeAsyncNotification?()
+          let publisher = publisher ?? .shared
           if wasExisting {
-            await MessagesPublisher.shared.messageUpdated(message: messageForPublish, peer: peer, animated: false)
+            await publisher.messageUpdated(message: messageForPublish, peer: peer, animated: false)
           } else {
-            await MessagesPublisher.shared.messageAdded(message: messageForPublish, peer: peer)
+            await publisher.messageAdded(message: messageForPublish, peer: peer)
           }
         }
       }

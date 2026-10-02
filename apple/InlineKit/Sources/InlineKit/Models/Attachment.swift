@@ -55,7 +55,8 @@ public extension Attachment {
   /// - Returns: The saved Attachment object
   @discardableResult
   static func saveWithInnerItems(
-    _ db: Database, attachment: InlineProtocol.MessageAttachment, messageClientGlobalId: Int64
+    _ db: Database, attachment: InlineProtocol.MessageAttachment, messageClientGlobalId: Int64,
+    publisher: MessagesPublisher? = nil
   ) throws -> Attachment {
     var externalTaskId: Int64? = nil
     var urlPreviewId: Int64? = nil
@@ -64,12 +65,12 @@ public extension Attachment {
       switch attachmentType {
         case let .externalTask(externalTask):
 
-          let savedExternalTask = try ExternalTask.save(db, externalTask: externalTask)
+          let savedExternalTask = try ExternalTask.save(db, externalTask: externalTask, publisher: publisher)
           externalTaskId = savedExternalTask.id
 
         case let .urlPreview(urlPreviewProto):
           do {
-            let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto)
+            let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto, publisher: publisher)
             urlPreviewId = savedUrlPreview.id
           } catch {
             Log.shared.error("Failed to save UrlPreview: \(error)")

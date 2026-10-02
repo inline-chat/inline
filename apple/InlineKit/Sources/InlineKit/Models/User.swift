@@ -305,11 +305,14 @@ public extension User {
 public extension ApiUser {
   @discardableResult
   func saveFull(
-    _ db: Database
+    _ db: Database, publisher: MessagesPublisher? = nil
   )
     throws -> User
   {
     let existing = try? User.fetchOne(db, id: id)
+    let previousPhoto: File?
+    if photo?.first != nil { previousPhoto = try existing?.profileFileId.flatMap { try File.fetchOne(db, key: $0) } }
+    else { previousPhoto = nil }
     var user = User(from: self)
 
     var profileCdnUrl = profilePhoto?.cdnURL
@@ -322,7 +325,7 @@ public extension ApiUser {
       profileCdnUrl = photo.temporaryUrl
       profileFileUniqueId = photo.fileUniqueId
       // save file
-      file = try? File.save(db, apiPhoto: photo, forUserId: user.id)
+      file = try? File.save(db, apiPhoto: photo, forUserId: user.id, publisher: publisher)
     }
 
     // remove old photos except new ones for existing users
@@ -332,10 +335,15 @@ public extension ApiUser {
        existing.profileFileId != file.id
     {
       // clear all other files for this user
-      try File
+      let removed = try File
         .filter(Column("profileForUserId") == user.id)
         .filter(Column("id") != file.id)
         .deleteAll(db)
+      if removed > 0 {
+        var changes = MessageProjectionDependencies()
+        changes.unknownSharedRows = true
+        changes.publishAfterCommit(db, publisher: publisher)
+      }
     }
 
     if let existing {
@@ -374,6 +382,9 @@ public extension ApiUser {
       try user.save(db)
     }
 
+    if existing != user || (file != nil && file != previousPhoto) {
+      User.publishPresentationAfterCommit(db, userId: user.id, publisher: publisher)
+    }
     return user
   }
 }
@@ -417,7 +428,7 @@ public extension User {
   }
 
   static func save(
-    _ db: Database, user protocolUser: InlineProtocol.User
+    _ db: Database, user protocolUser: InlineProtocol.User, publisher: MessagesPublisher? = nil
   )
     throws -> User
   {
@@ -468,7 +479,19 @@ public extension User {
       try user.save(db)
     }
 
+    if existing != user { publishPresentationAfterCommit(db, userId: user.id, publisher: publisher) }
     return user
+  }
+
+  /// Queries and sidecars update the same User owner as an updated-user event.
+  /// Signal changed identities after commit so an unrelated coarse chat reload
+  /// need not invalidate every pending user projection.
+  internal static func publishPresentationAfterCommit(_ db: Database, userId: Int64, publisher: MessagesPublisher? = nil) {
+    db.afterNextTransaction { _ in
+      let publisher = publisher ?? .shared
+      publisher.projectionRowsCommitted(.init(identities: [.user(userId)]))
+      Task { @MainActor in await publisher.userPresentationUpdated(userId: userId) }
+    }
   }
 }
 
@@ -532,6 +555,8 @@ public extension User {
         return directory.appendingPathComponent(oldLocalPath)
       }
 
+      await MessagesPublisher.shared.userPresentationUpdated(userId: userId)
+
       if let oldLocalUrl, oldLocalUrl != localUrl {
         try? FileManager.default.removeItem(at: oldLocalUrl)
       }
@@ -562,6 +587,7 @@ public extension User {
     try User.filter(id: userId).updateAll(db, [
       Column("profileLocalPath").set(to: localPath),
     ])
+    MessageProjectionDependencies(identities: [.user(userId)]).publishAfterCommit(db)
     return user.profileLocalPath
   }
 

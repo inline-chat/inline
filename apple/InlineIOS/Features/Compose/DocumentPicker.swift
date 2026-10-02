@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import Logger
 import UIKit
@@ -22,21 +23,28 @@ extension ComposeView: UIDocumentPickerDelegate {
 
   func addFile(_ url: URL) {
     if isVideoFile(url) {
-      addVideo(url, sendImmediately: true)
+      addVideo(url)
       return
     }
+
+    guard let destinationPeer = peerId,
+          let account = try? Auth.shared.handle.beginAccountMutation() else { return }
 
     Task { @MainActor [weak self] in
       guard let self else { return }
       do {
         let documentInfo = try await FileCache.saveDocumentWithThumbnail(url: url)
+        try Auth.shared.handle.validateAccountMutation(account)
+        guard self.peerId == destinationPeer else { return }
         let mediaItem = FileMediaItem.document(documentInfo)
-        sendMediaItemImmediately(mediaItem)
+        addAttachmentItem(mediaItem)
 
-        Log.shared.debug("Sent file immediately from document picker")
+        textView.becomeFirstResponder()
         dismissAttachmentPickerIfPresented(animated: true)
       } catch {
         Log.shared.error("Failed to save document", error: error)
+        guard self.peerId == destinationPeer,
+              (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
         showFileError(error)
       }
     }
@@ -45,7 +53,7 @@ extension ComposeView: UIDocumentPickerDelegate {
   private func showFileError(_ error: Error) {
     let alert = UIAlertController(
       title: "File Error",
-      message: "Failed to send file: \(error.localizedDescription)",
+      message: "Failed to attach file: \(error.localizedDescription)",
       preferredStyle: .alert
     )
     alert.addAction(UIAlertAction(title: "OK", style: .default))

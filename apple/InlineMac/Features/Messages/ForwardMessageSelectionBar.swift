@@ -8,19 +8,23 @@ final class ForwardMessageSelectionBar: NSView {
   private let countLabel = NSTextField(labelWithString: "")
   private let cancelButton = NSButton()
   private let forwardButton = NSButton()
+  private let startChatButton = NSButton()
   private let deleteButton = NSButton()
   private let progress = NSProgressIndicator()
   private let onForward: () -> Void
+  private let onStartChat: () -> Void
   private let onDelete: () -> Void
   private let onCancel: () -> Void
 
   init(
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
     onForward: @escaping () -> Void,
+    onStartChat: @escaping () -> Void,
     onDelete: @escaping () -> Void,
     onCancel: @escaping () -> Void
   ) {
     self.onForward = onForward
+    self.onStartChat = onStartChat
     self.onDelete = onDelete
     self.onCancel = onCancel
     super.init(frame: .zero)
@@ -65,7 +69,7 @@ final class ForwardMessageSelectionBar: NSView {
       view.translatesAutoresizingMaskIntoConstraints = false
       controls.addSubview(view)
     }
-    for view in [countLabel, forwardButton, progress] {
+    for view in [countLabel, startChatButton, forwardButton, progress] {
       view.translatesAutoresizingMaskIntoConstraints = false
       pillContent.addSubview(view)
     }
@@ -78,6 +82,9 @@ final class ForwardMessageSelectionBar: NSView {
     deleteButton.hasDestructiveAction = true
     configure(forwardButton, symbol: "arrowshape.turn.up.right", label: "Forward selected messages", help: "Choose recipients (Return)",
               pointSize: Self.mode.sendIconPointSize, action: #selector(forward))
+    configure(startChatButton, symbol: "bubble.left.and.bubble.right", label: "Start chat with selected discussion",
+              help: "Start chat with selected discussion", pointSize: Self.mode.sendIconPointSize,
+              action: #selector(startChat))
     forwardButton.bezelColor = Theme.accentColor
     forwardButton.contentTintColor = .white
 
@@ -112,10 +119,14 @@ final class ForwardMessageSelectionBar: NSView {
       ),
       countLabel.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
       countLabel.trailingAnchor.constraint(lessThanOrEqualTo: progress.leadingAnchor, constant: -8),
-      progress.trailingAnchor.constraint(equalTo: forwardButton.leadingAnchor, constant: -Self.mode.pillContentInset),
+      progress.trailingAnchor.constraint(equalTo: startChatButton.leadingAnchor, constant: -Self.mode.pillContentInset),
       progress.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
       progress.widthAnchor.constraint(equalToConstant: 16),
       progress.heightAnchor.constraint(equalToConstant: 16),
+      startChatButton.trailingAnchor.constraint(equalTo: forwardButton.leadingAnchor, constant: -Self.mode.pillContentInset),
+      startChatButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
+      startChatButton.widthAnchor.constraint(equalToConstant: Self.mode.sendButtonSize),
+      startChatButton.heightAnchor.constraint(equalToConstant: Self.mode.sendButtonSize),
       forwardButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -Self.mode.sendButtonEdgeInset),
       forwardButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
       forwardButton.widthAnchor.constraint(equalToConstant: Self.mode.sendButtonSize),
@@ -160,10 +171,12 @@ final class ForwardMessageSelectionBar: NSView {
     countLabel.setAccessibilityLabel(count == 1 ? "1 message selected" : "\(count) messages selected")
     cancelButton.isEnabled = !isDeleting
     forwardButton.isEnabled = count > 0 && !isDeleting
+    startChatButton.isEnabled = count > 0 && !isDeleting
     deleteButton.isEnabled = count > 0 && !isDeleting
     if isDeleting { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
   }
 
+  @objc private func startChat() { onStartChat() }
   @objc private func forward() { onForward() }
   @objc private func deleteSelected() { onDelete() }
   @objc private func cancel() { onCancel() }

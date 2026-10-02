@@ -12,13 +12,7 @@ struct MessagesPublisherTerminationTests {
     let queue = try DatabaseQueue()
     let database = try AppDatabase(queue)
     let (started, startedContinuation) = AsyncStream<Void>.makeStream()
-    let blocker = StatementBlocker(started: startedContinuation)
-    try await queue.write { db in
-      db.trace { event in
-        guard case let .statement(statement) = event else { return }
-        blocker.record(statement.sql)
-      }
-    }
+    let blocker = AdmittedReadGate(started: startedContinuation)
 
     let publisher = MessagesPublisher(database: database)
     #if os(iOS)
@@ -35,15 +29,22 @@ struct MessagesPublisherTerminationTests {
       chatId: 1
     )
     let hydration = Task { @MainActor in
-      await publisher.messageAdded(message: message, peer: .thread(id: 1))
+      await publisher.messageAdded(message: message, peer: .thread(id: 1), read: {
+        let snapshot = try await queue.read { db in
+          try FullMessage.queryRequest().filter(Message.Columns.chatId == 1 && Message.Columns.messageId == 1).fetchOne(db)
+        }
+        await blocker.hold()
+        return snapshot
+      })
     }
 
     var startedIterator = started.makeAsyncIterator()
     let startDeadline = Task {
       try? await Task.sleep(for: .seconds(3))
       startedContinuation.finish()
+      await blocker.release()
     }
-    defer { startDeadline.cancel(); blocker.release() }
+    defer { startDeadline.cancel() }
     try #require(await startedIterator.next() != nil, "Hydration must start a database read")
     publisher.closeAdmissionForTermination()
 
@@ -55,10 +56,13 @@ struct MessagesPublisherTerminationTests {
     await Task.yield()
     #expect(await drainState.isFinished == false)
 
-    await publisher.messageUpdated(message: message, peer: .thread(id: 1), animated: false)
-    #expect(blocker.statementCount == 1)
+    await publisher.messageUpdated(message: message, peer: .thread(id: 1), animated: false, read: {
+      Issue.record("Closed admission must not start another projection read")
+      return nil
+    })
+    #expect(await blocker.readCount == 1)
 
-    blocker.release()
+    await blocker.release()
     await hydration.value
     await drain.value
     #expect(await drainState.isFinished)
@@ -70,34 +74,20 @@ private actor CompletionState {
   func finish() { isFinished = true }
 }
 
-private final class StatementBlocker: @unchecked Sendable {
-  private let lock = NSLock()
-  private let releaseSemaphore = DispatchSemaphore(value: 0)
+// Holds the actual SQL result after GRDB releases its transaction. No SQL
+// semaphore/timeout can silently admit extra work under unrelated test load.
+private actor AdmittedReadGate {
   private let started: AsyncStream<Void>.Continuation
-  private var didBlock = false
-  private var count = 0
-
-  init(started: AsyncStream<Void>.Continuation) {
-    self.started = started
-  }
-
-  var statementCount: Int { lock.withLock { count } }
-
-  func record(_ sql: String) {
-    guard sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("SELECT") else { return }
-    let shouldBlock = lock.withLock { () -> Bool in
-      count += 1
-      guard !didBlock else { return false }
-      didBlock = true
-      return true
+  private var waiter: CheckedContinuation<Void, Never>?
+  private(set) var readCount = 0
+  init(started: AsyncStream<Void>.Continuation) { self.started = started }
+  func hold() async {
+    readCount += 1
+    await withCheckedContinuation { continuation in
+      waiter = continuation
+      started.yield(())
+      started.finish()
     }
-    guard shouldBlock else { return }
-    started.yield(())
-    started.finish()
-    _ = releaseSemaphore.wait(timeout: .now() + 5)
   }
-
-  func release() {
-    releaseSemaphore.signal()
-  }
+  func release() { waiter?.resume(); waiter = nil }
 }

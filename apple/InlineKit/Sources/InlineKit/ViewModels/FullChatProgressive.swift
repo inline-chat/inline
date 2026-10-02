@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import GRDB
 import Logger
+import Synchronization
 
 /// Immutable history-continuity evidence for one loaded transcript window.
 /// Message rows are materialization only; every certified edge or adjacency is
@@ -478,6 +479,51 @@ public class MessagesProgressiveViewModel {
 
     //    log.trace("Applying changes: \(update)")
     switch update {
+      case let .userPresentation(userInfo):
+        var updated: [FullMessage] = []
+        var indices: [Int] = []
+        for index in messages.indices {
+          if messages[index].refreshUserPresentation(userInfo) {
+            updated.append(messages[index])
+            indices.append(index)
+          }
+        }
+        if threadAnchor?.refreshUserPresentation(userInfo) == true {
+          return .reload(animated: false)
+        }
+        guard !updated.isEmpty else { return nil }
+        return .updated(updated, indexSet: indices, animated: false)
+
+      case let .reconcile(fullMessage, messageId, previousGlobalId, reconciledPeer):
+        if let threadAnchor, reconciledPeer == threadAnchor.peerId,
+           threadAnchor.id == previousGlobalId || threadAnchor.message.messageId == messageId {
+          self.threadAnchor = fullMessage?.withoutAcknowledgements
+          return .reload(animated: false)
+        }
+        guard reconciledPeer == peer else { return nil }
+        let previousIndex = messages.firstIndex { $0.id == previousGlobalId }
+        let confirmedIndex = messages.firstIndex { $0.message.messageId == messageId }
+        guard previousIndex != nil || confirmedIndex != nil else {
+          if maximumWindowCount != nil { updateLoadedWindowMetadata() }
+          return nil
+        }
+        let hadPendingReload = reloadTask != nil
+        invalidatePendingReload()
+        let insertionIndex = confirmedIndex ?? previousIndex ?? 0
+        let precedingCount = messages.prefix(insertionIndex).filter {
+          $0.id != previousGlobalId && $0.message.messageId != messageId
+        }.count
+        messages.removeAll { $0.id == previousGlobalId || $0.message.messageId == messageId }
+        if let fullMessage {
+          messages.insert(reapplyingPendingAcknowledgements(to: fullMessage), at: min(precedingCount, messages.count))
+        }
+        updateRange()
+        updateLoadedWindowMetadata()
+        // The superseded snapshot may contain unrelated silent history changes.
+        // Keep that reload obligation, with a fresh committed read/generation.
+        if hadPendingReload { scheduleReload(animated: false) }
+        return .reload(animated: false)
+
       case let .add(messageAdd):
         if messageAdd.peer == peer {
           invalidatePendingReload()
@@ -533,10 +579,11 @@ public class MessagesProgressiveViewModel {
         }
 
         if messageDelete.peer == peer {
-          invalidatePendingReload()
           let deletedIndices = messages.enumerated()
             .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
             .map(\.offset)
+          let hadPendingReload = reloadTask != nil
+          if !deletedIndices.isEmpty { invalidatePendingReload() }
           let deletedGlobalIds: [Int64] = deletedIndices.map { messages[$0].id }
 
           // Store indices in reverse order to safely remove items
@@ -548,6 +595,7 @@ public class MessagesProgressiveViewModel {
           // Update ange
           updateRange()
           updateLoadedWindowMetadata()
+          if hadPendingReload, !deletedIndices.isEmpty { scheduleReload(animated: false) }
 
           // Return changeset
           return MessagesChangeSet.deleted(deletedGlobalIds, indexSet: sortedIndices)
@@ -560,7 +608,6 @@ public class MessagesProgressiveViewModel {
         }
 
         if messageUpdate.peer == peer {
-          invalidatePendingReload()
           guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
             // Confirming an optimistic message outside an anchored window can
             // create its first positive newer candidate. Refresh the edge even
@@ -568,10 +615,13 @@ public class MessagesProgressiveViewModel {
             if maximumWindowCount != nil { updateLoadedWindowMetadata() }
             return nil
           }
+          let hadPendingReload = reloadTask != nil
+          invalidatePendingReload()
 
           messages[index] = reapplyingPendingAcknowledgements(to: messageUpdate.message)
           updateRange() // ??
           updateLoadedWindowMetadata()
+          if hadPendingReload { scheduleReload(animated: false) }
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
@@ -1607,7 +1657,7 @@ private extension MessagesProgressiveViewModel.MessagesLoadDirection {
 
 @MainActor
 public final class MessagesPublisher {
-  public static let shared = MessagesPublisher(database: .shared)
+  public nonisolated static let shared = MessagesPublisher(database: .shared)
 
   private struct OptimisticAcknowledgementKey: Hashable {
     let chatId: Int64
@@ -1654,19 +1704,97 @@ public final class MessagesPublisher {
     case update(MessageUpdate)
     case acknowledgements(AcknowledgementChange)
     case delete(MessageDelete)
+    case userPresentation(UserInfo)
+    case reconcile(FullMessage?, messageId: Int64, replacingGlobalId: Int64, peer: Peer)
     case reload(peer: Peer, animated: Bool?)
   }
 
   private let db: AppDatabase
   let publisher = PassthroughSubject<UpdateType, Never>()
+  // Only suspended projection attempts retain a change footprint. Unrelated
+  // traffic must not postpone retirement of an already-confirmed pending row.
+  private struct ProjectionRead: Sendable {
+    let admissionOrdinal: UInt64
+    var dependencies: MessageProjectionDependencies
+    var changes = MessageProjectionDependencies()
+  }
+  private struct ProjectionState: Sendable {
+    var admissionOrdinal: UInt64 = 0
+    var reads: [UUID: ProjectionRead] = [:]
+
+    mutating func record(_ changes: MessageProjectionDependencies, admittedBefore ordinal: UInt64? = nil) {
+      for id in reads.keys {
+        if let ordinal, reads[id]!.admissionOrdinal >= ordinal { continue }
+        // Missing joins can become dependencies only after the SQL result.
+        reads[id]!.changes.formUnion(changes)
+      }
+    }
+  }
+  // The same active-attempt owner also receives synchronous postcommit keys
+  // from GRDB's writer executor. No SQL, callbacks or actor hop holds this lock.
+  private nonisolated let projectionState = Mutex(ProjectionState())
   private var acceptsUpdates = true
   private var activeDatabaseReads = 0
   private var databaseReadDrainWaiters: [CheckedContinuation<Void, Never>] = []
   private var nextAcknowledgementProjectionToken: Int64 = 1
   private var pendingAcknowledgements: [OptimisticAcknowledgementKey: PendingAcknowledgement] = [:]
 
-  init(database: AppDatabase) {
+  nonisolated init(database: AppDatabase) {
     db = database
+  }
+
+  private func publish(_ update: UpdateType) {
+    // A retry from an older admission may have read a newer SQL snapshot.
+    // Every overlapping held read must respect this visible publication.
+    recordProjectionChanges(update.projectionDependencies)
+    publisher.send(update)
+  }
+
+  private nonisolated func recordProjectionChanges(_ changes: MessageProjectionDependencies) {
+    projectionState.withLock { $0.record(changes) }
+  }
+
+  /// A shared-row deletion can disappear from the resulting visible message.
+  /// Its existing writer records those identities only after commit.
+  nonisolated func projectionRowsCommitted(_ changes: MessageProjectionDependencies) {
+    recordProjectionChanges(changes)
+  }
+
+  // A held real-SQL regression can await the writer signal without adding an
+  // observer or a presentation event. The seam cannot alter read admission.
+  func hasActiveProjectionChanges(_ dependencies: MessageProjectionDependencies) -> Bool {
+    projectionState.withLock { $0.reads.values.contains { $0.changes.overlaps(dependencies) } }
+  }
+
+  private func admitProjection(_ dependencies: MessageProjectionDependencies) -> UInt64 {
+    projectionState.withLock { state in
+      state.admissionOrdinal &+= 1
+      state.record(dependencies, admittedBefore: state.admissionOrdinal)
+      return state.admissionOrdinal
+    }
+  }
+
+  private func beginProjectionAttempt(_ dependencies: MessageProjectionDependencies, ordinal: UInt64) -> UUID {
+    let id = UUID()
+    projectionState.withLock { $0.reads[id] = ProjectionRead(admissionOrdinal: ordinal, dependencies: dependencies) }
+    return id
+  }
+
+  private func projectionWasOvertaken(_ id: UUID, snapshot: MessageProjectionDependencies) -> Bool {
+    projectionState.withLock { state in
+      guard var read = state.reads[id] else { return true }
+      read.dependencies.formUnion(snapshot)
+      guard !read.changes.overlaps(read.dependencies) else { return true }
+      // This is the read's linearization point. Earlier registered commits
+      // refetch; later commits are newer work. The caller emits synchronously
+      // in this same MainActor turn, with no callback/SQL/await under the lock.
+      state.reads.removeValue(forKey: id)
+      return false
+    }
+  }
+
+  private func retireProjectionAttempt(_ id: UUID) {
+    projectionState.withLock { _ = $0.reads.removeValue(forKey: id) }
   }
 
   /// Process teardown closes admission synchronously before the shared SQLCipher owner drains.
@@ -1682,7 +1810,7 @@ public final class MessagesPublisher {
   }
 
   private func beginDatabaseRead(peer: Peer) -> Bool {
-    guard shouldPublish(peer: peer) else { return false }
+    guard !Task.isCancelled, shouldPublish(peer: peer) else { return false }
     activeDatabaseReads += 1
     return true
   }
@@ -1708,7 +1836,7 @@ public final class MessagesPublisher {
     activePeerCounts[peer, default: 0] += 1
 
     if wasInactive {
-      publisher.send(.reload(peer: peer, animated: false))
+      publish(.reload(peer: peer, animated: false))
     }
 
     return token
@@ -1739,7 +1867,8 @@ public final class MessagesPublisher {
 #endif
 
   // Static methods to publish update
-  func messageAdded(message: Message, peer: Peer) async {
+  func messageAdded(message: Message, peer: Peer,
+                    read: (@Sendable () async throws -> FullMessage?)? = nil) async {
 //    Log.shared.debug("Message added: \(message)")
     guard beginDatabaseRead(peer: peer) else { return }
     defer { finishDatabaseRead() }
@@ -1765,19 +1894,14 @@ public final class MessagesPublisher {
     }
 
     do {
-      let fullMessage = try await db.reader.read { db in
-        try FullMessage.queryRequest()
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-          .fetchOne(db)
-      }
-      guard let fullMessage else {
-        Log.shared.error("Failed to get full message")
-        return
-      }
-
-      guard acceptsUpdates else { return }
-      publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
+      try await publishMessageProjection(message: message, peer: peer, read: read ?? { [db] in
+        try await db.reader.read { db in
+          try FullMessage.queryRequest()
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+            .fetchOne(db)
+        }
+      }, update: { .add(MessageAdd(messages: [$0], peer: peer)) })
     } catch {
       Log.shared.error("Failed to get full message", error: error)
     }
@@ -1787,17 +1911,93 @@ public final class MessagesPublisher {
   func messageAddedSync(fullMessage: FullMessage, peer: Peer) {
     guard shouldPublish(peer: peer) else { return }
 
-    publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
+    publish(.add(MessageAdd(messages: [fullMessage], peer: peer)))
+  }
+
+  public func userPresentationUpdated(userId: Int64) async {
+    await userPresentationUpdated(userId: userId, read: nil)
+  }
+
+  func userPresentationUpdated(userId: Int64, read: (@Sendable () async throws -> UserInfo?)?) async {
+    guard acceptsUpdates, !Task.isCancelled else { return }
+    #if os(iOS)
+    guard !activePeerCounts.isEmpty else { return }
+    #endif
+    activeDatabaseReads += 1
+    defer { finishDatabaseRead() }
+    let dependencies = MessageProjectionDependencies(identities: [.user(userId)])
+    let ordinal = admitProjection(dependencies)
+    do {
+      while acceptsUpdates, !Task.isCancelled {
+        let attempt = beginProjectionAttempt(dependencies, ordinal: ordinal)
+        defer { retireProjectionAttempt(attempt) }
+        let userInfo: UserInfo?
+        if let read { userInfo = try await read() }
+        else {
+          userInfo = try await db.reader.read { db in
+            try User.userInfoQuery().filter(User.Columns.id == userId).fetchOne(db)
+          }
+        }
+        guard acceptsUpdates, !Task.isCancelled else { return }
+        var snapshot = MessageProjectionDependencies()
+        snapshot.include(userInfo)
+        guard !projectionWasOvertaken(attempt, snapshot: snapshot) else { continue }
+        guard let userInfo else { return }
+        publish(.userPresentation(userInfo))
+        return
+      }
+    } catch {
+      Log.shared.error("Failed to resolve updated sender presentation", error: error)
+    }
+  }
+
+  func messageReconciled(messageId: Int64, chatId: Int64, replacingGlobalId: Int64, peer: Peer,
+                         read: (@Sendable () async throws -> FullMessage?)? = nil) async {
+    guard beginDatabaseRead(peer: peer) else { return }
+    defer { finishDatabaseRead() }
+    let dependencies = MessageProjectionDependencies(identities: [
+      .peer(peer), .peer(.thread(id: chatId)), .message(chatId: chatId, messageId: messageId),
+    ])
+    let ordinal = admitProjection(dependencies)
+    do {
+      while acceptsUpdates, !Task.isCancelled {
+        let attempt = beginProjectionAttempt(dependencies, ordinal: ordinal)
+        defer { retireProjectionAttempt(attempt) }
+        let fullMessage: FullMessage?
+        if let read { fullMessage = try await read() }
+        else {
+          fullMessage = try await db.reader.read { db in
+            try FullMessage.queryRequest().filter(Message.Columns.chatId == chatId && Message.Columns.messageId == messageId)
+              .fetchOne(db)
+          }
+        }
+        guard acceptsUpdates, !Task.isCancelled else { return }
+        guard !projectionWasOvertaken(attempt, snapshot: fullMessage?.projectionDependencies ?? .init()) else { continue }
+        // Validation and emission share this actor turn. A later edit/delete
+        // cannot be undone by an older captured projection after resumption.
+        publish(.reconcile(fullMessage, messageId: messageId, replacingGlobalId: replacingGlobalId, peer: peer))
+        return
+      }
+    } catch {
+      Log.shared.error("Failed to resolve committed message identity", error: error)
+      // A failed projection fetch must not retire the sole loaded pending row.
+      messagesReload(peer: peer, animated: false)
+    }
   }
 
   // Message IDs not Global IDs
   public func messagesDeleted(messageIds: [Int64], peer: Peer) {
     guard shouldPublish(peer: peer) else { return }
 
-    publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
+    publish(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
   public func messageUpdated(message: Message, peer: Peer, animated: Bool?) async {
+    await messageUpdated(message: message, peer: peer, animated: animated, read: nil)
+  }
+
+  func messageUpdated(message: Message, peer: Peer, animated: Bool?,
+                      read: (@Sendable () async throws -> FullMessage?)?) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     guard beginDatabaseRead(peer: peer) else { return }
@@ -1823,27 +2023,39 @@ public final class MessagesPublisher {
       )
     }
 
-    let fullMessage = try? await db.reader.read { db in
-      let query = FullMessage.queryRequest()
-      let base =
-        if let messageGlobalId = message.globalId {
-          query
-            .filter(id: messageGlobalId)
-        } else {
-          query
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
+    do {
+      try await publishMessageProjection(message: message, peer: peer, read: read ?? { [db] in
+        try await db.reader.read { db in
+          let query = FullMessage.queryRequest()
+          let base =
+            if let messageGlobalId = message.globalId { query.filter(id: messageGlobalId) }
+            else { query.filter(Column("messageId") == message.messageId && Column("chatId") == message.chatId) }
+          return try base.fetchOne(db)
         }
-
-      return try base.fetchOne(db)
+      }, update: { .update(MessageUpdate(message: $0, animated: animated, peer: peer)) })
+    } catch {
+      Log.shared.error("Failed to get full message", error: error)
     }
+  }
 
-    guard let fullMessage else {
-      Log.shared.error("Failed to get full message")
+  // Ordinary adds/edits contain the same joined rows as ACK projections. An
+  // old rich result must not undo a newer user/edit/delete after suspension.
+  private func publishMessageProjection(message: Message, peer: Peer,
+                                        read: @Sendable () async throws -> FullMessage?,
+                                        update: (FullMessage) -> UpdateType) async throws {
+    var dependencies = MessageProjectionDependencies(identities: [.peer(peer)])
+    dependencies.include(message)
+    let ordinal = admitProjection(dependencies)
+    while acceptsUpdates, !Task.isCancelled {
+      let attempt = beginProjectionAttempt(dependencies, ordinal: ordinal)
+      defer { retireProjectionAttempt(attempt) }
+      let fullMessage = try await read()
+      guard acceptsUpdates, !Task.isCancelled else { return }
+      guard !projectionWasOvertaken(attempt, snapshot: fullMessage?.projectionDependencies ?? .init()) else { continue }
+      guard let fullMessage else { return }
+      publish(update(fullMessage))
       return
     }
-    guard acceptsUpdates else { return }
-    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
   /// Cursor publication only updates already-loaded rows. No message query or anchor routing.
@@ -1856,7 +2068,7 @@ public final class MessagesPublisher {
       ))
     }
     guard shouldPublish(peer: peer) else { return }
-    publisher.send(.acknowledgements(AcknowledgementChange(
+    publish(.acknowledgements(AcknowledgementChange(
       projections: cursors.map(AcknowledgementProjection.replace),
       animated: animated,
       peer: peer
@@ -1894,7 +2106,7 @@ public final class MessagesPublisher {
     )
 
     if shouldPublish(peer: peer) {
-      publisher.send(.acknowledgements(AcknowledgementChange(
+      publish(.acknowledgements(AcknowledgementChange(
         projections: [.replace(projection)],
         animated: animated,
         peer: peer
@@ -1917,7 +2129,7 @@ public final class MessagesPublisher {
     pending.projection.userInfo = userInfo
     pendingAcknowledgements[key] = pending
     guard shouldPublish(peer: peer) else { return }
-    publisher.send(.acknowledgements(AcknowledgementChange(
+    publish(.acknowledgements(AcknowledgementChange(
       projections: [.replace(pending.projection)],
       animated: animated,
       peer: peer
@@ -1965,7 +2177,7 @@ public final class MessagesPublisher {
     guard let pending = pendingAcknowledgements[key], pending.requestId == requestId else { return }
     pendingAcknowledgements.removeValue(forKey: key)
     guard shouldPublish(peer: peer) else { return }
-    publisher.send(.acknowledgements(AcknowledgementChange(
+    publish(.acknowledgements(AcknowledgementChange(
       projections: [.restore(
         chatId: chatId,
         userId: userId,
@@ -2022,7 +2234,7 @@ public final class MessagesPublisher {
       Log.shared.error("Failed to get full message")
       return
     }
-    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
+    publish(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
   public func messagesReload(peer: Peer, animated: Bool?) {
@@ -2033,7 +2245,7 @@ public final class MessagesPublisher {
       category: .messages,
       "animated=\(animated ?? false)"
     )
-    publisher.send(.reload(peer: peer, animated: animated))
+    publish(.reload(peer: peer, animated: animated))
   }
 
   public func messageUpdatedWithId(messageId: Int64, chatId: Int64, peer: Peer, animated: Bool?) {
@@ -2071,7 +2283,7 @@ public final class MessagesPublisher {
       Log.shared.error("Failed to get full message by messageId: \(messageId)")
       return
     }
-    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
+    publish(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 }
 
@@ -2088,16 +2300,101 @@ public extension MessagesProgressiveViewModel {
 }
 
 private extension MessagesPublisher.UpdateType {
+  var projectionDependencies: MessageProjectionDependencies {
+    var dependencies = MessageProjectionDependencies()
+    switch self {
+    case let .add(change):
+      dependencies.identities.insert(.peer(change.peer))
+      for message in change.messages { dependencies.formUnion(message.projectionDependencies) }
+    case let .update(change):
+      dependencies.identities.insert(.peer(change.peer))
+      dependencies.formUnion(change.message.projectionDependencies)
+    case let .acknowledgements(change):
+      dependencies.identities.insert(.peer(change.peer))
+      for projection in change.projections {
+        switch projection {
+        case let .replace(cursor): dependencies.include(cursor)
+        case let .restore(chatId, userId, _, previous):
+          dependencies.identities.insert(.peer(.thread(id: chatId)))
+          dependencies.identities.insert(.user(userId))
+          if let previous { dependencies.include(previous) }
+        }
+      }
+    case let .delete(change):
+      dependencies.identities.insert(.peer(change.peer))
+      // Cascaded legacy files/attachments may be shared outside this peer.
+      dependencies.unknownSharedRows = true
+    case let .userPresentation(user): dependencies.include(user)
+    case let .reconcile(message, messageId, _, peer):
+      dependencies.identities.insert(.peer(peer))
+      if let chatId = peer.asThreadId() {
+        dependencies.identities.insert(.message(chatId: chatId, messageId: messageId))
+      }
+      if let message { dependencies.formUnion(message.projectionDependencies) }
+    case let .reload(peer, _):
+      dependencies.identities.insert(.peer(peer))
+      if case let .user(id) = peer { dependencies.identities.insert(.user(id)) }
+      dependencies.unknownSharedRows = true
+    }
+    return dependencies
+  }
+
   var traceLabel: String {
     switch self {
       case .add:
         "add"
-      case .update, .acknowledgements:
+      case .update, .acknowledgements, .userPresentation:
         "update"
       case .delete:
         "delete"
+      case .reconcile:
+        "reconcile"
       case .reload:
         "reload"
     }
+  }
+}
+
+private extension FullMessage {
+  mutating func refreshUserPresentation(_ userInfo: UserInfo) -> Bool {
+    var changed = false
+    if message.fromId == userInfo.id, senderInfo != userInfo {
+      senderInfo = userInfo
+      changed = true
+    }
+    if message.forwardFromUserId == userInfo.id, forwardFromUserInfo != userInfo {
+      forwardFromUserInfo = userInfo
+      changed = true
+    }
+    if message.forwardFromPeerUserId == userInfo.id, forwardFromPeerUserInfo != userInfo {
+      forwardFromPeerUserInfo = userInfo
+      changed = true
+    }
+    if repliedToMessage?.message.fromId == userInfo.id, repliedToMessage?.senderInfo != userInfo {
+      repliedToMessage?.senderInfo = userInfo
+      changed = true
+    }
+    for index in reactions.indices where reactions[index].reaction.userId == userInfo.id {
+      if reactions[index].userInfo != userInfo {
+        reactions[index].userInfo = userInfo
+        changed = true
+      }
+    }
+    if var cursors = acknowledgements {
+      for index in cursors.indices where cursors[index].acknowledgement.userId == userInfo.id {
+        if cursors[index].userInfo != userInfo {
+          cursors[index].userInfo = userInfo
+          changed = true
+        }
+      }
+      acknowledgements = cursors
+    }
+    for index in attachments.indices where attachments[index].externalTask?.assignedUserId == userInfo.id {
+      if attachments[index].userInfo != userInfo {
+        attachments[index].userInfo = userInfo
+        changed = true
+      }
+    }
+    return changed
   }
 }

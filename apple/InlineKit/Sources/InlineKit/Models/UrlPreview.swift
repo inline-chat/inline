@@ -223,16 +223,17 @@ public extension UrlPreview {
   ///   - linkEmbed: The InlineProtocol.UrlPreview to save
   /// - Returns: The saved UrlPreview object
   @discardableResult
-  static func save(_ db: Database, linkEmbed: InlineProtocol.UrlPreview) throws -> UrlPreview {
+  static func save(_ db: Database, linkEmbed: InlineProtocol.UrlPreview,
+                   publisher: MessagesPublisher? = nil) throws -> UrlPreview {
     var photoId: Int64? = nil
     if linkEmbed.hasPhoto {
-      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.photo)
+      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.photo, publisher: publisher)
       photoId = savedPhoto.photoId
     }
 
     var authorPhotoId: Int64?
     if linkEmbed.hasAuthorPhoto {
-      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.authorPhoto)
+      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.authorPhoto, publisher: publisher)
       authorPhotoId = savedPhoto.photoId
     }
 
@@ -253,26 +254,26 @@ public extension UrlPreview {
     if linkEmbed.hasMedia {
       switch linkEmbed.media.media {
       case .photo(let protoPhoto):
-        let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoPhoto)
+        let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoPhoto, publisher: publisher)
         photoId = photoId ?? savedPhoto.photoId
         mediaKind = "photo"
 
       case .video(let protoVideo):
         var thumbnailPhotoId: Int64?
         if protoVideo.hasPhoto {
-          let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoVideo.photo)
+          let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoVideo.photo, publisher: publisher)
           thumbnailPhotoId = savedPhoto.id
           photoId = photoId ?? savedPhoto.photoId
         }
 
-        let savedVideo = try Video.updateFromProtocol(db, protoVideo: protoVideo, thumbnailPhotoId: thumbnailPhotoId)
+        let savedVideo = try Video.updateFromProtocol(db, protoVideo: protoVideo, thumbnailPhotoId: thumbnailPhotoId, publisher: publisher)
         videoId = savedVideo.videoId
         mediaKind = "video"
 
       case .document(let protoDocument):
         var thumbnailPhotoId: Int64?
         if protoDocument.hasPhoto {
-          let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoDocument.photo)
+          let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: protoDocument.photo, publisher: publisher)
           thumbnailPhotoId = savedPhoto.id
           photoId = photoId ?? savedPhoto.photoId
         }
@@ -280,7 +281,8 @@ public extension UrlPreview {
         let savedDocument = try Document.updateFromProtocol(
           db,
           protoDocument: protoDocument,
-          thumbnailPhotoId: thumbnailPhotoId
+          thumbnailPhotoId: thumbnailPhotoId,
+          publisher: publisher
         )
         documentId = savedDocument.documentId
         mediaKind = "document"
@@ -344,6 +346,7 @@ public extension UrlPreview {
       urlPreview = try urlPreview.insertAndFetch(db)
     }
 
+    MessageProjectionDependencies(identities: [.urlPreview(urlPreview.id)]).publishAfterCommit(db, publisher: publisher)
     return urlPreview
   }
 

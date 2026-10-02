@@ -328,48 +328,52 @@ public extension Chat {
 }
 
 public extension Chat {
-  func ensurePeerUserExists(_ db: Database) throws {
+  func ensurePeerUserExists(_ db: Database, publisher: MessagesPublisher? = nil) throws {
     guard let peerUserId else { return }
     guard try User.fetchOne(db, id: peerUserId) == nil else { return }
     try User(id: peerUserId, email: nil, firstName: nil).save(db)
+    MessageProjectionDependencies(identities: [.user(peerUserId)]).publishAfterCommit(db, publisher: publisher)
   }
 
-  private mutating func mergeLocalFieldsForFullSave(_ db: Database) throws {
-    guard let existing = try Chat.fetchOne(db, key: id) else { return }
+  private mutating func mergeLocalFieldsForFullSave(_ db: Database) throws -> Chat? {
+    guard let existing = try Chat.fetchOne(db, key: id) else { return nil }
     if agentContext == nil {
       agentContext = existing.agentContext
     }
     if let title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-      return
+      return existing
     }
     guard let existingTitle = existing.title,
           existingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     else {
-      return
+      return existing
     }
 
     title = existingTitle
     isUntitled = existing.isUntitled
+    return existing
   }
 
   @discardableResult
-  func saveFull(_ db: Database) throws -> Chat {
+  func saveFull(_ db: Database, publisher: MessagesPublisher? = nil) throws -> Chat {
     var chat = self
-    try chat.mergeLocalFieldsForFullSave(db)
+    let previous = try chat.mergeLocalFieldsForFullSave(db)
     try chat.save(db)
+    chat.registerProjectionMutationAfterCommit(db, previous: previous, publisher: publisher)
     return chat
   }
 
-  mutating func saveWithValidLastMsg(_ db: Database) throws {
-    try ensurePeerUserExists(db)
-    try mergeLocalFieldsForFullSave(db)
+  mutating func saveWithValidLastMsg(_ db: Database, publisher: MessagesPublisher? = nil) throws {
+    try ensurePeerUserExists(db, publisher: publisher)
+    let previous = try mergeLocalFieldsForFullSave(db)
 
-    if let existing = try Chat.fetchOne(db, key: id), lastMsgId == nil {
-      lastMsgId = existing.lastMsgId
+    if lastMsgId == nil {
+      lastMsgId = previous?.lastMsgId
     }
 
     guard let localLastMsgId = lastMsgId else {
       try save(db)
+      registerProjectionMutationAfterCommit(db, previous: previous, publisher: publisher)
       return
     }
 
@@ -380,11 +384,21 @@ public extension Chat {
 
     if hasLastMessage {
       try save(db)
+      registerProjectionMutationAfterCommit(db, previous: previous, publisher: publisher)
       return
     }
 
     lastMsgId = nil
     try save(db)
+    registerProjectionMutationAfterCommit(db, previous: previous, publisher: publisher)
+  }
+
+  internal func registerProjectionMutationAfterCommit(_ db: Database, previous: Chat? = nil,
+                                                       publisher: MessagesPublisher? = nil) {
+    var changes = MessageProjectionDependencies()
+    if let previous { changes.includeChatMutation(previous) }
+    changes.includeChatMutation(self)
+    changes.publishAfterCommit(db, publisher: publisher)
   }
 
   static func getByPeerId(db: Database, peerId: Peer) throws -> Chat? {
