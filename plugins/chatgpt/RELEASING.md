@@ -12,6 +12,10 @@ bun --no-env-file scripts/check-codex-plugin.mjs
 bun run --cwd packages/protocol build
 bun run --cwd packages/oauth-core build
 bun run --cwd packages/sdk build
+bun run --cwd plugins/chatgpt/ui build
+bun run --cwd plugins/chatgpt/ui typecheck
+bun run --cwd plugins/chatgpt/ui lint
+bun run --cwd plugins/chatgpt/ui test
 bun run --cwd packages/mcp typecheck
 bun run --cwd packages/mcp lint
 bun run --cwd packages/mcp test
@@ -40,12 +44,17 @@ Exercise these cases with a test account and approved test conversations:
 2. Test empty chats, long Unicode messages, denied scope, and revoked conversation access. A denial must not return cached content.
 3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Only message-list results offer continuation; capped searches suggest refinement.
 4. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor card rendering should post messages or mark them read.
+5. In a supported Work/Cloud host, subscribe to an approved thread's `message.created`, receive a verified callback, read the actual reply and continue the waiting task. Renew before `refreshBefore`; qualify replay, restart, expiry, unsubscribe and revoked access. Do not equate a green proxy test with host continuation.
+6. With approved test recipients, call `conversations.ask`: check the private audience, one delivered question, pre-question replay cursor, subscription acknowledgement and resumed task. An uncertain create/send must retain its receipt and avoid an automatic duplicate.
+7. Open the React thread view from the tool and host entrypoints. Check light/dark, narrow layout, older history, read-only scope, confirmed/unconfirmed replies and selected context. Its picker must show only explicitly opened threads. Qualify actual media asset origins under the widget CSP.
 
 Record host name/build, candidate SHA, deployment identity, case outcomes, and actual screenshots. Do not publish screenshots or capability claims before these paths work. Use the submission JSON as review material; the picker case is host-driven, not a promise that the model chooses an app-only search tool.
 
 ## Deploy the hosted MCP candidate
 
-The deployable artifact is `packages/mcp/Dockerfile`, built from the repository root, with runtime port `8791`. Its build invokes the MCP package build and copies `dist` into the runtime image. The UI must therefore be present in that compiled output, not merely a local source file.
+This release also adds an API migration and owned delivery worker. First qualify and deploy the exact API candidate through `server-deploy.yml`; check the migration and worker before deploying MCP. The internal `/oauth/mcp-events` endpoint uses the existing shared-secret channel. Keep the original OAuth scopes, grant context and API/MCP secret pairing. Do not send real teammates test messages without their authorized test scope.
+
+The deployable artifact is `packages/mcp/Dockerfile`, built from the repository root, with runtime port `8791`. Its build invokes the MCP package build and copies MCP and `plugins/chatgpt/ui` distributions into the runtime image. The React UI must be present in that compiled output, not merely a local source file. Configure `MCP_UI_RESOURCE_DOMAINS` with exact HTTPS signed-media origins if needed; default photos use the API origin.
 
 In the deployment controller for `mcp.inline.chat`, verify the current service, repository, branch/commit selection, root build context, Dockerfile path, and OAuth/API configuration. Select the reviewed candidate through that service's existing deployment process; preserve the previous working image for rollback. The controller's current identity and permissions must be checked by the release operator: this repository does not contain an MCP-specific production deployment workflow, and the API server's deployment workflow is not a substitute.
 
