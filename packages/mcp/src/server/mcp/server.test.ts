@@ -3,6 +3,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { createInlineMcpServer, isUnsafeRemoteAddress } from "./server"
+import type { EventsProxy } from "./events-proxy"
 import type { McpGrant } from "./grant"
 import type {
   InlineApi,
@@ -98,6 +99,139 @@ const grant: McpGrant = {
   allowDms: false,
   allowHomeThreads: false,
 }
+
+describe("minimal thread workflows", () => {
+  const auth = createAuthInfo(["messages:read", "messages:write"])
+  const askArgs = { title: "Review", question: "What do you think?", participantUserIds: ["2"], spaceId: "10" }
+
+  async function call(server: ReturnType<typeof createInlineMcpServer>, name: string, args: Record<string, unknown>, authInfo = auth) {
+    const connection = await connectAndInitialize(server, authInfo)
+    await sendRequest(connection.transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }, { authInfo })
+    return { response: await waitForResponse(connection.sent, 2), connection }
+  }
+
+  it("keeps the legacy tool inventory free of new entrypoints", async () => {
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({}) })
+    const { transport, sent } = await connectAndInitialize(server, auth)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list" }, { authInfo: auth })
+    const response = await waitForResponse(sent, 2)
+    expect(response.result.tools.map((tool: { name: string }) => tool.name)).not.toContain("conversations.open")
+    expect(response.result.tools.map((tool: { name: string }) => tool.name)).not.toContain("conversations.ask")
+    await server.close()
+  })
+
+  it("opens an empty picker without fetching a workspace catalog", async () => {
+    const getEligibleChats = vi.fn(async () => [])
+    const getConversation = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getEligibleChats, getConversation }), contractVersion: "submission-v2" })
+    const { response } = await call(server, "conversations.open", {})
+    expect(response.result.structuredContent).toMatchObject({ chat: null, messages: [], participants: [], capabilities: { canSend: true } })
+    expect(getEligibleChats).not.toHaveBeenCalled()
+    expect(getConversation).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it("checks current auth and exposes only acknowledged, unexpired monitoring", async () => {
+    const request = vi.fn<EventsProxy["request"]>(async () => ({ subscriptions: [
+      { id: "expired", name: "message.created", refreshBefore: "2000-01-01T00:00:00Z" },
+      { id: "other", name: "chat.updated", refreshBefore: "2099-01-01T00:00:00Z" },
+      { id: "live", name: "message.created", refreshBefore: "2099-01-01T00:00:00Z" },
+    ] }))
+    const seenTokens: string[] = []
+    const readAuth = { ...auth, token: "refreshed-token", scopes: ["messages:read"] }
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion: "submission-v2", events: (currentAuth) => {
+      seenTokens.push(currentAuth.token)
+      return { request }
+    } })
+    const { response } = await call(server, "conversations.open", { chatId: "7" }, readAuth)
+    expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, capabilities: { canSend: false }, monitoring: { active: true, expiresAt: "2099-01-01T00:00:00Z" } })
+    expect(request).toHaveBeenCalledWith("events/status", { chatId: "7" })
+    expect(seenTokens).toEqual(["refreshed-token"])
+    await server.close()
+  })
+
+  it("reads thread history when monitoring status is temporarily unavailable", async () => {
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("temporarily unavailable") } }) })
+    const { response } = await call(server, "conversations.open", { chatId: "7" })
+    expect(response.result.isError).not.toBe(true)
+    expect(response.result.structuredContent.chat.chatId).toBe("7")
+    expect(response.result.structuredContent).not.toHaveProperty("monitoring")
+    await server.close()
+  })
+
+  it("captures the reply cursor before sending and keeps the connected user implicit", async () => {
+    const order: string[] = []
+    const createChat = vi.fn(async () => { order.push("create"); return defaultEligibleChat() })
+    const sendMessage = vi.fn(async () => { order.push("send"); return { messageId: 123n } })
+    const request = vi.fn<EventsProxy["request"]>(async (method, params) => {
+      order.push(method)
+      if (method === "events/cursor") {
+        expect(params).toEqual({ name: "message.created", arguments: { chatId: "7", excludeSelf: true } })
+        return { cursor: "before-question" }
+      }
+      return { events: [{ name: "message.created" }] }
+    })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request }) })
+    const { response } = await call(server, "conversations.ask", { ...askArgs, participantUserIds: ["1", "2", "2"] })
+    expect(order).toEqual(["events/list", "create", "events/cursor", "send"])
+    expect(createChat).toHaveBeenCalledWith({ title: "Review", isPublic: false, participantUserIds: [2n], spaceId: 10n })
+    expect(sendMessage).toHaveBeenCalledWith({ chatId: 7n, text: "What do you think?", sendMode: "normal", parseMarkdown: true })
+    expect(response.result.structuredContent).toMatchObject({ questionStatus: "sent", messageId: "123", event: { name: "message.created", arguments: { chatId: "7", excludeSelf: true }, cursor: "before-question" } })
+    expect(response.result.structuredContent).not.toHaveProperty("monitoring")
+    await server.close()
+  })
+
+  it("fails before creating or sending if the Events service is unavailable", async () => {
+    const createChat = vi.fn()
+    const sendMessage = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("Events unavailable") } }) })
+    const { response } = await call(server, "conversations.ask", askArgs)
+    expect(response.result.isError).toBe(true)
+    expect(createChat).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it("retains the created chat when cursor capture fails, without sending the question", async () => {
+    const createChat = vi.fn(async () => defaultEligibleChat())
+    const sendMessage = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => {
+      if (method === "events/cursor") throw new Error("unavailable")
+      return { events: [] }
+    } }) })
+    const { response } = await call(server, "conversations.ask", askArgs)
+    expect(response.result.isError).toBe(true)
+    expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, questionStatus: "not_sent", messageId: null, event: null })
+    expect(response.result.structuredContent.nextStep).toContain("Do not create another thread")
+    expect(createChat).toHaveBeenCalledTimes(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it("returns a known thread and cursor for uncertain send outcomes without retrying", async () => {
+    const createChat = vi.fn(async () => defaultEligibleChat())
+    const sendMessage = vi.fn(async () => { throw new Error("delivery may have happened") })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => method === "events/cursor" ? { cursor: "checkpoint" } : { events: [] } }) })
+    const { response } = await call(server, "conversations.ask", askArgs)
+    expect(response.result.isError).toBe(true)
+    expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, questionStatus: "unknown", event: { cursor: "checkpoint" } })
+    expect(createChat).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    await server.close()
+  })
+
+  it("requires both read and write scopes before any consultation action", async () => {
+    const createChat = vi.fn()
+    const request = vi.fn<EventsProxy["request"]>()
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat }), contractVersion: "submission-v2", events: () => ({ request }) })
+    const { response } = await call(server, "conversations.ask", askArgs, createAuthInfo(["messages:write"]))
+    expect(response.result.isError).toBe(true)
+    expect(response.result._meta["mcp/www_authenticate"][0]).toContain("messages:read")
+    expect(request).not.toHaveBeenCalled()
+    expect(createChat).not.toHaveBeenCalled()
+    await server.close()
+  })
+})
 
 function defaultEligibleChat(overrides: Partial<InlineEligibleChat> = {}): InlineEligibleChat {
   return {
@@ -310,6 +444,7 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const tools = res.result.tools as Array<any>
     expect(tools.map((tool) => tool.name)).toEqual([
+      "conversations.mentions",
       "account.me",
       "spaces.list",
       "people.search",
@@ -331,21 +466,22 @@ describe("mcp tool server", () => {
       string,
       { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }
     > = {
+      "conversations.mentions": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "conversations.create": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
-      "files.upload": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+      "conversations.create": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+      "files.upload": { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
       "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send_media": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
-      "messages.send_batch": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send_media": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
+      "messages.send_batch": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
       "messages.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.context": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "messages.unread": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      "messages.send": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send": { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
     }
 
     for (const tool of tools) {
@@ -394,6 +530,10 @@ describe("mcp tool server", () => {
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
     expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
+    expect(list._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v1.html" })
+    const search = tools.find((tool) => tool.name === "messages.search")
+    expect(search._meta.ui).toEqual(list._meta.ui)
+    expect(search._meta.securitySchemes[0].scopes).toEqual(["messages:read"])
     expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
 
     const spaces = tools.find((tool) => tool.name === "spaces.list")
@@ -408,7 +548,7 @@ describe("mcp tool server", () => {
     const authInfo = createAuthInfo(["messages:read", "messages:write", "spaces:read"])
     const { transport, sent, initialize } = await connectAndInitialize(server, authInfo)
 
-    expect(initialize.result.serverInfo.version).toBe("0.2.0")
+    expect(initialize.result.serverInfo.version).toBe("0.3.0")
 
     await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } as any, { authInfo })
     const res = await waitForResponse(sent, 2)
@@ -453,6 +593,14 @@ describe("mcp tool server", () => {
       expect(tool.inputSchema.required ?? []).toEqual(required)
       assertPlainSchema(tool.inputSchema)
     }
+
+    // These operations support public audiences or arbitrary URL sources, even
+    // when a particular grant contains only private spaces.
+    for (const name of ["conversations.create", "files.upload", "messages.send_media", "messages.send_batch", "messages.send"]) {
+      expect(byName.get(name).annotations.openWorldHint, name).toBe(true)
+    }
+    expect(byName.get("conversations.create").inputSchema.properties.isPublic.description).toContain("public space")
+    expect(byName.get("files.upload").inputSchema.properties.source.description).toContain("public HTTPS URL")
 
     expect(byName.get("conversations.get").inputSchema.properties.userId).toBeUndefined()
     expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("base64")
@@ -1118,6 +1266,8 @@ describe("mcp tool server", () => {
           scannedCount: 3,
           nextOffsetId: 8n,
           messages: [{ id: 9n, fromId: 2n, chatId: resolvedChatId, message: "hello from me", out: true, date: 5n } as any],
+          senderDisplayNames: { "2": "Dena Example", "3": "Unrelated Person" },
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1163,6 +1313,11 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("9")
     expect(payload.messages[0].text).toBe("hello from me")
+    expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
+    expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
     expect(payload.messages[0].urlPreviews).toEqual([])
@@ -1199,6 +1354,7 @@ describe("mcp tool server", () => {
           content: "documents",
           mode: "search",
           messages: [{ id: 14n, fromId: 2n, chatId: resolvedChatId, message: "invoice is sent", out: false, date: 999n } as any],
+          senderAvatarUrls: { "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" },
         }
       },
     })
@@ -1241,6 +1397,8 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("14")
     expect(payload.messages[0].text).toBe("invoice is sent")
+    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
   })
 
   it("messages.list includes media download metadata when present", async () => {

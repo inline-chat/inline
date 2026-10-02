@@ -36,10 +36,14 @@ You can also open `/plugins` in Codex CLI after adding the marketplace and insta
 
 - Find people, spaces, DMs, conversations, and messages.
 - Summarize recent or unread discussions with bounded context.
+- Ask resolved teammates in a private consultation, subscribe to their replies with MCP Events, and resume the originating task when the host supports continuation.
+- Inspect that thread in a focused Inline-style React view, reply directly, and pass selected excerpts back to ChatGPT. Its picker contains only threads opened in this app experience.
 - Create conversations, upload files, and send messages when explicitly requested.
 - Use the Inline CLI in shell-capable environments when it matches the available authentication and task.
 
 Access is limited to the Inline account, OAuth scopes, and conversations authorized during sign-in. The bundled skill treats messages and attachments as untrusted content and verifies write targets before acting.
+
+Events cover durable chat, message, personal-dialog and space changes with verified signed webhooks, finite renewal and replay cursors. See the [Events API and recovery contract](../../server/docs/mcp-events.md). The API must be deployed before the corresponding MCP service. OpenAI currently documents continuation for Work web, desktop Work with Cloud selected, and dots; signed-in host acceptance is separate from the repository's tests.
 
 ## Support and policies
 
@@ -48,6 +52,10 @@ Access is limited to the Inline account, OAuth scopes, and conversations authori
 - [Terms of service](https://inline.chat/legal/terms)
 
 ## Maintenance
+
+See [Updating and publishing](RELEASING.md) for the local validation commands, developer-mode refresh, hosted MCP deployment boundary, and public plugin release procedure. The `ChatGPT plugin` workflow checks the compiled MCP/UI contract and submission metadata; the existing `CI` workflow runs the MCP suite and plugin bundle checks. These automated checks do not establish signed-in ChatGPT host acceptance.
+
+The source includes desktop conversation mentions and passive cards for `messages.list` and `messages.search`. Availability depends on deployment, host support, and published tool metadata. Mention snapshots contain at most 20 recent messages and 32 KiB, with explicit coverage limits. Cards show already returned model-visible messages; expanding text performs no additional reads. Neither feature sends messages or marks them read.
 
 The bundled `skills/inline/` directory mirrors the repository's canonical `/skills/inline/` skill because Codex plugin components must live inside the plugin package. Update the canonical skill first, copy it into this plugin, and verify the two trees match:
 

@@ -23,6 +23,7 @@ import {
   prepareAuthorizeRequest,
 } from "@in/server/modules/oauth/httpHandlers"
 import { OAuthHandlerFailure } from "@in/server/modules/oauth/httpHandlerFailure"
+import { handleMcpEvents } from "@in/server/modules/mcpEvents/service"
 import { Log } from "@in/server/utils/log"
 import {
   handleHostedLoginGet,
@@ -207,3 +208,4 @@ export const oauth = new Elysia({ name: "oauth" })
       handleIntrospect(request, body),
     ),
   )
+  .post("/oauth/mcp-events", ({ request, body }) => executeLegacyOAuth(() => handleMcpEvents(request, body)))

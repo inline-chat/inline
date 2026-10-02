@@ -17,6 +17,7 @@ export type OAuthHttpOperation =
   | "token"
   | "revoke"
   | "introspect"
+  | "mcpEvents"
   | "providerStart"
   | "providerNativeAppleStart"
   | "providerNativeAppleComplete"

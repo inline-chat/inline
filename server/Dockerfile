@@ -41,7 +41,7 @@ COPY --from=build /usr/src/app/server/dist ./server/dist
 COPY --from=build /usr/src/app/server/drizzle ./server/drizzle
 COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
-COPY --from=build /usr/src/app/server/scripts/start-production.ts ./server/scripts/start-production.ts
+COPY --from=build /usr/src/app/server/scripts/start-production.ts /usr/src/app/server/scripts/forge-runtime-proof.ts ./server/scripts/
 # Keep existing operational command paths, but resolve their complete import
 # graph at build time. No hand-maintained server/src copies in the runtime.
 RUN mkdir -p server/scripts && \

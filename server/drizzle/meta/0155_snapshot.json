@@ -1,6 +1,6 @@
 {
-  "id": "efcfe7b3-aa9d-4b19-848d-9f9a0b286c58",
-  "prevId": "7c6f1d8b-1db8-4d35-be80-581ecb8e607a",
+  "id": "4f3349f3-d8d8-4b69-928f-228ff70fa2db",
+  "prevId": "eb3023d8-8ff6-4f11-8a01-c0fbb639d68a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2471,77 +2471,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.message_submissions": {
-      "name": "message_submissions",
-      "schema": "",
-      "columns": {
-        "from_id": {
-          "name": "from_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "random_id": {
-          "name": "random_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "intent_hash": {
-          "name": "intent_hash",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_revision": {
-          "name": "source_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "message_submissions_from_id_users_id_fk": {
-          "name": "message_submissions_from_id_users_id_fk",
-          "tableFrom": "message_submissions",
-          "tableTo": "users",
-          "columnsFrom": [
-            "from_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "message_submissions_identity": {
-          "name": "message_submissions_identity",
-          "columns": [
-            "from_id",
-            "random_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.block_content_image_jobs": {
       "name": "block_content_image_jobs",
       "schema": "",
@@ -3814,12 +3743,6 @@
         "creation_intent_hash": {
           "name": "creation_intent_hash",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_chat_id": {
-          "name": "resolved_chat_id",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -12392,6 +12315,300 @@
         "auth_delivery_budgets_attempts_positive": {
           "name": "auth_delivery_budgets_attempts_positive",
           "value": "\"auth_delivery_budgets\".\"attempts\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.mcp_event_subscriptions": {
+      "name": "mcp_event_subscriptions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(80)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "grant_id": {
+          "name": "grant_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "selector": {
+          "name": "selector",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "callback_url": {
+          "name": "callback_url",
+          "type": "varchar(4096)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_encrypted": {
+          "name": "secret_encrypted",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_secret_encrypted": {
+          "name": "previous_secret_encrypted",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previous_secret_until": {
+          "name": "previous_secret_until",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cursor_seq": {
+          "name": "cursor_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gap_seq": {
+          "name": "gap_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_encrypted": {
+          "name": "pending_encrypted",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_seq": {
+          "name": "pending_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "stopped": {
+          "name": "stopped",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "date": {
+          "name": "date",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_events_due_idx": {
+          "name": "mcp_events_due_idx",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"mcp_event_subscriptions\".\"stopped\" = false AND \"mcp_event_subscriptions\".\"gap_seq\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_events_grant_idx": {
+          "name": "mcp_events_grant_idx",
+          "columns": [
+            {
+              "expression": "grant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_events_expiry_idx": {
+          "name": "mcp_events_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_event_subscriptions_grant_id_oauth_grants_id_fk": {
+          "name": "mcp_event_subscriptions_grant_id_oauth_grants_id_fk",
+          "tableFrom": "mcp_event_subscriptions",
+          "tableTo": "oauth_grants",
+          "columnsFrom": [
+            "grant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "mcp_events_cursor_nonnegative": {
+          "name": "mcp_events_cursor_nonnegative",
+          "value": "\"mcp_event_subscriptions\".\"cursor_seq\" >= 0 AND (\"mcp_event_subscriptions\".\"gap_seq\" IS NULL OR \"mcp_event_subscriptions\".\"gap_seq\" >= \"mcp_event_subscriptions\".\"cursor_seq\")"
+        },
+        "mcp_events_pending_pair": {
+          "name": "mcp_events_pending_pair",
+          "value": "(\"mcp_event_subscriptions\".\"pending_encrypted\" IS NULL) = (\"mcp_event_subscriptions\".\"pending_seq\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.recent_realtime_buckets": {
+      "name": "recent_realtime_buckets",
+      "schema": "",
+      "columns": {
+        "bucket": {
+          "name": "bucket",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "recent_realtime_buckets_expiry_idx": {
+          "name": "recent_realtime_buckets_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "recent_realtime_buckets_bucket_entity_id_pk": {
+          "name": "recent_realtime_buckets_bucket_entity_id_pk",
+          "columns": [
+            "bucket",
+            "entity_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "recent_realtime_buckets_bucket_valid": {
+          "name": "recent_realtime_buckets_bucket_valid",
+          "value": "\"recent_realtime_buckets\".\"bucket\" in (1, 2, 3)"
+        },
+        "recent_realtime_buckets_entity_positive": {
+          "name": "recent_realtime_buckets_entity_positive",
+          "value": "\"recent_realtime_buckets\".\"entity_id\" > 0"
+        },
+        "recent_realtime_buckets_seq_positive": {
+          "name": "recent_realtime_buckets_seq_positive",
+          "value": "\"recent_realtime_buckets\".\"seq\" > 0"
         }
       },
       "isRLSEnabled": false

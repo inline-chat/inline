@@ -14,6 +14,9 @@ on:
       runtime_image:
         description: Immutable digest of the qualified runtime image
         value: ${{ jobs.container.outputs.runtime_image }}
+      standby_image:
+        description: Immutable digest of the qualified ARM64 Coolify image
+        value: ${{ jobs.container-arm.outputs.standby_image }}
 
   push:
     branches:
@@ -117,6 +120,79 @@ jobs:
           [[ "$image" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]]
           printf 'runtime_image=%s\n' "$image" >> "$GITHUB_OUTPUT"
 
+  container-arm:
+    name: Server ARM64 Coolify image and runtime
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    outputs:
+      standby_image: ${{ steps.publish.outputs.standby_image }}
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: container_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Require manual main context when publishing
+        if: ${{ inputs.publish_image }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: Export committed server build context
+        run: bun --no-env-file scripts/docker/server-context.ts "$GITHUB_SHA" "$RUNNER_TEMP/server-context"
+      - name: Build the native ARM64 Coolify image
+        run: |
+          docker build --platform linux/arm64 --target coolify --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f "$RUNNER_TEMP/server-context/server/Dockerfile" -t inline-server:ci-coolify "$RUNNER_TEMP/server-context"
+          test "$(docker image inspect --format '{{.Architecture}}' inline-server:ci-coolify)" = arm64
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' inline-server:ci-coolify)" = "$GITHUB_SHA"
+      - name: Verify migrations, native dependencies, HTTP, WebSocket, and drain
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/container_test
+        run: |
+          if docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/verify-migrations.js; then
+            echo "Verification incorrectly accepted an empty database"
+            exit 1
+          fi
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/migrate.js
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/verify-migrations.js
+          docker run --rm inline-server:ci-coolify wget --version
+          docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/core-production-smoke.js --artifact
+
+      - name: Setup Fly registry client
+        if: ${{ inputs.publish_image }}
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+
+      - name: Publish the qualified ARM64 image without rebuilding
+        if: ${{ inputs.publish_image }}
+        id: publish
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN"
+          test "$(docker image inspect --format '{{.Architecture}}' inline-server:ci-coolify)" = arm64
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' inline-server:ci-coolify)" = "$GITHUB_SHA"
+          flyctl auth docker
+          tag="registry.fly.io/inline-api:coolify-arm64-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag inline-server:ci-coolify "$tag"
+          docker push "$tag"
+          image=$(docker image inspect --format '{{json .RepoDigests}}' "$tag" | jq -er '.[] | select(startswith("registry.fly.io/inline-api@sha256:"))')
+          [[ "$image" =~ ^registry\.fly\.io/inline-api@sha256:[a-f0-9]{64}$ ]]
+          printf 'standby_image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+
   test:
     name: Server Typecheck, Lint, and Tests
     runs-on: ubuntu-latest
@@ -186,6 +262,13 @@ jobs:
           bun run generate:proto
           git diff --exit-code
           test -z "$(git status --porcelain)"
+
+      - name: Build paired MCP integration artifact
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/sdk build
+          bun run --cwd packages/mcp build
 
       - name: Run linter
         run: cd server && bun lint
@@ -258,7 +341,7 @@ jobs:
   required:
     name: Server validation required
     if: ${{ always() }}
-    needs: [container, test]
+    needs: [container, container-arm, test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

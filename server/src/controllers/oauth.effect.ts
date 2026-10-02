@@ -820,6 +820,15 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
     ),
   )
 
+  .add(
+    HttpApiEndpoint.post("oauthMcpEvents", "/oauth/mcp-events", {
+      payload: Schema.Struct({ method: Schema.String, params: Schema.optionalKey(Schema.Unknown), token: Schema.String }),
+      headers: { "x-inline-mcp-secret": Schema.optionalKey(Schema.String) },
+      success: Schema.Unknown,
+      error: [OAuthTransportBadRequest, jsonErrorAt(401), jsonErrorAt(500)],
+    }).annotateMerge(requireOpenApiRequestHeader("x-inline-mcp-secret", "Required shared secret for the internal MCP events boundary.")),
+  )
+
 export const OAuthEndpoints = OAuthEndpointGroup.endpoints
 
 type OAuthResponseMediaType =
@@ -1037,6 +1046,7 @@ const oauthResponseContracts: Readonly<
     ),
     jsonVariant(500, OAuthError),
   ],
+  mcpEvents: [jsonVariant(200, Schema.Unknown), badRequestVariant, jsonVariant(401, OAuthError), jsonVariant(500, OAuthError)],
 }
 
 export class OAuthResponseContractFailure extends Data.TaggedError(

@@ -1,9 +1,16 @@
 import { expect, it } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
 import { createServer, type IncomingHttpHeaders, type ServerHttp2Session } from "node:http2"
+import { createRequire } from "node:module"
 import APN from "apn"
 
 it("preserves APNs JWT, HTTP/2 payload and failure contracts on Bun", async () => {
+  const apnRequire = createRequire(import.meta.resolve("apn"))
+  const forge = apnRequire("node-forge") as { pki: { setRsaPublicKey: (...args: unknown[]) => unknown; rsa: { setPublicKey: (...args: unknown[]) => unknown } } }
+  const originalPublicKey = forge.pki.rsa.setPublicKey
+  const originalAlias = forge.pki.setRsaPublicKey
+  let rsaCalls = 0
+  const rsaTrap = () => { rsaCalls++; throw new Error("Forge RSA verification path reached") }
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
   const seen: { headers: IncomingHttpHeaders; body: string }[] = []
   const sessions = new Set<ServerHttp2Session>()
@@ -24,12 +31,18 @@ it("preserves APNs JWT, HTTP/2 payload and failure contracts on Bun", async () =
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
   if (!address || typeof address === "string") throw new Error("No test address")
-  const provider = new APN.Provider({
-    address: "127.0.0.1", port: address.port,
-    token: { key: privateKey.export({ type: "pkcs8", format: "pem" }), keyId: "TESTKEY", teamId: "TESTTEAM" },
-    production: false,
-  })
+  let provider: APN.Provider | undefined
   try {
+    forge.pki.rsa.setPublicKey = rsaTrap
+    forge.pki.setRsaPublicKey = rsaTrap
+    expect(() => forge.pki.rsa.setPublicKey()).toThrow("Forge RSA verification path reached")
+    expect(() => forge.pki.setRsaPublicKey()).toThrow("Forge RSA verification path reached")
+    rsaCalls = 0
+    provider = new APN.Provider({
+      address: "127.0.0.1", port: address.port,
+      token: { key: privateKey.export({ type: "pkcs8", format: "pem" }), keyId: "TESTKEY", teamId: "TESTTEAM" },
+      production: false,
+    })
     // The library supplies this seam for its local HTTP/2 mock. No Apple connection is made.
     const client = (provider as unknown as { client: { _mockOverrideUrl: string } }).client
     client._mockOverrideUrl = `http://127.0.0.1:${address.port}`
@@ -54,8 +67,11 @@ it("preserves APNs JWT, HTTP/2 payload and failure contracts on Bun", async () =
     expect(JSON.parse(Buffer.from(payload!, "base64url").toString())).toMatchObject({ iss: "TESTTEAM" })
     expect(verify("sha256", Buffer.from(`${header}.${payload}`), { key: publicKey, dsaEncoding: "ieee-p1363" },
       Buffer.from(signature!, "base64url"))).toBe(true)
+    expect(rsaCalls).toBe(0)
   } finally {
-    provider.shutdown()
+    forge.pki.rsa.setPublicKey = originalPublicKey
+    forge.pki.setRsaPublicKey = originalAlias
+    provider?.shutdown()
     for (const session of sessions) session.destroy()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }

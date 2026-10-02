@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 265,
+  "count": 266,
   "methodCounts": {
     "ALL": 3,
     "GET": 103,
     "OPTIONS": 18,
-    "POST": 140,
+    "POST": 141,
     "WS": 1
   },
-  "sha256": "4f90fa2700e065bbcdab27eb80b950977384d50e7923fba6534f549c82b179cc",
+  "sha256": "d89553d0b5f98533505c681414cfe06c02083001e385c0f23e64c56a8cc37b8c",
   "routes": [
     {
       "method": "ALL",
@@ -801,6 +801,10 @@
     {
       "method": "POST",
       "path": "/oauth/introspect"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/mcp-events"
     },
     {
       "method": "POST",

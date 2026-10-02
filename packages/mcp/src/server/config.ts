@@ -9,6 +9,7 @@ export type McpConfig = {
   allowedOriginHosts: string[]
   endpointRateLimits: {
     mcpInitialize: RateLimitRule
+    mcpRequest?: RateLimitRule
   }
 }
 
@@ -99,6 +100,7 @@ export function defaultConfig(): McpConfig {
     allowedOriginHosts: defaultAllowedOriginHosts(DEFAULT_ISSUER, baseAllowedHosts),
     endpointRateLimits: {
       mcpInitialize: parseRateLimitRuleEnv("MCP_RATE_LIMIT_MCP_INIT", { max: 30, windowMs: 60_000 }),
+      mcpRequest: parseRateLimitRuleEnv("MCP_RATE_LIMIT_MCP_REQUEST", { max: 180, windowMs: 60_000 }),
     },
   }
 }

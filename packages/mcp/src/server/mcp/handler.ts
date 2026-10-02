@@ -1,11 +1,13 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { MCP_DEFAULT_SCOPE } from "@inline-chat/oauth-core"
-import { createInlineMcpServer, type McpToolContract } from "./server"
+import { createInlineMcpServer, inlineMcpInstructions, type McpToolContract } from "./server"
 import { McpSessionManager } from "./sessions"
 import { getBearerToken } from "./auth"
 import type { McpConfig } from "../config"
 import { createInlineApi } from "../inline/inline-api"
 import type { McpGrant } from "./grant"
+import { createEventsProxy } from "./events-proxy"
+import { handleModernRequest, isModernRequest } from "./modern"
 
 const DEFAULT_REQUIRED_SCOPE = MCP_DEFAULT_SCOPE
 
@@ -257,7 +259,7 @@ export const Mcp = {
     const sessions = new McpSessionManager()
 
     return {
-      async handle(req: Request, url: URL): Promise<Response | null> {
+      async handle(req: Request, url: URL, modern?: boolean): Promise<Response | null> {
         if (url.pathname !== path) return null
 
         try {
@@ -281,6 +283,41 @@ export const Mcp = {
           const authRes = await buildAuthInfo(params.config, bearer.token)
           if (!authRes.ok) {
             return json(authRes.status, authRes.body, authRes.headers)
+          }
+
+          // Select stateless traffic before considering legacy session IDs.
+          // The same registered tools/resources execute through the SDK's public
+          // transport, while discovery/events never create an Inline connection.
+          if (modern ?? await isModernRequest(req)) {
+            let inline: ReturnType<typeof createInlineApi> | undefined
+            try {
+              return await handleModernRequest({
+                req,
+                auth: authRes.auth,
+                events: createEventsProxy(params.config, bearer.token, req.signal),
+                instructions: inlineMcpInstructions(contractVersion),
+                createServer: () => {
+                  inline = createInlineApi({
+                    baseUrl: params.config.inlineApiBaseUrl,
+                    token: authRes.inlineToken,
+                    allowed: {
+                      allowedSpaceIds: authRes.grant.spaceIds,
+                      allowDms: authRes.grant.allowDms,
+                      allowHomeThreads: authRes.grant.allowHomeThreads,
+                    },
+                  })
+                  return createInlineMcpServer({
+                    grant: authRes.grant,
+                    inline,
+                    resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
+                    contractVersion,
+                    events: (auth) => createEventsProxy(params.config, auth.token, req.signal),
+                  })
+                },
+              })
+            } finally {
+              await inline?.close().catch(() => undefined)
+            }
           }
 
           const sessionId = req.headers.get("mcp-session-id")
@@ -326,6 +363,9 @@ export const Mcp = {
               inline,
               resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
               contractVersion,
+              // Each tool callback supplies its freshly introspected bearer;
+              // the initialization token may already have been refreshed.
+              events: (auth) => createEventsProxy(params.config, auth.token),
             })
 
             const managed = sessions.createTransport({

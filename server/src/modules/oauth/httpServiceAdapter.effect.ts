@@ -54,6 +54,7 @@ export interface OAuthHttpHandlers {
     request: Request,
     body: unknown,
   ) => Promise<Response>
+  readonly mcpEvents?: (request: Request, body: unknown) => Promise<Response>
   readonly providerStart: (request: Request, clientIp?: string) => Promise<Response>
   readonly providerNativeAppleStart: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerNativeAppleComplete: (body: unknown, clientIp?: string) => Promise<Response>
@@ -135,6 +136,9 @@ const execute = async (
       return handlers.revoke(body)
     case "introspect":
       return handlers.introspect(request, body)
+    case "mcpEvents":
+      if (!handlers.mcpEvents) throw new Error("MCP event handler is unavailable")
+      return handlers.mcpEvents(request, body)
     case "providerCallbackApple":
       return handlers.providerCallbackApple(request, body, clientIp)
     case "providerNativeAppleStart":

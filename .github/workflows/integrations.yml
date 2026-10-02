@@ -100,6 +100,13 @@ jobs:
           bun run --cwd packages/protocol build
           bun run --cwd packages/oauth-core build
           bun run --cwd packages/sdk build
+          bun run --cwd plugins/chatgpt/ui build
+
+      - name: Check bundled thread UI
+        run: |
+          bun run --cwd plugins/chatgpt/ui typecheck
+          bun run --cwd plugins/chatgpt/ui lint
+          bun run --cwd plugins/chatgpt/ui test
 
       - name: Check MCP
         run: bun run --cwd packages/mcp typecheck

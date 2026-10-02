@@ -9,6 +9,7 @@ import {
 export type OwnedProcessName =
   | "block-content-image"
   | "bot-webhook-delivery"
+  | "mcp-event-delivery"
   | "database-health-monitor"
   | "grid-provider-effects"
   | "native-upload"

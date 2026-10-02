@@ -23,6 +23,20 @@ Use Inline as a thread-first work chat system. Find the exact conversation, read
    - When exact flags are uncertain, query `inline capabilities COMMAND... --compact`; it is offline and reflects the installed command tree.
 6. Read the smallest useful message window, then answer or act.
 
+## Ask teammates and continue
+
+When the host advertises Events and `conversations.ask`, a request such as “get my teammate's opinion” authorizes sending that question to the resolved teammate. Resolve people and the allowed space/home context first. Keep the question and shared context within the user's request.
+
+1. Call `conversations.ask` with the title, question, participant user IDs and optional authorized space. Inline includes the connected user and creates a private thread.
+2. Keep the returned chat ID and message receipt. `questionStatus: sent` confirms the question. `not_sent` means the thread exists without the question; `unknown` requires inspecting the thread before any retry. Never recreate or resend automatically after an uncertain outcome.
+3. Subscribe with `events/subscribe` to the returned event name, exact arguments and cursor. That checkpoint precedes the question and recovers a reply that arrived before subscription. Monitoring is active only after subscription acknowledgement. Follow the host's renewal/stop mechanism; a finite `refreshBefore` requires renewal before expiry.
+4. Wait for a qualifying reply. On a delivered event, read `messages.context` in that chat and continue the originating task as requested. Deduplicate by event ID. Do not wait for all participants unless asked, and do not create repeated agent-to-agent sends. Posting a conclusion into Inline requires the user's instruction.
+5. Use `conversations.open` to inspect the thread or reply directly through the minimal UI. Its picker remembers only threads explicitly opened in this ChatGPT app. An active view refreshes through authorized tools; background continuation belongs to Events, independently of the UI lifecycle.
+
+Event payloads identify committed occurrences, not immutable historical message bodies. Read tools return current authorized content. Cursors are opaque and tied to the grant, event and selector; reuse them exactly. If refresh returns `truncated: true`, recover current state with read tools and acknowledge that some occurrences are unavailable. Typing, presence and live-only reactions are not replayable events.
+
+Events depend on the connected host and endpoint. Use them only when advertised; do not claim background monitoring in a host that cannot subscribe. OpenAI currently documents event continuation for Work web, desktop Work with Cloud selected, and dots. Existing read/send workflows remain available to other clients.
+
 If no usable Inline path is available, state what is missing and ask the user to connect or reauthorize MCP, or install or authenticate the CLI, as appropriate for that environment. Do not invent results or silently substitute another chat service. The unversioned `/mcp` endpoint exists only for older clients using the legacy argument contract.
 
 When running inside an Inline local-agent bridge, use the host's `inline` tool namespace instead of the hosted OAuth MCP names above. Start with `inline.get_current_context`; use `inline.search_chats`, `inline.search_messages`, `inline.get_history`, and the exact-ID tools to resolve context. Normal assistant replies must still be returned to the bridge, not sent through a tool. Durable writes such as creating a top-level chat, pinning, editing, or updating the bot profile require clear user intent and the tool's confirmation flag. These tools are bot-scoped: never assume access outside the chats returned by them.
@@ -61,6 +75,8 @@ Use only columns for access paths the environment actually provides. MCP entries
 | Create a thread or chat | Resolve the parent and participants → `conversations.create` | Resolve IDs, then `inline chats create --title TITLE --json --compact` with the required space, visibility, and participant flags |
 | Create a reply thread | Use the CLI; MCP does not expose reply-thread creation | `inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title TITLE --json --compact` |
 | Send text or a reply | Verify target → `messages.send` | `inline messages send --chat-id CHAT_ID --text TEXT` with `--reply-to MESSAGE_ID` when needed |
+| Ask teammates and wait for their replies | Resolve participants → `conversations.ask` → `events/subscribe` from the returned cursor → read context on a reply | Use supported MCP Events in the originating host; the CLI message send alone does not install background continuation |
+| Inspect a focused thread UI | `conversations.open` with a resolved `chatId` | Open the returned canonical Inline thread link in an Inline client |
 | Send files or media | Verify target → `files.upload` → `messages.send_media` | `inline messages send --chat-id CHAT_ID --attach PATH --text CAPTION` |
 | Pin or unpin a message | Use the CLI; MCP does not expose pin changes | Use `inline messages pin` or `inline messages unpin` with `--chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
 

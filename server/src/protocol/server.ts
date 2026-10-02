@@ -4,10 +4,10 @@
 // tslint:disable
 import type { BinaryWriteOptions } from "@protobuf-ts/runtime";
 import type { IBinaryWriter } from "@protobuf-ts/runtime";
-import { WireType } from "@protobuf-ts/runtime";
 import type { BinaryReadOptions } from "@protobuf-ts/runtime";
 import type { IBinaryReader } from "@protobuf-ts/runtime";
 import { UnknownFieldHandler } from "@protobuf-ts/runtime";
+import { WireType } from "@protobuf-ts/runtime";
 import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
@@ -33,6 +33,54 @@ import { ChatParticipant } from "@inline-chat/protocol/core";
 import { UpdateSpaceProfile } from "@inline-chat/protocol/core";
 import { UpdateDialogTranslation } from "@inline-chat/protocol/core";
 import { ChatAcknowledgement } from "@inline-chat/protocol/core";
+import { Update } from "@inline-chat/protocol/core";
+/**
+ * Private, short-lived server fanout. The entire message is authenticated and
+ * encrypted before publication. Updates are already projected for these exact
+ * recipients; public client messages and durable journal formats are unchanged.
+ *
+ * @generated from protobuf message server.RealtimeDelivery
+ */
+export interface RealtimeDelivery {
+    /**
+     * @generated from protobuf field: uint32 version = 1;
+     */
+    version: number;
+    /**
+     * @generated from protobuf field: string origin_boot_id = 2;
+     */
+    originBootId: string;
+    /**
+     * @generated from protobuf field: string event_id = 3;
+     */
+    eventId: string;
+    /**
+     * @generated from protobuf field: int64 expires_at_ms = 4;
+     */
+    expiresAtMs: bigint;
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 5;
+     */
+    userIds: bigint[];
+    /**
+     * @generated from protobuf field: optional int64 space_id = 6;
+     */
+    spaceId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 skip_session_id = 7;
+     */
+    skipSessionId?: bigint;
+    /**
+     * @generated from protobuf field: repeated Update updates = 8;
+     */
+    updates: Update[];
+    /**
+     * Bounded ordered receiver lane. Included in the authenticated payload.
+     *
+     * @generated from protobuf field: uint32 partition = 9;
+     */
+    partition: number;
+}
 /**
  * @generated from protobuf message server.ServerUpdate
  */
@@ -1169,6 +1217,123 @@ export interface ServerUserUpdateMessageActionAnswered {
      */
     ui?: MessageActionResponseUi;
 }
+// @generated message type with reflection information, may provide speed optimized methods
+class RealtimeDelivery$Type extends MessageType<RealtimeDelivery> {
+    constructor() {
+        super("server.RealtimeDelivery", [
+            { no: 1, name: "version", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "origin_boot_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "event_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "expires_at_ms", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "skip_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update },
+            { no: 9, name: "partition", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RealtimeDelivery>): RealtimeDelivery {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.version = 0;
+        message.originBootId = "";
+        message.eventId = "";
+        message.expiresAtMs = 0n;
+        message.userIds = [];
+        message.updates = [];
+        message.partition = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RealtimeDelivery>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RealtimeDelivery): RealtimeDelivery {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 version */ 1:
+                    message.version = reader.uint32();
+                    break;
+                case /* string origin_boot_id */ 2:
+                    message.originBootId = reader.string();
+                    break;
+                case /* string event_id */ 3:
+                    message.eventId = reader.string();
+                    break;
+                case /* int64 expires_at_ms */ 4:
+                    message.expiresAtMs = reader.int64().toBigInt();
+                    break;
+                case /* repeated int64 user_ids */ 5:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                case /* optional int64 space_id */ 6:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 skip_session_id */ 7:
+                    message.skipSessionId = reader.int64().toBigInt();
+                    break;
+                case /* repeated Update updates */ 8:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* uint32 partition */ 9:
+                    message.partition = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RealtimeDelivery, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 version = 1; */
+        if (message.version !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.version);
+        /* string origin_boot_id = 2; */
+        if (message.originBootId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.originBootId);
+        /* string event_id = 3; */
+        if (message.eventId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.eventId);
+        /* int64 expires_at_ms = 4; */
+        if (message.expiresAtMs !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expiresAtMs);
+        /* repeated int64 user_ids = 5; */
+        if (message.userIds.length) {
+            writer.tag(5, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        /* optional int64 space_id = 6; */
+        if (message.spaceId !== undefined)
+            writer.tag(6, WireType.Varint).int64(message.spaceId);
+        /* optional int64 skip_session_id = 7; */
+        if (message.skipSessionId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.skipSessionId);
+        /* repeated Update updates = 8; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* uint32 partition = 9; */
+        if (message.partition !== 0)
+            writer.tag(9, WireType.Varint).uint32(message.partition);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.RealtimeDelivery
+ */
+export const RealtimeDelivery = new RealtimeDelivery$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {

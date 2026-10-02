@@ -17,12 +17,13 @@
   },
   "scripts": {
     "dev": "bun --watch src/main.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "bun run --cwd ../../plugins/chatgpt/ui build && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@inline-chat/chatgpt-ui": "workspace:*",
     "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/protocol": "workspace:*",
@@ -33,6 +34,7 @@
     "@types/bun": "catalog:",
     "@types/node": "^20.11.30",
     "@vitest/coverage-v8": "4.1.10",
+    "happy-dom": "20.14.5",
     "typescript": "^5.8.3",
     "vitest": "4.1.10"
   }

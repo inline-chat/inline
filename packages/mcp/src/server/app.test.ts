@@ -129,6 +129,37 @@ describe("mcp app", () => {
     expect(second.headers.get("retry-after")).toBeTruthy()
   })
 
+  it("rate limits stateless calls separately, including calls with stale legacy session IDs", async () => {
+    const app = createApp({
+      issuer: "http://localhost:1234",
+      endpointRateLimits: {
+        mcpInitialize: { max: 1, windowMs: 60_000 },
+        mcpRequest: { max: 2, windowMs: 60_000 },
+      },
+    })
+    const modernRequest = () => new Request("http://localhost/mcp/v2", {
+      method: "POST", headers: { "mcp-protocol-version": "2026-07-28", "mcp-session-id": "stale-session", "x-forwarded-for": "10.0.0.1" },
+    })
+    const legacyRequest = () => new Request("http://localhost/mcp", { method: "POST", headers: { "x-forwarded-for": "10.0.0.1" } })
+    expect((await app.fetch(modernRequest())).status).toBe(401)
+    expect((await app.fetch(legacyRequest())).status).toBe(401)
+    expect((await app.fetch(modernRequest())).status).toBe(401)
+    const limited = await app.fetch(modernRequest())
+    expect(limited.status).toBe(429)
+    expect(await limited.json()).toMatchObject({ error_description: "Too many MCP requests." })
+    expect((await app.fetch(legacyRequest())).status).toBe(429)
+  })
+
+  it("checks authentication without reading ambiguous untrusted request bodies", async () => {
+    const app = createApp({ issuer: "http://localhost:1234" })
+    const req = new Request("http://localhost/mcp", {
+      method: "POST", body: "unread request",
+    })
+    const clone = vi.spyOn(req, "clone")
+    expect((await app.fetch(req)).status).toBe(401)
+    expect(clone).not.toHaveBeenCalled()
+  })
+
   it("serves the clean submission contract at /mcp/v2", async () => {
     const app = createApp({ issuer: "http://localhost:1234" })
     const res = await app.fetch(new Request("http://localhost/mcp/v2", { method: "POST" }))
@@ -208,6 +239,16 @@ describe("mcp app", () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: "forbidden_origin" })
     expect(res.headers.get("access-control-allow-origin")).toBeNull()
+  })
+
+  it("allows modern protocol routing headers in a default preflight", async () => {
+    const app = createApp({ allowedHosts: ["localhost"], allowedOriginHosts: ["chatgpt.com"] })
+    const response = await app.fetch(new Request("http://localhost/mcp/v2", {
+      method: "OPTIONS", headers: { origin: "https://chatgpt.com", "access-control-request-method": "POST" },
+    }))
+    expect(response.status).toBe(204)
+    expect(response.headers.get("access-control-allow-headers")).toContain("mcp-method")
+    expect(response.headers.get("access-control-allow-headers")).toContain("mcp-name")
   })
 
   it("adds CORS expose headers to actual responses for allowed origins", async () => {

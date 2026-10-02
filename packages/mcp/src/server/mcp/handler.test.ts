@@ -321,6 +321,26 @@ describe("/mcp", () => {
     expect(res.headers.get("mcp-session-id")).toBeTruthy()
   })
 
+  it.each(["2024-10-07", "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"])("keeps legacy initialization with a recognized version header: %s", async (version) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json(activeIntrospection({ grantId: "g1" })))
+    const app = createApp({ issuer: "http://localhost:8791", oauthInternalSharedSecret: "test-secret" })
+    const res = await app.fetch(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer test-bearer", accept: "application/json, text/event-stream", "content-type": "application/json",
+        "mcp-protocol-version": version,
+      },
+      body: JSON.stringify({ ...initRequest, params: { ...initRequest.params, protocolVersion: version } }),
+    }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("mcp-session-id")).toBeTruthy()
+    const sessionId = res.headers.get("mcp-session-id")!
+    const ended = await app.fetch(new Request("http://localhost/mcp", {
+      method: "DELETE", headers: { authorization: "Bearer test-bearer", "mcp-protocol-version": version, "mcp-session-id": sessionId },
+    }))
+    expect(ended.status).toBe(200)
+  })
+
   it("initializes the submission-v2 contract on its versioned endpoint", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(activeIntrospection({ grantId: "g1" })), { status: 200 }))
 
@@ -345,7 +365,7 @@ describe("/mcp", () => {
     expect(res.status).toBe(200)
     expect(res.headers.get("content-type")).toContain("text/event-stream")
     expect(res.headers.get("mcp-session-id")).toBeTruthy()
-    expect(await res.text()).toContain('"version":"0.2.0"')
+    expect(await res.text()).toContain('"version":"0.3.0"')
   })
 
   it("rejects session grant mismatches", async () => {

@@ -1,6 +1,7 @@
 import { notFound, text, withJson } from "./http/response"
 import { OAuth } from "./oauth/routes"
 import { Mcp } from "./mcp/handler"
+import { modernRequestHeaderHint } from "./mcp/modern"
 import { defaultAllowedHosts, defaultAllowedOriginHosts, defaultConfig, type McpConfig } from "./config"
 
 export type InlineMcpApp = {
@@ -15,7 +16,7 @@ type RateLimitBucket = {
 }
 
 const CORS_ALLOWED_METHODS = "GET, POST, DELETE, OPTIONS"
-const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id, mcp-protocol-version"
+const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id, mcp-protocol-version, mcp-method, mcp-name"
 const CORS_EXPOSE_HEADERS = "mcp-session-id, www-authenticate"
 const CORS_MAX_AGE_SECONDS = "600"
 const OPENAI_APPS_CHALLENGE = "eW-AusO0QlqMClXtl9W_XdVXoPzxO48GdZIGaQq7bvI"
@@ -124,14 +125,21 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
 
   const legacyMcp = Mcp.create({ config, path: "/mcp", contractVersion: "legacy" })
   const submissionMcp = Mcp.create({ config, path: "/mcp/v2", contractVersion: "submission-v2" })
-  const initRateLimits = new Map<string, RateLimitBucket>()
+  const rateLimits = new Map<string, RateLimitBucket>()
 
-  const consumeInitRateLimit = (key: string, nowMs: number): { allowed: boolean; retryAfterSeconds: number } => {
-    const bucket = initRateLimits.get(key)
-    const rule = config.endpointRateLimits.mcpInitialize
+  const consumeRateLimit = (key: string, nowMs: number, modern: boolean): { allowed: boolean; retryAfterSeconds: number } => {
+    const bucket = rateLimits.get(key)
+    const rule = modern
+      ? config.endpointRateLimits.mcpRequest ?? defaulted.endpointRateLimits.mcpRequest!
+      : config.endpointRateLimits.mcpInitialize
 
     if (!bucket || bucket.resetAtMs <= nowMs) {
-      initRateLimits.set(key, { count: 1, resetAtMs: nowMs + rule.windowMs })
+      // Bound tracking even when untrusted forwarded addresses keep changing.
+      if (!bucket && rateLimits.size >= 10_000) {
+        for (const [address, existing] of rateLimits) if (existing.resetAtMs <= nowMs) rateLimits.delete(address)
+        if (rateLimits.size >= 10_000) return { allowed: false, retryAfterSeconds: Math.ceil(rule.windowMs / 1000) }
+      }
+      rateLimits.set(key, { count: 1, resetAtMs: nowMs + rule.windowMs })
       return { allowed: true, retryAfterSeconds: 0 }
     }
 
@@ -168,15 +176,20 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
         return finish(text(200, OPENAI_APPS_CHALLENGE))
       }
 
-      if ((url.pathname === "/mcp" || url.pathname === "/mcp/v2") && req.method === "POST" && !req.headers.get("mcp-session-id")) {
+      const isMcp = url.pathname === "/mcp" || url.pathname === "/mcp/v2"
+      // Defer any body-based compatibility detection until authentication.
+      // Correct modern requests supply version/method headers and never consume
+      // the session-initialization budget, even if a stale session ID is sent.
+      const modern = isMcp ? modernRequestHeaderHint(req) : false
+      if (isMcp && req.method === "POST" && (modern || !req.headers.get("mcp-session-id"))) {
         const nowMs = Date.now()
         const ip = resolveClientIp(req)
-        const rateLimit = consumeInitRateLimit(`endpoint:mcp-init:${ip}`, nowMs)
+        const rateLimit = consumeRateLimit(`endpoint:mcp-${modern ? "request" : "init"}:${ip}`, nowMs, modern === true)
 
         if (!rateLimit.allowed) {
           return finish(
             withJson(
-              { error: "rate_limited", error_description: "Too many MCP initialization attempts." },
+              { error: "rate_limited", error_description: modern ? "Too many MCP requests." : "Too many MCP initialization attempts." },
               {
                 status: 429,
                 headers: { "retry-after": String(rateLimit.retryAfterSeconds) },
@@ -190,7 +203,7 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
         return finish(withJson({ ok: true }))
       }
 
-      const mcpRes = (await legacyMcp.handle(req, url)) ?? (await submissionMcp.handle(req, url))
+      const mcpRes = (await legacyMcp.handle(req, url, modern)) ?? (await submissionMcp.handle(req, url, modern))
       if (mcpRes) return finish(mcpRes)
 
       const oauthRes = await OAuth.handle(req, url, config)
