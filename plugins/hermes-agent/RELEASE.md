@@ -6,6 +6,19 @@ Use this checklist before publishing `@inline-chat/hermes-agent-adapter`.
 
 - The package version in `package.json` is the intended release version.
 - `@inline-chat/realtime-sdk` and `yaml` dependency versions are pinned.
+- Publish the immutable protocol `0.0.11-alpha.1` prerequisite first, then
+  realtime SDK `0.0.19-alpha.1`, before running this candidate's registry-only
+  preflight. These candidate versions are currently unpublished; local tarball
+  qualification does not establish their registry availability. Recheck version
+  availability before an authorized publication and never overwrite an existing
+  version.
+- The additive REST graph has its own prerequisites: publish Bot API types
+  `0.1.3-alpha.1` before Bot client `0.1.2-alpha.1`, which pins those types.
+  Hermes `0.0.22` and OpenClaw `0.0.71-alpha.1` pin the new realtime SDK.
+- Unchanged ChatSDK `0.1.0-alpha.0` retains its published Bot client
+  `0.1.2-alpha.0` and Bot API types `0.1.3-alpha.0` dependency graph. Its existing
+  behavior is a separate legacy lane; it does not qualify the new provenance,
+  forwarding receipt, or emoji APIs.
 - `inlineHermes.testedHermesCommit` matches the Hermes source commit used for
   the final compatibility smoke.
 - No tokens or `.env` contents are printed, copied, or committed.
@@ -58,6 +71,9 @@ durable adoption and a persisted outbound reply, and recover an acknowledged
 pending input after process death. Test deleted/edited inputs, revoked access,
 receiver/profile mismatch, controls excluded from replay, and atomic user-row
 consumption. These tests need no production credential or LLM.
+
+This receiving lane uses an already configured DM home. First-use home
+onboarding requires separate qualification.
 
 `Hermes stable compatibility` runs every six hours against npm `latest` and both
 the latest stable Hermes source and upstream `main`. Failures remain failed

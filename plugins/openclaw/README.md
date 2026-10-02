@@ -53,12 +53,18 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
+| `0.0.71-alpha.1` | `>=2026.8.2` | `0.0.19-alpha.1` | Candidate | Pins the new generated wire fields; package and host qualification remain pending. Publish protocol and SDK prerequisites first. |
 | `0.0.71-alpha.0` | `>=2026.8.2` | `0.0.19-alpha.0` | Prerelease | Reports install provenance safely, avoids false reconnect-loop status, and keeps autonomous sync-recovery diagnostics non-sticky. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Stable | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 | `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
-| `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+
+### Candidate 0.0.71-alpha.1
+
+Pins realtime SDK `0.0.19-alpha.1` and its protocol `0.0.11-alpha.1`
+prerequisite. The candidate needs separate package and host qualification before
+publication; the published `0.0.71-alpha.0` instructions below remain historical.
 
 ### Prerelease 0.0.71-alpha.0
 

@@ -192,7 +192,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. A successful directory fetch that misses the requested sender can refresh after the one-second retry interval; verified users retain their normal cache TTL. Stream replacement wakes pending backpressure writes.
-- Inline transport: this local candidate pins `@inline-chat/realtime-sdk@0.0.19-alpha.0`
+- Inline transport: this local candidate pins `@inline-chat/realtime-sdk@0.0.19-alpha.1`
   and the matching protocol candidate. Their immutable local tarballs qualify this
   build without asserting registry publication. The sidecar is bundled, so Hermes
   startup does not run `npm install`.

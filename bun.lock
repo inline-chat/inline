@@ -135,7 +135,7 @@
     },
     "packages/bot-api-types": {
       "name": "@inline-chat/bot-api-types",
-      "version": "0.1.3-alpha.0",
+      "version": "0.1.3-alpha.1",
       "devDependencies": {
         "@types/node": "^20.11.30",
         "typescript": "^5.8.3",
@@ -143,9 +143,9 @@
     },
     "packages/bot-client": {
       "name": "@inline-chat/bot-client",
-      "version": "0.1.2-alpha.0",
+      "version": "0.1.2-alpha.1",
       "dependencies": {
-        "@inline-chat/bot-api-types": "0.1.3-alpha.0",
+        "@inline-chat/bot-api-types": "0.1.3-alpha.1",
       },
       "devDependencies": {
         "@types/node": "^20.11.30",
@@ -184,7 +184,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.11-alpha.0",
+      "version": "0.0.11-alpha.1",
       "dependencies": {
         "@noble/ciphers": "^1.3.0",
         "@noble/hashes": "^1.8.0",
@@ -196,9 +196,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.19-alpha.0",
+      "version": "0.0.19-alpha.1",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.11-alpha.0",
+        "@inline-chat/protocol": "0.0.11-alpha.1",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -250,7 +250,7 @@
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.19-alpha.0",
+        "@inline-chat/realtime-sdk": "0.0.19-alpha.1",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -262,9 +262,9 @@
     },
     "plugins/openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.71-alpha.0",
+      "version": "0.0.71-alpha.1",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.19-alpha.0",
+        "@inline-chat/realtime-sdk": "0.0.19-alpha.1",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -2782,6 +2782,8 @@
     "@inline-chat/bot-api-types/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@inline-chat/bot-client/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@inline-chat/chat-sdk/@inline-chat/bot-client": ["@inline-chat/bot-client@0.1.2-alpha.0", "", { "dependencies": { "@inline-chat/bot-api-types": "0.1.3-alpha.0" } }, "sha512-fKjvmnXj+qSloRgoZXahmM5NP8gUgj2iIit0R7p1bVBGGA4blCKmX6H1NlfTHGIVIITfQhAfVFT74E7lleXRwg=="],
 
     "@inline-chat/chat-sdk/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
