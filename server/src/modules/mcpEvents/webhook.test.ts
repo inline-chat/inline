@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync } from "node:fs"
 import { createServer, request as httpsRequest, type Server } from "node:https"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { signature } from "./crypto"
 import { isPublicAddress, callbackUrl, makeCallbackTransport, resolveCallback, signedHeaders, verifyCallback, MAX_EVENT_BYTES } from "./webhook"
 
@@ -25,11 +28,14 @@ describe("actual HTTPS callback delivery", () => {
   let requestCount = 0
   const requests: { body: string; headers: Record<string, string | string[] | undefined>; path: string }[] = []
   beforeAll(async () => {
-    // Ephemeral test certificate/key produced in memory; no developer files or credentials.
-    const pem = execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=receiver.test", "-addext", "subjectAltName=DNS:receiver.test", "-days", "1", "-keyout", "/dev/stdout", "-out", "/dev/stdout"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-    const key = pem.match(/-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----/)?.[0]
-    certificate = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/)?.[0] ?? ""
-    if (!key || !certificate) throw new Error("Test TLS fixture generation failed")
+    // Synthetic keys only, in a fresh OS temporary directory. Linux subprocess
+    // pipes cannot reliably be reopened by OpenSSL through /dev/stdout.
+    const directory = mkdtempSync(join(tmpdir(), "inline-mcp-events-tls-"))
+    const keyPath = join(directory, "key.pem")
+    const certificatePath = join(directory, "certificate.pem")
+    execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=receiver.test", "-addext", "subjectAltName=DNS:receiver.test", "-days", "1", "-keyout", keyPath, "-out", certificatePath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    const key = readFileSync(keyPath, "utf8")
+    certificate = readFileSync(certificatePath, "utf8")
     server = createServer({ key, cert: certificate }, (request, response) => {
       requestCount += 1
       let body = ""
@@ -50,7 +56,9 @@ describe("actual HTTPS callback delivery", () => {
     if (!address || typeof address === "string") throw new Error("Test listener has no TCP address")
     port = address.port
   })
-  afterAll(async () => { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) })
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  })
   const transport = () => makeCallbackTransport({
     resolve: async (raw) => ({ url: new URL(`https://receiver.test:${port}${new URL(raw).pathname}`), address: "127.0.0.1", family: 4 }),
     request: (url, options, callback) => httpsRequest(url, { ...options, ca: certificate }, callback),
