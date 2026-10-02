@@ -14,6 +14,27 @@ struct AcceptanceBackend {
     interactive: Arc<std::sync::Mutex<Vec<SendInteractiveTextRequest>>>,
 }
 
+pub(super) async fn local_client_without_agent_session(
+    bot_store: SqliteStore,
+) -> (InlineClient, InMemoryBackend) {
+    let inner = InMemoryBackend::new();
+    let backend = AcceptanceBackend {
+        inner: inner.clone(),
+        bot_store,
+        connection: Default::default(),
+        syncs: Default::default(),
+        fail_next_history_sync: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        interactive: Default::default(),
+    };
+    let bot = InlineClient::builder().backend(backend).build().spawn();
+    bot.connect(ConnectRequest::new(AuthCredential::AccessToken {
+        token: AuthToken::try_new("in-memory-public-input-only").unwrap(),
+    }))
+    .await
+    .unwrap();
+    (bot, inner)
+}
+
 impl ClientBackend for AcceptanceBackend {
     fn get_agent_session(
         &self,
@@ -356,8 +377,10 @@ fn input_chat_id(peer: Option<&proto::InputPeer>) -> Option<i64> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_message(
     bot: &InlineClient,
+    backend: &AcceptanceBackend,
     route: &InboundRoute,
     manager: &ProviderSessionManager<ProviderDriver>,
     identity: &SettingsIdentity,
@@ -367,6 +390,7 @@ async fn run_message(
 ) -> Result<String, Box<dyn std::error::Error>> {
     run_message_expect(
         bot,
+        backend,
         route,
         manager,
         identity,
@@ -381,6 +405,7 @@ async fn run_message(
 #[allow(clippy::too_many_arguments)]
 async fn run_message_expect(
     bot: &InlineClient,
+    backend: &AcceptanceBackend,
     route: &InboundRoute,
     manager: &ProviderSessionManager<ProviderDriver>,
     identity: &SettingsIdentity,
@@ -392,13 +417,32 @@ async fn run_message_expect(
     let active = conversation_for_chat(route, chat_id)?;
     let snapshot = active.snapshot();
     let event_id = format!("acceptance-{number}");
+    let source = MessageRecord {
+        chat_id: InlineId::new(chat_id),
+        message_id: InlineId::new(number),
+        sender_id: InlineId::new(route.owner_user_id),
+        timestamp: now_seconds(),
+        is_outgoing: false,
+        content: MessageContent::Text {
+            text: text.to_string(),
+        },
+        reply_to_message_id: None,
+        metadata: MessageMetadata {
+            sender_is_bot: Some(false),
+            ..Default::default()
+        },
+        transaction: None,
+    };
+    backend.inner.insert_message(source.clone());
+    route.bot_store.record_message(source.clone()).await?;
     let record = InboundRecord {
         event_id: event_id.clone(),
         binding: snapshot.binding.clone(),
         message_id: number,
         delivery_chat_id: chat_id,
         sender_user_id: route.owner_user_id,
-        direction: Direction::new(DirectionId::new(event_id.clone())?, text),
+        direction: Direction::new(DirectionId::new(event_id.clone())?, text)
+            .with_source_version(Some(public_source_version(&source, text))),
         state: InboundState::Accepted,
         accepted_at: now_seconds(),
         started_at: None,
@@ -544,17 +588,17 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
     );
     let marker = format!("inline-handler-{}", now_millis());
     let result = tokio::time::timeout(Duration::from_secs(150), async {
-        run_message(&bot, &route, &manager, &identity, 706, 101,
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 101,
             &format!("This is a text-only test. Do not use tools, inspect files or change anything. Remember {marker}. Reply with only that marker.")).await?;
         let active = conversation_for_chat(&route, 706)?;
         let binding = active.snapshot().binding;
         let default_session = route.store.get_binding(&binding)?.expect("default session").1;
         let history = bot.history(HistoryRequest { chat_id: InlineId::new(706), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
         assert!(history.messages.iter().any(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == marker)), "default handler must deliver final to Inline");
-        run_message(&bot, &route, &manager, &identity, 706, 130, "/verbose on").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 130, "/verbose on").await?;
         let output_marker = format!("inline-command-output-{}", now_millis());
         let answer_marker = format!("inline-tool-answer-{}", now_millis());
-        run_message(&bot, &route, &manager, &identity, 706, 131,
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 131,
             &format!("Use the terminal tool exactly once to run `printf {output_marker}` without reading or changing files. Then reply with only `{answer_marker}`.")).await?;
         let history = bot.history(HistoryRequest { chat_id: InlineId::new(706), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
         let history_text = history.messages.iter().filter_map(|message| match &message.content {
@@ -567,7 +611,7 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         }
         assert!(history.messages.iter().any(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == answer_marker)),
             "tool turn must still deliver its separate final answer");
-        run_message(&bot, &route, &manager, &identity, 706, 132, "/verbose off").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 132, "/verbose off").await?;
         // Model an existing session created in Codex, separate from the session
         // already attached to the ordinary Inline DM. Opening must never steal
         // that DM binding or fork its context.
@@ -586,11 +630,11 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
             }
         }
         assert!(completed, "external test turn completed");
-        run_message(&bot, &route, &manager, &identity, 706, 102, "/projects").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 102, "/projects").await?;
         assert!(backend.interactive.lock().expect("interactive").iter().any(|request| !request.actions.rows.is_empty()
             && request.message.text.starts_with("Current project:") && request.message.text.contains(&workspace_label(&workspace))),
             "projects must publish a usable picker with the configured workspace");
-        run_message(&bot, &route, &manager, &identity, 706, 103, "/sessions").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, 706, 103, "/sessions").await?;
         let picker = route.store.session_picker_for_origin_event(&route.installation_id, "acceptance-103")?.expect("session picker");
         let index = picker.sessions.iter().position(|session| session.session().session_id() == &provider_session).expect("new session listed");
         let event = ClientEvent::MessageActionInvoked { interaction_id: InlineId::new(77), chat_id: InlineId::new(706), message_id: InlineId::new(picker.picker_message_id.expect("picker message")), actor_user_id: InlineId::new(route.owner_user_id), action_id: format!("bridge_agent_sessions_open_{index}"), data: backend.interactive.lock().expect("interactive").iter().flat_map(|request| &request.actions.rows).flat_map(|row| &row.actions).find_map(|button| match &button.kind { MessageActionKind::Callback { data } if button.action_id == format!("bridge_agent_sessions_open_{index}") => Some(data.clone()), _ => None }).expect("published Open callback") };
@@ -607,9 +651,11 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         Ok::<_, Box<dyn std::error::Error>>((target, provider_session))
     }).await;
     let release = if let Ok(Ok((target, _))) = &result {
-        run_message(&bot, &route, &manager, &identity, *target, 110, "/stop")
-            .await
-            .map(|_| ())
+        run_message(
+            &bot, &backend, &route, &manager, &identity, *target, 110, "/stop",
+        )
+        .await
+        .map(|_| ())
     } else {
         Ok(())
     };
@@ -624,19 +670,19 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         route.provider_id.clone(),
     );
     let result = tokio::time::timeout(Duration::from_secs(120), async {
-        run_message(&bot, &route, &manager, &identity, target, 109, "This prompt must wait for resume.").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 109, "This prompt must wait for resume.").await?;
         assert!(route.store.get_inbound("acceptance-109")?.unwrap().provider_turn_id.is_none());
         backend.fail_next_history_sync.store(true, std::sync::atomic::Ordering::SeqCst);
-        run_message_expect(&bot, &route, &manager, &identity, target, 117, "/resume", InboundState::Failed).await?;
+        run_message_expect(&bot, &backend, &route, &manager, &identity, target, 117, "/resume", InboundState::Failed).await?;
         let binding = conversation_for_chat(&route, target)?.snapshot().binding;
         assert!(manager.session_is_active(&binding).await, "writer acquisition can precede a failed history sync");
         assert!(!manager.session_history_is_ready(&binding).await);
-        run_message(&bot, &route, &manager, &identity, target, 118, "This prompt must also wait for successful sync.").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 118, "This prompt must also wait for successful sync.").await?;
         assert!(route.store.get_inbound("acceptance-118")?.unwrap().provider_turn_id.is_none());
-        run_message(&bot, &route, &manager, &identity, target, 111, "/resume").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 111, "/resume").await?;
         assert!(manager.session_history_is_ready(&binding).await);
         assert!(route.store.get_inbound("acceptance-111")?.unwrap().provider_turn_id.is_none(), "resume must not send a model prompt");
-        run_message(&bot, &route, &manager, &identity, target, 104, "Do not use tools. Reply with only the marker I asked you to remember earlier.").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 104, "Do not use tools. Reply with only the marker I asked you to remember earlier.").await?;
         let history = bot.history(HistoryRequest { chat_id: InlineId::new(target), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
         assert_eq!(history.messages.iter().filter(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == marker)).count(), 1, "one delivered answer in the canonical session thread");
         let binding = conversation_for_chat(&route, target)?.snapshot().binding;
@@ -648,9 +694,11 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         Ok::<_, Box<dyn std::error::Error>>(())
     }).await;
     let release = if matches!(&result, Ok(Ok(()))) {
-        run_message(&bot, &route, &manager, &identity, target, 112, "/stop")
-            .await
-            .map(|_| ())
+        run_message(
+            &bot, &backend, &route, &manager, &identity, target, 112, "/stop",
+        )
+        .await
+        .map(|_| ())
     } else {
         Ok(())
     };
@@ -682,15 +730,15 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
     );
     let result = tokio::time::timeout(Duration::from_secs(120), async {
         backend.syncs.lock().unwrap().clear();
-        run_message(&bot, &route, &manager, &identity, target, 113, "/resume").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 113, "/resume").await?;
         assert!(backend.syncs.lock().unwrap().iter().any(|batch|
             batch.mode == proto::AgentSessionSyncMode::History as i32 && batch.messages.iter().any(|message|
                 matches!(&message.operation, Some(proto::agent_session_message_sync::Operation::Upsert(item)) if item.text.contains(&external_marker)))));
         let binding = conversation_for_chat(&route, target)?.snapshot().binding;
         assert_eq!(route.store.get_binding(&binding)?.unwrap().1, provider_session);
-        run_message(&bot, &route, &manager, &identity, target, 114, "/resume").await?;
+        run_message(&bot, &backend, &route, &manager, &identity, target, 114, "/resume").await?;
         assert!(route.store.get_inbound("acceptance-114")?.unwrap().provider_turn_id.is_none());
-        run_message(&bot, &route, &manager, &identity, target, 115,
+        run_message(&bot, &backend, &route, &manager, &identity, target, 115,
             "Do not use tools. Reply only with the newest marker I asked you to remember.").await?;
         let history = bot.history(HistoryRequest { chat_id: InlineId::new(target), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
         assert!(history.messages.iter().any(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == external_marker)));

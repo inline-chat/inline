@@ -13,7 +13,7 @@ use std::{
         Arc, Mutex as StdMutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::future::BoxFuture;
@@ -203,9 +203,21 @@ impl SdkBackendBuilder {
             realtime: Arc::new(Mutex::new(None)),
             realtime_events: Arc::new(Mutex::new(None)),
             queued_realtime_events: Arc::new(Mutex::new(VecDeque::new())),
-            in_flight_deliveries: Arc::new(StdMutex::new(HashSet::new())),
+            in_flight_deliveries: Arc::new(StdMutex::new(HashMap::new())),
             client_event_notify: Arc::new(Notify::new()),
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DeliveryClaim {
+    Held,
+    RetryAt(tokio::time::Instant),
+}
+
+impl DeliveryClaim {
+    fn available(self, now: tokio::time::Instant) -> bool {
+        matches!(self, Self::RetryAt(retry_at) if retry_at <= now)
     }
 }
 
@@ -224,7 +236,7 @@ pub struct SdkBackend {
     realtime: Arc<Mutex<Option<RealtimeSession>>>,
     realtime_events: Arc<Mutex<Option<RealtimeEventReceiver>>>,
     queued_realtime_events: Arc<Mutex<VecDeque<RealtimeEvent>>>,
-    in_flight_deliveries: Arc<StdMutex<HashSet<u64>>>,
+    in_flight_deliveries: Arc<StdMutex<HashMap<u64, DeliveryClaim>>>,
     client_event_notify: Arc<Notify>,
 }
 
@@ -1017,14 +1029,24 @@ impl SdkBackend {
     }
 
     async fn claim_pending_client_events(&self) -> BackendResult<Vec<ClientEventDelivery>> {
+        let now = tokio::time::Instant::now();
+        let excluded = self
+            .in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned")
+            .iter()
+            .filter_map(|(id, claim)| (!claim.available(now)).then_some(*id))
+            .collect();
         let pending = self
             .store
             .pending_client_events_page(
                 CLIENT_EVENT_DELIVERY_PAGE_LIMIT,
                 CLIENT_EVENT_DELIVERY_PAGE_BYTES,
+                excluded,
             )
             .await
             .map_err(store_error_to_backend)?;
+        let now = tokio::time::Instant::now();
         let mut in_flight = self
             .in_flight_deliveries
             .lock()
@@ -1032,9 +1054,16 @@ impl SdkBackend {
         Ok(pending
             .into_iter()
             .filter(|delivery| {
-                delivery
-                    .delivery_id
-                    .is_none_or(|delivery_id| in_flight.insert(delivery_id))
+                delivery.delivery_id.is_none_or(|delivery_id| {
+                    if in_flight
+                        .get(&delivery_id)
+                        .is_some_and(|claim| !claim.available(now))
+                    {
+                        return false;
+                    }
+                    in_flight.insert(delivery_id, DeliveryClaim::Held);
+                    true
+                })
             })
             .collect())
     }
@@ -1047,8 +1076,20 @@ impl SdkBackend {
         in_flight.extend(
             deliveries
                 .iter()
-                .filter_map(|delivery| delivery.delivery_id),
+                .filter_map(|delivery| delivery.delivery_id.map(|id| (id, DeliveryClaim::Held))),
         );
+    }
+
+    fn next_delivery_retry(&self) -> Option<tokio::time::Instant> {
+        self.in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned")
+            .values()
+            .filter_map(|claim| match claim {
+                DeliveryClaim::Held => None,
+                DeliveryClaim::RetryAt(retry_at) => Some(*retry_at),
+            })
+            .min()
     }
 
     async fn receive_next_event_deliveries(&self) -> BackendResult<Vec<ClientEventDelivery>> {
@@ -1079,7 +1120,20 @@ impl SdkBackend {
             }
         }
         loop {
+            let retry_at = self.next_delivery_retry();
             let realtime_event = tokio::select! {
+                _ = async {
+                    match retry_at {
+                        Some(retry_at) => tokio::time::sleep_until(retry_at).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let pending = self.claim_pending_client_events().await?;
+                    if !pending.is_empty() {
+                        return Ok(pending);
+                    }
+                    continue;
+                }
                 _ = self.client_event_notify.notified() => {
                     let pending = self.claim_pending_client_events().await?;
                     if !pending.is_empty() {
@@ -1596,6 +1650,7 @@ impl ClientBackend for SdkBackend {
                         title,
                         emoji,
                         agent_context: None,
+                        generate_emoji: None,
                     },
                 )
                 .await?;
@@ -1755,6 +1810,7 @@ impl ClientBackend for SdkBackend {
                         agent_context: requested_agent_context
                             .as_ref()
                             .map(agent_thread_context_to_proto),
+                        reserved_chat_id: None,
                     },
                 )
                 .await?;
@@ -2609,6 +2665,37 @@ impl ClientBackend for SdkBackend {
             backend.client_event_notify.notify_one();
             acknowledgement
         })
+    }
+
+    fn defer_event_delivery(&self, delivery_id: u64, delay: Duration) -> BackendResult<()> {
+        let retry_at = tokio::time::Instant::now()
+            .checked_add(delay)
+            .ok_or_else(|| {
+                BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "delivery retry delay is too large",
+                )
+            })?;
+        let mut claims = self
+            .in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned");
+        let claim = claims.get_mut(&delivery_id).ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::InvalidInput,
+                "delivery is no longer claimed",
+            )
+        })?;
+        if !matches!(claim, DeliveryClaim::Held) {
+            return Err(BackendError::new(
+                ClientErrorCategory::InvalidInput,
+                "delivery already has a deferred retry",
+            ));
+        }
+        *claim = DeliveryClaim::RetryAt(retry_at);
+        drop(claims);
+        self.client_event_notify.notify_one();
+        Ok(())
     }
 
     fn release_event_delivery(&self, delivery_id: u64) {
@@ -4560,7 +4647,11 @@ fn user_record_from_proto(user: &proto::User) -> UserRecord {
                     .as_ref()
                     .and_then(|avatar| non_empty_option(avatar.cdn_url.as_deref()))
             }),
-        is_bot: user.bot,
+        // This private decoder is used only for authenticated server User
+        // snapshots/RPC sidecars. encodeUser always emits true for bots,
+        // including min profiles, and omits false for humans. Do not apply
+        // this normalization to arbitrary or missing cached UserRecords.
+        is_bot: Some(user.bot.unwrap_or(false)),
     }
 }
 
@@ -5825,6 +5916,8 @@ fn message_metadata_from_proto(message: &proto::Message) -> crate::MessageMetada
         mentioned: message.mentioned,
         edit_timestamp: message.edit_date,
         revision: message.rev,
+        is_forwarded: message.is_forwarded.unwrap_or(false),
+        source_snapshot: message.source_snapshot.clone(),
         sender_is_bot: None,
         entities: message
             .entities
@@ -7057,6 +7150,233 @@ mod tests {
 
         assert_eq!(replayed[0].delivery_id, Some(delivery_id));
         assert_eq!(replayed[0].event, event);
+    }
+
+    #[tokio::test]
+    async fn deferred_and_held_claims_cannot_starve_later_persisted_events_or_restart_replay() {
+        let path = std::env::temp_dir().join(format!(
+            "inline-deferred-event-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = crate::SqliteStore::open(&path).unwrap();
+        let events = (1..=300)
+            .map(|id| {
+                let mut message = test_message_record(id);
+                message.sender_id = InlineId::new(8);
+                ClientEvent::MessageStored { message }
+            })
+            .collect();
+        store.append_client_events(events).await.unwrap();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let first = backend.receive_event_deliveries().await.unwrap();
+        assert_eq!(first.len(), CLIENT_EVENT_DELIVERY_PAGE_LIMIT);
+        for delivery in &first[..150] {
+            backend
+                .defer_event_delivery(delivery.delivery_id.unwrap(), Duration::from_secs(60))
+                .unwrap();
+        }
+        // The first 256 rows contain both held and deferred claims. Filtering
+        // after SQL LIMIT would prevent these next 44 rows from ever arriving.
+        let second = backend.receive_event_deliveries().await.unwrap();
+        assert_eq!(second.len(), 44);
+        let mut known = test_message_record(301);
+        known.metadata.sender_is_bot = Some(false);
+        let later = store
+            .append_client_events(vec![ClientEvent::MessageStored { message: known }])
+            .await
+            .unwrap();
+        // Execute the previous filter-after-page ordering against these same
+        // SQLite rows. It returns no work despite the persisted later message.
+        let old_page = store
+            .pending_client_events_page(
+                CLIENT_EVENT_DELIVERY_PAGE_LIMIT,
+                CLIENT_EVENT_DELIVERY_PAGE_BYTES,
+                Vec::new(),
+            )
+            .await
+            .unwrap();
+        {
+            let held = backend.in_flight_deliveries.lock().unwrap();
+            assert!(
+                old_page.iter().all(|delivery| delivery
+                    .delivery_id
+                    .is_some_and(|id| held.contains_key(&id))),
+                "legacy ordering must reproduce starvation on these physical rows"
+            );
+        }
+        let available = backend.receive_event_deliveries().await.unwrap();
+        assert_eq!(available, later);
+        assert_eq!(store.pending_client_events().await.unwrap().len(), 301);
+
+        // Process-local backoff is not an ACK or a persistent visibility grant.
+        // Reopening the exact SQLite outbox restores the original physical rows.
+        drop(backend);
+        drop(store);
+        let reopened = crate::SqliteStore::open(&path).unwrap();
+        let restarted = SdkBackend::builder()
+            .store(reopened.clone())
+            .build()
+            .unwrap();
+        let replay = restarted.receive_event_deliveries().await.unwrap();
+        assert_eq!(replay, first);
+        assert_eq!(reopened.pending_client_events().await.unwrap().len(), 301);
+    }
+
+    #[tokio::test]
+    async fn deferred_delivery_keeps_controls_live_and_bounds_actual_directory_retries() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let directory_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed_calls = directory_calls.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            for id in 2..=4 {
+                let call = read_test_client_message(&mut ws).await;
+                assert!(
+                    matches!(&call.body, Some(proto::client_message::Body::RpcCall(call))
+                    if matches!(call.input, Some(proto::rpc_call::Input::GetChatParticipants(_))))
+                );
+                observed_calls.fetch_add(1, Ordering::SeqCst);
+                send_test_server_message(
+                    &mut ws,
+                    rpc_result_message(
+                        id,
+                        call.id,
+                        proto::rpc_result::Result::GetChatParticipants(
+                            proto::GetChatParticipantsResult {
+                                participants: Vec::new(),
+                                users: Vec::new(),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                )
+                .await;
+            }
+        });
+        let store = crate::SqliteStore::open_in_memory().unwrap();
+        store.save_session(connect_session()).await.unwrap();
+        let mut unknown = test_message_record(11);
+        unknown.sender_id = InlineId::new(8);
+        store
+            .append_client_events(vec![ClientEvent::MessageStored { message: unknown }])
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{address}"))
+            .build()
+            .unwrap();
+        // This gate exercises intake scheduling, not initial history discovery.
+        backend.sync_required.store(false, Ordering::Release);
+        let first = backend.receive_event_deliveries().await.unwrap();
+        let id = first[0].delivery_id.unwrap();
+        let request = ChatParticipantsRequest {
+            chat_id: InlineId::new(7),
+        };
+        assert!(
+            backend
+                .chat_participants(request.clone())
+                .await
+                .unwrap()
+                .users
+                .is_empty()
+        );
+        assert_eq!(directory_calls.load(Ordering::SeqCst), 1);
+        // The old unknown-recovery path did exactly this unacknowledged claim
+        // release. It re-delivers immediately and issues another real RPC.
+        backend.release_event_delivery(id);
+        let immediate = tokio::time::timeout(
+            Duration::from_millis(100),
+            backend.receive_event_deliveries(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(immediate, first);
+        backend.chat_participants(request.clone()).await.unwrap();
+        assert_eq!(directory_calls.load(Ordering::SeqCst), 2);
+        backend
+            .defer_event_delivery(id, Duration::from_millis(150))
+            .unwrap();
+        backend
+            .queued_realtime_events
+            .lock()
+            .await
+            .push_back(RealtimeEvent::Bot(proto::BotEvent {
+                event: Some(proto::bot_event::Event::ChatSettingsRequested(
+                    proto::BotChatSettingsRequested {
+                        request_id: 91,
+                        chat_id: 7,
+                        actor_user_id: 42,
+                        version: 1,
+                    },
+                )),
+            }));
+        let control = tokio::time::timeout(
+            Duration::from_millis(100),
+            backend.receive_event_deliveries(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(control[0].event, ClientEvent::BotInteraction(_)));
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(25),
+                backend.receive_event_deliveries()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            directory_calls.load(Ordering::SeqCst),
+            2,
+            "deferred row must not retry directory RPCs immediately"
+        );
+        assert_eq!(
+            store.pending_client_events().await.unwrap().len(),
+            1,
+            "deferral is not acknowledgement"
+        );
+        let replay =
+            tokio::time::timeout(Duration::from_secs(1), backend.receive_event_deliveries())
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(replay, first);
+        assert!(
+            backend
+                .chat_participants(request)
+                .await
+                .unwrap()
+                .users
+                .is_empty()
+        );
+        assert_eq!(directory_calls.load(Ordering::SeqCst), 3);
+        backend.acknowledge_event_delivery(id).await.unwrap();
+        assert!(store.pending_client_events().await.unwrap().is_empty());
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -8995,6 +9315,169 @@ mod tests {
     }
 
     #[test]
+    fn authoritative_proto_users_normalize_omitted_human_flag_including_min_profiles() {
+        for min in [None, Some(false), Some(true)] {
+            for (bot, expected) in [(None, false), (Some(false), false), (Some(true), true)] {
+                let wire = proto::User {
+                    id: 8,
+                    min,
+                    bot,
+                    ..Default::default()
+                }
+                .encode_to_vec();
+                let decoded = proto::User::decode(wire.as_slice()).unwrap();
+                assert_eq!(user_record_from_proto(&decoded).is_bot, Some(expected));
+            }
+        }
+        // Display-only records constructed outside this decoder stay unknown.
+        let partial = UserRecord {
+            user_id: InlineId::new(8),
+            display_name: None,
+            username: None,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            is_bot: None,
+        };
+        assert_eq!(partial.is_bot, None);
+    }
+
+    #[tokio::test]
+    async fn network_participant_hydration_supplies_kind_before_message_addressing_metadata() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            let request = read_test_client_message(&mut ws).await;
+            let Some(proto::client_message::Body::RpcCall(call)) = request.body else {
+                panic!("RPC request")
+            };
+            assert!(
+                matches!(call.input, Some(proto::rpc_call::Input::GetChatParticipants(input)) if input.chat_id == 7)
+            );
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    request.id,
+                    proto::rpc_result::Result::GetChatParticipants(
+                        proto::GetChatParticipantsResult {
+                            participants: vec![
+                                proto::ChatParticipant {
+                                    user_id: 8,
+                                    date: 10,
+                                },
+                                proto::ChatParticipant {
+                                    user_id: 98,
+                                    date: 10,
+                                },
+                            ],
+                            users: vec![
+                                proto::User {
+                                    id: 8,
+                                    min: Some(true),
+                                    bot: None,
+                                    ..Default::default()
+                                },
+                                proto::User {
+                                    id: 98,
+                                    min: Some(true),
+                                    bot: Some(true),
+                                    ..Default::default()
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                    ),
+                ),
+            )
+            .await;
+        });
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .record_users(vec![UserRecord {
+                user_id: InlineId::new(8),
+                display_name: Some("Legacy display".into()),
+                username: None,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                is_bot: None,
+            }])
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+        let source = proto::Message {
+            id: 1,
+            chat_id: 7,
+            from_id: 8,
+            date: 10,
+            message: Some("current direction".into()),
+            ..Default::default()
+        };
+        let before = backend
+            .record_proto_message(source.clone(), Some(InlineId::new(7)), None)
+            .await
+            .unwrap();
+        assert_eq!(before.metadata.sender_is_bot, None);
+        let participants = backend
+            .chat_participants(ChatParticipantsRequest {
+                chat_id: InlineId::new(7),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            participants
+                .users
+                .iter()
+                .find(|user| user.user_id.get() == 8)
+                .unwrap()
+                .is_bot,
+            Some(false)
+        );
+        let after = backend
+            .record_proto_message(source, Some(InlineId::new(7)), None)
+            .await
+            .unwrap();
+        assert_eq!(after.metadata.sender_is_bot, Some(false));
+        let bot_message = backend
+            .record_proto_message(
+                proto::Message {
+                    id: 2,
+                    chat_id: 7,
+                    from_id: 98,
+                    date: 10,
+                    message: Some("bot request".into()),
+                    ..Default::default()
+                },
+                Some(InlineId::new(7)),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(bot_message.metadata.sender_is_bot, Some(true));
+        server.await.unwrap();
+    }
+
+    #[test]
     fn chat_participants_page_uses_direct_participants() {
         let page = chat_participants_page_from_proto(proto::GetChatParticipantsResult {
             participants: vec![proto::ChatParticipant {
@@ -9615,6 +10098,8 @@ mod tests {
                         block_content: None,
                         agent_session: None,
                         subthread: None,
+                        is_forwarded: None,
+                        source_snapshot: None,
                     }),
                 })),
             }],

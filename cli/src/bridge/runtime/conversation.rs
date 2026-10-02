@@ -5,7 +5,6 @@ use super::*;
 #[derive(Debug)]
 pub(in crate::bridge) enum ConversationResolutionError {
     MissingWorkspace,
-    InvalidAgentContext(String),
     ClientStore(inline_client::StoreError),
     Store(inline_agent_bridge::StoreError),
 }
@@ -21,7 +20,6 @@ impl std::fmt::Display for ConversationResolutionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingWorkspace => formatter.write_str(BridgeNotice::MissingWorkspace.message()),
-            Self::InvalidAgentContext(message) => formatter.write_str(message),
             Self::ClientStore(error) => std::fmt::Display::fmt(error, formatter),
             Self::Store(error) => std::fmt::Display::fmt(error, formatter),
         }
@@ -31,7 +29,7 @@ impl std::fmt::Display for ConversationResolutionError {
 impl std::error::Error for ConversationResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MissingWorkspace | Self::InvalidAgentContext(_) => None,
+            Self::MissingWorkspace => None,
             Self::ClientStore(error) => Some(error),
             Self::Store(error) => Some(error),
         }
@@ -66,14 +64,9 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
     context: Option<&proto::AgentThreadContext>,
     apply_provider_configuration: bool,
 ) -> Result<ActiveConversation, ConversationResolutionError> {
-    let context = match context {
-        Some(context) if context.bot_user_id != route.bot_user_id => {
-            return Err(ConversationResolutionError::InvalidAgentContext(
-                "This thread is bound to a different Agent provider.".to_string(),
-            ));
-        }
-        context => context,
-    };
+    // A chat preset configures its paired bot. Other authorized participants
+    // keep their own installation's workspace, settings, and provider session.
+    let context = context.filter(|context| context.bot_user_id == route.bot_user_id);
     let requested_project_id = context
         .and_then(|context| context.configuration.as_ref())
         .and_then(|configuration| configuration.project_id.as_deref());

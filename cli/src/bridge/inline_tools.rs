@@ -662,6 +662,7 @@ impl InlineToolHost {
                     })
                     .collect(),
                 agent_context: Some(agent_context.clone()),
+                reserved_chat_id: None,
             })
             .await;
         let Ok(created) = created else {

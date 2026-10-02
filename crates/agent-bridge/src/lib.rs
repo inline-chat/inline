@@ -33,8 +33,8 @@ pub use driver::{
 };
 pub use model::{
     BindingKey, Direction, DirectionId, InputAttachment, InputAttachmentKind, InstallationId,
-    OutputAttachment, OutputAttachmentKind, ProviderId, ProviderSessionId, QueueItemId, TurnId,
-    WorkspaceId,
+    OutputAttachment, OutputAttachmentKind, ProviderId, ProviderSessionId, QueueItemId,
+    SourceMessageVersion, TurnId, WorkspaceId,
 };
 pub use policy::{
     ActionInvocation, AddressSignals, Addressing, CommandInvocation, IgnoreReason, InboundEnvelope,
@@ -76,7 +76,8 @@ pub use session_continuity::{
 pub use store::{
     ApprovalClaim, ApprovalClaimContext, ApprovalClaimOutcome, ApprovalRecord, ApprovalState,
     BridgeStore, ChatSettingsRecord, CommandChoiceAction, CommandChoiceClaimContext,
-    CommandChoiceClaimOutcome, CommandChoiceRequest, CommandChoiceState, DurableProgress,
+    CommandChoiceClaimOutcome, CommandChoiceRequest, CommandChoiceState, ContextInputSnapshot,
+    ContextInputState, ContextMessageRef, ContextReceipt, ContextTriggerProof, DurableProgress,
     HistoryImportState, HostToolCallClaim, HostToolCallRecord, InboundRecord, InboundState,
     InboundUndoOutcome, InstallationRecord, InterruptedInbound, MAX_ACTIVE_SESSION_PICKERS,
     MAX_RECENT_WORKSPACES, MAX_SESSION_PICKER_ITEMS, OperatorAllowlistClaimContext,

@@ -448,6 +448,16 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         Box::pin(async { Ok(()) })
     }
 
+    /// Defers a claimed durable event without acknowledging it. The backend
+    /// must keep later deliveries moving and make this event available again
+    /// after the delay. Backends without that scheduling contract must refuse.
+    fn defer_event_delivery(&self, _delivery_id: u64, _delay: Duration) -> BackendResult<()> {
+        Err(BackendError::new(
+            ClientErrorCategory::Unsupported,
+            "client backend does not support deferred durable delivery",
+        ))
+    }
+
     /// Releases a process-local claim when a consumer drops a delivery without
     /// acknowledging it. The durable store entry remains pending.
     fn release_event_delivery(&self, _delivery_id: u64) {}

@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard, OwnedRwLockReadGuard, RwLock};
 use crate::{
     AgentDriver, BindingKey, BridgeStore, DriverError, ProviderId, ProviderSessionId,
     ResumeSessionSpec, SessionReplay, SessionSpec, SessionThreadBindOutcome, SessionThreadBinding,
-    SessionThreadOpening, SessionThreadPrepareOutcome, StartedTurn, StoreError, TurnInput,
+    SessionThreadOpening, SessionThreadPrepareOutcome, StartedTurn, StoreError, TurnId, TurnInput,
     TurnOptions,
 };
 
@@ -245,7 +245,14 @@ where
         let slot = self.session_slot(binding).await;
         let mut active = slot.lock().await;
         let cwd = self.workspace_path(binding, now)?;
-        if let Some(current) = active.as_ref() {
+        let stored = self.store.get_binding_with_configuration_state(binding)?;
+        if let Some(current) = active.as_ref().filter(|current| {
+            stored
+                .as_ref()
+                .is_some_and(|(provider, session, _, invalidated)| {
+                    provider == &self.provider_id && !invalidated && session == &current.session_id
+                })
+        }) {
             let session_id = &current.session_id;
             log::trace!(
                 target: "inline_agent_bridge::session",
@@ -257,8 +264,9 @@ where
             return Ok(SessionOpenOutcome::Active(session_id.clone()));
         }
 
-        let outcome = match self.store.get_binding_with_configuration(binding)? {
-            Some((stored_provider, session_id, stored_fingerprint)) => {
+        *active = None;
+        let outcome = match stored {
+            Some((stored_provider, session_id, stored_fingerprint, invalidated)) => {
                 if stored_provider != self.provider_id {
                     return Err(SessionManagerError::ProviderMismatch {
                         expected: self.provider_id.clone(),
@@ -271,7 +279,8 @@ where
                     .store
                     .session_thread_binding_for_chat(&binding.installation_id, binding.chat_id)?
                     .is_some();
-                if (configuration_changed && !session_thread_pinned)
+                if invalidated
+                    || (configuration_changed && !session_thread_pinned)
                     || !self.driver.capabilities().resume_session
                 {
                     log::trace!(
@@ -287,7 +296,7 @@ where
                         stored_fingerprint.is_some(),
                         self.session_configuration_fingerprint.is_some()
                     );
-                    SessionOpenOutcome::Replaced(self.replace_session(binding, now).await?)
+                    SessionOpenOutcome::Replaced(self.replace_session(binding, now, false).await?)
                 } else {
                     if configuration_changed {
                         log::trace!(
@@ -326,9 +335,9 @@ where
                         // This is intentionally narrower than a generic rejection.
                         // A timeout, unavailable process, or ordinary provider error
                         // must keep the binding intact for a later retry.
-                        Err(DriverError::InvalidSession(_)) => {
-                            SessionOpenOutcome::Replaced(self.replace_session(binding, now).await?)
-                        }
+                        Err(DriverError::InvalidSession(_)) => SessionOpenOutcome::Replaced(
+                            self.replace_session(binding, now, false).await?,
+                        ),
                         Err(error) => {
                             self.seal_epoch_if_needed(&error);
                             return Err(error.into());
@@ -343,7 +352,7 @@ where
                     self.provider_id.as_str(),
                     binding.chat_id
                 );
-                SessionOpenOutcome::Created(self.replace_session(binding, now).await?)
+                SessionOpenOutcome::Created(self.replace_session(binding, now, false).await?)
             }
         };
         *active = Some(ActiveSession {
@@ -529,11 +538,19 @@ where
         &self,
         binding: &BindingKey,
         now: i64,
+        reset_context: bool,
     ) -> Result<ProviderSessionId, SessionManagerError> {
         let transition = self
             .transition_slot(&binding.installation_id, binding.chat_id)
             .await;
         let _transition = transition.lock().await;
+        if reset_context && self.store.chat_has_submitted_input(binding)? {
+            return Err(DriverError::SessionBusy(
+                "a provider input is still running in this conversation; stop it before resetting"
+                    .to_string(),
+            )
+            .into());
+        }
         if self
             .store
             .session_thread_binding_for_chat(&binding.installation_id, binding.chat_id)?
@@ -551,12 +568,13 @@ where
                 return Err(error.into());
             }
         };
-        self.store.put_binding_with_configuration(
+        self.store.put_binding_with_configuration_and_reset(
             binding,
             &self.provider_id,
             &session_id,
             self.session_configuration_fingerprint.as_deref(),
             now,
+            reset_context,
         )?;
         Ok(session_id)
     }
@@ -584,6 +602,90 @@ where
             }
         };
         Ok((session, turn, lease))
+    }
+
+    /// Submit only the immutable input admitted in the existing inbox. The
+    /// provider acknowledgement is persisted before callers render progress.
+    pub async fn start_admitted_turn(
+        &self,
+        event_id: &str,
+        binding: &BindingKey,
+        now: i64,
+        mut options: TurnOptions,
+    ) -> Result<(SessionOpenOutcome, StartedTurn, ProviderWorkLease), SessionManagerError> {
+        let lease = self.begin_provider_work().await?;
+        let session = self.ensure_session(binding, now).await?;
+        options
+            .cwd
+            .get_or_insert(self.workspace_path(binding, now)?);
+        let transition = self
+            .transition_slot(&binding.installation_id, binding.chat_id)
+            .await;
+        let _transition = transition.lock().await;
+        let snapshot = self
+            .store
+            .begin_context_input(event_id, binding, session.session_id())?;
+        let turn = match self
+            .driver
+            .start_turn(session.session_id(), snapshot.input, options)
+            .await
+        {
+            Ok(turn) => turn,
+            Err(error) => {
+                self.seal_epoch_if_needed(&error);
+                self.store.reject_context_input(event_id, &error)?;
+                return Err(error.into());
+            }
+        };
+        self.record_input_acceptance(event_id, session.session_id(), &turn.turn_id)
+            .await?;
+        Ok((session, turn, lease))
+    }
+
+    async fn record_input_acceptance(
+        &self,
+        event_id: &str,
+        session_id: &ProviderSessionId,
+        turn_id: &TurnId,
+    ) -> Result<(), SessionManagerError> {
+        if matches!(self.store.accept_context_input(event_id, turn_id), Ok(true)) {
+            return Ok(());
+        }
+        // Retain the live handle and work lease through the stop attempt.
+        // Submitting remains an honest unknown receipt even if SQLite fails.
+        self.epoch_ended.store(true, Ordering::Release);
+        if self.driver.cancel_turn(session_id, turn_id).await.is_err() {
+            let _ = self.driver.shutdown().await;
+        }
+        Err(DriverError::EpochEnded("provider accepted input but its durable acknowledgement was lost; cancellation was attempted and this connection cannot be reused".to_string()).into())
+    }
+
+    pub async fn steer_admitted_turn(
+        &self,
+        event_id: &str,
+        binding: &BindingKey,
+        session_id: &ProviderSessionId,
+        turn_id: &TurnId,
+    ) -> Result<(), SessionManagerError> {
+        let _lease = self.begin_provider_work().await?;
+        let transition = self
+            .transition_slot(&binding.installation_id, binding.chat_id)
+            .await;
+        let _transition = transition.lock().await;
+        let snapshot = self
+            .store
+            .begin_context_input(event_id, binding, session_id)?;
+        if let Err(error) = self
+            .driver
+            .steer_turn(session_id, turn_id, snapshot.input)
+            .await
+        {
+            self.seal_epoch_if_needed(&error);
+            self.store.reject_context_input(event_id, &error)?;
+            return Err(error.into());
+        }
+        self.record_input_acceptance(event_id, session_id, turn_id)
+            .await
     }
 
     fn seal_epoch_if_needed(&self, error: &DriverError) {
@@ -671,7 +773,7 @@ where
     ) -> Result<ProviderSessionId, SessionManagerError> {
         let slot = self.session_slot(binding).await;
         let mut active = slot.lock().await;
-        let session_id = self.replace_session(binding, now).await?;
+        let session_id = self.replace_session(binding, now, true).await?;
         *active = Some(ActiveSession {
             session_id: session_id.clone(),
             history_ready: false,
@@ -717,6 +819,9 @@ mod tests {
         yield_on_resume: bool,
         resume_gate: Option<Arc<tokio::sync::Barrier>>,
         turns: StdMutex<Vec<(ProviderSessionId, TurnInput, TurnOptions)>>,
+        cancellations: StdMutex<Vec<(ProviderSessionId, TurnId)>>,
+        cancel_error: bool,
+        cancel_gate: Option<Arc<tokio::sync::Barrier>>,
         shutdowns: StdMutex<usize>,
         shutdown_gate: Option<Arc<tokio::sync::Barrier>>,
     }
@@ -737,6 +842,9 @@ mod tests {
                 yield_on_resume: false,
                 resume_gate: None,
                 turns: StdMutex::default(),
+                cancellations: StdMutex::default(),
+                cancel_error: false,
+                cancel_gate: None,
                 shutdowns: StdMutex::default(),
                 shutdown_gate: None,
             }
@@ -820,10 +928,26 @@ mod tests {
 
         fn cancel_turn<'a>(
             &'a self,
-            _session_id: &'a ProviderSessionId,
-            _turn_id: &'a TurnId,
+            session_id: &'a ProviderSessionId,
+            turn_id: &'a TurnId,
         ) -> DriverFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
+            Box::pin(async move {
+                self.cancellations
+                    .lock()
+                    .unwrap()
+                    .push((session_id.clone(), turn_id.clone()));
+                if let Some(gate) = self.cancel_gate.as_ref() {
+                    gate.wait().await;
+                    gate.wait().await;
+                }
+                if self.cancel_error {
+                    Err(DriverError::Transient(
+                        "cancel acknowledgement lost".to_string(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            })
         }
 
         fn compact_session<'a>(
@@ -918,6 +1042,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admitted_turn_sends_frozen_public_input_and_records_acceptance_before_completion() {
+        let provider = ProviderId::new("codex").unwrap();
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store.clone(), provider);
+        let session = manager.ensure_session(&binding(), 10).await.unwrap();
+        let record = crate::InboundRecord {
+            event_id: "public-input".to_string(),
+            binding: binding(),
+            message_id: 1,
+            delivery_chat_id: 7,
+            sender_user_id: 7,
+            direction: crate::Direction::new(
+                DirectionId::new("public-input").unwrap(),
+                "Current direction",
+            )
+            .with_source_version(Some(crate::SourceMessageVersion {
+                revision: 0,
+                source_snapshot: None,
+                visible_fingerprint: Some("a".repeat(64)),
+                discretionary: false,
+                text: "Current direction".into(),
+            })),
+            state: crate::InboundState::Accepted,
+            accepted_at: 10,
+            started_at: None,
+            lease_expires_at: None,
+            attempt_count: 0,
+            provider_turn_id: None,
+            stream_message_id: None,
+            failure: None,
+        };
+        store.accept_inbound(&record).unwrap();
+        store.start_inbound(&record.event_id, 11).unwrap();
+        let input = TurnInput {
+            text: "Public excerpt\nCurrent direction".to_string(),
+            attachments: vec![],
+            client_message_id: Some("public-input".to_string()),
+        };
+        store
+            .prepare_context_input(
+                &record.event_id,
+                &crate::ContextInputSnapshot {
+                    binding: binding(),
+                    provider_session_id: session.session_id().clone(),
+                    generation: store.context_receipt(&binding()).unwrap().generation,
+                    input: input.clone(),
+                    messages: vec![crate::ContextMessageRef {
+                        chat_id: 7,
+                        message_id: 1,
+                        revision: 0,
+                        source_snapshot: None,
+                        visible_fingerprint: Some("a".repeat(64)),
+                    }],
+                    trigger: Some(crate::ContextTriggerProof {
+                        chat_id: 7,
+                        message_id: 1,
+                        timestamp: 10,
+                    }),
+                },
+            )
+            .unwrap();
+        let (_, turn, _lease) = manager
+            .start_admitted_turn(&record.event_id, &binding(), 12, TurnOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(driver.turns.lock().unwrap()[0].1, input);
+        assert_eq!(
+            store.context_input(&record.event_id).unwrap().unwrap().1,
+            crate::ContextInputState::Accepted
+        );
+        assert_eq!(
+            store
+                .get_inbound(&record.event_id)
+                .unwrap()
+                .unwrap()
+                .provider_turn_id,
+            Some(turn.turn_id)
+        );
+        assert_eq!(
+            store.get_inbound(&record.event_id).unwrap().unwrap().state,
+            crate::InboundState::Started
+        );
+        assert_eq!(store.context_receipt(&binding()).unwrap().consumed.len(), 1);
+        assert!(
+            manager
+                .start_admitted_turn(&record.event_id, &binding(), 13, TurnOptions::default())
+                .await
+                .is_err()
+        );
+        assert_eq!(driver.turns.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn explicit_rotation_starts_and_persists_a_fresh_session() {
         let provider = ProviderId::new("codex").expect("provider");
         let (_workspace, store, _cwd) = registered_store(&provider);
@@ -938,6 +1156,218 @@ mod tests {
             store.get_binding(&binding()).expect("binding"),
             Some((provider, rotated))
         );
+    }
+
+    fn admitted_record(binding: BindingKey, event_id: &str) -> crate::InboundRecord {
+        crate::InboundRecord {
+            event_id: event_id.to_string(),
+            message_id: 1,
+            delivery_chat_id: binding.chat_id,
+            binding,
+            sender_user_id: 7,
+            direction: crate::Direction::new(DirectionId::new(event_id).unwrap(), "request")
+                .with_source_version(Some(crate::SourceMessageVersion {
+                    revision: 0,
+                    source_snapshot: None,
+                    visible_fingerprint: Some("a".repeat(64)),
+                    discretionary: false,
+                    text: "request".into(),
+                })),
+            state: crate::InboundState::Accepted,
+            accepted_at: 10,
+            started_at: None,
+            lease_expires_at: None,
+            attempt_count: 0,
+            provider_turn_id: None,
+            stream_message_id: None,
+            failure: None,
+        }
+    }
+
+    fn admit(
+        store: &BridgeStore,
+        record: &crate::InboundRecord,
+        session: &ProviderSessionId,
+    ) -> crate::ContextInputSnapshot {
+        store.accept_inbound(record).unwrap();
+        store.start_inbound(&record.event_id, 11).unwrap();
+        let snapshot = crate::ContextInputSnapshot {
+            binding: record.binding.clone(),
+            provider_session_id: session.clone(),
+            generation: store.context_receipt(&record.binding).unwrap().generation,
+            input: TurnInput {
+                text: record.direction.text.clone(),
+                attachments: vec![],
+                client_message_id: Some(record.event_id.clone()),
+            },
+            messages: vec![crate::ContextMessageRef {
+                chat_id: record.binding.chat_id,
+                message_id: record.message_id,
+                revision: 0,
+                source_snapshot: None,
+                visible_fingerprint: Some("a".repeat(64)),
+            }],
+            trigger: Some(crate::ContextTriggerProof {
+                chat_id: record.binding.chat_id,
+                message_id: record.message_id,
+                timestamp: 10,
+            }),
+        };
+        store
+            .prepare_context_input(&record.event_id, &snapshot)
+            .unwrap();
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn receipt_sql_error_after_provider_acceptance_cancels_before_releasing_epoch_lease() {
+        for steering in [false, true] {
+            let workspace = tempfile::tempdir().unwrap();
+            let database = workspace.path().join("receipt.sqlite");
+            let store = Arc::new(BridgeStore::open(&database).unwrap());
+            store
+                .put_installation(&crate::InstallationRecord {
+                    installation_id: binding().installation_id,
+                    provider_id: ProviderId::new("codex").unwrap(),
+                    display_name: "Agent".to_string(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .unwrap();
+            store
+                .select_workspace(
+                    &binding().installation_id,
+                    &binding().workspace_id,
+                    workspace.path(),
+                    1,
+                )
+                .unwrap();
+            let gate = Arc::new(tokio::sync::Barrier::new(2));
+            let driver = Arc::new(FakeDriver {
+                cancel_gate: Some(gate.clone()),
+                cancel_error: steering,
+                ..FakeDriver::default()
+            });
+            let manager = Arc::new(ProviderSessionManager::new(
+                driver.clone(),
+                store.clone(),
+                ProviderId::new("codex").unwrap(),
+            ));
+            let session = manager
+                .ensure_session(&binding(), 10)
+                .await
+                .unwrap()
+                .into_session_id();
+            let record = admitted_record(binding(), "lost-receipt");
+            admit(&store, &record, &session);
+            rusqlite::Connection::open(&database).unwrap().execute_batch(
+                "CREATE TRIGGER fail_receipt BEFORE UPDATE OF context_input_state ON inbound_directions
+                 WHEN NEW.context_input_state = 'accepted' BEGIN SELECT RAISE(FAIL, 'synthetic receipt failure'); END;"
+            ).unwrap();
+            let worker = manager.clone();
+            let task = tokio::spawn(async move {
+                if steering {
+                    worker
+                        .steer_admitted_turn(
+                            "lost-receipt",
+                            &binding(),
+                            &session,
+                            &TurnId::new("turn-1").unwrap(),
+                        )
+                        .await
+                } else {
+                    worker
+                        .start_admitted_turn("lost-receipt", &binding(), 12, TurnOptions::default())
+                        .await
+                        .map(|_| ())
+                }
+            });
+            gate.wait().await;
+            assert!(
+                !manager.shutdown_epoch_if_idle().await.unwrap(),
+                "live accepted handle must retain the epoch lease while cancelling"
+            );
+            assert_eq!(
+                store.context_input("lost-receipt").unwrap().unwrap().1,
+                crate::ContextInputState::Submitting
+            );
+            gate.wait().await;
+            assert!(matches!(
+                task.await.unwrap(),
+                Err(SessionManagerError::Driver(DriverError::EpochEnded(_)))
+            ));
+            assert_eq!(driver.cancellations.lock().unwrap().len(), 1);
+            assert_eq!(*driver.shutdowns.lock().unwrap(), usize::from(steering));
+            assert!(manager.begin_provider_work().await.is_err());
+            assert_eq!(store.recover_expired_inbound(1000).unwrap(), 0);
+            assert!(!store.defer_inbound("lost-receipt").unwrap());
+            assert!(
+                store
+                    .context_receipt(&binding())
+                    .unwrap()
+                    .consumed
+                    .is_empty()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn reset_invalidates_preexisting_alternate_workspace_and_cached_provider_history() {
+        let provider = ProviderId::new("codex").unwrap();
+        let (_first_workspace, store, _cwd) = registered_store(&provider);
+        let second_workspace = tempfile::tempdir().unwrap();
+        let second = BindingKey {
+            workspace_id: WorkspaceId::new("workspace-b").unwrap(),
+            ..binding()
+        };
+        store
+            .select_workspace(
+                &second.installation_id,
+                &second.workspace_id,
+                second_workspace.path(),
+                1,
+            )
+            .unwrap();
+        let old_second_session = ProviderSessionId::new("pre-reset-private-history-b").unwrap();
+        store
+            .put_binding(&second, &provider, &old_second_session, 2)
+            .unwrap();
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store.clone(), provider);
+        manager.ensure_session(&binding(), 10).await.unwrap();
+        manager.ensure_session(&second, 10).await.unwrap();
+        let record = admitted_record(second.clone(), "queued-b");
+        let snapshot = admit(&store, &record, &old_second_session);
+        manager.rotate_session(&binding(), 20).await.unwrap();
+        assert_eq!(
+            store.get_inbound("queued-b").unwrap().unwrap().state,
+            crate::InboundState::Failed
+        );
+        assert!(store.context_receipt(&second).is_err());
+        assert!(
+            store
+                .begin_context_input("queued-b", &second, &old_second_session)
+                .is_err()
+        );
+        let reopened = manager.ensure_session(&second, 21).await.unwrap();
+        assert!(matches!(reopened, SessionOpenOutcome::Replaced(_)));
+        assert_ne!(reopened.session_id(), &old_second_session);
+        assert_eq!(driver.starts.lock().unwrap().len(), 3);
+        assert_eq!(
+            driver.resumes.lock().unwrap().len(),
+            1,
+            "alternate cached session must not resume its pre-reset history"
+        );
+        let receipt = store.context_receipt(&second).unwrap();
+        assert_eq!(receipt.reset_at, 20);
+        assert!(receipt.generation > snapshot.generation);
+        assert!(
+            manager
+                .start_admitted_turn("queued-b", &second, 22, TurnOptions::default())
+                .await
+                .is_err()
+        );
+        assert!(driver.turns.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

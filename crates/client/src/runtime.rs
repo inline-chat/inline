@@ -259,7 +259,7 @@ pub struct LosslessEventDelivery {
     delivery_id: Option<u64>,
     event: ClientEvent,
     backend: Arc<dyn ClientBackend>,
-    acknowledged: AtomicBool,
+    settled: AtomicBool,
 }
 
 impl LosslessEventDelivery {
@@ -278,7 +278,19 @@ impl LosslessEventDelivery {
         if let Some(delivery_id) = self.delivery_id {
             self.backend.acknowledge_event_delivery(delivery_id).await?;
         }
-        self.acknowledged.store(true, Ordering::Release);
+        self.settled.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Keeps a durable event pending and schedules a later retry without
+    /// blocking delivery of controls or other realtime events. An ephemeral
+    /// event has no durable retry identity. Unsupported backends return an
+    /// error and retain ordinary unacknowledged-drop behavior.
+    pub fn defer(&self, delay: Duration) -> BackendResult<()> {
+        if let Some(delivery_id) = self.delivery_id {
+            self.backend.defer_event_delivery(delivery_id, delay)?;
+        }
+        self.settled.store(true, Ordering::Release);
         Ok(())
     }
 }
@@ -286,7 +298,7 @@ impl LosslessEventDelivery {
 impl Drop for LosslessEventDelivery {
     fn drop(&mut self) {
         if let Some(delivery_id) = self.delivery_id
-            && !self.acknowledged.load(Ordering::Acquire)
+            && !self.settled.load(Ordering::Acquire)
         {
             self.backend.release_event_delivery(delivery_id);
         }
@@ -955,7 +967,7 @@ impl ClientEventEmitter {
             delivery_id: delivery.delivery_id,
             event: delivery.event,
             backend: self.backend.clone(),
-            acknowledged: AtomicBool::new(false),
+            settled: AtomicBool::new(false),
         };
         if self.lossless_active.load(Ordering::Acquire) {
             if let Err(error) = self.lossless.send(delivery).await {
@@ -1996,6 +2008,42 @@ mod tests {
         delivery.ack().await.unwrap();
         assert!(store.pending_client_events().await.unwrap().is_empty());
         client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn deferred_lossless_delivery_drop_keeps_outbox_pending_and_unsupported_is_explicit() {
+        let store = crate::SqliteStore::open_in_memory().unwrap();
+        let backend = crate::SdkBackend::builder()
+            .store(store.clone())
+            .build()
+            .unwrap();
+        let (client, runner) = InlineClient::builder()
+            .backend(backend.clone())
+            .build()
+            .split();
+        let mut lossless = client.take_lossless_events().unwrap();
+        let staged = backend
+            .stage_client_events(vec![ClientEvent::MessageDeleted {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(11),
+            }])
+            .await
+            .unwrap();
+        runner.event_emitter.emit_deliveries(staged).await.unwrap();
+        let delivery = lossless.recv_delivery().await.unwrap();
+        let id = delivery.delivery_id().unwrap();
+        delivery.defer(Duration::from_secs(60)).unwrap();
+        drop(delivery);
+        assert_eq!(
+            store.pending_client_events().await.unwrap()[0].delivery_id,
+            Some(id)
+        );
+        // If Drop released the deferred claim, this call would replay it.
+        assert!(backend.receive_event_deliveries().await.is_err());
+        let unsupported = InMemoryBackend::new()
+            .defer_event_delivery(1, Duration::from_secs(1))
+            .unwrap_err();
+        assert_eq!(unsupported.category, ClientErrorCategory::Unsupported);
     }
 
     #[test]

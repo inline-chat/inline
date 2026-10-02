@@ -217,10 +217,20 @@ impl BridgeStore {
         if final_text.is_empty() {
             return Err(StoreError::InvalidInboundFinalText);
         }
-        let connection = self.connection.lock().expect("bridge store poisoned");
-        let changed = connection.execute(
+        let mut connection = self.connection.lock().expect("bridge store poisoned");
+        let transaction = connection.transaction()?;
+        let quiet = transaction.execute(
+            "UPDATE inbound_directions SET state = 'failed', failure = ?2, lease_expires_at = NULL
+            WHERE installation_id = ?1 AND state = 'started' AND terminal_state IS NULL
+              AND COALESCE(json_extract(direction_source_json, '$.discretionary'), 0) = 1",
+            params![installation_id.as_str(), failure],
+        )?;
+        let changed = transaction.execute(
             "UPDATE inbound_directions SET
-                terminal_state = 'failed', terminal_text = ?3, terminal_failure = ?2
+                terminal_state = 'failed', terminal_text = CASE
+                    WHEN context_input_state = 'accepted' OR provider_turn_id IS NOT NULL THEN ?4
+                    WHEN context_input_state IN ('submitting', 'uncertain') THEN ?5
+                    ELSE ?3 END, terminal_failure = ?2
              WHERE installation_id = ?1 AND state = 'started'
                AND terminal_state IS NULL
                AND NOT EXISTS (
@@ -231,9 +241,12 @@ impl BridgeStore {
                           'publishing', 'active', 'opening', 'retryable', 'completed'
                       )
                )",
-            params![installation_id.as_str(), failure, final_text],
+            params![installation_id.as_str(), failure, final_text,
+                "The connection was interrupted after the provider accepted this input. I won’t replay it automatically. Check the existing result before sending another request.",
+                "The connection was interrupted and this input may have reached the provider. I won’t replay it automatically. Check the existing result before sending another request."],
         )?;
-        Ok(changed)
+        transaction.commit()?;
+        Ok(changed + quiet)
     }
 }
 

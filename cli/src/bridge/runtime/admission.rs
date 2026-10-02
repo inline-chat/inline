@@ -221,6 +221,16 @@ pub(in crate::bridge) async fn recover_failed_delivery(
     phase: &'static str,
     error: &(dyn std::error::Error + 'static),
 ) {
+    if error.is::<UnverifiedMessageActor>() {
+        // A directory gap is transient, not a processed human request. Keep
+        // the durable receipt pending, with backoff in the existing SDK claim
+        // owner so later controls and realtime sidecars remain readable.
+        log::debug!("deferring Inline delivery until its actor and recipient are verified");
+        if let Err(error) = delivery.defer(Duration::from_secs(1)) {
+            log::error!("could not defer unverified Inline delivery: {error}");
+        }
+        return;
+    }
     crate::telemetry::report_bridge_runtime_error(route.provider_id.as_str(), phase, error, None);
     eprintln!(
         "Bridge delivery failed during {phase}; continuing with later work: {}",
@@ -238,7 +248,8 @@ pub(in crate::bridge) async fn recover_failed_delivery(
                 let sender_is_bot = message.is_outgoing
                     || message_sender_is_bot(&route.bot_store, message)
                         .await
-                        .unwrap_or(true);
+                        .unwrap_or(None)
+                        != Some(false);
                 if route.allows(message.sender_id.get()) && !sender_is_bot {
                     send_text_reply(
                         bot,

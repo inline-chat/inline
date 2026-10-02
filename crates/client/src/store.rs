@@ -415,14 +415,19 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
     }
 
     /// Returns one ordered page of durable deliveries without materializing the
-    /// entire outbox. One oversized first event is returned to avoid starvation.
+    /// entire outbox. Excluded process-local claims are skipped before the
+    /// page limits. One oversized first event is returned to avoid starvation.
     fn pending_client_events_page(
         &self,
         limit: usize,
         max_bytes: usize,
+        excluded_delivery_ids: Vec<u64>,
     ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         let pending = self.pending_client_events();
-        Box::pin(async move { bounded_client_event_page(pending.await?, limit, max_bytes) })
+        Box::pin(async move {
+            let excluded = excluded_delivery_ids.into_iter().collect::<HashSet<_>>();
+            bounded_client_event_page(pending.await?, limit, max_bytes, &excluded)
+        })
     }
 
     /// Acknowledges one durable lossless event after the host has persisted or
@@ -731,6 +736,7 @@ fn bounded_client_event_page(
     pending: Vec<ClientEventDelivery>,
     limit: usize,
     max_bytes: usize,
+    excluded_delivery_ids: &HashSet<u64>,
 ) -> StoreResult<Vec<ClientEventDelivery>> {
     if limit == 0 || max_bytes == 0 {
         return Err(StoreError::internal(
@@ -739,7 +745,15 @@ fn bounded_client_event_page(
     }
     let mut page = Vec::with_capacity(limit.min(pending.len()));
     let mut bytes = 0usize;
-    for delivery in pending.into_iter().take(limit) {
+    for delivery in pending
+        .into_iter()
+        .filter(|delivery| {
+            delivery
+                .delivery_id
+                .is_none_or(|id| !excluded_delivery_ids.contains(&id))
+        })
+        .take(limit)
+    {
         let event_bytes = serde_json::to_vec(&delivery.event)
             .map_err(|error| StoreError::internal(format!("encode client event: {error}")))?
             .len();
@@ -1074,6 +1088,7 @@ impl ClientStore for InMemoryStore {
         &self,
         limit: usize,
         max_bytes: usize,
+        excluded_delivery_ids: Vec<u64>,
     ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         let store = self.clone();
         Box::pin(async move {
@@ -1083,7 +1098,8 @@ impl ClientStore for InMemoryStore {
                 .expect("in-memory store poisoned")
                 .client_event_outbox
                 .clone();
-            bounded_client_event_page(pending, limit, max_bytes)
+            let excluded = excluded_delivery_ids.into_iter().collect::<HashSet<_>>();
+            bounded_client_event_page(pending, limit, max_bytes, &excluded)
         })
     }
 
@@ -2292,6 +2308,7 @@ impl SqliteStore {
         &self,
         limit: usize,
         max_bytes: usize,
+        excluded_delivery_ids: Vec<u64>,
     ) -> StoreResult<Vec<ClientEventDelivery>> {
         if limit == 0 || max_bytes == 0 {
             return Err(StoreError::internal(
@@ -2300,16 +2317,21 @@ impl SqliteStore {
         }
         let sql_limit = i64::try_from(limit)
             .map_err(|_| StoreError::internal("client event page limit exceeded SQLite range"))?;
+        let excluded = serde_json::to_string(&excluded_delivery_ids)
+            .map_err(|error| StoreError::internal(format!("encode delivery claims: {error}")))?;
         let connection = self.connection.lock().expect("sqlite store poisoned");
         let mut statement = connection
             .prepare(
                 "SELECT delivery_id, event_json
                  FROM client_event_outbox
+                 WHERE delivery_id NOT IN (SELECT value FROM json_each(?2))
                  ORDER BY delivery_id ASC
                  LIMIT ?1",
             )
             .map_err(sqlite_error)?;
-        let mut rows = statement.query(params![sql_limit]).map_err(sqlite_error)?;
+        let mut rows = statement
+            .query(params![sql_limit, excluded])
+            .map_err(sqlite_error)?;
         let mut deliveries = Vec::with_capacity(limit);
         let mut bytes = 0usize;
         while let Some(row) = rows.next().map_err(sqlite_error)? {
@@ -3542,9 +3564,12 @@ impl ClientStore for SqliteStore {
         &self,
         limit: usize,
         max_bytes: usize,
+        excluded_delivery_ids: Vec<u64>,
     ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         let store = self.clone();
-        Box::pin(async move { store.pending_client_events_page_sync(limit, max_bytes) })
+        Box::pin(async move {
+            store.pending_client_events_page_sync(limit, max_bytes, excluded_delivery_ids)
+        })
     }
 
     fn acknowledge_client_event(&self, delivery_id: u64) -> BoxFuture<'static, StoreResult<()>> {
@@ -5885,7 +5910,10 @@ mod tests {
             .collect::<Vec<_>>();
         store.append_client_events(events).await.unwrap();
 
-        let first = store.pending_client_events_page(2, 1).await.unwrap();
+        let first = store
+            .pending_client_events_page(2, 1, Vec::new())
+            .await
+            .unwrap();
         assert_eq!(
             first.len(),
             1,
@@ -5897,7 +5925,7 @@ mod tests {
             .unwrap();
 
         let second = store
-            .pending_client_events_page(2, usize::MAX)
+            .pending_client_events_page(2, usize::MAX, Vec::new())
             .await
             .unwrap();
         assert_eq!(second.len(), 2);
@@ -6018,6 +6046,8 @@ mod tests {
             mentioned: Some(true),
             edit_timestamp: Some(13),
             revision: Some(2),
+            is_forwarded: true,
+            source_snapshot: Some("public-snapshot".to_string()),
             sender_is_bot: Some(false),
             entities: vec![crate::MessageEntityRecord {
                 kind: "TYPE_MENTION".to_string(),
