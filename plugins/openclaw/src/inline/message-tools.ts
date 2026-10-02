@@ -586,6 +586,7 @@ function createInlineForwardTool(ctx: InlineMessageToolContext): AnyAgentTool {
               fromPeerId: source.peerId,
               toPeerId: destination.peerId,
               messageIds,
+              submissions: [],
               ...(typeof args.shareForwardHeader === "boolean"
                 ? { shareForwardHeader: args.shareForwardHeader }
                 : {}),

@@ -3972,6 +3972,7 @@ export const inlineMessageActions = {
               fromPeerId: source.peerId,
               toPeerId: destination.peerId,
               messageIds,
+              submissions: [],
               ...(shareForwardHeader !== undefined ? { shareForwardHeader } : {}),
             },
           })

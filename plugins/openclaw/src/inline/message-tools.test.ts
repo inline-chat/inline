@@ -574,6 +574,14 @@ describe("inline/message-tools", () => {
       shareForwardHeader: false,
     })
 
+    const { ForwardMessagesInput } = await vi.importActual<typeof import("@inline-chat/realtime-sdk")>("@inline-chat/realtime-sdk")
+    const forwardCall = invokeRaw.mock.calls[0]?.[1] as {
+      forwardMessages: Parameters<typeof ForwardMessagesInput.toBinary>[0]
+    }
+    // Base e061f6d's ordinary forwarding wire remains unchanged.
+    expect(Buffer.from(ForwardMessagesInput.toBinary(forwardCall.forwardMessages)).toString("hex"))
+      .toBe("0a041a02083712020a0b1a04220208632000")
+
     expect(result).toMatchObject({
       details: {
         ok: true,
@@ -602,6 +610,7 @@ describe("inline/message-tools", () => {
             },
           },
           messageIds: [10n, 11n],
+          submissions: [],
           shareForwardHeader: false,
         },
       }),
