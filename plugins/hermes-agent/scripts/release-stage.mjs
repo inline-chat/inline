@@ -84,8 +84,16 @@ if (candidateSdkTarball || candidateProtocolTarball) {
     throw new Error("candidate dependency versions do not match the release manifest")
   }
 }
+const checkEnv = { ...process.env }
+delete checkEnv.INLINE_HERMES_TEST_SDK_TARBALL
+delete checkEnv.INLINE_HERMES_TEST_PROTOCOL_TARBALL
+if (candidateSdkTarball && candidateProtocolTarball) {
+  checkEnv.INLINE_HERMES_TEST_SDK_TARBALL = path.resolve(candidateSdkTarball)
+  checkEnv.INLINE_HERMES_TEST_PROTOCOL_TARBALL = path.resolve(candidateProtocolTarball)
+}
 execFileSync("bun", ["run", "check"], {
   cwd: stagePackageRoot,
+  env: checkEnv,
   stdio: "inherit",
 })
 

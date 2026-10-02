@@ -151,11 +151,18 @@ describe("packed artifact", () => {
       const pack = parsePackOutput(raw)
       const tarball = path.join(packDir, pack.filename)
 
-      // Source CI has unreleased workspace dependencies. Install local packed
-      // prerequisites so this still exercises a clean npm tree. The isolated
-      // release stage has no sibling packages and resolves published versions.
+      // Source CI packs workspace prerequisites. Candidate release staging
+      // supplies its exact artifacts; registry-only staging supplies neither.
+      // Each path still installs a clean npm tree and verifies its wire graph.
       const localPrerequisites: string[] = []
-      if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
+      const sdkTarball = process.env.INLINE_HERMES_TEST_SDK_TARBALL
+      const protocolTarball = process.env.INLINE_HERMES_TEST_PROTOCOL_TARBALL
+      if (Boolean(sdkTarball) !== Boolean(protocolTarball)) {
+        throw new Error("artifact tests require both candidate SDK and protocol tarballs")
+      }
+      if (sdkTarball && protocolTarball) {
+        localPrerequisites.push(path.resolve(protocolTarball), path.resolve(sdkTarball))
+      } else if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
         for (const directory of ["protocol", "sdk"]) {
           const prerequisiteDir = path.join(repoRoot, "packages", directory)
           const prerequisitePack = parsePackOutput(execFileSync("npm", [
