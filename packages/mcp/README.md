@@ -78,10 +78,12 @@ Legacy reads using `userId` resolve an existing approved DM from conversation me
   - Input: `{ query?, limit? }`
   - Output: `{ query, bestMatch, items[] }`
   - Requires both `messages:read` and `spaces:read`. Use `userId` for participant and sender selection; use `dmChatId` or `conversations.list` for DM tools.
-- `conversations.list` (read-only): list recent conversations or find by name/title/id.
-  - Input: `{ query?, limit?, spaceId?, kind?, unreadOnly?, sort? }`
-  - Output: `{ query, sort, bestMatch, unreadOnly, spaceId, kind, items[] }`
-  - `kind` is `"dm"`, `"home_thread"`, or `"space_chat"`. `spaceId` restricts to one approved space and cannot be combined with a DM/home kind. Filtering and sorting happen before the result limit.
+- `conversations.list` (read-only): list recent conversations, find by name/title/id, or discover all authorized chats for capture.
+  - Input: `{ query?, limit?, spaceId?, kind?, unreadOnly?, sort?, includeSubthreads?, afterChatId? }`
+  - Output: `{ query, sort, bestMatch, unreadOnly, spaceId, kind, nextAfterChatId, items[] }`
+  - `kind` is `"dm"`, `"home_thread"`, or `"space_chat"`. `spaceId` restricts to one approved space and cannot be combined with a DM/home kind. Filtering and sorting happen before pagination.
+  - Complete capture uses `includeSubthreads: true`, no query, and `sort: "id"`. It includes authorized unopened child threads. Continue with `nextAfterChatId` as the exclusive `afterChatId` until null; grant and optional filters still apply. Archive discovery/cursors default to ascending ID sort and reject other sort modes or a query.
+  - Deploy the complete-catalog backend before using matching MCP consumers. An older backend can ignore the opt-in request; response shape alone cannot establish catalog completeness.
 - `conversations.mentions` (read-only, app-visible): search approved conversation metadata for the desktop composer picker.
   - Input: `{ query }`, including an empty string for recent conversations.
   - Output: `{ items: ResourceLink[] }` in structured content, with empty text content, as required by the mention-search extension. At most 20 links; no message bodies are fetched by search.

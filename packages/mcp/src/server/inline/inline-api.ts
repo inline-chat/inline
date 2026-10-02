@@ -1035,7 +1035,7 @@ export function createInlineApi(params: {
 
     async getEligibleChats(params) {
       // Archive discovery is opt-in and must not expand the ordinary search
-      // and mentions cache. The backing server explicitly confirms completeness.
+      // and mentions cache. Complete results require the upgraded backing server.
       if (params?.includeSubthreads === true) return (await buildEligibleChatContext(true)).chats
       const context = await getEligibleChatContext()
       return context.chats
