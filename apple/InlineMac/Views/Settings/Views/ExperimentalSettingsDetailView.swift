@@ -20,15 +20,12 @@ struct ExperimentalSettingsDetailView: View {
   private var richMessageCopyEditingEnabled = false
   @AppStorage(ExperimentalMessageListFeature.key)
   private var messageListV2Enabled = false
-  @AppStorage(ExperimentalChatSymbol.defaultsKey)
-  private var chatSymbol: ExperimentalChatSymbol = .existing
 
   var body: some View {
     Form {
       // Keep experiments grouped by purpose; see AGENTS.md before adding a section.
       agentsSection
       messagesSection
-      appearanceSection
       filesSection
       if ExperimentalMessageListFeature.isAvailable {
         developerToolsSection
@@ -92,29 +89,6 @@ struct ExperimentalSettingsDetailView: View {
       }
     } header: {
       SettingsSectionHeader("Messages")
-    }
-  }
-
-  private var appearanceSection: some View {
-    Section {
-      LabeledContent {
-        Picker("Chat Symbol", selection: $chatSymbol) {
-          ForEach(ExperimentalChatSymbol.allCases) { symbol in
-            Label(symbol.title, systemImage: symbol.symbolName ?? ThreadIconDefaults.normalFallbackSymbol)
-              .tag(symbol)
-          }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .fixedSize()
-      } label: {
-        SettingsRowLabel(
-          "Chat Symbol",
-          description: "Try symbols in the sidebar and chat toolbars. Custom emoji and reply arrows stay the same. Choose Existing to reset."
-        )
-      }
-    } header: {
-      SettingsSectionHeader("Appearance & Navigation")
     }
   }
 

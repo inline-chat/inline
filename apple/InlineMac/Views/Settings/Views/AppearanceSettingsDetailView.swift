@@ -1,5 +1,6 @@
 import AppKit
 import InlineMacUI
+import InlineUI
 import MacTheme
 import SwiftUI
 import TextProcessing
@@ -7,6 +8,7 @@ import UniformTypeIdentifiers
 
 struct AppearanceSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
+  @AppStorage(ChatSymbol.defaultsKey) private var chatSymbol: ChatSymbol = .existing
 
   var body: some View {
     Form {
@@ -24,6 +26,23 @@ struct AppearanceSettingsDetailView: View {
           .fixedSize()
         } label: {
           SettingsRowLabel("Item Size")
+        }
+
+        LabeledContent {
+          Picker("Chat Icon", selection: $chatSymbol) {
+            ForEach(ChatSymbol.allCases) { symbol in
+              Label(symbol.title, systemImage: symbol.symbolName ?? ThreadIconDefaults.normalFallbackSymbol)
+                .tag(symbol)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .fixedSize()
+        } label: {
+          SettingsRowLabel(
+            "Chat Icon",
+            description: "Choose a symbol for chats without a custom emoji."
+          )
         }
 
         Toggle(isOn: $appSettings.sidebarGlassAndTintEnabled) {

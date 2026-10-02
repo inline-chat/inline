@@ -2,26 +2,28 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
-enum ExperimentalChatSymbol: String, CaseIterable, Identifiable {
-  case circle
-  case circleFill = "circle.fill"
-  case document
-  case textPage = "text.page"
-  case message
-  case stackForwardFill = "square.stack.3d.down.forward.fill"
-  case stackRight = "square.stack.3d.down.right"
+enum ChatSymbol: String, CaseIterable, Identifiable {
   case existing
+  case hashtag = "number"
+  case message
 
+  // Keep the stored key so existing selections survive the move to Appearance.
   static let defaultsKey = "experimental.macChatSymbol"
 
   var id: String { rawValue }
-  var title: String { self == .existing ? "Existing" : rawValue }
-  // Existing keeps the experiment off by leaving the original fallback symbol unchanged.
+  var title: String {
+    switch self {
+    case .existing: "Bubble"
+    case .hashtag: "Hashtag"
+    case .message: "Message"
+    }
+  }
+
   var symbolName: String? { self == .existing ? nil : rawValue }
 }
 
 struct SidebarThreadIcon: View, Equatable {
-  @AppStorage(ExperimentalChatSymbol.defaultsKey) private var chatSymbol: ExperimentalChatSymbol = .existing
+  @AppStorage(ChatSymbol.defaultsKey) private var chatSymbol: ChatSymbol = .existing
 
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.emoji == rhs.emoji && lhs.isReplyThread == rhs.isReplyThread &&
@@ -72,17 +74,10 @@ struct SidebarThreadIcon: View, Equatable {
       ),
       size: threadIconSize,
       shape: shape.threadIconShape,
-      contentScaleMultiplier: usesCircleSymbol ? 0.5 : 1,
       fallbackSymbolName: isReplyThread ? nil : chatSymbol.symbolName
     )
     // Keep the icon centered in its original column so titles stay aligned.
     .frame(width: size, height: size, alignment: .center)
-  }
-
-  private var usesCircleSymbol: Bool {
-    ThreadIconDescriptor.normalizedEmoji(emoji) == nil &&
-      !isReplyThread &&
-      (chatSymbol == .circle || chatSymbol == .circleFill)
   }
 
   private var threadIconSize: ThreadIconSize {
