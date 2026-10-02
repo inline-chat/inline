@@ -43102,6 +43102,8 @@ class MessageIdGenerator {
     candidate = candidate & ~3n | BigInt(modulo);
     if (candidate <= this.#last)
       candidate = this.#last + 4n & ~3n | BigInt(modulo);
+    if (modulo === 0 && (candidate & 0xffffffffn) === 0n)
+      candidate += 4n;
     this.#last = candidate;
     return candidate;
   }
