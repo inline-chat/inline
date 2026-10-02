@@ -216,6 +216,10 @@ def observe_wire(runner, adapter, *args, **kwargs):
     return result
 async def observe_start(runner, *args, **kwargs):
     # Observation only: the ordinary startup implementation runs unchanged.
+    platform = next(p for p in runner.config.platforms if p.value == 'inline')
+    native_home = runner.config.get_home_channel(platform)
+    assert native_home is not None and native_home.chat_id == '30', 'The configured home was not loaded before startup'
+    observed['nativeHomeConfiguredBeforeStart'] = True
     result = await original_start(runner, *args, **kwargs)
     observed['normalStartReturned'] = result
     observed['enabledInline'] = any(p.value=='inline' and c.enabled for p,c in runner.config.platforms.items())
@@ -226,7 +230,7 @@ async def observe_start(runner, *args, **kwargs):
     return result
 GatewayRunner.start = observe_start
 GatewayRunner._wire_adapter_handlers = observe_wire
-job = {'reply':'no-input-fixture', 'hold':False, 'expectedInputs':[],
+job = {'reply':'no-input-fixture', 'hold':False, 'expectedInputs':[], 'homeChatId':'30',
        **{key:str(home/('probe-'+key+'.json')) for key in ('observations','ready','stop','query','history','status')}}
 try:
     asyncio.run(flow.worker(job))
@@ -237,6 +241,7 @@ else:
 after = require_readable_config_before_write(home/'config.yaml')
 assert after['plugins']['enabled'] == enabled
 assert after['platforms']['inline']['connect_timeout_ms'] == 1000
+assert after['platforms']['inline']['home_channel']['chat_id'] == '30'
 assert observed['normalStartReturned'] and observed['enabledInline']
 observed.update(case='normal-plugin-admission-preserved', nativeEnablePersisted=True,
                 pluginConfigurationPreserved=True, profile=str(home))
@@ -245,6 +250,7 @@ report_path.write_text(json.dumps(observed))
         value.update(canonicalInstallProbeCount=len(probes), realCanonicalHostDelegated=True,
                      installProbeAfterAllRuntimeBytesMatch=True, installerBin=installer)
         self.assertTrue(value["durableHandlerWired"] and value["pluginConfigurationPreserved"])
+        self.assertTrue(value["nativeHomeConfiguredBeforeStart"])
         self.assertFalse(value["authenticatedReceiving"])
 
     def test_actual_context_resolver_uses_declared_fixture_contract_without_http_probes(self):

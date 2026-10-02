@@ -27,6 +27,15 @@ try {
   assert.equal((await client.getMe()).userId, id(process.env.INLINE_E2E_HUMAN_ID))
   let result
   switch (operation.kind) {
+    case "resolve-dm": {
+      assert.ok(!operation.chatId, "DM resolution requires its actual bot peer")
+      const opened = await client.invoke(Method.GET_CHAT, { oneofKind: "getChat", getChat: {
+        peerId: { type: { oneofKind: "user", user: { userId: target.userId } } },
+      } })
+      assert.ok(opened.getChat.chat?.id, "The human/bot DM was not established")
+      result = { chatId: String(id(opened.getChat.chat.id)) }
+      break
+    }
     case "send": {
       const peerId = operation.chatId ? peer(operation.chatId)
         : { type: { oneofKind: "user", user: { userId: target.userId } } }

@@ -310,12 +310,12 @@ class DeterministicProvider:
         self.thread.join(timeout=2)
 
 
-def configuration(provider_url, *, environment=None):
+def configuration(provider_url, *, environment=None, home_chat_id=None):
     env = os.environ if environment is None else environment
     human = env["INLINE_E2E_HUMAN_ID"]
     home = Path(env["HERMES_HOME"])
     bot = env["INLINE_E2E_BOT_ID"]
-    return {"model": {"provider": "custom", "default": "ci-hermes-local", "base_url": provider_url,
+    config = {"model": {"provider": "custom", "default": "ci-hermes-local", "base_url": provider_url,
                       "api_key": "no-key-required", "api_mode": "chat_completions", "context_length": 65536},
             "agent": {"max_iterations": 2}, "memory": {"memory_enabled": False},
             "gateway": {"multiplex_profiles": False, "group_sessions_per_user": False,
@@ -328,16 +328,22 @@ def configuration(provider_url, *, environment=None):
                 "reactions": False, "sync_commands": False, "text_debounce_seconds": 0,
                 "state_path": str(home / f"sdk-{bot}.json"),
                 "settings_path": str(home / f"settings-{bot}.json")}}}
+    if home_chat_id is not None:
+        assert isinstance(home_chat_id, str) and re.fullmatch(r"[1-9]\d*", home_chat_id)
+        config["platforms"]["inline"]["home_channel"] = {
+            "platform": "inline", "chat_id": home_chat_id, "name": "CI receiving chat"}
+    return config
 
 
-def write_profile_configuration(provider_url, *, environment=None):
+def write_profile_configuration(provider_url, *, environment=None, home_chat_id=None):
     from hermes_cli.config import _deep_merge, atomic_config_write, require_readable_config_before_write
     env = os.environ if environment is None else environment
     path = Path(env["HERMES_HOME"]) / "config.yaml"
     # Normal plugin enable owns its persisted allow-list. Update only fixture
     # settings through the native guarded YAML owner, retaining that admission.
     existing = require_readable_config_before_write(path)
-    atomic_config_write(path, _deep_merge(existing, configuration(provider_url, environment=env)))
+    atomic_config_write(path, _deep_merge(existing, configuration(provider_url, environment=env,
+                                                                 home_chat_id=home_chat_id)))
 
 
 async def worker(job):
@@ -345,7 +351,7 @@ async def worker(job):
     assert not (home / ".env").exists()
     _host, source = host_info()
     provider = DeterministicProvider(home, job)
-    write_profile_configuration(provider.url)
+    write_profile_configuration(provider.url, home_chat_id=job["homeChatId"])
     provider.install_llm_seam()
     from hermes_cli.plugins import get_plugin_manager
     get_plugin_manager().discover_and_load()
@@ -468,6 +474,13 @@ class Receiver:
         self.log = None
 
     async def start(self):
+        # Configure the lane as an ordinarily set-up gateway. Resolve this
+        # receiver's real DM through the authenticated packed human SDK before
+        # startup; never hide native onboarding output from the assertions.
+        home = await human({"kind": "resolve-dm", "botId": os.environ[
+            "INLINE_E2E_OTHER_BOT_ID" if self.other else "INLINE_E2E_BOT_ID"]})
+        self.job["homeChatId"] = home["chatId"]
+        write_json(self.path, self.job)
         self.log = (self.home / f"{self.identifier}-worker.log").open("wb")
         self.child = await asyncio.create_subprocess_exec(sys.executable, str(Path(__file__).resolve()),
             "worker", str(self.path), env=child_environment(self.home, other=self.other),
