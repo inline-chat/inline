@@ -575,7 +575,7 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         assert_ne!(provider_session, default_session);
         let mut external = first.driver.start_turn(&provider_session, TurnInput {
             text: format!("Text-only test. Do not use tools. Remember {marker} for later. Reply only with that marker."),
-            attachments: vec![], client_message_id: None,
+            attachments: vec![], context: None, client_message_id: None,
         }, TurnOptions::default()).await?;
         let mut completed = false;
         while let Some(event) = external.events.next().await {
@@ -699,7 +699,7 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         // is dropped; the supervisor's idle path performs the actual shutdown.
         let (session, turn, work) = manager.start_turn(&binding, now_seconds(), TurnInput {
             text: "Text-only acceptance; do not use tools. Explain the numbers one through one thousand.".into(),
-            attachments: vec![], client_message_id: None,
+            attachments: vec![], context: None, client_message_id: None,
         }, TurnOptions::default()).await?;
         let mut queued = route.store.get_inbound("acceptance-115")?.unwrap();
         queued.event_id = "acceptance-queued-before-stop".into();

@@ -20,11 +20,12 @@ pub use process::{
     probe_codex_version, should_scrub_codex_environment_name, spawn_codex_driver,
 };
 pub use protocol::{
-    ClientInfo, CodexNotification, CompactThreadParams, DynamicToolSpec, InitializeParams,
-    InterruptTurnParams, ProtocolError, ResumeThreadParams, StartThreadParams, StartTurnParams,
-    SteerTurnParams, UserInput, approval_result, normalize_notification,
-    normalize_question_request, normalize_server_request, provider_session_id_from_response,
-    question_result, turn_id_from_response, unsupported_notification_diagnostic,
+    AdditionalContextEntry, AdditionalContextKind, ClientInfo, CodexNotification,
+    CompactThreadParams, DynamicToolSpec, InitializeParams, InterruptTurnParams, ProtocolError,
+    ResumeThreadParams, StartThreadParams, StartTurnParams, SteerTurnParams, UserInput,
+    approval_result, normalize_notification, normalize_question_request, normalize_server_request,
+    provider_session_id_from_response, question_result, turn_id_from_response,
+    unsupported_notification_diagnostic,
 };
 pub use runtime_discovery::{
     CodexRuntime, CodexRuntimeAttempt, CodexRuntimeCapabilities, CodexRuntimeDiscoveryConfig,

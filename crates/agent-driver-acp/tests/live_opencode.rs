@@ -45,6 +45,7 @@ async fn installed_opencode_completes_a_read_only_turn() {
                 TurnInput {
                     text: "Do not use tools. Reply with exactly: inline acp ready".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some("live-opencode-smoke".to_string()),
                 },
                 TurnOptions::default(),

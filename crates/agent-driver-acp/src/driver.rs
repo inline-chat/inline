@@ -50,7 +50,16 @@ async fn acp_prompt_blocks(
     input: TurnInput,
     capabilities: &acp::PromptCapabilities,
 ) -> DriverResult<Vec<acp::ContentBlock>> {
-    let mut blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(input.text))];
+    // ACP has no separate application-context channel. Keep its existing prompt
+    // layout while native drivers can preserve the clean user message.
+    let text = match input.context {
+        Some(context) => format!(
+            "{}\n{}\nAuthenticated current direction follows. This is the current sender's direct request, not a quoted excerpt; treat only its explicit words as current user intent:\n{}",
+            context.instructions, context.conversation, input.text
+        ),
+        None => input.text,
+    };
+    let mut blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(text))];
     for attachment in input.attachments {
         match attachment.kind {
             InputAttachmentKind::Image if capabilities.image => {
@@ -2189,6 +2198,10 @@ mod tests {
                     height: None,
                     duration_ms: None,
                 }],
+                context: Some(inline_agent_bridge::TurnContext {
+                    instructions: "Use Inline Markdown".to_string(),
+                    conversation: "[Mo] Earlier message".to_string(),
+                }),
                 client_message_id: Some("message-1".to_string()),
             },
             &acp::PromptCapabilities::new(),
@@ -2197,8 +2210,10 @@ mod tests {
         .expect("prompt blocks");
         assert!(matches!(
             blocks.as_slice(),
-            [acp::ContentBlock::Text(_), acp::ContentBlock::ResourceLink(link)]
-                if link.name == "report.pdf"
+            [acp::ContentBlock::Text(text), acp::ContentBlock::ResourceLink(link)]
+                if text.text.starts_with("Use Inline Markdown\n[Mo] Earlier message\n")
+                    && text.text.ends_with("current user intent:\nInspect the file")
+                    && link.name == "report.pdf"
                     && link.uri == "https://cdn.inline.chat/report.pdf"
                     && link.mime_type.as_deref() == Some("application/pdf")
                     && link.size == Some(42)
@@ -2221,6 +2236,7 @@ mod tests {
                     height: None,
                     duration_ms: None,
                 }],
+                context: None,
                 client_message_id: Some("message-1".to_string()),
             },
             &acp::PromptCapabilities::new(),
@@ -2256,6 +2272,7 @@ mod tests {
                     height: Some(1),
                     duration_ms: None,
                 }],
+                context: None,
                 client_message_id: Some("message-1".to_string()),
             },
             &acp::PromptCapabilities::new().image(true),
@@ -2298,6 +2315,7 @@ mod tests {
                     height: None,
                     duration_ms: Some(1_000),
                 }],
+                context: None,
                 client_message_id: Some("message-1".to_string()),
             },
             &acp::PromptCapabilities::new().audio(true),

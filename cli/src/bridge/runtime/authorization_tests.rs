@@ -151,6 +151,52 @@ fn history_contains(history: &inline_client::HistoryPage, expected: &str) -> boo
 }
 
 #[tokio::test]
+async fn admitted_direction_keeps_the_request_and_stable_inline_links() {
+    let route = route("codex");
+    let (bot, backend, mut events) = client().await;
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    route.bot_store.record_dialog(dialog).await.expect("DM");
+    let text = "  @Mo’s Codex hi 😀 ask @Dena about Planning";
+    let mut message = message(7, Some(false), text);
+    message.metadata.entities = vec![
+        text_links::tests::entity(text, "@Mo’s Codex", "TYPE_MENTION", 17),
+        text_links::tests::entity(text, "@Dena", "TYPE_MENTION", 123),
+        text_links::tests::entity(text, "Planning", "TYPE_THREAD", 456),
+    ];
+    backend.push_event_batch(vec![ClientEvent::MessageStored { message }]);
+    let delivery = delivery(&mut events).await;
+    let record = inbound_from_delivery(&bot, &delivery, &route)
+        .await
+        .expect("admission")
+        .expect("direction");
+    let expected = "hi 😀 ask [@Dena](in://user/123) about [Planning](in://chat/456)";
+    assert_eq!(record.direction.text, expected);
+    route
+        .store
+        .accept_inbound(&record)
+        .expect("persist direction");
+    assert_eq!(
+        route
+            .store
+            .get_inbound(&record.event_id)
+            .expect("record")
+            .expect("persisted direction")
+            .direction
+            .text,
+        expected
+    );
+    // The authenticated source and its entities still drive routing and linking.
+    assert!(
+        matches!(delivery.event(), ClientEvent::MessageStored { message }
+        if matches!(&message.content, MessageContent::Text { text: original } if original == text)
+        && message.metadata.entities.len() == 3)
+    );
+    delivery.ack().await.expect("ack");
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
 async fn provider_unavailable_bound_context_without_catalog_handles_status_and_queues_work() {
     let route = route("codex");
     record_bound_dialog(&route, "gpt-test").await;

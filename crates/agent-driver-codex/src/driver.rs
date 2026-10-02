@@ -10,8 +10,8 @@ use inline_agent_bridge::{
     ApprovalOption, DriverCapabilities, DriverError, DriverFuture, DriverModelOption, DriverResult,
     DriverSettingOption, DriverSettingsCatalog, HostToolCall, HostToolConfiguration,
     HostToolResult, InputAttachment, InputAttachmentKind, ProviderSessionId, QuestionAnswer,
-    ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnId, TurnInput,
-    TurnOptions,
+    ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnContext,
+    TurnId, TurnInput, TurnOptions,
 };
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -22,10 +22,11 @@ use tokio::sync::mpsc;
 use crate::INLINE_CLIENT_MESSAGE_ID_PREFIX;
 use crate::peer::{CodexPeer, IncomingMessage, PeerError, PeerResult, RemoteError};
 use crate::protocol::{
-    CodexNotification, CompactThreadParams, DynamicToolSpec, InterruptTurnParams, ModelListParams,
-    ModelListResponse, PermissionProfileListParams, PermissionProfileListResponse,
-    ResumeThreadParams, StartThreadParams, StartTurnParams, SteerTurnParams, UserInput,
-    approval_result, normalize_notification, normalize_question_request, normalize_server_request,
+    AdditionalContextEntry, AdditionalContextKind, CodexNotification, CompactThreadParams,
+    DynamicToolSpec, InterruptTurnParams, ModelListParams, ModelListResponse,
+    PermissionProfileListParams, PermissionProfileListResponse, ResumeThreadParams,
+    StartThreadParams, StartTurnParams, SteerTurnParams, UserInput, approval_result,
+    normalize_notification, normalize_question_request, normalize_server_request,
     provider_session_id_from_response, question_result, turn_id_from_response,
     unsupported_notification_diagnostic,
 };
@@ -36,6 +37,36 @@ const DEFAULT_MODE_REQUEST_USER_INPUT: &str = "features.default_mode_request_use
 const MAX_CODEX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_CODEX_AUDIO_BYTES: usize = 20 * 1024 * 1024;
 const CODEX_IMAGE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn codex_turn_context(
+    context: Option<TurnContext>,
+    persistent_instructions: Option<&str>,
+) -> Option<BTreeMap<String, AdditionalContextEntry>> {
+    context.map(|context| {
+        // Codex deduplicates additionalContext by value even after compaction
+        // drops the corresponding history items. Refresh both entries for each
+        // input so an unchanged guide or conversation is still delivered.
+        let delivery_id = uuid::Uuid::new_v4();
+        let refresh = |value: String| format!("Inline context delivery: {delivery_id}\n\n{value}");
+        let mut entries = BTreeMap::from([(
+            "inline_conversation".to_string(),
+            AdditionalContextEntry {
+                value: refresh(context.conversation),
+                kind: AdditionalContextKind::Untrusted,
+            },
+        )]);
+        if persistent_instructions != Some(context.instructions.as_str()) {
+            entries.insert(
+                "inline_delivery".to_string(),
+                AdditionalContextEntry {
+                    value: refresh(context.instructions),
+                    kind: AdditionalContextKind::Application,
+                },
+            );
+        }
+        entries
+    })
+}
 
 async fn codex_attachment_inputs(
     attachments: Vec<InputAttachment>,
@@ -428,6 +459,7 @@ type WeakShutdownHook = Weak<dyn Fn() -> ShutdownFuture + Send + Sync>;
 
 pub struct CodexAppServerDriver<W> {
     peer: CodexPeer<W>,
+    application_instructions: Option<String>,
     server_user_agent: String,
     routing: SharedEventRouting,
     approvals: PendingApprovals,
@@ -442,6 +474,7 @@ impl<W> Clone for CodexAppServerDriver<W> {
     fn clone(&self) -> Self {
         Self {
             peer: self.peer.clone(),
+            application_instructions: self.application_instructions.clone(),
             server_user_agent: self.server_user_agent.clone(),
             routing: self.routing.clone(),
             approvals: self.approvals.clone(),
@@ -469,6 +502,54 @@ impl<W> CodexAppServerDriver<W>
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    /// Adds stable application guidance to native session instructions when
+    /// creating or resuming a session. Configure before opening sessions.
+    /// Existing configured developer instructions are preserved verbatim.
+    pub fn with_application_instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.application_instructions = Some(instructions.into());
+        self
+    }
+
+    async fn thread_config(&self, cwd: &std::path::Path) -> DriverResult<BTreeMap<String, Value>> {
+        let mut overrides = inline_thread_config();
+        if let Some(instructions) = self.application_instructions.as_deref() {
+            let response = self
+                .peer
+                .request_with_timeout(
+                    "config/read",
+                    json!({"includeLayers": false, "cwd": cwd}),
+                    CONTROL_REQUEST_TIMEOUT,
+                )
+                .await
+                .map_err(driver_error)?;
+            let configuration = response
+                .get("config")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    DriverError::Protocol("Codex omitted effective configuration".to_string())
+                })?;
+            let existing = match configuration.get("developer_instructions") {
+                None | Some(Value::Null) => "",
+                Some(Value::String(value)) => value.as_str(),
+                Some(_) => {
+                    return Err(DriverError::Protocol(
+                        "Codex returned invalid developer instructions".to_string(),
+                    ));
+                }
+            };
+            let combined = if existing.is_empty() || existing == instructions {
+                instructions.to_string()
+            } else {
+                format!("{existing}\n\n{instructions}")
+            };
+            overrides.insert(
+                "developer_instructions".to_string(),
+                Value::String(combined),
+            );
+        }
+        Ok(overrides)
+    }
+
     pub(crate) async fn session_catalog_request(
         &self,
         method: &'static str,
@@ -548,6 +629,7 @@ where
         ));
         Ok(Self {
             peer,
+            application_instructions: None,
             server_user_agent,
             routing,
             approvals,
@@ -1062,8 +1144,8 @@ where
                         .collect()
                 });
             let params = StartThreadParams {
+                config: Some(self.thread_config(&spec.cwd).await?),
                 cwd: Some(spec.cwd),
-                config: Some(inline_thread_config()),
                 dynamic_tools,
                 ..StartThreadParams::default()
             };
@@ -1085,9 +1167,9 @@ where
                 .request_with_timeout(
                     "thread/resume",
                     serialize(ResumeThreadParams {
+                        config: Some(self.thread_config(&spec.cwd).await?),
                         thread_id: spec.session_id.to_string(),
                         cwd: Some(spec.cwd),
-                        config: Some(inline_thread_config()),
                     })?,
                     MUTATING_REQUEST_TIMEOUT,
                 )
@@ -1144,6 +1226,8 @@ where
     ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async move {
             let mut params = StartTurnParams::text(session_id.to_string(), input.text);
+            params.additional_context =
+                codex_turn_context(input.context, self.application_instructions.as_deref());
             params.input.extend(
                 codex_attachment_inputs(input.attachments, self.native_audio_inputs_supported())
                     .await?,
@@ -1196,6 +1280,10 @@ where
                             .await?,
                         )
                         .collect(),
+                    additional_context: codex_turn_context(
+                        input.context,
+                        self.application_instructions.as_deref(),
+                    ),
                     expected_turn_id: turn_id.to_string(),
                 })?,
             )
@@ -2058,6 +2146,10 @@ fn resume_driver_error(error: PeerError) -> DriverError {
 }
 
 #[cfg(test)]
+#[path = "native_context_tests.rs"]
+mod native_context_tests;
+
+#[cfg(test)]
 mod tests {
     use futures_util::StreamExt;
     use inline_agent_bridge::{ActivitySemanticKind, ActivityStatus, ActivityUpsert};
@@ -2879,6 +2971,7 @@ mod tests {
                 TurnInput {
                     text: "hello".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some("message-1".to_string()),
                 },
                 TurnOptions {
@@ -2929,6 +3022,7 @@ mod tests {
                 TurnInput {
                     text: "test".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -2979,6 +3073,7 @@ mod tests {
                 TurnInput {
                     text: "inspect".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -3031,6 +3126,7 @@ mod tests {
                 TurnInput {
                     text: "use provider default".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions {
@@ -3076,6 +3172,7 @@ mod tests {
                 TurnInput {
                     text: "fast".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -3132,6 +3229,7 @@ mod tests {
                 TurnInput {
                     text: "test".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -3478,6 +3576,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_session_guidance_preserves_configured_instructions_for_start_and_resume() {
+        let (driver, mut server) = initialized_driver().await;
+        let driver = driver.with_application_instructions("Inline delivery guide");
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            for method in ["thread/start", "thread/resume"] {
+                let config: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(config["method"], "config/read");
+                assert_eq!(
+                    config["params"],
+                    json!({"includeLayers": false, "cwd": "/repo"})
+                );
+                writer.write_all(format!("{{\"id\":{},\"result\":{{\"config\":{{\"developer_instructions\":\"Existing instructions\\nunchanged\"}}}}}}\n", config["id"]).as_bytes()).await.unwrap();
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], method);
+                assert_eq!(
+                    request["params"]["config"]["developer_instructions"],
+                    "Existing instructions\nunchanged\n\nInline delivery guide"
+                );
+                assert_eq!(
+                    request["params"]["config"][DEFAULT_MODE_REQUEST_USER_INPUT],
+                    true
+                );
+                assert!(request["params"].get("baseInstructions").is_none());
+                writer
+                    .write_all(
+                        format!(
+                            "{{\"id\":{},\"result\":{{\"thread\":{{\"id\":\"thread-1\"}}}}}}\n",
+                            request["id"]
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let session = driver
+            .start_session(SessionSpec {
+                cwd: "/repo".into(),
+            })
+            .await
+            .unwrap();
+        driver
+            .resume_session(ResumeSessionSpec {
+                session_id: session,
+                cwd: "/repo".into(),
+                replay: SessionReplay::None,
+            })
+            .await
+            .unwrap();
+        server_task.await.unwrap();
+        let context = codex_turn_context(
+            Some(TurnContext {
+                instructions: "Inline delivery guide".to_string(),
+                conversation: "Quoted data".to_string(),
+            }),
+            driver.application_instructions.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(context.len(), 1);
+        assert_eq!(
+            context["inline_conversation"].kind,
+            AdditionalContextKind::Untrusted
+        );
+    }
+
+    #[tokio::test]
+    async fn supplemental_context_is_native_and_user_messages_stay_clean_for_start_and_steer() {
+        let (driver, mut server) = initialized_driver().await;
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let mut previous_delivery = None;
+            for (method, text) in [("turn/start", "hi"), ("turn/steer", "next request")] {
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], method);
+                assert_eq!(
+                    request["params"]["input"],
+                    json!([{"type": "text", "text": text}])
+                );
+                let context = &request["params"]["additionalContext"];
+                assert_eq!(context["inline_delivery"]["kind"], "application");
+                assert_eq!(context["inline_conversation"]["kind"], "untrusted");
+                let (delivery, guide) = context["inline_delivery"]["value"]
+                    .as_str()
+                    .unwrap()
+                    .split_once("\n\n")
+                    .unwrap();
+                uuid::Uuid::parse_str(delivery.strip_prefix("Inline context delivery: ").unwrap())
+                    .unwrap();
+                assert_eq!(guide, "Use Inline Markdown");
+                assert_eq!(
+                    context["inline_conversation"]["value"],
+                    format!("{delivery}\n\n[Mo] Earlier message")
+                );
+                assert_ne!(previous_delivery.as_deref(), Some(delivery));
+                previous_delivery = Some(delivery.to_string());
+                assert_eq!(
+                    request["params"]["clientUserMessageId"],
+                    format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{method}")
+                );
+                let result = if method == "turn/start" {
+                    json!({"turn": {"id": "turn-1"}})
+                } else {
+                    assert_eq!(request["params"]["expectedTurnId"], "turn-1");
+                    json!({"turnId": "turn-1"})
+                };
+                writer
+                    .write_all(
+                        format!("{{\"id\":{},\"result\":{result}}}\n", request["id"]).as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let input = |text: &str, id: &str| TurnInput {
+            text: text.to_string(),
+            attachments: Vec::new(),
+            context: Some(TurnContext {
+                instructions: "Use Inline Markdown".to_string(),
+                conversation: "[Mo] Earlier message".to_string(),
+            }),
+            client_message_id: Some(id.to_string()),
+        };
+        let session_id = ProviderSessionId::new("thread-1").unwrap();
+        let turn = driver
+            .start_turn(
+                &session_id,
+                input("hi", "turn/start"),
+                TurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        driver
+            .steer_turn(
+                &session_id,
+                &turn.turn_id,
+                input("next request", "turn/steer"),
+            )
+            .await
+            .unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn maps_every_supported_session_and_turn_operation() {
         let (driver, mut server) = initialized_driver().await;
         let server_task = tokio::spawn(async move {
@@ -3580,6 +3827,7 @@ mod tests {
                 TurnInput {
                     text: "work".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some("message-1".to_string()),
                 },
                 TurnOptions {
@@ -3598,6 +3846,7 @@ mod tests {
                 TurnInput {
                     text: "focus tests".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some("message-2".to_string()),
                 },
             )

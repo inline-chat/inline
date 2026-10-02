@@ -675,7 +675,11 @@ async fn inbound_from_message(
         .await?;
         return Ok(None);
     }
-    let Some(content) = normalize_inbound_content(&message.content) else {
+    let Some(content) = normalize_inbound_content(
+        &message.content,
+        &message.metadata.entities,
+        route.bot_user_id,
+    ) else {
         return Ok(None);
     };
     let text = content.text;
@@ -1091,7 +1095,11 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
     {
         return Ok(false);
     }
-    let Some(content) = normalize_inbound_content(&message.content) else {
+    let Some(content) = normalize_inbound_content(
+        &message.content,
+        &message.metadata.entities,
+        route.bot_user_id,
+    ) else {
         return Ok(false);
     };
     if content.text == source.direction.text && content.attachments == source.direction.attachments
@@ -1118,6 +1126,7 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
         }
         return Ok(true);
     }
+    let context = resolve_turn_context(route, &source).await;
     if !dispatch_source_edit_once(store, &event_id, || {
         sessions.driver().steer_turn(
             session_id,
@@ -1125,6 +1134,7 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
             TurnInput {
                 text: content.text,
                 attachments: content.attachments,
+                context: Some(context),
                 client_message_id: Some(event_id.clone()),
             },
         )
@@ -1468,19 +1478,10 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         .into());
     }
     let mut typing = TypingIndicator::start(bot, binding.chat_id).await;
-    let instruction = if is_compaction {
-        instruction
+    let context = if is_compaction {
+        None
     } else {
-        match build_turn_instruction(route, &record, &instruction).await {
-            Ok(instruction) => instruction,
-            Err(error) => {
-                eprintln!(
-                    "Inline context resolution failed: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-                instruction
-            }
-        }
+        Some(resolve_turn_context(route, &record).await)
     };
     let settings = match store.chat_settings(binding, now_seconds()) {
         Ok(settings) => settings,
@@ -1523,6 +1524,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                 TurnInput {
                     text: instruction,
                     attachments: provider_attachments,
+                    context,
                     client_message_id: Some(record.direction.id.to_string()),
                 },
                 TurnOptions {
@@ -3473,6 +3475,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     return Ok(());
                                 }
                             };
+                            let context = resolve_turn_context(route, &record).await;
                             let steered = sessions
                                 .driver()
                                 .steer_turn(
@@ -3481,6 +3484,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     TurnInput {
                                         text: record.direction.text.clone(),
                                         attachments: record.direction.attachments.clone(),
+                                        context: Some(context),
                                         client_message_id: Some(record.direction.id.to_string()),
                                     },
                                 )

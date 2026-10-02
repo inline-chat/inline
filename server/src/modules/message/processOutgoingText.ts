@@ -277,7 +277,10 @@ const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: stri
     return null
   }
 
-  if (url.protocol.toLowerCase() !== "inline:" || url.hostname.toLowerCase() !== "user") {
+  if (
+    !["inline:", "in:"].includes(url.protocol.toLowerCase()) ||
+    url.hostname.toLowerCase() !== "user"
+  ) {
     return null
   }
 

@@ -186,6 +186,7 @@ async fn claude_form_elicitation_round_trips_through_inline_questions() {
             TurnInput {
                 text: "ask me".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions::default(),
@@ -464,6 +465,7 @@ async fn creates_session_normalizes_stream_and_resolves_permission() {
             TurnInput {
                 text: "do it".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: Some("message-1".to_string()),
             },
             TurnOptions::default(),
@@ -699,6 +701,7 @@ async fn prewarms_claude_shaped_settings_and_applies_supported_selections() {
             TurnInput {
                 text: "Use the selected settings".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions {
@@ -745,6 +748,7 @@ async fn prewarms_claude_shaped_settings_and_applies_supported_selections() {
             TurnInput {
                 text: "Keep the selected settings".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions {
@@ -829,6 +833,7 @@ async fn ambiguous_native_mode_error_stops_the_provider_epoch() {
                 TurnInput {
                     text: "must not run after uncertain mode".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -970,6 +975,7 @@ async fn cancellation_is_forwarded_and_completes_as_interrupted() {
             TurnInput {
                 text: "wait".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions::default(),
@@ -1208,6 +1214,7 @@ async fn invalid_approval_choice_keeps_the_permission_request_resolvable() {
             TurnInput {
                 text: "request permission".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions::default(),
@@ -1335,6 +1342,7 @@ async fn cancel_turn_approval_responds_cancelled_and_notifies_the_agent() {
             TurnInput {
                 text: "cancel through approval".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions::default(),
@@ -1432,6 +1440,7 @@ async fn turn_and_approval_ids_are_unique_across_driver_restarts() {
                 TurnInput {
                     text: "capture IDs".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -1528,6 +1537,7 @@ async fn transport_eof_fails_active_turn_and_is_observable() {
             TurnInput {
                 text: "wait while transport closes".to_string(),
                 attachments: Vec::new(),
+                context: None,
                 client_message_id: None,
             },
             TurnOptions::default(),

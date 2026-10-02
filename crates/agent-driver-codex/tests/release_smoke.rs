@@ -30,6 +30,7 @@ async fn reply(
             TurnInput {
                 text: text.into(),
                 attachments: vec![],
+                context: None,
                 client_message_id: Some(correlation.into()),
             },
             TurnOptions::default(),

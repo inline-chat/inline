@@ -4,9 +4,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use inline_agent_bridge::{InputAttachment, InputAttachmentKind};
-use inline_client::{MediaKind, MessageContent};
+use inline_client::{MediaKind, MessageContent, MessageEntityRecord};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
+
+use super::super::render_inline_text;
 
 const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -17,10 +19,16 @@ pub(super) struct InboundContent {
     pub attachments: Vec<InputAttachment>,
 }
 
-pub(super) fn normalize_inbound_content(content: &MessageContent) -> Option<InboundContent> {
+pub(super) fn normalize_inbound_content(
+    content: &MessageContent,
+    entities: &[MessageEntityRecord],
+    addressed_bot: i64,
+) -> Option<InboundContent> {
     let normalized = match content {
         MessageContent::Text { text } => InboundContent {
-            text: text.trim().to_string(),
+            text: render_inline_text(text, entities, Some(addressed_bot))
+                .trim()
+                .to_string(),
             unsupported_notice: None,
             attachments: Vec::new(),
         },
@@ -42,9 +50,10 @@ pub(super) fn normalize_inbound_content(content: &MessageContent) -> Option<Inbo
                 .map_or_else(|| format!("{kind:?}").to_lowercase(), str::to_string);
             let text = caption
                 .as_deref()
-                .map(str::trim)
+                .map(|caption| render_inline_text(caption, entities, Some(addressed_bot)))
                 .filter(|caption| !caption.is_empty())
-                .map(str::to_string)
+                .map(|caption| caption.trim().to_string())
+                .filter(|caption| !caption.is_empty())
                 .unwrap_or_else(|| default_media_direction(*kind).to_string());
             let attachment = url
                 .as_deref()
@@ -245,6 +254,10 @@ mod tests {
 
     use super::*;
 
+    fn normalize_inbound_content(content: &MessageContent) -> Option<InboundContent> {
+        super::normalize_inbound_content(content, &[], 99)
+    }
+
     #[test]
     fn trims_text_and_ignores_empty_messages() {
         let normalized = normalize_inbound_content(&MessageContent::Text {
@@ -348,5 +361,33 @@ mod tests {
             normalized.attachments[0].uri,
             "https://cdn.inline.chat/photo.jpg"
         );
+    }
+
+    #[test]
+    fn captions_render_original_entities_before_trimming_or_stripping_the_address() {
+        let caption = "  @Mo’s Codex, 😀 show @Dena this";
+        let entities = [
+            crate::bridge::text_links::tests::entity(caption, "@Mo’s Codex", "TYPE_MENTION", 99),
+            crate::bridge::text_links::tests::entity(caption, "@Dena", "TYPE_MENTION", 123),
+        ];
+        let normalized = super::normalize_inbound_content(
+            &MessageContent::Media {
+                kind: MediaKind::Photo,
+                file_id: "file-4".to_string(),
+                url: Some("https://cdn.inline.chat/photo.jpg".to_string()),
+                mime_type: Some("image/jpeg".to_string()),
+                file_name: None,
+                caption: Some(caption.to_string()),
+                size_bytes: None,
+                width: None,
+                height: None,
+                duration_ms: None,
+            },
+            &entities,
+            99,
+        )
+        .expect("caption content");
+        assert_eq!(normalized.text, "😀 show [@Dena](in://user/123) this");
+        assert_eq!(normalized.attachments.len(), 1);
     }
 }

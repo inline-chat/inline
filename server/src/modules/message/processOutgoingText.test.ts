@@ -106,6 +106,83 @@ describe("processOutgoingText", () => {
     })
   })
 
+  test("resolves canonical in user links with the same user and Agent validation", async () => {
+    const user = await testUtils.createUser(nextEmail("in-link-user"))
+    const bot = await testUtils.createUser(nextEmail("in-link-bot"))
+    const agent = await BotAgentsModel.create({ botUserId: bot.id, name: "Analyst" })
+
+    for (const scheme of ["in", "inline"]) {
+      for (const target of [`${scheme}://user/${user.id}`, `${scheme}://user?id=${user.id}`]) {
+        const result = await processOutgoingText({
+          text: `😀 cc [@Dena](${target})`,
+          entities: undefined,
+          parseMarkdown: true,
+        })
+        expect(result.text).toBe("😀 cc @Dena")
+        expect(result.entities?.entities).toEqual([
+          {
+            type: MessageEntity_Type.MENTION,
+            offset: 6n,
+            length: 5n,
+            entity: { oneofKind: "mention", mention: { userId: BigInt(user.id) } },
+          },
+        ])
+      }
+      for (const [targetId, expected] of [
+        [bot.id, { userId: BigInt(bot.id), agentId: agent.id }],
+        [user.id, { userId: BigInt(user.id) }],
+      ] as const) {
+        const result = await processOutgoingText({
+          text: `ask [@Analyst](${scheme}://user/${targetId}?agent_id=${agent.id})`,
+          entities: undefined,
+          parseMarkdown: true,
+        })
+        expect(result.entities?.entities[0]?.entity).toEqual({ oneofKind: "mention", mention: expected })
+      }
+    }
+  })
+
+  test("bridge mention and chat labels retain literal references and line breaks", async () => {
+    const user = await testUtils.createUser(nextEmail("bridge-link-label"))
+    const highlighted = await processOutgoingText({
+      text: String.raw`[@a \=\=B\=\=](in://user/${user.id})`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+    expect(highlighted.text).toBe("@a ==B==")
+    expect(highlighted.entities?.entities).toHaveLength(1)
+    expect(highlighted.entities?.entities[0]?.type).toBe(MessageEntity_Type.MENTION)
+    const result = await processOutgoingText({
+      text: String.raw`ask [@A \&amp; B](in://user/${user.id}) about [First&#10;&#10;Second](in://chat/456)`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+    expect(result.text).toBe("ask @A &amp; B about First\n\nSecond")
+    expect(result.entities?.entities).toEqual([
+      {
+        type: MessageEntity_Type.MENTION,
+        offset: 4n,
+        length: 10n,
+        entity: { oneofKind: "mention", mention: { userId: BigInt(user.id) } },
+      },
+      {
+        type: MessageEntity_Type.THREAD,
+        offset: 21n,
+        length: 13n,
+        entity: { oneofKind: "thread", thread: { chatId: 456n } },
+      },
+    ])
+    const url = await processOutgoingText({
+      text: String.raw`[doc](https://example.com/a\(b\)?x=\&amp;\&y=1)`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+    expect(url.entities?.entities[0]?.entity).toEqual({
+      oneofKind: "textUrl",
+      textUrl: { url: "https://example.com/a(b)?x=&amp;&y=1" },
+    })
+  })
+
   test("falls back to the bot mention when the Agent belongs to another bot", async () => {
     const bot = await testUtils.createUser(nextEmail("inline-agent-target"))
     const otherBot = await testUtils.createUser(nextEmail("inline-agent-owner"))

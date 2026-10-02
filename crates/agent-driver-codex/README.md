@@ -4,6 +4,23 @@ Direct, structured integration with `codex app-server` for Inline's local
 coding-agent bridge. The driver owns Codex process supervision, JSONL protocol
 compatibility, and event normalization; it does not own Inline presentation.
 
+Turns keep the user's text in `input`. Inline configures the stable delivery
+guide through `with_application_instructions` before opening sessions. The
+driver reads the workspace's effective developer instructions and appends the
+guide through thread-local config for start/resume. Existing developer text,
+workspace guidance, base instructions, and collaboration-mode instructions
+remain intact. The guide therefore survives compaction within an active turn.
+
+Sender metadata and conversation excerpts use native `additionalContext` with
+kind `untrusted`. Each input refreshes that entry because Codex can retain its
+value-deduplication cache after compaction removes the history item. Quoted
+history is summarized by ordinary mid-turn compaction. The same separation
+applies to `turn/start` and `turn/steer`, keeping visible user messages clean.
+Standalone callers without a configured stable guide use kind `application`
+for per-input instructions; those entries alone do not survive mid-turn
+compaction. Qualify native context with the opt-in `native_context_tests` on
+the runtime under test using `INLINE_CODEX_CONTEXT_EXECUTABLE`.
+
 The capability-gated session connection shares the driver's one JSON-RPC
 reader. Attachment registers before `thread/resume`, then uses that response's
 wire sequence and bounded thread snapshot as one atomic repair boundary. Frames

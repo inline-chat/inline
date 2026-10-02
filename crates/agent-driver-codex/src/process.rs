@@ -1883,6 +1883,7 @@ mod tests {
         let prompt = || TurnInput {
             text: "Reply with exactly OK. Do not use tools or change files.".to_string(),
             attachments: Vec::new(),
+            context: None,
             client_message_id: None,
         };
         let options = || TurnOptions {

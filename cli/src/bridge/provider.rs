@@ -1012,7 +1012,11 @@ impl ProviderLaunch {
             Self::Codex(config) => {
                 let spawned = spawn_codex_driver(config.clone(), bridge_version).await?;
                 Ok(SpawnedProvider {
-                    driver: ProviderDriver::Codex(spawned.driver),
+                    driver: ProviderDriver::Codex(
+                        spawned.driver.with_application_instructions(
+                            super::context::INLINE_DELIVERY_GUIDANCE,
+                        ),
+                    ),
                     process_status: ProviderProcessStatus::Codex {
                         status: spawned.process_status,
                         stderr_tail: spawned.stderr_tail,

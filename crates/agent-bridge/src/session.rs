@@ -879,6 +879,7 @@ mod tests {
                 TurnInput {
                     text: String::new(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: None,
                 },
                 TurnOptions::default(),
@@ -1695,6 +1696,7 @@ mod tests {
                 TurnInput {
                     text: "fix tests".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some(direction_id.to_string()),
                 },
                 TurnOptions::default(),
@@ -1736,6 +1738,7 @@ mod tests {
                     TurnInput {
                         text: "too late".to_string(),
                         attachments: Vec::new(),
+                        context: None,
                         client_message_id: None,
                     },
                     TurnOptions::default(),

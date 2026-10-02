@@ -29,7 +29,7 @@ use inline_agent_bridge::{
     SessionPickerAction, SessionPickerClaimContext, SessionPickerClaimOutcome,
     SessionPickerCompletion, SessionPickerRecord, SessionPickerState, SessionPickerThreadGate,
     SettingsUpdateOutcome, SteeringSupport, StoreError, StreamingPresenter, TriggerDecision,
-    TriggerResolver, TurnCoordinator, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
+    TriggerResolver, TurnContext, TurnCoordinator, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
     UpdatePriority, ValidationSummary, VisibilityMode, WORKING_CONTINUED_STATUS, WORKING_STATUS,
     WorkspaceChoice, WorkspaceId, WorkspaceRecord, format_elapsed_compact, parse_command,
     reap_stale_process_host, sanitize_visible_command, sanitize_visible_transcript,
@@ -133,6 +133,8 @@ mod routing;
 use routing::*;
 mod context;
 use context::*;
+mod text_links;
+use text_links::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

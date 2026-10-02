@@ -596,8 +596,20 @@ pub struct TurnInput {
     /// Ordered media and file descriptors supplied with this direction.
     #[serde(default)]
     pub attachments: Vec<InputAttachment>,
+    /// Bridge guidance and untrusted conversation data, separate from user intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<TurnContext>,
     /// Optional stable client identity for provider-side deduplication.
     pub client_message_id: Option<String>,
+}
+
+/// Supplemental input with an explicit instruction/data boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnContext {
+    /// Trusted application instructions. Never interpolate conversation data here.
+    pub instructions: String,
+    /// Untrusted excerpts and sender metadata; these do not authorize actions.
+    pub conversation: String,
 }
 
 /// Optional provider settings applied when a turn starts.

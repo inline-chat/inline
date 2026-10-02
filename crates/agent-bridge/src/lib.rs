@@ -29,7 +29,7 @@ pub use driver::{
     HostToolCall, HostToolConfiguration, HostToolFuture, HostToolHandler, HostToolResult,
     HostToolSpec, HostToolTransport, PlanStep, PlanStepStatus, Question, QuestionAnswer,
     QuestionOption, QuestionRequest, ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn,
-    SteeringSupport, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
+    SteeringSupport, TurnContext, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
 };
 pub use model::{
     BindingKey, Direction, DirectionId, InputAttachment, InputAttachmentKind, InstallationId,

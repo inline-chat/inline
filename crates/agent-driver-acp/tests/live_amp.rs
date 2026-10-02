@@ -80,6 +80,7 @@ async fn installed_amp_completes_a_direct_new_session_turn() {
                 TurnInput {
                     text: "Do not use tools. Reply with exactly: inline amp acp ready".to_string(),
                     attachments: Vec::new(),
+                    context: None,
                     client_message_id: Some("live-amp-smoke".to_string()),
                 },
                 TurnOptions::default(),

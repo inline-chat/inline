@@ -112,10 +112,25 @@ pub enum UserInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AdditionalContextKind {
+    Application,
+    Untrusted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdditionalContextEntry {
+    pub value: String,
+    pub kind: AdditionalContextKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTurnParams {
     pub thread_id: String,
     pub input: Vec<UserInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_context: Option<BTreeMap<String, AdditionalContextEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_user_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,6 +148,7 @@ impl StartTurnParams {
         Self {
             thread_id: thread_id.into(),
             input: vec![UserInput::Text { text: text.into() }],
+            additional_context: None,
             client_user_message_id: None,
             cwd: None,
             model: None,
@@ -149,6 +165,8 @@ pub struct SteerTurnParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_user_message_id: Option<String>,
     pub input: Vec<UserInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_context: Option<BTreeMap<String, AdditionalContextEntry>>,
     pub expected_turn_id: String,
 }
 
