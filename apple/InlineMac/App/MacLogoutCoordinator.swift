@@ -3,6 +3,18 @@ import Foundation
 import InlineConfig
 import InlineKit
 import Logger
+import Sentry
+
+enum MacLogoutTrigger: String, Sendable {
+  case requested
+  case pendingRecovery = "pending_recovery"
+  case realtimeAuthInvalidated = "realtime_auth_invalidated"
+  case accountRecoveryRequired = "account_recovery_required"
+
+  var shouldReport: Bool {
+    self != .requested
+  }
+}
 
 /// All macOS logout policy lives in this file. AppDelegate only owns the platform lifetime and
 /// forwards entry points; Auth owns durable authority, proofs, and login admission.
@@ -102,11 +114,28 @@ final class MacLogoutAttempt {
 
 extension AppDelegate {
   @MainActor
-  func performLogOut(notifyServer: Bool = true) async {
+  func performLogOut(
+    notifyServer: Bool = true,
+    trigger: MacLogoutTrigger = .requested
+  ) async {
     guard !isLoggingOut else { return }
-    guard !deferLogoutUntilLocalDataResetFinishes(notifyServer: notifyServer) else { return }
+    guard !deferLogoutUntilLocalDataResetFinishes(notifyServer: notifyServer, trigger: trigger) else { return }
     isLoggingOut = true
+    log.warning("LOGOUT_TRACE event=requested source=\(trigger.rawValue)")
     let logoutAccountID = Auth.shared.getCurrentUserId()
+    if trigger.shouldReport {
+      Task.detached(priority: .utility) {
+        guard SentrySDK.isEnabled else { return }
+        _ = SentrySDK.capture(message: "mac_logout_trigger") { scope in
+          scope.setLevel(trigger == .pendingRecovery ? .warning : .error)
+          scope.setFingerprint(["mac-logout-trigger", trigger.rawValue])
+          scope.setTag(value: trigger.rawValue, key: "logout.source")
+          if let logoutAccountID {
+            scope.setTag(value: String(logoutAccountID), key: "account.user_id")
+          }
+        }
+      }
+    }
 
     let logoutFence: AuthLogoutFence
     do {
@@ -148,6 +177,9 @@ extension AppDelegate {
       completionPermit: AuthLogoutCompletionPermit(fence: logoutFence)
     )
     logoutAttempt = attempt
+    log.info(
+      "LOGOUT_TRACE transition_id=\(attempt.transitionID.uuidString) event=started source=\(trigger.rawValue)"
+    )
 
     // Cancel main-actor account continuations before any fallible/network suspension.
     cancelPendingSpaceJoin()

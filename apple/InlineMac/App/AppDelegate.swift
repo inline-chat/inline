@@ -64,7 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor var isLoggingOut = false
   @MainActor private var isResettingLocalData = false
-  @MainActor private var pendingLogoutAfterLocalDataReset: Bool?
+  @MainActor private var pendingLogoutAfterLocalDataReset: (notifyServer: Bool, trigger: MacLogoutTrigger)?
   @MainActor var logoutAttempt: MacLogoutAttempt?
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
@@ -173,7 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
     Task { @MainActor [weak self] in
       guard await Auth.shared.hasPendingLogout() else { return }
-      await self?.performLogOut(notifyServer: false)
+      await self?.performLogOut(notifyServer: false, trigger: .pendingRecovery)
     }
     // Register for URL events
     NSAppleEventManager.shared().setEventHandler(
@@ -712,10 +712,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     isResettingLocalData = true
     defer {
       isResettingLocalData = false
-      if let notifyServer = pendingLogoutAfterLocalDataReset {
+      if let pendingLogout = pendingLogoutAfterLocalDataReset {
         pendingLogoutAfterLocalDataReset = nil
         Task { @MainActor [weak self] in
-          await self?.performLogOut(notifyServer: notifyServer)
+          await self?.performLogOut(
+            notifyServer: pendingLogout.notifyServer, trigger: pendingLogout.trigger
+          )
         }
       }
     }
@@ -792,9 +794,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   /// reset starts immediately after that reset returns (successfully or otherwise), never midway
   /// through its realtime/database phases.
   @MainActor
-  func deferLogoutUntilLocalDataResetFinishes(notifyServer: Bool) -> Bool {
+  func deferLogoutUntilLocalDataResetFinishes(
+    notifyServer: Bool, trigger: MacLogoutTrigger
+  ) -> Bool {
     guard isResettingLocalData else { return false }
-    pendingLogoutAfterLocalDataReset = (pendingLogoutAfterLocalDataReset ?? false) || notifyServer
+    let pending = pendingLogoutAfterLocalDataReset
+    pendingLogoutAfterLocalDataReset = (
+      notifyServer: (pending?.notifyServer ?? false) || notifyServer,
+      trigger: trigger.shouldReport ? trigger : (pending?.trigger ?? trigger)
+    )
     return true
   }
 
@@ -847,13 +855,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func handleAuthAccountRecoveryRequiredNotification() {
     Task { [weak self] in
-      await self?.performLogOut(notifyServer: false)
+      await self?.performLogOut(notifyServer: false, trigger: .accountRecoveryRequired)
     }
   }
 
   @objc private func handleRealtimeAuthInvalidatedNotification() {
     Task { [weak self] in
-      await self?.performLogOut(notifyServer: false)
+      await self?.performLogOut(notifyServer: false, trigger: .realtimeAuthInvalidated)
     }
   }
 

@@ -44,11 +44,16 @@ struct AuthRecoveryDiagnosticsTests {
     #expect(RealtimeAuthAuthority(snapshot: first) != RealtimeAuthAuthority(snapshot: replacement))
   }
 
-  @Test("only the authenticated V3 revocation close becomes terminal auth invalidation")
-  func v3RevocationCloseBecomesTerminalAuthInvalidation() {
+  @Test("V3 preserves the account on ambiguous authorization loss")
+  func v3StartAndLiveCloseUseDifferentAuthPolicies() {
     #expect(
       InlineProtocolV3Transport.authenticationInvalidationReason(
         for: InlineProtocolV3ConnectionError.authorizationInvalidated
+      ) == nil
+    )
+    #expect(
+      InlineProtocolV3Transport.authenticationInvalidationReason(
+        for: InlineProtocolV3ConnectionError.sessionRevoked
       ) == .sessionRevoked
     )
     #expect(
@@ -61,6 +66,14 @@ struct AuthRecoveryDiagnosticsTests {
         for: InlineProtocolV3ConnectionError.protocolFailure
       ) == nil
     )
+
+    if case let .disconnected(errorDescription) = InlineProtocolV3Transport.liveClosureEvent(
+      for: .authorizationInvalidated
+    ) {
+      #expect(errorDescription == "authorization_recheck")
+    } else {
+      Issue.record("A live temporary-key rejection must reconnect before logging out")
+    }
   }
 
   @Test("V3 start logging separates transient failures from actionable failures")

@@ -445,9 +445,9 @@ public actor InlineProtocolNativeLogin {
     }
 
     return switch connectionError {
-    case .authorizationInvalidated:
+    case .sessionRevoked:
       RealtimeDirectRpcError.notAuthorized
-    case .closed, .temporaryAuthorizationRotationDue:
+    case .authorizationInvalidated, .closed, .temporaryAuthorizationRotationDue:
       RealtimeDirectRpcError.notConnected
     case .commitOutcomeUnknown:
       RealtimeDirectRpcError.commitOutcomeUnknown

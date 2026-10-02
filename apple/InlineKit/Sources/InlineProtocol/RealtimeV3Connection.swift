@@ -259,6 +259,7 @@ public enum InlineProtocolV3ConnectionError:
   Error, Equatable, PrivacySafeErrorCategoryProviding, Sendable
 {
   case authorizationInvalidated
+  case sessionRevoked
   case closed
   case commitOutcomeUnknown
   case inboundMessageTooLarge
@@ -279,6 +280,8 @@ public enum InlineProtocolV3ConnectionError:
     switch self {
     case .authorizationInvalidated:
       "realtime_v3:authorization_invalidated"
+    case .sessionRevoked:
+      "realtime_v3:session_revoked"
     case .closed:
       "realtime_v3:closed"
     case .commitOutcomeUnknown:
@@ -1014,12 +1017,20 @@ public actor InlineProtocolV3Connection {
   }
 
   private func receiveFailed(_ error: any Error) async {
-    let failure: any Error = if task.closeCode.rawValue == 4401 {
-      InlineProtocolV3ConnectionError.authorizationInvalidated
+    let failure: any Error = if let authorizationError = Self.authorizationCloseError(
+      code: task.closeCode.rawValue, reason: task.closeReason
+    ) {
+      authorizationError
     } else {
       error
     }
     await terminate(with: failure, closeCode: .goingAway)
+  }
+
+  static func authorizationCloseError(code: Int, reason: Data?) -> InlineProtocolV3ConnectionError? {
+    guard code == 4401 else { return nil }
+    return reason.flatMap { String(data: $0, encoding: .utf8) } == "session_revoked_confirmed"
+      ? .sessionRevoked : .authorizationInvalidated
   }
 
   private func failPending(messageID: Int64, with error: any Error) async {
@@ -1241,6 +1252,7 @@ public actor InlineProtocolV3Connection {
       .unexpectedResponse:
       return .error
     case .authorizationInvalidated,
+      .sessionRevoked,
       .closed,
       .commitOutcomeUnknown,
       .rejectedBeforeExecution,

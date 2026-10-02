@@ -139,6 +139,7 @@ actor AuthStore {
   private let credentialDeletionOverride: (@Sendable () -> Bool)?
   private let authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)?
   private let authorityRestoreOverride: (@Sendable () -> Bool)?
+  private let temporaryAuthorityWriteOverride: (@Sendable () -> Bool)?
   private let logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)?
   private let credentialWriteInterleavingHook: (@Sendable () -> Void)?
   private let authorityFinalizationInterleavingHook: (@Sendable () -> Void)?
@@ -166,6 +167,7 @@ actor AuthStore {
     credentialDeletionOverride: (@Sendable () -> Bool)? = nil,
     authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)? = nil,
     authorityRestoreOverride: (@Sendable () -> Bool)? = nil,
+    temporaryAuthorityWriteOverride: (@Sendable () -> Bool)? = nil,
     logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
     credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
     authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
@@ -188,6 +190,7 @@ actor AuthStore {
     self.credentialDeletionOverride = credentialDeletionOverride
     self.authorityReplacementDeletionOverride = authorityReplacementDeletionOverride
     self.authorityRestoreOverride = authorityRestoreOverride
+    self.temporaryAuthorityWriteOverride = temporaryAuthorityWriteOverride
     self.logoutFencePersistenceOverride = logoutFencePersistenceOverride
     self.credentialWriteInterleavingHook = credentialWriteInterleavingHook
     self.authorityFinalizationInterleavingHook = authorityFinalizationInterleavingHook
@@ -226,6 +229,11 @@ actor AuthStore {
       )
       : snapshotReader(primaryKeychain, fallbackKeychain, resolvedUserDefaultsKey)
     lastStatus = initial.status
+    log.info(
+      "AUTH2_HYDRATE status=\(Self.diagnosticName(for: initial.status))" +
+        " logout_marker=\(logoutMarkerPresent || logoutAttemptMarkerPresent ? 1 : 0)" +
+        " login_marker=\(loginCommitMarkerPresent ? 1 : 0)"
+    )
 
     cache.seedLoginCommitPending(loginCommitMarkerPresent)
     cache.seedLogoutPending(effectiveLogoutPending, correlationID: recoveredTransitionID)
@@ -322,6 +330,41 @@ actor AuthStore {
       didHydrate: true,
       inlineProtocol: credentials
     )
+    let currentSnapshot = cache.snapshot()
+    if loginAttempt == nil,
+       case .authenticatedV3 = currentSnapshot.status,
+       let existing = currentSnapshot.inlineProtocol,
+       existing.userId == credentials.userId,
+       existing.accountSessionId == credentials.accountSessionId,
+       existing.permanent.keyID == credentials.permanent.keyID,
+       existing.permanent.key == credentials.permanent.key
+    {
+      // A temporary-key rotation changes one durable item, not the account authority. Staging
+      // a login marker here would turn a crash or failed Keychain write into account logout.
+      guard !hasPendingAccountTransition() else { throw AuthStorageError.loginUnavailable }
+      let saved: Bool
+      if temporaryAuthorityWriteOverride?() == false {
+        saved = false
+      } else if mocked {
+        AuthKeychainConfig.mockSet(data, forKey: Self.inlineProtocolCredentialsKey, namespace: namespace)
+        saved = true
+      } else {
+        let primarySaved = primaryKeychain.set(
+          data, forKey: Self.inlineProtocolCredentialsKey, withAccess: .accessibleAfterFirstUnlock
+        )
+        saved = primarySaved || fallbackKeychain?.set(
+          data, forKey: Self.inlineProtocolCredentialsKey, withAccess: .accessibleAfterFirstUnlock
+        ) == true
+      }
+      guard saved else {
+        log.error("AUTH2_TEMPORARY_ROTATION write_failed status=\(primaryKeychain.lastResultCode)")
+        throw AuthStorageError.keychainWriteFailed
+      }
+      guard cache.update(snapshot) else { throw AuthStorageError.logoutInProgress }
+      publishAuthenticatedSnapshot(snapshot)
+      log.info("AUTH2_TEMPORARY_ROTATION persisted")
+      return
+    }
     try persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
       try self.replaceStoredAuthority(
         with: [Self.inlineProtocolCredentialsKey: data],
@@ -536,7 +579,7 @@ actor AuthStore {
         "AUTH2_LOGIN rollback failed; retaining pending login authority fence",
         error: error
       )
-      promoteFailedLoginToRecovery(correlationID: attempt.correlationID)
+      promoteFailedLoginToRecovery(correlationID: attempt.correlationID, reason: "rollback_failed")
     }
   }
 
@@ -545,7 +588,7 @@ actor AuthStore {
   /// durable recovery transition and let the platform logout owner clear both sides together.
   func promoteProjectedLoginToRecovery(_ attempt: AuthLoginAttempt) {
     guard cache.isStagedAuthorityOwned(by: attempt) || hasPendingLogout() else { return }
-    promoteFailedLoginToRecovery(correlationID: attempt.correlationID)
+    promoteFailedLoginToRecovery(correlationID: attempt.correlationID, reason: "projection_committed")
   }
 
   func completePendingLogout(
@@ -691,7 +734,7 @@ actor AuthStore {
       if markerIsAbsent {
         _ = cache.cancelAuthorityStagingReservation(authorityAttempt)
       } else {
-        promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID)
+        promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID, reason: "marker_persistence_failed")
       }
       throw error
     }
@@ -730,7 +773,7 @@ actor AuthStore {
             "AUTH2_LOGIN failed to restore prior authority; retaining transition fence",
             error: error
           )
-          promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID)
+          promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID, reason: "authority_restore_failed")
         }
       }
       throw error
@@ -814,7 +857,8 @@ actor AuthStore {
     else { throw AuthStorageError.keychainWriteFailed }
   }
 
-  private func promoteFailedLoginToRecovery(correlationID: UUID = UUID()) {
+  private func promoteFailedLoginToRecovery(correlationID: UUID, reason: String) {
+    log.error("AUTH2_RECOVERY transition_id=\(correlationID.uuidString) reason=\(reason)")
     UserDefaults.standard.set(correlationID.uuidString, forKey: loginCommitPendingKey)
     _ = UserDefaults.standard.synchronize()
     cache.seedLoginCommitPending(true)
@@ -1038,6 +1082,9 @@ actor AuthStore {
     case .interactionNotAllowed, .error:
       // Existing authority may still be present but unreadable. Keep launch fail-closed until
       // Keychain access recovers instead of silently selecting another authority.
+      if case .error(let status) = inlineProtocolOutcome {
+        Log.scoped("AuthStore").warning("AUTH2_STORAGE_READ_UNAVAILABLE slot=v3 status=\(status)")
+      }
       return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
     }
 
@@ -1144,6 +1191,15 @@ actor AuthStore {
         didHydrate: true,
         inlineProtocol: nil
       )
+    }
+
+    if case .error = credentialsOutcome {
+      // An unreadable V2 item may still contain the account authority. An absent legacy token
+      // cannot turn that uncertainty into a signed-out or reauthentication state.
+      Log.scoped("AuthStore").warning(
+        "AUTH2_STORAGE_READ_UNAVAILABLE slot=v2 status=\(credentialsOutcome.status)"
+      )
+      return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
     }
 
     if userId != nil, token == nil {

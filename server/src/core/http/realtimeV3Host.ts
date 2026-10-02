@@ -156,7 +156,12 @@ const closeOverloaded = (socket: ServerWebSocket<InlineProtocolWebSocketData>): 
 
 const closeAuthorizationInvalidated = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
   if (!socket.data.closed) {
-    socket.close(REALTIME_CLOSE_SESSION_REVOKED, REALTIME_CLOSE_SESSION_REVOKED_REASON)
+    // A missing process-local temporary key is recoverable. Only the session authority owner
+    // may use the explicit session_revoked reason.
+    realtimeV3Log.warn("Inline Protocol V3 authorization unavailable", {
+      connectionId: socket.data.id,
+    })
+    socket.close(REALTIME_CLOSE_SESSION_REVOKED, "authorization_unavailable")
   }
 }
 
@@ -543,14 +548,30 @@ export const makeInlineProtocolRealtimeTransport = (
       // authority timestamp here: that would let traffic hide an unavailable
       // session revalidation. It only closes the narrow revoke/admit race.
       const connection = connectionManager.getConnection(socket.data.id)
-      if (connection?.userId === userId && connection.sessionId === accountSessionId &&
-          sessionAuthority.allows({ userId, sessionId: accountSessionId })) return true
-      connectionManager.closeConnection(socket.data.id, { authenticationInvalidated: true })
+      const sameIdentity = connection?.userId === userId && connection.sessionId === accountSessionId
+      const identity = { userId, sessionId: accountSessionId }
+      if (sameIdentity && sessionAuthority.allows(identity)) return true
+      const closeReason = !sameIdentity ? "identity_mismatch" :
+        sessionAuthority.isKnownInvalidated(identity) ? "revoked" : "unverified"
+      realtimeV3Log.warn("Inline Protocol V3 registered authority closed", {
+        userId,
+        sessionId: accountSessionId,
+        reason: closeReason,
+      })
+      connectionManager.closeConnection(socket.data.id, {
+        authenticationInvalidated: closeReason === "revoked",
+      })
       return false
     }
     const compatibilitySocket = {
       id: socket.data.id,
-      close: (code?: number, reason?: string) => socket.close(code, reason),
+      close: (code?: number, reason?: string) => socket.close(
+        code,
+        code === REALTIME_CLOSE_SESSION_REVOKED && reason === REALTIME_CLOSE_SESSION_REVOKED_REASON
+          // Older V3 servers also sent session_revoked for forgotten temporary keys. Only the
+          // confirmed reason can trigger client credential destruction across mixed versions.
+          ? "session_revoked_confirmed" : reason,
+      ),
       raw: {
         sendBinary: (bytes: Uint8Array) => {
           let payload: Uint8Array

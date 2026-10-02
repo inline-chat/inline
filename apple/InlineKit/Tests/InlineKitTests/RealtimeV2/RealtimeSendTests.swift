@@ -1941,6 +1941,41 @@ final class RealtimeSendTests {
 
     withExtendedLifetime(realtime) {}
   }
+
+  @Test("server-unavailable handshake response retains the account and never requests logout")
+  func unavailableHandshakeDoesNotInvalidateAuth() async throws {
+    let credentials = AuthCredentials(userId: 1, token: "1:still-valid")
+    let authDriver = AuthSnapshotDriver(
+      AuthSnapshot(status: .authenticated(credentials), didHydrate: true)
+    )
+    let auth = makeTestAuthHandle(snapshotDriver: authDriver)
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport, auth: auth,
+      applyUpdates: SendTestApplyUpdates(), syncStorage: SendTestSyncStorage()
+    )
+    let invalidated = SendTestFlag()
+    let observer = NotificationCenter.default.addObserver(
+      forName: .realtimeV2AuthInvalidated, object: nil, queue: nil
+    ) { _ in Task { await invalidated.set() } }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    // Realtime starts asynchronously. A connection error delivered before connection init can
+    // legitimately be ignored because no handshake session owns it yet.
+    try #require(await waitForCondition(timeout: .seconds(2)) {
+      await transport.sentMessages.contains { message in
+        if case .connectionInit = message.body { return true }
+        return false
+      }
+    })
+    let readsBefore = authDriver.readCount
+    await transport.emit(.message(connectionErrorMessage(reason: .unauthorized)))
+    #expect(await waitForCondition { authDriver.readCount > readsBefore })
+    try? await Task.sleep(for: .milliseconds(20))
+    #expect(await invalidated.get() == false)
+    #expect(auth.snapshot().status == .authenticated(credentials))
+    withExtendedLifetime(realtime) {}
+  }
 }
 
 private actor RPCPreparationProbe {
@@ -2690,14 +2725,20 @@ private actor DirectDispatchFailureTransport: Transport {
 private final class AuthSnapshotDriver: @unchecked Sendable {
   private let lock = NSLock()
   private var snapshot: AuthSnapshot
+  private var reads = 0
 
   init(_ initialSnapshot: AuthSnapshot) {
     snapshot = initialSnapshot
   }
 
   func get() -> AuthSnapshot {
-    lock.withLock { snapshot }
+    lock.withLock {
+      reads += 1
+      return snapshot
+    }
   }
+
+  var readCount: Int { lock.withLock { reads } }
 
   func set(_ nextSnapshot: AuthSnapshot) {
     lock.withLock { snapshot = nextSnapshot }

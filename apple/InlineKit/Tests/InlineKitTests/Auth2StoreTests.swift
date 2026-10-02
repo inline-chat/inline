@@ -135,6 +135,7 @@ final class Auth2StoreTests {
       credentialDeletionOverride: (@Sendable () -> Bool)? = nil,
       authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)? = nil,
       authorityRestoreOverride: (@Sendable () -> Bool)? = nil,
+      temporaryAuthorityWriteOverride: (@Sendable () -> Bool)? = nil,
       logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
       credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
       authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
@@ -147,6 +148,7 @@ final class Auth2StoreTests {
         credentialDeletionOverride: credentialDeletionOverride,
         authorityReplacementDeletionOverride: authorityReplacementDeletionOverride,
         authorityRestoreOverride: authorityRestoreOverride,
+        temporaryAuthorityWriteOverride: temporaryAuthorityWriteOverride,
         logoutFencePersistenceOverride: logoutFencePersistenceOverride,
         credentialWriteInterleavingHook: credentialWriteInterleavingHook,
         authorityFinalizationInterleavingHook: authorityFinalizationInterleavingHook
@@ -407,6 +409,92 @@ final class Auth2StoreTests {
     let (cache, _) = h.makeStore()
     #expect(cache.snapshot().status == .authenticatedV3(userId: 42))
     #expect(cache.snapshot().inlineProtocol == credentials)
+  }
+
+  @Test("temporary-key rotation stays authenticated across relaunch without a login recovery marker")
+  func temporaryRotationIsRestartSafe() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (_, store) = h.makeStore()
+    let original = try v3Credentials()
+    try await store.saveInlineProtocolCredentials(original)
+
+    var rotated = original
+    let key = Array(repeating: UInt8(9), count: 256)
+    rotated.temporary = try InlineProtocolAuthorization(
+      key: key, keyID: InlineSecureTransport.authKeyID(key), serverSalt: 9,
+      temporary: true, expiresAt: 1_900_000_000
+    )
+    try await store.saveInlineProtocolCredentials(rotated)
+
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+    let (reopenedCache, reopenedStore) = h.makeStore()
+    #expect(reopenedCache.snapshot().status == .authenticatedV3(userId: 42))
+    #expect(reopenedCache.snapshot().inlineProtocol == rotated)
+    #expect(reopenedStore.hasPendingLogout() == false)
+  }
+
+  @Test("failed temporary-key write retains permanent authority and does not request logout")
+  func failedTemporaryRotationDoesNotLogOut() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let original = try v3Credentials()
+    let (_, seedStore) = h.makeStore()
+    try await seedStore.saveInlineProtocolCredentials(original)
+    let baseline = AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace)
+    let (cache, store) = h.makeStore(temporaryAuthorityWriteOverride: { false })
+    var rotated = original
+    let key = Array(repeating: UInt8(10), count: 256)
+    rotated.temporary = try InlineProtocolAuthorization(
+      key: key, keyID: InlineSecureTransport.authKeyID(key), serverSalt: 10,
+      temporary: true, expiresAt: 1_900_000_000
+    )
+
+    await #expect(throws: AuthStorageError.keychainWriteFailed) {
+      try await store.saveInlineProtocolCredentials(rotated)
+    }
+    #expect(cache.snapshot().inlineProtocol == original)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == baseline)
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+    #expect(store.hasPendingLogout() == false)
+  }
+
+  @Test("account-session replacement still uses the durable login fence")
+  func accountSessionReplacementRemainsStaged() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let original = try v3Credentials()
+    let (_, seedStore) = h.makeStore()
+    try await seedStore.saveInlineProtocolCredentials(original)
+    let sawMarker = BoolProbe()
+    let markerKey = h.loginCommitPendingKey
+    let (_, store) = h.makeStore(credentialWriteInterleavingHook: {
+      if UserDefaults.standard.object(forKey: markerKey) != nil { sawMarker.set() }
+    })
+    var replacement = original
+    replacement.accountSessionId += 1
+
+    try await store.saveInlineProtocolCredentials(replacement)
+    #expect(sawMarker.get())
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+  }
+
+  @Test("unreadable V2 Keychain item never looks signed out", arguments: [false, true])
+  func unreadableV2RecordStaysLocked(hasUserHint: Bool) {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    if hasUserHint { UserDefaults.standard.set(42, forKey: h.userDefaultsKey) }
+    let keychain = FakeKeychain(statusByKey: ["credentials_v2": errSecParam])
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: keychain, fallbackKeychain: nil,
+      userDefaultsKey: h.userDefaultsKey, mocked: false, namespace: nil
+    )
+    #expect(snapshot.status == .locked(userIdHint: hasUserHint ? 42 : nil))
   }
 
   @Test("invalid V3 identity cannot be published by a credential writer")
@@ -1333,8 +1421,8 @@ final class Auth2StoreTests {
     #expect(snapshot.status == .locked(userIdHint: 42))
   }
 
-  @Test("snapshot preserves reauthRequired when v2 errors but legacy token is missing")
-  func snapshotPreservesReauthRequiredWhenV2ErrorsButLegacyTokenMissing() {
+  @Test("V2 read failure remains locked even when the legacy token is absent")
+  func v2ReadFailureWithNoLegacyTokenRemainsLocked() {
     let userDefaultsKey = "test_\(UUID().uuidString)_userId"
     UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: userDefaultsKey)
     defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
@@ -1352,6 +1440,6 @@ final class Auth2StoreTests {
       namespace: nil
     )
 
-    #expect(snapshot.status == .reauthRequired(userIdHint: 42))
+    #expect(snapshot.status == .locked(userIdHint: 42))
   }
 }

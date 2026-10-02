@@ -138,7 +138,11 @@ public actor InlineProtocolV3Transport: Transport {
           await cached.close()
           candidate = nil
           try requireCurrentStart(generation)
-          guard Self.authenticationInvalidationReason(for: error) != nil ||
+          if terminalError == .sessionRevoked {
+            throw InlineProtocolV3ConnectionError.sessionRevoked
+          }
+          if Self.authenticationInvalidationReason(for: error) != nil { throw error }
+          guard error as? InlineProtocolV3ConnectionError == .authorizationInvalidated ||
             terminalError == .authorizationInvalidated
           else {
             log.debug("Stored temporary authorization verification failed transiently; keeping key")
@@ -560,18 +564,30 @@ public actor InlineProtocolV3Transport: Transport {
     activePingNonce = nil
     log.debug("Inline Protocol transport receive loop ended")
     connection = nil
-    if let terminationError = await endedConnection.terminationError,
-       Self.authenticationInvalidationReason(for: terminationError) != nil {
-      await emitAuthenticationInvalidated(terminationError)
+    let terminationError = await endedConnection.terminationError
+    if terminationError == .sessionRevoked {
+      await emitAuthenticationInvalidated(InlineProtocolV3ConnectionError.sessionRevoked)
       return
     }
-    await channel.send(.disconnected(errorDescription: "connection_closed"))
+    if terminationError == .authorizationInvalidated {
+      // A live temporary key can disappear or expire while the permanent account authority
+      // remains valid. Reconnect through performStart, which verifies the cached temporary key
+      // and regenerates it once using the permanent key before reporting terminal invalidation.
+      log.warning("Inline Protocol live authorization closed; rechecking permanent authority")
+    }
+    await channel.send(Self.liveClosureEvent(for: terminationError))
+  }
+
+  static func liveClosureEvent(for error: InlineProtocolV3ConnectionError?) -> TransportEvent {
+    .disconnected(errorDescription: error == .authorizationInvalidated
+      ? "authorization_recheck"
+      : "connection_closed")
   }
 
   static func authenticationInvalidationReason(
     for error: any Error
   ) -> InlineProtocol.ConnectionError.Reason? {
-    guard error as? InlineProtocolV3ConnectionError == .authorizationInvalidated else {
+    guard error as? InlineProtocolV3ConnectionError == .sessionRevoked else {
       return nil
     }
     return .sessionRevoked
@@ -616,6 +632,7 @@ public actor InlineProtocolV3Transport: Transport {
     guard let connectionError = error as? InlineProtocolV3ConnectionError else { return .error }
     switch connectionError {
     case .authorizationInvalidated,
+      .sessionRevoked,
       .closed,
       .commitOutcomeUnknown,
       .rejectedBeforeExecution,

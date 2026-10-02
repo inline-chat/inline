@@ -576,11 +576,11 @@ export const startCoreProductionServer = async <
     sessionAuthority.start({
       connectedSessions: () =>
         connectionManager.getAuthenticatedSessionIdentities(),
-      closeSession: ({ userId, sessionId }) => {
+      closeSession: ({ userId, sessionId }, reason) => {
         connectionManager.closeConnectionForSession(
           userId,
           sessionId,
-          { authenticationInvalidated: true },
+          { authenticationInvalidated: reason === "revoked" },
         )
       },
     })

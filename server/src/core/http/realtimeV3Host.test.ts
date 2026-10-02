@@ -440,7 +440,7 @@ describe("Inline Protocol WebSocket carrier", () => {
     ))
     await data.state?.queue
 
-    expect(closes).toEqual([[4401, "session_revoked"]])
+    expect(closes).toEqual([[4401, "authorization_unavailable"]])
     await transport.shutdown()
   })
 
@@ -967,9 +967,124 @@ describe("Inline Protocol WebSocket carrier", () => {
         accountSessionId: 84,
       })).toBeFalse()
 
-      expect(closes).toEqual([{ code: 4401, reason: "session_revoked" }])
+      expect(closes).toEqual([{ code: 4401, reason: "session_revoked_confirmed" }])
       expect(connectionManager.getConnection(data.id)).toBeUndefined()
       expect(data.state?.registered).toBeFalse()
+    } finally {
+      sessionAuthority.stop()
+      connectionManager.removeConnection(data.id)
+      await transport.shutdown()
+    }
+  })
+
+  test("closes an unverified V3 session without claiming its credentials were revoked", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const data = upgrade(transport)
+    const closes: Array<{ code?: number; reason?: string }> = []
+    const socket = {
+      data,
+      close: (code?: number, reason?: string) => { closes.push({ code, reason }) },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+    const authorization: ServerApplicationAuthorization = {
+      authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+      permanent: false,
+      temporaryBound: true,
+      userId: 42,
+      accountSessionId: 84,
+    }
+
+    try {
+      expect(register(authorization)).toBeTrue()
+      sessionAuthority.forget({ userId: 42, sessionId: 84 })
+      expect(register(authorization)).toBeFalse()
+
+      expect(closes).toEqual([{ code: undefined, reason: undefined }])
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
+    } finally {
+      sessionAuthority.stop()
+      connectionManager.removeConnection(data.id)
+      await transport.shutdown()
+    }
+  })
+
+  test("closes a mismatched V3 connection without claiming session revocation", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const data = upgrade(transport)
+    const closes: Array<{ code?: number; reason?: string }> = []
+    const socket = {
+      data,
+      close: (code?: number, reason?: string) => { closes.push({ code, reason }) },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+    const authorization: ServerApplicationAuthorization = {
+      authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+      permanent: false,
+      temporaryBound: true,
+      userId: 42,
+      accountSessionId: 84,
+    }
+
+    try {
+      expect(register(authorization)).toBeTrue()
+      expect(register({ ...authorization, userId: 43 })).toBeFalse()
+      expect(closes).toEqual([{ code: undefined, reason: undefined }])
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
+    } finally {
+      sessionAuthority.stop()
+      connectionManager.removeConnection(data.id)
+      await transport.shutdown()
+    }
+  })
+
+  test("rejects an authenticated socket identity change without claiming revocation", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const data = upgrade(transport)
+    const closes: Array<{ code?: number; reason?: string }> = []
+    const socket = {
+      data,
+      close: (code?: number, reason?: string) => { closes.push({ code, reason }) },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+
+    try {
+      expect(register({
+        authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+        permanent: false,
+        temporaryBound: true,
+        userId: 42,
+        accountSessionId: 84,
+      })).toBeTrue()
+      expect(connectionManager.authenticateConnection(data.id, 43, 84)).toBeFalse()
+      expect(closes).toEqual([{ code: undefined, reason: undefined }])
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
     } finally {
       sessionAuthority.stop()
       connectionManager.removeConnection(data.id)

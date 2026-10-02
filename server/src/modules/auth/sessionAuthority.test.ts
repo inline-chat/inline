@@ -72,8 +72,30 @@ describe("SessionAuthorityReconciler", () => {
     now = 30
     await reconciler.reconcileNow()
 
-    expect(close).toHaveBeenCalledWith(target)
+    expect(close).toHaveBeenCalledWith(target, "unverified")
     expect(reconciler.diagnostics.trackedSessions).toBe(0)
+    expect(reconciler.isKnownInvalidated(target)).toBe(false)
+    expect(reconciler.admit(target)).toBe(true)
+    reconciler.stop()
+  })
+
+  test("a completed lookup that excludes the session closes it as revoked", async () => {
+    let now = 0
+    const target = identity(10, 1)
+    const close = mock()
+    const reconciler = new SessionAuthorityReconciler({
+      now: () => now,
+      findActiveSessions: async () => [],
+    })
+    reconciler.start({ connectedSessions: () => [target], closeSession: close }, configuration)
+    reconciler.admit(target)
+
+    now = 10
+    await reconciler.reconcileNow()
+
+    expect(close).toHaveBeenCalledWith(target, "revoked")
+    expect(reconciler.isKnownInvalidated(target)).toBe(true)
+    expect(reconciler.admit(target)).toBe(false)
     reconciler.stop()
   })
 
@@ -114,7 +136,7 @@ describe("SessionAuthorityReconciler", () => {
     query.resolve([target])
     await reconciling
 
-    expect(close).toHaveBeenCalledWith(target)
+    expect(close).toHaveBeenCalledWith(target, "unverified")
     expect(reconciler.diagnostics.trackedSessions).toBe(0)
     reconciler.stop()
   })
@@ -145,7 +167,7 @@ describe("SessionAuthorityReconciler", () => {
     fireTimer()
     await Promise.resolve()
 
-    expect(close).toHaveBeenCalledWith(target)
+    expect(close).toHaveBeenCalledWith(target, "unverified")
     expect(reconciler.diagnostics.trackedSessions).toBe(0)
     query.resolve([target])
     await reconciling
@@ -170,7 +192,7 @@ describe("SessionAuthorityReconciler", () => {
 
     now = 40
     await reconciler.reconcileNow()
-    expect(close).toHaveBeenCalledWith(target)
+    expect(close).toHaveBeenCalledWith(target, "unverified")
     reconciler.stop()
   })
 

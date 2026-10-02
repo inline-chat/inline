@@ -43,6 +43,22 @@ struct RealtimeV3LoggingPolicyTests {
     )
   }
 
+  @Test("only an explicit session-revoked close is terminal")
+  func closeReasonDistinguishesRevocationFromUnavailableAuthorization() {
+    #expect(InlineProtocolV3Connection.authorizationCloseError(
+      code: 4401, reason: Data("authorization_unavailable".utf8)
+    ) == .authorizationInvalidated)
+    #expect(InlineProtocolV3Connection.authorizationCloseError(
+      code: 4401, reason: Data("session_revoked".utf8)
+    ) == .authorizationInvalidated)
+    #expect(InlineProtocolV3Connection.authorizationCloseError(
+      code: 4401, reason: Data("session_revoked_confirmed".utf8)
+    ) == .sessionRevoked)
+    #expect(InlineProtocolV3Connection.authorizationCloseError(
+      code: 1001, reason: Data("session_revoked".utf8)
+    ) == nil)
+  }
+
   @Test("protocol and credential failures remain errors")
   func protocolFailuresRemainErrors() {
     #expect(

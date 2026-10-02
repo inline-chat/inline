@@ -221,7 +221,9 @@ class ConnectionManager {
         userId,
         sessionId,
       })
-      this.closeConnection(id, { authenticationInvalidated: true })
+      // The socket identity is inconsistent, but this does not prove either account session
+      // was revoked. Close this connection without telling clients to destroy credentials.
+      this.closeConnection(id)
       return false
     }
     // Connection init already queried the session row. This synchronous gate

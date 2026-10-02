@@ -53,17 +53,24 @@ final class KeychainStore: KeychainClient, @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
 
-    _ = deleteNoLock(key)
-
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrAccount as String: keyWithPrefix(key),
-      kSecValueData as String: value,
-      kSecAttrAccessible as String: (access ?? .accessibleWhenUnlocked).value,
     ]
     addAccessGroup(to: &query)
 
-    lastResultCode = SecItemAdd(query as CFDictionary, nil)
+    let attributes: [String: Any] = [
+      kSecValueData as String: value,
+      kSecAttrAccessible as String: (access ?? .accessibleWhenUnlocked).value,
+    ]
+    lastResultCode = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+    if lastResultCode == errSecItemNotFound {
+      lastResultCode = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+      if lastResultCode == errSecDuplicateItem {
+        // Another process added the item between our update and add. Preserve it on failure.
+        lastResultCode = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+      }
+    }
     return lastResultCode == errSecSuccess
   }
 

@@ -14,7 +14,7 @@ export type SessionAuthorityConfiguration = {
 
 export type SessionAuthorityBindings = {
   connectedSessions: () => readonly SessionAuthorityIdentity[]
-  closeSession: (identity: SessionAuthorityIdentity) => void
+  closeSession: (identity: SessionAuthorityIdentity, reason: "revoked" | "unverified") => void
 }
 
 type AuthorityRecord = SessionAuthorityIdentity & {
@@ -155,6 +155,13 @@ export class SessionAuthorityReconciler {
       now - authority.verifiedAtMs < this.configuration.maximumAuthorityAgeMs
   }
 
+  /** A committed revocation or an authoritative missing-session result, never a stale proof. */
+  isKnownInvalidated(identity: SessionAuthorityIdentity): boolean {
+    const now = this.now()
+    this.pruneInvalidations(now)
+    return this.invalidatedUntil.has(keyFor(identity))
+  }
+
   /** Call after the revocation transaction commits, before registering any new socket. */
   invalidate(identity: SessionAuthorityIdentity): void {
     const now = this.now()
@@ -247,7 +254,7 @@ export class SessionAuthorityReconciler {
           for (const authority of batch) {
             if (this.authorities.get(authority.key) !== authority) continue
             if (completedAtMs - authority.verifiedAtMs >= this.configuration.maximumAuthorityAgeMs) {
-              this.revokeAuthority(authority)
+              this.closeAuthority(authority, "unverified")
             } else {
               // Retrying at the hard deadline prevents an unavailable database
               // from spinning while preserving a bounded fail-closed window.
@@ -263,8 +270,9 @@ export class SessionAuthorityReconciler {
           // A revoke or reconnect can replace this record while the query is
           // in flight. Only the exact still-current record may be refreshed.
           if (this.authorities.get(authority.key) !== authority) continue
-          if (completedAtMs - authority.verifiedAtMs >= this.configuration.maximumAuthorityAgeMs || !active.has(authority.key)) {
-            this.revokeAuthority(authority)
+          const proofExpired = completedAtMs - authority.verifiedAtMs >= this.configuration.maximumAuthorityAgeMs
+          if (proofExpired || !active.has(authority.key)) {
+            this.closeAuthority(authority, proofExpired ? "unverified" : "revoked")
             continue
           }
           authority.verifiedAtMs = queryStartedAtMs
@@ -303,7 +311,7 @@ export class SessionAuthorityReconciler {
         continue
       }
       if (now - authority.verifiedAtMs >= this.configuration.maximumAuthorityAgeMs) {
-        this.revokeAuthority(authority)
+        this.closeAuthority(authority, "unverified")
       } else if (now >= authority.nextReconciliationAtMs) {
         due.push(authority)
       }
@@ -311,10 +319,19 @@ export class SessionAuthorityReconciler {
     return due
   }
 
-  private revokeAuthority(authority: AuthorityRecord): void {
+  private closeAuthority(authority: AuthorityRecord, reason: "revoked" | "unverified"): void {
     if (this.authorities.get(authority.key) !== authority) return
     this.authorities.delete(authority.key)
-    this.bindings?.closeSession({ userId: authority.userId, sessionId: authority.sessionId })
+    this.log.warn("session authority closed", {
+      userId: authority.userId,
+      sessionId: authority.sessionId,
+      reason,
+      proofAgeMs: Math.max(0, this.now() - authority.verifiedAtMs),
+    })
+    if (reason === "revoked") {
+      this.invalidatedUntil.set(authority.key, this.now() + this.configuration.invalidationRetentionMs)
+    }
+    this.bindings?.closeSession({ userId: authority.userId, sessionId: authority.sessionId }, reason)
   }
 
   private pruneInvalidations(now: number): void {
