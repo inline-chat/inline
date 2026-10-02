@@ -63,6 +63,9 @@ jobs:
           bun run --cwd packages/mcp build
       - name: Check MCP types, lint, and behavior fixtures
         run: |
+          bun run --cwd plugins/chatgpt/ui typecheck
+          bun run --cwd plugins/chatgpt/ui lint
+          bun run --cwd plugins/chatgpt/ui test
           bun run --cwd packages/mcp typecheck
           bun run --cwd packages/mcp lint
           bun run --cwd packages/mcp test

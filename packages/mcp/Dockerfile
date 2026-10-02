@@ -29,6 +29,7 @@ COPY --from=build /app/packages/protocol/dist ./packages/protocol/dist
 COPY --from=build /app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=build /app/packages/mcp/dist ./packages/mcp/dist
+COPY --from=build /app/plugins/chatgpt/ui/dist ./plugins/chatgpt/ui/dist
 
 ENV NODE_ENV=production
 ENV PORT=8791
