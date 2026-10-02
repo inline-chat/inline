@@ -27,7 +27,7 @@ _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
 _MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _MACHINE_SETUP_PROTOCOL_VERSION = 1
-_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.21"
+_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.22"
 _ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
@@ -97,7 +97,7 @@ def gateway_setup() -> None:
     hermes_setup.print_success("💬 Inline configuration saved.")
     hermes_setup.print_info("Restart the gateway when prompted; setup is not ready until that restart succeeds.")
     hermes_setup.print_info("Then run `hermes inline status --json --probe` to verify the bot credential.")
-    hermes_setup.print_info("After it reports ready, message your bot in Inline.")
+    hermes_setup.print_info("After its gateway reports delivery ready, message your bot in Inline.")
     hermes_setup.print_info("Send /sethome in that chat to use it for cron results and notifications.")
 
 
@@ -456,6 +456,8 @@ def _status(args) -> int:
     runtime_usable = bool(sidecar["ok"] and node["ok"])
     compatibility = _compatibility_status() if getattr(args, "check_compatibility", False) else None
     compatible = compatibility is None or compatibility["ok"]
+    receiving_capability = _receiving_capability_status()
+    gateway = _gateway_status()
     ready = compatible and runtime_usable and configured and (not probe_requested or bool(probe and probe.get("ok")))
     result = {
         "ok": ready,
@@ -469,7 +471,8 @@ def _status(args) -> int:
         "sidecar": sidecar,
         "node": node,
         "probeRequested": probe_requested,
-        "gateway": _gateway_status(),
+        "receivingCapability": receiving_capability,
+        "gateway": gateway,
         **({"compatibility": compatibility} if compatibility is not None else {}),
         **({"probe": probe} if probe is not None else {}),
     }
@@ -481,7 +484,11 @@ def _status(args) -> int:
         print(f"Inline configured: {'yes' if configured else 'no'}")
         print(f"Inline sidecar usable: {'yes' if sidecar['ok'] else 'no'}")
         print(f"Node available: {_node_status_text(node)}")
-        print(f"Inline runtime ready: {'yes' if ready else 'no'}")
+        print(f"Inline credential/send runtime ready: {'yes' if ready else 'no'}")
+        print(f"Hermes durable receiving supported: {'yes' if receiving_capability['supported'] else 'no'} ({receiving_capability['reason']})")
+        print(f"Inline gateway delivery ready: {'yes' if gateway['ready'] else 'no'}")
+        if not receiving_capability["supported"]:
+            print("Receiving requires the matching Hermes durable-intake core; loader compatibility and a valid token only qualify sending.")
         if not configured:
             print("Next: run `hermes inline setup` for guided bot setup.")
         elif probe_requested:
@@ -528,6 +535,35 @@ def _compatibility_status() -> dict:
                 return {"ok": False, "reason": "deprecated_imports"}
         return {"ok": True, "reason": "loaded", "pluginPath": str(plugin_dir)}
     except Exception:
+        return unavailable
+
+
+def _receiving_capability_status() -> dict:
+    """Report core support, separately from credentials and running-instance proof.
+
+    The adapter's connect preflight verifies registered adoption/drain callbacks;
+    only the existing gateway runtime projection can attest a connected instance.
+    This check must not instantiate a gateway or create a database for doctor.
+    """
+    unavailable = {"supported": False, "requiredIntakeVersion": 1, "reason": "durable_intake_required"}
+    try:
+        from gateway.platforms.base import BasePlatformAdapter
+        from gateway.run import GatewayRunner
+        from gateway.run_intake import GatewayIntakeMixin
+        from hermes_state import SessionDB
+
+        supported = (
+            getattr(BasePlatformAdapter, "durable_intake_version", None) == 1
+            and callable(getattr(BasePlatformAdapter, "set_durable_intake_handler", None))
+            and issubclass(GatewayRunner, GatewayIntakeMixin)
+            and callable(getattr(GatewayRunner, "_make_durable_intake_handler", None))
+            and callable(getattr(GatewayRunner, "_drain_durable_intakes", None))
+            and callable(getattr(SessionDB, "adopt_gateway_intake", None))
+            and callable(getattr(SessionDB, "_consume_gateway_intake", None))
+        )
+        return {"supported": True, "requiredIntakeVersion": 1, "reason": "core_capability_available"} if supported else unavailable
+    except Exception:
+        # Exceptions can contain configuration/credentials; expose no host text.
         return unavailable
 
 

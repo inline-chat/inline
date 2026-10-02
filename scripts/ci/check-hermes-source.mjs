@@ -55,10 +55,10 @@ const metadata = JSON.parse(await readFile(path.join(home, "plugins", ".install-
 assert.equal(metadata["inline-platform"].revision, revision)
 assert.equal(metadata["inline-platform"].pinned, true)
 assert.equal(typeof metadata["inline-platform"].source, "string")
-const expectedVersion = /^version:\s*[\'"]?([^\'"\n#]+)/m.exec(await readFile(path.join(source, "plugin.yaml"), "utf8"))?.[1]?.trim()
+const expectedVersion = /^version:\s*['"]?([^'"\n#]+)/m.exec(await readFile(path.join(source, "plugin.yaml"), "utf8"))?.[1]?.trim()
 assert.ok(expectedVersion)
 // The host test below invokes validate_plugin_dir when the host provides it,
-// then always exercises the real loader and message flow. Native source install
+// then exercises the real loader, offline send and unwired receive refusal. Native source install
 // exists in Hermes 0.21.0 before the separate `plugins validate` CLI command.
 const hostTest = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-hermes-host.py")
 console.log(run(pythonBin, [hostTest, installed], 60_000))
@@ -110,5 +110,5 @@ try {
   child.kill("SIGTERM")
   await exited
 }
-console.log(`Native source admission + installed bundled sidecar offline smoke passed: ${identifier} @ ${revision}`)
+console.log(`Native source loader/tool/send compatibility, unwired durable receive refusal and mock sidecar smoke passed: ${identifier} @ ${revision}`)
 console.log(`Isolated Hermes home: ${home}`)

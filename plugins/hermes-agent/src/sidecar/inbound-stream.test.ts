@@ -45,7 +45,7 @@ describe("InboundStream lifecycle", () => {
     consumer.destroy()
   })
 
-  it.each(["close", "error", "replacement"])("replays the same unacknowledged identity after consumer %s", async (cause) => {
+  it.each(["close", "error"])("replays the same unacknowledged identity after consumer %s", async (cause) => {
     const stream = new InboundStream()
     const old = new PassThrough()
     const original = readEvents(old)
@@ -81,6 +81,18 @@ describe("InboundStream lifecycle", () => {
     stream.close()
     old.destroy()
     replacement.destroy()
+  })
+
+  it("refuses a second live consumer instead of replacing the owner", () => {
+    const stream = new InboundStream()
+    const first = new PassThrough()
+    const second = new PassThrough()
+    expect(stream.attach(first)).toBe(true)
+    expect(stream.attach(second)).toBe(false)
+    expect(first.writableEnded).toBe(false)
+    stream.close()
+    first.destroy()
+    second.destroy()
   })
 
   it("acknowledges unrelated concurrent deliveries independently", async () => {

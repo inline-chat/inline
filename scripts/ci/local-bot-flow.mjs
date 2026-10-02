@@ -7,6 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { assertLocalTestDatabaseUrl, prepareTestDatabaseTemplate } from "../../server/scripts/test-database-template.ts"
+import { assertHermesReceivingHost, hermesReceivingPin, makeHermesReceivingReceipt } from "./hermes-receiving-proof.mjs"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const serverRoot = path.join(repoRoot, "server")
@@ -17,6 +18,33 @@ if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
 const hermesBin = process.env.HERMES_BIN
 const hermesPython = process.env.HERMES_PYTHON_BIN
 if (!hermesBin || !hermesPython) throw new Error("HERMES_BIN and HERMES_PYTHON_BIN are required for the real Hermes transport test")
+const sourceHermesManifest = JSON.parse(await readFile(path.join(repoRoot, "plugins/hermes-agent/package.json"), "utf8"))
+const receivingPin = hermesReceivingPin(sourceHermesManifest)
+// Inspect the actual imported host, not a caller's claimed repository/version.
+const hostRuntime = JSON.parse(execFileSync(hermesPython, ["-c", `
+import json
+from pathlib import Path
+from gateway.platforms import base
+import hermes_state
+from hermes_state import SessionDB
+from hermes_cli import version_info
+assert callable(getattr(SessionDB, "adopt_gateway_intake", None)), "Matching durable intake StateDB is required"
+source = Path(base.__file__).resolve().parents[2]
+assert Path(hermes_state.__file__).resolve().parent == source, "Gateway and StateDB must come from the same core"
+assert Path(version_info.__file__).resolve().parents[1] == source, "Version provenance must come from the loaded core"
+version = version_info.get_version_info()
+print(json.dumps({"source": str(source), "intakeVersion": getattr(base.BasePlatformAdapter, "durable_intake_version", None),
+    "version": {"baseVersion": version.base_version, "derivedVersion": version.derived_version,
+                "commit": version.commit, "source": version.source}}))
+`], { encoding: "utf8", timeout: 30_000 }))
+const hostSource = hostRuntime.source
+const hostSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: hostSource, encoding: "utf8" }).trim()
+const hostOrigin = execFileSync("git", ["remote", "get-url", "origin"], { cwd: hostSource, encoding: "utf8" }).trim()
+if (hostOrigin !== `https://github.com/${receivingPin.repository}.git`) {
+  throw new Error("Imported Hermes source does not have the reviewed GitHub origin")
+}
+const receivingHost = { repository: receivingPin.repository, sha: hostSha, intakeVersion: hostRuntime.intakeVersion, version: hostRuntime.version }
+assertHermesReceivingHost(receivingPin, receivingHost)
 const provisioningUrl = process.env.TEST_DATABASE_URL
 if (!provisioningUrl) throw new Error("TEST_DATABASE_URL is required")
 assertLocalTestDatabaseUrl(provisioningUrl)
@@ -139,7 +167,7 @@ try {
   const hermesHome = path.join(consumer, "hermes-home")
   await mkdir(hermesHome)
   const hermesEnv = {
-    ...process.env, HERMES_HOME: hermesHome, HOME: consumer,
+    ...process.env, HERMES_HOME: hermesHome, HERMES_RUNTIME_DIR: path.join(consumer, "hermes-runtime"),
     INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
     INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
     INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
@@ -151,11 +179,17 @@ try {
     cwd: consumer, env: hermesEnv, stdio: "inherit", timeout: 90_000,
   })
   runHermes(path.join(consumer, "node_modules/.bin/inline-hermes"), ["install", "--hermes-home", hermesHome, "--force", "--json"])
+  const installedHermesManifest = JSON.parse(await readFile(path.join(consumer,
+    "node_modules/@inline-chat/hermes-agent-adapter/package.json"), "utf8"))
+  assertHermesReceivingHost(hermesReceivingPin(installedHermesManifest), receivingHost)
   runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
   await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
   runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
-  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify({ sourceSha: manifest.sourceSha,
-    scenarios: [{ scenario: "hermes-real-host-inbound-and-persisted-reply", status: "passed" }] }, null, 2) + "\n")
+  const hermesArtifact = manifest.packages.find((entry) => entry.name === sourceHermesManifest.name)
+  assert.ok(hermesArtifact, "receiving-qualified adapter artifact must exist")
+  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify(makeHermesReceivingReceipt({
+    sourceSha: manifest.sourceSha, host: receivingHost, artifactSha256: hermesArtifact.sha256,
+  }), null, 2) + "\n")
   await closeDb()
   closeDb = undefined
   await stopServer()

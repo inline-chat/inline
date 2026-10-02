@@ -105,9 +105,33 @@ describe("public CI contracts", () => {
     expect(integration).not.toContain('pip" install "hermes-agent==')
     const publish = read(".github/workflows/npm-publish.yml")
     expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
-    expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
+    expect(publish.indexOf("Validate exact Hermes artifact stock compatibility and receive refusal")).toBeLessThan(
       publish.indexOf("HERMES_ARTIFACT_SHA256:"),
     )
+  })
+
+  it("qualifies receiving with the pinned core and gates publication on the exact CI artifact", () => {
+    const integration = workflow("integrations.yml")
+    const receiveSteps = integration.jobs["local-integration"]!.steps!
+    const matchingInstall = receiveSteps.find((step) => step.run?.includes("install-hermes-host.sh"))!.run!
+    expect(matchingInstall).toContain("inlineHermes.testedHermesRepository")
+    expect(matchingInstall).toContain("inlineHermes.testedHermesCommit")
+    expect(matchingInstall).toContain('"$host_sha" "$host_repository"')
+    expect(matchingInstall).not.toContain(" latest")
+    expect(read("scripts/ci/hermes-local-flow.py")).toContain('getattr(adapter, "durable_intake", False) is True')
+    expect(read("scripts/ci/local-bot-flow.mjs")).toContain("assertHermesReceivingHost(hermesReceivingPin(installedHermesManifest), receivingHost)")
+    const publish = workflow("npm-publish.yml")
+    expect(publish.permissions.actions).toBe("read")
+    const runs = publish.jobs.publish!.steps!.map((step) => step.run ?? "")
+    const select = runs.findIndex((run) => run.includes("hermes-receiving-proof.mjs select-run"))
+    const verify = runs.findIndex((run) => run.includes("hermes-receiving-proof.mjs verify"))
+    const send = runs.findIndex((run) => run.includes("npm publish --ignore-scripts"))
+    expect(select).toBeGreaterThan(-1)
+    expect(verify).toBeGreaterThan(select)
+    expect(send).toBeGreaterThan(verify)
+    expect(read(".github/workflows/npm-publish.yml")).toContain("name: local-integration-receipts")
+    expect(read(".github/workflows/npm-publish.yml")).toContain("run-id: ${{ steps.hermes-proof.outputs.run-id }}")
+    expect(read("scripts/ci/check-hermes-admission.mjs")).toContain("unwired durable receive refusal passed (offline)")
   })
 
 })

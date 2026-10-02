@@ -10,7 +10,7 @@ Implemented Hermes-native surfaces:
 
 - realtime inbound messages, replies, and action callbacks
 - outbound text, markdown, opt-in edit-message streaming, deletes, typing, media uploads, and reply threads
-- Discord-style native Hermes `inline` tool for bounded chat/message/history/search/thread, reaction, pin, and agent-authored button-message actions
+- Native Hermes `inline` tool for bounded chat/message/history/search/thread, reaction, pin, and agent-authored button-message actions
 - clarify prompts, command approvals, slash confirmations, and model picker buttons
 - Hermes slash commands synced into Inline's native `/` bot command menu
 - DM/group access policy controls compatible with Hermes gateway allowlists
@@ -25,16 +25,17 @@ Supported:
 - `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, and `inline.token` auth paths, including simple `${ENV_NAME}` config references.
 - Supervised loopback Node sidecar using the Inline realtime SDK.
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
-- Inbound SDK receipts remain pending until Python handles the event. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Agent-button preflight retries are bounded, then show a retry prompt so an unavailable button cannot indefinitely block the shared action cursor. Shutdown leaves unresolved receipts available for catch-up; this is an at-least-once handoff, not a durable exactly-once guarantee for model turns or external effects.
+- Inbound SDK receipts remain pending until the matching host durably adopts a model input, completes a synchronous control, or proves a permanent refusal. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Other agent-button dependency failures have bounded retries and a retry prompt; unavailable sender-kind proof always remains pending. Shutdown leaves unresolved receipts available for catch-up. Durable intake does not promise exactly-once model turns or external effects.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
-- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
+- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level chat creation, participant changes, chat renaming/deletion, explicit emoji backfill, and avatar presence/status.
+- Explicitly mentioned Agents and this bot's bound `agentContext` select specialized instructions for accepted turns. Lookup or identity failure leaves delivery pending instead of running the generic bot. Binding does not bypass mention requirements or access policy. Instructions enter the current turn's context without rewriting an existing Hermes system prompt.
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
 - Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
-- Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged after its target and access checks succeed, then enters Hermes as a normal turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
+- Agent-created `send_message`/`edit_message` button rows with opaque callback data. Model-directed callbacks enter Hermes as normal turns naming the source message and exact action fields; durable host adoption precedes acknowledgement. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
 - Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
@@ -43,8 +44,8 @@ Supported:
 
 Unsupported or intentionally limited:
 
-- Multiple Inline accounts in one Hermes process. Run separate Hermes instances for separate tokens.
-- Inline member, space, and admin tools beyond bounded current-chat/thread message access.
+- Multiple Inline accounts assigned to one adapter or one Hermes profile. Each receiving adapter owns one authenticated bot. The candidate supports distinct configured named profiles with separate credentials, listeners, state and settings; concurrent multi-profile receiving still requires the matching core and its runtime acceptance checks.
+- Space management and administrative tools beyond the supported chat operations.
 - Full Inline rich-text span conversion. Outbound formatting uses [Inline's bounded Markdown surface](../../packages/protocol/docs/markdown.md); rich entities are summarized for the agent instead of converted into Hermes-specific spans. Parsing is enabled by default, while disabling it preserves the supplied syntax literally.
 - Native animated draft streaming. Inline can stream by sending one preview message and editing it, but this edit-based streaming path is off by default like Discord and Slack.
 - Ephemeral in-channel private replies. Private notices are sent as DMs when a user id is available.
@@ -156,7 +157,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.21   inline-platform
+enabled      user     0.0.22   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -177,19 +178,24 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 ## Compatibility
 
-- Hermes Agent: requires the external user plugin registry and native platform
-  plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
-  `v2026.9.24`).
+- Hermes Agent: the external user plugin registry and native platform loader in
+  Hermes Agent `>=0.21.3` establish the historical loader/send-only floor.
+  Receiving requires the reviewed fork pinned by the manifest, currently
+  `morajabi/hermes-agent@cd7f349d7aa072f45fce5d2721869ba59c5bbfa2`.
+  Its source-derived base version is `0.21.5`; that version alone does not prove
+  the required core capabilities. Packaged receiving qualification is pending.
 - CI checks the minimum supported Hermes release, newest stable source, and upstream
   `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
-  `inline-hermes doctor` requires successful host loading and compatibility validation;
-  unavailable Hermes diagnostics no longer count as healthy.
+  `inline-hermes doctor` requires successful host loading, credential validation
+  and the actual durable receiving core capability. Unavailable Hermes diagnostics
+  no longer count as healthy. A connected gateway remains a separate runtime check.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
-- Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.18` and is
-  bundled into the npm package, so Hermes startup does not run `npm install`.
+- Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. A successful directory fetch that misses the requested sender can refresh after the one-second retry interval; verified users retain their normal cache TTL. Stream replacement wakes pending backpressure writes.
+- Inline transport: this local candidate pins `@inline-chat/realtime-sdk@0.0.19-alpha.0`
+  and the matching protocol candidate. Their immutable local tarballs qualify this
+  build without asserting registry publication. The sidecar is bundled, so Hermes
+  startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
 
@@ -312,7 +318,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_OBSERVED_CONTEXT_LIMIT` | Max unmentioned group messages kept in the observed-context buffer. Must be `0` through `100`; defaults to `20`. |
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
-| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
+| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. SDK state and settings have exclusive writer locks and account/API ownership tags. A tagged file cannot be reused by another bot or API endpoint. Untagged legacy files retain their contents; keep their original configured profile because their prior owner cannot be reconstructed. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
@@ -321,12 +327,13 @@ Access control follows Hermes' native platform model:
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
 | `INLINE_MEDIA_MAX_MB` | Maximum inbound media download size for URL-backed Inline attachments. Defaults to `25`. |
 | `INLINE_UPLOAD_MAX_MB` | Maximum outbound local file upload size. The Python adapter and Node sidecar both enforce it before upload bytes are read. Defaults to `300`. |
-| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults to `~/.hermes/inline/sdk-state.json`. |
+| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults under the owning Hermes profile's `inline/sdk-state.json`. Separate served profiles keep separate checkpoints and settings. One-shot sends use a stateless transport and cannot update the live receiver's files. |
 | `INLINE_RPC_TIMEOUT_MS` | Realtime RPC timeout for the Node sidecar. |
 | `INLINE_CONNECT_TIMEOUT_MS` | Adapter startup timeout while waiting for the sidecar to become realtime-ready. Defaults to `20000`. |
 | `INLINE_CONNECT_RETRY_INITIAL_MS` | Initial sidecar retry delay after realtime startup failure. Defaults to `1000`. |
 | `INLINE_CONNECT_RETRY_MAX_MS` | Maximum sidecar retry delay after repeated realtime startup failures. Defaults to `15000`. |
-| `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to `8794`; `test-send` uses a random free port. |
+| `INLINE_SIDECAR_PORT` | Optional fixed loopback port from `1` through `65535`. Managed sidecars otherwise ask the kernel for a free listener, preventing default-profile collisions. Standalone send transports use their own listener. |
+| `INLINE_SIDECAR_AUTOSTART` | Defaults to `true`. Receiving requires the managed sidecar so its state writer and lifecycle have one owner. `false` is supported only for send-only fallback using an externally supervised endpoint; external receiving fails before reporting connected. |
 | `INLINE_SIDECAR_BIND` | Sidecar bind host. Must be loopback: `127.0.0.1`, `localhost`, or `::1`. Defaults to `127.0.0.1`. |
 | `INLINE_HERMES_SENTRY_DSN` | Explicitly enables adapter and sidecar error reporting to the configured collector. Reporting is disabled when unset. |
 | `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable explicitly configured plugin error reporting. `DO_NOT_TRACK=1` is also honored. |
@@ -350,6 +357,24 @@ the adapter denies the operation instead of guessing a profile. Controls that
 change the parent's reply-thread mode also require access to that parent;
 thread-local model and following settings remain available to an authorized
 child-thread user.
+
+Reply threads keep one Hermes identity from the opening turn through later
+child-chat turns. A group reply thread keys on the child chat and thread ID;
+a DM reply thread keys on its immediate parent chat and thread ID. DM policy
+follows nested parent edges to the root DM, while Inline transport targets and
+message IDs retain their actual chat. Unavailable or malformed ancestry cannot
+fall through to group policy. Root chats and sibling threads remain separate.
+
+For workflows that use a pinned bot DM for casual exchanges and explicitly
+created conversations for tasks, set `reply_threads: off`. The `create_thread`
+tool and Inline's new-chat flow remain available. Scheduled delivery does not
+automatically create another Inline subthread; Hermes owns transcript attachment
+and CLI handoff identity, which need separate host validation.
+
+Default SDK state, chat settings, and downloaded media use the active Hermes
+profile home. Explicit `state_path` and `settings_path` continue to take priority.
+An upgrade does not move previously shared files into named profiles; review
+per-chat `/threads` overrides when moving from the old shared defaults.
 
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
@@ -428,10 +453,34 @@ unless the bot is also explicitly mentioned.
 The model-callable `inline` tool keeps reply and top-level creation separate:
 `create_thread` creates a reply subthread under the current or explicit parent
 chat, while `create_chat` creates a new top-level destination. `create_chat`
-requires a title, defaults to private, accepts optional participant user IDs or
+requires a title, defaults to private with the verified person making the request, accepts explicit participant user IDs or
 a parent space ID, and requires both `space_id` and explicit `is_public: true`
 for space-wide visibility. It returns the new chat ID so Hermes can link it in
 the normal reply.
+An explicit empty `participant_user_ids: []` creates a bot-only chat. Outside a
+verified human Inline turn, provide explicit participants; an automated request
+does not infer or invite the bot's owner.
+
+`add_participant` and `remove_participant` take a separate
+`participant_user_id`; `rename_chat` changes only the title. These operations
+use the bot's current server permissions. `delete_chat` permanently deletes
+one selected chat when server permissions and parent constraints permit, so it requires an explicit
+`chat_id` and a user deletion request. Closing a chat remains a separate dialog
+action.
+
+`generate_chat_emojis` accepts one to five explicit `chat_ids`. It preserves
+titles and existing emojis, skips anchored reply threads, and returns one
+outcome per chat. `emoji_present` means an emoji was observed afterward;
+`unchanged` includes an empty provider result. A `failed` outcome carries the
+server or transport error and available current metadata. Inspect these results
+before retrying a partial or uncertain request.
+
+Inside a reply thread, pass `parent_chat_id` explicitly to `create_thread`.
+Omit `parent_message_id` for an unanchored child, or pass the exact parent
+chat/message pair for an anchored reply thread. Message IDs are scoped to their
+chat: edit, delete, reaction, and pin actions in a reply thread require an
+explicit destination and message ID. The per-turn context provides the actual
+triggering pair, even when the opening message belongs to the parent chat.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
@@ -464,6 +513,11 @@ Run `inline-hermes doctor --json` first. It checks the installed plugin path,
 required files, Node executable, source/installed sidecar bundle hashes, and
 whether an Inline token is available to Hermes.
 
+`hermes inline status --json --probe --check-compatibility` separates credential/send
+readiness (`ready`), host receiving support (`receivingCapability.supported`) and
+the connected gateway (`gateway.ready`). A successful doctor confirms prerequisites;
+only the gateway projection and an actual reply establish running delivery.
+
 - `plugin is not installed`: run `inline-hermes install`.
 - `Hermes plugin 'inline-platform' is not enabled`: run
   `hermes plugins enable inline-platform`.
@@ -481,3 +535,73 @@ whether an Inline token is available to Hermes.
 - `INLINE_SIDECAR_BIND must be loopback`: remove the override or set it to
   `127.0.0.1`, `localhost`, or `::1`. The sidecar intentionally refuses
   externally reachable bind addresses even though its HTTP API is token-gated.
+
+### Candidate runtime qualification
+
+Receiving in this candidate requires the matching Hermes durable-intake core
+patch: `BasePlatformAdapter.durable_intake_version == 1` and profile handlers
+wired by the gateway. An unpatched or unwired host refuses receiving at startup
+with `DURABLE_INTAKE_REQUIRED`; standalone send-only delivery remains available.
+The historical minimum host version is a plugin loader/send-only compatibility
+floor, and does not prove this receiving contract.
+
+The profile StateDB adopts one immutable authenticated input before the SDK ACK.
+The ordinary user-row transaction consumes its receipt before a provider request.
+Restart rechecks the receiving bot, API/profile, current source access, authored
+revision, recipient/Agent policy and canonical route. It reconstructs context
+from current public messages, without serializing private provider history.
+Completed controls use the synchronous handler disposition and are excluded from
+automatic receipt replay. Model-directed buttons and reactions have independent
+interaction/update identities and revalidate their referenced public message.
+
+### Cron continuation qualification
+
+The Jack workflow candidate is adapter 0.0.22 paired with the reviewed fork's
+core changes for durable intake, public-context admission and worker-owned cron.
+A release number or the historical plugin-loader floor does not establish those
+capabilities. `delivery_source_resolver` resolves the same logical root/child
+source as a follow-up under the owning profile's current authorization and sharing
+policy. Adapter installation alone does not supply these core changes.
+
+The worker runs its cron in an independent scratch session and posts its confirmed
+output into the intended public task chat. Its next ordinary authorized input
+admits the currently visible output once, alongside other public history. Cron and
+generic send tools do not also seed or mirror private transcripts on this path.
+The actual current source, reset boundary and accepted public revisions determine
+continuation, rather than an older sender-matching private transcript. A confirmed
+visible message is never resent to repair attachment. An unavailable owning route
+fails before sending; temporary unavailability at follow-up admission retains the
+input for retry. Legacy hosts without public admission retain their separate
+canonical attachment/mirror behavior and diagnostic warnings.
+
+No transcript merge or legacy shared-file migration is performed. Named profiles
+without explicit path overrides start from their configured `/threads` default;
+new per-profile overrides persist across restart. Legacy SDK/settings files remain
+unchanged. Configure explicit paths when deliberately retaining old state, and
+back up those files before changing existing profile paths.
+
+Chief may seed an authorized task and ask its configured worker to own the cron.
+The matching core also supports an explicit configured executor profile; this
+selects execution ownership without expanding chat access or copying private
+history. Conversation promotion, title ownership and Apple client behavior use
+Inline's own product primitives and are qualified in their separate slices.
+Real post-restart provider/cron/follow-up acceptance is required before handing
+this candidate to Jack.
+
+Receiving qualification installs the exact `inlineHermes.testedHermesCommit`
+from `inlineHermes.testedHermesRepository` (`morajabi/hermes-agent`) in the existing
+real-server CI lane. The core is reviewed and pushed; this pin still requires
+qualification with the exact packaged adapter and Inline source. The installer
+preserves source ancestry and tags for the actual version, and builds PM-capable
+hosts through their own `pm.build_env` into an isolated environment. Official
+Hermes tag/latest/main checks continue to qualify plugin loading, tools, offline
+sends and actionable receive refusal without a wired durable-intake gateway.
+
+A successful receiving receipt binds the actual imported core repository/SHA
+and intake version 1 to the Inline source commit and exact adapter tarball hash.
+Publication requires that receipt from successful trusted-main CI and rejects
+different release bytes. A differing repack must receive its own real-server
+qualification; stock compatibility checks cannot substitute. This lane proves
+native adoption, user-row consumption and one persisted reply with a deterministic
+handler. Live provider, process-death recovery and deployed service acceptance
+retain their separately stated tests and limits.

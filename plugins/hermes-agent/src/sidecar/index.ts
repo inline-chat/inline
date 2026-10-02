@@ -1,17 +1,24 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http"
 import { InboundStream } from "./inbound-stream.js"
+import { AccountStateStore } from "./account-state-store.js"
 import { deliverInboundEvent } from "./inbound-delivery.js"
 import { timingSafeEqual } from "node:crypto"
 import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import {
   BotCapability_Kind,
+  ConnectionError_Reason,
   DialogFollowMode,
   InlineSdkClient,
   InlineSdkAuthenticationError,
-  JsonFileStateStore,
+  ProtocolClientError,
+  RpcError_Code,
   GetMeInput,
   GetChatInput,
+  AddChatParticipantInput,
+  RemoveChatParticipantInput,
+  UpdateChatInfoInput,
+  DeleteChatInput,
   Method,
   InputPeer,
   registerBotCapabilitiesWithRetry,
@@ -22,6 +29,7 @@ import {
   MessageActionRow,
   MessageActions,
   MessageActionToast,
+  UpdateComposeAction_ComposeAction,
   type InlineSdkClientOptions,
   type InlineSdkGetMessagesParams,
   type InlineSdkSendMessageParams,
@@ -30,6 +38,7 @@ import {
   type InlineSdkUploadFileParams,
   type InlineSdkUploadFileResult,
   type BotChatSettingsResponse,
+  type AgentThreadContext,
 } from "@inline-chat/realtime-sdk"
 
 // The server contract defines UNFOLLOWED = 2, but the currently published
@@ -73,6 +82,7 @@ const sidecarToken = process.env.INLINE_SIDECAR_TOKEN || ""
 const port = normalizeSidecarPort(process.env.INLINE_SIDECAR_PORT)
 const bind = normalizeSidecarBind(process.env.INLINE_SIDECAR_BIND)
 const statePath = process.env.INLINE_STATE_PATH || path.join(process.cwd(), "inline-sdk-state.json")
+const sendOnly = process.env.INLINE_SIDECAR_SEND_ONLY === "1"
 const rpcTimeoutMs = parseOptionalInt(process.env.INLINE_RPC_TIMEOUT_MS)
 const uploadMaxBytes = Math.floor(normalizePositiveMb(process.env.INLINE_UPLOAD_MAX_MB, 300, "INLINE_UPLOAD_MAX_MB") * 1024 * 1024)
 const connectRetryInitialMs = clampRetryMs(parseOptionalInt(process.env.INLINE_CONNECT_RETRY_INITIAL_MS), 1_000)
@@ -96,6 +106,7 @@ type RawChat = {
   createdBy?: bigint | number | string | null
   untitled?: boolean | null
   number?: number | null
+  agentContext?: AgentThreadContext | null
 }
 
 type RawDialog = {
@@ -108,7 +119,7 @@ if (!token || !sidecarToken) {
   process.exit(2)
 }
 
-await mkdir(path.dirname(statePath), { recursive: true }).catch(() => {})
+if (!sendOnly) await mkdir(path.dirname(statePath), { recursive: true }).catch(() => {})
 
 let connected = false
 let connecting = false
@@ -120,11 +131,12 @@ let connectAttempts = 0
 let nextConnectRetryAt: string | null = null
 const inboundStream = new InboundStream()
 const inboundAbort = new AbortController()
+const stateStore = sendOnly ? null : new AccountStateStore(statePath, token, baseUrl)
 
 const clientOptions: InlineSdkClientOptions = {
   token,
   baseUrl,
-  state: new JsonFileStateStore(statePath),
+  ...(stateStore ? { state: stateStore } : {}),
   onAuthenticationError: (error) => {
     reportHermesPluginError("sdk.authentication", error)
     connected = false
@@ -135,6 +147,7 @@ const clientOptions: InlineSdkClientOptions = {
     console.error(
       `inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`,
     )
+    void shutdown(3)
   },
   ...(rpcTimeoutMs != null ? { rpcTimeoutMs } : {}),
   logger: {
@@ -159,8 +172,9 @@ async function connectClientLoop() {
       const me = asOptionalRecord(asOptionalRecord(meResult?.getMe)?.user)
       if (me?.id == null) throw new Error("getMe: missing user")
       meId = String(me.id)
+      stateStore?.bindAccount(meId)
       meUsername = normalizeOwnUsername(me.username)
-      void registerBotCapabilitiesWithRetry({
+      if (!sendOnly) void registerBotCapabilitiesWithRetry({
         register: () => client.setMyBotCapabilities({
           capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
         }),
@@ -205,6 +219,7 @@ async function consumeEvents() {
         resolveSender: resolveInboundSender, deliver,
       })
     })
+    if (!stopping) throw new Error("Inline realtime inbound stream ended before shutdown")
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false })
@@ -235,6 +250,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         meUsername,
         baseUrl: redactUrl(baseUrl),
         statePath,
+        sendOnly,
         version: await packageVersion(),
         connectAttempts,
         connectRetryInitialMs,
@@ -244,6 +260,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         ...(connectError ? { connectError } : {}),
       },
     })
+    return
+  }
+  if (req.method === "POST" && url.pathname === "/test/authentication-error" && client instanceof MockInlineClient) {
+    writeJson(res, 200, { ok: true, result: {} })
+    client.triggerAuthenticationError()
     return
   }
 
@@ -309,6 +330,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/messages":
       await endpointMessages(res, body)
       return
+    case "/sender":
+      await endpointSender(res, body)
+      return
     case "/history":
       await endpointHistory(res, body)
       return
@@ -332,6 +356,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return
     case "/create-chat":
       await endpointCreateChat(res, body)
+      return
+    case "/add-participant":
+    case "/remove-participant":
+      await endpointParticipant(res, body, url.pathname === "/remove-participant")
+      return
+    case "/rename-chat":
+      await endpointRenameChat(res, body)
+      return
+    case "/delete-chat":
+      await endpointDeleteChat(res, body)
+      return
+    case "/generate-chat-emojis":
+      await endpointGenerateChatEmojis(res, body)
       return
     case "/create-agent":
       await endpointCreateAgent(res, body)
@@ -430,11 +467,13 @@ async function endpointTyping(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
   const typing = (readOptionalString(record, "state") ?? "start") !== "stop"
-  if ("userId" in target) {
-    writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } })
-    return
-  }
-  await client.sendTyping({ chatId: target.chatId, typing })
+  await client.invoke(Method.SEND_COMPOSE_ACTION, {
+    oneofKind: "sendComposeAction",
+    sendComposeAction: {
+      peerId: inputPeerFromTarget(target),
+      ...(typing ? { action: UpdateComposeAction_ComposeAction.TYPING } : {}),
+    },
+  })
   writeJson(res, 200, { ok: true, result: {} })
 }
 
@@ -572,6 +611,7 @@ async function endpointChat(res: ServerResponse, body: unknown) {
       ...(chat.createdBy != null ? { createdBy: chat.createdBy.toString() } : {}),
       ...(chat.untitled != null ? { untitled: chat.untitled } : {}),
       ...(chat.number != null ? { number: chat.number } : {}),
+      ...(chat.agentContext != null ? { agentContext: safeJson(chat.agentContext) } : {}),
       ...(snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {}),
       ...(snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {}),
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
@@ -612,16 +652,28 @@ async function endpointMessages(res: ServerResponse, body: unknown) {
   writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(ordered, target)) } })
 }
 
+async function endpointSender(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const userId = readRequiredInlineId(record, "userId")
+  const chatId = readRequiredInlineId(record, "chatId")
+  const result = await userDirectory.resolveWithProvenance({
+    userId, chatId, direct: readOptionalBoolean(record, "direct") ?? false,
+  })
+  writeJson(res, 200, { ok: true, result: safeJson(result) })
+}
+
 async function endpointHistory(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
   const limit = readOptionalNumber(record, "limit") ?? 20
   const anchorId = readOptionalInlineId(record, "anchorId")
+  const offsetId = readOptionalInlineId(record, "offsetId")
   const result = await client.invoke(Method.GET_CHAT_HISTORY, {
     oneofKind: "getChatHistory",
     getChatHistory: {
       peerId: inputPeerFromTarget(target),
       limit,
+      ...(offsetId ? { offsetId } : {}),
       ...(anchorId ? { anchorId, includeAnchor: true } : {}),
     },
   })
@@ -776,7 +828,10 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
   const emoji = readOptionalString(record, "emoji")
   const spaceId = readOptionalInlineId(record, "spaceId")
   const isPublic = readOptionalBoolean(record, "isPublic") ?? false
-  const participantUserIds = readInlineIdArray(record, "participantUserIds", 50)
+  if (Object.hasOwn(record, "participantUserIds") && !Array.isArray(record.participantUserIds)) {
+    throw new SidecarError("participantUserIds must be an explicit array; use [] for a bot-only chat", "bad_format")
+  }
+  let participantUserIds = readInlineIdArray(record, "participantUserIds", 50)
 
   if (title.length > 200) throw new SidecarError("create-chat title is too long", "bad_format")
   if (description && description.length > 1_000) {
@@ -788,6 +843,22 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
   }
   if (isPublic && participantUserIds.length > 0) {
     throw new SidecarError("public create-chat cannot include participantUserIds", "bad_format")
+  }
+  if (!isPublic && !Object.hasOwn(record, "participantUserIds")) {
+    const userId = readOptionalInlineId(record, "initiatingUserId")
+    const chatId = readOptionalInlineId(record, "initiatingChatId")
+    if (!userId || !chatId) {
+      throw new SidecarError("create-chat needs explicit participantUserIds when no current Inline person is available; use [] for a bot-only chat", "bad_format")
+    }
+    // Canonical encodeUser includes bot=true even in the minimum projection;
+    // an omitted bot field is human only after a matching server directory or
+    // participant profile is verified. Missing profiles never qualify.
+    const resolved = await userDirectory.resolveWithProvenance({ userId, chatId,
+      direct: readOptionalBoolean(record, "initiatingDirect") ?? false })
+    if (!resolved.provenanceVerified || resolved.profile?.id !== String(userId) || resolved.profile.bot !== false) {
+      throw new SidecarError("The current Inline sender is a bot or cannot be verified; pass explicit participantUserIds (use [] for a bot-only chat)", "bad_format")
+    }
+    participantUserIds = [userId]
   }
 
   const result = await client.invokeUncheckedRaw(Method.CREATE_CHAT, {
@@ -842,6 +913,64 @@ async function callBotApi(
     throw new SidecarError(String(payload?.description ?? `Bot API HTTP ${response.status}`), "unknown")
   }
   return asOptionalRecord(payload.result) ?? {}
+}
+
+async function endpointParticipant(res: ServerResponse, body: unknown, remove: boolean) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const userId = readRequiredInlineId(record, "userId")
+  if (remove) {
+    await client.invoke(Method.REMOVE_CHAT_PARTICIPANT, { oneofKind: "removeChatParticipant",
+      removeChatParticipant: RemoveChatParticipantInput.create({ chatId, userId }) })
+  } else {
+    await client.invoke(Method.ADD_CHAT_PARTICIPANT, { oneofKind: "addChatParticipant",
+      addChatParticipant: AddChatParticipantInput.create({ chatId, userId }) })
+  }
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), userId: String(userId), removed: remove } })
+}
+
+async function endpointRenameChat(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const title = readRequiredString(record, "title").trim()
+  if (!title || title.length > 128) throw new SidecarError("title must have 1 to 128 characters", "bad_format")
+  await client.invoke(Method.UPDATE_CHAT_INFO, { oneofKind: "updateChatInfo",
+    updateChatInfo: UpdateChatInfoInput.create({ chatId, title }) })
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), title } })
+}
+
+async function endpointDeleteChat(res: ServerResponse, body: unknown) {
+  const chatId = readRequiredInlineId(asRecord(body), "chatId")
+  await client.invoke(Method.DELETE_CHAT, { oneofKind: "deleteChat",
+    deleteChat: DeleteChatInput.create({ peerId: inputPeerFromTarget({ chatId }) }) })
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), deleted: true } })
+}
+
+async function endpointGenerateChatEmojis(res: ServerResponse, body: unknown) {
+  const chatIds = readInlineIdArray(asRecord(body), "chatIds", 5, true)
+  // Independent chats share no mutation state. Five requests bound provider
+  // concurrency; each result remains inspectable after a partial failure.
+  const outcomes = await Promise.all(chatIds.map(async (chatId) => {
+    const observed = (chat: RawChat) => ({ chatId: String(chatId), title: chat.title ?? "", emoji: chat.emoji ?? "" })
+    try {
+      const before = (await getRawChatSnapshot(chatId, 10_000)).chat
+      if (before.emoji?.trim()) return { ...observed(before), status: "skipped_existing" }
+      if (before.parentMessageId != null) return { ...observed(before), status: "skipped_reply_thread" }
+      await client.invoke(Method.UPDATE_CHAT_INFO, { oneofKind: "updateChatInfo",
+        updateChatInfo: UpdateChatInfoInput.create({ chatId, generateEmoji: true }) }, { timeoutMs: 30_000 })
+      const after = (await getRawChatSnapshot(chatId, 10_000)).chat
+      // The wire response cannot distinguish generated from a concurrent human
+      // choice. Report observed presence, never claim authorship or a title edit.
+      return { ...observed(after), status: after.emoji?.trim() ? "emoji_present" : "unchanged" }
+    } catch (error) {
+      const normalized = normalizeError(error, redactError)
+      let current: RawChat | undefined
+      try { current = (await getRawChatSnapshot(chatId, 10_000)).chat } catch { /* Keep the original actionable failure. */ }
+      return { chatId: String(chatId), status: "failed", error: normalized.message, errorKind: normalized.errorKind,
+        ...(current ? observed(current) : {}) }
+    }
+  }))
+  writeJson(res, 200, { ok: true, result: { outcomes } })
 }
 
 async function endpointCreateAgent(res: ServerResponse, body: unknown) {
@@ -931,7 +1060,7 @@ async function endpointDeleteAgent(res: ServerResponse, body: unknown) {
   writeJson(res, 200, { ok: true, result: safeJson(result) })
 }
 
-async function getRawChatSnapshot(chatId: bigint): Promise<{
+async function getRawChatSnapshot(chatId: bigint, timeoutMs?: number): Promise<{
   chat: RawChat
   dialog?: RawDialog
   dialogFollowMode?: bigint | number | string
@@ -941,7 +1070,7 @@ async function getRawChatSnapshot(chatId: bigint): Promise<{
   const result = await client.invoke(Method.GET_CHAT, {
     oneofKind: "getChat",
     getChat: GetChatInput.create({ peerId: inputPeerFromTarget({ chatId }) }),
-  })
+  }, timeoutMs == null ? undefined : { timeoutMs })
   const typed = result as {
     getChat?: {
       chat?: RawChat
@@ -1097,18 +1226,17 @@ type SidecarClient = {
   getMessages(params: InlineSdkGetMessagesParams): Promise<{ messages: unknown[] }>
   sendMessage(params: InlineSdkSendMessageParams): Promise<{ messageId: bigint | null }>
   uploadFile(params: InlineSdkUploadFileParams): Promise<InlineSdkUploadFileResult>
-  sendTyping(params: { chatId: bigint; typing: boolean }): Promise<void>
   setBotPresenceState(params: InlineSdkSetBotPresenceStateParams): Promise<void>
   answerMessageAction(params: { interactionId: bigint; ui?: unknown }): Promise<void>
   setMyBotCapabilities(params: { capabilities: Array<{ kind: BotCapability_Kind; version: number }> }): Promise<unknown>
   answerBotChatSettings(params: { requestId: bigint; response: BotChatSettingsResponse }): Promise<void>
-  invoke(method: Method, input: unknown): Promise<unknown>
+  invoke(method: Method, input: unknown, options?: { timeoutMs: number }): Promise<unknown>
   invokeUncheckedRaw(method: Method, input: unknown, options?: { timeoutMs: number }): Promise<unknown>
 }
 
 function createClient(options: InlineSdkClientOptions): SidecarClient {
   if (testMockEnabled(options)) {
-    return new MockInlineClient()
+    return new MockInlineClient(options)
   }
   return new InlineSdkClient(options) as unknown as SidecarClient
 }
@@ -1151,6 +1279,7 @@ function normalizeSidecarBind(value: string | undefined): string {
 function normalizeSidecarPort(value: string | undefined): number {
   const raw = (value || "").trim()
   if (!raw) return 8794
+  if (raw === "0") return 0
   if (!/^\d+$/.test(raw)) {
     console.error("inline-sidecar: INLINE_SIDECAR_PORT must be an integer from 1 to 65535")
     process.exit(2)
@@ -1179,6 +1308,12 @@ class MockInlineClient implements SidecarClient {
   private messageId = 9000n
   private uploadId = 7000n
   private readonly calls: Json[] = []
+  private readonly chatOverrides = new Map<string, Partial<RawChat>>()
+  constructor(private readonly options: InlineSdkClientOptions) {}
+
+  triggerAuthenticationError(): void {
+    this.options.onAuthenticationError?.(new InlineSdkAuthenticationError("SESSION_REVOKED", ConnectionError_Reason.SESSION_REVOKED))
+  }
 
   async connect(): Promise<void> {
     this.record("connect")
@@ -1295,10 +1430,6 @@ class MockInlineClient implements SidecarClient {
     return { fileUniqueId, documentId: this.uploadId }
   }
 
-  async sendTyping(params: { chatId: bigint; typing: boolean }): Promise<void> {
-    this.record("sendTyping", params)
-  }
-
   async setBotPresenceState(params: InlineSdkSetBotPresenceStateParams): Promise<void> {
     this.record("setBotPresenceState", params)
   }
@@ -1332,7 +1463,10 @@ class MockInlineClient implements SidecarClient {
         : {
             id: chatId,
             title: `Mock chat ${chatId.toString()}`,
+            agentContext: { botUserId: 999n, agentId: 73n },
+            ...(chatId === 555n ? { emoji: "🛡️" } : {}),
           }
+      Object.assign(chat, this.chatOverrides.get(String(chatId)))
       return {
         getChat: {
           chat,
@@ -1347,6 +1481,21 @@ class MockInlineClient implements SidecarClient {
           },
         },
       }
+    }
+    if (method === Method.UPDATE_CHAT_INFO) {
+      const parameters = asOptionalRecord(asOptionalRecord(input)?.updateChatInfo)
+      const chatId = asPositiveBigInt(parameters?.chatId)
+      if (!chatId) throw new SidecarError("chat ID missing", "bad_format")
+      if (chatId === 777n) throw new ProtocolClientError("rpc-error", {
+        code: RpcError_Code.UNAUTHENTICATED,
+        message: "Only the chat creator or an authorized admin can change this chat",
+      })
+      const previous = this.chatOverrides.get(String(chatId)) ?? {}
+      const next = { ...previous }
+      if (typeof parameters?.title === "string") next.title = parameters.title
+      if (parameters?.generateEmoji === true && chatId !== 888n && !next.emoji) next.emoji = "🧭"
+      this.chatOverrides.set(String(chatId), next)
+      return { updateChatInfo: {} }
     }
     if (method === Method.GET_CHAT_HISTORY) {
       return {
@@ -1449,6 +1598,7 @@ class MockInlineClient implements SidecarClient {
           users: [
             { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
             { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" },
+            { id: 999n, firstName: "Mock bot", username: "mock_inline_bot", bot: true },
           ],
         },
       }
@@ -1504,7 +1654,7 @@ const userDirectory = new InlineUserDirectory(client, {
 })
 
 void connectClientLoop()
-void consumeEvents()
+if (!sendOnly) void consumeEvents()
 
 const server = http.createServer((req, res) => {
   void handleRequest(req, res).catch((error) => {
@@ -1521,18 +1671,26 @@ const server = http.createServer((req, res) => {
 })
 
 server.listen(port, bind, () => {
-  console.error(`inline-sidecar: listening on ${bind}:${port}`)
+  const address = server.address()
+  if (address && typeof address !== "string") {
+    console.log(JSON.stringify({ inlineSidecarListening: { port: address.port } }))
+    console.error(`inline-sidecar: listening on ${bind}:${address.port}`)
+  }
 })
 
 setupShutdown()
 
 function attachConsumer(res: ServerResponse) {
+  if (sendOnly || !inboundStream.attach(res)) {
+    writeJson(res, 409, { ok: false, error: "Inline sidecar already has a receiver or is send-only", errorKind: "forbidden" })
+    return
+  }
   res.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
-  inboundStream.attach(res)
+  res.flushHeaders()
 }
 
 async function deliver(event: Json) {

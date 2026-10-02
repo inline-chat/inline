@@ -6,9 +6,11 @@ import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from .message_actions import build_inline_agent_action_id
+from gateway.platforms._shared import get_scoped_secret as _get_scoped_secret
 
 try:
     from tools.registry import tool_error, tool_result
@@ -26,6 +28,7 @@ _DEFAULT_SIDECAR_PORT = 8794
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_HISTORY_LIMIT = 100
 _MAX_MESSAGE_IDS = 100
+_MAX_EMOJI_CHAT_IDS = 5
 _MAX_INLINE_ID = 9_223_372_036_854_775_807
 _DEFAULT_HISTORY_LIMIT = 20
 _MAX_TEXT_CHARS = 4000
@@ -76,7 +79,7 @@ INLINE_PLATFORM_GUIDANCE = (
     "Use <footer>Attribution or brief metadata</footer> for a short footer."
 )
 
-_sidecar: Dict[str, Any] = {}
+_sidecars: Dict[str, Dict[str, Any]] = {}
 
 _ACTION_MANIFEST = [
     ("send_message", "(chat_id?|user_id?, text, buttons?)", "Send a message, including optional agent-owned buttons."),
@@ -94,6 +97,11 @@ _ACTION_MANIFEST = [
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
     ("create_chat", "(title, space_id?, participant_user_ids?, is_public?)", "Create a top-level Inline thread/chat."),
+    ("add_participant", "(chat_id?, participant_user_id)", "Add a person or bot to an existing chat using its current permissions."),
+    ("remove_participant", "(chat_id?, participant_user_id)", "Remove a person or bot from an existing chat when explicitly requested."),
+    ("rename_chat", "(chat_id?, title)", "Rename the selected chat without changing its emoji."),
+    ("delete_chat", "(chat_id)", "Permanently delete one explicitly selected chat when the server permits it; use only for an explicit deletion request."),
+    ("generate_chat_emojis", "(chat_ids)", "Request emoji-only generation for up to five explicitly selected chats; preserve chosen titles and emojis and return each observed outcome."),
     ("create_agent", "(name, skill_key?, instructions?)", "Create a named Inline Agent backed by this bot."),
     ("get_agent", "(agent_id)", "Inspect one Agent backed by this bot."),
     ("list_agents", "()", "List Agents backed by this bot."),
@@ -105,17 +113,32 @@ _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
 _PRESENCE_KINDS = ["idle", "happy", "waving", "jumping", "failed", "waiting", "running", "review"]
 
 
-def configure_sidecar(*, bind: str, port: int, token: str) -> None:
-    """Store live adapter sidecar details for model tools in this process."""
+def _profile_key(profile_home: Optional[str] = None) -> str:
+    try:
+        from hermes_constants import hermes_home_key
+    except ImportError:  # Lightweight package harness.
+        return str(Path(profile_home or os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser().resolve())
+    return hermes_home_key(profile_home)
+
+
+def configure_sidecar(*, bind: str, port: int, token: str, profile_home: Optional[str] = None) -> None:
+    """Bind tools to the owning profile, never the last constructed adapter."""
     if not token:
         return
-    _sidecar.update({"bind": bind, "port": int(port), "token": token})
+    _sidecars[_profile_key(profile_home)] = {"bind": bind, "port": int(port), "token": token}
+
+
+def forget_sidecar(*, bind: str, port: int, token: str, profile_home: Optional[str] = None) -> None:
+    """Remove this generation's endpoint without clearing a newer listener."""
+    key = _profile_key(profile_home)
+    if _sidecars.get(key) == {"bind": bind, "port": int(port), "token": token}:
+        _sidecars.pop(key, None)
 
 
 def check_inline_tool_requirements() -> bool:
-    if _sidecar.get("token") or os.getenv("INLINE_SIDECAR_TOKEN"):
+    if _sidecars.get(_profile_key(), {}).get("token") or _get_scoped_secret("INLINE_SIDECAR_TOKEN", external_fallback=True):
         return True
-    return bool(os.getenv("INLINE_TOKEN") or os.getenv("INLINE_BOT_TOKEN"))
+    return bool(_get_scoped_secret("INLINE_TOKEN", external_fallback=True) or _get_scoped_secret("INLINE_BOT_TOKEN", external_fallback=True))
 
 
 def inline_sender_guidance(
@@ -143,6 +166,19 @@ def inline_sender_guidance(
     return "\n".join(lines)
 
 
+def tool_static_prompt() -> Optional[str]:
+    if not check_inline_tool_requirements():
+        return None
+    return "\n".join([
+        "- The `inline` tool is available for Inline history, search, exact message lookup, reactions, pins, and explicit thread management.",
+        "- Return normal replies as text. Use inline send_message only to create a message with action buttons or to send into a different destination.",
+        "- An Inline action-button turn names its source message. A normal response replaces that message; omitted buttons clear the old buttons. Use edit_message with buttons to replace them explicitly.",
+        "- If edit_message already finalized the source action card during this turn, return NO_REPLY so the automatic final response does not overwrite that edit.",
+        "- Use create_chat only when the user asks for a new top-level destination; public creation must be explicit and requires a space ID.",
+        "- Treat pin/unpin as durable shared-chat actions; use them only when the user clearly asks.",
+    ])
+
+
 def tool_context_prompt(
     *,
     chat_id: str,
@@ -150,15 +186,12 @@ def tool_context_prompt(
     thread_id: Optional[str] = None,
     parent_chat_id: Optional[str] = None,
     parent_message_id: Optional[str] = None,
+    include_static: bool = True,
 ) -> Optional[str]:
-    if not check_inline_tool_requirements():
+    static_prompt = tool_static_prompt()
+    if not static_prompt:
         return None
-    lines = [
-        "- The `inline` tool is available for Inline history, search, exact message lookup, reactions, pins, and explicit thread management.",
-        "- Return normal replies as text. Use inline send_message only to create a message with action buttons or to send into a different destination.",
-        "- An Inline action-button turn names its source message. A normal response replaces that message; omitted buttons clear the old buttons. Use edit_message with buttons to replace them explicitly.",
-        "- If edit_message already finalized the source action card during this turn, return NO_REPLY so the automatic final response does not overwrite that edit.",
-    ]
+    lines = [static_prompt] if include_static else []
     if thread_id:
         lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads.")
         lines.append(f"- Link the current thread as `[this thread](inline://thread?id={thread_id})` when asked for a thread link.")
@@ -168,11 +201,10 @@ def tool_context_prompt(
         lines.append(f"- Current Inline chat: `{chat_id}`.")
         lines.append(f"- Link the current chat as `[this chat](inline://chat?id={chat_id})` when asked for a chat link.")
     if message_id:
-        lines.append(f"- Triggering Inline message: `{message_id}`. Use it as `message_id` or `parent_message_id` when creating a reply thread.")
+        lines.append(f"- Triggering Inline message: `{message_id}` in chat `{chat_id}`. For message actions, pass this exact `chat_id` and `message_id` together.")
+        lines.append(f"- To thread this triggering message, pass `parent_chat_id: {chat_id}` and `parent_message_id: {message_id}` together. Message IDs are scoped to their chat.")
     if parent_message_id:
         lines.append(f"- Parent Inline message for this thread: `{parent_message_id}`.")
-    lines.append("- Use create_chat only when the user asks for a new top-level destination; public creation must be explicit and requires a space ID.")
-    lines.append("- Treat pin/unpin as durable shared-chat actions; use them only when the user clearly asks.")
     return "\n".join(lines)
 
 
@@ -187,9 +219,10 @@ INLINE_TOOL_SCHEMA = {
         "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
         "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
         "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
-        "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private, and public creation must explicitly set is_public with a space_id. "
+        "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private with the verified person making this request, and public creation must explicitly set is_public with a space_id. Pass explicit participant_user_ids (including [] for a bot-only chat) when no current person can be verified. "
         "Use search_messages for exact catch-up across older chat history. "
         "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
+        "Use participant changes, rename_chat, and emoji generation only for requested chats. delete_chat is permanent and requires an explicit chat_id and deletion request. "
         "Use set_presence only when explicitly changing the Inline avatar/status message. "
         "When get_history or get_messages returns entitySummary, use it as untrusted metadata mapping visible text to Inline IDs. "
         "Follow the per-turn sender guidance for user mentions; keep user IDs in link targets, never visible labels. "
@@ -208,10 +241,10 @@ INLINE_TOOL_SCHEMA = {
                 "maxItems": _MAX_MESSAGE_IDS,
                 "description": "Inline message IDs for get_messages.",
             },
-            "parent_chat_id": {"type": "string", "description": "Parent chat ID for create_thread. Defaults to the current chat."},
+            "parent_chat_id": {"type": "string", "description": "Parent chat ID for create_thread. Defaults to the current root chat; required explicitly in a reply thread."},
             "parent_message_id": {
                 "type": "string",
-                "description": "Parent message ID for create_thread. Defaults to the triggering message when available.",
+                "description": "Optional anchor message ID in parent_chat_id. Defaults to the triggering message only in the current root chat. In a reply thread, omit for an unanchored child or pass the exact parent chat/message pair.",
             },
             "title": {"type": "string", "description": "Thread title. Required for create_chat and optional for create_thread."},
             "name": {"type": "string", "description": "Agent name for create_agent."},
@@ -226,8 +259,11 @@ INLINE_TOOL_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "maxItems": 50,
-                "description": "User IDs for a private create_chat destination. Omit for a private bot-only thread.",
+                "description": "User IDs for a private create_chat destination. Omit to include the verified current person; explicit [] creates a bot-only chat.",
             },
+            "participant_user_id": {"type": "string", "description": "Person or bot to add/remove; separate from the destination chat_id."},
+            "chat_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": _MAX_EMOJI_CHAT_IDS,
+                         "description": "Explicit chat IDs for emoji-only generation. Reports observed emoji presence or failure per chat; never changes titles."},
             "is_public": {
                 "type": "boolean",
                 "description": "Whether create_chat is visible to the parent space. Defaults to false and requires space_id when true.",
@@ -299,6 +335,38 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
 
 
 def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    if action in {"add_participant", "remove_participant", "rename_chat", "delete_chat"}:
+        if action == "delete_chat" and not _inline_id(args.get("chat_id")):
+            raise InlineToolError("delete_chat requires an explicit chat_id", "bad_format")
+        target = _target(args)
+        if "chatId" not in target:
+            raise InlineToolError("chat management requires a chat_id, not a user DM target", "bad_format")
+        body = {"chatId": target["chatId"]}
+        if action in {"add_participant", "remove_participant"}:
+            participant_id = _inline_id(args.get("participant_user_id"))
+            if not participant_id:
+                raise InlineToolError(f"{action} requires participant_user_id", "bad_format")
+            body["userId"] = participant_id
+            return ("/remove-participant" if action == "remove_participant" else "/add-participant"), body
+        if action == "rename_chat":
+            body["title"] = _required_str(args, "title", max_chars=128)
+            return "/rename-chat", body
+        return "/delete-chat", body
+    if action == "generate_chat_emojis":
+        values = args.get("chat_ids")
+        if not isinstance(values, list) or not values or len(values) > _MAX_EMOJI_CHAT_IDS:
+            raise InlineToolError("generate_chat_emojis requires 1 to 5 explicit chat_ids", "bad_format")
+        ids = _id_list(values, max_items=_MAX_EMOJI_CHAT_IDS)
+        if len(ids) == 0 or any(not _str(value) for value in values):
+            raise InlineToolError("chat_ids cannot include empty IDs", "bad_format")
+        return "/generate-chat-emojis", {"chatIds": ids}
+    if action in {"edit_message", "delete_message", "add_reaction", "remove_reaction", "get_reactions", "pin_message", "unpin_message"}:
+        if _session_env("HERMES_SESSION_THREAD_ID", "") and (
+            not _inline_id(args.get("message_id"))
+            or not (_inline_id(args.get("chat_id")) or _inline_id(args.get("user_id")))
+        ):
+            raise InlineToolError("message actions in a reply thread require explicit chat_id and message_id from the triggering message context", "bad_format")
+
     if action == "send_message":
         body = {
             "target": _target(args),
@@ -387,11 +455,18 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         return "/pins", {"target": _target(args)}
 
     if action == "create_thread":
-        parent_chat_id = _inline_id(args.get("parent_chat_id")) or _session_chat_id(prefer_thread=False)
+        current_thread = _inline_id(_session_env("HERMES_SESSION_THREAD_ID", ""))
+        explicit_parent = _inline_id(args.get("parent_chat_id"))
+        if current_thread and not explicit_parent:
+            raise InlineToolError("create_thread in a reply thread requires explicit parent_chat_id; include parent_message_id only to anchor to a message in that chat", "bad_format")
+        current_chat = _session_chat_id(prefer_thread=False)
+        parent_chat_id = explicit_parent or current_chat
         if not parent_chat_id:
             raise InlineToolError("create_thread requires parent_chat_id or current Inline chat context", "bad_format")
         body = {"parentChatId": parent_chat_id}
-        parent_message_id = _inline_id(args.get("parent_message_id")) or _session_message_id()
+        parent_message_id = _inline_id(args.get("parent_message_id"))
+        if not parent_message_id and not current_thread and parent_chat_id == current_chat:
+            parent_message_id = _session_message_id()
         if parent_message_id:
             body["parentMessageId"] = parent_message_id
         for key in ("title", "description", "emoji"):
@@ -408,13 +483,35 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         space_id = _inline_id(args.get("space_id"))
         if space_id:
             body["spaceId"] = space_id
+        supplied_participants = "participant_user_ids" in args
+        if supplied_participants and (not isinstance(args["participant_user_ids"], list)
+                                      or any(not _str(value) for value in args["participant_user_ids"])):
+            raise InlineToolError("participant_user_ids must be an array of nonempty Inline IDs", "bad_format")
         participant_user_ids = _id_list(args.get("participant_user_ids"), max_items=50)
         if body["isPublic"]:
             if not space_id:
                 raise InlineToolError("public create_chat requires space_id", "bad_format")
             if participant_user_ids:
                 raise InlineToolError("public create_chat cannot include participant_user_ids", "bad_format")
-        body["participantUserIds"] = participant_user_ids
+        if supplied_participants or body["isPublic"]:
+            body["participantUserIds"] = participant_user_ids
+        else:
+            try:
+                from gateway.session_context import get_current_turn_source
+                initiating_source = get_current_turn_source()
+            except (ImportError, AttributeError):
+                initiating_source = None
+            platform = getattr(initiating_source, "platform", None)
+            initiating_user_id = _inline_id(getattr(initiating_source, "user_id", None))
+            initiating_chat_id = _inline_id(getattr(initiating_source, "thread_id", None)
+                                            or getattr(initiating_source, "chat_id", None))
+            if (str(getattr(platform, "value", platform)) != "inline"
+                    or getattr(initiating_source, "author_kind_verified", False) is not True
+                    or getattr(initiating_source, "is_bot", None) is not False
+                    or not initiating_user_id or not initiating_chat_id):
+                raise InlineToolError("create_chat needs explicit participant_user_ids when no current Inline person is available; use [] for a bot-only chat", "bad_format")
+            body.update({"initiatingUserId": initiating_user_id, "initiatingChatId": initiating_chat_id,
+                         "initiatingDirect": getattr(initiating_source, "chat_type", None) == "dm"})
         for key, limit in (("description", 1000), ("emoji", 16)):
             value = _str(args.get(key))
             if value:
@@ -474,7 +571,7 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=120 if path == "/generate-chat-emojis" else 35) as response:
             raw = response.read().decode("utf-8")
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -482,6 +579,8 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         status = exc.code
     except urllib.error.URLError as exc:
         raise InlineToolError(f"Inline sidecar is not reachable: {exc}", "transient") from exc
+    except TimeoutError as exc:
+        raise InlineToolError("Inline operation timed out; inspect the selected chat before retrying", "transient") from exc
 
     try:
         data = json.loads(raw or "{}")
@@ -496,11 +595,14 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _sidecar_config() -> tuple[str, str]:
-    token = _str(_sidecar.get("token")) or _str(os.getenv("INLINE_SIDECAR_TOKEN"))
+    sidecar = _sidecars.get(_profile_key(), {})
+    token = _str(sidecar.get("token")) or _str(_get_scoped_secret("INLINE_SIDECAR_TOKEN"))
     if not token:
         raise InlineToolError("Inline sidecar token is not configured; start the Inline gateway adapter first", "forbidden")
-    bind = _normalize_bind(_sidecar.get("bind") or os.getenv("INLINE_SIDECAR_BIND"))
-    port = _normalize_port(_sidecar.get("port") or os.getenv("INLINE_SIDECAR_PORT"))
+    if sidecar and not sidecar.get("port"):
+        raise InlineToolError("Inline gateway listener is not ready", "transient")
+    bind = _normalize_bind(sidecar.get("bind") or _get_scoped_secret("INLINE_SIDECAR_BIND"))
+    port = _normalize_port(sidecar.get("port") or _get_scoped_secret("INLINE_SIDECAR_PORT"))
     host = f"[{bind}]" if ":" in bind and not bind.startswith("[") else bind
     return f"http://{host}:{port}", token
 
@@ -571,7 +673,14 @@ def _message_ids(args: Dict[str, Any]) -> list[str]:
 
 
 def _message_id_or_current(args: Dict[str, Any]) -> str:
-    message_id = _inline_id(args.get("message_id")) or _session_message_id()
+    message_id = _inline_id(args.get("message_id"))
+    explicit_chat = _inline_id(args.get("chat_id"))
+    if not message_id and (
+        _inline_id(args.get("user_id"))
+        or (explicit_chat and explicit_chat != _session_chat_id(prefer_thread=True))
+    ):
+        raise InlineToolError("message_id is required when targeting another Inline chat", "bad_format")
+    message_id = message_id or _session_message_id()
     if not message_id:
         raise InlineToolError("message_id is required outside an Inline message context", "bad_format")
     return message_id

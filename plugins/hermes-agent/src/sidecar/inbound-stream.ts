@@ -11,12 +11,8 @@ export class InboundStream {
   private readonly changed = new Set<() => void>()
   private readonly pending = new Map<string, { acknowledged: boolean }>()
 
-  attach(consumer: Writable): void {
-    if (this.stopped) {
-      consumer.end()
-      return
-    }
-    const previous = this.consumer
+  attach(consumer: Writable): boolean {
+    if (this.stopped || (this.consumer && !this.consumer.destroyed && !this.consumer.writableEnded)) return false
     this.consumer = consumer
     const retired = () => {
       if (this.consumer === consumer) {
@@ -27,7 +23,7 @@ export class InboundStream {
     consumer.once("close", retired)
     consumer.on("error", retired)
     this.wake()
-    previous?.end()
+    return true
   }
 
   /** Repeated/unknown acknowledgements are harmless, including a retry after the

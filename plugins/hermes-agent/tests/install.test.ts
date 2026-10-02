@@ -69,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.21",
-      "@inline-chat/hermes-agent-adapter@0.0.21",
-      "@inline-chat/hermes-agent-adapter@0.0.21",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
     ])
   })
 
@@ -349,6 +349,7 @@ describe("inline-hermes installer", () => {
     const text = String(log.mock.calls.at(-1)?.[0])
     const payload = JSON.parse(text)
     expect(payload.activation).toMatchObject({
+      hermesReceivingSupported: true,
       hermesCredentialStoreChecked: true,
       hermesCredentialStoreTokenConfigured: true,
       credentialState: "verified",
@@ -358,6 +359,28 @@ describe("inline-hermes installer", () => {
     })
     expect(payload.warnings).toEqual([])
     expect(text).not.toContain("secret-token")
+  })
+
+  it.each([
+    ["missing core attestation", undefined],
+    ["stock host", { supported: false, requiredIntakeVersion: 1, reason: "durable_intake_required" }],
+    ["wrong capability version", { supported: true, requiredIntakeVersion: 2 }],
+  ])("fails receiving doctor with %s while preserving verified sender readiness", async (_name, receivingCapability) => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await useFakeHermes(home, {
+      action: "inline.status", setupProtocolVersion: 1, configured: true,
+      receivingCapability, probe: { ok: true, botUserId: "42" },
+    })
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(payload.activation).toMatchObject({
+      hermesCompatibilityVerified: true, hermesReceivingSupported: false,
+      credentialState: "verified", credentialBotUserId: "42",
+    })
+    expect(payload.issues.join(" ")).toContain("Hermes durable receiving support is unavailable")
   })
 
   it.each([
@@ -904,7 +927,11 @@ async function writeTopLevelInlineConfig(home: string, token: string): Promise<v
 
 async function useFakeHermes(home: string, payload: Record<string, unknown>, exitCode = 0): Promise<void> {
   const executable = path.join(home, "fake-hermes")
-  const response = { compatibility: { ok: true, pluginPath: path.join(await realpath(home), "plugins", "inline") }, ...payload }
+  const response = {
+    compatibility: { ok: true, pluginPath: path.join(await realpath(home), "plugins", "inline") },
+    receivingCapability: { supported: true, requiredIntakeVersion: 1, reason: "core_capability_available" },
+    ...payload,
+  }
   const encoded = JSON.stringify(response).replaceAll("'", "'\\''")
   await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' 'secret-token' >&2\nprintf '%s\\n' '${encoded}'\nexit ${exitCode}\n`)
   await chmod(executable, 0o755)

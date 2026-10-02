@@ -28,10 +28,23 @@ from pathlib import Path
 
 gateway = types.ModuleType("gateway")
 config = types.ModuleType("gateway.config")
+session_context = types.ModuleType("gateway.session_context")
+session_context.current_turn_source = None
+session_context.get_current_turn_source = lambda: (
+    session_context.current_turn_source
+    if getattr(session_context.current_turn_source, "author_kind_verified", False) is True else None
+)
 display_config = types.ModuleType("gateway.display_config")
 platforms = types.ModuleType("gateway.platforms")
 base = types.ModuleType("gateway.platforms.base")
 helpers = types.ModuleType("gateway.platforms.helpers")
+shared = types.ModuleType("gateway.platforms._shared")
+test_secret_scope = None
+def get_scoped_secret(name, default=None, *, external_fallback=False):
+    if test_secret_scope is not None:
+        return test_secret_scope.get(name, default)
+    return os.getenv(name, default)
+shared.get_scoped_secret = get_scoped_secret
 platform_registry = types.ModuleType("gateway.platform_registry")
 httpx = types.ModuleType("httpx")
 tools = types.ModuleType("tools")
@@ -84,12 +97,17 @@ class PlatformConfig:
     extra: dict = field(default_factory=dict)
 
 class BasePlatformAdapter:
+    # Routing smoke uses an explicit host-capability double. Real transactional
+    # adoption/restart checks run against the matching Hermes core separately.
+    durable_intake_version = 1
     def __init__(self, config, platform):
         self.config = config
         self.platform = platform
         self.name = str(platform)
         self.connected = False
         self._authorization_check = None
+        self._durable_intake_handler = lambda event: event
+        self._durable_intake_drain = lambda session_key: None
 
     def set_authorization_check(self, callback):
         self._authorization_check = callback
@@ -120,10 +138,15 @@ class BasePlatformAdapter:
 
     def _set_fatal_error(self, code, message, retryable):
         self.fatal_error = (code, message, retryable)
+        self.connected = False
+
+    async def _notify_fatal_error(self):
+        self.fatal_notifications = getattr(self, "fatal_notifications", 0) + 1
 
 class MessageEvent:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
+        self._gateway_durable_adopted = True
 
 class MessageType:
     TEXT = "text"
@@ -191,6 +214,7 @@ hermes_constants.with_hermes_node_path = lambda env=None: {**(env or {}), "PATH"
 test_hermes_home = Path(tempfile.mkdtemp(prefix="inline-hermes-home-"))
 os.environ["HERMES_HOME"] = str(test_hermes_home)
 hermes_constants.get_hermes_home = lambda: test_hermes_home
+hermes_constants.hermes_home_key = lambda home=None: str(Path(home or hermes_constants.get_hermes_home()).resolve())
 commands.telegram_menu_commands = lambda max_commands=100: ([
     ("help", "Show help"),
     ("threads", "Duplicate Inline command"),
@@ -275,10 +299,12 @@ httpx.AsyncClient = AsyncClient
 
 sys.modules["gateway"] = gateway
 sys.modules["gateway.config"] = config
+sys.modules["gateway.session_context"] = session_context
 sys.modules["gateway.display_config"] = display_config
 sys.modules["gateway.platforms"] = platforms
 sys.modules["gateway.platforms.base"] = base
 sys.modules["gateway.platforms.helpers"] = helpers
+sys.modules["gateway.platforms._shared"] = shared
 sys.modules["gateway.platform_registry"] = platform_registry
 sys.modules["httpx"] = httpx
 sys.modules["tools"] = tools
@@ -324,6 +350,25 @@ trusted_extra = {**base_extra, "allow_all": True}
 
 async def root_chat_info(chat_id, **kwargs):
     return {"id": chat_id, "peer": {"type": {"oneofKind": "chat"}}}
+
+# Routing fixtures model an already authenticated directory response. Cases
+# with an explicit provenance flag bypass this fixture and exercise the real
+# unavailable/current-kind checks; real-host tests do not use this double.
+def directory_fixture(event, actor_id):
+    if "_inlineSenderProvenanceVerified" in event or not actor_id:
+        return event
+    profile = inline_adapter_module._inline_sender_profile(event, event.get("message"))
+    return {**event, "_inlineSenderProvenanceVerified": True,
+            "sender": {**profile, "id": str(actor_id), "bot": profile.get("bot", False)}}
+
+real_dispatch_message = InlineAdapter._dispatch_message
+async def fixture_dispatch_message(self, event, **kwargs):
+    return await real_dispatch_message(self, directory_fixture(event, (event.get("message") or {}).get("fromId")), **kwargs)
+InlineAdapter._dispatch_message = fixture_dispatch_message
+real_dispatch_reaction = InlineAdapter._dispatch_reaction
+async def fixture_dispatch_reaction(self, event, **kwargs):
+    return await real_dispatch_reaction(self, directory_fixture(event, event.get("userId") or (event.get("reaction") or {}).get("userId")), **kwargs)
+InlineAdapter._dispatch_reaction = fixture_dispatch_reaction
 
 assert resolve_inline_message_action_ownership("agent:1:2").owner == "agent"
 assert resolve_inline_message_action_ownership("system:cl:abc:0").native_action_id == "cl:abc:0"
@@ -420,7 +465,7 @@ version_text = _inline_version_text({
     "skills": {"state": "synced", "count": 2},
 })
 assert "Inline Hermes plugin" in version_text
-assert "Plugin version: 0.0.21" in version_text
+assert "Plugin version: 0.0.22" in version_text
 assert "Hermes version: 0.18.2" in version_text
 assert "Installed or updated at:" in version_text
 assert "commands 10 published" in version_text
@@ -435,7 +480,7 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
     legacy_dir.mkdir(parents=True)
     catalog_dir.mkdir(parents=True)
     (legacy_dir / "plugin.yaml").write_text("version: 0.0.1\n", encoding="utf-8")
-    (catalog_dir / "plugin.yaml").write_text("version: 0.0.21\n", encoding="utf-8")
+    (catalog_dir / "plugin.yaml").write_text("version: 0.0.22\n", encoding="utf-8")
     saved_adapter_file = inline_adapter_module.__file__
     saved_cli_file = inline_cli.__file__
     saved_catalog_home = os.environ.get("HERMES_HOME")
@@ -444,13 +489,13 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
         inline_adapter_module.__file__ = str(catalog_dir / "adapter.py")
         inline_cli.__file__ = str(catalog_dir / "cli.py")
         os.environ["HERMES_HOME"] = str(catalog_home)
-        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.21"
-        assert inline_cli._plugin_version() == "0.0.21"
+        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.22"
+        assert inline_cli._plugin_version() == "0.0.22"
         # Distinct directory timestamps ensure the test catches the legacy path.
         Path.lstat = lambda self: types.SimpleNamespace(st_ctime=100 if self == catalog_dir else 200)
         assert inline_adapter_module._inline_install_timestamp() == "1970-01-01T00:01:40Z"
         catalog_text = _inline_version_text()
-        assert "Plugin version: 0.0.21" in catalog_text
+        assert "Plugin version: 0.0.22" in catalog_text
         assert "1970-01-01T00:01:40Z" in catalog_text
         assert "Plugin version: 0.0.1\n" not in catalog_text
     finally:
@@ -601,6 +646,8 @@ assert "requires space_id" in ctx.tool["schema"]["parameters"]["properties"]["is
 assert "search_messages" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "add_reaction" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "pin_message" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert not ctx.tool["check_fn"](), "constructing a disconnected adapter must not publish its endpoint"
+inline_tools.configure_sidecar(bind="127.0.0.1", port=8794, token="tool-fixture-token")
 assert ctx.tool["check_fn"]()
 
 tool_calls = []
@@ -704,6 +751,8 @@ saved_session_env = {key: os.environ.get(key) for key in [
     "HERMES_SESSION_CHAT_ID",
     "HERMES_SESSION_THREAD_ID",
     "HERMES_SESSION_MESSAGE_ID",
+    "HERMES_SESSION_USER_ID",
+    "HERMES_SESSION_CHAT_TYPE",
 ]}
 try:
     inline_tools._sidecar_call = fake_inline_sidecar
@@ -980,6 +1029,60 @@ try:
     assert public_with_participants["error"] == "public create_chat cannot include participant_user_ids"
     assert len(tool_calls) == calls_before_invalid_create
 
+    explicit_bot_only = json.loads(ctx.tool["handler"]({
+        "action": "create_chat", "title": "Worker task", "participant_user_ids": [],
+    }))
+    assert explicit_bot_only["success"] is True
+    assert tool_calls[-1] == ("/create-chat", {"title": "Worker task", "isPublic": False, "participantUserIds": []})
+    os.environ.update({"HERMES_SESSION_PLATFORM": "inline", "HERMES_SESSION_CHAT_ID": "10",
+        "HERMES_SESSION_THREAD_ID": "99", "HERMES_SESSION_USER_ID": "42", "HERMES_SESSION_CHAT_TYPE": "group"})
+    session_context.current_turn_source = types.SimpleNamespace(platform="inline", user_id="42", chat_id="10",
+        thread_id="99", chat_type="group", is_bot=False, author_kind_verified=True)
+    default_personal = json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "Personal task"}))
+    assert default_personal["success"] is True
+    assert tool_calls[-1] == ("/create-chat", {"title": "Personal task", "isPublic": False,
+        "initiatingUserId": "42", "initiatingChatId": "99", "initiatingDirect": False})
+    session_context.current_turn_source = None
+    missing_person = json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "Unknown task"}))
+    assert missing_person["error_kind"] == "bad_format"
+    for invalid_participants in [None, "42", [""]]:
+        invalid = json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "Invalid", "participant_user_ids": invalid_participants}))
+        assert invalid["error_kind"] == "bad_format"
+
+    for action, expected_path in [("add_participant", "/add-participant"), ("remove_participant", "/remove-participant")]:
+        participant_result = json.loads(ctx.tool["handler"]({
+            "action": action, "chat_id": "chat:10", "participant_user_id": "user:42",
+        }))
+        assert participant_result["success"] is True
+        assert tool_calls[-1] == (expected_path, {"chatId": "10", "userId": "42"})
+    rename_result = json.loads(ctx.tool["handler"]({
+        "action": "rename_chat", "chat_id": "thread:10", "title": "User task title",
+    }))
+    assert rename_result["success"] is True
+    assert tool_calls[-1] == ("/rename-chat", {"chatId": "10", "title": "User task title"})
+    emoji_result = json.loads(ctx.tool["handler"]({
+        "action": "generate_chat_emojis", "chat_ids": ["chat:10", "thread:99", "10"],
+    }))
+    assert emoji_result["success"] is True
+    assert tool_calls[-1] == ("/generate-chat-emojis", {"chatIds": ["10", "99"]})
+    delete_chat_result = json.loads(ctx.tool["handler"]({"action": "delete_chat", "chat_id": "chat:10"}))
+    assert delete_chat_result["success"] is True
+    assert tool_calls[-1] == ("/delete-chat", {"chatId": "10"})
+    calls_before_invalid_management = len(tool_calls)
+    for invalid_args in [
+        {"action": "delete_chat"},
+        {"action": "delete_chat", "user_id": "42"},
+        {"action": "rename_chat", "chat_id": "10", "title": " "},
+        {"action": "add_participant", "chat_id": "10", "user_id": "42"},
+        {"action": "remove_participant", "chat_id": "10", "participant_user_id": "-1"},
+        {"action": "generate_chat_emojis", "chat_ids": []},
+        {"action": "generate_chat_emojis", "chat_ids": ["10"] * 6},
+        {"action": "generate_chat_emojis", "chat_ids": ["10", ""]},
+    ]:
+        invalid = json.loads(ctx.tool["handler"](invalid_args))
+        assert invalid["error_kind"] == "bad_format", (invalid_args, invalid)
+    assert len(tool_calls) == calls_before_invalid_management
+
     name_only_agent = json.loads(ctx.tool["handler"]({
         "action": "create_agent",
         "name": "Concierge",
@@ -1018,6 +1121,41 @@ try:
     os.environ["HERMES_SESSION_CHAT_ID"] = "10"
     os.environ["HERMES_SESSION_THREAD_ID"] = "99"
     os.environ["HERMES_SESSION_MESSAGE_ID"] = "5"
+    # The opening event can carry a parent-chat message while Hermes points at
+    # the child. A message ID alone must never act on the child by accident.
+    before_ambiguous = len(tool_calls)
+    for action in ["add_reaction", "remove_reaction", "get_reactions", "pin_message", "unpin_message", "edit_message", "delete_message"]:
+        for incomplete in [{}, {"message_id": "5"}, {"chat_id": "10"}]:
+            result = json.loads(ctx.tool["handler"]({"action": action, "emoji": "ok", "text": "edited", **incomplete}))
+            assert result["error_kind"] == "bad_format", (action, incomplete, result)
+    implicit_thread = json.loads(ctx.tool["handler"]({"action": "create_thread", "title": "Ambiguous"}))
+    assert implicit_thread["error_kind"] == "bad_format"
+    assert len(tool_calls) == before_ambiguous
+    explicit_reaction = json.loads(ctx.tool["handler"]({
+        "action": "add_reaction", "chat_id": "10", "message_id": "5", "emoji": "ok",
+    }))
+    assert explicit_reaction["success"] is True
+    assert tool_calls[-1] == ("/reaction", {"target": {"chatId": "10"}, "messageId": "5", "emoji": "ok"})
+    for parent_args, expected in [
+        ({"parent_chat_id": "123"}, {"parentChatId": "123"}),
+        ({"parent_chat_id": "10"}, {"parentChatId": "10"}),
+        ({"parent_chat_id": "20", "parent_message_id": "7"}, {"parentChatId": "20", "parentMessageId": "7"}),
+    ]:
+        result = json.loads(ctx.tool["handler"]({"action": "create_thread", **parent_args}))
+        assert result["success"] is True
+        assert tool_calls[-1] == ("/create-subthread", expected)
+
+    # Preserve root-message convenience, but never borrow its ID for another chat.
+    os.environ["HERMES_SESSION_THREAD_ID"] = ""
+    root_pin = json.loads(ctx.tool["handler"]({"action": "pin_message"}))
+    assert root_pin["success"] is True
+    assert tool_calls[-1] == ("/pin", {"target": {"chatId": "10"}, "messageId": "5"})
+    other_chat_pin = json.loads(ctx.tool["handler"]({"action": "pin_message", "chat_id": "123"}))
+    assert other_chat_pin["error_kind"] == "bad_format"
+    root_thread = json.loads(ctx.tool["handler"]({"action": "create_thread"}))
+    assert root_thread["success"] is True
+    assert tool_calls[-1] == ("/create-subthread", {"parentChatId": "10", "parentMessageId": "5"})
+    os.environ["HERMES_SESSION_THREAD_ID"] = "99"
     context_result = json.loads(ctx.tool["handler"]({"action": "get_history"}))
     assert context_result["success"] is True
     assert tool_calls[-1] == ("/history", {"target": {"chatId": "99"}, "limit": 20})
@@ -1223,7 +1361,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.21",
+    "pluginVersion": "0.0.22",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1273,7 +1411,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.21"
+assert probe_payload["pluginVersion"] == "0.0.22"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1288,7 +1426,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.21"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.22"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1321,7 +1459,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.21"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.22"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -1523,7 +1661,7 @@ if real_node_bin:
     os.environ["INLINE_NODE_BIN"] = real_node_bin
 loopback_bind = InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_bind": "[::1]"}))
 assert loopback_bind._sidecar_bind == "::1"
-assert loopback_bind._sidecar_base_url() == "http://[::1]:8794"
+assert loopback_bind._sidecar_port == 0
 custom_port = InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_port": "6543"}))
 assert custom_port._sidecar_port == 6543
 for bad_port in ["0", "-1", "70000", "abc"]:
@@ -1702,7 +1840,7 @@ async def assert_bot_command_sync():
         thread_id=None,
     )
     assert handled is True
-    assert "Plugin version: 0.0.21" in sent[-1][1]
+    assert "Plugin version: 0.0.22" in sent[-1][1]
     assert "Last catalog sync:" in sent[-1][1]
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
@@ -1792,12 +1930,12 @@ async def assert_thread_bindings():
     assert events[0].source.thread_id == "thread:99"
     assert events[0].channel_prompt.startswith("Thread prompt\n\nYou are handling an Inline message.")
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
-    assert "Current Inline sender is" in events[0].channel_prompt
-    assert "user:u1" in events[0].channel_prompt
-    assert '[@Ada](inline://user?id=u1)' in events[0].channel_prompt
-    assert "@user:u1" not in events[0].channel_prompt
+    assert "Current Inline sender is" in events[0].channel_context
+    assert "user:u1" in events[0].channel_context
+    assert '[@Ada](inline://user?id=u1)' in events[0].channel_context
+    assert "@user:u1" not in events[0].channel_context
     assert events[0].source.user_name == "Ada Lovelace"
-    assert '[this thread](inline://thread?id=99)' in events[0].channel_prompt
+    assert '[this thread](inline://thread?id=99)' in events[0].channel_context
     assert events[0].metadata["inline"]["sender_user_id"] == "u1"
     assert events[0].metadata["inline"]["thread_id"] == "99"
     assert events[0].metadata["inline"]["parent_chat_id"] == "10"
@@ -1827,7 +1965,7 @@ async def assert_reply_thread_chat_metadata():
                 "parentMessageId": "9001",
             }
         if chat_id == "123":
-            return {"chatId": "123", "title": "Parent room"}
+            return {"chatId": "123", "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}
         raise AssertionError(f"unexpected chat info {chat_id}")
 
     adapter.handle_message = fake_handle_message
@@ -1914,7 +2052,7 @@ async def assert_mentioned_agent_projection():
 
     async def fake_sidecar_call(path, body):
         assert (path, body) == ("/get-agent", {"agentId": "73"})
-        return {"agent": {"id": "73", "name": "Data Analyst", "skillKey": "analysis"}}
+        return {"ok": True, "result": {"agent": {"id": "73", "botUserId": "20", "name": "Data Analyst", "skillKey": "analysis"}}}
 
     adapter.handle_message = fake_handle_message
     adapter._get_chat_info = fake_get_chat_info
@@ -1951,7 +2089,7 @@ async def assert_mentioned_agent_projection():
             "fromId": "u1",
             "message": "Summarizer inspect this",
             "peerId": {"peer": {"oneofKind": "chat"}},
-            "activatedAgent": {"id": "74", "name": "Summarizer"},
+            "activatedAgent": {"id": "74", "botUserId": "20", "name": "Summarizer"},
             "entities": {"entities": [{
                 "type": 4,
                 "offset": "0",
@@ -1961,9 +2099,164 @@ async def assert_mentioned_agent_projection():
         },
     })
     assert len(events) == 2
-    assert 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.' in events[1].channel_prompt
+    assert 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.' in events[1].channel_context
+    assert events[0].channel_prompt == events[1].channel_prompt
 
 asyncio.run(assert_mentioned_agent_projection())
+
+async def assert_bound_agent_selection_is_authorized_and_turn_local():
+    adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False, "reply_threads": "off"}))
+    adapter._me_id = "20"
+    owner = "20"
+    instructions = "Use the current project glossary."
+    lookup_attempts = 0
+    events = []
+    acknowledgements = []
+    async def chat_info(chat_id, **kwargs):
+        return {"chatId": chat_id, "peer": {"type": {"oneofKind": "chat"}},
+                "agentContext": {"botUserId": owner, "agentId": "73"}}
+    async def sidecar(path, body):
+        nonlocal lookup_attempts
+        if path == "/inbound/ack":
+            acknowledgements.append(body)
+            return {"ok": True, "result": {}}
+        assert (path, body) == ("/get-agent", {"agentId": "73"})
+        lookup_attempts += 1
+        if lookup_attempts == 1:
+            raise RuntimeError("Agent metadata temporarily unavailable")
+        return {"ok": True, "result": {"agent": {"id": "73", "bot_user_id": "20", "name": "Scout", "instructions": instructions}}}
+    async def handle(event):
+        events.append(event)
+    def message(message_id):
+        return {"kind": "message.new", "seq": int(message_id), "chatId": "10",
+                "message": {"id": message_id, "chatId": "10", "fromId": "u1", "message": "continue",
+                            "peerId": {"peer": {"oneofKind": "chat"}}}}
+    adapter._get_chat_info = chat_info
+    adapter._sidecar_call = sidecar
+    adapter.handle_message = handle
+    old_retry = inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS
+    inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = 0.001
+    try:
+        await asyncio.wait_for(adapter._handle_inbound_delivery("bound-1", message("101")), timeout=2)
+    finally:
+        inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = old_retry
+    assert lookup_attempts == 2 and len(events) == 1
+    assert acknowledgements == [{"deliveryId": "bound-1"}]
+    assert instructions in events[0].channel_context
+    assert instructions not in events[0].channel_prompt
+    assert events[0].source.user_id == "u1" and adapter._me_id == "20"
+    instructions = "The glossary changed explicitly."
+    adapter._bot_agent_cache.clear()
+    await adapter._dispatch_message(message("102"))
+    assert instructions in events[1].channel_context
+    assert events[0].channel_prompt == events[1].channel_prompt
+    owner = "21"
+    await adapter._dispatch_message(message("103"))
+    assert len(events) == 3 and "Current Inline Agent" not in events[2].channel_context
+    assert lookup_attempts == 3  # Another bot's binding is never fetched or adopted.
+    owner = "20"
+    adapter.require_mention = True
+    await adapter._dispatch_message(message("104"))
+    assert len(events) == 3  # A binding does not grant wake or sender permission.
+
+asyncio.run(assert_bound_agent_selection_is_authorized_and_turn_local())
+
+async def assert_selected_agent_failures_never_run_generic_bot():
+    failures = ["unavailable", "missing", "mismatched_id", "other_bot", "activated_other_bot"]
+    for index, failure in enumerate(failures):
+        adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+            "reply_threads": "off", "context_backfill": "off"}))
+        adapter._me_id = "20"
+        adapter._get_chat_info = root_chat_info
+        events = []
+        repaired = False
+        async def sidecar(path, body):
+            assert (path, body) == ("/get-agent", {"agentId": "73"})
+            if not repaired:
+                if failure == "unavailable":
+                    raise inline_adapter_module.InlineSidecarError(path, 503, "Agent unavailable", "transient")
+                if failure == "missing":
+                    return {"ok": True, "result": {}}
+                if failure == "mismatched_id":
+                    return {"ok": True, "result": {"agent": {"id": "74", "name": "Other Agent"}}}
+                if failure == "other_bot":
+                    return {"ok": True, "result": {"agent": {"id": "73", "bot_user_id": "21", "name": "Other bot"}}}
+            return {"ok": True, "result": {"agent": {"id": "73", "bot_user_id": "20", "name": "Scout", "instructions": "Use the glossary"}}}
+        async def handle(event):
+            events.append(event)
+        adapter._sidecar_call, adapter.handle_message = sidecar, handle
+        message_id = str(501 + index)
+        event = {"kind": "message.new", "seq": int(message_id), "chatId": "10", "message": {
+            "id": message_id, "chatId": "10", "fromId": "u1", "message": "Scout inspect this",
+            "peerId": {"peer": {"oneofKind": "chat"}}, "entities": {"entities": [{
+                "type": 4, "offset": "0", "length": "5", "entity": {"oneofKind": "mention",
+                    "mention": {"userId": "20", "agentId": "73"}},
+            }]},
+        }}
+        if failure == "activated_other_bot":
+            event["message"]["activatedAgent"] = {"id": "73", "botUserId": "21", "name": "Other bot"}
+        try:
+            await adapter._dispatch_message(event)
+            raise AssertionError(f"selected Agent failure ran a generic bot: {failure}")
+        except inline_adapter_module.InlineInboundDeferred:
+            pass
+        assert not events and not adapter._seen_messages and not adapter._seen_message_instances, failure
+        repaired = True
+        event["message"].pop("activatedAgent", None)
+        await adapter._dispatch_message(event)
+        assert len(events) == 1 and "Use the glossary" in events[0].channel_context, failure
+
+asyncio.run(assert_selected_agent_failures_never_run_generic_bot())
+
+async def assert_malformed_agent_metadata_never_enters_a_turn():
+    invalid_agents = [
+        {"id": "73"},
+        {"id": "73", "name": "Scout"},
+        {"id": "73", "botUserId": "20"},
+        {"id": "73", "botUserId": "20", "name": " "},
+        {"id": "73", "botUserId": "20", "name": 7},
+        {"id": "73", "botUserId": "20", "name": "Scout", "instructions": ["not text"]},
+        {"id": "73", "botUserId": "20", "name": "Scout", "skillKey": {"not": "text"}},
+        {"id": "73", "botUserId": "20", "name": "Scout", "skill_key": None},
+        {"id": "73", "botUserId": True, "name": "Scout"},
+    ]
+    for activated in (False, True):
+        for index, invalid in enumerate(invalid_agents):
+            adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+                "reply_threads": "off", "context_backfill": "off"}))
+            adapter._me_id = "20"
+            adapter._get_chat_info = root_chat_info
+            events = []
+            response_agent = invalid
+            async def sidecar(path, body):
+                assert (path, body) == ("/get-agent", {"agentId": "73"})
+                return {"ok": True, "result": {"agent": response_agent}}
+            async def handle(event):
+                events.append(event)
+            adapter._sidecar_call, adapter.handle_message = sidecar, handle
+            message_id = str(600 + int(activated) * 20 + index)
+            message = {"id": message_id, "chatId": "10", "fromId": "u1", "message": "Scout inspect this",
+                "peerId": {"peer": {"oneofKind": "chat"}}, "entities": {"entities": [{
+                    "type": 4, "offset": "0", "length": "5", "entity": {"oneofKind": "mention",
+                        "mention": {"userId": "20", "agentId": "73"}},
+                }]}}
+            if activated:
+                message["activatedAgent"] = invalid
+            event = {"kind": "message.new", "seq": int(message_id), "chatId": "10", "message": message}
+            try:
+                await adapter._dispatch_message(event)
+                raise AssertionError(f"malformed selected Agent entered a turn: {activated}, {invalid}")
+            except inline_adapter_module.InlineInboundDeferred:
+                pass
+            assert not events and not adapter._seen_messages and not adapter._seen_message_instances
+            assert not adapter._bot_agent_cache
+            # Integer HTTP IDs and explicitly empty optional text are legitimate.
+            response_agent = {"id": 73, "bot_user_id": 20, "name": "Scout", "instructions": "", "skill_key": ""}
+            message.pop("activatedAgent", None)
+            await adapter._dispatch_message(event)
+            assert len(events) == 1 and 'specialized agent named "Scout"' in events[0].channel_context
+
+asyncio.run(assert_malformed_agent_metadata_never_enters_a_turn())
 
 async def assert_ambient_bot_message_is_context_only():
     adapter = InlineAdapter(PlatformConfig(extra={
@@ -1995,7 +2288,7 @@ async def assert_ambient_bot_message_is_context_only():
 
 asyncio.run(assert_ambient_bot_message_is_context_only())
 
-async def assert_unverified_sender_provenance_is_context_only():
+async def assert_unverified_sender_provenance_retries_without_consumption():
     adapter = InlineAdapter(PlatformConfig(extra={
         **trusted_extra,
         "require_mention": False,
@@ -2003,12 +2296,18 @@ async def assert_unverified_sender_provenance_is_context_only():
     adapter._get_chat_info = root_chat_info
     adapter._me_id = "20"
     events = []
+    verified = False
+
+    async def current_sender(path, body):
+        assert path == "/sender"
+        return {"ok": True, "result": {"profile": {"id": "u1", "bot": False}, "provenanceVerified": verified}}
 
     async def fake_handle_message(event):
         events.append(event)
 
     adapter.handle_message = fake_handle_message
-    await adapter._dispatch_message({
+    adapter._sidecar_call = current_sender
+    raw = {
         "seq": 10,
         "chatId": "10",
         "_inlineSenderProvenanceVerified": False,
@@ -2019,11 +2318,21 @@ async def assert_unverified_sender_provenance_is_context_only():
             "message": "ambient message with unknown provenance",
             "peerId": {"peer": {"oneofKind": "chat"}},
         },
-    })
+    }
+    try:
+        await adapter._dispatch_message(raw)
+    except inline_adapter_module.InlineAuthorUnavailable:
+        pass
+    else:
+        raise AssertionError("Unknown sender kind was silently consumed")
 
     assert events == []
+    assert not adapter._seen_messages
+    verified = True
+    await adapter._dispatch_message(raw)
+    assert len(events) == 1 and events[0].source.author_kind_verified is True
 
-asyncio.run(assert_unverified_sender_provenance_is_context_only())
+asyncio.run(assert_unverified_sender_provenance_retries_without_consumption())
 
 async def assert_activated_agent_avoids_lookup():
     adapter = InlineAdapter(PlatformConfig(extra={
@@ -2056,6 +2365,7 @@ async def assert_activated_agent_avoids_lookup():
             "peerId": {"peer": {"oneofKind": "chat"}},
             "activatedAgent": {
                 "id": "73",
+                "botUserId": "20",
                 "name": "Data Analyst",
                 "instructions": "Inspect the supplied data carefully.",
             },
@@ -2069,7 +2379,8 @@ async def assert_activated_agent_avoids_lookup():
     })
 
     assert len(events) == 1
-    assert "Inspect the supplied data carefully." in events[0].channel_prompt
+    assert "Inspect the supplied data carefully." in events[0].channel_context
+    assert "Inspect the supplied data carefully." not in events[0].channel_prompt
 
 asyncio.run(assert_activated_agent_avoids_lookup())
 
@@ -2089,7 +2400,7 @@ async def assert_forced_reply_thread_creation():
 
     async def fake_get_chat_info(chat_id, **kwargs):
         assert chat_id == "10"
-        return {"chatId": "10", "title": "Parent room"}
+        return {"chatId": "10", "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}
 
     async def fake_sidecar_call(path, body):
         calls.append((path, body))
@@ -2129,7 +2440,7 @@ async def assert_forced_reply_thread_creation():
         "title": "please investigate the incident",
     })]
     assert len(events) == 1
-    assert events[0].source.chat_id == "10"
+    assert events[0].source.chat_id == "99"
     assert events[0].source.thread_id == "99"
     assert events[0].source.parent_chat_id == "10"
     assert events[0].channel_prompt.startswith("Thread prompt\n\nYou are handling an Inline message.")
@@ -2142,36 +2453,39 @@ async def assert_forced_reply_thread_creation():
     assert events[0].reply_to_text == "parent quote"
     assert events[0].auto_skill == ["thread-skill"]
 
-    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    await adapter.send_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "start"})
 
-    trigger_reply = await adapter.send("10", "agent reply", reply_to="7", metadata={"thread_id": "99"})
+    trigger_reply = await adapter.send(events[0].source.chat_id, "agent reply", reply_to=events[0].reply_anchor_override, metadata={"thread_id": "99"})
     assert trigger_reply.success is True
     assert calls[-1][1]["target"] == {"chatId": "99"}
     assert "replyToMsgId" not in calls[-1][1]
 
-    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    await adapter.stop_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "stop"})
 
-    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    await adapter.send_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
-    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    await adapter.stop_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
     reused_thread = await adapter._create_reply_thread("10", "7", "please investigate the incident", "6")
     assert reused_thread == "99"
-    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    await adapter.send_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
-    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    await adapter.stop_typing(events[0].source.chat_id, metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
-    quote_reply = await adapter.send("10", "agent reply", reply_to="6", metadata={"thread_id": "99"})
+    quote_reply = await adapter.send(events[0].source.chat_id, "agent reply", reply_to=events[0].reply_anchor_override, metadata={"thread_id": "99"})
     assert quote_reply.success is True
     assert "replyToMsgId" not in calls[-1][1]
 
-    in_thread_reply = await adapter.send("10", "agent reply", reply_to="sent-2", metadata={"thread_id": "99"})
+    in_thread_reply = await adapter.send(events[0].source.chat_id, "agent reply", reply_to="sent-2", metadata={"thread_id": "99"})
     assert in_thread_reply.success is True
     assert calls[-1][1]["replyToMsgId"] == "sent-2"
+    # The child's own ID can equal its parent starter's ID.
+    await adapter.send("99", "child reply", reply_to="7", metadata={"thread_id": "99"})
+    assert calls[-1][1]["replyToMsgId"] == "7"
 
 asyncio.run(assert_forced_reply_thread_creation())
 
@@ -2218,13 +2532,13 @@ async def assert_default_dm_reply_thread_creation():
     assert events[0].source.thread_id == "dm-thread-99"
     assert events[0].source.parent_chat_id == "20"
     assert events[0].source.user_name == "@fallback"
-    assert "[@fallback](inline://user?id=u1)" in events[0].channel_prompt
+    assert "[@fallback](inline://user?id=u1)" in events[0].channel_context
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
     assert events[0].metadata["inline"]["thread_id"] == "dm-thread-99"
     assert events[0].metadata["inline"]["parent_chat_id"] == "20"
     assert events[0].metadata["inline"]["parent_message_id"] == "dm-7"
 
-    dm_reply = await adapter.send("20", "agent reply", reply_to="dm-7", metadata={"thread_id": "dm-thread-99"})
+    dm_reply = await adapter.send("20", "agent reply", reply_to=events[0].reply_anchor_override, metadata={"thread_id": "dm-thread-99"})
     assert dm_reply.success is True
     assert calls[-1][1]["target"] == {"chatId": "dm-thread-99"}
     assert "replyToMsgId" not in calls[-1][1]
@@ -2244,7 +2558,7 @@ async def assert_reply_threads_disabled_preserves_existing_threads():
         events.append(event)
 
     async def fake_get_chat_info(chat_id, **kwargs):
-        return {"chatId": chat_id, "title": f"Chat {chat_id}"}
+        return {"chatId": chat_id, "title": f"Chat {chat_id}", "peer": {"type": {"oneofKind": "chat"}}}
 
     async def fake_sidecar_call(path, body):
         calls.append((path, body))
@@ -2296,7 +2610,7 @@ async def assert_inline_entity_context():
         events.append(event)
 
     async def fake_get_chat_info(chat_id, **kwargs):
-        return {"chatId": chat_id, "title": f"Chat {chat_id}"}
+        return {"chatId": chat_id, "title": f"Chat {chat_id}", "peer": {"type": {"oneofKind": "chat"}}}
 
     adapter.handle_message = fake_handle_message
     adapter._get_chat_info = fake_get_chat_info
@@ -2337,16 +2651,16 @@ async def assert_inline_entity_context():
 
     assert len(events) == 1
     summary = 'mention "Alice" -> user:99 | text link "docs" -> https://example.com/docs | thread link "thread" -> thread:77'
-    assert events[0].channel_context == f"[Inline message entities]\n{summary}"
+    assert events[0].channel_context.endswith(f"[Inline message entities]\n{summary}")
     assert events[0].metadata["inline"]["message_entities"] == summary
     assert events[0].metadata["inline"]["sender_user_id"] == "u1"
-    assert "Current Inline sender is" in events[0].channel_prompt
-    assert "user:u1" in events[0].channel_prompt
-    assert '[@Mo](inline://user?id=u1)' in events[0].channel_prompt
-    assert "@user:u1" not in events[0].channel_prompt
+    assert "Current Inline sender is" in events[0].channel_context
+    assert "user:u1" in events[0].channel_context
+    assert '[@Mo](inline://user?id=u1)' in events[0].channel_context
+    assert "@user:u1" not in events[0].channel_context
     assert events[0].source.user_name == "Mo Jorjani"
-    assert '[this chat](inline://chat?id=10)' in events[0].channel_prompt
-    assert "Inline entity metadata maps visible text to IDs" in events[0].channel_prompt
+    assert '[this chat](inline://chat?id=10)' in events[0].channel_context
+    assert "Inline entity metadata maps visible text to IDs" in events[0].channel_context
     assert "https://example.com/docs" not in events[0].channel_prompt
 
 asyncio.run(assert_inline_entity_context())
@@ -2374,8 +2688,8 @@ async def assert_inline_thread_context_history():
                 "parentMessageId": "9001",
             }
         if chat_id == "123":
-            return {"chatId": "123", "title": "Parent room"}
-        return {"chatId": chat_id, "title": f"Chat {chat_id}"}
+            return {"chatId": "123", "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}
+        return {"chatId": chat_id, "title": f"Chat {chat_id}", "peer": {"type": {"oneofKind": "chat"}}}
 
     async def fake_sidecar_call(path, body):
         calls.append((path, body))
@@ -2562,7 +2876,7 @@ async def assert_observed_context_buffer():
     assert events[0].text == "what changed?"
     assert "[Inline observed context]" in events[0].channel_context
     assert "message:60 from an unknown sender: QA found one blocker" in events[0].channel_context
-    assert "Inline observed context contains recent group messages" in events[0].channel_prompt
+    assert "Inline observed context contains recent group messages" in events[0].channel_context
     assert adapter._observed_context == {}
 
 asyncio.run(assert_observed_context_buffer())
@@ -2714,6 +3028,7 @@ async def assert_reply_thread_slash_command():
         settings_path = Path(tmp) / "settings.json"
         adapter = InlineAdapter(PlatformConfig(extra={
             **trusted_extra,
+            "token": "20:settings-fixture",
             "settings_path": str(settings_path),
             "require_mention": True,
         }))
@@ -2743,7 +3058,7 @@ async def assert_reply_thread_slash_command():
         async def fake_get_chat_info(chat_id, **kwargs):
             if chat_id == "99":
                 return {"chatId": "99", "title": "Child thread", "parentChatId": "10"}
-            return {"chatId": chat_id, "title": f"Chat {chat_id}"}
+            return {"chatId": chat_id, "title": f"Chat {chat_id}", "peer": {"type": {"oneofKind": "chat"}}}
 
         async def fake_fetch_message(chat_id, message_id, **kwargs):
             if chat_id == "20":
@@ -3060,7 +3375,7 @@ async def assert_group_room_controls():
         if chat_id == "456":
             return {"chatId": "456", "title": "Child thread", "parentChatId": "10"}
         if chat_id == "10":
-            return {"chatId": "10", "title": "Parent room"}
+            return {"chatId": "10", "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}
         raise AssertionError(f"unexpected chat info {chat_id}")
 
     parent_allowed = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False, "allowed_chats": "10"}))
@@ -3136,7 +3451,7 @@ async def assert_chat_info_cache_invalidation():
                     "dialogFollowMode": "1" if following["value"] else "2",
                     "followModeMentionEligible": True,
                 }}
-            return {"result": {"chatId": chat_id, "title": "Parent room"}}
+            return {"result": {"chatId": chat_id, "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}}
         if path == "/messages":
             return {"result": {"messages": []}}
         if path == "/send":
@@ -4252,7 +4567,8 @@ async def assert_host_authorization_boundaries():
         async def forbidden(*args, **kwargs):
             raise AssertionError("unauthorized enrichment or mutation")
         async def chat_info(chat_id, **kwargs):
-            return {"id": chat_id, "parentChatId": "parent", "peer": {"type": {"oneofKind": "chat"}}}
+            return {"id": chat_id, **({"parentChatId": "parent"} if chat_id != "parent" else {}),
+                    "peer": {"type": {"oneofKind": "chat"}}}
         async def target(chat_id, message_id, **kwargs):
             return {"id": message_id, "fromId": "bot", "peerId": {"peer": {"oneofKind": "chat"}}}
         async def answer(interaction_id, text):
@@ -4342,12 +4658,12 @@ async def assert_host_authorization_boundaries():
         assert events[-1].source.user_id is None
         assert events[-1].source.parent_chat_id == "parent"
         adapter._group_policy = "open"
-        # Opted-in reactions survive an unavailable target; core decides admission.
+        # A deleted target cannot become a reference-bearing reaction turn.
         async def missing_target(*args, **kwargs):
             return None
         adapter._fetch_message = missing_target
         await adapter._dispatch_reaction({"chatId": "10", "messageId": "gone", "userId": "paired", "emoji": "ok"}, added=True)
-        assert len(events) == before + 2
+        assert len(events) == before + 1
         adapter._fetch_message = target
         # Parent resolution is bounded and never grants access after timeout.
         original_timeout = inline_adapter_module._CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS
@@ -5306,8 +5622,7 @@ async def assert_standalone_sender():
         assert result["message_id"] == "document-1"
         assert result["thread_id"] == "chat:99"
         assert [call[0] for call in calls] == ["connect", "send", "image", "voice", "video", "document", "disconnect"]
-        assert 1 <= calls[0][2] <= 65535
-        assert calls[0][2] != 6543
+        assert calls[0][2] == 0  # The real child asks the kernel to allocate its listener.
         assert calls[1][4] == {"thread_id": "chat:99"}
         assert calls[2][4] == {"thread_id": "chat:99"}
         assert calls[3][4] == {"thread_id": "chat:99"}
@@ -5390,8 +5705,39 @@ async def assert_adapter_sidecar_loopback():
             direct_info = await adapter.get_chat_info("user:42")
             assert direct_info == {"id": "42", "name": "Grace Hopper", "type": "dm"}
 
+            saved_tool_session = {key: os.environ.get(key) for key in (
+                "HERMES_SESSION_PLATFORM", "HERMES_SESSION_CHAT_ID", "HERMES_SESSION_THREAD_ID",
+                "HERMES_SESSION_USER_ID", "HERMES_SESSION_CHAT_TYPE")}
+            try:
+                os.environ.update({"HERMES_SESSION_PLATFORM": "inline", "HERMES_SESSION_CHAT_ID": "123",
+                    "HERMES_SESSION_THREAD_ID": "", "HERMES_SESSION_USER_ID": "42", "HERMES_SESSION_CHAT_TYPE": "dm"})
+                session_context.current_turn_source = types.SimpleNamespace(platform="inline", user_id="42", chat_id="123",
+                    thread_id=None, chat_type="dm", is_bot=False, author_kind_verified=True)
+                personal_task = json.loads(inline_tools._handle_inline_tool({"action": "create_chat", "title": "Initiating person's task"}))
+                assert personal_task["success"] is True, personal_task
+                # A cron has no current author even if old env names a human.
+                session_context.current_turn_source = None
+                automated_task = json.loads(inline_tools._handle_inline_tool({"action": "create_chat", "title": "Implicit bot task"}))
+                assert automated_task["error_kind"] == "bad_format", automated_task
+                assert "no current Inline person" in automated_task["error"]
+                worker_task = json.loads(inline_tools._handle_inline_tool({"action": "create_chat", "title": "Explicit worker task", "participant_user_ids": []}))
+                assert worker_task["success"] is True, worker_task
+                health = await adapter._sidecar_call("/healthz", {})
+                created = [call["params"]["createChat"] for call in health["result"]["diagnostics"]["calls"]
+                           if call["method"] == "invokeUncheckedRaw:CREATE_CHAT"]
+                assert created[-2]["participants"] == [{"userId": "42"}]
+                assert created[-1]["participants"] == []
+                assert all(call.get("title") != "Implicit bot task" for call in created)
+            finally:
+                session_context.current_turn_source = None
+                for key, value in saved_tool_session.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
             thread_id = await adapter.create_handoff_thread("123", "Spec thread")
-            assert thread_id == "321"
+            assert thread_id is None
         finally:
             await adapter.disconnect()
 
@@ -5433,6 +5779,50 @@ async def assert_connect_does_not_block_on_command_sync():
 
 asyncio.run(assert_connect_does_not_block_on_command_sync())
 
+async def assert_reaction_receipt_retry():
+    original_delay = inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS
+    inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = 0.001
+    try:
+        adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+            "reply_threads": "off", "context_backfill": "off"}))
+        adapter._me_id = "999"
+        adapter.set_authorization_check(lambda *_args, **_kwargs: True)
+        lookup_started, available = asyncio.Event(), asyncio.Event()
+        received, acknowledgements = [], []
+        async def sidecar(path, body):
+            if path == "/messages":
+                lookup_started.set()
+                if not available.is_set():
+                    raise inline_adapter_module.InlineSidecarError(path, 503, "offline fixture", "transient")
+                return {"ok": True, "result": {"messages": [{"id": "80", "fromId": "999", "message": "reply"}]}}
+            if path == "/chat":
+                return {"ok": True, "result": {"chatId": "99", "peer": {"type": {"oneofKind": "chat"}}}}
+            assert path == "/inbound/ack", path
+            acknowledgements.append(body["deliveryId"])
+            return {"ok": True}
+        async def receive(event):
+            received.append(event)
+        adapter._sidecar_call, adapter.handle_message = sidecar, receive
+        reaction = {"kind": "reaction.add", "chatId": "99", "messageId": "80", "userId": "paired",
+            "emoji": "ok", "seq": 91, "_inlineDeliveryId": "held-reaction"}
+        await adapter._on_inbound(json.dumps(reaction))
+        first = adapter._inbound_deliveries["held-reaction"]
+        await asyncio.wait_for(lookup_started.wait(), 2)
+        assert received == [] and acknowledgements == [] and not adapter._seen_messages
+        available.set()
+        await asyncio.wait_for(first, 2)
+        assert len(received) == 1 and acknowledgements == ["held-reaction"]
+        assert received[0].message_id.startswith("reaction.add:")
+        assert received[0].reply_anchor_override == "80"
+        reaction["_inlineDeliveryId"] = "replayed-reaction"
+        await adapter._on_inbound(json.dumps(reaction))
+        await asyncio.wait_for(adapter._inbound_deliveries["replayed-reaction"], 2)
+        assert len(received) == 1 and acknowledgements[-1] == "replayed-reaction"
+    finally:
+        inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = original_delay
+
+asyncio.run(assert_reaction_receipt_retry())
+
 async def assert_disconnect_cleans_after_inbound_cancel():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     calls = []
@@ -5461,6 +5851,8 @@ asyncio.run(assert_disconnect_cleans_after_inbound_cancel())
 
 async def assert_bot_settings_document_and_mutation():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    adapter._me_id = "999"
+    adapter._settings_path = Path(tempfile.mkdtemp(prefix="inline-bot-settings-")) / "settings.json"
     context = {
         "access": "full",
         "scope_id": "42",
@@ -5577,6 +5969,422 @@ async def assert_bot_settings_fail_closed_and_serialized():
     assert adapter._bot_settings_lock_users == {}
 
 asyncio.run(assert_bot_settings_fail_closed_and_serialized())
+
+async def assert_group_reply_thread_turns_share_source_identity():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra, "reply_threads": "off", "require_mention": False,
+        "context_backfill": "off", "reactions": True, "group_allow_from": "u1",
+    }))
+    events = []
+    calls = []
+
+    async def fake_chat_info(chat_id, **kwargs):
+        if chat_id == "10":
+            return {"chatId": "10", "title": "Parent room", "peer": {"type": {"oneofKind": "chat"}}}
+        return {"chatId": chat_id, "title": "Child thread", "parentChatId": "10", "parentMessageId": "7"}
+
+    async def fake_sidecar(path, body):
+        calls.append((path, body))
+        return {"ok": True, "result": {"messageId": "sent"}}
+
+    async def capture(event):
+        events.append(event)
+    adapter.handle_message = capture
+    adapter._get_chat_info = fake_chat_info
+    adapter._fetch_message = lambda chat_id, msg_id: missing_message()
+    async def missing_message():
+        return None
+    adapter._sidecar_call = fake_sidecar
+
+    def message(chat_id, msg_id, *, replies=None):
+        return {
+            "kind": "message.new", "seq": int(msg_id), "chatId": chat_id,
+            "message": {
+                "id": msg_id, "chatId": chat_id, "fromId": "u1", "message": "hello",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+                **({"replies": {"chatId": replies}} if replies else {}),
+            },
+        }
+
+    await adapter._dispatch_message(message("10", "7", replies="99"))
+    await adapter._dispatch_message(message("99", "8"))
+    await adapter._dispatch_message(message("10", "9", replies="100"))
+    assert [(event.source.chat_id, event.source.thread_id, event.source.parent_chat_id) for event in events] == [
+        ("99", "99", "10"), ("99", "99", "10"), ("100", "100", "10"),
+    ]
+    assert [event.metadata["inline"]["chat_id"] for event in events] == ["10", "99", "10"]
+    await adapter.on_processing_start(events[0])
+    await adapter.on_processing_start(events[1])
+    assert [(path, body["target"]) for path, body in calls] == [
+        ("/reaction", {"chatId": "10"}), ("/reaction", {"chatId": "99"}),
+    ]
+    assert (await adapter.send(events[0].source.chat_id, "reply", metadata={"thread_id": "99"})).success
+    assert calls[-1][1]["target"] == {"chatId": "99"}
+
+asyncio.run(assert_group_reply_thread_turns_share_source_identity())
+
+async def assert_child_arrival_clears_pending_parent_typing():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra, "reply_threads": "on", "require_mention": False,
+        "context_backfill": "off", "group_policy": "allowlist", "group_allow_from": "u1",
+    }))
+    events = []
+    calls = []
+
+    async def fake_chat_info(chat_id, **kwargs):
+        if chat_id == "10":
+            return {"chatId": "10", "title": "Parent", "peer": {"type": {"oneofKind": "chat"}}}
+        return {"chatId": "99", "title": "Child", "parentChatId": "10", "parentMessageId": "7"}
+
+    async def fake_sidecar(path, body):
+        calls.append((path, body))
+        if path == "/create-subthread":
+            return {"ok": True, "result": {"chatId": "99"}}
+        return {"ok": True, "result": {}}
+
+    async def capture(event):
+        events.append(event)
+
+    async def missing_message(chat_id, msg_id):
+        return None
+
+    adapter.handle_message = capture
+    adapter._get_chat_info = fake_chat_info
+    adapter._fetch_message = missing_message
+    adapter._sidecar_call = fake_sidecar
+    for chat_id, msg_id in (("10", "7"), ("99", "8")):
+        await adapter._dispatch_message({
+            "seq": int(msg_id), "chatId": chat_id,
+            "message": {
+                "id": msg_id, "chatId": chat_id, "fromId": "u1", "message": "hello",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            },
+        })
+        assert events[-1].source.chat_id == "99"
+        await adapter.send_typing(events[-1].source.chat_id, metadata={"thread_id": "99"})
+        assert calls[-1][1]["target"] == {"chatId": chat_id}
+        await adapter.stop_typing(events[-1].source.chat_id, metadata={"thread_id": "99"})
+        if chat_id == "10":
+            await adapter._dispatch_message({
+                "seq": 18, "chatId": "99",
+                "message": {
+                    "id": "18", "chatId": "99", "fromId": "u2", "message": "unauthorized",
+                    "peerId": {"peer": {"oneofKind": "chat"}},
+                },
+            })
+            assert len(events) == 1
+            await adapter.send_typing(events[-1].source.chat_id, metadata={"thread_id": "99"})
+            assert calls[-1][1]["target"] == {"chatId": "10"}
+            await adapter.stop_typing(events[-1].source.chat_id, metadata={"thread_id": "99"})
+
+asyncio.run(assert_child_arrival_clears_pending_parent_typing())
+
+async def assert_dm_reply_thread_turns_share_source_identity():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra, "reply_threads": "off", "context_backfill": "off",
+        "dm_policy": "allowlist", "allow_from": "u1", "group_policy": "open",
+        "require_mention": True, "reactions": True,
+    }))
+    events = []
+    calls = []
+
+    async def fake_chat_info(chat_id, **kwargs):
+        if chat_id == "20":
+            return {"chatId": "20", "title": "Private DM", "peer": {"type": {"oneofKind": "user"}}}
+        return {"chatId": chat_id, "title": "DM reply", "parentChatId": "20", "parentMessageId": "7"}
+
+    async def fake_sidecar(path, body):
+        calls.append((path, body))
+        return {"ok": True, "result": {"messageId": "sent"}}
+
+    async def capture(event):
+        events.append(event)
+
+    async def missing_message():
+        return None
+
+    adapter.handle_message = capture
+    adapter._get_chat_info = fake_chat_info
+    adapter._fetch_message = lambda chat_id, msg_id: missing_message()
+    adapter._sidecar_call = fake_sidecar
+
+    def message(chat_id, msg_id, from_id="u1", *, replies=None):
+        return {
+            "kind": "message.new", "seq": int(msg_id), "chatId": chat_id,
+            "message": {
+                "id": msg_id, "chatId": chat_id, "fromId": from_id, "message": "hello",
+                "peerId": {"peer": {"oneofKind": "user" if chat_id == "20" else "chat"}},
+                **({"replies": {"chatId": replies}} if replies else {}),
+            },
+        }
+
+    await adapter._dispatch_message(message("20", "7", replies="99"))
+    await adapter._dispatch_message(message("99", "8"))
+    await adapter._dispatch_message(message("20", "9", replies="100"))
+    await adapter._dispatch_message(message("99", "10", from_id="u2"))
+    assert len(events) == 3  # The DM allowlist blocks u2 despite open group policy.
+    await adapter._dispatch_message(message("20", "12"))
+    assert events[-1].source.chat_type == "dm"
+    assert events[-1].source.chat_id == "20"
+    assert events[-1].source.thread_id is None
+    assert [(event.source.chat_type, event.source.chat_id, event.source.thread_id) for event in events] == [
+        ("dm", "20", "99"), ("dm", "20", "99"), ("dm", "20", "100"), ("dm", "20", None),
+    ]
+    assert [event.metadata["inline"]["chat_id"] for event in events] == ["20", "99", "20", "20"]
+    await adapter.on_processing_start(events[0])
+    await adapter.on_processing_start(events[1])
+    assert [(path, body["target"]) for path, body in calls] == [
+        ("/reaction", {"chatId": "20"}), ("/reaction", {"chatId": "99"}),
+    ]
+    assert (await adapter.send(events[1].source.chat_id, "reply", metadata={"thread_id": "99"})).success
+    assert calls[-1][1]["target"] == {"chatId": "99"}
+
+    async def unknown_parent(chat_id, **kwargs):
+        return {} if chat_id == "20" else await fake_chat_info(chat_id)
+    adapter._get_chat_info = unknown_parent
+    try:
+        await adapter._dispatch_message(message("99", "11"))
+    except inline_adapter_module.InlineInboundDeferred:
+        pass
+    else:
+        raise AssertionError("missing parent peer was acknowledged")
+    assert len(events) == 4  # Unknown parent peer must not fall through to group policy.
+
+asyncio.run(assert_dm_reply_thread_turns_share_source_identity())
+
+async def assert_handoffs_stay_in_existing_conversations():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    async def forbidden_sidecar(path, body):
+        raise AssertionError(f"handoff must not create a subthread: {path}")
+    adapter._sidecar_call = forbidden_sidecar
+    assert await adapter.create_handoff_thread("123", "Scheduled report") is None
+    assert await adapter.create_handoff_thread("456", "CLI handoff") is None
+
+asyncio.run(assert_handoffs_stay_in_existing_conversations())
+
+def assert_profile_configuration_and_tools_are_isolated():
+    global test_secret_scope
+    from inline import tools as inline_tools
+    original_home = hermes_constants.get_hermes_home
+    old_provider_secret = os.environ.get("OPENAI_API_KEY")
+    try:
+        with tempfile.TemporaryDirectory(prefix="inline-profile-runtime-") as root:
+            os.environ["OPENAI_API_KEY"] = "launch-profile-provider-placeholder"
+            profiles = []
+            for name in ("a", "b", "a"):
+                home = Path(root) / name
+                hermes_constants.get_hermes_home = lambda home=home: home
+                test_secret_scope = {
+                    "INLINE_TOKEN": name + "-profile-placeholder",
+                    "INLINE_BASE_URL": "https://" + name + ".inline.test",
+                    "INLINE_ALLOWED_USERS": name + "-owner",
+                    "INLINE_SIDECAR_TOKEN": name + "-sidecar-placeholder",
+                }
+                adapter = InlineAdapter(PlatformConfig(extra={"sidecar_port": 6543}))
+                assert adapter._token == name + "-profile-placeholder"
+                assert adapter._base_url == "https://" + name + ".inline.test"
+                assert adapter._state_path == home / "inline" / "sdk-state.json"
+                assert adapter._settings_path == home / "inline" / "adapter-settings.json"
+                assert adapter._allow_from == {name + "-owner"}
+                child_env = adapter._sidecar_child_env()
+                assert child_env["INLINE_TOKEN"] == adapter._token
+                assert child_env["INLINE_BASE_URL"] == adapter._base_url
+                assert child_env["HERMES_HOME"] == str(home.resolve())
+                assert "OPENAI_API_KEY" not in child_env
+                inline_tools.configure_sidecar(bind="127.0.0.1", port=6543 if name == "a" else 6544,
+                                               token=adapter._sidecar_token, profile_home=adapter._profile_home)
+                endpoint, tool_token = inline_tools._sidecar_config()
+                assert endpoint.endswith(":6543" if name == "a" else ":6544")
+                assert tool_token == name + "-sidecar-placeholder"
+                profiles.append(adapter)
+            assert profiles[0]._state_path == profiles[2]._state_path
+            assert profiles[0]._state_path != profiles[1]._state_path
+            # A scoped miss never borrows the launch profile's credential.
+            test_secret_scope = {}
+            assert InlineAdapter(PlatformConfig())._token == ""
+            configured = InlineAdapter(PlatformConfig(extra={"token": "configured-placeholder", "state_path": str(Path(root) / "explicit.json")}))
+            assert configured._state_path == Path(root) / "explicit.json"
+            assert configured._settings_path == Path(root) / "adapter-settings.json"
+    finally:
+        test_secret_scope = None
+        hermes_constants.get_hermes_home = original_home
+        if old_provider_secret is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = old_provider_secret
+
+assert_profile_configuration_and_tools_are_isolated()
+
+async def assert_runtime_listener_lock_and_crash_recovery():
+    with tempfile.TemporaryDirectory(prefix="inline-sidecar-runtime-") as root:
+        adapters = [InlineAdapter(PlatformConfig(extra={
+            "token": "fake", "base_url": "http://127.0.0.1/mock-inline",
+            "state_path": str(Path(root) / name / "state.json"),
+            "settings_path": str(Path(root) / name / "settings.json"),
+            "connect_timeout_ms": 5000,
+        })) for name in ("a", "b")]
+        try:
+            for adapter in adapters:
+                await adapter._start_sidecar()
+            assert adapters[0]._sidecar_port > 0 and adapters[1]._sidecar_port > 0
+            assert adapters[0]._sidecar_port != adapters[1]._sidecar_port
+            held = adapters[0]
+            # A fallback cron sender has the same configured profile files as
+            # the live receiver. It must neither lease nor mutate those files,
+            # consume inbound events, nor replace the model-tool endpoint.
+            held._state_path.write_text('{"version":1,"lastSeqByChatId":{"123":42},"lastUserSeq":12}', encoding="utf-8")
+            held._settings_path.write_text('{"version":1,"reply_threads":{"123":"off"}}', encoding="utf-8")
+            before_state = held._state_path.read_bytes()
+            before_settings = held._settings_path.read_bytes()
+            before_endpoint = inline_tools._sidecar_config()
+            standalone = await _standalone_send(held.config, "chat:123", "scheduled report")
+            assert standalone["success"] is True
+            assert held._state_path.read_bytes() == before_state
+            assert held._settings_path.read_bytes() == before_settings
+            assert inline_tools._sidecar_config() == before_endpoint
+            assert held._sidecar_proc.poll() is None
+            collision = InlineAdapter(PlatformConfig(extra={
+                "token": "fake", "base_url": "http://127.0.0.1/mock-inline",
+                "state_path": str(held._state_path), "settings_path": str(held._settings_path),
+            }))
+            try:
+                collision._acquire_state_file_locks()
+                raise AssertionError("shared state allowed two writers")
+            except RuntimeError as error:
+                assert "active writer" in str(error)
+            if sys.platform != "win32":
+                # Closing the parent descriptors models parent loss. The live
+                # Node process keeps the same locks until it has stopped.
+                held._close_state_file_locks()
+                try:
+                    collision._acquire_state_file_locks()
+                    raise AssertionError("live child lost its state lease")
+                except RuntimeError as error:
+                    assert "active writer" in str(error)
+            held._inbound_running = True
+            held._mark_connected()
+            child = held._sidecar_proc
+            child.kill()
+            deadline = time.monotonic() + 5
+            while not getattr(held, "fatal_notifications", 0) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert held.fatal_error[0] == "SIDECAR_CRASHED"
+            assert held.connected is False
+            assert held.fatal_notifications == 1
+            await held._stop_sidecar()
+            collision._acquire_state_file_locks()
+            collision._close_state_file_locks()
+            # A late supervisor from an old generation cannot poison a new one.
+            held._sidecar_proc = adapters[1]._sidecar_proc
+            held._inbound_running = True
+            await held._sidecar_exited(child)
+            assert held.fatal_notifications == 1
+            held._sidecar_proc = None
+            held._inbound_running = False
+            terminal = adapters[1]
+            terminal._inbound_running = True
+            terminal._mark_connected()
+            terminal._http_client = httpx.AsyncClient()
+            await terminal._sidecar_call("/test/authentication-error", {})
+            deadline = time.monotonic() + 5
+            while not getattr(terminal, "fatal_notifications", 0) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert terminal.connected is False
+            assert terminal.fatal_error[0] == "SIDECAR_CRASHED"
+            assert terminal.fatal_notifications == 1
+        finally:
+            for adapter in adapters:
+                await adapter._stop_sidecar()
+
+asyncio.run(assert_runtime_listener_lock_and_crash_recovery())
+
+def assert_settings_have_account_ownership():
+    with tempfile.TemporaryDirectory(prefix="inline-settings-owner-") as root:
+        settings = Path(root) / "settings.json"
+        def configured(token, base_url="https://api.inline.chat"):
+            return InlineAdapter(PlatformConfig(extra={"token": token, "base_url": base_url, "settings_path": str(settings)}))
+        first = configured("42:first")
+        first._set_reply_threads_for_chat("123", "off")
+        original = settings.read_bytes()
+        assert configured("42:rotated")._reply_thread_mode_for_chat("123") == "off"
+        for token, api in (("43:other", "https://api.inline.chat"), ("42:first", "https://other.inline.chat")):
+            try:
+                configured(token, api)
+                raise AssertionError("another account adopted settings")
+            except RuntimeError as error:
+                assert "another account" in str(error)
+            assert settings.read_bytes() == original
+        external = json.loads(original)
+        external["inlineAccount"]["botUserId"] = "43"
+        settings.write_text(json.dumps(external), encoding="utf-8")
+        changed = settings.read_bytes()
+        try:
+            first._set_reply_threads_for_chat("123", "on")
+            raise AssertionError("overwrote another account's replaced settings")
+        except RuntimeError:
+            pass
+        assert settings.read_bytes() == changed and first._reply_thread_mode_for_chat("123") == "off"
+
+assert_settings_have_account_ownership()
+
+async def assert_external_receiver_and_repeated_eof_fail_closed():
+    external = InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_autostart": False}))
+    assert await external.connect() is False
+    assert external.fatal_error[0] == "EXTERNAL_RECEIVER_UNSUPPORTED"
+    assert external._inbound_task is None and external._sidecar_proc is None
+    legacy = InlineAdapter(PlatformConfig(extra=base_extra))
+    original_version = BasePlatformAdapter.durable_intake_version
+    BasePlatformAdapter.durable_intake_version = None
+    try:
+        assert await legacy.connect() is False
+    finally:
+        BasePlatformAdapter.durable_intake_version = original_version
+    assert legacy.fatal_error[0] == "DURABLE_INTAKE_REQUIRED"
+    assert legacy._inbound_task is None and legacy._sidecar_proc is None and legacy.connected is False
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    class EndedResponse:
+        status_code = 200
+        async def aiter_lines(self):
+            if False:
+                yield ""
+    class EndedStream:
+        async def __aenter__(self): return EndedResponse()
+        async def __aexit__(self, *args): pass
+    class EndedClient:
+        def stream(self, *args, **kwargs): return EndedStream()
+    adapter._http_client = EndedClient()
+    adapter._inbound_running = True
+    adapter._mark_connected()
+    original_sleep = asyncio.sleep
+    delays = []
+    async def sleep(delay):
+        delays.append(delay)
+        await original_sleep(0)
+    asyncio.sleep = sleep
+    try:
+        await asyncio.wait_for(adapter._inbound_loop(), timeout=1)
+    finally:
+        asyncio.sleep = original_sleep
+    assert delays == [1.0, 2.0]
+    assert adapter.connected is False and adapter.fatal_notifications == 1
+    assert adapter.fatal_error[0] == "INBOUND_STREAM_ENDED"
+
+asyncio.run(assert_external_receiver_and_repeated_eof_fail_closed())
+
+async def assert_clarify_rows_obey_inline_card_limits():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    bodies = []
+    async def capture(path, body):
+        bodies.append(body)
+        return SendResult(success=True, message_id="1")
+    adapter._send_sidecar = capture
+    for count in (7, 8, 9, 10):
+        await adapter.send_clarify("chat:10", "Choose", [str(i) for i in range(count)], "card", "session")
+        rows = bodies[-1]["actions"]["rows"]
+        assert all(1 <= len(row["actions"]) <= 8 for row in rows)
+        assert sum(len(row["actions"]) for row in rows) == count + 1
+
+asyncio.run(assert_clarify_rows_obey_inline_card_limits())
 
 print("adapter python smoke ok")
 `

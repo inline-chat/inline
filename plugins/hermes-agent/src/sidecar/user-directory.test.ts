@@ -24,6 +24,7 @@ describe("InlineUserDirectory", () => {
       firstName: "Ada",
       lastName: "Lovelace",
       username: "ada",
+      bot: false,
     })
     await expect(directory.resolve({ userId: 42n, chatId: 7n, direct: false })).resolves.toMatchObject({ firstName: "Ada" })
     expect(calls).toEqual([Method.GET_CHAT_PARTICIPANTS])
@@ -51,8 +52,62 @@ describe("InlineUserDirectory", () => {
     await expect(directory.resolve({ userId: 91n, chatId: 8n, direct: true })).resolves.toEqual({
       id: "91",
       username: "fallback",
+      bot: false,
     })
     expect(calls).toEqual([Method.GET_CHATS])
+  })
+
+  it.each(["direct", "participants", "directory"])("refreshes a successful missing-sender lookup before the positive TTL (%s)", async source => {
+    let now = 0
+    let present = false
+    const calls: Method[] = []
+    const direct = source === "direct"
+    const directory = new InlineUserDirectory({
+      async invokeUncheckedRaw(method) {
+        calls.push(method)
+        await Promise.resolve()
+        const kind = method === Method.GET_CHAT_PARTICIPANTS ? "getChatParticipants" : "getChats"
+        const matchingSource = source === "participants" ? method === Method.GET_CHAT_PARTICIPANTS : method === Method.GET_CHATS
+        return { oneofKind: kind, [kind]: { users: [
+          user(41n, { firstName: "Already known" }),
+          ...(present && matchingSource ? [user(42n, { firstName: "New sender" })] : []),
+        ] } }
+      },
+    }, { now: () => now })
+    const lookup = (userId: bigint) => directory.resolveWithProvenance({ userId, chatId: 7n, direct })
+    await expect(lookup(41n)).resolves.toMatchObject({ provenanceVerified: true, profile: { id: "41", bot: false } })
+    await expect(lookup(42n)).resolves.toEqual({ provenanceVerified: false })
+    const firstCalls = direct ? [Method.GET_CHATS] : [Method.GET_CHAT_PARTICIPANTS, Method.GET_CHATS]
+    expect(calls).toEqual(firstCalls)
+
+    now = 999
+    expect(await Promise.all(Array.from({ length: 20 }, () => lookup(42n))))
+      .toEqual(Array.from({ length: 20 }, () => ({ provenanceVerified: false })))
+    await Promise.all(Array.from({ length: 20 }, () => lookup(41n)))
+    expect(calls).toEqual(firstCalls)
+
+    now = 1_000
+    expect(await Promise.all(Array.from({ length: 20 }, () => lookup(42n))))
+      .toEqual(Array.from({ length: 20 }, () => ({ provenanceVerified: false })))
+    expect(calls).toEqual([...firstCalls, ...firstCalls])
+
+    present = true
+    now = 1_999
+    await expect(lookup(42n)).resolves.toEqual({ provenanceVerified: false })
+    expect(calls).toEqual([...firstCalls, ...firstCalls])
+    now = 2_000
+    const recovered = await Promise.all(Array.from({ length: 20 }, () => lookup(42n)))
+    expect(recovered).toEqual(Array.from({ length: 20 }, () => ({
+      profile: { id: "42", firstName: "New sender", bot: false }, provenanceVerified: true,
+    })))
+    expect(calls).toEqual([...firstCalls, ...firstCalls,
+      ...(source === "participants" ? [Method.GET_CHAT_PARTICIPANTS] : firstCalls),
+    ])
+    const recoveredCalls = [...calls]
+    now = 20_000
+    await Promise.all(Array.from({ length: 20 }, () => lookup(42n)))
+    await Promise.all(Array.from({ length: 20 }, () => lookup(41n)))
+    expect(calls).toEqual(recoveredCalls)
   })
 
   it("falls back to the directory when participants contain only an id", async () => {
@@ -112,6 +167,41 @@ describe("InlineUserDirectory", () => {
 
     await expect(directory.resolveWithProvenance({ userId: 5n, chatId: 10n, direct: false }))
       .resolves.toEqual({ provenanceVerified: false })
+  })
+
+  it("requires authoritative proof for the matching sender, preserving known bot kind across partial updates", async () => {
+    const directory = new InlineUserDirectory({
+      async invokeUncheckedRaw() {
+        return { oneofKind: "getChats", getChats: { users: [
+          user(1n, { firstName: "Worker", bot: true }), user(2n, { firstName: "Human" }),
+        ] } }
+      },
+    })
+    directory.remember([user(42n, { firstName: "Unverified partial", bot: false })])
+    await expect(directory.resolveWithProvenance({ userId: 42n, chatId: 8n, direct: true }))
+      .resolves.toMatchObject({ profile: { id: "42", bot: false }, provenanceVerified: false })
+    await expect(directory.resolveWithProvenance({ userId: 2n, chatId: 8n, direct: true }))
+      .resolves.toMatchObject({ profile: { id: "2", bot: false }, provenanceVerified: true })
+    directory.remember([user(1n, { username: "worker_updated" })])
+    await expect(directory.resolveWithProvenance({ userId: 1n, chatId: 8n, direct: true }))
+      .resolves.toMatchObject({ profile: { id: "1", username: "worker_updated", bot: true }, provenanceVerified: true })
+  })
+
+  it("does not let partial profile refreshes extend expired sender-kind proof", async () => {
+    let now = 0
+    const directory = new InlineUserDirectory({
+      async invokeUncheckedRaw() {
+        if (now > 10) throw new Error("Current directory unavailable")
+        return { oneofKind: "getChats", getChats: { users: [user(42n, { firstName: "Ada" })] } }
+      },
+    }, { now: () => now, ttlMs: 10 })
+    await expect(directory.resolveWithProvenance({ userId: 42n, chatId: 8n, direct: true }))
+      .resolves.toMatchObject({ profile: { bot: false }, provenanceVerified: true })
+    now = 9
+    directory.remember([user(42n, { username: "ada_updated" })])
+    now = 11
+    await expect(directory.resolveWithProvenance({ userId: 42n, chatId: 8n, direct: true }))
+      .resolves.toMatchObject({ profile: { id: "42", username: "ada_updated" }, provenanceVerified: false })
   })
 
   it("expires cached profiles and bounds the cache", async () => {

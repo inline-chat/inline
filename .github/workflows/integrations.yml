@@ -377,7 +377,7 @@ jobs:
         run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/inline-packages" "$OPENCLAW_VERSION"
 
   hermes-admission:
-    name: Installed Hermes host (${{ matrix.host }})
+    name: Stock Hermes loader/tool/send compatibility (${{ matrix.host }})
     needs: candidate-packages
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -405,12 +405,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HERMES_REF: ${{ matrix.host }}
         run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" "$HERMES_REF"
-      - name: Validate packed adapter and message flow through real Hermes
+      - name: Validate packed loader/tools/send and durable receive refusal
         env:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs "$RUNNER_TEMP/inline-packages" "$HERMES_BIN" "$HERMES_PYTHON"
-      - name: Validate native catalog source installation
+      - name: Validate native source loader and mock sidecar smoke
         env:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
@@ -460,11 +460,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install stable Hermes for local transport end-to-end test
+      - name: Install reviewed matching core for real receiving qualification
         id: hermes-host
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
+        run: |
+          host_repository="$(node -p "require('./plugins/hermes-agent/package.json').inlineHermes.testedHermesRepository ?? ''")"
+          host_sha="$(node -p "require('./plugins/hermes-agent/package.json').inlineHermes.testedHermesCommit ?? ''")"
+          bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" "$host_sha" "$host_repository"
       - name: Build compiled MCP app for real transport checks
         run: |
           for package in protocol oauth-core sdk mcp; do

@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import { Message, UpdateChatInfoInput } from "@inline-chat/realtime-sdk"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageRoot, "..", "..")
@@ -27,6 +28,19 @@ type PackEntry = {
 }
 
 describe("packed artifact", () => {
+  it("retains promoted-history provenance and emoji-only requests on the installed wire", () => {
+    const message = Message.create({ id: 4n, chatId: 123n, isForwarded: true, sourceSnapshot: "carried public context" })
+    const decoded = Message.fromBinary(Message.toBinary(message))
+    expect(decoded.isForwarded).toBe(true)
+    expect(decoded.sourceSnapshot).toBe("carried public context")
+    const request = UpdateChatInfoInput.fromBinary(UpdateChatInfoInput.toBinary(
+      UpdateChatInfoInput.create({ chatId: 123n, generateEmoji: true }),
+    ))
+    expect(request.generateEmoji).toBe(true)
+    expect(request.title).toBeUndefined()
+    expect(request.emoji).toBeUndefined()
+  })
+
   it("ships only runtime files and license text needed by the external Hermes plugin", async () => {
     const raw = execFileSync("npm", ["pack", "--dry-run", "--json", "--silent"], {
       cwd: packageRoot,
@@ -62,6 +76,7 @@ describe("packed artifact", () => {
       inlineHermes?: Record<string, unknown>
       repository?: { directory?: string }
       scripts?: Record<string, string>
+      dependencies?: Record<string, string>
     }
     expect(pkg.bin?.["inline-hermes"]).toBe("dist/install.js")
     expect(pkg.engines?.node).toBe(">=20")
@@ -69,14 +84,16 @@ describe("packed artifact", () => {
     expect(pkg.scripts?.prepublishOnly).toBe("bun run check")
     expect(pkg.scripts?.["release:preflight"]).toBe("node ./scripts/release-stage.mjs --dry-run")
     expect(pkg.scripts?.["release:stage"]).toBe("node ./scripts/release-stage.mjs --prepare-only")
+    expect(pkg.dependencies?.["@inline-chat/realtime-sdk"]).toBe("0.0.19-alpha.0")
     expect(pkg.inlineHermes).toMatchObject({
       pluginId: "inline",
       pluginPath: "plugin/inline",
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.21.3",
-      testedHermesVersion: "0.21.5",
-      testedHermesCommit: "f97608f178d1ffeca59860195ab7da295f7c8e5f",
+      testedHermesVersion: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      testedHermesRepository: "morajabi/hermes-agent",
+      testedHermesCommit: expect.stringMatching(/^[0-9a-f]{40}$/),
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -195,7 +212,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.21")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.22")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,
