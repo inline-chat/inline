@@ -6,6 +6,7 @@ mock. Observers do not alter startup outcomes. No receiving receipt is produced.
 Retain every fresh profile, and run with explicit caller-owned prepared paths.
 """
 import argparse
+import asyncio
 import importlib.util
 import json
 import os
@@ -13,13 +14,17 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import signal
+import tempfile
+import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 
 HERE = Path(__file__).resolve().parent
 OPTIONS = argparse.Namespace(source=None, home_root=None, tools_root=None, consumer=None, node_bin=None,
-                             baseline_flow=None, report=None)
+                             baseline_flow=None, installer_bin=None, report=None)
 OBSERVATIONS = []
 
 
@@ -36,6 +41,79 @@ home = Path(os.environ['HERMES_HOME'])
 report_path = Path(os.environ['CALIBRATION_REPORT'])
 from hermes_cli.config import atomic_config_write, require_readable_config_before_write
 """
+
+
+@unittest.skipUnless(os.name == "posix", "The process-death receiving lane requires POSIX process groups")
+class ActualCommandOwnership(unittest.IsolatedAsyncioTestCase):
+    async def exercise_held_descendant(self, *, cancel, leader_exits):
+        spec = importlib.util.spec_from_file_location("owned_command_flow", HERE / "hermes-local-flow.py")
+        flow = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(flow)
+        directory = Path(tempfile.mkdtemp(prefix="ih-command-owned-"))
+        ready = directory / "owned-pids.json"
+        child_code = "import time; time.sleep(600)"
+        leader_code = """
+import json, os, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen([sys.executable, '-I', '-B', '-c', sys.argv[2]])
+Path(sys.argv[1]).write_text(json.dumps({'leader':os.getpid(), 'descendant':child.pid,
+                                      'group':os.getpgrp()}))
+if sys.argv[3] == 'exit':
+    sys.exit(0)
+time.sleep(600)
+"""
+        env = {key: os.environ[key] for key in ("PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL") if key in os.environ}
+        pids = None
+        with patch.dict(os.environ, {"INLINE_E2E_CONSUMER": str(directory)}):
+            task = asyncio.create_task(flow.command(sys.executable, "-I", "-B", "-c", leader_code,
+                str(ready), child_code, "exit" if leader_exits else "hold", env=env, timeout=3))
+            try:
+                deadline = time.monotonic() + 2.5
+                while not ready.exists() and time.monotonic() < deadline:
+                    await asyncio.sleep(0.02)
+                self.assertTrue(ready.exists(), "The actual descendant was not started")
+                pids = json.loads(ready.read_text())
+                self.assertTrue(self.is_running(pids["descendant"]), "The descendant must be alive before settlement")
+                if cancel:
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                else:
+                    with self.assertRaises(TimeoutError):
+                        await task
+                deadline = time.monotonic() + 3
+                while any(self.is_running(pids[key]) for key in ("leader", "descendant")) and time.monotonic() < deadline:
+                    await asyncio.sleep(0.02)
+                self.assertFalse(self.is_running(pids["descendant"]), "The held descendant survived command settlement")
+                self.assertFalse(self.is_running(pids["leader"]), "The command leader survived settlement")
+                self.assertEqual(pids["group"], pids["leader"], "The command must own its isolated process group")
+                OBSERVATIONS.append({"case":"owned-command-cancellation" if cancel else "owned-command-timeout",
+                    "leaderExitedBeforeSettlement":leader_exits, "leaderStopped":True, "descendantStopped":True,
+                    "ownedGroup":True, "fixture":str(directory)})
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                # Only the exact PIDs spawned by this fixture may be cleaned up
+                # when testing the known-broken baseline; never a shared group.
+                if pids:
+                    for key in ("descendant", "leader"):
+                        if self.is_running(pids[key]):
+                            os.kill(pids[key], signal.SIGKILL)
+
+    @staticmethod
+    def is_running(pid):
+        result = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True, timeout=3)
+        return result.returncode == 0 and bool(result.stdout.strip()) and not result.stdout.strip().startswith("Z")
+
+    async def test_timeout_stops_descendant_even_after_command_leader_exits(self):
+        await self.exercise_held_descendant(cancel=False, leader_exits=True)
+
+    async def test_cancellation_stops_live_command_and_held_descendant(self):
+        await self.exercise_held_descendant(cancel=True, leader_exits=False)
 
 
 class ActualFixtureCalibration(unittest.TestCase):
@@ -91,11 +169,30 @@ class ActualFixtureCalibration(unittest.TestCase):
     def test_actual_normal_enable_survives_worker_configuration_and_wires_startup(self):
         home, env = self.profile()
         self.run_probe("flow.write_profile_configuration('http://127.0.0.1:9/v1')\nreport_path.write_text('{}')\n", env)
-        for command in ([OPTIONS.node_bin, str(self.consumer / "node_modules/.bin/inline-hermes"),
+        probe_log = home / "canonical-install-probes.jsonl"
+        observer = home / "observe-canonical-hermes"
+        observer.write_text("#!" + sys.executable + "\n" + """
+import json, os, sys
+from pathlib import Path
+source = Path(""" + repr(str(self.consumer / "node_modules/@inline-chat/hermes-agent-adapter/plugin/inline")) + """)
+target = Path(os.environ['HERMES_HOME'])/'plugins/inline'
+files = [p for p in source.rglob('*') if p.is_file()]
+equal = all((target/p.relative_to(source)).is_file() and
+            p.read_bytes() == (target/p.relative_to(source)).read_bytes() for p in files)
+with Path(""" + repr(str(probe_log)) + """).open('a') as log:
+    log.write(json.dumps({'args':sys.argv[1:], 'allRuntimeBytesMatch':equal})+'\\n')
+os.execv(""" + repr(env["HERMES_BIN"]) + """, [""" + repr(env["HERMES_BIN"]) + """, *sys.argv[1:]])
+""")
+        observer.chmod(0o755)
+        env["INLINE_HERMES_BIN"] = str(observer)
+        installer = OPTIONS.installer_bin or str(self.consumer / "node_modules/.bin/inline-hermes")
+        for command in ([OPTIONS.node_bin, installer,
                          "install", "--hermes-home", str(home), "--json"],
                         [env["HERMES_BIN"], "plugins", "enable", "inline-platform"]):
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=env, cwd=self.consumer)
-            self.assertEqual(result.returncode, 0, "Normal packed setup failed; return code " + str(result.returncode))
+            self.run_probe("asyncio.run(flow.command(*sys.argv[3:], env=dict(os.environ)))\nreport_path.write_text('{}')\n",
+                           env, *command, timeout=40)
+        probes = [json.loads(line) for line in probe_log.read_text().splitlines()]
+        self.assertEqual(probes, [{"args":["inline", "status", "--json"], "allRuntimeBytesMatch":True}])
         value = self.run_probe("""
 config = require_readable_config_before_write(home/'config.yaml')
 enabled = config['plugins']['enabled']
@@ -145,6 +242,8 @@ observed.update(case='normal-plugin-admission-preserved', nativeEnablePersisted=
                 pluginConfigurationPreserved=True, profile=str(home))
 report_path.write_text(json.dumps(observed))
 """, env)
+        value.update(canonicalInstallProbeCount=len(probes), realCanonicalHostDelegated=True,
+                     installProbeAfterAllRuntimeBytesMatch=True, installerBin=installer)
         self.assertTrue(value["durableHandlerWired"] and value["pluginConfigurationPreserved"])
         self.assertFalse(value["authenticatedReceiving"])
 
@@ -198,7 +297,7 @@ report_path.write_text(json.dumps({'case':'actual-model-context-probe-calibratio
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    for name in ("source", "home-root", "tools-root", "consumer", "node-bin", "baseline-flow", "report"):
+    for name in ("source", "home-root", "tools-root", "consumer", "node-bin", "baseline-flow", "installer-bin", "report"):
         parser.add_argument("--" + name)
     OPTIONS, unittest_args = parser.parse_known_args()
     program = unittest.main(argv=[sys.argv[0], *unittest_args], exit=False)

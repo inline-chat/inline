@@ -160,33 +160,36 @@ async function installPlugin(params: {
   opts: InstallOptions
   pkg: PackageInfo
 }): Promise<InstallResult> {
-  const before = await inspectInstall(params)
-  if (!before.sourceValid) return { ...before, action: "install", installed: false }
-  if (params.opts.dryRun) {
+  // Preflight the artifact and replacement policy without invoking runtime
+  // probes against a plugin that has not been installed yet.
+  const sourceValid = await hasPluginFiles(params.source)
+  const targetExists = await exists(params.target)
+  if (!sourceValid || params.opts.dryRun || (targetExists && !params.opts.force)) {
+    const before = await inspectInstall(params)
+    if (!sourceValid) return { ...before, action: "install", installed: false }
+    if (params.opts.dryRun) {
+      return {
+        ...before,
+        ok: before.sourceReady,
+        action: "install",
+        installed: false,
+        issues: before.sourceReady ? [] : before.issues,
+      }
+    }
     return {
       ...before,
-      ok: before.sourceReady,
+      ok: false,
       action: "install",
       installed: false,
-      issues: before.sourceReady ? [] : before.issues,
+      issues: [
+        ...before.issues,
+        `target already exists: ${params.target}. Re-run with --force to replace it.`,
+      ],
     }
   }
 
   await mkdir(path.dirname(params.target), { recursive: true })
-
-  if (before.targetExists) {
-    if (!params.opts.force) {
-      return {
-        ...before,
-        ok: false,
-        action: "install",
-        installed: false,
-        issues: [
-          ...before.issues,
-          `target already exists: ${params.target}. Re-run with --force to replace it.`,
-        ],
-      }
-    }
+  if (targetExists) {
     await rm(params.target, { recursive: true, force: true })
   }
 

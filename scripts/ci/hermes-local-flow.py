@@ -413,17 +413,23 @@ def child_environment(home, *, other=False):
 
 
 async def command(*args, env, stdin=None, timeout=30):
+    assert os.name == "posix", "Process-death qualification requires POSIX command ownership"
     child = await asyncio.create_subprocess_exec(*args, env=env,
         cwd=os.environ["INLINE_E2E_CONSUMER"], stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
     try:
         out, _err = await asyncio.wait_for(child.communicate(stdin), timeout)
         assert child.returncode == 0, "Local setup/human operation failed (credential diagnostics suppressed)"
         return out.decode()
     finally:
-        if child.returncode is None:
-            child.kill()
-            await child.wait()
+        # A leader can exit while a nested probe still owns the captured pipes.
+        # Settle this command's isolated group even in that case, including on
+        # timeout/cancellation. Normal completion also cannot leave descendants.
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await child.wait()
 
 
 async def human(operation):
