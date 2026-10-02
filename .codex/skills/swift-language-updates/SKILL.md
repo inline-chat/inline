@@ -3,6 +3,8 @@ name: swift-language-updates
 description: Use when writing, reviewing, or modernizing Swift code based on recent Swift language, standard library, compiler, Swift Testing, SwiftPM, Foundation, interoperability, or ownership changes. Trigger for requests mentioning latest Swift, Swift 6.3, Swift 6.4, WWDC26 "What's new in Swift", changelogs, @diagnose, anyAppleOS, module selectors, @c/@implementation, task cancellation shields, ~Sendable, async defer, @inline(always), @specialize/@specialized, Iterable, borrow/mutate accessors, UniqueBox, UniqueArray, Ref/MutableRef, Swift Testing migration, Subprocess 1.0, Swift Build, Embedded Swift, Android SDK, Wasm, or Java interop.
 ---
 
+For internal Inline work, prefer a separately installed global `swift-language-updates` package at `${CODEX_HOME:-$HOME/.codex}/skills/swift-language-updates/SKILL.md` when it resolves outside this repository. Load that maintained guidance instead of this generic fallback; do not copy private instructions here. Current user and repository instructions still take precedence.
+
 # Swift Language Updates
 
 ## Overview

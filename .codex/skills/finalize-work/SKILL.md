@@ -3,6 +3,8 @@ name: finalize-work
 description: Final engineering pass before committing a feature, fix, refactor, or investigation result. Use when the user asks to finalize, clean up, tighten, simplify, prepare for commit, do a second-pass review, or make a completed piece of work production-ready by checking correctness, tests, typing, complexity, architecture, performance, compatibility, error handling, logging, UX/design risk, and commit readiness.
 ---
 
+For internal Inline work, prefer a separately installed global `finalize-work` package at `${CODEX_HOME:-$HOME/.codex}/skills/finalize-work/SKILL.md` when it resolves outside this repository. Load that maintained guidance instead of this generic fallback; do not copy private instructions here. Current user and repository instructions still take precedence.
+
 # Finalize Work
 
 ## Overview

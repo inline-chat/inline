@@ -3,6 +3,8 @@ name: disk-cleanup
 description: Audit and reclaim disk space on macOS with cold-first replacement-cost classification and guarded safe, extra, and deep inventories. Use when disk space is low, builds fail with no-space errors, or the user asks to inspect, clean, prune, or remove caches, temporary files, Docker artifacts, Xcode data, build outputs, node_modules, target directories, or other reproducible developer artifacts without immediately forcing expensive rebuilds or downloads.
 ---
 
+For internal Inline work, prefer a separately installed global `disk-cleanup` package at `${CODEX_HOME:-$HOME/.codex}/skills/disk-cleanup/SKILL.md` when it resolves outside this repository. Load that maintained guidance instead of this generic fallback; do not copy private instructions here. Current user and repository instructions still take precedence.
+
 # Disk Cleanup
 
 Use `scripts/disk-cleanup.sh` for repeatable audits. Keep source, personal data, credentials, databases, Docker volumes, `.env` files, mounted device filesystems, and active build state out of scope.

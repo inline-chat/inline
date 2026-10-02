@@ -3,6 +3,8 @@ name: production-cli-smoke-test
 description: Safely exercise Inline production through the locally installed `inline` CLI using the authenticated user's self-DM as the default mutation target. Use for important production smoke tests of authentication, messages, file/image uploads, media fetch-back, or recently deployed server routes when a real user-path check is needed without affecting another person or shared chat.
 ---
 
+For internal Inline work, prefer a separately installed global `production-cli-smoke-test` package at `${CODEX_HOME:-$HOME/.codex}/skills/production-cli-smoke-test/SKILL.md` when it resolves outside this repository. Load that maintained guidance instead of this generic fallback; do not copy private instructions here. Current user and repository instructions still take precedence.
+
 # Production CLI Smoke Test
 
 Use the installed `inline` CLI and its existing authentication. Default every

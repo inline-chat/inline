@@ -7,6 +7,8 @@ metadata:
   version: "1.0.0"
 ---
 
+For internal Inline work, prefer a separately installed global `postgres` package at `${CODEX_HOME:-$HOME/.codex}/skills/postgres/SKILL.md` when it resolves outside this repository. Load that maintained guidance instead of this generic fallback; do not copy private instructions here. Current user and repository instructions still take precedence.
+
 # PlanetScale Postgres
 
 This bundled skill is adapted from
