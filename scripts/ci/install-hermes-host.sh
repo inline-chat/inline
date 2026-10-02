@@ -21,10 +21,10 @@ host_url="https://github.com/$host_repository.git"
 if [[ "$host_ref" =~ ^[a-f0-9]{40}$ ]]; then
   git init -q "$host_dir/source"
   git -C "$host_dir/source" remote add origin "$host_url"
-  git -C "$host_dir/source" fetch --depth 1 origin "$host_ref"
+  git -C "$host_dir/source" fetch --depth 1 --filter=blob:none origin "$host_ref"
   git -C "$host_dir/source" -c advice.detachedHead=false checkout --detach FETCH_HEAD
 else
-  git clone --depth 1 --branch "$host_ref" -- "$host_url" "$host_dir/source"
+  git clone --depth 1 --filter=blob:none --branch "$host_ref" -- "$host_url" "$host_dir/source"
 fi
 host_sha=$(git -C "$host_dir/source" rev-parse HEAD)
 if [[ "$host_ref" =~ ^[a-f0-9]{40}$ && "$host_sha" != "$host_ref" ]]; then
@@ -36,15 +36,21 @@ if [[ -e "$host_dir/source/pm" ]]; then
   [[ -f "$host_dir/source/pm/build_env.py" ]] || { echo 'Hermes PM source is missing its fresh environment builder' >&2; exit 1; }
   # Canonical source version comes from reachable release tags and ancestry,
   # never a fabricated install stamp or the unstamped __version__ placeholder.
-  history_options=(--tags)
+  history_options=(--tags --filter=blob:none)
   if [[ "$(git -C "$host_dir/source" rev-parse --is-shallow-repository)" == true ]]; then
     history_options+=(--unshallow)
   fi
   git -C "$host_dir/source" fetch "${history_options[@]}" origin "$host_sha"
   if [[ "$host_repository" != NousResearch/hermes-agent ]]; then
-    git -C "$host_dir/source" fetch --no-tags https://github.com/NousResearch/hermes-agent.git 'refs/tags/v*:refs/tags/v*'
+    git -C "$host_dir/source" fetch --no-tags --filter=blob:none https://github.com/NousResearch/hermes-agent.git 'refs/tags/v*:refs/tags/v*'
   fi
   [[ "$(git -C "$host_dir/source" rev-parse HEAD)" == "$host_sha" ]] || { echo 'Hermes checkout changed while fetching version ancestry' >&2; exit 1; }
+  # VersionInfo reads the nearest CalVer release's project through a three-second
+  # Git timeout. Hydrate that one deferred blob before its normal reader runs.
+  if release_description=$(git -C "$host_dir/source" describe --tags --long --match 'v2[0-9][0-9][0-9].*' HEAD); then
+    release_tag=${release_description%-*-*}
+    git -C "$host_dir/source" show "$release_tag:pyproject.toml" > /dev/null
+  fi
   # PM owns its pinned tools and frozen dependency build. This caller-owned
   # output never selects or repairs an installed application's generation.
   pm_host_dir=$(cd "$host_dir" && pwd -P)

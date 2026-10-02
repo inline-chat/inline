@@ -12,7 +12,8 @@ const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim()
 // Keep disposable fixtures; no workspace, services or external network is used.
 function fixture(repository = "morajabi/hermes-agent", spoofHead = false,
   options: { pm?: "ready" | "incomplete"; pmExit?: number; versionExit?: number; historyExit?: number;
-    canonicalExit?: number; conflictingTag?: boolean; relativePython?: boolean } = {}) {
+    canonicalExit?: number; conflictingTag?: boolean; relativePython?: boolean;
+    filter?: boolean; hydrationExit?: number } = {}) {
   const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), "inline-hermes-installer-")))
   const remote = path.join(scratch, "remote.git")
   execFileSync(realGit, ["init", "--bare", "-q", remote])
@@ -62,6 +63,12 @@ ${entries}
     execFileSync(realGit, ["-C", canonical, "fetch", "--no-tags", remote, "refs/heads/main:refs/heads/main"])
     execFileSync(realGit, ["-C", canonical, "tag", "v2026.9.21", releaseSha])
     execFileSync(realGit, ["-C", canonical, "tag", "v99.0.0", "main"])
+  }
+  if (options.filter) {
+    for (const transport of new Set([remote, canonical])) {
+      execFileSync(realGit, ["-C", transport, "config", "uploadpack.allowFilter", "true"])
+      execFileSync(realGit, ["-C", transport, "config", "uploadpack.allowAnySHA1InWant", "true"])
+    }
   }
   const bin = path.join(scratch, "bin")
   mkdirSync(bin)
@@ -119,6 +126,18 @@ elif [[ "$*" == *"fetch --no-tags"* && "$CANONICAL_EXIT" != 0 ]]; then
 else
   exec "$REAL_GIT" "$@"
 fi`)
+  else if (options.filter || options.hydrationExit) script("git", `if [[ "$1" == -C && "$3" == show && "$4" == v2026.9.21:pyproject.toml ]]; then
+  [[ ! -e "$TRACE/pm-cwd" ]] || { echo 'Release hydration ran after PM' >&2; exit 25; }
+  oid=$("$REAL_GIT" -C "$2" rev-parse "$4")
+  objects=$("$REAL_GIT" -C "$2" cat-file --batch-all-objects --batch-check='%(objectname)')
+  if [[ $'\\n'"$objects"$'\\n' == *$'\\n'"$oid"$'\\n'* ]]; then
+    printf 'present\\n' > "$TRACE/release-blob-before-hydration"
+  else
+    printf 'omitted\\n' > "$TRACE/release-blob-before-hydration"
+  fi
+  [[ "$HYDRATION_EXIT" == 0 ]] || exit "$HYDRATION_EXIT"
+fi
+exec "$REAL_GIT" "$@"`)
   const destination = path.join(scratch, "host folder")
   const output = path.join(scratch, "outputs")
   const callerHome = path.join(scratch, "caller home")
@@ -135,6 +154,7 @@ fi`)
     TRACE: trace, PM_EXIT: String(options.pmExit ?? 0), VERSION_EXIT: String(options.versionExit ?? 0),
     HISTORY_EXIT: String(options.historyExit ?? 0),
     CANONICAL_EXIT: String(options.canonicalExit ?? 0),
+    HYDRATION_EXIT: String(options.hydrationExit ?? 0),
     HERMES_HOME: callerHome, HERMES_RUNTIME_DIR: callerRuntime,
     GITHUB_OUTPUT: output,
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_ALLOW_PROTOCOL: "file",
@@ -249,6 +269,45 @@ describe("Hermes host installation provenance", () => {
     expect(result.status, result.stderr).toBe(0)
     expect(test.args("bootstrap-args")[1]).toBe("pm.build_env")
     expect(test.called("pip-args")).toBe(false)
+  })
+
+  it("hydrates the omitted release blob before PM while retaining exact graph and current files", () => {
+    const test = fixture("morajabi/hermes-agent", false, { pm: "ready", filter: true })
+    const result = test.run(test.sha, "morajabi/hermes-agent")
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stderr).not.toContain("filtering not recognized")
+    expect(test.args("release-blob-before-hydration")).toEqual(["omitted"])
+    expect(test.args("release-project")).toEqual(["[project]", 'version = "0.21.4"'])
+    expect(test.args("pm-description")).toEqual([`v2026.9.21-1-g${test.sha.slice(0, 7)}`])
+    const source = path.join(test.destination, "source")
+    const git = (...args: string[]) => execFileSync(realGit, ["-C", source, ...args], { encoding: "utf8" }).trim()
+    expect(git("rev-parse", "HEAD")).toBe(test.sha)
+    expect(git("rev-parse", "--is-shallow-repository")).toBe("false")
+    expect(git("rev-list", "--count", "HEAD")).toBe("2")
+    expect(git("config", "--get", "remote.origin.url")).toBe("https://github.com/morajabi/hermes-agent.git")
+    expect(git("config", "--get", "remote.origin.promisor")).toBe("true")
+    expect(readFileSync(path.join(source, "pyproject.toml"), "utf8")).toContain('version = "0.0.0"')
+    expect(readFileSync(path.join(source, "pm/build_env.py"), "utf8")).toBe("# PM command seam\n")
+    expect(git("show", "v2026.9.21:pyproject.toml")).toContain('version = "0.21.4"')
+  })
+
+  it("preserves correctness with visible warnings when the server ignores blob filtering", () => {
+    const test = fixture("morajabi/hermes-agent", false, { pm: "ready" })
+    const result = test.run(test.sha, "morajabi/hermes-agent")
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stderr).toContain("filtering not recognized by server")
+    expect(test.args("release-project")).toEqual(["[project]", 'version = "0.21.4"'])
+    expect(test.args("pm-description")).toEqual([`v2026.9.21-1-g${test.sha.slice(0, 7)}`])
+  })
+
+  it("refuses release-blob hydration failure before PM instead of caching an unknown version", () => {
+    const test = fixture("morajabi/hermes-agent", false, { pm: "ready", filter: true, hydrationExit: 28 })
+    const result = test.run(test.sha, "morajabi/hermes-agent")
+    expect(result.status).toBe(28)
+    expect(test.args("release-blob-before-hydration")).toEqual(["omitted"])
+    expect(test.called("bootstrap-args")).toBe(false)
+    expect(test.called("hermes-args")).toBe(false)
+    expect(existsSync(test.output)).toBe(false)
   })
 
   it("propagates PM failure without pip fallback, launcher validation or a host receipt", () => {
