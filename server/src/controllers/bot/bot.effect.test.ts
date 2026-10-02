@@ -1698,11 +1698,9 @@ describe("Effect Bot routes", () => {
     ).toEqual([
       "/bot:token/deleteMessages",
       "/bot:token/editMessageActions",
-      "/bot:token/forwardMessages",
       "/bot:token/getSpace",
       "/bot/deleteMessages",
       "/bot/editMessageActions",
-      "/bot/forwardMessages",
       "/bot/getSpace",
     ])
   })

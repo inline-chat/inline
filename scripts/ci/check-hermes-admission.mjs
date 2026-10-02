@@ -37,8 +37,11 @@ const installedHermes = path.join(consumer, "node_modules/@inline-chat/hermes-ag
 const installedManifest = JSON.parse(await readFile(path.join(installedHermes, "package.json"), "utf8"))
 console.log(`Testing installed adapter ${installedManifest.version}; ${provenance}`)
 if (mode !== "--latest") {
-  const bytes = execFileSync("tar", ["-xOzf", installSpec, "package/dist/install.js"])
-  assert.deepEqual(await readFile(path.join(installedHermes, "dist/install.js")), bytes)
+  const installedBytes = await readFile(path.join(installedHermes, "dist/install.js"))
+  const bytes = execFileSync("tar", ["-xOzf", installSpec, "package/dist/install.js"], {
+    maxBuffer: installedBytes.length + 1,
+  })
+  assert.deepEqual(installedBytes, bytes)
 }
 const env = { ...process.env, HERMES_HOME: home, HOME: scratch, INLINE_NODE_BIN: process.execPath }
 const adapterBin = path.join(consumer, "node_modules/.bin/inline-hermes")
