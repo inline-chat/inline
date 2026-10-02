@@ -316,7 +316,7 @@ def configuration(provider_url, *, environment=None):
     home = Path(env["HERMES_HOME"])
     bot = env["INLINE_E2E_BOT_ID"]
     return {"model": {"provider": "custom", "default": "ci-hermes-local", "base_url": provider_url,
-                      "api_key": "no-key-required"},
+                      "api_key": "no-key-required", "api_mode": "chat_completions", "context_length": 65536},
             "agent": {"max_iterations": 2}, "memory": {"memory_enabled": False},
             "gateway": {"multiplex_profiles": False, "group_sessions_per_user": False,
                         "standalone": True, "streaming": {"enabled": False}},
@@ -330,12 +330,22 @@ def configuration(provider_url, *, environment=None):
                 "settings_path": str(home / f"settings-{bot}.json")}}}
 
 
+def write_profile_configuration(provider_url, *, environment=None):
+    from hermes_cli.config import _deep_merge, atomic_config_write, require_readable_config_before_write
+    env = os.environ if environment is None else environment
+    path = Path(env["HERMES_HOME"]) / "config.yaml"
+    # Normal plugin enable owns its persisted allow-list. Update only fixture
+    # settings through the native guarded YAML owner, retaining that admission.
+    existing = require_readable_config_before_write(path)
+    atomic_config_write(path, _deep_merge(existing, configuration(provider_url, environment=env)))
+
+
 async def worker(job):
     home = Path(os.environ["HERMES_HOME"]).resolve()
     assert not (home / ".env").exists()
     _host, source = host_info()
     provider = DeterministicProvider(home, job)
-    write_json(home / "config.yaml", configuration(provider.url))
+    write_profile_configuration(provider.url)
     provider.install_llm_seam()
     from hermes_cli.plugins import get_plugin_manager
     get_plugin_manager().discover_and_load()
@@ -558,7 +568,7 @@ async def fresh_home():
     home = root / "profiles" / ("c" + uuid.uuid4().hex[:8])
     home.mkdir(parents=True)
     env = child_environment(home)
-    write_json(home / "config.yaml", configuration("http://127.0.0.1:9/v1", environment=env))
+    write_profile_configuration("http://127.0.0.1:9/v1", environment=env)
     consumer = Path(os.environ["INLINE_E2E_CONSUMER"])
     await command(os.environ["INLINE_NODE_BIN"], str(consumer / "node_modules/.bin/inline-hermes"),
                   "install", "--hermes-home", str(home), "--json", env=env)
