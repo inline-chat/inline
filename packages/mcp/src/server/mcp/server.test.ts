@@ -1179,7 +1179,6 @@ describe("mcp tool server", () => {
         await sendRequest(transport, { jsonrpc: "2.0", id, method: "tools/call", params: { name: "conversations.list", arguments: { includeSubthreads: true, sort: "id", limit: 50, ...(afterChatId ? { afterChatId } : {}) } } } as any, { authInfo })
         const result = (await waitForResponse(sent, id)).result
         expect(result.isError).not.toBe(true)
-        expect(result.structuredContent.subthreadsIncluded).toBe(true)
         expect(result.structuredContent.sort).toBe("id")
         expect(result.structuredContent).toEqual(JSON.parse(result.content[0].text))
         all.push(...result.structuredContent.items.map((item: { chatId: string }) => item.chatId))
@@ -1191,14 +1190,14 @@ describe("mcp tool server", () => {
     } finally { await server.close() }
   })
 
-  it("returns completeness for an empty authorized catalog and requires read scope", async () => {
+  it("returns an empty authorized catalog and requires read scope", async () => {
     const getEligibleChats = vi.fn<InlineApi["getEligibleChats"]>().mockResolvedValue([])
     const server = createInlineMcpServer({ grant, inline: createInlineStub({ getEligibleChats }), contractVersion: "submission-v2" })
     const authInfo = createAuthInfo(["messages:read"])
     const { transport, sent } = await connectAndInitialize(server, authInfo)
     try {
       await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "conversations.list", arguments: { includeSubthreads: true } } } as any, { authInfo })
-      expect((await waitForResponse(sent, 2)).result.structuredContent).toMatchObject({ sort: "id", subthreadsIncluded: true, nextAfterChatId: null, items: [] })
+      expect((await waitForResponse(sent, 2)).result.structuredContent).toMatchObject({ sort: "id", nextAfterChatId: null, items: [] })
       await sendRequest(transport, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "conversations.list", arguments: { includeSubthreads: true } } } as any, { authInfo: createAuthInfo(["offline_access"]) })
       const failure = (await waitForResponse(sent, 3)).result
       expect(failure.isError).toBe(true)

@@ -1516,7 +1516,6 @@ const conversationsListOutputSchema = z.object({
   kind: z.enum(["dm", "home_thread", "space_chat"]).nullable(),
   items: z.array(conversationListItemOutputSchema),
   nextAfterChatId: z.string().nullable(),
-  subthreadsIncluded: z.boolean().describe("True only when complete authorized subthread discovery was confirmed by the Inline server"),
 })
 
 const conversationGetOutputSchema = z.object({
@@ -2061,12 +2060,12 @@ export function createInlineMcpServer(params: {
     {
       title: "List Inline Conversations",
       description:
-        "Find the chatId for a person, DM, thread, or space chat before reading or sending. Query can be a contact name, @username, chat title, or chat ID. Use kind or spaceId to narrow approved conversations. For complete archive discovery, omit query, set includeSubthreads true and sort id, and continue with nextAfterChatId as afterChatId until null. This includes authorized hidden subthreads and requires server support; older servers fail explicitly. Filters apply before pagination.",
+        "Find the chatId for a person, DM, thread, or space chat before reading or sending. Query can be a contact name, @username, chat title, or chat ID. Use kind or spaceId to narrow approved conversations. For complete archive discovery, omit query, set includeSubthreads true and sort id, and continue with nextAfterChatId as afterChatId until null. This includes authorized hidden subthreads and requires an Inline server with includeSubthreads support. Filters apply before pagination.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional contact name, chat title, or chat ID"),
         spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Only conversations in this approved space; incompatible with dm or home_thread kind"),
         kind: z.enum(["dm", "home_thread", "space_chat"]).optional().describe("Restrict the result to DMs, home threads, or space chats"),
-        includeSubthreads: z.boolean().optional().describe("Confirm a complete authorized catalog including hidden subthreads; requires id sort and no query"),
+        includeSubthreads: z.boolean().optional().describe("Request a complete authorized catalog including hidden subthreads; requires id sort and no query"),
         afterChatId: z.string().regex(/^[1-9]\d*$/).optional().describe("Exclusive ascending chat ID cursor; requires id sort and no query"),
         limit: submissionV2
           ? z.number().int().min(1).max(50).optional().describe("Maximum conversations to return; defaults to 20")
@@ -2127,7 +2126,6 @@ export function createInlineMcpServer(params: {
           kind: kind ?? null,
           items,
           nextAfterChatId: safeSort === "id" && ordered.length > selected.length ? selected[selected.length - 1]!.chatId.toString() : null,
-          subthreadsIncluded: completeCatalog,
         }
         return {
           structuredContent: payload,
@@ -2159,7 +2157,6 @@ export function createInlineMcpServer(params: {
         kind: kind ?? null,
         items,
         nextAfterChatId: null,
-        subthreadsIncluded: false,
       }
       return {
         structuredContent: payload,

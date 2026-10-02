@@ -539,9 +539,8 @@ mod tests {
     }
 
     #[test]
-    fn unfiltered_json_catalog_preserves_unopened_subthreads_and_capability_marker() {
+    fn unfiltered_json_catalog_preserves_unopened_subthreads() {
         let mut payload = scope_fixture();
-        payload.subthreads_included = Some(true);
         payload.chats.push(proto::Chat {
             id: 500,
             title: "Unopened child".into(),
@@ -564,7 +563,13 @@ mod tests {
                 .any(|dialog| dialog.chat_id == Some(500))
         );
         let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["subthreads_included"], true);
+        let child = json["chats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|chat| chat["id"] == 500)
+            .unwrap();
+        assert_eq!(child["parent_chat_id"], 42);
     }
 
     #[test]

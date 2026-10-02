@@ -49,13 +49,12 @@ describe("getChats", () => {
     expect(returnedChat?.spaceId).toBeUndefined()
   })
 
-  test("complete catalog acknowledges an empty result without changing the default snapshot", async () => {
+  test("complete catalog returns empty collections without changing the default snapshot", async () => {
     const user = await testUtils.createUser("empty-catalog@example.test")
     const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(user.id))
-    expect(complete.subthreadsIncluded).toBe(true)
-    expect(complete.chats).toEqual([])
+    expect(complete).toEqual({ chats: [], dialogs: [], spaces: [], users: [], messages: [], folders: [] })
     const normal = await getChats({ includeSubthreads: false }, makeHandlerContext(user.id))
-    expect(normal.subthreadsIncluded).toBeUndefined()
+    expect(normal).toEqual(complete)
   })
 
   test("complete catalog includes hidden, unopened, archived and nested children without creating child dialogs", async () => {
@@ -83,7 +82,6 @@ describe("getChats", () => {
     expect(normal.chats.map((chat) => Number(chat.id))).toEqual([parent.id])
 
     const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(user.id))
-    expect(complete.subthreadsIncluded).toBe(true)
     expect(complete.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual(
       [parent.id, hidden.id, unopened.id, archived.id, nested.id].sort((a, b) => a - b),
     )

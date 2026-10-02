@@ -2993,10 +2993,6 @@ message GetChatsResult {
 
   // Personal dialog folders. Dialogs remain present for unsupported clients.
   repeated DialogFolder folders = 6;
-
-  // True only when include_subthreads was honored with a complete accessible
-  // catalog. Older servers omit this field; archive clients must check it.
-  optional bool subthreads_included = 7;
 }
 
 message TranslateMessagesInput {

@@ -53,7 +53,7 @@ describe("createInlineApi", () => {
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
   })
 
-  it("confirms expanded discovery, filters grants, and keeps ordinary discovery unchanged", async () => {
+  it("requests expanded discovery, filters grants, and keeps ordinary discovery unchanged", async () => {
     const root = spaceChat(1n, "Root", 10n, 1n)
     const child = { ...spaceChat(3n, "Hidden child", 10n, 2n), parentChatId: 1n }
     const outside = { ...spaceChat(4n, "Other context", 20n, 1n), parentChatId: 2n }
@@ -62,7 +62,7 @@ describe("createInlineApi", () => {
     realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
       expect(method).toBe(Method.GET_CHATS)
       const expanded = input.getChats.includeSubthreads === true
-      return { getChats: { chats: expanded ? [root, child, outside, dm, home] : [root], dialogs: [], users: [], spaces: [], messages: [], folders: [], ...(expanded ? { subthreadsIncluded: true } : {}) } }
+      return { getChats: { chats: expanded ? [root, child, outside, dm, home] : [root], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
     })
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     try {
@@ -74,14 +74,8 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
-  it.each([undefined, false])("rejects unconfirmed full discovery with marker %s", async (subthreadsIncluded) => {
-    realtimeSdk.client.invoke.mockResolvedValue({ getChats: { chats: [], dialogs: [], users: [], spaces: [], messages: [], folders: [], subthreadsIncluded } })
-    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: true, allowHomeThreads: true } })
-    try { await expect(api.getEligibleChats({ includeSubthreads: true })).rejects.toThrow("upgrade required") } finally { await api.close() }
-  })
-
-  it("confirms empty complete discovery and does not mistake it for unsupported discovery", async () => {
-    realtimeSdk.client.invoke.mockResolvedValue({ getChats: { chats: [], dialogs: [], users: [], spaces: [], messages: [], folders: [], subthreadsIncluded: true } })
+  it("returns an empty expanded discovery result", async () => {
+    realtimeSdk.client.invoke.mockResolvedValue({ getChats: { chats: [], dialogs: [], users: [], spaces: [], messages: [], folders: [] } })
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: true, allowHomeThreads: true } })
     try { expect(await api.getEligibleChats({ includeSubthreads: true })).toEqual([]) } finally { await api.close() }
   })

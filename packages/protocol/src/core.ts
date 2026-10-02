@@ -8332,13 +8332,6 @@ export interface GetChatsResult {
      * @generated from protobuf field: repeated DialogFolder folders = 6;
      */
     folders: DialogFolder[];
-    /**
-     * True only when include_subthreads was honored with a complete accessible
-     * catalog. Older servers omit this field; archive clients must check it.
-     *
-     * @generated from protobuf field: optional bool subthreads_included = 7;
-     */
-    subthreadsIncluded?: boolean;
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -35929,8 +35922,7 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
             { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
             { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
             { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder },
-            { no: 7, name: "subthreads_included", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder }
         ]);
     }
     create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
@@ -35968,9 +35960,6 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
                 case /* repeated DialogFolder folders */ 6:
                     message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
                     break;
-                case /* optional bool subthreads_included */ 7:
-                    message.subthreadsIncluded = reader.bool();
-                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36001,9 +35990,6 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         /* repeated DialogFolder folders = 6; */
         for (let i = 0; i < message.folders.length; i++)
             DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
-        /* optional bool subthreads_included = 7; */
-        if (message.subthreadsIncluded !== undefined)
-            writer.tag(7, WireType.Varint).bool(message.subthreadsIncluded);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

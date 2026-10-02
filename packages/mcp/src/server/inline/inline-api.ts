@@ -440,9 +440,6 @@ export function createInlineApi(params: {
       oneofKind: "getChats",
       getChats: GetChatsInput.create(includeSubthreads ? { includeSubthreads: true } : {}),
     })
-    if (includeSubthreads && result.getChats.subthreadsIncluded !== true) {
-      throw new Error("Inline server upgrade required: complete conversation discovery was not confirmed")
-    }
     return result.getChats
   }
 

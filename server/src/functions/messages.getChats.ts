@@ -38,7 +38,6 @@ type Output = {
   users: User[]
   messages: Message[]
   folders: DialogFolder[]
-  subthreadsIncluded?: boolean
 }
 
 const log = new Log("functions.getChats")
@@ -600,7 +599,6 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     users: encodedUsers,
     messages: messagesList,
     folders: foldersList.map(Encoders.dialogFolder),
-    ...(input.includeSubthreads === true ? { subthreadsIncluded: true } : {}),
   }
 }
 

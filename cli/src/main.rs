@@ -3127,7 +3127,6 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             include_subthreads: Some(args.include_subthreads),
                         })
                         .await?;
-                    validate_subthreads_catalog(args.include_subthreads, payload.subthreads_included)?;
                     let payload = apply_chat_list_scope(payload, &args.scope);
 
                     if cli.json {
@@ -5944,15 +5943,6 @@ async fn fetch_message_translations(
         .collect())
 }
 
-fn validate_subthreads_catalog(requested: bool, included: Option<bool>) -> Result<(), CliError> {
-    if requested && included != Some(true) {
-        return Err(CliError::invalid_args(
-            "This server does not support complete subthread discovery; upgrade the Inline server before using --include-subthreads",
-        ));
-    }
-    Ok(())
-}
-
 fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
     let Some(needle) = normalized_filter(filter) else {
         return;
@@ -7325,7 +7315,7 @@ mod cli_parsing_tests {
     }
 
     #[test]
-    fn chats_list_subthread_discovery_is_opt_in_and_requires_server_support() {
+    fn chats_list_subthread_discovery_is_opt_in() {
         for (argv, expected) in [
             (vec!["inline", "chats", "list"], false),
             (
@@ -7341,10 +7331,6 @@ mod cli_parsing_tests {
                 _ => panic!("expected chats list"),
             }
         }
-        assert!(validate_subthreads_catalog(true, Some(true)).is_ok());
-        assert!(validate_subthreads_catalog(true, Some(false)).is_err());
-        assert!(validate_subthreads_catalog(true, None).is_err());
-        assert!(validate_subthreads_catalog(false, None).is_ok());
     }
 
     #[test]
