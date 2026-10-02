@@ -40,6 +40,11 @@ print(json.dumps({"source": str(source), "intakeVersion": getattr(base.BasePlatf
 const hostSource = hostRuntime.source
 const hostSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: hostSource, encoding: "utf8" }).trim()
 const hostOrigin = execFileSync("git", ["remote", "get-url", "origin"], { cwd: hostSource, encoding: "utf8" }).trim()
+for (const stage of [[], ["--cached"]]) {
+  const trackedDiff = execFileSync("git", ["diff", ...stage, "--no-ext-diff", "--no-textconv", "--name-only"],
+    { cwd: hostSource, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 })
+  assert.equal(trackedDiff, "", "Loaded Hermes tracked worktree and index must be clean")
+}
 if (hostOrigin !== `https://github.com/${receivingPin.repository}.git`) {
   throw new Error("Imported Hermes source does not have the reviewed GitHub origin")
 }
@@ -94,16 +99,19 @@ try {
   const { users } = await import("../../server/src/db/schema/users.ts")
   const { generateToken, hashToken } = await import("../../server/src/utils/auth.ts")
   const { SessionsModel } = await import("../../server/src/db/models/sessions.ts")
-  const [bot, human] = await db.insert(users).values([
+  const [bot, human, otherBot] = await db.insert(users).values([
     { firstName: "CI Bot", username: `ci_bot_${process.pid}`, bot: true, emailVerified: false, phoneVerified: false, pendingSetup: false },
     { firstName: "CI Human", username: `ci_human_${process.pid}`, bot: false, emailVerified: false, phoneVerified: false, pendingSetup: false },
+    { firstName: "CI Other Bot", username: `ci_other_bot_${process.pid}`, bot: true, emailVerified: false, phoneVerified: false, pendingSetup: false },
   ]).returning()
-  assert.ok(bot && human)
+  assert.ok(bot && human && otherBot)
   const { token } = await generateToken(bot.id)
   await SessionsModel.create({ userId: bot.id, tokenHash: hashToken(token), personalData: {}, clientType: "api" })
 
   const { token: humanToken } = await generateToken(human.id)
   await SessionsModel.create({ userId: human.id, tokenHash: hashToken(humanToken), personalData: {}, clientType: "api" })
+  const { token: otherBotToken } = await generateToken(otherBot.id)
+  await SessionsModel.create({ userId: otherBot.id, tokenHash: hashToken(otherBotToken), personalData: {}, clientType: "api" })
 
   let ready
   const readyPromise = new Promise((resolve) => { ready = resolve })
@@ -166,17 +174,24 @@ try {
   })
   const hermesHome = path.join(consumer, "hermes-home")
   await mkdir(hermesHome)
+  const hermesArtifact = manifest.packages.find((entry) => entry.name === sourceHermesManifest.name)
+  assert.ok(hermesArtifact, "receiving-qualified adapter artifact must exist")
+  const hermesReport = path.join(consumer, "hermes-observed-report.json")
   const hermesEnv = {
     ...process.env, HERMES_HOME: hermesHome, HERMES_RUNTIME_DIR: path.join(consumer, "hermes-runtime"),
     INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
     INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
     INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
+    INLINE_E2E_OTHER_BOT_ID: String(otherBot.id), INLINE_E2E_OTHER_BOT_TOKEN: otherBotToken,
     INLINE_E2E_CONSUMER: consumer,
+    INLINE_E2E_SOURCE_SHA: manifest.sourceSha,
+    INLINE_E2E_HERMES_ARTIFACT_SHA256: hermesArtifact.sha256,
+    INLINE_E2E_HERMES_REPORT: hermesReport,
   }
   // Never allow the mock sidecar transport to make this lane pass accidentally.
   delete hermesEnv.INLINE_SIDECAR_TEST_MOCK
-  const runHermes = (bin, args) => execFileSync(bin, args, {
-    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout: 90_000,
+  const runHermes = (bin, args, timeout = 90_000) => execFileSync(bin, args, {
+    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout,
   })
   runHermes(path.join(consumer, "node_modules/.bin/inline-hermes"), ["install", "--hermes-home", hermesHome, "--force", "--json"])
   const installedHermesManifest = JSON.parse(await readFile(path.join(consumer,
@@ -184,12 +199,14 @@ try {
   assertHermesReceivingHost(hermesReceivingPin(installedHermesManifest), receivingHost)
   runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
   await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
-  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
-  const hermesArtifact = manifest.packages.find((entry) => entry.name === sourceHermesManifest.name)
-  assert.ok(hermesArtifact, "receiving-qualified adapter artifact must exist")
-  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify(makeHermesReceivingReceipt({
-    sourceSha: manifest.sourceSha, host: receivingHost, artifactSha256: hermesArtifact.sha256,
-  }), null, 2) + "\n")
+  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")], 240_000)
+  // A successful child exit cannot stand in for the observed failure/recovery matrix.
+  const report = JSON.parse(await readFile(hermesReport, "utf8"))
+  const receipt = makeHermesReceivingReceipt({
+    sourceSha: manifest.sourceSha, host: receivingHost, artifactSha256: hermesArtifact.sha256, report,
+  })
+  await writeFile(path.join(artifactDir, "hermes-flow-report.json"), JSON.stringify(report, null, 2) + "\n")
+  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify(receipt, null, 2) + "\n")
   await closeDb()
   closeDb = undefined
   await stopServer()

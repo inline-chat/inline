@@ -6,7 +6,16 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const adapterName = "@inline-chat/hermes-agent-adapter"
-const receivingScenario = "hermes-real-host-inbound-and-persisted-reply"
+const receivingScenarios = [
+  "hermes-real-host-inbound-and-persisted-reply",
+  "hermes-acknowledged-pending-process-death-recovery",
+  "hermes-pending-edited-current-source",
+  "hermes-pending-deleted-source-settlement",
+  "hermes-pending-revoked-access-settlement",
+  "hermes-receiver-profile-mismatch-refused",
+  "hermes-control-command-excluded-from-replay",
+  "hermes-atomic-user-row-consumption-and-no-replay",
+]
 const repositoryPattern = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/
 const commitPattern = /^[a-f0-9]{40}$/
 const artifactPattern = /^[a-f0-9]{64}$/
@@ -27,16 +36,39 @@ export function assertHermesReceivingHost(pin, host) {
   assert.equal(host.intakeVersion, 1, "receiving requires the matching durable-intake core v1")
 }
 
-export function makeHermesReceivingReceipt({ sourceSha, host, artifactSha256 }) {
+function assertObservedReceivingReport(report, { sourceSha, host, artifactSha256 }) {
+  assert.ok(report && typeof report === "object", "observed Python receiving report is required")
+  assert.equal(report.sourceSha, sourceSha, "receiving proof belongs to another Inline commit")
+  assertHermesReceivingHost(host, report.host ?? {})
+  assert.equal(report.adapter?.name, adapterName, "receiving proof is for another adapter")
+  assert.equal(report.adapter?.sha256, artifactSha256,
+    "release bytes differ from receiving-qualified bytes; qualify the exact tarball before publication")
+  assert.ok(Array.isArray(report.scenarios), "observed receiving scenarios are required")
+  const observed = new Set()
+  for (const entry of report.scenarios) {
+    assert.ok(receivingScenarios.includes(entry?.scenario), "unrecognized receiving scenario")
+    assert.ok(!observed.has(entry.scenario), `receiving scenario reported more than once: ${entry.scenario}`)
+    assert.equal(entry.status, "passed", `receiving scenario must pass: ${entry.scenario}`)
+    observed.add(entry.scenario)
+  }
+  for (const scenario of receivingScenarios) {
+    assert.ok(observed.has(scenario), `required receiving scenario was not observed: ${scenario}`)
+  }
+}
+
+export function makeHermesReceivingReceipt({ sourceSha, host, artifactSha256, report }) {
   assert.match(sourceSha, commitPattern, "Inline source SHA is required")
   assert.match(artifactSha256, artifactPattern, "exact adapter artifact SHA-256 is required")
+  assert.match(host.repository, repositoryPattern, "actual receiving host repository is required")
+  assert.match(host.sha, commitPattern, "actual receiving host commit must be exact")
   assert.equal(host.intakeVersion, 1, "a stock loader/send result cannot qualify receiving")
+  assertObservedReceivingReport(report, { sourceSha, host, artifactSha256 })
   return {
     sourceSha,
     qualification: "receiving-qualified",
     host,
     adapter: { name: adapterName, sha256: artifactSha256 },
-    scenarios: [{ scenario: receivingScenario, status: "passed" }],
+    scenarios: structuredClone(report.scenarios),
   }
 }
 
@@ -44,15 +76,7 @@ export function verifyHermesReceivingReceipt(receipt, { sourceSha, artifactSha25
   assert.match(sourceSha, commitPattern, "release source SHA must be exact")
   assert.match(artifactSha256, artifactPattern, "release artifact hash must be exact")
   assert.equal(receipt.qualification, "receiving-qualified", "stock compatibility is not receiving proof")
-  assert.equal(receipt.sourceSha, sourceSha, "receiving proof belongs to another Inline commit")
-  assertHermesReceivingHost(hermesReceivingPin(manifest), receipt.host ?? {})
-  assert.equal(receipt.adapter?.name, adapterName, "receiving proof is for another adapter")
-  assert.equal(receipt.adapter?.sha256, artifactSha256,
-    "release bytes differ from receiving-qualified bytes; qualify the exact tarball before publication")
-  assert.ok(Array.isArray(receipt.scenarios) && receipt.scenarios.length > 0
-    && receipt.scenarios.every((entry) => entry.status === "passed")
-    && receipt.scenarios.some((entry) => entry.scenario === receivingScenario),
-  "real host inbound and persisted reply must have passed")
+  assertObservedReceivingReport(receipt, { sourceSha, artifactSha256, host: hermesReceivingPin(manifest) })
 }
 
 export function selectHermesReceivingRun(runs, { sourceSha, repository }) {

@@ -206,11 +206,27 @@ tag/latest/main/Umbrel stock checks describe loader/tool/send compatibility and
 receive refusal, not working durable receiving.
 
 The receiving receipt records actual core repository/SHA, intake version 1,
-Inline source SHA and adapter tarball SHA-256 after the real inbound/adoption,
-consumed user row and persisted reply pass. The publication workflow retrieves
+Inline source SHA and adapter tarball SHA-256 from an explicit observed report
+produced by the packaged Python flow using normal gateway initialization and
+startup. A successful child exit or normal reply alone cannot qualify receiving.
+The report and release receipt must contain each of these scenarios once, passed:
+
+- `hermes-real-host-inbound-and-persisted-reply`
+- `hermes-acknowledged-pending-process-death-recovery`
+- `hermes-pending-edited-current-source`
+- `hermes-pending-deleted-source-settlement`
+- `hermes-pending-revoked-access-settlement`
+- `hermes-receiver-profile-mismatch-refused`
+- `hermes-control-command-excluded-from-replay`
+- `hermes-atomic-user-row-consumption-and-no-replay`
+
+Missing, failed, repeated or foreign-identity evidence blocks receipt creation
+and publication. The report is retained beside the receipt in the existing CI
+artifact. The publication workflow retrieves
 the existing receipt from successful trusted-main CI for that exact Inline SHA
 and requires the release tarball bytes and core pin to match. An absent receipt,
 expired artifact or different repack blocks publication; qualify those exact
 bytes rather than borrowing stock or candidate evidence. No workflow is
-automatically dispatched by this comparison, and it does not claim live-provider,
-process-death recovery or patched Umbrel receiving acceptance.
+automatically dispatched by this comparison. A complete observed matrix qualifies
+the tested packaged process-death and authority cases; it does not claim a live
+provider response, deployed service health or patched Umbrel receiving acceptance.

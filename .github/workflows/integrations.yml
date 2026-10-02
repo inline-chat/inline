@@ -471,7 +471,7 @@ jobs:
           for package in protocol oauth-core sdk mcp; do
             bun run --cwd "packages/$package" build
           done
-      - name: Run packed adapters and Hermes against source server
+      - name: Run packed adapters and complete Hermes receiving matrix against source server
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test_db
           INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
@@ -485,6 +485,7 @@ jobs:
           name: local-integration-receipts
           path: |
             ${{ runner.temp }}/inline-packages/*receipt.json
+            ${{ runner.temp }}/inline-packages/hermes-flow-report.json
             ${{ runner.temp }}/inline-packages/manifest.json
           retention-days: 7
 
