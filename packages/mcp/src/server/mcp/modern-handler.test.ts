@@ -38,7 +38,7 @@ function fixtureApi(): inlineApi.InlineApi {
     listSpaces: vi.fn(async () => [{ id: 10n, name: "Inline", creator: true, date: 100n, isPublic: false, chatCount: 1, unreadCount: 0, lastMessageDate: null }]),
     searchPeople: unused, getEligibleChats: unused, resolveConversation: unused, getConversation: unused,
     messageContext: unused, getMessages: unused, recentMessages: unused, searchMessages: unused,
-    unreadMessages: unused, createChat: unused, createSubthread: unused, forwardMessages: unused,
+    unreadMessages: unused, createChat: unused,
     uploadFile: unused, sendMessage: unused, sendMediaMessage: unused,
   }
 }

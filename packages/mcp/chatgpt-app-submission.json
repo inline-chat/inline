@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Inline",
     "subtitle": "Work chats in ChatGPT",
-    "description": "Inline helps users find people and conversations, read scoped work chats, ask teammates in private threads, monitor authorized events in supported hosts, inspect a focused thread UI, upload files, send messages.",
+    "description": "Inline helps users find people and conversations, read scoped work chats, ask teammates in private threads, monitor authorized events in supported hosts, inspect a focused thread UI, upload files, and send messages.",
     "category": "COLLABORATION"
   },
   "tools": {
