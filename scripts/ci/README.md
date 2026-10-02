@@ -28,6 +28,24 @@ Scenario receipts and the candidate manifest are retained for seven days. OAuth
 introspection is synthetic and Chat SDK webhook delivery is driven by the fixture;
 this does not qualify the production OAuth issuer or webhook worker.
 
+The reviewed Hermes host setup prepares one short, caller-owned default root
+through `pm.sync_venv(explicit=True)`, then checks a normal plugin CLI launch.
+Its `hermes-home-root` and `hermes-runtime-dir` outputs are handed explicitly to
+the receiving lane as `HERMES_PREPARED_HOME_ROOT` and
+`HERMES_PREPARED_RUNTIME_DIR`. A frozen `pm.build_env` output alone does not
+complete normal PM admission. Cold preparation has a separate 300-second bound;
+the 90-second plugin commands and 240-second eight-case receiving bound are
+unchanged. Missing or stale PM selection, changed source identity, wrong tools
+scope, or a production/default receiving home refuses the lane.
+
+Every receiving case creates a fresh named profile under that prepared root,
+sharing only the managed dependency/tools owner. Config, SDK checkpoint, intake,
+and session state stay profile-local; `gateway.standalone` excludes these cases
+from multiplexed profile service. The normal constructor chooses its ephemeral
+sidecar port when the setting is absent. Host admission and constructor checks
+are separate from the actual SDK ACK, OS process death, current-source refusal,
+and atomic-consumption matrix; only its eight observed cases qualify receiving.
+
 Hermes and OpenClaw scheduled compatibility checks exercise published packages
 against moving hosts independently of source changes. OpenClaw admission proves
 installation and registration; an actual OpenClaw host message handler against

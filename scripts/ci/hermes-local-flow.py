@@ -13,6 +13,7 @@ from dataclasses import asdict
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import inspect
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -79,6 +80,13 @@ def host_info():
     origin = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=source, text=True).strip()
     assert origin == "https://github.com/morajabi/hermes-agent.git", "Loaded core has an unqualified origin"
     assert re.fullmatch(r"[a-f0-9]{40}", head)
+    spec = importlib.util.spec_from_file_location("hermes_host_runtime", Path(__file__).with_name("hermes-host-runtime.py"))
+    runtime_helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime_helper)
+    runtime_helper.require_source(source, head, "morajabi/hermes-agent")
+    runtime = runtime_helper.inspect_runtime(source, os.environ["HERMES_PREPARED_HOME_ROOT"],
+                                            os.environ["HERMES_PREPARED_RUNTIME_DIR"])
+    assert runtime["source"] == str(source) and runtime["version"]["commit"] == head
     version = version_info.get_version_info()
     assert version.commit == head, "Loaded version stamp and actual core disagree"
     assert base.BasePlatformAdapter.durable_intake_version == 1
@@ -311,10 +319,10 @@ def configuration(provider_url, *, environment=None):
                       "api_key": "no-key-required"},
             "agent": {"max_iterations": 2}, "memory": {"memory_enabled": False},
             "gateway": {"multiplex_profiles": False, "group_sessions_per_user": False,
-                        "streaming": {"enabled": False}},
+                        "standalone": True, "streaming": {"enabled": False}},
             "platforms": {"inline": {"enabled": True, "token": env["INLINE_TOKEN"],
                 "typing_indicator": False, "gateway_restart_notification": False,
-                "base_url": env["INLINE_BASE_URL"], "sidecar_port": 0,
+                "base_url": env["INLINE_BASE_URL"],
                 "dm_policy": "allowlist", "allow_from": human, "group_allow_from": human,
                 "require_mention": False, "reply_threads": "off", "context_backfill": "off",
                 "reactions": False, "sync_commands": False, "text_debounce_seconds": 0,
@@ -381,11 +389,14 @@ def child_environment(home, *, other=False):
                 "INLINE_E2E_HUMAN_TOKEN", "INLINE_E2E_HUMAN_ID", "INLINE_E2E_SOURCE_SHA",
                 "INLINE_E2E_HERMES_ARTIFACT_SHA256", "HERMES_BIN", "HERMES_PYTHON_BIN"):
         keep[key] = os.environ[key]
+    for key in ("HERMES_PREPARED_HOME_ROOT", "HERMES_PREPARED_RUNTIME_DIR"):
+        keep[key] = os.environ[key]
     # The installer uses this alias; never let it select an ambient host.
     assert Path(keep["HERMES_BIN"]).resolve() == (Path(sys.executable).parent / "hermes").resolve(), \
         "Hermes launcher must belong to the qualified Python environment"
     keep["INLINE_HERMES_BIN"] = keep["HERMES_BIN"]
-    keep.update(HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(get_default_hermes_root(home=home) / "tools"),
+    assert get_default_hermes_root(home=home).resolve() == Path(keep["HERMES_PREPARED_HOME_ROOT"]).resolve()
+    keep.update(HERMES_HOME=str(home), HERMES_RUNTIME_DIR=keep["HERMES_PREPARED_RUNTIME_DIR"],
                 INLINE_TOKEN=os.environ["INLINE_E2E_OTHER_BOT_TOKEN" if other else "INLINE_TOKEN"],
                 INLINE_E2E_BOT_ID=os.environ["INLINE_E2E_OTHER_BOT_ID" if other else "INLINE_E2E_BOT_ID"])
     return keep
@@ -542,7 +553,8 @@ async def fresh_home():
     from hermes_constants import get_default_hermes_root
     # Normal named profiles isolate journals while sharing the caller's prepared PM root.
     root = get_default_hermes_root(home=os.environ["HERMES_HOME"]).resolve()
-    assert root == Path(os.environ["HERMES_HOME"]).resolve(), "The caller must supply its fresh default root"
+    assert root == Path(os.environ["HERMES_HOME"]).resolve() == Path(os.environ["HERMES_PREPARED_HOME_ROOT"]).resolve(), \
+        "The caller must supply its admitted default root"
     home = root / "profiles" / ("c" + uuid.uuid4().hex[:8])
     home.mkdir(parents=True)
     env = child_environment(home)

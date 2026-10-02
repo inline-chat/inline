@@ -477,6 +477,8 @@ jobs:
           INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
           HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
           HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
+          HERMES_PREPARED_HOME_ROOT: ${{ steps.hermes-host.outputs.hermes-home-root }}
+          HERMES_PREPARED_RUNTIME_DIR: ${{ steps.hermes-host.outputs.hermes-runtime-dir }}
         run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"
       - name: Upload scenario receipts
         if: always()

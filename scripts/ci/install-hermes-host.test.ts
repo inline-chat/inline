@@ -13,7 +13,7 @@ const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim()
 function fixture(repository = "morajabi/hermes-agent", spoofHead = false,
   options: { pm?: "ready" | "incomplete"; pmExit?: number; versionExit?: number; historyExit?: number;
     canonicalExit?: number; conflictingTag?: boolean; relativePython?: boolean;
-    filter?: boolean; hydrationExit?: number } = {}) {
+    filter?: boolean; hydrationExit?: number; admissionExit?: number } = {}) {
   const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), "inline-hermes-installer-")))
   const remote = path.join(scratch, "remote.git")
   execFileSync(realGit, ["init", "--bare", "-q", remote])
@@ -79,7 +79,13 @@ ${entries}
   }
   const trace = path.join(scratch, "trace")
   mkdirSync(trace)
-  const fakePip = script("pip-python", `printf '%s\\n' "$@" > "$TRACE/pip-args"
+  const fakePip = script("pip-python", `if [[ "$1" == -I && "$2" == -B && "$3" == */hermes-host-runtime.py ]]; then
+  printf '%s\\n' "$@" > "$TRACE/admission-args"
+  printf '%s\\n' "$HERMES_HOME" "$HERMES_RUNTIME_DIR" > "$TRACE/admission-state"
+  [[ "$4" == prepare ]]
+  exit "$ADMISSION_EXIT"
+fi
+printf '%s\\n' "$@" > "$TRACE/pip-args"
 [[ "$1" == -m && "$2" == pip && "$3" == install && "$4" == uv==0.12.19 ]]`)
   const fakeHermes = script("hermes", `printf '%s\\n' "$@" > "$TRACE/hermes-args"
 printf '%s\\n' "$HERMES_HOME" "$HERMES_RUNTIME_DIR" > "$TRACE/hermes-state"
@@ -155,6 +161,7 @@ exec "$REAL_GIT" "$@"`)
     HISTORY_EXIT: String(options.historyExit ?? 0),
     CANONICAL_EXIT: String(options.canonicalExit ?? 0),
     HYDRATION_EXIT: String(options.hydrationExit ?? 0),
+    ADMISSION_EXIT: String(options.admissionExit ?? 0),
     HERMES_HOME: callerHome, HERMES_RUNTIME_DIR: callerRuntime,
     GITHUB_OUTPUT: output,
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_ALLOW_PROTOCOL: "file",
@@ -249,9 +256,17 @@ describe("Hermes host installation provenance", () => {
     expect(execFileSync(realGit, ["-C", path.join(test.destination, "source"), "config", "--get", "remote.origin.url"], { encoding: "utf8" }).trim()).toBe("https://github.com/morajabi/hermes-agent.git")
     expect(readFileSync(path.join(test.destination, "source/pyproject.toml"), "utf8")).toContain('version = "0.0.0"')
     expect(existsSync(path.join(test.destination, "source/install-stamp.json"))).toBe(false)
-    const isolatedState = [path.join(test.destination, "build-home"), path.join(test.destination, "runtime")]
+    const outputs = Object.fromEntries(readFileSync(test.output, "utf8").trim().split("\n").map((line) => line.split("=")))
+    const isolatedState = [outputs["hermes-home-root"]!, outputs["hermes-runtime-dir"]!]
+    expect(isolatedState[0]).toMatch(/^\/tmp\/ih-host-/)
+    expect(isolatedState[1]).toBe(`${isolatedState[0]}/tools`)
     expect(test.args("pm-state")).toEqual(isolatedState)
     expect(test.args("hermes-state")).toEqual(isolatedState)
+    expect(test.args("admission-state")).toEqual(isolatedState)
+    expect(test.args("admission-args")).toEqual(["-I", "-B", path.join(root, "scripts/ci/hermes-host-runtime.py"), "prepare",
+      "--source", path.join(test.destination, "source"), "--sha", test.sha, "--repository", "morajabi/hermes-agent",
+      "--home-root", isolatedState[0]!, "--tools-root", isolatedState[1]!,
+      "--launcher", path.join(test.destination, "venv/bin/hermes")])
     expect(test.args("hermes-args")).toEqual(["--version"])
     for (const tool of ["pip-args", "uv-venv-args", "uv-pip-args"]) expect(test.called(tool)).toBe(false)
     expect(existsSync(path.join(test.destination, "bootstrap"))).toBe(false)
@@ -375,6 +390,16 @@ describe("Hermes host installation provenance", () => {
     expect(result.status).toBe(25)
     expect(test.called("hermes-args")).toBe(true)
     expect(test.called("pip-args")).toBe(false)
+    expect(existsSync(test.output)).toBe(false)
+  })
+
+  it("withholds host outputs if normal managed-root admission fails after the frozen build", () => {
+    const test = fixture("morajabi/hermes-agent", false, { pm: "ready", admissionExit: 27 })
+    const result = test.run(test.sha, "morajabi/hermes-agent")
+    expect(result.status).toBe(27)
+    expect(test.called("pm-state")).toBe(true)
+    expect(test.args("hermes-args")).toEqual(["--version"])
+    expect(test.called("admission-state")).toBe(true)
     expect(existsSync(test.output)).toBe(false)
   })
 })

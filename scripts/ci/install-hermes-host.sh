@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Official stock compatibility or an exact reviewed GitHub core commit.
 set -euo pipefail
+installer_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 [[ $# -le 3 ]] || { echo 'usage: install-hermes-host.sh DEST [latest|TAG|main|SHA] [OWNER/REPO]' >&2; exit 1; }
 host_dir=${1:?usage: install-hermes-host.sh DEST [latest|TAG|main|SHA] [OWNER/REPO]}
 host_ref=${2-latest}
@@ -32,6 +33,8 @@ if [[ "$host_ref" =~ ^[a-f0-9]{40}$ && "$host_sha" != "$host_ref" ]]; then
   exit 1
 fi
 bootstrap_python=${PYTHON_BIN:-python3}
+prepared_home=$(mktemp -d /tmp/ih-host-XXXXXX)
+prepared_tools="$prepared_home/tools"
 if [[ -e "$host_dir/source/pm" ]]; then
   [[ -f "$host_dir/source/pm/build_env.py" ]] || { echo 'Hermes PM source is missing its fresh environment builder' >&2; exit 1; }
   # Canonical source version comes from reachable release tags and ancestry,
@@ -58,10 +61,16 @@ if [[ -e "$host_dir/source/pm" ]]; then
   [[ "$bootstrap_python" == /* ]] || bootstrap_python="$PWD/$bootstrap_python"
   (
     cd "$pm_host_dir/source"
-    export HERMES_HOME="$pm_host_dir/build-home"
-    export HERMES_RUNTIME_DIR="$pm_host_dir/runtime"
+    export HERMES_HOME="$prepared_home"
+    export HERMES_RUNTIME_DIR="$prepared_tools"
     "$bootstrap_python" -m pm.build_env --source . --out "$pm_host_dir/venv"
     "$pm_host_dir/venv/bin/hermes" --version
+    # A frozen build environment is not PM's committed application selection.
+    # Finish that normal cold admission here, before fresh receiving profiles.
+    "$pm_host_dir/venv/bin/python" -I -B "$installer_dir/hermes-host-runtime.py" prepare \
+      --source "$pm_host_dir/source" --sha "$host_sha" --repository "$host_repository" \
+      --home-root "$prepared_home" --tools-root "$prepared_tools" \
+      --launcher "$pm_host_dir/venv/bin/hermes"
   )
 else
   # Legacy stock sources predate PM. Follow their declared runtime, rather
@@ -88,5 +97,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'host-ref=%s\n' "$host_ref"
     printf 'host-sha=%s\n' "$host_sha"
     printf 'host-repository=%s\n' "$host_repository"
+    printf 'hermes-home-root=%s\n' "$prepared_home"
+    printf 'hermes-runtime-dir=%s\n' "$prepared_tools"
   } >> "$GITHUB_OUTPUT"
 fi
