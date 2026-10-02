@@ -2108,10 +2108,16 @@ public actor RealtimeV2 {
   }
 
   private func handleConnectionErrorDuringHandshake(reason: InlineProtocol.ConnectionError.Reason) async {
-    if reason == .sessionRevoked || reason == .invalidAuth {
-      log.error("Realtime handshake failed because auth was invalidated")
+    if reason == .sessionRevoked {
+      log.error("Realtime handshake failed because the session was revoked")
       await handleAuthInvalidated()
       return
+    }
+
+    if reason == .invalidAuth {
+      // A missing token lookup is not proof that the server revoked this session. Keep the
+      // stored authority so a later handshake can retry after server state recovers.
+      log.warning("Realtime handshake did not recognize stored auth; retaining credentials")
     }
 
     await auth.refreshFromStorage()

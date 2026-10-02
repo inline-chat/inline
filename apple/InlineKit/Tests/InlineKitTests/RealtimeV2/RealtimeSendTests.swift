@@ -1376,7 +1376,7 @@ final class RealtimeSendTests {
     #expect(received)
   }
 
-  @Test("application UNAUTHENTICATED stays request-scoped; authenticated invalidation remains terminal")
+  @Test("application UNAUTHENTICATED stays request-scoped; confirmed session revocation remains terminal")
   func testApplicationUnauthenticatedDoesNotInvalidateAccount() async throws {
     let auth = Auth.mocked(authenticated: true)
     let transport = ApplicationUnauthenticatedTransport()
@@ -1942,8 +1942,12 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
-  @Test("server-unavailable handshake response retains the account and never requests logout")
-  func unavailableHandshakeDoesNotInvalidateAuth() async throws {
+  @Test(
+    "unverified handshake response retains the account and never requests logout",
+    .timeLimit(.minutes(1)),
+    arguments: [ConnectionError.Reason.unauthorized, .invalidAuth]
+  )
+  func unavailableHandshakeDoesNotInvalidateAuth(reason: ConnectionError.Reason) async throws {
     let credentials = AuthCredentials(userId: 1, token: "1:still-valid")
     let authDriver = AuthSnapshotDriver(
       AuthSnapshot(status: .authenticated(credentials), didHydrate: true)
@@ -1969,11 +1973,19 @@ final class RealtimeSendTests {
       }
     })
     let readsBefore = authDriver.readCount
-    await transport.emit(.message(connectionErrorMessage(reason: .unauthorized)))
+    await transport.emit(.message(connectionErrorMessage(reason: reason)))
     #expect(await waitForCondition { authDriver.readCount > readsBefore })
     try? await Task.sleep(for: .milliseconds(20))
     #expect(await invalidated.get() == false)
     #expect(auth.snapshot().status == .authenticated(credentials))
+    // The server leaves the rejected socket open. Let the real handshake timeout stop it and
+    // back off, then verify that the stored account can begin another connection attempt.
+    #expect(await waitForCondition(timeout: .seconds(15)) {
+      await transport.sentMessages.filter { message in
+        if case .connectionInit = message.body { return true }
+        return false
+      }.count >= 2
+    })
     withExtendedLifetime(realtime) {}
   }
 }
@@ -2492,7 +2504,7 @@ private actor ApplicationUnauthenticatedTransport: Transport {
   func didOpen() -> Bool { opened }
 
   func emitAuthenticatedInvalidation() async {
-    await channel.send(.message(connectionErrorMessage(reason: .invalidAuth)))
+    await channel.send(.message(connectionErrorMessage(reason: .sessionRevoked)))
   }
 }
 
