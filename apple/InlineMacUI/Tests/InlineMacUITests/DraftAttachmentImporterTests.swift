@@ -32,8 +32,8 @@ struct DraftAttachmentImporterTests {
     #expect(writer.calls.allSatisfy { $0.peer == peer })
   }
 
-  @Test("rejects directories before calling the draft writer")
-  func rejectsDirectories() async {
+  @Test("passes directories to document preparation for archiving")
+  func importsDirectories() async {
     let writer = FakeDraftAttachmentWriter()
 
     let summary = await DraftAttachmentImporter.importAttachments(
@@ -42,9 +42,9 @@ struct DraftAttachmentImporterTests {
       writer: writer
     )
 
-    #expect(summary.importedCount == 0)
-    #expect(summary.failedCount == 1)
-    #expect(writer.calls.isEmpty)
+    #expect(summary.importedCount == 1)
+    #expect(summary.failedCount == 0)
+    #expect(writer.calls.map(\.kind) == [.file])
   }
 
   @Test("keeps consecutive imports scoped to their destination peers")

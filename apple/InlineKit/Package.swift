@@ -63,6 +63,7 @@ let package = Package(
   ],
   dependencies: [
     .package(path: "../InlineThumbnailing"),
+    .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
     .package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.0"),
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
     // Keep SQLCipher exact so every SwiftPM root and Xcode preview resolves
@@ -110,6 +111,7 @@ let package = Package(
     .target(
       name: "InlineKit",
       dependencies: [
+        .product(name: "ZIPFoundation", package: "ZIPFoundation"),
         .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
         .product(name: "GRDB", package: "GRDB.swift"),
         .product(name: "GRDBQuery", package: "GRDBQuery"),
@@ -237,6 +239,7 @@ let package = Package(
     .testTarget(
       name: "InlineKitTests",
       dependencies: [
+        .product(name: "ZIPFoundation", package: "ZIPFoundation"),
         "InlineAvatarCore",
         "InlineKit",
         .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),

@@ -229,9 +229,6 @@ public enum DraftAttachmentImporter {
       )
 
     case let .file(url):
-      guard !isDirectory(url) else {
-        return .failed("Folders aren't supported yet.")
-      }
       return outcome(from: await importFile(
         url,
         peer: peer,
@@ -304,9 +301,6 @@ public enum DraftAttachmentImporter {
       )
 
     case let .file(url, _):
-      guard !isDirectory(url) else {
-        return .failed("Folders aren't supported yet.")
-      }
       return outcome(from: await importFile(
         url,
         peer: peer,
@@ -410,6 +404,6 @@ public enum DraftAttachmentImporter {
   }
 
   private static func isDirectory(_ url: URL) -> Bool {
-    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
   }
 }

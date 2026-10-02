@@ -7,6 +7,30 @@ import Testing
 @MainActor
 @Suite("Pasteboard attachment capture")
 struct PasteboardAttachmentCaptureTests {
+  @Test("media-named folders and folder symlinks stay documents", arguments: ["gif", "mov", "mp4", "png"], [false, true])
+  func mediaNamedFolders(fileExtension: String, useSymlink: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appendingPathComponent("target", isDirectory: true)
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    let selected = root.appendingPathComponent("photos." + fileExtension)
+    if useSymlink {
+      try FileManager.default.createSymbolicLink(at: selected, withDestinationURL: target)
+    } else {
+      try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+    }
+    let board = makePasteboard(type: .fileURL, string: selected.absoluteString)
+    let result = await InlinePasteboard.captureAttachments(from: board, includeText: false).materialize()
+    defer { result.cleanup() }
+    guard case let .file(url)? = result.attachments.first else {
+      Issue.record("Expected the folder document instead of media")
+      return
+    }
+    #expect(url == selected)
+    #expect(result.failures.isEmpty)
+  }
+
   @Test("file URLs stay immutable and are not copied during capture")
   func fileURLCapture() async throws {
     let sourceURL = FileManager.default.temporaryDirectory
@@ -55,7 +79,7 @@ struct PasteboardAttachmentCaptureTests {
     #expect(!FileManager.default.fileExists(atPath: url.path))
   }
 
-  @Test("directories are rejected without a materialization job")
+  @Test("directories defer archiving until document preparation")
   func directoryCapture() async {
     let capture = InlinePasteboard.captureAttachments(
       from: makePasteboard(
@@ -65,12 +89,16 @@ struct PasteboardAttachmentCaptureTests {
       includeText: false
     )
 
-    #expect(capture.potentialAttachmentCount == 0)
-    #expect(capture.failures.first?.isDirectory == true)
+    #expect(capture.potentialAttachmentCount == 1)
+    #expect(capture.failures.isEmpty)
     let result = await capture.materialize()
     defer { result.cleanup() }
-    #expect(result.attachments.isEmpty)
-    #expect(result.failures.first?.isDirectory == true)
+    guard case let .file(url)? = result.attachments.first else {
+      Issue.record("Expected a folder document")
+      return
+    }
+    #expect(url == FileManager.default.temporaryDirectory)
+    #expect(result.failures.isEmpty)
   }
 
   @Test("invalid raw image data is rejected instead of attached as a document")

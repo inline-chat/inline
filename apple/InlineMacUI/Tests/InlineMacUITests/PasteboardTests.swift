@@ -7,8 +7,31 @@ import Testing
 @MainActor
 @Suite("Inline pasteboard")
 struct PasteboardTests {
-  @Test("directory file URLs are rejected when materialized")
-  func directoryFileURLsAreRejected() {
+  @Test("media-named folders and folder symlinks stay documents", arguments: ["gif", "mov", "mp4", "png"], [false, true])
+  func mediaNamedFolders(fileExtension: String, useSymlink: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appendingPathComponent("target", isDirectory: true)
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    let selected = root.appendingPathComponent("photos." + fileExtension)
+    if useSymlink {
+      try FileManager.default.createSymbolicLink(at: selected, withDestinationURL: target)
+    } else {
+      try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+    }
+    let board = makePasteboard(type: .fileURL, string: selected.absoluteString)
+    let result = InlinePasteboard.findAttachmentsResult(from: board, includeText: false)
+    guard case let .file(url, _)? = result.attachments.first else {
+      Issue.record("Expected the folder document instead of media")
+      return
+    }
+    #expect(url == selected)
+    #expect(result.failures.isEmpty)
+  }
+
+  @Test("directory file URLs become documents for deferred archiving")
+  func directoryFileURLsBecomeDocuments() {
     let pasteboard = makePasteboard(
       type: .fileURL,
       string: FileManager.default.temporaryDirectory.absoluteString
@@ -19,14 +42,17 @@ struct PasteboardTests {
       includeText: false
     )
 
-    #expect(result.attachments.isEmpty)
-    #expect(result.failures.count == 1)
-    #expect(result.failures.first?.isDirectory == true)
+    guard case let .file(url, _)? = result.attachments.first else {
+      Issue.record("Expected a folder document")
+      return
+    }
+    #expect(url == FileManager.default.temporaryDirectory)
+    #expect(result.failures.isEmpty)
     #expect(InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
   }
 
-  @Test("directory file URLs stay rejected when an image representation is present")
-  func directoryWithImageRepresentationIsRejected() throws {
+  @Test("directories take precedence over image representations")
+  func directoryWithImageRepresentationBecomesDocument() throws {
     let item = NSPasteboardItem()
     item.setString(FileManager.default.temporaryDirectory.absoluteString, forType: .fileURL)
     item.setData(try onePixelPNGData(), forType: .png)
@@ -37,9 +63,12 @@ struct PasteboardTests {
       includeText: false
     )
 
-    #expect(result.attachments.isEmpty)
-    #expect(result.failures.count == 1)
-    #expect(result.failures.first?.isDirectory == true)
+    guard case let .file(url, _)? = result.attachments.first else {
+      Issue.record("Expected a folder document")
+      return
+    }
+    #expect(url == FileManager.default.temporaryDirectory)
+    #expect(result.failures.isEmpty)
     #expect(InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
   }
 

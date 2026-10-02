@@ -10,14 +10,8 @@ public enum PasteboardAttachment {
 }
 
 public enum PasteboardAttachmentFailure: Equatable, Sendable {
-  case directory(URL)
   case materializationFailed
   case unreadableFile(url: URL, isSymlink: Bool, isTelegram: Bool)
-
-  public var isDirectory: Bool {
-    if case .directory = self { return true }
-    return false
-  }
 
   public var isTelegramSource: Bool {
     if case let .unreadableFile(_, _, isTelegram) = self { return isTelegram }
@@ -31,8 +25,6 @@ public enum PasteboardAttachmentFailure: Equatable, Sendable {
 
   public var userFacingMessage: String {
     switch self {
-    case .directory:
-      "Folders aren't supported yet."
     case .materializationFailed:
       "Couldn't prepare that item."
     case let .unreadableFile(_, isSymlink, isTelegram):
@@ -178,9 +170,6 @@ public enum InlinePasteboard {
       if result.attachment != nil {
         return result
       }
-      if result.failures.contains(where: \.isDirectory) {
-        return result
-      }
       failures.append(contentsOf: result.failures)
     }
 
@@ -265,6 +254,10 @@ public enum InlinePasteboard {
       )
     }
 
+    if (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+      return ItemAttachmentResult(attachment: .file(url, thumbnail: nil), failures: [])
+    }
+
     let fileExtension = url.pathExtension.lowercased()
 
     if isVideoFileExtension(fileExtension) {
@@ -302,10 +295,6 @@ public enum InlinePasteboard {
   }
 
   static func fileURLFailure(_ url: URL) -> PasteboardAttachmentFailure? {
-    if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-      return .directory(url)
-    }
-
     let fileManager = FileManager.default
     if !fileManager.fileExists(atPath: url.path) || !fileManager.isReadableFile(atPath: url.path) {
       return .unreadableFile(

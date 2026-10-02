@@ -1,5 +1,6 @@
 import CoreTransferable
 import Foundation
+import InlineKit
 import UniformTypeIdentifiers
 
 public struct IncomingAttachmentTransfer: Transferable, Sendable {
@@ -63,14 +64,17 @@ public struct IncomingAttachmentTransfer: Transferable, Sendable {
   }
 
   private static func stageFile(at sourceURL: URL) throws -> Self {
+    if let archive = try FolderArchive.createIfDirectory(at: sourceURL) {
+      return Self(payload: .stagedFile(
+        url: archive,
+        cleanupDirectory: archive.deletingLastPathComponent()
+      ))
+    }
     let sourceValues = try? sourceURL.resourceValues(forKeys: [
       .contentTypeKey,
       .isDirectoryKey,
       .isSymbolicLinkKey,
     ])
-    if sourceValues?.isDirectory == true {
-      return Self(payload: .failure(.directory(sourceURL)))
-    }
 
     let copySource = sourceValues?.isSymbolicLink == true
       ? sourceURL.resolvingSymlinksInPath()
@@ -79,9 +83,6 @@ public struct IncomingAttachmentTransfer: Transferable, Sendable {
       .contentTypeKey,
       .isDirectoryKey,
     ])
-    if copySourceValues?.isDirectory == true {
-      return Self(payload: .failure(.directory(sourceURL)))
-    }
     let hasSecurityScope = copySource.startAccessingSecurityScopedResource()
     defer {
       if hasSecurityScope {

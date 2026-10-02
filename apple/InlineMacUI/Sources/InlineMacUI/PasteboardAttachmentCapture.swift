@@ -107,6 +107,9 @@ public struct PasteboardAttachmentCapture: Sendable {
     for url: URL,
     representedType: NSPasteboard.PasteboardType? = nil
   ) -> PreparedPasteboardAttachment? {
+    if (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+      return .file(url)
+    }
     let fileExtension = url.pathExtension.lowercased()
     if representedType.map(InlinePasteboard.isAnimatedImageType) == true || fileExtension == "gif" {
       return .animatedImage(url)
@@ -374,10 +377,6 @@ public extension InlinePasteboard {
          let value = item.string(forType: .fileURL),
          let url = resolveFileURL(value, decodedFileURLs: decodedFileURLs) {
         if let failure = fileURLFailure(url) {
-          if failure.isDirectory {
-            failures.append(failure)
-            continue
-          }
           unreadableFileFailure = failure
         } else {
           payloads.append(.fileURL(url))

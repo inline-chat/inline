@@ -2372,12 +2372,14 @@ class GlassComposeAppKit: NSView {
   }
 
   private func isVideoFile(_ url: URL) -> Bool {
+    guard (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true else { return false }
     let ext = url.pathExtension.lowercased()
     return ["mp4", "mov", "m4v", "avi", "mkv", "webm"].contains(ext)
   }
 
   private func isAnimatedImageFile(_ url: URL) -> Bool {
-    url.pathExtension.lowercased() == "gif"
+    guard (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true else { return false }
+    return url.pathExtension.lowercased() == "gif"
   }
 
   private func loadThumbnail(from photoInfo: PhotoInfo?) -> NSImage? {

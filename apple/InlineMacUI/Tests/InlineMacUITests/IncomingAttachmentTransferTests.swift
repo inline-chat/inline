@@ -114,16 +114,23 @@ struct IncomingAttachmentTransferTests {
     #expect(result.failures.isEmpty)
   }
 
-  @Test("folders become explicit rejected transfers")
-  func folderIsRejected() async throws {
-    let provider = try #require(NSItemProvider(contentsOf: FileManager.default.temporaryDirectory))
+  @Test("folders become staged ZIP transfers")
+  func folderIsArchived() async throws {
+    let folder = try makeTemporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let provider = try #require(NSItemProvider(contentsOf: folder))
 
     let transfer = try await load(provider).get()
     let result = InlinePasteboard.findAttachmentsResult(from: [transfer])
 
-    #expect(result.attachments.isEmpty)
-    #expect(result.failures.count == 1)
-    #expect(result.failures.first?.isDirectory == true)
+    defer { transfer.cleanup() }
+    guard case let .file(url, _)? = result.attachments.first else {
+      Issue.record("Expected a ZIP document")
+      return
+    }
+    #expect(url.lastPathComponent == folder.lastPathComponent + ".zip")
+    #expect(try Data(contentsOf: url).prefix(2) == Data([0x50, 0x4b]))
+    #expect(result.failures.isEmpty)
   }
 
   @Test("file representations are copied before provider access expires")
@@ -153,12 +160,14 @@ struct IncomingAttachmentTransferTests {
     #expect(FileManager.default.fileExists(atPath: stagedURL.path))
   }
 
-  @Test("mixed transfers preserve valid items and folder failures")
+  @Test("mixed transfers preserve files and folder ZIPs")
   func mixedTransfersPreservePartialResults() async throws {
     let fileURL = try makeTemporaryFile(extension: "txt", data: Data("hello".utf8))
     defer { try? FileManager.default.removeItem(at: fileURL) }
     let fileProvider = try #require(NSItemProvider(contentsOf: fileURL))
-    let folderProvider = try #require(NSItemProvider(contentsOf: FileManager.default.temporaryDirectory))
+    let folder = try makeTemporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let folderProvider = try #require(NSItemProvider(contentsOf: folder))
 
     let fileTransfer = try await load(fileProvider).get()
     let folderTransfer = try await load(folderProvider).get()
@@ -166,9 +175,15 @@ struct IncomingAttachmentTransferTests {
     defer { transfers.forEach { $0.cleanup() } }
     let result = InlinePasteboard.findAttachmentsResult(from: transfers)
 
-    #expect(result.attachments.count == 1)
-    #expect(result.failures.count == 1)
-    #expect(result.failures.first?.isDirectory == true)
+    #expect(result.attachments.count == 2)
+    #expect(result.failures.isEmpty)
+  }
+
+  private func makeTemporaryFolder() throws -> URL {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data("folder contents".utf8).write(to: folder.appendingPathComponent("hello.txt"))
+    return folder
   }
 
   private func load(
