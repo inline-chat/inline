@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
@@ -172,13 +172,13 @@ try {
       INLINE_E2E_BOT_ID: String(bot.id), INLINE_E2E_CHAT_ID: String(flowReceipt.chatId),
       INLINE_E2E_RECEIPT: path.join(artifactDir, "mcp-flow-receipt.json") },
   })
-  const hermesHome = path.join(consumer, "hermes-home")
-  await mkdir(hermesHome)
+  const hermesHome = await mkdtemp("/tmp/ih-ci-")
   const hermesArtifact = manifest.packages.find((entry) => entry.name === sourceHermesManifest.name)
   assert.ok(hermesArtifact, "receiving-qualified adapter artifact must exist")
   const hermesReport = path.join(consumer, "hermes-observed-report.json")
   const hermesEnv = {
-    ...process.env, HERMES_HOME: hermesHome, HERMES_RUNTIME_DIR: path.join(consumer, "hermes-runtime"),
+    ...process.env, HERMES_HOME: hermesHome, HERMES_RUNTIME_DIR: path.join(hermesHome, "tools"),
+    INLINE_HERMES_BIN: hermesBin,
     INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
     INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
     INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),

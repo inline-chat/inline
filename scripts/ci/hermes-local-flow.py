@@ -21,7 +21,6 @@ import signal
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from urllib.parse import urlparse
@@ -375,13 +374,18 @@ async def worker(job):
 
 
 def child_environment(home, *, other=False):
+    from hermes_constants import get_default_hermes_root
     # Retain HOME verbatim; carry only the local-server credentials minted by CI.
     keep = {key: os.environ[key] for key in ("PATH", "HOME", "USER", "TMPDIR", "LANG", "LC_ALL", "TZ") if key in os.environ}
     for key in ("INLINE_NODE_BIN", "INLINE_BASE_URL", "INLINE_E2E_BASE_URL", "INLINE_E2E_CONSUMER",
                 "INLINE_E2E_HUMAN_TOKEN", "INLINE_E2E_HUMAN_ID", "INLINE_E2E_SOURCE_SHA",
-                "INLINE_E2E_HERMES_ARTIFACT_SHA256"):
+                "INLINE_E2E_HERMES_ARTIFACT_SHA256", "HERMES_BIN", "HERMES_PYTHON_BIN"):
         keep[key] = os.environ[key]
-    keep.update(HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(home / "run"),
+    # The installer uses this alias; never let it select an ambient host.
+    assert Path(keep["HERMES_BIN"]).resolve() == (Path(sys.executable).parent / "hermes").resolve(), \
+        "Hermes launcher must belong to the qualified Python environment"
+    keep["INLINE_HERMES_BIN"] = keep["HERMES_BIN"]
+    keep.update(HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(get_default_hermes_root(home=home) / "tools"),
                 INLINE_TOKEN=os.environ["INLINE_E2E_OTHER_BOT_TOKEN" if other else "INLINE_TOKEN"],
                 INLINE_E2E_BOT_ID=os.environ["INLINE_E2E_OTHER_BOT_ID" if other else "INLINE_E2E_BOT_ID"])
     return keep
@@ -535,16 +539,18 @@ class Receiver:
 
 
 async def fresh_home():
-    # Short caller-owned paths keep normal AF_UNIX startup within its native limit.
-    # Deliberately retain them; no cleanup/deletion of journals or evidence.
-    home = Path(tempfile.mkdtemp(prefix="ih-ci-", dir="/tmp")).resolve()
+    from hermes_constants import get_default_hermes_root
+    # Normal named profiles isolate journals while sharing the caller's prepared PM root.
+    root = get_default_hermes_root(home=os.environ["HERMES_HOME"]).resolve()
+    assert root == Path(os.environ["HERMES_HOME"]).resolve(), "The caller must supply its fresh default root"
+    home = root / "profiles" / ("c" + uuid.uuid4().hex[:8])
+    home.mkdir(parents=True)
     env = child_environment(home)
     write_json(home / "config.yaml", configuration("http://127.0.0.1:9/v1", environment=env))
     consumer = Path(os.environ["INLINE_E2E_CONSUMER"])
     await command(os.environ["INLINE_NODE_BIN"], str(consumer / "node_modules/.bin/inline-hermes"),
                   "install", "--hermes-home", str(home), "--json", env=env)
-    hermes = str(Path(sys.executable).parent / "hermes")
-    await command(hermes, "plugins", "enable", "inline-platform", env=env)
+    await command(env["HERMES_BIN"], "plugins", "enable", "inline-platform", env=env)
     return home
 
 
