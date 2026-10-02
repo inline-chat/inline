@@ -2,6 +2,7 @@ import { db } from "@in/server/db"
 import { Type, type Static } from "@sinclair/typebox"
 import { InlineError } from "@in/server/types/errors"
 import { getFileByUniqueId } from "@in/server/db/models/files"
+import { FileTypes } from "@in/server/modules/files/types"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
@@ -32,8 +33,8 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
   }
 
-  // Verify file ownership
-  if (file.userId !== currentUserId) {
+  // Verify file ownership and media kind
+  if (file.userId !== currentUserId || file.fileType !== FileTypes.PHOTO) {
     throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
   }
 

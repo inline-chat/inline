@@ -632,6 +632,9 @@ assert "send_message" in ctx.tool["schema"]["parameters"]["properties"]["action"
 assert "send_message" in ctx.tool["schema"]["description"]
 assert "set_typing" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "set_presence" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "update_profile" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "ask the user to attach an image" in ctx.tool["schema"]["description"]
+assert "[Image attached at: ...]" in ctx.tool["schema"]["description"]
 assert "reply_to_msg_id" not in ctx.tool["schema"]["parameters"]["properties"]
 assert "send_mode" not in ctx.tool["schema"]["parameters"]["properties"]
 assert "state" not in ctx.tool["schema"]["parameters"]["properties"]
@@ -741,6 +744,8 @@ def fake_inline_sidecar(path, body):
         return {"ok": True, "result": {"agents": [{"id": "73", "name": "Concierge"}]}}
     if path == "/update-agent":
         return {"ok": True, "result": {"agent": {"id": body["agentId"], "name": body.get("name", "Concierge")}}}
+    if path == "/update-profile":
+        return {"ok": True, "result": {"bot": {"id": "999", "firstName": body.get("name", "Hermes")}}}
     if path == "/delete-agent":
         return {"ok": True, "result": {"agentId": body["agentId"]}}
     return {"ok": True, "result": {}}
@@ -1112,6 +1117,47 @@ try:
         "name": "Research Concierge",
         "description": "",
     })
+
+    profile = json.loads(ctx.tool["handler"]({
+        "action": "update_profile",
+        "name": "Hermes Inline",
+        "photo_path": "/tmp/hermes.png",
+    }))
+    assert profile["success"] is True
+    assert profile["result"]["bot"]["firstName"] == "Hermes Inline"
+    assert tool_calls[-1] == ("/update-profile", {"name": "Hermes Inline", "photoPath": "/tmp/hermes.png"})
+
+    profile_by_id = json.loads(ctx.tool["handler"]({
+        "action": "update_profile",
+        "photo_file_unique_id": "INP-photo",
+    }))
+    assert profile_by_id["success"] is True
+    assert tool_calls[-1] == ("/update-profile", {"photoFileUniqueId": "INP-photo"})
+
+    for field, payload_key, limit, value in [
+        ("photo_path", "photoPath", 4096, "/" + "x" * 4091 + ".png"),
+        ("photo_file_unique_id", "photoFileUniqueId", 256, "INP-" + "x" * 252),
+    ]:
+        assert len(value) == limit
+        exact_profile = json.loads(ctx.tool["handler"]({
+            "action": "update_profile", field: " \t" + value + "\n ",
+        }))
+        assert exact_profile["success"] is True, (field, exact_profile)
+        assert tool_calls[-1] == ("/update-profile", {payload_key: value})
+        before_oversized_profile = len(tool_calls)
+        oversized_profile = json.loads(ctx.tool["handler"]({
+            "action": "update_profile", "name": "Do not change me", field: value + "x",
+        }))
+        assert oversized_profile.get("error_kind") == "bad_format", (field, oversized_profile)
+        assert len(tool_calls) == before_oversized_profile, field
+
+    before_invalid_profiles = len(tool_calls)
+    for invalid_profile_args in [{}, {"name": " "}, {"photo_path": ""}, {"photo_file_unique_id": " "}, {
+        "photo_path": "/tmp/hermes.png", "photo_file_unique_id": "INP-photo",
+    }]:
+        invalid_profile = json.loads(ctx.tool["handler"]({"action": "update_profile", **invalid_profile_args}))
+        assert invalid_profile["error_kind"] == "bad_format", invalid_profile_args
+    assert len(tool_calls) == before_invalid_profiles
 
     deleted_agent = json.loads(ctx.tool["handler"]({"action": "delete_agent", "agent_id": "73"}))
     assert deleted_agent["result"]["agentId"] == "73"

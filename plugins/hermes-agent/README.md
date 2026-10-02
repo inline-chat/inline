@@ -482,6 +482,17 @@ chat: edit, delete, reaction, and pin actions in a reply thread require an
 explicit destination and message ID. The per-turn context provides the actual
 triggering pair, even when the opening message belongs to the parent chat.
 
+`update_profile` lets Hermes change its authenticated Inline bot display name
+and profile photo when explicitly requested. Pass `name`, an absolute local
+JPEG/PNG `photo_path`, or an existing Inline `photo_file_unique_id`; a name and one
+photo source can be supplied together. This changes the bot's profile image,
+separate from its animated avatar presence/status.
+When a user supplies an Inline photo, the adapter saves it locally. Hermes'
+current image or vision context gives it the path to pass as `photo_path`.
+If no image is available, Hermes asks the user to attach one. The user's
+original file ID belongs to the user, so
+Hermes uploads its own copy before updating the profile.
+
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
 

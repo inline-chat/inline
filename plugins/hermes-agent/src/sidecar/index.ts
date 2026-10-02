@@ -382,6 +382,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/update-agent":
       await endpointUpdateAgent(res, body)
       return
+    case "/update-profile":
+      await endpointUpdateProfile(res, body)
+      return
     case "/delete-agent":
       await endpointDeleteAgent(res, body)
       return
@@ -1060,6 +1063,71 @@ async function endpointDeleteAgent(res: ServerResponse, body: unknown) {
   writeJson(res, 200, { ok: true, result: safeJson(result) })
 }
 
+async function endpointUpdateProfile(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const name = readAgentPatchString(record, "name")
+  const photoPath = readAgentPatchString(record, "photoPath")
+  const existingPhotoFileUniqueId = readAgentPatchString(record, "photoFileUniqueId")
+  if (name !== undefined && !name) {
+    throw new SidecarError("name cannot be empty", "bad_format")
+  }
+  if (photoPath !== undefined && !photoPath) {
+    throw new SidecarError("photoPath cannot be empty", "bad_format")
+  }
+  if (existingPhotoFileUniqueId !== undefined && !existingPhotoFileUniqueId) {
+    throw new SidecarError("photoFileUniqueId cannot be empty", "bad_format")
+  }
+  if (photoPath !== undefined && existingPhotoFileUniqueId !== undefined) {
+    throw new SidecarError("update-profile accepts only one photo source", "bad_format")
+  }
+  if (name === undefined && photoPath === undefined && existingPhotoFileUniqueId === undefined) {
+    throw new SidecarError("update-profile requires name and/or a photo source", "bad_format")
+  }
+  if (!meId) throw new SidecarError("bot identity is unavailable", "transient")
+
+  let photoFileUniqueId = existingPhotoFileUniqueId
+  if (photoPath) {
+    const contentType = profilePhotoContentType(photoPath)
+    const info = await statAttachment(photoPath)
+    if (info.size > uploadMaxBytes) {
+      throw new SidecarError(`profile photo exceeds Inline upload cap (${info.size} > ${uploadMaxBytes} bytes)`, "too_long")
+    }
+    const upload = await client.uploadFile({
+      type: "photo",
+      file: await readFile(photoPath),
+      fileName: path.basename(photoPath),
+      contentType,
+    })
+    if (!upload.fileUniqueId || upload.photoId == null) {
+      throw new SidecarError("profile photo upload did not return a photo", "unknown")
+    }
+    photoFileUniqueId = upload.fileUniqueId
+  }
+
+  const result = await client.invokeUncheckedRaw(Method.UPDATE_BOT_PROFILE, {
+    oneofKind: "updateBotProfile",
+    updateBotProfile: {
+      botUserId: BigInt(meId),
+      ...(name !== undefined ? { name } : {}),
+      ...(photoFileUniqueId !== undefined ? { photoFileUniqueId } : {}),
+    },
+  })
+  const typed = result as { oneofKind?: string; updateBotProfile?: { bot?: unknown } }
+  if (typed.oneofKind !== "updateBotProfile" || !typed.updateBotProfile?.bot) {
+    throw new SidecarError("update-profile returned no bot profile", "unknown")
+  }
+  writeJson(res, 200, { ok: true, result: { bot: safeJson(typed.updateBotProfile.bot) } })
+}
+
+function profilePhotoContentType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg": return "image/jpeg"
+    case ".png": return "image/png"
+    default: throw new SidecarError("profile photo path must be a JPEG or PNG image", "bad_format")
+  }
+}
+
 async function getRawChatSnapshot(chatId: bigint, timeoutMs?: number): Promise<{
   chat: RawChat
   dialog?: RawDialog
@@ -1558,6 +1626,20 @@ class MockInlineClient implements SidecarClient {
             isPublic: Boolean(createChat?.isPublic),
           },
           dialog: { chatId: 322n },
+        },
+      }
+    }
+    if (method === Method.UPDATE_BOT_PROFILE) {
+      const inputRecord = asOptionalRecord(input)
+      const update = asOptionalRecord(inputRecord?.updateBotProfile)
+      return {
+        oneofKind: "updateBotProfile",
+        updateBotProfile: {
+          bot: {
+            id: update?.botUserId,
+            firstName: update?.name ?? "Mock Inline Bot",
+            ...(update?.photoFileUniqueId ? { profilePhoto: { fileUniqueId: update.photoFileUniqueId } } : {}),
+          },
         },
       }
     }

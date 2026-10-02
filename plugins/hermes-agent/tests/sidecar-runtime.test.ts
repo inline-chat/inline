@@ -255,6 +255,38 @@ describe("sidecar runtime", () => {
         fileUniqueId: "mock-file-7001",
       })
 
+      const profile = await post(port, "/update-profile", {
+        name: "Hermes Inline",
+        photoPath,
+      }, auth)
+      expect(profile.status).toBe(200)
+      expect(resultOf(profile.body)).toMatchObject({
+        bot: {
+          id: "999",
+          firstName: "Hermes Inline",
+          profilePhoto: { fileUniqueId: "mock-file-7002" },
+        },
+      })
+
+      const profileByFileId = await post(port, "/update-profile", {
+        photoFileUniqueId: "mock-file-7002",
+      }, auth)
+      expect(profileByFileId.status).toBe(200)
+      expect(resultOf(profileByFileId.body)).toMatchObject({
+        bot: { id: "999", profilePhoto: { fileUniqueId: "mock-file-7002" } },
+      })
+
+      for (const invalidBody of [{}, { name: " " }, { photoPath: "relative.png" }, {
+        photoPath: path.join(dir, "notes.txt"),
+      }, {
+        photoPath,
+        photoFileUniqueId: "mock-file-7002",
+      }]) {
+        const invalid = await post(port, "/update-profile", invalidBody, auth)
+        expect(invalid.status).toBe(400)
+        expect(invalid.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
+
       const voicePath = path.join(dir, "voice.ogg")
       await writeFile(voicePath, Buffer.from("fake voice"))
       const voiceAttachment = await post(port, "/send-attachment", {
@@ -266,15 +298,37 @@ describe("sidecar runtime", () => {
       expect(voiceAttachment.status).toBe(200)
       expect(resultOf(voiceAttachment.body)).toMatchObject({
         messageId: "9005",
-        fileUniqueId: "mock-file-7002",
+        fileUniqueId: "mock-file-7003",
       })
 
       const healthAfterAttachments = await post(port, "/healthz", {}, auth)
       const attachmentDiagnostics = resultOf(healthAfterAttachments.body).diagnostics as {
         calls: Array<{ method: string; params?: Record<string, unknown> }>
       }
+      const profileCalls = attachmentDiagnostics.calls.filter((call) => call.method === "invokeUncheckedRaw:UPDATE_BOT_PROFILE")
+      expect(profileCalls.map((call) => call.params)).toEqual([
+        { oneofKind: "updateBotProfile", updateBotProfile: {
+          botUserId: "999", name: "Hermes Inline", photoFileUniqueId: "mock-file-7002",
+        } },
+        { oneofKind: "updateBotProfile", updateBotProfile: {
+          botUserId: "999", photoFileUniqueId: "mock-file-7002",
+        } },
+      ])
+      const profileCallIndex = attachmentDiagnostics.calls.indexOf(profileCalls[0]!)
+      expect(attachmentDiagnostics.calls[profileCallIndex - 1]).toEqual({
+        method: "uploadFile", params: {
+          type: "photo", fileName: "photo.png", contentType: "image/png", size: 10,
+        },
+      })
+      // One attachment, one bot-owned profile copy, and one voice upload. The
+      // existing-file request and all invalid profile requests cause no upload.
+      expect(attachmentDiagnostics.calls.filter((call) => call.method === "uploadFile")).toHaveLength(3)
       expect(attachmentDiagnostics.calls).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            method: "uploadFile",
+            params: expect.objectContaining({ fileName: "photo.png", contentType: "image/png", type: "photo" }),
+          }),
           expect.objectContaining({
             method: "sendMessage",
             params: expect.objectContaining({
@@ -284,7 +338,7 @@ describe("sidecar runtime", () => {
           }),
           expect.objectContaining({
             method: "sendMessage",
-            params: expect.objectContaining({ media: { kind: "voice", voiceId: "7002" } }),
+            params: expect.objectContaining({ media: { kind: "voice", voiceId: "7003" } }),
           }),
           expect.objectContaining({
             method: "sendMessage",
@@ -660,6 +714,8 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_CHAT")
+      expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_BOT_PROFILE")
+      expect(callsJson).toContain("Hermes Inline")
       expect(callsJson).toContain("Private planning")
       expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
       expect(callsJson.match(/invokeUncheckedRaw:GET_CHAT_PARTICIPANTS/g)).toHaveLength(1)

@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema/users"
 import { getFileByUniqueId } from "@in/server/db/models/files"
+import { FileTypes } from "@in/server/modules/files/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -32,7 +33,7 @@ export const updateBotProfile = async (
       updates.photoFileId = null
     } else {
       const file = await getFileByUniqueId(trimmed)
-      if (!file || file.userId !== context.currentUserId) {
+      if (!file || file.userId !== context.currentUserId || file.fileType !== FileTypes.PHOTO) {
         throw RealtimeRpcError.BadRequest()
       }
 

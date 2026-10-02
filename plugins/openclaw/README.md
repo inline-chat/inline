@@ -378,6 +378,7 @@ The plugin also registers dedicated tools outside the `message` action surface.
 `inline_bot_presence` updates the bot's on-screen body state in Inline without sending a chat message. Use `action: "get"` to inspect the current avatar/state for a chat or user target.
 
 `inline_update_profile` updates the authenticated bot's Inline display name and/or profile photo. Use it only for explicit profile-setup requests.
+For a requested photo change, the bot can upload an image attached to the current Inline message using its saved local path or attachment URL. If the user has not supplied an image, it asks them to attach one; the user's original Inline file ID cannot be reused by the bot.
 
 `inline_bot_avatar` installs, replaces, or clears the bot's on-screen avatar. Set/install uses a local or remote `.zip` avatar package; clearing uses `action: "clear"` or `clear: true`. It is for avatar setup/removal, not mood or presence changes.
 
