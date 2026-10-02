@@ -461,7 +461,7 @@ describe("Inline Protocol application ordering", () => {
       RpcCall.create({
         input: {
           oneofKind: "forwardMessages",
-          forwardMessages: { toPeerId: peerId, messageIds: [1n] },
+          forwardMessages: { toPeerId: peerId, messageIds: [1n], submissions: [] },
         },
       }),
       RpcCall.create({

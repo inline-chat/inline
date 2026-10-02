@@ -27,6 +27,9 @@ export const messages = pgTable(
     // random id, used for optimistic update and deduplication
     randomId: bigint("random_id", { mode: "bigint" }),
 
+    /** Server-private forwarding intent. Presence also marks carried context. */
+    forwardIntentHash: bytea("forward_intent_hash"),
+
     /** message raw text, optional @deprecated */
     text: text(),
     textEncrypted: bytea("text_encrypted"),

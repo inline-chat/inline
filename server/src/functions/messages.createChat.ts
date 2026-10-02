@@ -1,13 +1,13 @@
 import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
+import { users } from "@in/server/db/schema/users"
 import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
 import { Chat, Dialog, type AgentThreadContext, type ChatParticipant } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { dialogs } from "@in/server/db/schema"
-import { chatIdReservations } from "@in/server/db/schema/chatIdReservations"
 import { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -27,6 +27,13 @@ import type { Transaction } from "@in/server/db/types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { encodeAgentThreadContext, validateAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import { getPublicSpaceBotUserIds } from "@in/server/functions/bot.peerDiscovery"
+import {
+  chatCreationIntentHash,
+  lockChatCreationReservation,
+  claimChatCreationReservation,
+} from "@in/server/modules/chatCreationReservation"
+import { DialogsModel } from "@in/server/db/models/dialogs"
+import { initializeInvitedDialogs } from "@in/server/modules/dialogInvitations"
 
 type InitialParticipant = {
   chatId: number
@@ -58,7 +65,7 @@ export async function createChat(
 ): Promise<{ chat: Chat; dialog: Dialog }> {
   const hasSpaceId = input.spaceId !== undefined && input.spaceId !== null
   const spaceId = hasSpaceId ? Number(input.spaceId) : undefined
-  if (hasSpaceId && (spaceId === undefined || Number.isNaN(spaceId))) {
+  if (hasSpaceId && (spaceId === undefined || !Number.isSafeInteger(spaceId) || spaceId <= 0)) {
     throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Space ID is invalid", 400)
   }
   const resolvedSpaceId = spaceId as number
@@ -80,7 +87,7 @@ export async function createChat(
         400,
       )
     }
-    if (!input.participants || input.participants.length === 0) {
+    if (!input.participants) {
       throw new RealtimeRpcError(
         RealtimeRpcError.Code.BAD_REQUEST,
         "Participants are required for home threads",
@@ -90,7 +97,7 @@ export async function createChat(
   }
 
   // For space threads, if it's private, participants are required
-  if (hasSpaceId && isPublic === false && (!input.participants || input.participants.length === 0)) {
+  if (hasSpaceId && isPublic === false && !input.participants) {
     throw new RealtimeRpcError(
       RealtimeRpcError.Code.BAD_REQUEST,
       "Participants are required for private space threads",
@@ -107,49 +114,15 @@ export async function createChat(
     )
   }
 
-  // For private chats, ensure the current user is included in participants
-  if (isPublic === false && input.participants) {
-    const currentUserIncluded = input.participants.some((p) => p.userId === BigInt(context.currentUserId))
-    if (!currentUserIncluded) {
-      input.participants.push({ userId: BigInt(context.currentUserId) })
-    }
+  // Do not mutate the submitted request: the same immutable intent can be retried.
+  const participantUserIds = Array.from(new Set(input.participants?.map((p) => Number(p.userId)) ?? []))
+  if (!isPublic && !participantUserIds.includes(context.currentUserId)) {
+    participantUserIds.push(context.currentUserId)
   }
-
-  const participantUserIds = input.participants?.map((p) => Number(p.userId)) ?? []
+  participantUserIds.sort((a, b) => a - b)
   if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
     throw RealtimeRpcError.UserIdInvalid()
   }
-
-  if (!hasSpaceId && isPublic === false) {
-    const activeUserIds = await UsersModel.getActiveUserIds(participantUserIds)
-    if (activeUserIds.length !== new Set(participantUserIds).size) {
-      throw RealtimeRpcError.UserIdInvalid()
-    }
-  }
-
-  if (hasSpaceId) {
-    await ensureCanCreateSpaceThread({
-      spaceId: resolvedSpaceId,
-      userId: context.currentUserId,
-      isPublic,
-      participantUserIds,
-    })
-  }
-
-  const agentContext = input.agentContext
-    ? await validateAgentThreadContext(input.agentContext, {
-        bindingActorUserId: context.currentUserId,
-        operation: "create_chat",
-      })
-    : undefined
-  if (agentContext) {
-    const botUserId = Number(agentContext.botUserId)
-    if (!isPublic && !participantUserIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
-    if (isPublic && !(await getPublicSpaceBotUserIds(resolvedSpaceId)).includes(botUserId)) {
-      throw RealtimeRpcError.UserIdInvalid()
-    }
-  }
-  const encodedAgentContext = agentContext ? encodeAgentThreadContext(agentContext) : null
 
   const explicitTitle = normalizeOptionalString(input.title)
   const placeholderTitle = normalizePlaceholderTitle(input.placeholderTitle)
@@ -161,151 +134,103 @@ export async function createChat(
     )
   }
   const storedTitle = explicitTitle ?? placeholderTitle
-
-  // Only enforce title uniqueness within a space.
-  // Home threads and server-owned placeholders are intentionally NOT unique.
-  if (explicitTitle && hasSpaceId) {
-    const titleLower = explicitTitle.toLowerCase()
-    const duplicate = await db
-      .select({ id: chats.id })
-      .from(chats)
-      .where(
-        and(
-          eq(chats.type, "thread"),
-          eq(chats.spaceId, resolvedSpaceId),
-          chatTitleMatches(titleLower, { spaceId: resolvedSpaceId }),
-        ),
-      )
-      .limit(1)
-
-    if (duplicate.length > 0) {
-      throw new RealtimeRpcError(
-        RealtimeRpcError.Code.BAD_REQUEST,
-        "A thread with that name already exists",
-        400,
-      )
-    }
-  }
-
-  if (reservedChatId !== undefined) {
-    const {
-      chat: createdChat,
-      dialog: createdDialog,
-      participants: createdParticipants,
-      accessUpdates,
-    } = await db.transaction(async (tx) => {
-      const threadNumber = await allocateThreadNumber(
-        tx,
-        hasSpaceId
-          ? { type: "space", id: resolvedSpaceId }
-          : { type: "user", id: context.currentUserId },
-      )
-
-      const [reservation] = await tx
-        .select()
-        .from(chatIdReservations)
-        .where(eq(chatIdReservations.chatId, reservedChatId))
-        .for("update")
-        .limit(1)
-
-      if (
-        !reservation ||
-        reservation.userId !== context.currentUserId ||
-        reservation.claimedAt !== null ||
-        reservation.expiresAt.getTime() <= Date.now()
-      ) {
-        throw RealtimeRpcError.BadRequest()
-      }
-
-      const [chat] = await tx
-        .insert(chats)
-        .values({
-          id: reservedChatId,
-          type: "thread",
-          spaceId: hasSpaceId ? resolvedSpaceId : null,
-          ...chatTitleFields(storedTitle ?? null, { spaceId: hasSpaceId ? resolvedSpaceId : null, createdBy: context.currentUserId }),
-          isUntitled: explicitTitle ? null : true,
-          publicThread: isPublic,
-          date: new Date(),
-          threadNumber: threadNumber,
-          emoji: input.emoji ?? null,
-          description: input.description ?? null,
-          createdBy: context.currentUserId,
-          agentContext: encodedAgentContext,
-        })
-        .returning()
-
-      if (!chat) {
-        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
-      }
-
-      let participants: InitialParticipant[] = []
-      let accessUpdates: InitialAccessUpdate[] = []
-      if (isPublic === false && input.participants) {
-        participants = input.participants.map((p) => ({
-          chatId: chat.id,
-          userId: Number(p.userId),
-          date: new Date(),
-        }))
-
-        await tx.insert(chatParticipants).values(participants)
-        accessUpdates = await enqueueInitialParticipantAdds(
-          tx,
-          chat.id,
-          participants,
-          context.currentUserId,
-        )
-      }
-
-      const [dialog] = await tx
-        .insert(dialogs)
-        .values({
-          chatId: chat.id,
-          userId: context.currentUserId,
-          spaceId: hasSpaceId ? resolvedSpaceId : null,
-          date: new Date(),
-          ...dialogOpenDefaultsForChat(chat),
-        })
-        .returning()
-
-      if (!dialog) {
-        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
-      }
-
-      await tx
-        .update(chatIdReservations)
-        .set({
-          claimedAt: new Date(),
-        })
-        .where(eq(chatIdReservations.chatId, reservedChatId))
-
-      return { chat, dialog, participants, accessUpdates }
-    })
-
-    createdParticipants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
-
-    const encodedDialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
-    const persisted = await persistNewChatUpdate(createdChat.id)
-    await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
-    pushInitialAccessUpdates(createdChat.id, accessUpdates)
-
-    return {
-      chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
-      dialog: encodedDialog,
-    }
-  }
+  const intentHash = chatCreationIntentHash({
+    method: "createChat",
+    userId: context.currentUserId,
+    spaceId: spaceId ?? null,
+    isPublic,
+    title: explicitTitle ?? null,
+    placeholderTitle: placeholderTitle ?? null,
+    emoji: input.emoji ?? null,
+    description: input.description ?? null,
+    participantUserIds,
+    agentContext: input.agentContext ? Buffer.from(encodeAgentThreadContext(input.agentContext)).toString("hex") : null,
+  })
 
   let createdChat: DbChat
   let createdDialog: DbDialog
   let createdParticipants: InitialParticipant[] = []
   let initialAccessUpdates: InitialAccessUpdate[] = []
+  let persistedUpdate: UpdateSeqAndDate | undefined
   try {
     ;({
       chat: createdChat,
       dialog: createdDialog,
       participants: createdParticipants,
       accessUpdates: initialAccessUpdates,
+      update: persistedUpdate,
     } = await db.transaction(async (tx) => {
+      if (reservedChatId !== undefined) {
+        const existing = await lockChatCreationReservation(tx, {
+          chatId: reservedChatId,
+          userId: context.currentUserId,
+          intentHash,
+        })
+        if (existing) {
+          const [dialog] = await tx
+            .select()
+            .from(dialogs)
+            .where(and(eq(dialogs.chatId, existing.id), eq(dialogs.userId, context.currentUserId)))
+            .limit(1)
+          if (!dialog) throw RealtimeRpcError.InternalError()
+          return { chat: existing, dialog, participants: [], accessUpdates: [], update: undefined }
+        }
+      }
+
+      // Only an unclaimed reservation performs new-creation checks. A retry
+      // reconciles captured intent and current destination access above.
+      if (!hasSpaceId && isPublic === false) {
+        const activeUserIds = await UsersModel.getActiveUserIds(participantUserIds, { tx })
+        if (activeUserIds.length !== participantUserIds.length) throw RealtimeRpcError.UserIdInvalid()
+      }
+      if (hasSpaceId) {
+        await ensureCanCreateSpaceThread({ spaceId: resolvedSpaceId, userId: context.currentUserId, isPublic, participantUserIds }, { tx })
+      }
+      const agentContext = input.agentContext
+        ? await validateAgentThreadContext(input.agentContext, {
+            bindingActorUserId: context.currentUserId,
+            operation: "create_chat",
+            tx,
+          })
+        : undefined
+      if (agentContext) {
+        const botUserId = Number(agentContext.botUserId)
+        if (!isPublic && !participantUserIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+        if (isPublic && !(await getPublicSpaceBotUserIds(resolvedSpaceId, { tx })).includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+      }
+      const encodedAgentContext = agentContext ? encodeAgentThreadContext(agentContext) : null
+
+      // Replay is resolved before title uniqueness: a retry must also survive
+      // automatic titles and later human renames without overwriting either.
+      if (explicitTitle && hasSpaceId) {
+        const duplicate = await tx
+          .select({ id: chats.id })
+          .from(chats)
+          .where(
+            and(
+              eq(chats.type, "thread"),
+              eq(chats.spaceId, resolvedSpaceId),
+              chatTitleMatches(explicitTitle.toLowerCase(), { spaceId: resolvedSpaceId }),
+            ),
+          )
+          .limit(1)
+
+        if (duplicate.length > 0) {
+          throw new RealtimeRpcError(
+            RealtimeRpcError.Code.BAD_REQUEST,
+            "A thread with that name already exists",
+            400,
+          )
+        }
+      }
+
+      if (!isPublic) {
+        // Creation may allocate a creator-scoped number and multiple user
+        // frontiers. Own all user rows in one order before either operation.
+        for (const userId of participantUserIds) {
+          await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
+        }
+      }
       const threadNumber = await allocateThreadNumber(
         tx,
         hasSpaceId
@@ -316,9 +241,13 @@ export async function createChat(
       const [chat] = await tx
         .insert(chats)
         .values({
+          ...(reservedChatId !== undefined ? { id: reservedChatId } : {}),
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          ...chatTitleFields(storedTitle ?? null, { spaceId: hasSpaceId ? resolvedSpaceId : null, createdBy: context.currentUserId }),
+          ...chatTitleFields(storedTitle ?? null, {
+            spaceId: hasSpaceId ? resolvedSpaceId : null,
+            createdBy: context.currentUserId,
+          }),
           isUntitled: explicitTitle ? null : true,
           publicThread: isPublic,
           date: new Date(),
@@ -336,10 +265,10 @@ export async function createChat(
 
       let participants: InitialParticipant[] = []
       let accessUpdates: InitialAccessUpdate[] = []
-      if (isPublic === false && input.participants) {
-        participants = input.participants.map((p) => ({
+      if (isPublic === false) {
+        participants = participantUserIds.map((userId) => ({
           chatId: chat.id,
-          userId: Number(p.userId),
+          userId,
           date: new Date(),
         }))
 
@@ -352,7 +281,7 @@ export async function createChat(
         )
       }
 
-      const [dialog] = await tx
+      let [dialog] = await tx
         .insert(dialogs)
         .values({
           chatId: chat.id,
@@ -367,7 +296,17 @@ export async function createChat(
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
       }
 
-      return { chat, dialog, participants, accessUpdates }
+      if (!isPublic) {
+        const invited = await initializeInvitedDialogs(tx, { chat, userIds: participantUserIds })
+        dialog = invited.dialogs.find((candidate) => candidate.userId === context.currentUserId) ?? dialog
+      }
+
+      if (reservedChatId !== undefined) {
+        await claimChatCreationReservation(tx, { chatId: reservedChatId, intentHash })
+      }
+      const update = await persistNewChatUpdate(chat.id, tx)
+
+      return { chat, dialog, participants, accessUpdates, update }
     }))
   } catch (error) {
     Log.shared.error(`Failed to create chat: ${error}`)
@@ -379,12 +318,12 @@ export async function createChat(
 
   createdParticipants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
 
-  let encodedDialog: Dialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
+  const unreadCount = persistedUpdate ? 0 : await DialogsModel.getUnreadCount(createdChat.id, context.currentUserId)
+  const encodedDialog: Dialog = Encoders.dialog(createdDialog, { unreadCount })
 
-  const persisted = await persistNewChatUpdate(createdChat.id)
-
-  // Broadcast the new chat update
-  await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
+  if (persistedUpdate) {
+    await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persistedUpdate })
+  }
   pushInitialAccessUpdates(createdChat.id, initialAccessUpdates)
 
   return {
@@ -423,7 +362,7 @@ async function enqueueInitialParticipantAdds(
           participant: encodeParticipant(participant),
         },
       },
-      })),
+    })),
     { tx },
   )
 
@@ -436,17 +375,19 @@ async function enqueueInitialParticipantAdds(
 
 function pushInitialAccessUpdates(chatId: number, accessUpdates: InitialAccessUpdate[]): void {
   for (const item of accessUpdates) {
-    RealtimeUpdates.pushToUser(item.userId, [{
-      seq: item.update.seq,
-      date: encodeDateStrict(item.update.date),
-      update: {
-        oneofKind: "userAddedToChat",
-        userAddedToChat: {
-          chatId: BigInt(chatId),
-          participant: item.participant,
+    RealtimeUpdates.pushToUser(item.userId, [
+      {
+        seq: item.update.seq,
+        date: encodeDateStrict(item.update.date),
+        update: {
+          oneofKind: "userAddedToChat",
+          userAddedToChat: {
+            chatId: BigInt(chatId),
+            participant: item.participant,
+          },
         },
       },
-    }])
+    ])
   }
 }
 
@@ -501,7 +442,7 @@ const pushUpdates = async ({
   return { selfUpdates, updateGroup }
 }
 
-const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> => {
+const persistNewChatUpdate = async (chatId: number, tx: Transaction): Promise<UpdateSeqAndDate> => {
   const chatUpdatePayload: ServerUpdate["update"] = {
     oneofKind: "newChat",
     newChat: {
@@ -509,29 +450,25 @@ const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> =
     },
   }
 
-  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
-    const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+  const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
 
-    if (!chat) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
-    }
+  if (!chat) {
+    throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
+  }
 
-    const update = await UpdatesModel.insertUpdate(tx, {
-      update: chatUpdatePayload,
-      bucket: UpdateBucket.Chat,
-      entity: chat,
-    })
-
-    await tx
-      .update(chats)
-      .set({
-        updateSeq: update.seq,
-        lastUpdateDate: update.date,
-      })
-      .where(eq(chats.id, chatId))
-
-    return update
+  const update = await UpdatesModel.insertUpdate(tx, {
+    update: chatUpdatePayload,
+    bucket: UpdateBucket.Chat,
+    entity: chat,
   })
 
-  return persisted
+  await tx
+    .update(chats)
+    .set({
+      updateSeq: update.seq,
+      lastUpdateDate: update.date,
+    })
+    .where(eq(chats.id, chatId))
+
+  return update
 }

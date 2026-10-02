@@ -2,7 +2,7 @@ import { DialogFollowMode, type Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
-import { dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { dialogs, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -102,35 +102,44 @@ export async function setDialogFollowModeForUsers(input: {
   skipSessionId?: number
   pushRealtime?: boolean
   showInChatList?: boolean
+  preserveUnfollowed?: boolean
 }): Promise<{
   dialogs: DbDialog[]
   changedDialogs: DbDialog[]
   unhiddenDialogs: DbDialog[]
   updates: { userId: number; update: Update }[]
 }> {
-  const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
+  const userIds = (await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))).sort((a, b) => a - b)
   if (userIds.length === 0) {
     return { dialogs: [], changedDialogs: [], unhiddenDialogs: [], updates: [] }
   }
 
   const result = await db.transaction(async (tx) => {
+    // Share the users -> dialogs lock order with open/close so invitation
+    // initialization and explicit follow choices serialize on the same owner.
+    for (const userId of userIds) {
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
+    }
     const existingDialogs = await tx
       .select()
       .from(dialogs)
       .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, userIds)))
 
     const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
+    const unfollowedUserIds = new Set(existingDialogs
+      .filter((dialog) => input.preserveUnfollowed === true && dialog.followMode === DIALOG_UNFOLLOWED)
+      .map((dialog) => dialog.userId))
     const changedUserIds = new Set<number>()
     const followModeChangedUserIds = new Set<number>()
     const shouldShowInChatList = input.showInChatList === true && input.followMode === DIALOG_FOLLOWING
 
     const followModeUpdateUserIds = existingDialogs
-      .filter((dialog) => dialog.followMode !== input.followMode)
+      .filter((dialog) => !unfollowedUserIds.has(dialog.userId) && dialog.followMode !== input.followMode)
       .map((dialog) => dialog.userId)
     const visibilityUpdateUserIds =
       shouldShowInChatList
         ? existingDialogs
-            .filter((dialog) => dialog.chatListHidden === true)
+            .filter((dialog) => !unfollowedUserIds.has(dialog.userId) && dialog.chatListHidden === true)
             .map((dialog) => dialog.userId)
         : []
     const updateUserIds = Array.from(new Set([...followModeUpdateUserIds, ...visibilityUpdateUserIds]))
@@ -217,7 +226,7 @@ export async function setDialogFollowModeForUsers(input: {
   }
 }
 
-async function enqueueFollowModeUpdates(
+export async function enqueueFollowModeUpdates(
   tx: Transaction,
   chat: ChatForFollow,
   userIds: number[],

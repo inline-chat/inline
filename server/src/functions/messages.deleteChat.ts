@@ -1,9 +1,12 @@
 import type { InputPeer, Peer, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
+import type { DbChat } from "@in/server/db/schema"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { messages } from "@in/server/db/schema/messages"
 import { members } from "@in/server/db/schema/members"
+import { users } from "@in/server/db/schema/users"
 import { Log } from "@in/server/utils/log"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -21,8 +24,12 @@ import { deleteBacklinkMessages, getBacklinkMessagesForSourceChat } from "@in/se
 import {
   getRootChatIdsForAccessEvents,
   getEffectiveChatAccessUserIds,
+  lockChatAndAncestors,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import { deleteSubthreadParentPlacement } from "@in/server/functions/messages.deleteMessage"
+import {
+  prepareSubthreadParentPlacementDeletion,
+  pushSubthreadParentPlacementDeletion,
+} from "@in/server/functions/messages.deleteMessage"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -56,98 +63,56 @@ async function deleteChatWithOptions(
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
     }
 
-    const isCreator = chat.createdBy === currentUserId
-    const trimmedTitle = chat.title?.trim() ?? ""
-    const hasTitle = trimmedTitle.length > 0
-    const hasMessages = chat.lastMsgId != null && chat.lastMsgId !== 0
-    const isUntitled = chat.isUntitled === true || !hasTitle
-
-    // Temporary: allow any participant to delete empty untitled threads until rollout is complete.
-    const canParticipantDeleteEmptyThread = isUntitled && !hasMessages
-
-    if (chat.spaceId) {
-      // Check user role in space
-      const member = await db._query.members.findFirst({
-        where: and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)),
-      })
-      if (!member) {
-        log.error("User is not a member of space", { userId: currentUserId, spaceId: chat.spaceId })
-        throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-      }
-
-      const canDelete = member.role === "admin" || member.role === "owner" || isCreator
-      if (!canDelete) {
-        if (canParticipantDeleteEmptyThread) {
-          if (chat.publicThread) {
-            if (member.canAccessPublicChats) {
-              // allow delete
-            } else {
-              log.error("User cannot access public chats in space", {
-                userId: currentUserId,
-                spaceId: chat.spaceId,
-                chatId: chat.id,
-              })
-              throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-            }
-          } else {
-            const participant = await db._query.chatParticipants.findFirst({
-              where: and(
-                eq(chatParticipants.chatId, chat.id),
-                eq(chatParticipants.userId, currentUserId),
-              ),
-            })
-            if (!participant) {
-              log.error("User is not a participant in private thread", {
-                userId: currentUserId,
-                spaceId: chat.spaceId,
-                chatId: chat.id,
-              })
-              throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-            }
-          }
-        } else {
-          log.error("User is not admin/owner or creator in space", {
-            userId: currentUserId,
-            spaceId: chat.spaceId,
-            chatId: chat.id,
-          })
-          throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-        }
-      }
-    } else if (!isCreator) {
-      if (canParticipantDeleteEmptyThread) {
-        const participant = await db._query.chatParticipants.findFirst({
-          where: and(
-            eq(chatParticipants.chatId, chat.id),
-            eq(chatParticipants.userId, currentUserId),
-          ),
-        })
-        if (!participant) {
-          log.error("User is not a participant for home thread", { userId: currentUserId, chatId: chat.id })
-          throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-        }
-      } else {
-        log.error("User is not creator for home thread", { userId: currentUserId, chatId: chat.id })
-        throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
-      }
-    }
-
     let persistedUpdate: UpdateSeqAndDate | undefined
     let accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[] = []
     let recipientIds: number[] = []
     let peerId: Peer | undefined
+    let placementDeletion: Awaited<ReturnType<typeof prepareSubthreadParentPlacementDeletion>>
     const backlinkMessages = await getBacklinkMessagesForSourceChat({ chatId: chat.id })
     // Delete chat, participants, dialogs in a transaction
     try {
-      await deleteSubthreadParentPlacement(chat.id, context)
-
       const didDelete = await db.transaction(async (tx) => {
-        const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
+        // Keep dialog FK KEY SHARE compatible until recipient frontiers own
+        // their users; the DELETE below takes its natural exclusive row lock.
+        const lockedChat = await lockChatAndAncestors(tx, chat.id, "no key update")
         if (!lockedChat) {
           throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
         }
 
+        await ensureChatDeletionAllowed(tx, lockedChat, currentUserId)
+
+        const [child] = await tx
+          .select({ id: chats.id })
+          .from(chats)
+          .where(eq(chats.parentChatId, lockedChat.id))
+          .limit(1)
+        if (child) {
+          if (options.requireEmptyUntitledAfterClose) return false
+          throw new RealtimeRpcError(
+            RealtimeRpcError.Code.BAD_REQUEST,
+            "Delete child chats before deleting their parent",
+            400,
+          )
+        }
+
+        const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [lockedChat.id])
+        const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        const accessRecipients = accessEventChatIds.flatMap((affectedChatId) =>
+          Array.from(accessBefore.get(affectedChatId) ?? []).map((userId) => ({
+            userId,
+            chatId: affectedChatId,
+          })),
+        )
+
         if (options.requireEmptyUntitledAfterClose) {
+          // Reopen and pin writers own users before their dialogs. Take every
+          // frontier owner in that same order before deciding to discard a draft;
+          // linked children still need their creator even without access events.
+          const ownerIds = Array.from(new Set([currentUserId, ...accessRecipients.map(({ userId }) => userId)]))
+            .sort((a, b) => a - b)
+          for (const userId of ownerIds) {
+            await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
+          }
           const [message] = await tx
             .select({ messageId: messages.messageId })
             .from(messages)
@@ -173,18 +138,12 @@ async function deleteChatWithOptions(
           }
         }
 
+        placementDeletion = await prepareSubthreadParentPlacementDeletion(tx, lockedChat.id)
+
         peerId = Encoders.peerFromChat(lockedChat, { currentUserId })
         const recipientAccess = await getEffectiveChatAccessUserIds(tx, [lockedChat.id])
         recipientIds = Array.from(recipientAccess.get(lockedChat.id) ?? [])
 
-        const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [lockedChat.id])
-        const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
-        const accessRecipients = accessEventChatIds.flatMap((affectedChatId) =>
-          Array.from(accessBefore.get(affectedChatId) ?? []).map((userId) => ({
-            userId,
-            chatId: affectedChatId,
-          })),
-        )
         const chatServerUpdatePayload: ServerUpdate["update"] = {
           oneofKind: "deleteChat",
           deleteChat: {
@@ -229,6 +188,12 @@ async function deleteChatWithOptions(
         return {}
       }
 
+      await pushSubthreadParentPlacementDeletion(placementDeletion, context).catch((error) => {
+        // The ordinary parent delete update is already durable; live fanout
+        // failure must not turn successful deletion into a failed RPC.
+        log.warn("Failed to publish deleted subthread placement", { chatId: chat.id, error })
+      })
+
       if (persistedUpdate && peerId) {
         const update: Update = {
           seq: persistedUpdate.seq,
@@ -269,6 +234,7 @@ async function deleteChatWithOptions(
       return {}
     } catch (err) {
       log.error("Failed to delete chat", { chatId: chat.id, error: err })
+      if (err instanceof RealtimeRpcError) throw err
       throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to delete chat", 500)
     }
   } catch (err) {
@@ -292,6 +258,38 @@ export async function deleteEmptyUntitledThreadAfterClose(chatId: number, contex
     context,
     { requireEmptyUntitledAfterClose: true },
   )
+}
+
+async function ensureChatDeletionAllowed(tx: Transaction, chat: DbChat, currentUserId: number): Promise<void> {
+  if (chat.type !== "thread") throw RealtimeRpcError.BadRequest()
+  const isCreator = chat.createdBy === currentUserId
+  const member = chat.spaceId === null ? undefined : await tx._query.members.findFirst({
+    where: and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)),
+  })
+  if (chat.spaceId !== null && !member) {
+    throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+  }
+  if (isCreator || member?.role === "admin" || member?.role === "owner") return
+
+  // Retain the existing temporary empty-draft policy, using current state
+  // under the mutation lock rather than the request's preflight snapshot.
+  const isUntitled = chat.isUntitled === true || !chat.title?.trim()
+  if (!isUntitled || (chat.lastMsgId != null && chat.lastMsgId !== 0)) {
+    throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+  }
+  const [message] = await tx.select({ id: messages.globalId }).from(messages).where(eq(messages.chatId, chat.id)).limit(1)
+  if (message) {
+    throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+  }
+  if (chat.publicThread === true && chat.spaceId !== null) {
+    if (member?.canAccessPublicChats) return
+  } else {
+    const participant = await tx._query.chatParticipants.findFirst({
+      where: and(eq(chatParticipants.chatId, chat.id), eq(chatParticipants.userId, currentUserId)),
+    })
+    if (participant) return
+  }
+  throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
 }
 
 export function queueEmptyUntitledThreadDeletionAfterClose(chatId: number, context: FunctionContext): void {

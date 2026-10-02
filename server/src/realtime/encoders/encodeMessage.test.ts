@@ -29,6 +29,7 @@ const baseMessage: DbMessage = {
   globalId: 1n,
   messageId: 1,
   randomId: null,
+  forwardIntentHash: null,
   text: null,
   textEncrypted: null,
   textIv: null,
@@ -99,6 +100,7 @@ const baseFullMessage: DbFullMessage = {
   globalId: 1n,
   messageId: 1,
   randomId: null,
+  forwardIntentHash: null,
   text: null,
   chatId: 10,
   fromId: 100,
@@ -407,6 +409,27 @@ describe("encode voice", () => {
 })
 
 describe("mentioned", () => {
+  it("keeps historical mention entities without setting a fresh mention flag in live or history payloads", () => {
+    const entities = MessageEntities.create({ entities: [{ type: MessageEntity_Type.MENTION, offset: 0n, length: 5n,
+      entity: { oneofKind: "mention", mention: { userId: 200n } },
+    }] })
+    const encrypted = encryptBinary(MessageEntities.toBinary(entities))
+    for (const provenance of [{ forwardIntentHash: Buffer.from("carried") }, { fwdFromMessageId: 7 }]) {
+      const live = encodeMessage({
+        message: buildMessage({ ...provenance, entitiesEncrypted: encrypted.encrypted, entitiesIv: encrypted.iv, entitiesTag: encrypted.authTag }),
+        encodingForUserId: 200, encodingForPeer: { peer }, mentionedUserIds: new Set(),
+      })
+      const history = encodeFullMessage({ message: { ...baseFullMessage, ...provenance, entities },
+        encodingForUserId: 200, encodingForPeer: { peer },
+      })
+      expect(live.mentioned).toBe(false)
+      expect(history.mentioned).toBe(false)
+      expect(live.entities).toEqual(entities)
+      expect(history.entities).toEqual(entities)
+      expect(live.isForwarded).toBe(true)
+      expect(history.isForwarded).toBe(true)
+    }
+  })
   const mentionedEntities: MessageEntities = {
     entities: [
       {

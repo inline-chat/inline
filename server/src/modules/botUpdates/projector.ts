@@ -236,6 +236,8 @@ const messageReference = (
     from_id: message.fromId,
     from: toUser(users.get(message.fromId) ?? message.from),
     date: unixSeconds(message.date),
+    rev: message.rev,
+    is_forwarded: message.forwardIntentHash != null || message.fwdFromMessageId != null || undefined,
     edit_date: message.editDate ? unixSeconds(message.editDate) : undefined,
     text: message.text ?? undefined,
     entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById: users }),
@@ -298,6 +300,7 @@ export const activationReason = (input: {
   reply: DbFullMessage | null
   sourceChatId?: number
 }): BotActivationReason | undefined => {
+  if (input.message.forwardIntentHash != null || input.message.fwdFromMessageId != null) return undefined
   const explicitlyMentioned = mentionTargets(input.message.entities).includes(input.stream.botUserId)
   if (input.message.fromId === input.stream.botUserId) {
     const context = chatAgentContext(input.chat)
@@ -336,7 +339,7 @@ async function messageCreated(input: {
     BotUpdatesModel.getStreamsForBotUserIds(input.updateGroup.userIds),
   ])
   if (streams.length === 0) return
-  if (message.systemMessage || await isSubthreadParentMessage(message.globalId)) return
+  if (message.systemMessage || message.forwardIntentHash != null || message.fwdFromMessageId != null || await isSubthreadParentMessage(message.globalId)) return
   const reply = message.replyToMsgId
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
@@ -389,7 +392,7 @@ async function messageEdited(input: { chat: DbChat; messageId: number }): Promis
   const routes = await BotUpdatesModel.getMessageRoutes(input.chat.id, [input.messageId])
   if (routes.length === 0) return
   const message = await MessageModel.getMessage(input.messageId, input.chat.id)
-  if (message.systemMessage || await isSubthreadParentMessage(message.globalId)) return
+  if (message.systemMessage || message.forwardIntentHash != null || message.fwdFromMessageId != null || await isSubthreadParentMessage(message.globalId)) return
   const reply = message.replyToMsgId
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null

@@ -49,6 +49,7 @@ export type AgentContextValidationOperation =
 type AgentContextValidationOptions = {
   operation: AgentContextValidationOperation
   bindingActorUserId?: number
+  tx?: Transaction
 }
 
 const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8")
@@ -279,12 +280,12 @@ export async function validateAgentThreadContext(
   const normalized = normalizedShape.context
   const discarded = normalizedShape.discarded
   const botUserId = Number(normalized.botUserId)
-  const bot = await UsersModel.getUserById(botUserId)
+  const bot = await UsersModel.getUserById(botUserId, { tx: options.tx })
   if (!bot?.bot || UsersModel.isDeleted(bot)) throw RealtimeRpcError.UserIdInvalid()
   if (options.bindingActorUserId !== undefined) {
     const actor = options.bindingActorUserId === botUserId
       ? bot
-      : await UsersModel.getUserById(options.bindingActorUserId)
+      : await UsersModel.getUserById(options.bindingActorUserId, { tx: options.tx })
     if (!actor || (!actor.bot && bot.botCreatorId !== options.bindingActorUserId)) {
       throw RealtimeRpcError.UserIdInvalid()
     }
@@ -292,7 +293,7 @@ export async function validateAgentThreadContext(
 
   let agentId = normalized.agentId
   if (agentId !== undefined) {
-    const agent = await BotAgentsModel.get(Number(agentId))
+    const agent = await BotAgentsModel.get(Number(agentId), { tx: options.tx })
     if (!agent || Number(agent.botUserId) !== botUserId) {
       agentId = undefined
       discarded.push("agent_unavailable")

@@ -186,6 +186,9 @@ export const TBotMessageReference = t.Object({
   from: TBotUser,
   date: t.Number(),
   edit_date: t.Optional(t.Number()),
+  rev: t.Optional(t.Integer({ minimum: 0 })),
+  is_forwarded: t.Optional(t.Boolean()),
+  source_snapshot: t.Optional(t.String()),
   text: t.Optional(t.String()),
   entities: t.Optional(TBotMessageEntitiesOutput),
   rich_message: t.Optional(TBotRichMessage),
@@ -328,6 +331,29 @@ export const TForwardMessageInput = t.Object({
   message_id: TTargetId,
 })
 
+export const TForwardMessagesInput = t.Object({
+  chat_id: TTargetId,
+  from_chat_id: TTargetId,
+  message_ids: t.Array(TTargetId, { minItems: 1, maxItems: 100 }),
+  share_forward_header: t.Optional(t.Boolean()),
+  submissions: t.Optional(t.Array(t.Object({
+    random_id: t.String({ pattern: "^-?[1-9][0-9]{0,18}$" }),
+    expected_source_revision: t.Integer({ minimum: 0 }),
+    expected_source_snapshot: t.Optional(t.String({ pattern: "^[0-9a-f]{64}$" })),
+  }), { minItems: 1, maxItems: 100 })),
+})
+
+export const TForwardMessagesResult = t.Object({
+  message_ids: t.Array(t.Number()),
+  receipts: t.Optional(t.Array(t.Object({
+    source_message_id: t.Number(),
+    random_id: t.String(),
+    message_id: t.Number(),
+    source_revision: t.Integer({ minimum: 0 }),
+    message_deleted: t.Optional(t.Boolean()),
+  }))),
+})
+
 export const TPinMessageInput = t.Object({
   chat_id: TTargetId,
   message_id: TTargetId,
@@ -347,7 +373,9 @@ export const TThreadParticipantMutationInput = t.Object({
 
 export const TSetThreadTitleInput = t.Object({
   chat_id: TTargetId,
-  title: t.String({ minLength: 1, maxLength: 256 }),
+  title: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+  emoji: t.Optional(t.String({ maxLength: 20 })),
+  generate_emoji: t.Optional(t.Boolean()),
 })
 
 export const TBotSpaceMember = t.Object({

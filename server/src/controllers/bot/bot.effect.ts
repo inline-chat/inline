@@ -354,7 +354,7 @@ const BotMethodDocumentation = {
       "Deletes every installed skill published by the authenticated bot harness.",
   },
   forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat." },
-  forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages and returns their new IDs. Missing source IDs are skipped." },
+  forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages in order. Stable per-item submissions bind the source snapshot and return retryable receipts; retry the complete original request after a partial failure. Legacy requests without submissions skip missing source IDs." },
   pinMessage: { summary: "Pin a message", description: "Pins one message in a chat." },
   unpinMessage: { summary: "Unpin a message", description: "Unpins one message in a chat." },
   getChatParticipant: { summary: "Get a chat participant", description: "Returns one participant of an accessible chat, with space membership when applicable." },

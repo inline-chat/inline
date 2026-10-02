@@ -56,6 +56,23 @@ const message = (fromId: number, fromBot: boolean, entities?: MessageEntities): 
 } as DbFullMessage)
 
 describe("Bot activation routing", () => {
+  test("carried mentions, commands and direct traffic remain context", () => {
+    for (const target of [chat(true, 73), { ...chat(false), type: "private" as const }]) {
+      expect(activationReason({
+        stream: { botUserId: BOT_ID, messageTrigger: "all" },
+        chat: target,
+        message: { ...message(30, false, mention(BOT_ID, 73)), forwardIntentHash: Buffer.alloc(32) },
+        reply: null,
+      })).toBeUndefined()
+    }
+    expect(activationReason({
+      stream: { botUserId: BOT_ID, messageTrigger: "all" },
+      chat: chat(true),
+      message: { ...message(30, false, mention()), fwdFromMessageId: 12 },
+      reply: null,
+    })).toBeUndefined()
+  })
+
   test("a bound Chat addresses ordinary human traffic independently of legacy trigger mode", () => {
     expect(activationReason({
       stream: { botUserId: BOT_ID, messageTrigger: "mentions" },

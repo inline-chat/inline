@@ -27,6 +27,16 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { hasImportedAgentMessages } from "@in/server/modules/agentSessions/service"
 
+import type { Transaction } from "@in/server/db/types"
+import type { ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
+
+type PreparedPlacementDeletion = {
+  parentChatId: number
+  parentMessageId: number
+  update: UpdateSeqAndDate
+  metadataChatUpdates: ChatMetadataUpdate[]
+}
+
 type Input = {
   messageIds: bigint[]
   peer: InputPeer
@@ -64,6 +74,48 @@ export async function deleteSubthreadParentPlacement(
       return
     }
     throw error
+  }
+}
+
+/** Prepare the existing placement deletion under the caller's chat lock.
+ * Nothing is published until the surrounding deletion transaction commits. */
+export async function prepareSubthreadParentPlacementDeletion(
+  tx: Transaction,
+  childChatId: number,
+): Promise<PreparedPlacementDeletion | undefined> {
+  const parentMessage = await getSubthreadParentMessageRef(childChatId, tx)
+  if (!parentMessage) return undefined
+  if (await hasImportedAgentMessages(parentMessage.parentChatId, [parentMessage.parentMessageId], { tx })) {
+    throw RealtimeRpcError.AgentSessionMessageImmutable()
+  }
+  const result = await MessageModel.deleteMessages(
+    [BigInt(parentMessage.parentMessageId)],
+    parentMessage.parentChatId,
+    tx,
+  )
+  return { ...parentMessage, ...result }
+}
+
+export async function pushSubthreadParentPlacementDeletion(
+  deletion: PreparedPlacementDeletion | undefined,
+  context: FunctionContext,
+): Promise<void> {
+  if (!deletion) return
+  await pushUpdates({
+    inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(deletion.parentChatId) } } },
+    messageIds: [BigInt(deletion.parentMessageId)],
+    currentUserId: context.currentUserId,
+    update: deletion.update,
+  })
+  await pushChatMetadataUpdates({ currentUserId: context.currentUserId, chatUpdates: deletion.metadataChatUpdates })
+  const parentChat = await ChatModel.getChatFromInputPeer(
+    { type: { oneofKind: "chat", chat: { chatId: BigInt(deletion.parentChatId) } } },
+    context,
+  )
+  if (isReplyThread(parentChat)) {
+    await emitMessageSubthreadUpdateIfNeeded({ chatId: parentChat.id, currentUserId: context.currentUserId })
+  } else if (isLinkedSubthread(parentChat)) {
+    queueSubthreadParentUpdate({ chatId: parentChat.id, currentUserId: context.currentUserId, reason: "message deletion" })
   }
 }
 

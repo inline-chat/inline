@@ -16,13 +16,13 @@ export class UsersModel {
     return user?.deleted === true
   }
 
-  static async getActiveUserIds(userIds: number[]): Promise<number[]> {
+  static async getActiveUserIds(userIds: number[], options?: { tx?: Transaction }): Promise<number[]> {
     const uniqueUserIds = [...new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
     if (uniqueUserIds.length === 0) {
       return []
     }
 
-    const rows = await db
+    const rows = await (options?.tx ?? db)
       .select({ id: users.id })
       .from(users)
       .where(and(inArray(users.id, uniqueUserIds), userNotDeleted()))
@@ -61,8 +61,8 @@ export class UsersModel {
    * @param id - The id of the user
    * @returns The user
    */
-  static async getUserById(id: number): Promise<DbUser | undefined> {
-    const user = await db._query.users.findFirst({
+  static async getUserById(id: number, options?: { tx?: Transaction }): Promise<DbUser | undefined> {
+    const user = await (options?.tx?._query ?? db._query).users.findFirst({
       where: eq(users.id, id),
     })
 

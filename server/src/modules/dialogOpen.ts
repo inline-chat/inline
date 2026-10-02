@@ -250,7 +250,7 @@ export async function setDialogOpenForUsers(
   return db.transaction((tx) => setDialogOpenForUsersInTransaction(tx, { ...input, userIds }))
 }
 
-async function setDialogOpenForUsersInTransaction(
+export async function setDialogOpenForUsersInTransaction(
   tx: Transaction,
   input: SetDialogOpenForUsersInput,
 ): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {

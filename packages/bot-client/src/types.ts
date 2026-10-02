@@ -66,6 +66,7 @@ export type {
   ForwardMessageResult,
   ForwardMessagesParams,
   ForwardMessagesResult,
+  ForwardMessageReceipt,
   EditMessageTextParams,
   EditMessageTextResult,
   EmptyResult,

@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 263,
+  "count": 265,
   "methodCounts": {
     "ALL": 3,
     "GET": 103,
     "OPTIONS": 18,
-    "POST": 138,
+    "POST": 140,
     "WS": 1
   },
-  "sha256": "2c10f537ff021f882e4a7d7233ace164c256f4371d4aa094f41ab5662a268300",
+  "sha256": "4f90fa2700e065bbcdab27eb80b950977384d50e7923fba6534f549c82b179cc",
   "routes": [
     {
       "method": "ALL",
@@ -608,6 +608,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/forwardMessages"
+    },
+    {
+      "method": "POST",
       "path": "/bot/getMessages"
     },
     {
@@ -713,6 +717,10 @@
     {
       "method": "POST",
       "path": "/bot:token/forwardMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/forwardMessages"
     },
     {
       "method": "POST",

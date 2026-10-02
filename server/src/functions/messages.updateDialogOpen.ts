@@ -4,10 +4,11 @@ import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { UsersModel } from "@in/server/db/models/users"
-import { dialogFolders } from "@in/server/db/schema"
+import { chats, dialogFolders, users } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { setDialogOpenForUsersInTransaction } from "@in/server/modules/dialogOpen"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -45,16 +46,27 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
     }
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
-  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  const requestedChat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  await AccessGuards.ensureChatAccess(requestedChat, context.currentUserId)
 
-  const { dialogs, changedDialogs } = await setDialogOpenForUsers({
-    chat,
-    userIds: [context.currentUserId],
-    open: input.open,
-    order: input.order,
-    folderId: input.folderId,
-    showInChatList: false,
+  const { chat, dialogs, changedDialogs } = await db.transaction(async (tx) => {
+    // Wait for the user's current workbench state before protecting the chat.
+    // This permits draft cleanup to finish its DELETE upgrade without a cycle.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, context.currentUserId)).for("no key update").limit(1)
+    const [chat] = await tx.select().from(chats).where(eq(chats.id, requestedChat.id)).for("key share").limit(1)
+    if (!chat) throw RealtimeRpcError.ChatIdInvalid()
+    const access = await getEffectiveChatAccessUserIds(tx, [chat.id], { userIds: [context.currentUserId] })
+    if (!access.get(chat.id)?.has(context.currentUserId)) throw RealtimeRpcError.PeerIdInvalid()
+
+    const result = await setDialogOpenForUsersInTransaction(tx, {
+      chat,
+      userIds: [context.currentUserId],
+      open: input.open,
+      order: input.order,
+      folderId: input.folderId,
+      showInChatList: false,
+    })
+    return { chat, ...result }
   })
 
   const dialog = dialogs.find((candidate) => candidate.userId === context.currentUserId)

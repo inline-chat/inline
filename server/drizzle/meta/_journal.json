@@ -1065,6 +1065,34 @@
       "when": 1790193451066,
       "tag": "0151_insights-query-indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1790808344510,
+      "tag": "0152_forward-submission-intent",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1790808626171,
+      "tag": "0153_chat-creation-replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1790808796645,
+      "tag": "0154_message-submission-receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1790811458308,
+      "tag": "0155_chat-reservation-resolution",
+      "breakpoints": true
     }
   ]
 }

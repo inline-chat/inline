@@ -129,18 +129,19 @@ describe("messages.createSubthread", () => {
 
     expect(childDialogs.sort((left, right) => left.userId - right.userId)).toEqual([
       {
-        userId: Math.min(creator.id, anchorAuthor.id),
+        userId: creator.id,
         chatListHidden: true,
-        followMode: "following",
+        followMode: "following" as const,
         open: null,
       },
       {
-        userId: Math.max(creator.id, anchorAuthor.id),
-        chatListHidden: true,
-        followMode: "following",
-        open: null,
+        userId: anchorAuthor.id,
+        // An explicit private invitation surfaces without waiting for activity.
+        chatListHidden: null,
+        followMode: "following" as const,
+        open: true,
       },
-    ])
+    ].sort((left, right) => left.userId - right.userId))
 
     const childChatUpdates = await db
       .select({ id: schema.updates.id })
@@ -341,73 +342,75 @@ describe("messages.createSubthread", () => {
     expect(children).toHaveLength(1)
   })
 
-  test("does not re-follow unfollowed anchor author when reusing existing reply thread", async () => {
-    const creator = await testUtils.createUser("subthread-reuse-creator@example.com")
-    const anchorAuthor = await testUtils.createUser("subthread-reuse-anchor-author@example.com")
+  for (const followMode of [null, "unfollowed"] as const) {
+    test(`reusing a reply thread leaves the anchor author's ${followMode ?? "unspecified"} follow state unchanged`, async () => {
+      const creator = await testUtils.createUser(`subthread-reuse-creator-${followMode}@example.com`)
+      const anchorAuthor = await testUtils.createUser(`subthread-reuse-anchor-author-${followMode}@example.com`)
 
-    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
-    if (!parentChat) {
-      throw new Error("Parent chat not created")
-    }
+      const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+      if (!parentChat) {
+        throw new Error("Parent chat not created")
+      }
 
-    await testUtils.addParticipant(parentChat.id, creator.id)
-    await testUtils.addParticipant(parentChat.id, anchorAuthor.id)
+      await testUtils.addParticipant(parentChat.id, creator.id)
+      await testUtils.addParticipant(parentChat.id, anchorAuthor.id)
 
-    await db.insert(schema.messages).values({
-      chatId: parentChat.id,
-      messageId: 1,
-      fromId: anchorAuthor.id,
-      text: "anchor",
-    })
-
-    const [childChat] = await db
-      .insert(schema.chats)
-      .values({
-        type: "thread",
-        title: "Re: anchor",
-        publicThread: false,
-        createdBy: creator.id,
-        parentChatId: parentChat.id,
-        parentMessageId: 1,
+      await db.insert(schema.messages).values({
+        chatId: parentChat.id,
+        messageId: 1,
+        fromId: anchorAuthor.id,
+        text: "anchor",
       })
-      .returning()
 
-    if (!childChat) {
-      throw new Error("Child chat not created")
-    }
+      const [childChat] = await db
+        .insert(schema.chats)
+        .values({
+          type: "thread",
+          title: "Re: anchor",
+          publicThread: false,
+          createdBy: creator.id,
+          parentChatId: parentChat.id,
+          parentMessageId: 1,
+        })
+        .returning()
 
-    await db.insert(schema.dialogs).values({
-      chatId: childChat.id,
-      userId: anchorAuthor.id,
-      followMode: "unfollowed",
-      chatListHidden: true,
-    })
+      if (!childChat) {
+        throw new Error("Child chat not created")
+      }
 
-    const result = await createSubthread(
-      {
-        parentChatId: BigInt(parentChat.id),
-        parentMessageId: 1n,
-      },
-      testUtils.functionContext({ userId: creator.id }),
-    )
-
-    expect(result.chat.id).toBe(BigInt(childChat.id))
-
-    const childDialogs = await db
-      .select({
-        userId: schema.dialogs.userId,
-        followMode: schema.dialogs.followMode,
+      await db.insert(schema.dialogs).values({
+        chatId: childChat.id,
+        userId: anchorAuthor.id,
+        followMode,
+        chatListHidden: true,
       })
-      .from(schema.dialogs)
-      .where(eq(schema.dialogs.chatId, childChat.id))
 
-    expect(new Map(childDialogs.map((dialog) => [dialog.userId, dialog.followMode]))).toEqual(
-      new Map([
-        [creator.id, "following"],
-        [anchorAuthor.id, "unfollowed"],
-      ]),
-    )
-  })
+      const result = await createSubthread(
+        {
+          parentChatId: BigInt(parentChat.id),
+          parentMessageId: 1n,
+        },
+        testUtils.functionContext({ userId: creator.id }),
+      )
+
+      expect(result.chat.id).toBe(BigInt(childChat.id))
+
+      const childDialogs = await db
+        .select({
+          userId: schema.dialogs.userId,
+          followMode: schema.dialogs.followMode,
+        })
+        .from(schema.dialogs)
+        .where(eq(schema.dialogs.chatId, childChat.id))
+
+      expect(new Map(childDialogs.map((dialog) => [dialog.userId, dialog.followMode]))).toEqual(
+        new Map([
+          [creator.id, "following"],
+          [anchorAuthor.id, followMode],
+        ]),
+      )
+    })
+  }
 
   test("assigns the next space thread number to linked subthreads", async () => {
     const space = await testUtils.createSpace("Numbered Subthreads")
@@ -990,7 +993,9 @@ describe("messages.createSubthread", () => {
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, bot.id)))
 
-    expect(botUpdates).toHaveLength(0)
+    const botPayloads = botUpdates.map((row) => UpdatesModel.decrypt(row).payload.update)
+    expect(botPayloads.filter((update) => update.oneofKind === "userAddedToChat")).toHaveLength(0)
+    expect(botPayloads.map((update) => update.oneofKind).sort()).toEqual(["userChatOpen", "userDialogFollowMode"])
     expect(result.chat.parentChatId).toBe(BigInt(parentChat.id))
   })
 

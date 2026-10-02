@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { members, userNotDeleted, users, type DbChat, type DbMember } from "@in/server/db/schema"
 import { getSpacePrivacyContext, type SpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -9,14 +10,14 @@ export async function ensureCanCreateSpaceThread(input: {
   userId: number
   isPublic: boolean
   participantUserIds?: number[]
-}): Promise<SpacePrivacyContext> {
-  const privacy = await getSpacePrivacyContext(input.spaceId, input.userId)
+}, options?: { tx?: Transaction }): Promise<SpacePrivacyContext> {
+  const privacy = await getSpacePrivacyContext(input.spaceId, input.userId, options)
   if (input.isPublic) {
     ensurePublicChatAccess(privacy.member)
     return privacy
   }
 
-  await ensureSpaceMembers(input.spaceId, input.participantUserIds ?? [])
+  await ensureSpaceMembers(input.spaceId, input.participantUserIds ?? [], options)
   return privacy
 }
 
@@ -58,13 +59,13 @@ export async function ensureUserCanParticipateInChat(chat: DbChat, userId: numbe
   }
 }
 
-export async function ensureSpaceMembers(spaceId: number, userIds: number[]): Promise<void> {
+export async function ensureSpaceMembers(spaceId: number, userIds: number[], options?: { tx?: Transaction }): Promise<void> {
   const uniqueUserIds = [...new Set(userIds)]
   if (uniqueUserIds.length === 0) {
     return
   }
 
-  const validMembers = await db
+  const validMembers = await (options?.tx ?? db)
     .select({ userId: members.userId })
     .from(members)
     .innerJoin(users, eq(members.userId, users.id))

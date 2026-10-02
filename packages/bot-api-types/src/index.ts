@@ -345,6 +345,11 @@ export type BotMessage = {
   from: BotUser
   date: number
   edit_date?: number
+  rev?: number
+  /** Historical carried context; mentions do not activate a new direction. */
+  is_forwarded?: boolean
+  /** Opaque token for the exact hydrated public forwarding preview. */
+  source_snapshot?: string
   text?: string
   entities?: BotMessageEntityOutput[]
   rich_message?: BotRichMessage
@@ -490,7 +495,14 @@ export type CreateThreadResult = { chat: BotChat }
 export type CreateReplyThreadResult = { chat: BotChat }
 export type SendMessageResult = { message: BotMessage }
 export type ForwardMessageResult = { message: BotMessage }
-export type ForwardMessagesResult = { message_ids: number[] }
+export type ForwardMessageReceipt = {
+  source_message_id: number
+  random_id: string
+  message_id: number
+  source_revision: number
+  message_deleted?: boolean
+}
+export type ForwardMessagesResult = { message_ids: number[]; receipts?: ForwardMessageReceipt[] }
 export type GetChatParticipantResult = { participant: BotChatParticipant }
 export type GetChatParticipantCountResult = { count: number }
 export type GetMyCommandsResult = { commands: BotCommand[] }
@@ -556,6 +568,9 @@ export type ForwardMessagesParams = {
   chat_id: BotInputId
   from_chat_id: BotInputId
   message_ids: BotInputId[]
+  share_forward_header?: boolean
+  /** Persist the complete ordered request; retry it unchanged after an ambiguous response. */
+  submissions?: { random_id: string; expected_source_revision: number; expected_source_snapshot?: string }[]
 }
 
 export type PinMessageParams = {
@@ -586,6 +601,8 @@ export type SetThreadTitleParams = {
   title?: string
   /** Empty string removes the emoji. */
   emoji?: string
+  /** Explicitly generate a missing emoji; preserves the title and any chosen emoji. */
+  generate_emoji?: boolean
 }
 
 export type SendReactionParams = BotTargetInput & {

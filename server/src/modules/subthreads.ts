@@ -54,16 +54,19 @@ const GENERIC_REPLY_THREAD_TITLE = "Message"
 
 type ReplyThreadTitleAnchor = Pick<DbFullMessage, "text">
 
-export async function getChatById(chatId: number): Promise<DbChat | undefined> {
-  return db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((rows) => rows[0])
+export async function getChatById(chatId: number, options?: { tx?: Transaction }): Promise<DbChat | undefined> {
+  return (options?.tx ?? db).select().from(chats).where(eq(chats.id, chatId)).limit(1).then((rows) => rows[0])
 }
 
-export async function getAnchorMessageForChat(chat: Pick<DbChat, "parentChatId" | "parentMessageId">): Promise<DbFullMessage | undefined> {
+export async function getAnchorMessageForChat(
+  chat: Pick<DbChat, "parentChatId" | "parentMessageId">,
+  tx?: Transaction,
+): Promise<DbFullMessage | undefined> {
   if (chat.parentChatId == null || chat.parentMessageId == null) {
     return undefined
   }
 
-  const anchorMessages = await MessageModel.getMessagesByIds(chat.parentChatId, [BigInt(chat.parentMessageId)])
+  const anchorMessages = await MessageModel.getMessagesByIds(chat.parentChatId, [BigInt(chat.parentMessageId)], { tx })
   return anchorMessages[0]
 }
 
@@ -598,10 +601,13 @@ export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]>
   return resolveEffectiveAccessUserIds(chat)
 }
 
-export async function persistMessageRepliesUpdate(input: {
-  parentChatId: number
-  parentMessageId: number
-}): Promise<UpdateSeqAndDate> {
+export async function persistMessageRepliesUpdate(
+  input: {
+    parentChatId: number
+    parentMessageId: number
+  },
+  transaction?: Transaction,
+): Promise<UpdateSeqAndDate> {
   const updatePayload: ServerUpdate["update"] = {
     oneofKind: "editMessage",
     editMessage: {
@@ -610,7 +616,7 @@ export async function persistMessageRepliesUpdate(input: {
     },
   }
 
-  return db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
+  const persist = async (tx: Transaction): Promise<UpdateSeqAndDate> => {
     const [parentChat] = await tx.select().from(chats).where(eq(chats.id, input.parentChatId)).for("update").limit(1)
 
     if (!parentChat) {
@@ -632,7 +638,8 @@ export async function persistMessageRepliesUpdate(input: {
       .where(eq(chats.id, input.parentChatId))
 
     return update
-  })
+  }
+  return transaction ? persist(transaction) : db.transaction(persist)
 }
 
 export async function pushMessageRepliesUpdate(input: {
@@ -691,8 +698,9 @@ export type SubthreadParentMessageRef = {
 
 export async function getSubthreadParentMessageRef(
   childChatId: number,
+  transaction?: Transaction,
 ): Promise<SubthreadParentMessageRef | undefined> {
-  const [row] = await db
+  const [row] = await (transaction ?? db)
     .select({
       parentChatId: messages.chatId,
       parentMessageId: messages.messageId,
@@ -705,8 +713,8 @@ export async function getSubthreadParentMessageRef(
   return row
 }
 
-export async function isSubthreadParentMessage(globalId: bigint): Promise<boolean> {
-  const [row] = await db
+export async function isSubthreadParentMessage(globalId: bigint, tx?: Transaction): Promise<boolean> {
+  const [row] = await (tx ?? db)
     .select({ childChatId: subthreadParentMessages.childChatId })
     .from(subthreadParentMessages)
     .where(eq(subthreadParentMessages.parentMessageGlobalId, globalId))

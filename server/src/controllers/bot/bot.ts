@@ -28,6 +28,8 @@ import {
   TSetMyCommandsInput,
   TSetMySkillsInput,
   TForwardMessageInput,
+  TForwardMessagesInput,
+  TForwardMessagesResult,
   TPinMessageInput,
   TGetChatParticipantInput,
   TGetChatParticipantCountInput,
@@ -45,7 +47,6 @@ import {
 import { handler as getMeHandler } from "@in/server/methods/getMe"
 import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
-import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
 import { deleteMessage as deleteMessageFn } from "@in/server/functions/messages.deleteMessage"
 import { addReaction as addReactionFn } from "@in/server/functions/messages.addReaction"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -54,7 +55,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { encodeBotEntities, type BotUserJson } from "./entities"
-import { encodeBotRichMessage, encodeBotRichMessageFromStored } from "./richContent"
+import { encodeBotRichMessageFromStored } from "./richContent"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
 import { botOperationHandlers } from "./operations"
@@ -68,6 +69,8 @@ import type {
   BotUser,
   CreateReplyThreadParams,
   CreateThreadParams,
+  ForwardMessagesParams,
+  GetChatHistoryParams,
   GetMessagesParams,
   SearchMessagesParams,
 } from "@inline-chat/bot-api-types"
@@ -414,36 +417,6 @@ const loadUsersByIds = async (userIds: number[]): Promise<Map<number, BotUserJso
   return map
 }
 
-const toBotMessageLiteFromProto = (
-  message: any,
-  botChat: BotChat,
-  usersById?: Map<number, BotUserJson>,
-): BotMessageReference => {
-  const messageId = typeof message.id === "bigint" ? Number(message.id) : Number(message.id)
-  const chatId = typeof message.chatId === "bigint" ? Number(message.chatId) : Number(message.chatId)
-  const fromId = typeof message.fromId === "bigint" ? Number(message.fromId) : Number(message.fromId)
-  const richMessage = encodeBotRichMessage({
-    text: message.message,
-    blockContent: message.blockContent,
-    entities: message.entities,
-    usersById,
-  })
-
-  return {
-    message_id: messageId,
-    peer_id: toBotPeerId(message.peerId),
-    chat_id: chatId,
-    peer: toBotPeer(message.peerId),
-    from_id: fromId,
-    from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
-    date: Number(message.date),
-    edit_date: message.editDate ? Number(message.editDate) : undefined,
-    text: message.message ?? undefined,
-    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
-    rich_message: richMessage,
-  }
-}
-
 const toBotMessageLiteFromDb = (
   message: any,
   inputPeer: InputPeer,
@@ -746,60 +719,7 @@ const botMethods = (authPlugin: any): any => {
     "/getChatHistory",
     async ({ query, store }: any) => {
       try {
-        const peerId = await makeInputPeerFromBotTarget(query, store.currentUserId)
-
-        const offsetMessageId = normalizeInputId(query.offset_message_id)
-        const limit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : undefined
-
-        const result = await getChatHistoryFn(
-          {
-            peerId,
-            offsetId: offsetMessageId ? BigInt(offsetMessageId) : undefined,
-            limit,
-          },
-          ctxFromStore(store),
-        )
-
-        const chatResult = await getChatFn({ peerId }, ctxFromStore(store))
-        const chatId = Number(chatResult.chat.id)
-        const botChat = toBotChat(chatResult.chat)
-
-        const replyIds = result.messages
-          .map((m) => (m.replyToMsgId !== undefined ? Number(m.replyToMsgId) : undefined))
-          .filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
-
-        const replyRows = await MessageModel.getMessagesByIds(
-          chatId,
-          Array.from(new Set(replyIds)).map((id) => BigInt(id)),
-        )
-        const replyById = new Map<number, any>(replyRows.map((m) => [Number(m.messageId), m]))
-
-        const mentionIds: number[] = []
-        const fromIds: number[] = []
-        for (const m of result.messages) {
-          mentionIds.push(...mentionUserIdsFromEntities(m.entities))
-          fromIds.push(typeof m.fromId === "bigint" ? Number(m.fromId) : Number(m.fromId))
-          const rid = m.replyToMsgId !== undefined ? Number(m.replyToMsgId) : undefined
-          if (rid) {
-            const reply = replyById.get(rid)
-            if (reply) {
-              mentionIds.push(...mentionUserIdsFromEntities(reply.entities))
-              fromIds.push(Number(reply.fromId))
-            }
-          }
-        }
-        const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
-
-        const messages = result.messages.map((m) => {
-          const base = toBotMessageLiteFromProto(m, botChat, usersById)
-          const rid = m.replyToMsgId !== undefined ? Number(m.replyToMsgId) : undefined
-          const reply = rid ? replyById.get(rid) : undefined
-          return {
-            ...base,
-            reply_to_message: reply ? toBotMessageLiteFromDb(reply, peerId, botChat, usersById) : undefined,
-          }
-        })
-        return { ok: true, result: { messages } }
+        return { ok: true, result: await botOperationHandlers.getChatHistory(query as GetChatHistoryParams, ctxFromStore(store)) }
       } catch (error) {
         throwInlineFromUnknown(error)
       }
@@ -1110,6 +1030,11 @@ const botMethods = (authPlugin: any): any => {
     ok: true,
     result: await botOperationHandlers.forwardMessage(mergePostInput(body, query) as any, ctxFromStore(store)),
   }), { detail: jsonBodyDoc(TForwardMessageInput), response: TApiEnvelope(t.Object({ message: TBotMessage })) })
+
+  app.post("/forwardMessages", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.forwardMessages(mergePostInput(body, query) as ForwardMessagesParams, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TForwardMessagesInput), response: TApiEnvelope(TForwardMessagesResult) })
 
   app.post("/pinMessage", async ({ body, query, store }: any) => ({
     ok: true,

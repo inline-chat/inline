@@ -42,6 +42,8 @@ import {
   getEffectiveChatAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
 
+import { initializeInvitedDialogs } from "@in/server/modules/dialogInvitations"
+
 type AddChatParticipantOutput = {
   participant?: ChatParticipant
   groupParticipant?: ChatParticipantGroup
@@ -78,8 +80,9 @@ export async function addChatParticipant(
       accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      // Check if chat exists
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      // Membership writers still serialize with each other; leave dialog
+      // readers' KEY SHARE compatible while recipient user owners are acquired.
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
@@ -135,6 +138,8 @@ export async function addChatParticipant(
       if (!newParticipant) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat participant", 500)
       }
+
+      await initializeInvitedDialogs(tx, { chat, userIds: [userId] })
 
       const participantForUpdate: ChatParticipant = {
         userId: BigInt(newParticipant.userId),
@@ -259,7 +264,7 @@ async function addChatParticipantGroup(
       accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)

@@ -1,0 +1,1 @@
+ALTER TABLE "chat_id_reservation" ADD COLUMN "resolved_chat_id" integer;

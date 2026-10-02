@@ -1,7 +1,8 @@
 import { db } from "@in/server/db"
 import { Optional, Type, type Static } from "@sinclair/typebox"
 import { encodeDialogInfo, TDialogInfo } from "@in/server/api-types"
-import { dialogs } from "../db/schema"
+import { chats, dialogs, users } from "../db/schema"
+import { getChatFromPeer } from "@in/server/db/models/chats"
 import { TInputId } from "../types/methods"
 import { InlineError } from "../types/errors"
 import { and, eq, or, sql } from "drizzle-orm"
@@ -17,8 +18,9 @@ import {
   isLinkedSubthread,
   promoteLinkedSubthreadDialogsToChatList,
 } from "@in/server/modules/subthreads"
-import { dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
+import { dialogOpenDefaultsForChat, dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 
 const TDialogOrder = Type.String({ minLength: 1, maxLength: 128, pattern: "^[0-9A-Za-z]+$" })
 
@@ -78,12 +80,23 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
 
+  const chat = await getChatFromPeer(peerId, { currentUserId })
+
   let previousArchived: boolean | null | undefined
   let shouldPublishArchiveUpdate = false
   let shouldPromoteToChatList = false
 
   let dialog = await db.transaction(async (tx) => {
-    const [existingDialog] = await tx
+    // Conditional draft cleanup owns the same user before DELETE upgrades its
+    // chat lock. Do not hold KEY SHARE while waiting for that user's ownership.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, currentUserId)).for("no key update").limit(1)
+    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("key share").limit(1)
+    if (!lockedChat) throw new InlineError(InlineError.ApiError.PEER_INVALID)
+    const access = await getEffectiveChatAccessUserIds(tx, [lockedChat.id], { userIds: [currentUserId] })
+    if (!access.get(lockedChat.id)?.has(currentUserId)) {
+      throw new InlineError(InlineError.ApiError.PEER_INVALID)
+    }
+    let [existingDialog] = await tx
       .select({
         archived: dialogs.archived,
         chatListHidden: dialogs.chatListHidden,
@@ -97,7 +110,25 @@ export const handler = async (
       .limit(1)
 
     if (!existingDialog) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      // Access exists independently of personal workbench state. Empty invited
+      // chats and inherited children can be archived before first navigation.
+      ;[existingDialog] = await tx
+        .insert(dialogs)
+        .values({
+          chatId: lockedChat.id,
+          userId: currentUserId,
+          peerUserId:
+            lockedChat.type === "private"
+              ? lockedChat.minUserId === currentUserId
+                ? lockedChat.maxUserId
+                : lockedChat.minUserId
+              : null,
+          spaceId: lockedChat.spaceId,
+          ...dialogOpenDefaultsForChat(lockedChat),
+          ...(isLinkedSubthread(lockedChat) ? { chatListHidden: true } : {}),
+        })
+        .returning()
+      if (!existingDialog) throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
     previousArchived = existingDialog.archived

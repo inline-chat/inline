@@ -27,6 +27,7 @@ import {
   agentSessions,
   blockContents,
   messages,
+  messageSubmissions,
   type DbBlockContent,
   type DbChat,
   type DbMessage,
@@ -320,7 +321,7 @@ function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
   return "latest"
 }
 
-async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Map<bigint, DbInputFullAttachment[]>> {
+async function getAttachmentsByMessageGlobalIds(globalIds: bigint[], transaction?: Transaction): Promise<Map<bigint, DbInputFullAttachment[]>> {
   const ids = Array.from(new Set(globalIds))
   const byMessageId = new Map<bigint, DbInputFullAttachment[]>()
 
@@ -328,7 +329,7 @@ async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Ma
     return byMessageId
   }
 
-  const attachments = await db._query.messageAttachments.findMany({
+  const attachments = await (transaction ?? db)._query.messageAttachments.findMany({
     where: inArray(messageAttachments.messageId, ids),
     orderBy: asc(messageAttachments.id),
     with: messageAttachmentRelations,
@@ -351,8 +352,8 @@ async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Ma
   return byMessageId
 }
 
-async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
-  const attachmentsByMessageId = await getAttachmentsByMessageGlobalIds(messagesList.map((message) => message.globalId))
+async function addMessageAttachments(messagesList: DbInputFullMessage[], transaction?: Transaction): Promise<DbInputFullMessage[]> {
+  const attachmentsByMessageId = await getAttachmentsByMessageGlobalIds(messagesList.map((message) => message.globalId), transaction)
 
   return messagesList.map((message) => ({
     ...message,
@@ -360,11 +361,11 @@ async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promis
   }))
 }
 
-async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
+async function addAgentSessionInfo(messagesList: DbInputFullMessage[], transaction?: Transaction): Promise<DbInputFullMessage[]> {
   const globalIds = Array.from(new Set(messagesList.map((message) => message.globalId)))
   if (globalIds.length === 0) return messagesList
 
-  const rows = await db
+  const rows = await (transaction ?? db)
     .select({
       messageGlobalId: agentSessionMessages.messageGlobalId,
       agentSessionId: agentSessionMessages.agentSessionId,
@@ -400,8 +401,8 @@ async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<
   }))
 }
 
-async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFullMessage[]> {
-  const hydrated = await addAgentSessionInfo(await addMessageAttachments(messagesList))
+async function processMessages(messagesList: DbInputFullMessage[], transaction?: Transaction): Promise<DbFullMessage[]> {
+  const hydrated = await addAgentSessionInfo(await addMessageAttachments(messagesList, transaction), transaction)
   const processed = hydrated.map(processMessage)
   const readyPhotoIdsByMessage = processed.map((message) =>
     message.blockContent ? collectReadyBlockPhotoIds(message.blockContent) : []
@@ -409,7 +410,7 @@ async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFu
   const readyPhotoIds = readyPhotoIdsByMessage.flat()
   if (readyPhotoIds.length === 0) return processed
 
-  const photos = await FileModel.getPhotosByIds(readyPhotoIds)
+  const photos = await FileModel.getPhotosByIds(readyPhotoIds, transaction)
   if (photos.length === 0) return processed
 
   const photosById = new Map(photos.map((photo) => [BigInt(photo.id), photo]))
@@ -700,6 +701,7 @@ async function insertMessage(
   preparedBlockContent?: PreparedBlockContent,
   transaction?: Transaction,
   initialAgentContext?: { value: AgentThreadContext; encoded: Uint8Array },
+  submission?: { intentHash: Buffer; sourceRevision?: number },
 ): Promise<InsertMessageOutput> {
   const chatId = message.chatId
 
@@ -781,6 +783,17 @@ async function insertMessage(
       throw ModelError.Failed
     }
 
+    if (message.randomId !== undefined && message.randomId !== null && submission) {
+      await tx.insert(messageSubmissions).values({
+        fromId: message.fromId,
+        randomId: message.randomId,
+        intentHash: Encryption2.encrypt(submission.intentHash),
+        chatId,
+        messageId: nextId,
+        sourceRevision: submission.sourceRevision ?? null,
+      })
+    }
+
     // Insert update
     const update = await UpdatesModel.insertUpdate(tx, {
       update: {
@@ -853,6 +866,7 @@ async function insertMessage(
 async function deleteMessages(
   messageIds: bigint[],
   chatId: number,
+  transaction?: Transaction,
 ): Promise<{
   update: UpdateSeqAndDate
   metadataChatUpdates: ChatMetadataUpdate[]
@@ -860,7 +874,7 @@ async function deleteMessages(
   log.trace("deleteMessages", { messageIds, chatId })
 
   // Use a transaction with FOR UPDATE to lock the row while we're working with it
-  let { update, metadataChatUpdates } = await db.transaction(async (tx) => {
+  const remove = async (tx: Transaction) => {
     let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
 
     if (!chat) throw ModelError.ChatInvalid
@@ -929,9 +943,9 @@ async function deleteMessages(
     const metadataChatUpdates = await persistChatMetadataUpdates(tx, orphanedChatIds)
 
     return { update, metadataChatUpdates }
-  })
+  }
 
-  return { update, metadataChatUpdates }
+  return transaction ? remove(transaction) : db.transaction(remove)
 }
 
 async function orphanReplyThreadsForDeletedMessages(
@@ -1141,8 +1155,8 @@ async function getMessageByRandomId(randomId: bigint, fromId: number): Promise<D
   return result[0]!
 }
 
-async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
-  let result = await db._query.messages.findFirst({
+async function getMessage(messageId: number, chatId: number, transaction?: Transaction): Promise<DbFullMessage> {
+  let result = await (transaction ?? db)._query.messages.findFirst({
     where: and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)),
     with: fullMessageRelations,
   })
@@ -1151,7 +1165,7 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
     throw ModelError.MessageInvalid
   }
 
-  const [message] = await processMessages([result])
+  const [message] = await processMessages([result], transaction)
   return message!
 }
 
