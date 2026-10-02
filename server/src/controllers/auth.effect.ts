@@ -82,6 +82,7 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   OAuthEndpoints.oauthRevoke,
   OAuthEndpoints.oauthRevokeAlias,
   OAuthEndpoints.oauthIntrospect,
+  OAuthEndpoints.oauthMcpEvents,
 )
 
 export const makeAuthRouteGroup = () => {
@@ -378,6 +379,7 @@ export const makeAuthRouteGroup = () => {
             ),
           ),
         )
+        .handleRaw("oauthMcpEvents", ({ request }) => execute(executeOAuth("mcpEvents", request)))
       }),
   )
 

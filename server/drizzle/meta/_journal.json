@@ -1072,6 +1072,13 @@
       "when": 1790392618081,
       "tag": "0152_recent-realtime-buckets",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1790951215908,
+      "tag": "0153_mcp-events",
+      "breakpoints": true
     }
   ]
 }

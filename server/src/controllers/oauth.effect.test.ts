@@ -911,6 +911,7 @@ describe("Effect OAuth routes", () => {
       "/oauth/authorize/verify-email-code",
       "/oauth/authorize/verify-sms-code",
       "/oauth/introspect",
+      "/oauth/mcp-events",
       "/oauth/register",
       "/oauth/revoke",
       "/oauth/token",

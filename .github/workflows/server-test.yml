@@ -263,6 +263,13 @@ jobs:
           git diff --exit-code
           test -z "$(git status --porcelain)"
 
+      - name: Build paired MCP integration artifact
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/sdk build
+          bun run --cwd packages/mcp build
+
       - name: Run linter
         run: cd server && bun lint
 

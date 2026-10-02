@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const { createApp } = await import(path.join(root, "packages/mcp/dist/index.js"))
 const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatgpt-app-submission.json"), "utf8"))
 const uiUri = "ui://inline/message-results-v1.html"
+const threadUiUri = "ui://inline/thread-v1.html"
 const scenarios = []
 
 // Use compiled tool handlers and their packaged HTML together. Domain fixtures
@@ -102,6 +103,7 @@ let active = true
 let scope = "messages:read spaces:read"
 let appServer
 let upstreamRequests = 0
+const eventRequests = []
 const upstream = Bun.serve({
   hostname: "127.0.0.1", port: 0,
   fetch: () => {
@@ -112,12 +114,29 @@ const upstream = Bun.serve({
 const introspection = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
-  fetch: () => Response.json({
+  fetch: async (request) => {
+    if (new URL(request.url).pathname === "/oauth/mcp-events") {
+      assert.equal(request.headers.get("x-inline-mcp-secret"), "synthetic-ci-secret")
+      const body = await request.json()
+      assert.equal(body.token, "mcp_at_chatgpt_ci")
+      assert.deepEqual(Object.keys(body).sort(), ["method", "params", "token"])
+      assert.ok(!("_meta" in body.params), "protocol metadata must stop at the MCP proxy")
+      eventRequests.push(body)
+      if (body.method === "events/list") return Response.json({ events: [{
+        name: "message.created", delivery: ["webhook"],
+        inputSchema: { type: "object", properties: { chatId: { type: "string" } }, required: ["chatId"] },
+      }] })
+      if (body.method === "events/subscribe") return Response.json({ id: "ci-subscription", cursor: "ci-cursor", truncated: false, refreshBefore: new Date(Date.now() + 300_000).toISOString() })
+      if (body.method === "events/unsubscribe") return Response.json({})
+      throw new Error("Unexpected compiled-smoke internal event method")
+    }
+    return Response.json({
     active, grant_id: "chatgpt-ci-grant", client_id: "chatgpt-ci-client", scope,
     aud: "http://127.0.0.1:8791", exp: Math.floor(Date.now() / 1000) + 3600,
     inline_user_id: "1", space_ids: [], allow_dms: false, allow_home_threads: false,
     inline_token: "1:synthetic-ci-token",
-  }),
+    })
+  },
 })
 
 try {
@@ -125,7 +144,7 @@ try {
     issuer: "http://127.0.0.1:8791",
     inlineApiBaseUrl: `http://127.0.0.1:${upstream.port}`,
     oauthIssuer: "http://127.0.0.1:8791",
-    oauthProxyBaseUrl: "http://127.0.0.1:8791",
+    oauthProxyBaseUrl: `http://127.0.0.1:${introspection.port}`,
     oauthIntrospectionUrl: `http://127.0.0.1:${introspection.port}/introspect`,
     oauthInternalSharedSecret: "synthetic-ci-secret",
   })
@@ -203,6 +222,18 @@ try {
   assert.deepEqual(Object.keys(submission.tools).sort(), tools.map((tool) => tool.name).sort(), "submission tool inventory must match compiled server")
   scenarios.push("submission-annotations-match-compiled-tools")
 
+  const open = tools.find((tool) => tool.name === "conversations.open")
+  const ask = tools.find((tool) => tool.name === "conversations.ask")
+  assert.equal(open?._meta?.ui?.resourceUri, threadUiUri)
+  assert.deepEqual(open?._meta?.["openai/ui"]?.entrypoints, [{ type: "thread" }, { type: "global" }])
+  assert.equal(ask?._meta?.ui?.resourceUri, threadUiUri)
+  assert.equal(ask?.annotations.idempotentHint, false)
+  const emptyPicker = await success("tools/call", { name: "conversations.open", arguments: {} })
+  assert.equal(emptyPicker.structuredContent.chat, null)
+  assert.deepEqual(emptyPicker.structuredContent.messages, [])
+  assert.equal(emptyPicker.structuredContent.capabilities.canSend, false)
+  scenarios.push("minimal-thread-entrypoints-open-without-workspace-catalog")
+
   const { resourceTemplates } = await success("resources/templates/list")
   assert.ok(resourceTemplates.some((resource) => resource.uriTemplate === "inline://chat/{chatId}"))
   const { contents } = await success("resources/read", { uri: uiUri })
@@ -216,6 +247,54 @@ try {
   assert.deepEqual(csp?.connectDomains, [], "passive cards must not request network connections")
   assert.deepEqual(csp?.resourceDomains, ["https://api.inline.chat"], "only Inline profile images may load remotely")
   scenarios.push("compiled-ui-resource-served-with-passive-csp")
+
+  const thread = await success("resources/read", { uri: threadUiUri })
+  assert.equal(thread.contents[0].mimeType, "text/html;profile=mcp-app")
+  assert.match(thread.contents[0].text, /ui\/initialize/)
+  assert.match(thread.contents[0].text, /conversations\.open/)
+  assert.match(thread.contents[0].text, /messages\.send/)
+  assert.deepEqual(thread.contents[0]._meta.ui.csp.connectDomains, [])
+  assert.deepEqual(thread.contents[0]._meta.ui.csp.resourceDomains, ["https://api.inline.chat"])
+  scenarios.push("compiled-react-thread-resource-and-exact-asset-csp")
+
+  const modernVersion = "2026-07-28"
+  const modernRequest = async (method, params = {}) => {
+    const id = ++requestId
+    const response = await fetch(endpoint, {
+      method: "POST", signal: AbortSignal.timeout(10_000),
+      headers: { ...headers, "mcp-protocol-version": modernVersion, "mcp-method": method,
+        // A cached legacy session must never select the legacy lane.
+        "mcp-session-id": session,
+        ...(method === "tools/call" ? { "mcp-name": params.name } : {}),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": modernVersion,
+        "io.modelcontextprotocol/clientCapabilities": {},
+      } } }),
+    })
+    assert.equal(response.status, 200, `${method} modern HTTP status`)
+    assert.equal(response.headers.get("mcp-session-id"), null)
+    const message = await response.json()
+    assert.equal(message.id, id)
+    assert.equal(message.result?.resultType, "complete")
+    assert.ok(!message.error && !message.result.isError, `${method} modern result`)
+    return message.result
+  }
+  const discovered = await modernRequest("server/discover")
+  assert.deepEqual(discovered.capabilities.events, {})
+  assert.ok(discovered.supportedVersions.includes(modernVersion))
+  const listedEvents = await modernRequest("events/list")
+  assert.equal(listedEvents.events[0].name, "message.created")
+  const selector = { name: "message.created", arguments: { chatId: "7", excludeSelf: true } }
+  const delivery = { mode: "webhook", url: "https://callbacks.example.com/inline", secret: "whsec_Y2ktdGVzdC1zaWduaW5nLWtleS13aXRoLWVub3VnaC1ieXRlcw==" }
+  const subscribed = await modernRequest("events/subscribe", { ...selector, delivery, cursor: "ci-cursor", ttlMs: 300_000 })
+  assert.equal(subscribed.id, "ci-subscription")
+  assert.equal(subscribed.truncated, false)
+  await modernRequest("events/unsubscribe", { ...selector, delivery: { mode: delivery.mode, url: delivery.url } })
+  assert.deepEqual(eventRequests.map((value) => value.method), ["events/list", "events/subscribe", "events/unsubscribe"])
+  assert.deepEqual(eventRequests[1].params.arguments, selector.arguments)
+  assert.equal((await modernRequest("tools/call", { name: "conversations.open", arguments: {} })).structuredContent.chat, null)
+  scenarios.push("modern-discovery-events-and-ui-preserve-legacy-session-compatibility")
 
   // Scope-denial paths must fail before any request to the Inline server.
   scope = "spaces:read"
@@ -231,6 +310,12 @@ try {
     assert.ok(!result.message?.result?.contents, "denial must not expose snapshot content")
   }
   scenarios.push("mention-search-and-direct-resource-require-read-scope")
+  scope = "messages:read spaces:read"
+  const deniedAsk = await request("tools/call", { name: "conversations.ask", arguments: { title: "CI consultation", question: "Approved fixture question", participantUserIds: ["2"] } })
+  assert.ok(deniedAsk.message?.result?.isError)
+  assert.match(JSON.stringify(deniedAsk.message), /messages:write/)
+  assert.equal(eventRequests.length, 3, "write denial must precede Events preflight")
+  scenarios.push("consultation-write-scope-denied-before-side-effects")
   active = false
   assert.equal((await request("resources/read", { uri: uiUri })).status, 401)
   scenarios.push("revoked-grant-denies-existing-session")

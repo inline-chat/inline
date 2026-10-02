@@ -12,6 +12,8 @@ const ENV_KEYS = [
   "MCP_INTERNAL_SHARED_SECRET",
   "MCP_RATE_LIMIT_MCP_INIT_MAX",
   "MCP_RATE_LIMIT_MCP_INIT_WINDOW_MS",
+  "MCP_RATE_LIMIT_MCP_REQUEST_MAX",
+  "MCP_RATE_LIMIT_MCP_REQUEST_WINDOW_MS",
 ] as const
 
 const ORIGINAL_ENV = new Map<string, string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]))
@@ -45,6 +47,7 @@ describe("defaultConfig", () => {
     expect(config.allowedHosts).toEqual(["mcp.inline.chat"])
     expect(config.allowedOriginHosts).toEqual(["mcp.inline.chat", "chatgpt.com", "chat.openai.com", "claude.ai"])
     expect(config.endpointRateLimits.mcpInitialize.max).toBe(30)
+    expect(config.endpointRateLimits.mcpRequest).toEqual({ max: 180, windowMs: 60_000 })
   })
 
   it("uses fixed production endpoints and allowlists", () => {
@@ -93,6 +96,15 @@ describe("defaultConfig", () => {
     const config = defaultConfig()
     expect(config.endpointRateLimits.mcpInitialize.max).toBe(30)
     expect(config.endpointRateLimits.mcpInitialize.windowMs).toBe(60_000)
+  })
+
+  it("configures modern stateless request limits separately from initialize", () => {
+    clearManagedEnv()
+    process.env.MCP_RATE_LIMIT_MCP_REQUEST_MAX = "240"
+    process.env.MCP_RATE_LIMIT_MCP_REQUEST_WINDOW_MS = "30000"
+    const config = defaultConfig()
+    expect(config.endpointRateLimits.mcpRequest).toEqual({ max: 240, windowMs: 30_000 })
+    expect(config.endpointRateLimits.mcpInitialize).toEqual({ max: 30, windowMs: 60_000 })
   })
 
   it("defaults secret to null", () => {

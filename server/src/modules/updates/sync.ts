@@ -14,6 +14,7 @@ import type {
 } from "@inline-chat/protocol/core"
 import { SyncSkippedSequence_Reason } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
@@ -102,7 +103,7 @@ type GetUpdatesOutput = {
 }
 
 // Get a list of updates from the database
-async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
+async function getUpdates(input: GetUpdatesInput, transaction?: Transaction): Promise<GetUpdatesOutput> {
   const { bucket, seqStart, seqEnd } = input
   const entityId = getEntityId(bucket)
 
@@ -118,47 +119,47 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
     seqEnd !== undefined ? lte(updatesTable.seq, seqEnd) : undefined,
   )
 
-  return db.transaction(
-    async (tx) => {
-      const list = await tx
-        .select()
-        .from(updatesTable)
-        .where(pageWhere)
-        .orderBy(asc(updatesTable.seq))
-        .limit(input.limit)
+  // Callers supplying a transaction must provide a repeatable-read snapshot.
+  // Reuse that connection rather than acquiring a nested pool slot under locks.
+  const read = async (tx: Transaction) => {
+    const list = await tx
+      .select()
+      .from(updatesTable)
+      .where(pageWhere)
+      .orderBy(asc(updatesTable.seq))
+      .limit(input.limit)
 
-      const [latest] = await tx
-        .select()
-        .from(updatesTable)
-        .where(latestWhere)
-        .orderBy(desc(updatesTable.seq))
-        .limit(1)
+    const [latest] = await tx
+      .select()
+      .from(updatesTable)
+      .where(latestWhere)
+      .orderBy(desc(updatesTable.seq))
+      .limit(1)
 
-      // Retention can remove every journal row. The owning entity is the
-      // durable tail, read in the same snapshot as the page, not the journal.
-      const entityTable = bucket.type === UpdateBucket.Chat
-        ? chats
-        : bucket.type === UpdateBucket.Space ? spaces : usersTable
-      const [entity] = await tx
-        .select({ seq: entityTable.updateSeq, date: entityTable.lastUpdateDate })
-        .from(entityTable)
-        .where(eq(entityTable.id, entityId))
-        .limit(1)
-      const entitySeq = entity?.seq ?? 0
-      const boundedEntitySeq = seqEnd === undefined ? entitySeq : Math.min(entitySeq, seqEnd)
-      const latestSeq = Math.max(latest?.seq ?? 0, boundedEntitySeq, seqStart)
-      const latestDate = latest?.seq === latestSeq
-        ? latest.date
-        : entitySeq === latestSeq ? entity?.date ?? null : null
+    // Retention can remove every journal row. The owning entity is the
+    // durable tail, read in the same snapshot as the page, not the journal.
+    const entityTable = bucket.type === UpdateBucket.Chat
+      ? chats
+      : bucket.type === UpdateBucket.Space ? spaces : usersTable
+    const [entity] = await tx
+      .select({ seq: entityTable.updateSeq, date: entityTable.lastUpdateDate })
+      .from(entityTable)
+      .where(eq(entityTable.id, entityId))
+      .limit(1)
+    const entitySeq = entity?.seq ?? 0
+    const boundedEntitySeq = seqEnd === undefined ? entitySeq : Math.min(entitySeq, seqEnd)
+    const latestSeq = Math.max(latest?.seq ?? 0, boundedEntitySeq, seqStart)
+    const latestDate = latest?.seq === latestSeq
+      ? latest.date
+      : entitySeq === latestSeq ? entity?.date ?? null : null
 
-      return {
-        updates: list,
-        latestSeq,
-        latestDate,
-      }
-    },
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  )
+    return {
+      updates: list,
+      latestSeq,
+      latestDate,
+    }
+  }
+  return transaction ? read(transaction) : db.transaction(read, { isolationLevel: "repeatable read", accessMode: "read only" })
 }
 
 const getEntityId = (bucket: UpdateBoxInput): number => {

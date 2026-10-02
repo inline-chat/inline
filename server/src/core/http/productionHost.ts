@@ -25,6 +25,7 @@ import {
 import {
   BotWebhookDeliveryProcess,
 } from "../../modules/botUpdates/delivery.effect"
+import { McpEventsProcess } from "../../modules/mcpEvents/worker.effect"
 import {
   BlockContentImageProcess,
 } from "../../modules/message/blockContentImageWorker.effect"
@@ -441,16 +442,17 @@ export const startCoreProductionServer = async <
   const producerStopFailures: unknown[] = []
   const stopBackgroundProducers = (): Promise<void> => producerStopPromise ??= (async () => {
     if (!startBackgroundProcesses) return
-    // Stop all six producers before any application/hint drain. Disposing the
+    // Stop all producers before any application/hint drain. Disposing the
     // runtime first would also close the database those drains still require.
     const result = await bridge.runPromiseExit(Effect.all([
       BotWebhookDeliveryProcess.use((process) => process.stop).pipe(Effect.exit),
+      McpEventsProcess.use((process) => process.stop).pipe(Effect.exit),
       BlockContentImageProcess.use((process) => process.stop).pipe(Effect.exit),
       NativeUploadProcess.use((process) => process.stop).pipe(Effect.exit),
       GridProviderEffectsProcess.use((process) => process.stop).pipe(Effect.exit),
       DatabaseHealthMonitorProcess.use((process) => process.stop).pipe(Effect.exit),
       UserSettingsCleanupProcess.use((process) => process.stop).pipe(Effect.exit),
-    ], { concurrency: 6 }))
+    ], { concurrency: 7 }))
     if (Exit.isFailure(result)) producerStopFailures.push(result.cause)
     else for (const stopped of result.value) {
       if (Exit.isFailure(stopped)) producerStopFailures.push(stopped.cause)
@@ -626,6 +628,7 @@ export const startCoreProductionServer = async <
               BotWebhookDeliveryProcess.use(
                 (process) => process.start,
               ),
+              McpEventsProcess.use((process) => process.start),
               BlockContentImageProcess.use(
                 (process) => process.start,
               ),

@@ -23,6 +23,8 @@ import type {
 import { logMessagesSendAudit } from "./audit-log"
 import { MESSAGE_RESULTS_RESOURCE_URI, registerMessageResultsUi } from "./message-results-ui"
 import { registerConversationMentions } from "./conversation-mentions"
+import type { EventsProxy } from "./events-proxy"
+import { THREAD_RESOURCE_URI, registerThreadUi } from "./thread-ui"
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 const MAX_UPLOAD_REDIRECTS = 3
@@ -31,7 +33,7 @@ const UPLOAD_FETCH_TIMEOUT_MS = 15_000
 const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
-const INLINE_MCP_INSTRUCTIONS =
+export const INLINE_MCP_INSTRUCTIONS =
   "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.list/search/context/unread; send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
 
 const INLINE_MARKDOWN_HELP =
@@ -51,6 +53,12 @@ type SendMode = "normal" | "silent"
 type ConversationSort = "relevance" | "recent" | "unread"
 
 export type McpToolContract = "legacy" | "submission-v2"
+
+export function inlineMcpInstructions(contractVersion: McpToolContract): string {
+  return INLINE_MCP_INSTRUCTIONS + (contractVersion === "submission-v2"
+    ? " For teammate input, use conversations.ask after resolving the people and context. It creates a private thread, sends one question and returns a message.created subscription selector and replay cursor. Subscribe using events/subscribe from that cursor before waiting; monitoring starts only after subscription acknowledgement. On an event, read current message context and continue the originating task. Never repeat an uncertain write automatically. conversations.open opens the minimal Inline thread UI; its picker only remembers threads explicitly opened in this ChatGPT experience."
+    : "")
+}
 
 // Keep the deployed /mcp descriptors and behavior intact for cached or hand-written clients.
 // /mcp/v2 selects the explicit branches below so submission scanners never see legacy ambiguity.
@@ -1493,6 +1501,27 @@ const conversationCreatedOutputSchema = z.object({
   chat: chatMetadataOutputSchema,
 })
 
+const conversationOpenOutputSchema = conversationGetOutputSchema.extend({
+  chat: chatMetadataOutputSchema.nullable(),
+  details: conversationGetOutputSchema.shape.details.nullable(),
+  messages: z.array(messageOutputSchema).max(50),
+  nextOffsetId: z.string().nullable(),
+  capabilities: z.object({ canSend: z.boolean() }),
+  monitoring: z.object({ active: z.boolean(), expiresAt: z.string().optional() }).optional(),
+})
+
+const conversationAskOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  questionStatus: z.enum(["sent", "not_sent", "unknown"]),
+  messageId: z.string().nullable(),
+  event: z.object({
+    name: z.literal("message.created"),
+    arguments: z.object({ chatId: z.string(), excludeSelf: z.literal(true) }),
+    cursor: z.string(),
+  }).nullable(),
+  nextStep: z.string(),
+})
+
 const fileUploadOutputSchema = z.object({
   ok: z.boolean(),
   source: z.enum(["base64", "url"]),
@@ -1695,6 +1724,7 @@ export function createInlineMcpServer(params: {
   inline: InlineApi
   resourceMetadataUrl?: string
   contractVersion?: McpToolContract
+  events?: (auth: AuthInfo) => EventsProxy
 }): McpServer {
   const resourceMetadataUrl = params.resourceMetadataUrl ?? DEFAULT_RESOURCE_METADATA_URL
   const contractVersion = params.contractVersion ?? "legacy"
@@ -1702,7 +1732,7 @@ export function createInlineMcpServer(params: {
   const server = new McpServer(
     {
       name: "inline",
-      version: submissionV2 ? "0.2.0" : "0.1.0",
+      version: submissionV2 ? "0.3.0" : "0.1.0",
       title: "Inline",
       description: "Scoped access to Inline work chats for thread-first agents.",
       websiteUrl: "https://inline.chat",
@@ -1711,7 +1741,7 @@ export function createInlineMcpServer(params: {
       capabilities: {
         tools: { listChanged: false },
       },
-      instructions: INLINE_MCP_INSTRUCTIONS,
+      instructions: inlineMcpInstructions(contractVersion),
     },
   )
 
@@ -1766,6 +1796,114 @@ export function createInlineMcpServer(params: {
   )
 
   registerMessageResultsUi(server)
+
+  if (submissionV2) {
+    registerThreadUi(server)
+    registerInlineTool(server, resourceMetadataUrl, "conversations.open", {
+      title: "Inline Threads",
+      description: "Open one resolved Inline thread with recent history, direct participants and a composer. Omit chatId to open the minimal picker of threads already viewed in this ChatGPT app; this does not list your workspace. Monitoring is reported only when the Events service confirms an active message subscription for this grant.",
+      inputSchema: { chatId: z.string().regex(/^[1-9]\d*$/).optional().describe("Resolved Inline chat ID; omit for the small thread picker") },
+      outputSchema: conversationOpenOutputSchema,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: {
+        ...toolMeta(["messages:read"], "Opening Inline thread...", "Inline thread opened"),
+        ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },
+        "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
+      },
+    }, async ({ chatId }: { chatId?: string }, extra) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+      const capabilities = { canSend: scopes.includes("messages:write") }
+      if (!chatId) {
+        const payload = { chat: null, details: null, participants: [], messages: [], nextOffsetId: null, capabilities }
+        return { structuredContent: payload, content: [jsonText(payload)] }
+      }
+      const target = { chatId: parseChatId(chatId) }
+      const details = await params.inline.getConversation(target)
+      const history = await params.inline.recentMessages({ ...target, limit: 50, freshChatAuthorization: true })
+      let monitoring: { active: boolean; expiresAt?: string } | undefined
+      if (auth && params.events) {
+        try {
+          const result = await params.events(auth).request("events/status", { chatId })
+          const subscriptions = Array.isArray(result.subscriptions) ? result.subscriptions : []
+          const expiries = subscriptions.flatMap((value: unknown) => {
+            if (!value || typeof value !== "object") return []
+            const entry = value as Record<string, unknown>
+            if (entry.name !== "message.created" || typeof entry.refreshBefore !== "string") return []
+            const expiresAt = Date.parse(entry.refreshBefore)
+            return Number.isFinite(expiresAt) && expiresAt > Date.now() ? [entry.refreshBefore] : []
+          }).sort()
+          monitoring = { active: expiries.length > 0, ...(expiries[0] ? { expiresAt: expiries[0] } : {}) }
+        } catch { /* Reading a thread stays useful if monitoring status is temporarily unavailable. */ }
+      }
+      const payload = {
+        ...conversationDetailsPayload(details),
+        messages: history.messages.map((message) => namedMessagePayload(message, history.senderDisplayNames)),
+        nextOffsetId: history.nextOffsetId?.toString() ?? null,
+        capabilities,
+        ...(monitoring ? { monitoring } : {}),
+      }
+      return { structuredContent: payload, content: [jsonText(payload)] }
+    })
+
+    registerInlineTool(server, resourceMetadataUrl, "conversations.ask", {
+      title: "Ask Inline Teammates",
+      description: "Create a private Inline thread containing you and the resolved participants, send one recipient-visible question, and return a replay cursor for waiting on their replies. Subscribe to the returned message.created event with events/subscribe, using its exact arguments and cursor; then wait and resume the originating task when a reply arrives. Creation and delivery are not idempotent: retain a confirmed chat ID and inspect any uncertain outcome before retrying. Monitoring is not active until the host acknowledges a subscription.",
+      inputSchema: {
+        title: z.string().trim().min(1).max(200),
+        question: z.string().trim().min(1).max(8000).describe(`Question delivered to the participants. ${INLINE_MARKDOWN_HELP}`),
+        participantUserIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(10).describe("Resolved teammate or existing Inline agent user IDs; the connected user is added automatically"),
+        spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Authorized parent space; omit for an authorized home thread"),
+      },
+      outputSchema: conversationAskOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      _meta: {
+        ...toolMeta(["messages:read", "messages:write"], "Asking Inline teammates...", "Inline question prepared"),
+        ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },
+      },
+    }, async (args: { title: string; question: string; participantUserIds: string[]; spaceId?: string }, extra) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+      requireScope(scopes, "messages:write")
+      if (!auth || !params.events) throw new Error("Inline Events is unavailable; the question was not sent.")
+      const participants = [...new Set(args.participantUserIds.map((id) => parseUserId(id)))].filter((id) => id !== params.grant.inlineUserId)
+      if (!participants.length) throw new Error("Choose at least one teammate other than yourself.")
+      const spaceId = args.spaceId ? parseInlineId(args.spaceId, "spaceId") : undefined
+      const events = params.events(auth)
+      await events.request("events/list", {}) // Confirm Events before creating anything.
+      let created: InlineEligibleChat
+      try {
+        created = await params.inline.createChat({ title: args.title, isPublic: false, participantUserIds: participants, ...(spaceId ? { spaceId } : {}) })
+      } catch {
+        throw new Error("Inline could not confirm thread creation. Inspect recent conversations before retrying; an uncertain write may already have created the thread.")
+      }
+      const chat = chatMetadata(created)
+      const selector = { chatId: created.chatId.toString(), excludeSelf: true as const }
+      const result = (questionStatus: "sent" | "not_sent" | "unknown", messageId: string | null,
+        event: { name: "message.created"; arguments: typeof selector; cursor: string } | null, nextStep: string): CallToolResult => {
+        const payload = { chat, questionStatus, messageId, event, nextStep }
+        return { ...(questionStatus === "sent" ? {} : { isError: true }), structuredContent: payload, content: [jsonText(payload)] }
+      }
+      let cursor: string
+      try {
+        const checkpoint = await events.request("events/cursor", { name: "message.created", arguments: selector })
+        if (typeof checkpoint.cursor !== "string" || !checkpoint.cursor) throw new Error("Missing event cursor")
+        cursor = checkpoint.cursor
+      } catch {
+        return result("not_sent", null, null, "The private thread exists, but the question was not sent. Reuse this chatId; activate a message.created subscription before using messages.send. Do not create another thread.")
+      }
+      const event = { name: "message.created" as const, arguments: selector, cursor }
+      try {
+        const receipt = await params.inline.sendMessage({ chatId: created.chatId, text: args.question, sendMode: "normal", parseMarkdown: true })
+        if (receipt.messageId === null) return result("unknown", null, event, "Thread creation is confirmed; question delivery has no message receipt. Inspect this thread before retrying. Subscribe from the returned cursor to recover any reply.")
+        return result("sent", receipt.messageId.toString(), event, "Subscribe to message.created using the returned arguments and cursor, then wait. On a teammate reply, read its current context and continue the originating task. Open this chatId with conversations.open to inspect or reply directly.")
+      } catch {
+        return result("unknown", null, event, "Thread creation is confirmed; question delivery is uncertain. Inspect this chat before retrying and do not recreate it. Subscribe from the returned cursor to recover any reply.")
+      }
+    })
+  }
 
   registerInlineTool(
     server,
@@ -2578,7 +2716,7 @@ export function createInlineMcpServer(params: {
       },
       _meta: {
         ...toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) },
       },
     },
     async (
@@ -2763,7 +2901,7 @@ export function createInlineMcpServer(params: {
       },
       _meta: {
         ...toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI },
+        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) },
       },
     },
     async (
@@ -2920,7 +3058,7 @@ export function createInlineMcpServer(params: {
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: toolMeta(["messages:write"], "Sending Inline message...", "Message sent"),
+      _meta: { ...toolMeta(["messages:write"], "Sending Inline message...", "Message sent"), ...(submissionV2 ? { ui: { visibility: ["model", "app"] } } : {}) },
     },
     async (
       {

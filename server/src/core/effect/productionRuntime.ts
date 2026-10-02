@@ -8,6 +8,7 @@ import {
 import {
   BotWebhookDeliveryProcessLive,
 } from "../../modules/botUpdates/delivery.effect"
+import { McpEventsProcessLive } from "../../modules/mcpEvents/worker.effect"
 import {
   GridProviderEffectsProcessLive,
 } from "../../modules/grid/providerEffects.effect"
@@ -44,6 +45,7 @@ const OwnedProcessServicesLive =
       Layer.mergeAll(
         BlockContentImageProcessLive,
         BotWebhookDeliveryProcessLive,
+        McpEventsProcessLive,
         DatabaseHealthMonitorProcessLive,
         GridProviderEffectsProcessLive,
         NativeUploadProcessLive,

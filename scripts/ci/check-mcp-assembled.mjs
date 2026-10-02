@@ -46,7 +46,7 @@ try {
   assert.match(initialized.headers.get("content-type") ?? "", /text\/event-stream/)
   const session = initialized.headers.get("mcp-session-id")
   assert.ok(session)
-  assert.match(await initialized.text(), /"version":"0\.2\.0"/)
+  assert.match(await initialized.text(), /"version":"0\.3\.0"/)
   const tools = await fetch(endpoint, {
     method: "POST", headers: { ...headers, "mcp-session-id": session }, signal: AbortSignal.timeout(10_000),
     body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),

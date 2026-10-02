@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Inline",
     "subtitle": "Work chats in ChatGPT",
-    "description": "Inline helps users find people and conversations, read and search scoped work chats, create threads, upload files, and send messages through ChatGPT.",
+    "description": "Inline helps users find people and conversations, read scoped work chats, ask teammates in private threads, monitor authorized events in supported hosts, inspect a focused thread UI, upload files, send messages.",
     "category": "COLLABORATION"
   },
   "tools": {
@@ -198,6 +198,30 @@
         "read_only_justification": "Searches metadata of approved conversations for the desktop composer picker without fetching message bodies or changing state.",
         "open_world_justification": "Returns scoped Inline resource links, without publishing content or contacting arbitrary external destinations.",
         "destructive_justification": "Does not send, edit, delete, or mark messages read. Selecting a result performs a separately authorized bounded resource read."
+      }
+    },
+    "conversations.open": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one resolved authorized thread and its subscription status, or opens an empty picker; does not mutate Inline.",
+        "open_world_justification": "Does not publish or write to third-party or public internet state.",
+        "destructive_justification": "Does not create, change, delete, or mark messages read."
+      }
+    },
+    "conversations.ask": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates a private thread and sends one recipient-visible question to the resolved participants.",
+        "open_world_justification": "Writes remain within the selected authorized Inline context; no third-party publication.",
+        "destructive_justification": "The recipient-visible question cannot be withdrawn through this tool. Uncertain creation or delivery must be inspected before retrying."
       }
     }
   },

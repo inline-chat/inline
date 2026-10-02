@@ -32,6 +32,7 @@ import {
   handleHostedLoginVerifyEmail,
   handleHostedLoginVerifySms,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
+import { handleMcpEvents } from "@in/server/modules/mcpEvents/service"
 import {
   OAuthHttpService,
 } from "./httpService.effect"
@@ -96,6 +97,7 @@ export const OAuthHttpServiceLive = Layer.effect(
           ),
         revoke: handleRevoke,
         introspect: handleIntrospect,
+        mcpEvents: handleMcpEvents,
         providerStart: (request, clientIp) =>
           handleProviderStart(request, clientIp, rateLimiter),
         providerNativeAppleStart: (body, clientIp) =>
