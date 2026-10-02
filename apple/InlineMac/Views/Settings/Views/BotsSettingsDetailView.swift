@@ -1195,7 +1195,7 @@ private struct ManagedBotIdentitySection: View {
       }
       HStack {
         Button("Edit Profile...", action: onEditProfile)
-        Button("Change Avatar...", action: onEditAvatar)
+        Button("Bot Avatar...", action: onEditAvatar)
       }
     }
   }

@@ -326,7 +326,6 @@ struct BotAvatarSettingsSheet: View {
 
   @StateObject private var viewModel = BotAvatarSettingsViewModel()
   @State private var currentBot: InlineProtocol.User
-  @State private var showImporter = false
 
   init(bot: InlineProtocol.User, onUpdated: @escaping (InlineProtocol.User) -> Void) {
     self.onUpdated = onUpdated
@@ -338,7 +337,7 @@ struct BotAvatarSettingsSheet: View {
       VStack(alignment: .leading, spacing: 6) {
         Text("Bot Avatar")
           .font(.title3.weight(.semibold))
-        Text("Supports Codex pets exported as .zip.")
+        Text("View or clear the current bot avatar.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -368,11 +367,6 @@ struct BotAvatarSettingsSheet: View {
       }
 
       HStack {
-        Button("Choose Zip...") {
-          showImporter = true
-        }
-        .disabled(viewModel.isSaving)
-
         Button("Clear") {
           Task {
             if let updated = await viewModel.clear(bot: currentBot, realtimeV2: realtimeV2) {
@@ -398,24 +392,6 @@ struct BotAvatarSettingsSheet: View {
     }
     .padding(20)
     .frame(width: 420)
-    .fileImporter(
-      isPresented: $showImporter,
-      allowedContentTypes: [.zip],
-      allowsMultipleSelection: false
-    ) { result in
-      switch result {
-        case let .success(urls):
-          guard let url = urls.first else { return }
-          Task {
-            if let updated = await viewModel.install(from: url, bot: currentBot, realtimeV2: realtimeV2) {
-              currentBot = updated
-              onUpdated(updated)
-            }
-          }
-        case let .failure(error):
-          viewModel.showImporterError(error)
-      }
-    }
     .interactiveDismissDisabled(viewModel.isSaving)
   }
 
