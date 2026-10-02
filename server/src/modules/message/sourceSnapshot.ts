@@ -16,7 +16,9 @@ export function messageSourceSnapshot(message: Message): string {
     entities: message.entities,
     blockContent: message.blockContent,
     media: message.media,
-    isSticker: message.isSticker,
+    // Live encoding omits false; full reads emit it. Bind the logical flag,
+    // preserving existing non-sticker tokens across those wire representations.
+    isSticker: message.isSticker === true ? true : undefined,
     fwdFrom: message.fwdFrom,
     // Only labels are carried; callback/copy payloads remain with the source.
     actions: message.actions ? { rows: message.actions.rows.map((row) => ({

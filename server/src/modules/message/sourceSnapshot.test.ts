@@ -1,8 +1,53 @@
 import { describe, expect, test } from "bun:test"
-import { Message } from "@inline-chat/protocol/core"
+import { Message, MessageEntity_Type } from "@inline-chat/protocol/core"
 import { messageSourceSnapshot } from "./sourceSnapshot"
 
 describe("public forwarding snapshot tokens", () => {
+  test("absent and false sticker flags have the same public snapshot across wire round trips", () => {
+    const ordinary = Message.create({ id: 1n, chatId: 10n, fromId: 5n, rev: 0n, message: "ordinary" })
+    const expected = messageSourceSnapshot(ordinary)
+    for (const isSticker of [undefined, false]) {
+      const variant = Message.create({ ...ordinary, isSticker })
+      const variants = [variant, Message.fromBinary(Message.toBinary(variant)), Message.fromJson(Message.toJson(variant))]
+      for (const roundTrip of variants) {
+        expect(roundTrip.isSticker).toBe(isSticker)
+        expect(messageSourceSnapshot(roundTrip)).toBe(expected)
+      }
+    }
+    const sticker = Message.create({ ...ordinary, isSticker: true })
+    for (const variant of [sticker, Message.fromBinary(Message.toBinary(sticker)), Message.fromJson(Message.toJson(sticker))]) {
+      expect(variant.isSticker).toBe(true)
+      expect(messageSourceSnapshot(variant)).not.toBe(expected)
+    }
+  })
+
+  test("ordinary read projections preserve the already-issued live mention token", () => {
+    const ordinary = Message.create({ id: 1n, chatId: 6n, fromId: 1000n, rev: 0n,
+      message: "@QA Chief For this authorized local QA test, reply with only chief-live-4826. Do not call tools.",
+      entities: { entities: [{ type: MessageEntity_Type.MENTION, offset: 0n, length: 9n,
+        entity: { oneofKind: "mention", mention: { userId: 1003n } },
+      }] },
+    })
+    const issuedLiveToken = "65485036e1bf41678e6ba55541cd0d25fb2e6f6a68ae7968b35a88066e4a8ac9"
+    expect(messageSourceSnapshot(ordinary)).toBe(issuedLiveToken)
+    expect(messageSourceSnapshot(Message.create({ ...ordinary, isSticker: false }))).toBe(issuedLiveToken)
+  })
+
+  test("canonical flag defaults still bind edit, forwarding and media changes", () => {
+    const ordinary = Message.create({ id: 1n, chatId: 10n, fromId: 5n, rev: 0n, message: "ordinary", isSticker: false })
+    const expected = messageSourceSnapshot(ordinary)
+    for (const changed of [
+      Message.create({ ...ordinary, rev: 1n }),
+      Message.create({ ...ordinary, message: "edited" }),
+      Message.create({ ...ordinary, fwdFrom: { fromId: 6n, fromMessageId: 2n,
+        fromPeerId: { type: { oneofKind: "chat", chat: { chatId: 20n } } },
+      } }),
+      Message.create({ ...ordinary, media: { media: { oneofKind: "nudge", nudge: {} } } }),
+    ]) {
+      expect(messageSourceSnapshot(changed)).not.toBe(expected)
+    }
+  })
+
   test("renewed delivery URLs and viewer decoration preserve the captured token", () => {
     const captured = Message.create({ id: 1n, chatId: 10n, fromId: 5n, rev: 0n, message: "image",
       media: { media: { oneofKind: "photo", photo: { photo: { id: 3n, date: 0n, format: 1, sizes: [{
@@ -21,6 +66,8 @@ describe("public forwarding snapshot tokens", () => {
     renewed.subthread!.messageCount = 99
     renewed.agentSession = { agentSessionId: 99n, provider: 1, role: 1, relation: 2 }
     expect(messageSourceSnapshot(renewed)).toBe(messageSourceSnapshot(captured))
+    const unavailablePhoto = Message.create({ ...captured, media: { media: { oneofKind: "photo", photo: {} } } })
+    expect(messageSourceSnapshot(unavailablePhoto)).not.toBe(messageSourceSnapshot(captured))
     renewed.media.media.photo.photo.id = 4n
     expect(messageSourceSnapshot(renewed)).not.toBe(messageSourceSnapshot(captured))
   })
