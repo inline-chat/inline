@@ -416,6 +416,7 @@
     "express-rate-limit": {
       "ip-address": "10.3.1",
     },
+    "node-forge": "github:digitalbazaar/forge#ceba34402e329f0365134f23fe19898756527d65",
   },
   "catalog": {
     "@effect/platform-bun": "4.0.0-beta.98",
@@ -2258,7 +2259,7 @@
 
     "node-fetch": ["node-fetch@2.7.0", "", { "dependencies": { "whatwg-url": "^5.0.0" }, "peerDependencies": { "encoding": "^0.1.0" }, "optionalPeers": ["encoding"] }, "sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A=="],
 
-    "node-forge": ["node-forge@1.4.0", "", {}, "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="],
+    "node-forge": ["node-forge@github:digitalbazaar/forge#ceba344", {}, "digitalbazaar-forge-ceba344", "sha512-wQzUb9EXQPFuPFkcj/4B6mxSxkAbkRTgCJ7xEH61S0uBcaeUy3x0y7ppyHDW8xMGwsvkxgMzPaJH0hgWZHs4cQ=="],
 
     "node-gyp-build": ["node-gyp-build@4.8.4", "", { "bin": { "node-gyp-build": "bin.js", "node-gyp-build-optional": "optional.js", "node-gyp-build-test": "build-test.js" } }, "sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ=="],
 

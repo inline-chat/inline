@@ -4,12 +4,14 @@ import { version } from "../package.json"
 import {
   FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN,
 } from "./runtimeImportPolicy"
+import { verifyForgeBundle, verifyForgeSource } from "./forge-runtime-proof"
 
 // https://coolify.io/docs/knowledge-base/environment-variables/
 const sourceCommit = process.env["SOURCE_COMMIT"] || (await $`git rev-parse HEAD`.quiet()).text().trim() || "N/A"
 const commitHash = sourceCommit === "N/A" ? "N/A" : sourceCommit.slice(0, 7)
 
 console.info("🚧 Building...")
+console.info("Reviewed Forge source:", JSON.stringify(verifyForgeSource()))
 
 const result = await Bun.build({
   entrypoints: [
@@ -59,5 +61,7 @@ if (!result.success) {
     "Production server build failed.",
   )
 }
+
+verifyForgeBundle(await Bun.file(resolve(__dirname, "../dist/index.js")).text())
 
 console.info("✅ Build complete")

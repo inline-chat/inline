@@ -68,7 +68,8 @@
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/bot-api-types": "workspace:*",
-    "express-rate-limit>ip-address": "10.3.1"
+    "express-rate-limit>ip-address": "10.3.1",
+    "node-forge": "github:digitalbazaar/forge#ceba34402e329f0365134f23fe19898756527d65"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

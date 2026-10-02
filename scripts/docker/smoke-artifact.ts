@@ -11,6 +11,9 @@ if (!["landing", "server", "mcp"].includes(target ?? "")) {
 }
 
 if (target === "server") {
+  const { verifyForgeBundle, verifyForgeSource } = await import("../../server/scripts/forge-runtime-proof.ts")
+  console.info("Reviewed packaged Forge source:", JSON.stringify(verifyForgeSource()))
+  verifyForgeBundle(await Bun.file("server/dist/index.js").text())
   for (const file of [
     "server/dist/index.js",
     "server/dist/core-production-smoke.js",
