@@ -65,7 +65,7 @@ export function inlineMcpInstructions(contractVersion: McpToolContract): string 
     : "")
 }
 
-// Keep the deployed /mcp descriptors and behavior intact for cached or hand-written clients.
+// Keep core /mcp schemas and behavior intact for cached or hand-written clients.
 // /mcp/v2 selects the explicit branches below so submission scanners never see legacy ambiguity.
 
 type SendBatchItem = {

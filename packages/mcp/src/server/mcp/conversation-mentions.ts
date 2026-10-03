@@ -192,7 +192,6 @@ export function registerConversationMentions(server: McpServer, params: MentionP
       }
     }
   })
-
 }
 
 export function registerConversationSnapshot(server: McpServer, params: MentionParams): void {
