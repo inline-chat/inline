@@ -18,6 +18,7 @@ const SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 const LEGACY_VERSIONS = new Set(SUPPORTED_PROTOCOL_VERSIONS)
 const SDK_METHODS = new Set(["tools/list", "tools/call", "resources/list", "resources/templates/list", "resources/read"])
 const EVENT_METHODS = new Set(["events/list", "events/subscribe", "events/unsubscribe"])
+const CACHEABLE_METHODS = new Set(["server/discover", "tools/list", "resources/list", "resources/templates/list", "resources/read"])
 const MAX_REQUEST_BYTES = 40 * 1024 * 1024 // Covers the existing 25 MiB base64 upload tool.
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -28,10 +29,13 @@ function rpcError(id: string | number | undefined, code: number, message: string
   return Response.json({ jsonrpc: "2.0", ...(id === undefined ? {} : { id }), error: { code, message, ...(data === undefined ? {} : { data }) } }, { status })
 }
 
-function complete(value: Record<string, unknown>): Record<string, unknown> {
+function complete(method: string, value: Record<string, unknown>): Record<string, unknown> {
   return {
     ...value,
     resultType: "complete",
+    // Required by MCP 2026-07-28. Never reuse grant-dependent data across
+    // authorization contexts or keep it fresh after access changes.
+    ...(CACHEABLE_METHODS.has(method) ? { ttlMs: 0, cacheScope: "private" } : {}),
     _meta: {
       ...(record(value._meta) ? value._meta : {}),
       [SERVER_INFO_KEY]: { name: "inline", version: "0.3.0", title: "Inline" },
@@ -253,7 +257,7 @@ export async function handleModernRequest(params: {
     }
   }
   if (request.method === "server/discover") {
-    return Response.json({ jsonrpc: "2.0", id, result: complete({
+    return Response.json({ jsonrpc: "2.0", id, result: complete(request.method, {
       supportedVersions: [MODERN_MCP_VERSION], capabilities: { tools: {}, resources: {}, events: {} },
       instructions: params.instructions,
     }) })
@@ -261,7 +265,7 @@ export async function handleModernRequest(params: {
   if (EVENT_METHODS.has(request.method)) {
     try {
       const result = await params.events.request(request.method, request.params ?? {})
-      return Response.json({ jsonrpc: "2.0", id, result: complete(result) })
+      return Response.json({ jsonrpc: "2.0", id, result: complete(request.method, result) })
     } catch (error) {
       return error instanceof EventsRpcError
         ? rpcError(id, error.code, error.message, error.code === -32603 ? 502 : 400, error.data)
@@ -303,7 +307,7 @@ export async function handleModernRequest(params: {
     }
     const message = await Promise.race([transport.request(request, params.auth, req), aborted])
     if ("result" in message) {
-      return Response.json({ ...message, result: complete(message.result) })
+      return Response.json({ ...message, result: complete(request.method, message.result) })
     }
     if ("error" in message) {
       // Reserved codes removed in July28 must not escape from a legacy SDK.

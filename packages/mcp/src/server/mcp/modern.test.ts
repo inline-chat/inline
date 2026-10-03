@@ -82,6 +82,30 @@ describe("modern stateless MCP transport", () => {
     } })
   })
 
+  // MCP 2026-07-28 CacheableResult requires both fields on these responses.
+  // Exercise serialized RPC responses, including legacy SDK registrations.
+  it.each(["server/discover", "tools/list", "resources/list", "resources/templates/list", "resources/read"])("provides private, immediately stale cache metadata for %s", async (method) => {
+    const uri = new URL("ui://inline/نظر.html").toString()
+    const response = await handle(request(method, method === "resources/read" ? { uri } : {}))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.result).toMatchObject({ resultType: "complete", ttlMs: 0, cacheScope: "private" })
+    expect(body.error).toBeUndefined()
+  })
+
+  it("does not mark tool execution or event subscription results as cacheable", async () => {
+    for (const [method, params] of [
+      ["tools/call", { name: "echo", arguments: { text: "Hello" } }],
+      ["events/subscribe", {}],
+    ] as const) {
+      const response = await handle(request(method, params))
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.result).not.toHaveProperty("ttlMs")
+      expect(body.result).not.toHaveProperty("cacheScope")
+    }
+  })
+
   it("decodes a UTF-8 Base64 sentinel before executing the SDK resource callback", async () => {
     const uri = "ui://inline/نظر.html"
     const response = await handle(request("resources/read", { uri }, { "mcp-name": `=?base64?${Buffer.from(uri).toString("base64")}?=` }))
