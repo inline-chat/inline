@@ -1864,7 +1864,7 @@ export function createInlineMcpServer(params: {
         spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Authorized parent space; omit for an authorized home thread"),
       },
       outputSchema: conversationAskOutputSchema,
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: {
         ...toolMeta(["messages:read", "messages:write"], "Asking Inline teammates...", "Inline question prepared"),
         ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },

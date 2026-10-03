@@ -11,6 +11,14 @@ cd packages/mcp
 bun run dev
 ```
 
+## Local contract checks
+
+From the repository root, run `bun run check:chatgpt-plugin` before deploying or rescanning. It rebuilds the relevant packages, then exercises the compiled server over real loopback HTTP with synthetic OAuth and no production account. The same compiled check runs in the ChatGPT plugin CI workflow.
+
+The check validates modern discovery, all tool descriptors and their JSON Schemas, every advertised UI resource, representative tool outputs, and error envelopes against the pinned official MCP 2026-07-28 schema. Negative controls reject omitted required fields (including the cache metadata that previously broke scanning), malformed nested payloads, and missing response IDs. It also checks header/version rejection, current authorization, recipient-communication annotations, legacy session compatibility, and packaged UI rendering. The [schema fixture](../../scripts/ci/fixtures/mcp-2026-07-28/README.md) documents its source and update procedure; tests do not fetch it at runtime.
+
+For behavior changes, also run `bun run --cwd packages/mcp test` and `bun run --cwd plugins/chatgpt/ui test`. Events persistence and delivery require the separate backend suite described in [the Events contract](../../server/docs/mcp-events.md). Local schema checks cannot reproduce the hosted review model, actual OAuth configuration, or ChatGPT callback/resume behavior; a real post-deploy rescan and host acceptance remain necessary.
+
 ## Docker
 
 Build from the repository root:

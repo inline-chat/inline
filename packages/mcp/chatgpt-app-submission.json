@@ -215,12 +215,12 @@
     "conversations.ask": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates a private thread and sends one recipient-visible question to the resolved participants.",
-        "open_world_justification": "Writes remain within the selected authorized Inline context; no third-party publication.",
+        "open_world_justification": "Creates a thread and sends a question to other independently controlled Inline users or agents. Recipient-visible communication is open-world even in an authorized private thread.",
         "destructive_justification": "The recipient-visible question cannot be withdrawn through this tool. Uncertain creation or delivery must be inspected before retrying."
       }
     }

@@ -53,6 +53,7 @@
     "release:cli": "bun run ./scripts/release-cli.ts",
     "release:npm": "bun run ./scripts/release-npm.ts",
     "check:codex-plugin": "bun run ./scripts/check-codex-plugin.mjs",
+    "check:chatgpt-plugin": "bun --no-env-file run --cwd packages/protocol build && bun --no-env-file run --cwd packages/oauth-core build && bun --no-env-file run --cwd packages/sdk build && bun --no-env-file run --cwd packages/mcp build && bun --no-env-file scripts/ci/check-chatgpt-plugin.mjs",
     "build:integrations": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-client build && bun run --cwd packages/mcp build && bun run --cwd plugins/openclaw build && bun run --cwd plugins/hermes-agent build && bun run --cwd plugins/chat-sdk-plugin build",
     "ci:cli": "bun run --cwd cli ci",
     "precommit:cli": "bun run --cwd cli precommit",

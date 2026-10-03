@@ -6,6 +6,41 @@ import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
+const requireMcp = createRequire(path.join(root, "packages/mcp/package.json"))
+const { default: Ajv2020 } = await import(requireMcp.resolve("ajv/dist/2020.js"))
+const { default: Ajv } = await import(requireMcp.resolve("ajv"))
+const { default: addFormats } = await import(requireMcp.resolve("ajv-formats"))
+const protocolSchema = JSON.parse(await readFile(path.join(root, "scripts/ci/fixtures/mcp-2026-07-28/schema.json"), "utf8"))
+const protocolValidator = new Ajv2020({ strict: false, allErrors: true })
+const toolValidator = new Ajv({ strict: false, allErrors: true })
+addFormats(protocolValidator)
+addFormats(toolValidator)
+const resultTypes = {
+  "server/discover": "DiscoverResult", "tools/list": "ListToolsResult",
+  "resources/list": "ListResourcesResult", "resources/templates/list": "ListResourceTemplatesResult",
+  "resources/read": "ReadResourceResult", "tools/call": "CallToolResult",
+}
+const schemaValidators = new Map()
+const validator = (name) => {
+  if (!schemaValidators.has(name)) schemaValidators.set(name, protocolValidator.compile({
+    $ref: `#/$defs/${name}`, $defs: protocolSchema.$defs,
+  }))
+  return schemaValidators.get(name)
+}
+const assertSchema = (name, value, context) => {
+  const validate = validator(name)
+  assert.ok(validate(value), `${context}: ${JSON.stringify(validate.errors)}`)
+}
+const validatedResponses = []
+function validateModernResponse(method, message) {
+  const name = resultTypes[method]
+  if (!name) return // Events use a separate draft, not the core protocol schema.
+  assertSchema(`${name}Response`, message, `${method} response envelope`)
+  // ReadResourceResultResponse also accepts an extensible InputRequiredResult.
+  // Validate the announced complete branch explicitly, not just that loose union.
+  assertSchema(name, message.result, `${method} complete result`)
+  validatedResponses.push({ method, message: structuredClone(message) })
+}
 const { createApp } = await import(path.join(root, "packages/mcp/dist/index.js"))
 const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatgpt-app-submission.json"), "utf8"))
 const uiUri = "ui://inline/message-results-v1.html"
@@ -228,6 +263,10 @@ try {
   assert.deepEqual(open?._meta?.["openai/ui"]?.entrypoints, [{ type: "thread" }, { type: "global" }])
   assert.equal(ask?._meta?.ui?.resourceUri, threadUiUri)
   assert.equal(ask?.annotations.idempotentHint, false)
+  for (const name of ["conversations.ask", "conversations.create", "messages.send", "messages.send_media", "messages.send_batch"]) {
+    assert.equal(tools.find((tool) => tool.name === name)?.annotations.openWorldHint, true,
+      `${name} communicates with independently controlled recipients, even in a private thread`)
+  }
   const emptyPicker = await success("tools/call", { name: "conversations.open", arguments: {} })
   assert.equal(emptyPicker.structuredContent.chat, null)
   assert.deepEqual(emptyPicker.structuredContent.messages, [])
@@ -265,7 +304,7 @@ try {
       headers: { ...headers, "mcp-protocol-version": modernVersion, "mcp-method": method,
         // A cached legacy session must never select the legacy lane.
         "mcp-session-id": session,
-        ...(method === "tools/call" ? { "mcp-name": params.name } : {}),
+        ...(method === "tools/call" ? { "mcp-name": params.name } : method === "resources/read" ? { "mcp-name": params.uri } : {}),
       },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, _meta: {
         "io.modelcontextprotocol/protocolVersion": modernVersion,
@@ -278,11 +317,78 @@ try {
     assert.equal(message.id, id)
     assert.equal(message.result?.resultType, "complete")
     assert.ok(!message.error && !message.result.isError, `${method} modern result`)
+    assert.doesNotMatch(JSON.stringify(message), /mcp_at_chatgpt_ci|synthetic-ci-secret|synthetic-ci-token/, "protocol replies must not leak credentials")
+    validateModernResponse(method, message)
     return message.result
   }
   const discovered = await modernRequest("server/discover")
   assert.deepEqual(discovered.capabilities.events, {})
   assert.ok(discovered.supportedVersions.includes(modernVersion))
+  const modernTools = (await modernRequest("tools/list")).tools
+  assert.deepEqual(modernTools.map((tool) => tool.name).sort(), tools.map((tool) => tool.name).sort())
+  for (const tool of modernTools) {
+    toolValidator.compile(tool.inputSchema)
+    if (tool.outputSchema) toolValidator.compile(tool.outputSchema)
+  }
+  const modernResources = (await modernRequest("resources/list")).resources
+  await modernRequest("resources/templates/list")
+  for (const resource of modernResources) {
+    const result = await modernRequest("resources/read", { uri: resource.uri })
+    assert.ok(result.contents.some((content) => content.uri === resource.uri), "every advertised resource is readable")
+  }
+  for (const name of ["account.me", "conversations.open"]) {
+    const result = await modernRequest("tools/call", { name, arguments: {} })
+    const tool = modernTools.find((tool) => tool.name === name)
+    assert.ok(tool?.outputSchema, `${name} output schema`)
+    const validateOutput = toolValidator.compile(tool.outputSchema)
+    assert.ok(validateOutput(result.structuredContent), `${name}: ${JSON.stringify(validateOutput.errors)}`)
+  }
+  scenarios.push("all-modern-catalogs-and-advertised-resources-match-official-schema")
+
+  // Negative controls reproduce the production defect and prove nested schema
+  // validation remains active. These must fail without relying on HTTP status.
+  for (const { method, message } of validatedResponses) {
+    const name = resultTypes[method]
+    const validateResult = validator(name)
+    for (const field of ["resultType", ...(method === "tools/call" ? [] : ["ttlMs", "cacheScope"])]) {
+      const malformed = structuredClone(message.result)
+      delete malformed[field]
+      assert.equal(validateResult(malformed), false, `${method} must reject missing ${field}`)
+    }
+    const missingId = structuredClone(message)
+    delete missingId.id
+    assert.equal(validator(`${name}Response`)(missingId), false, `${method} must reject missing response ID`)
+  }
+  const badTool = structuredClone(modernTools)
+  delete badTool[0].inputSchema
+  assert.equal(validator("ListToolsResult")({ resultType: "complete", ttlMs: 0, cacheScope: "private", tools: badTool }), false)
+  assert.equal(validator("ReadResourceResult")({ resultType: "complete", ttlMs: 0, cacheScope: "private", contents: [{ uri: threadUiUri, text: 42 }] }), false)
+  scenarios.push("official-schema-rejects-old-cache-defect-and-malformed-nested-payloads")
+
+  for (const [label, method, params, metadata, extraHeaders, expectedStatus, expectedCode] of [
+    ["missing client capabilities", "tools/list", {}, { "io.modelcontextprotocol/clientCapabilities": null }, {}, 400, -32602],
+    ["version mismatch", "tools/list", {}, {}, { "mcp-protocol-version": "2026-07-27" }, 400, -32020],
+    ["unsupported version", "tools/list", {}, { "io.modelcontextprotocol/protocolVersion": "2026-07-27" }, { "mcp-protocol-version": "2026-07-27" }, 400, -32022],
+    ["resource name mismatch", "resources/read", { uri: threadUiUri }, {}, { "mcp-name": "ui://wrong/resource.html" }, 400, -32020],
+    ["unknown tool", "tools/call", { name: "not-a-tool", arguments: {} }, {}, { "mcp-name": "not-a-tool" }, 400, -32602],
+    ["unknown method", "not-a-method", {}, {}, {}, 404, -32601],
+  ]) {
+    const id = ++requestId
+    const response = await fetch(endpoint, {
+      method: "POST", signal: AbortSignal.timeout(10_000),
+      headers: { ...headers, "mcp-protocol-version": modernVersion, "mcp-method": method, ...extraHeaders },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": modernVersion,
+        "io.modelcontextprotocol/clientCapabilities": {}, ...metadata,
+      } } }),
+    })
+    const message = await response.json()
+    assert.equal(response.status, expectedStatus, label)
+    assert.equal(message.id, id, label)
+    assert.equal(message.error?.code, expectedCode, label)
+    assertSchema("JSONRPCErrorResponse", message, label)
+  }
+  scenarios.push("modern-http-rejects-invalid-metadata-headers-versions-and-methods")
   const listedEvents = await modernRequest("events/list")
   assert.equal(listedEvents.events[0].name, "message.created")
   const selector = { name: "message.created", arguments: { chatId: "7", excludeSelf: true } }
@@ -318,6 +424,15 @@ try {
   scenarios.push("consultation-write-scope-denied-before-side-effects")
   active = false
   assert.equal((await request("resources/read", { uri: uiUri })).status, 401)
+  const revokedModern = await fetch(endpoint, {
+    method: "POST", signal: AbortSignal.timeout(10_000),
+    headers: { ...headers, "mcp-protocol-version": modernVersion, "mcp-method": "resources/read", "mcp-name": threadUiUri },
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method: "resources/read", params: { uri: threadUiUri, _meta: {
+      "io.modelcontextprotocol/protocolVersion": modernVersion, "io.modelcontextprotocol/clientCapabilities": {},
+    } } }),
+  })
+  assert.equal(revokedModern.status, 401)
+  assert.match(revokedModern.headers.get("www-authenticate") ?? "", /invalid_token/)
   scenarios.push("revoked-grant-denies-existing-session")
   assert.equal(upstreamRequests, 0, "metadata and scope-denial checks must not contact Inline")
 
@@ -327,6 +442,7 @@ try {
   const receipt = {
     sourceSha: process.env.GITHUB_SHA ?? null,
     evidence: "compiled MCP HTTP contract with synthetic local OAuth; not ChatGPT host acceptance",
+    protocolSchema: { version: "2026-07-28", upstreamCommit: "271ecc9accafdd9b83a3c869fa67c22953b2af80", validatedResponses: validatedResponses.length },
     scenarios: scenarios.map((scenario) => ({ scenario, status: "passed" })),
   }
   if (process.argv[2]) await writeFile(process.argv[2], `${JSON.stringify(receipt, null, 2)}\n`)
