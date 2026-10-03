@@ -16,7 +16,7 @@ afterAll(async () => {
 // the fixture's semantics; do not infer them from the measured query count.
 function recoveryWrites(spec: ScenarioSpec): number {
   switch (spec.kind) {
-    case "sendDm": return spec.variant === "retry" ? 0 : spec.variant === "closed" ? 2 : 1
+    case "sendDm": return spec.variant === "retry" || spec.variant === "receiptRetry" ? 0 : spec.variant === "closed" ? 2 : 1
     case "sendThread": return spec.variant === "reply" ? 2 : 1
     case "enqueue": return spec.size
     case "read": return spec.variant === "noop" ? 0 : 1

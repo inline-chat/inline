@@ -105,9 +105,10 @@ async function verifySend(chatId: number, messageId: number, senderId: number, r
   assert(dialogs.every((dialog) => dialog.open && dialog.order))
 }
 
-/** Each iteration gets equivalent durable state and cold authorization/session
- * caches. IDs are intentionally fresh: accidental cross-scenario cache reuse must
- * not make a path appear cheap. Pool/JIT warmup is a separate runner concern. */
+/** Each iteration starts with equivalent durable state and cold authorization/
+ * session caches. Receipt retry deliberately warms its own state by submitting
+ * once during preparation. Fresh IDs prevent accidental cross-scenario reuse;
+ * pool/JIT warmup is a separate runner concern. */
 export async function prepareScenario(spec: ScenarioSpec): Promise<PreparedOperation> {
   await cleanDatabase()
   desktopPushSuppressionTracker.resetForTests()
@@ -117,9 +118,25 @@ export async function prepareScenario(spec: ScenarioSpec): Promise<PreparedOpera
       const input = { peerId: s.peer, message: text, randomId: 91n, sendMode: MessageSendMode.MODE_SILENT }
       if (spec.variant === "closed") await db.update(S.dialogs).set({ open: false, order: null }).where(eq(S.dialogs.userId, s.users[1]!.id))
       if (spec.variant === "retry") await journalMessage(s.chat.id, s.sender.id, 91n)
+      if (spec.variant === "receiptRetry") {
+        // Seed through the real successful send owner. The caller drains this
+        // setup before measuring exact replay with warm post-submit state.
+        const submitted = await sendMessage(input, s.context)
+        assert(submitted.updates.some(update => update.update.oneofKind === "newMessage"))
+        await verifySend(s.chat.id, 1, s.sender.id, 91n)
+      }
       return checked(() => sendMessage(input, s.context), async (result) => {
         assert(result.updates.some((update) => update.update.oneofKind === "updateMessageId" && update.update.updateMessageId.randomId === 91n && update.update.updateMessageId.messageId === 1n))
         await verifySend(s.chat.id, 1, s.sender.id, 91n)
+        const receipts = await db.select().from(S.messageSubmissions).where(and(
+          eq(S.messageSubmissions.fromId, s.sender.id), eq(S.messageSubmissions.randomId, 91n),
+        ))
+        assert.equal(receipts.length, spec.variant === "retry" ? 0 : 1)
+        if (spec.variant !== "retry") {
+          assert.equal(receipts[0]!.chatId, s.chat.id)
+          assert.equal(receipts[0]!.messageId, 1)
+          assert.equal(receipts[0]!.sourceRevision, null)
+        }
       })
     }
     case "sendThread": {

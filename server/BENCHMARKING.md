@@ -7,7 +7,7 @@ The benchmark runner accepts a sample only after its behavioral assertions pass.
 
 Timing reports explicitly use standalone realtime mode (`INLINE_REALTIME_DISTRIBUTED=0`).
 The correctness suite tests both standalone and distributed mode, keeping the
-original standalone command budgets and adding only the fixture's expected
+reviewed standalone command budgets and adding only the fixture's expected
 recovery-index writes to distributed budgets. An optional test Redis endpoint
 does not change which baseline the timing runner measures.
 
@@ -61,6 +61,9 @@ Each iteration follows this sequence:
 
 1. Drain previous jobs, reset the owned database, construct a fresh fixture, and
    clear authorization/session activity caches. Connection pools stay alive.
+   `send.dm.receipt-retry.warm` then submits successfully through the real send
+   path during preparation; only its exact replay with warm post-submit state
+   is measured. The caller drains that initial send before measurement.
 2. Enable the requested loopback delay and the driver's query observer.
 3. Invoke the real operation and record its return time.
 4. Await the registered background job chain and record the settled time.
@@ -93,8 +96,10 @@ server CPU or connection-pool behavior. Stream chunking, timers and backpressure
 affect actual delay, so compare calibration distributions too. Wire counts
 include any catalog discovery inside a sample.
 
-Benchmarks use one active operation, cold application caches, warmup iterations
-and the production pool configuration. Fixtures and verification queries are
+Benchmarks use one active operation, initially cold application caches, warmup
+iterations and the production pool configuration. The named receipt-retry case
+is the explicit warm post-submit exception; it is distinct from the runner's
+warmup iterations. Fixtures and verification queries are
 excluded. Samples, median, minimum/maximum and p95 (only with at least 20 samples)
 are available through `summarize`; reports retain raw samples. A 20-sample p95 is
 still a rough estimate, not a production SLO. These are module/function
@@ -104,9 +109,10 @@ cardinality and multi-server delivery need separate experiments.
 
 ## Coverage and budgets
 
-The initial catalog has 24 scenarios:
+The version 2 catalog has 25 scenarios (50 correctness gates across both modes):
 
-- DM send with open/closed dialogs and an idempotent retry.
+- DM send with open/closed dialogs, pre-ledger random-ID recovery, and a separate
+  warm retained-receipt retry seeded by an actual successful send.
 - Public-thread and reply-thread sends with 1, 10 and 100 recipients.
 - Chat lists with 1, 10 and 100 DMs, and a 50-message history page.
 - Empty/nonempty chat replay and a fresh discovery checkpoint.
@@ -123,11 +129,17 @@ Do not disable domain jobs to make a path pass its budget.
 `catalog.ts` holds reviewed maximum command counts. They represent current costs,
 including costly linear fanout; they are not desired targets. Lower them with a
 proven optimization. Do not automatically regenerate budgets or loosen one to
-hide a regression. The 1/10/100 cases expose scaling: current public sends cost
-`32 + recipients`, reply sends `66 + 7 × recipients`, and user update batches
+hide a regression. Version 2 accepts the reviewed cost of durable submission
+receipts and current-authority replay checks, with standalone DM bounds of 27
+for Open, 43 for Closed, 13 for pre-ledger retry and 9 for warm receipt replay.
+Neither retry writes another journal entry or adds a distributed recovery-index
+allowance. The 1/10/100 cases expose scaling: current public sends cost
+`33 + recipients`, reply sends `68 + 7 × recipients`, and user update batches
 `2 + 4 × updates` for these fixtures. Chat-list queries remain constant at 11
 while result volume grows. These are local fixture observations, not production
-traffic statistics.
+traffic statistics. This is a reviewed correctness-cost contract, not an
+optimization or a timing claim. Version 1 reports require a new matching baseline
+before comparison; the report format and compatibility checks are unchanged.
 
 `test:backend` also selects the existing send, chat-list, history, message integrity,
 update discovery, user allocator, replay and dialog contracts. They cover authorization without
