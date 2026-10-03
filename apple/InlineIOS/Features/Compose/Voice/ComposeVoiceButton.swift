@@ -24,7 +24,7 @@ final class ComposeVoiceButton: UIButton {
 
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "mic.fill")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+      UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
     )
     config.baseForegroundColor = .tertiaryLabel
     config.cornerStyle = .capsule
