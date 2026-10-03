@@ -88,6 +88,14 @@ export class InlineProtocolAuthorizationInvalidated extends Error {
   }
 }
 
+/** A revoked permanent key was proven by its owner; never emitted for a key ID alone. */
+export class InlineProtocolSessionRevoked extends Error {
+  constructor() {
+    super("Account session was revoked")
+    this.name = "InlineProtocolSessionRevoked"
+  }
+}
+
 /** Application execution may have committed, but its retained update output exceeded capacity. */
 export class InlineProtocolApplicationOutputOverloaded extends Error {
   constructor() {
@@ -131,6 +139,10 @@ export type LoadedServerAuthorizationKey = {
 export interface ServerAuthorizationKeyRepository {
   create(key: EstablishedAuthorizationKey): Promise<"created" | "collision">
   load(authKeyId: Uint8Array): Promise<LoadedServerAuthorizationKey | undefined>
+  /** Read-only proof fallback. Return a fresh plaintext copy only for positively revoked keys.
+   * The caller must verify ownership before disclosing revocation and wipe the copy afterward.
+   */
+  loadRevokedForBinding?(authKeyId: Uint8Array): Promise<Uint8Array | undefined>
   bindTemporary(input: {
     temporaryAuthKeyId: Uint8Array
     permanentAuthKeyId: Uint8Array
@@ -825,23 +837,46 @@ export class InlineProtocolServerSession {
     }
     const request = decodeBindTempAuthKey(message.body)
     const permanentId = int64LE(request.permanentAuthKeyId)
+    const temporarySessionId = this.#sessionId
+    const temporaryKeyExpiresAt = temporary.expiresAt
+    const verifyProof = (key: Uint8Array): void => {
+      verifyTemporaryKeyBindingProof({
+        encryptedMessage: request.encryptedMessage,
+        permanentAuthKey: key,
+        outerPermanentAuthKeyId: request.permanentAuthKeyId,
+        outerTemporaryAuthKeyId: new DataView(temporary.keyId.buffer, temporary.keyId.byteOffset, 8).getBigInt64(0, true),
+        outerTemporarySessionId: temporarySessionId,
+        outerMessageId: message.messageId,
+        outerNonce: request.nonce,
+        outerExpiresAt: request.expiresAt,
+        temporaryKeyExpiresAt,
+        nowSeconds: Math.floor(this.options.nowMilliseconds() / 1000),
+      })
+    }
     const permanent = await this.options.authorizationKeys.load(permanentId)
-    if (!permanent || permanent.temporary || !permanent.authorized) {
+    if (!permanent) {
+      this.#destroyed = true
+      const revokedKey = await this.options.authorizationKeys.loadRevokedForBinding?.(permanentId)
+      if (revokedKey) {
+        try {
+          // Knowing the public key ID is insufficient: require the same cryptographic proof
+          // as a successful bind before disclosing revocation. This never admits the key.
+          verifyProof(revokedKey)
+        } catch {
+          // A guessed key ID with an invalid proof must match the unknown-key response.
+          throw new InlineProtocolAuthorizationInvalidated()
+        } finally {
+          revokedKey.fill(0)
+        }
+        throw new InlineProtocolSessionRevoked()
+      }
+      throw new InlineProtocolAuthorizationInvalidated()
+    }
+    if (permanent.temporary || !permanent.authorized) {
       this.#destroyed = true
       throw new InlineProtocolAuthorizationInvalidated()
     }
-    verifyTemporaryKeyBindingProof({
-      encryptedMessage: request.encryptedMessage,
-      permanentAuthKey: permanent.key,
-      outerPermanentAuthKeyId: request.permanentAuthKeyId,
-      outerTemporaryAuthKeyId: new DataView(temporary.keyId.buffer, temporary.keyId.byteOffset, 8).getBigInt64(0, true),
-      outerTemporarySessionId: this.#sessionId,
-      outerMessageId: message.messageId,
-      outerNonce: request.nonce,
-      outerExpiresAt: request.expiresAt,
-      temporaryKeyExpiresAt: temporary.expiresAt,
-      nowSeconds: Math.floor(this.options.nowMilliseconds() / 1000),
-    })
+    verifyProof(permanent.key)
     const result = await this.options.authorizationKeys.bindTemporary({
       temporaryAuthKeyId: temporary.keyId,
       permanentAuthKeyId: permanent.keyId,

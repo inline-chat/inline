@@ -57,6 +57,10 @@ export class InlineProtocolAuthorizationKeys implements ServerAuthorizationKeyRe
     }
   }
 
+  loadRevokedForBinding(authKeyId: Uint8Array): Promise<Uint8Array | undefined> {
+    return this.permanent.loadRevokedForBinding(authKeyId)
+  }
+
   async bindTemporary(input: {
     temporaryAuthKeyId: Uint8Array
     permanentAuthKeyId: Uint8Array

@@ -1,5 +1,6 @@
 import {
   InlineProtocolAuthorizationInvalidated,
+  InlineProtocolSessionRevoked,
   InlineProtocolServerSession,
   acceptObfuscatedClientHeader,
   decodeAbridgedFrame,
@@ -156,8 +157,8 @@ const closeOverloaded = (socket: ServerWebSocket<InlineProtocolWebSocketData>): 
 
 const closeAuthorizationInvalidated = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
   if (!socket.data.closed) {
-    // A missing process-local temporary key is recoverable. Only the session authority owner
-    // may use the explicit session_revoked reason.
+    // A missing process-local temporary key is recoverable. Only confirmed session authority
+    // revocation or an ownership-proven revoked binding may emit session_revoked_confirmed.
     realtimeV3Log.warn("Inline Protocol V3 authorization unavailable", {
       connectionId: socket.data.id,
     })
@@ -362,7 +363,9 @@ export const makeInlineProtocolRealtimeTransport = (
         connectionId: socket.data.id,
         error,
       })
-      if (error instanceof InlineProtocolAuthorizationInvalidated) {
+      if (error instanceof InlineProtocolSessionRevoked) {
+        if (!socket.data.closed) socket.close(REALTIME_CLOSE_SESSION_REVOKED, "session_revoked_confirmed")
+      } else if (error instanceof InlineProtocolAuthorizationInvalidated) {
         closeAuthorizationInvalidated(socket)
       } else {
         closeProtocol(socket)

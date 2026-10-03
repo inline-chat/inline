@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { authKeyId } from "@inline-chat/protocol/secure"
+import { constants, generateKeyPairSync, privateDecrypt, randomBytes } from "node:crypto"
+import { gunzipSync } from "node:zlib"
+import {
+  authKeyId, createTemporaryKeyBindingProof, encodeBindTempAuthKey, encryptRecord,
+  InlineProtocolAuthorizationInvalidated, InlineProtocolSessionRevoked, InlineProtocolServerSession,
+  MessageIdGenerator, readInt64LE, makeRsaPublicKey,
+} from "@inline-chat/protocol/secure"
 import { db, schema } from "@in/server/db"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import {
@@ -23,6 +29,56 @@ const repository = (activeId: "old" | "new", includeOld = true) =>
       ...(activeId === "new" ? [["new", newKey] as const] : []),
     ]),
   }))
+
+const rsaPair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
+const rsaJwk = rsaPair.publicKey.export({ format: "jwk" })
+const rsaKey = makeRsaPublicKey(
+  Uint8Array.from(Buffer.from(rsaJwk.n!, "base64url")),
+  Uint8Array.from(Buffer.from(rsaJwk.e!, "base64url")),
+)
+
+// Exercise the production repository through the real encrypted protocol binding path.
+const bindOffline = async (authorizations: InlineProtocolAuthorizationKeys, permanent: Uint8Array, validProof = true) => {
+  const now = Date.now()
+  const temporary = Uint8Array.from(randomBytes(256))
+  const temporaryId = authKeyId(temporary)
+  const expiresAt = Math.floor(now / 1000) + 600
+  await authorizations.create({ key: temporary, keyId: temporaryId, temporary: true, serverSalt: 456n, expiresAt })
+  const session = new InlineProtocolServerSession({
+    rsaKeys: [{
+      ...rsaKey,
+      rawDecrypt: (bytes) => Uint8Array.from(privateDecrypt({ key: rsaPair.privateKey, padding: constants.RSA_NO_PADDING }, bytes)),
+    }],
+    authorizationKeys: authorizations,
+    replay: {
+      claim: async () => { throw new Error("Binding must not claim application replay") },
+      complete: async () => { throw new Error("Binding must not complete application replay") },
+      dropAnswer: async () => "unknown", forgetAnswer: async () => {},
+    },
+    application: { dispatch: async () => { throw new Error("Revoked authority must not dispatch") } },
+    randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+    nowMilliseconds: () => now,
+    gunzip: (bytes, maximum) => Uint8Array.from(gunzipSync(bytes, { maxOutputLength: maximum })),
+  })
+  const sessionId = 789n
+  const messageId = new MessageIdGenerator().next(now, 1, 0)
+  const nonce = 123n
+  const proof = createTemporaryKeyBindingProof({
+    permanentAuthKey: permanent, temporaryAuthKey: temporary, temporarySessionId: sessionId,
+    messageId, nonce, expiresAt, randomInt128: randomBytes(16), randomPadding: randomBytes(8),
+  })
+  if (!validProof) proof[proof.length - 1] = proof[proof.length - 1]! ^ 1
+  const body = encodeBindTempAuthKey({
+    permanentAuthKeyId: readInt64LE(authKeyId(permanent), 0), nonce, expiresAt, encryptedMessage: proof,
+  })
+  try {
+    return await session.receive(encryptRecord(temporary, "client-to-server", {
+      serverSalt: 456n, sessionId, messageId, sequenceNumber: 1, body,
+    }, randomBytes(12 + ((16 - ((32 + body.length + 12) % 16)) % 16))))
+  } finally {
+    expect((await authorizations.load(temporaryId))?.binding).toBeUndefined()
+  }
+}
 
 describe("Inline Protocol durable authorization-key lifecycle", () => {
   setupTestLifecycle()
@@ -152,6 +208,50 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
       .where(eq(schema.sessions.id, account.session.id))
     expect(await authorizations.load(temporaryKeyId)).toBeUndefined()
     expect(temporary.size).toBe(0)
+  })
+
+  test.each(["session", "key"] as const)(
+    "loads a revoked %s key only for an ownership proof without reauthorizing it",
+    async (revocation) => {
+      const user = await testUtils.createUser(`offline-${revocation}@example.com`)
+      const account = await testUtils.createSessionForUser(user.id)
+      const permanent = repository("old")
+      await permanent.create({ key, keyId, serverSalt: 456n, temporary: false })
+      await permanent.authorize(keyId, user.id, account.session.id)
+      const authorizations = new InlineProtocolAuthorizationKeys(permanent, new TemporaryAuthorizationKeyStore(() => Math.floor(Date.now() / 1000)))
+      expect(await authorizations.loadRevokedForBinding(keyId)).toBeUndefined()
+      if (revocation === "session") {
+        await db.update(schema.sessions).set({ revoked: new Date() })
+          .where(eq(schema.sessions.id, account.session.id))
+      } else {
+        await db.update(schema.inlineProtocolAuthKeys).set({ revokedAt: new Date() })
+          .where(eq(schema.inlineProtocolAuthKeys.authKeyId, Buffer.from(keyId)))
+      }
+      expect(await authorizations.load(keyId)).toBeUndefined()
+      await expect(bindOffline(authorizations, key, false)).rejects.toBeInstanceOf(InlineProtocolAuthorizationInvalidated)
+      await expect(bindOffline(authorizations, key)).rejects.toBeInstanceOf(InlineProtocolSessionRevoked)
+      const proofKey = await authorizations.loadRevokedForBinding(keyId)
+      expect(proofKey).toEqual(key)
+      proofKey?.fill(0)
+      expect(await authorizations.load(keyId)).toBeUndefined()
+      const nextProofKey = await authorizations.loadRevokedForBinding(keyId)
+      expect(nextProofKey).toEqual(key)
+      nextProofKey?.fill(0)
+    },
+  )
+
+  test("unknown and expired unrevoked keys do not count as confirmed revocation", async () => {
+    const permanent = repository("old")
+    expect(await permanent.loadRevokedForBinding(keyId)).toBeUndefined()
+    const authorizations = new InlineProtocolAuthorizationKeys(permanent, new TemporaryAuthorizationKeyStore(() => Math.floor(Date.now() / 1000)))
+    await expect(bindOffline(authorizations, key)).rejects.toBeInstanceOf(InlineProtocolAuthorizationInvalidated)
+    await permanent.create({
+      key, keyId, serverSalt: 456n, temporary: false,
+      expiresAt: Math.floor(Date.now() / 1000) - 60,
+    })
+    expect(await permanent.getActive(keyId)).toBeUndefined()
+    expect(await permanent.loadRevokedForBinding(keyId)).toBeUndefined()
+    await expect(bindOffline(authorizations, key)).rejects.toBeInstanceOf(InlineProtocolAuthorizationInvalidated)
   })
 
   test("atomically replaces a queued replay result with a dropped-answer tombstone", async () => {

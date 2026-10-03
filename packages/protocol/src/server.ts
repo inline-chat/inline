@@ -2,6 +2,7 @@ export {
   InlineHandshakeServer,
   InlineProtocolApplicationOutputOverloaded,
   InlineProtocolAuthorizationInvalidated,
+  InlineProtocolSessionRevoked,
   InlineProtocolServerSession,
   acceptObfuscatedClientHeader,
   decodeAbridgedFrame,

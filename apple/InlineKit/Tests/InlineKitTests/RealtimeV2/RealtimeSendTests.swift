@@ -1943,7 +1943,7 @@ final class RealtimeSendTests {
   }
 
   @Test(
-    "unverified handshake response retains the account and never requests logout",
+    "unverified handshake response retains the account and reconnects after recovery",
     .timeLimit(.minutes(1)),
     arguments: [ConnectionError.Reason.unauthorized, .invalidAuth]
   )
@@ -1986,7 +1986,22 @@ final class RealtimeSendTests {
         return false
       }.count >= 2
     })
-    withExtendedLifetime(realtime) {}
+    let retry = try #require(await transport.sentMessages.last { message in
+      if case .connectionInit = message.body { return true }
+      return false
+    })
+    var open = ServerProtocolMessage()
+    open.id = retry.id
+    open.body = .connectionOpen(.init())
+    await transport.emit(.message(open))
+    #expect(await waitForCondition(timeout: .seconds(2)) {
+      await MainActor.run {
+        realtime.stateObject.connectionState == .connected || realtime.stateObject.connectionState == .updating
+      }
+    })
+    #expect(auth.snapshot().status == .authenticated(credentials))
+    #expect(await invalidated.get() == false)
+    await realtime.prepareForTermination()
   }
 }
 

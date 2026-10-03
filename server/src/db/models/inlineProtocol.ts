@@ -89,6 +89,37 @@ export class PermanentAuthorizationKeyRepository {
     }
   }
 
+  /** Only the binding-proof verifier may use this key; it must wipe the returned copy. */
+  async loadRevokedForBinding(authKeyId: Uint8Array): Promise<Uint8Array | undefined> {
+    if (authKeyId.length !== 8) return undefined
+    try {
+      const [row] = await db.select({
+        keyEncryptionKeyId: inlineProtocolAuthKeys.keyEncryptionKeyId,
+        authKeyEncrypted: inlineProtocolAuthKeys.authKeyEncrypted,
+      }).from(inlineProtocolAuthKeys).where(and(
+        eq(inlineProtocolAuthKeys.authKeyId, Buffer.from(authKeyId)),
+        or(
+          isNotNull(inlineProtocolAuthKeys.revokedAt),
+          exists(db.select({ one: sql`1` }).from(sessions).where(and(
+            eq(sessions.id, inlineProtocolAuthKeys.accountSessionId),
+            eq(sessions.userId, inlineProtocolAuthKeys.userId),
+            isNotNull(sessions.revoked),
+          ))),
+        ),
+      )).limit(1)
+      if (!row) return undefined
+      const key = this.cipher.unwrap(authKeyId, row.keyEncryptionKeyId, row.authKeyEncrypted)
+      if (!equalBytes(deriveAuthKeyId(key), authKeyId)) {
+        key.fill(0)
+        throw new InlineProtocolKeyStoreError({ operation: "verify_revoked_key_id" })
+      }
+      return key
+    } catch (cause) {
+      if (cause instanceof InlineProtocolKeyStoreError) throw cause
+      throw new InlineProtocolKeyStoreError({ operation: "load_revoked_binding_key", cause })
+    }
+  }
+
   async rewrapBatch(limit = 100): Promise<{ rewrapped: number; remaining: number }> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
       throw new InlineProtocolKeyStoreError({ operation: "rewrap_batch_limit" })

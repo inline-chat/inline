@@ -8,6 +8,8 @@ import {
   authKeyId,
   bytesToHex,
   createObfuscatedClientHeader,
+  createTemporaryKeyBindingProof,
+  encodeBindTempAuthKey,
   decodeAbridgedFrame,
   decodeAbridgedPacket,
   decodeInlineApplicationObject,
@@ -58,6 +60,12 @@ import { createConnection } from "node:net"
 
 class MemoryKeys implements ServerAuthorizationKeyRepository {
   readonly values = new Map<string, LoadedServerAuthorizationKey>()
+  readonly revoked = new Map<string, Uint8Array>()
+  lastRevokedProofKey: Uint8Array | undefined
+  async loadRevokedForBinding(authKeyId: Uint8Array): Promise<Uint8Array | undefined> {
+    this.lastRevokedProofKey = this.revoked.get(bytesToHex(authKeyId))?.slice()
+    return this.lastRevokedProofKey
+  }
   async create(key: EstablishedAuthorizationKey): Promise<"created"> {
     this.values.set(bytesToHex(key.keyId), {
       key: key.key.slice(),
@@ -163,6 +171,62 @@ const combinedListener = () => {
 }
 
 describe("assembled V2/V3 Bun listener", () => {
+  test.each(["revoked", "invalid-proof", "unknown"] as const)(
+    "offline binding recovery reports %s without admitting revoked authority",
+    async (scenario) => {
+      const listener = combinedListener()
+      const client = connectSocket(`ws://127.0.0.1:${listener.server.port}/realtime/v3`)
+      try {
+        const permanent = Uint8Array.from(randomBytes(256))
+        const permanentId = authKeyId(permanent)
+        const temporary = Uint8Array.from(randomBytes(256))
+        const temporaryId = authKeyId(temporary)
+        const expiresAt = Math.floor(Date.now() / 1000) + 600
+        await listener.runtime.authorizationKeys.create({
+          key: temporary, keyId: temporaryId, serverSalt: 456n, temporary: true, expiresAt,
+        })
+        if (scenario !== "unknown") {
+          listener.runtime.authorizationKeys.revoked.set(bytesToHex(permanentId), permanent)
+        }
+        await client.opened
+        const closed = new Promise<CloseEvent>((resolve) => {
+          client.socket.addEventListener("close", resolve, { once: true })
+        })
+        let header: Uint8Array
+        do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+        const carrier = createObfuscatedClientHeader(header, 1)
+        client.socket.send(Uint8Array.from(carrier.wireHeader).buffer)
+        const sessionId = 789n
+        const messageId = new MessageIdGenerator().next(Date.now(), 1, 0)
+        const nonce = 123n
+        const proof = createTemporaryKeyBindingProof({
+          permanentAuthKey: permanent, temporaryAuthKey: temporary,
+          temporarySessionId: sessionId, messageId, nonce, expiresAt,
+          randomInt128: randomBytes(16), randomPadding: randomBytes(8),
+        })
+        if (scenario === "invalid-proof") proof[proof.length - 1] = proof[proof.length - 1]! ^ 1
+        const body = encodeBindTempAuthKey({
+          permanentAuthKeyId: readInt64LE(permanentId, 0), nonce, expiresAt, encryptedMessage: proof,
+        })
+        const record = encryptRecord(temporary, "client-to-server", {
+          serverSalt: 456n, sessionId, messageId, sequenceNumber: 1, body,
+        }, paddingFor(body.length))
+        client.socket.send(Uint8Array.from(carrier.outbound.process(encodeAbridgedPacket(record))).buffer)
+        const result = await closed
+        expect([result.code, result.reason]).toEqual(scenario === "revoked"
+          ? [4401, "session_revoked_confirmed"]
+          : [4401, "authorization_unavailable"])
+        expect(listener.runtime.authorizationKeys.values.get(bytesToHex(temporaryId))?.binding).toBeUndefined()
+        if (scenario !== "unknown") {
+          expect(listener.runtime.authorizationKeys.lastRevokedProofKey).toEqual(new Uint8Array(256))
+        }
+      } finally {
+        client.socket.close()
+        await listener.close()
+      }
+    },
+  )
+
   test("preserves V2 binary requests and V3 handshakes across reconnects on the same listener", async () => {
     const listener = combinedListener()
     const sockets: WebSocket[] = []

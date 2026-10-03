@@ -5,6 +5,37 @@ import Testing
 
 @Suite("WebSocket transport policy")
 struct WebSocketTransportPolicyTests {
+  @Test(
+    "real WebSocket closes distinguish confirmed revocation from ambiguous authorization loss",
+    .timeLimit(.minutes(1)),
+    arguments: ["session_revoked_confirmed", "session_revoked", "authorization_unavailable"]
+  )
+  func classifiesAuthorizationCloseThroughFoundation(reason: String) async throws {
+    let server = try LoopbackWebSocketServer(closeReason: reason)
+    defer { server.cancel() }
+    let port = try server.port
+    let url = try #require(URL(string: "ws://127.0.0.1:\(port)/authorization-close"))
+    let key = [UInt8](repeating: 0x5A, count: 256)
+    let authorization = try InlineProtocolAuthorization(
+      key: key, keyID: InlineSecureTransport.authKeyID(key), serverSalt: 1,
+      temporary: true, expiresAt: Int32(Date().timeIntervalSince1970) + 3_600
+    )
+    let connection = try await InlineProtocolV3Connection.connect(.reconnect(
+      url: url, authorization: authorization
+    ))
+
+    // Exercise the real receive failure and URLSession closeCode/closeReason delivery. The
+    // server waits for the carrier header, so an HTTP upgrade failure cannot satisfy the test.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while await connection.terminationError == nil, ContinuousClock.now < deadline {
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+    let terminationError = await connection.terminationError
+    await connection.close()
+    #expect(terminationError == (reason == "session_revoked_confirmed"
+      ? .sessionRevoked : .authorizationInvalidated))
+  }
+
   @Test("configures Foundation for the largest valid Inline packet")
   func configuresMaximumIncomingMessageSize() throws {
     let session = URLSession(configuration: .ephemeral)
@@ -131,6 +162,7 @@ private enum LoopbackWebSocketServerError: Error {
 private final class LoopbackWebSocketServer: @unchecked Sendable {
   private let listener: NWListener
   private let payload: Data
+  private let closeReason: String?
   private let queue = DispatchQueue(label: "chat.inline.websocket-transport-policy-test")
   private let lock = NSLock()
   private var connections: [NWConnection] = []
@@ -144,8 +176,9 @@ private final class LoopbackWebSocketServer: @unchecked Sendable {
     }
   }
 
-  init(payload: Data) throws {
+  init(payload: Data = Data(), closeReason: String? = nil) throws {
     self.payload = payload
+    self.closeReason = closeReason
     let webSocketOptions = NWProtocolWebSocket.Options()
     webSocketOptions.autoReplyPing = true
     let parameters = NWParameters.tcp
@@ -191,8 +224,24 @@ private final class LoopbackWebSocketServer: @unchecked Sendable {
     lock.withLock {
       connections.append(connection)
     }
-    connection.stateUpdateHandler = { [payload] state in
+    connection.stateUpdateHandler = { [payload, closeReason] state in
       guard case .ready = state else { return }
+      if let closeReason {
+        connection.receiveMessage { data, _, _, error in
+          guard error == nil, data?.count == 64 else { return }
+          let metadata = NWProtocolWebSocket.Metadata(opcode: .close)
+          metadata.closeCode = .privateCode(4401)
+          connection.send(
+            content: Data(closeReason.utf8),
+            contentContext: NWConnection.ContentContext(
+              identifier: "authorization-close", metadata: [metadata]
+            ),
+            isComplete: true,
+            completion: .contentProcessed { _ in }
+          )
+        }
+        return
+      }
       let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
       let context = NWConnection.ContentContext(
         identifier: "oversized-inline-record",
