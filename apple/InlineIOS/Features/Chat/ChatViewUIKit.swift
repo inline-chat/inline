@@ -757,6 +757,9 @@ public class ChatContainerView: UIView {
   }
 
   private func restoreComposeFocusAfterContextMenu() {
+    // An emoji selection can finish the menu before its overlay sheet closes.
+    // Keep the pending focus request until the picker returns the key window.
+    guard !messagesCollectionView.isReactionPickerPresented else { return }
     let shouldRestore = restoresComposeFocusAfterContextMenu
     restoresComposeFocusAfterContextMenu = false
     keyboardDismissTapGestureRecognizer.isEnabled = true
@@ -765,16 +768,21 @@ public class ChatContainerView: UIView {
     guard shouldRestore,
           window?.isKeyWindow == true,
           composeView.textView.isEditable,
-          !composeView.textView.isFirstResponder,
           let controller = findViewController(),
           !controller.isBeingDismissed,
           !controller.isMovingFromParent,
           controller.presentedViewController == nil,
           controller.navigationController?.presentedViewController == nil,
           controller.navigationController.map({ $0.topViewController === controller }) ?? true
-    else { return }
+    else {
+      messagesCollectionView.cancelContextMenuKeyboardRestoration()
+      return
+    }
     // Keyboard notifications can arrive after the menu animator completes.
     messagesCollectionView.preserveContextMenuViewportForKeyboardRestoration()
+    // UIKit can retain focus while temporarily hiding the keyboard for its menu.
+    // Restoring the viewport is still necessary when focus itself never changed.
+    guard !composeView.textView.isFirstResponder else { return }
     if !composeView.textView.becomeFirstResponder() {
       messagesCollectionView.cancelContextMenuKeyboardRestoration()
     }

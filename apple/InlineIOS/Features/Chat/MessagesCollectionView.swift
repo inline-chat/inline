@@ -40,17 +40,59 @@ final class MessagesCollectionView: UICollectionView {
 
   private var contextMenuPhase = ContextMenuPhase.idle
   private var contextMenuConfiguration: UIContextMenuConfiguration?
-  private var contextMenuKeyboardRestorationOffset: CGPoint?
+  private struct ContextMenuViewport {
+    let offset: CGPoint
+    let wasAtBottom: Bool
+    let anchor: (item: MessageListItem, minY: CGFloat)?
+    var keyboardSettled: Bool
+  }
+
+  private var contextMenuKeyboardViewport: ContextMenuViewport?
   var isContextMenuInteractionActive: Bool { contextMenuPhase != .idle }
+  var isReactionPickerPresented: Bool { coordinator.isReactionPickerPresented }
   var onContextMenuWillDisplay: (() -> Void)?
   var onContextMenuDidEnd: (() -> Void)?
 
   func preserveContextMenuViewportForKeyboardRestoration() {
-    contextMenuKeyboardRestorationOffset = contentOffset
+    // Capture before the menu hides the keyboard; focus restoration must not
+    // replace this with an offset already clamped to the keyboard-closed inset.
+    guard contextMenuKeyboardViewport == nil else { return }
+    let source = dataSource as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>
+    let visibleRect = bounds.inset(by: adjustedContentInset)
+    let anchor = indexPathsForVisibleItems.compactMap { indexPath -> (MessageListItem, CGFloat)? in
+      guard let item = source?.itemIdentifier(for: indexPath), item.messageStableId != nil,
+            let frame = layoutAttributesForItem(at: indexPath)?.frame,
+            frame.intersects(visibleRect) else { return nil }
+      return (item, frame.minY)
+    }.min { $0.1 < $1.1 }
+    contextMenuKeyboardViewport = ContextMenuViewport(
+      offset: contentOffset,
+      wasAtBottom: visualBottomDistance <= 1,
+      anchor: anchor,
+      keyboardSettled: isKeyboardVisible
+    )
   }
 
   func cancelContextMenuKeyboardRestoration() {
-    contextMenuKeyboardRestorationOffset = nil
+    contextMenuKeyboardViewport = nil
+  }
+
+  private func restoreContextMenuViewport() {
+    guard let viewport = contextMenuKeyboardViewport,
+          isKeyboardVisible, contextMenuPhase != .presented,
+          !isReactionPickerPresented else { return }
+    var offset = viewport.wasAtBottom
+      ? CGPoint(x: viewport.offset.x, y: -adjustedContentInset.top)
+      : viewport.offset
+    if !viewport.wasAtBottom, let anchor = viewport.anchor,
+       let source = dataSource as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>,
+       let indexPath = source.indexPath(for: anchor.item),
+       let frame = layoutAttributesForItem(at: indexPath)?.frame {
+      // New messages and resized rows change content coordinates while the menu
+      // is open. Preserve the same message on screen, not a stale raw offset.
+      offset.y += frame.minY - anchor.minY
+    }
+    setContentOffset(clampedSendAnimationContentOffset(offset), animated: false)
   }
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
@@ -275,6 +317,7 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func scrollToBottom() {
+    cancelContextMenuKeyboardRestoration()
     guard !itemsEmpty else { return }
 
     let visibleHeight = bounds.height
@@ -300,6 +343,7 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func scrollToMessageWhenAvailable(_ messageID: Int64) {
+    cancelContextMenuKeyboardRestoration()
     messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
     pendingScrollLoadTask?.cancel()
@@ -929,6 +973,12 @@ final class MessagesCollectionView: UICollectionView {
       name: UIResponder.keyboardWillChangeFrameNotification,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardDidChangeFrame),
+      name: UIResponder.keyboardDidChangeFrameNotification,
+      object: nil
+    )
 
     NotificationCenter.default.addObserver(
       self,
@@ -978,14 +1028,32 @@ final class MessagesCollectionView: UICollectionView {
     updateKeyboardHeight(0, notification: notification)
   }
 
+  @objc private func keyboardDidChangeFrame(_ notification: Notification) {
+    guard contextMenuKeyboardViewport != nil, isKeyboardVisible, !isReactionPickerPresented,
+          let window,
+          let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+          !frame.isNull, !frame.isInfinite else { return }
+    let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
+    let viewport = convert(bounds, to: window)
+    let overlap = viewport.intersection(keyboardFrame)
+    // Ignore completion of an earlier hide/frame while a newer show is pending.
+    guard !overlap.isNull, keyboardFrame.maxY >= viewport.maxY - 1,
+          abs(overlap.height - keyboardHeight) <= 0.5 else { return }
+    contextMenuKeyboardViewport?.keyboardSettled = true
+    restoreContextMenuViewport()
+    if contextMenuPhase == .idle {
+      cancelContextMenuKeyboardRestoration()
+    }
+  }
+
   private func updateKeyboardHeight(_ height: CGFloat, notification: Notification) {
     let wasAtBottom = shouldScrollToBottom
+    contextMenuKeyboardViewport?.keyboardSettled = false
     isKeyboardVisible = height > 0
     keyboardHeight = height
-    if height > 0, let offset = contextMenuKeyboardRestorationOffset {
-      contextMenuKeyboardRestorationOffset = nil
+    if height > 0, contextMenuKeyboardViewport != nil {
       updateContentInsets()
-      setContentOffset(clampedSendAnimationContentOffset(offset), animated: false)
+      restoreContextMenuViewport()
       return
     }
     if isContextMenuInteractionActive {
@@ -1412,6 +1480,9 @@ private extension MessagesCollectionView {
     ) {
       if let collectionView = collectionView as? MessagesCollectionView {
         collectionView.cancelContextMenuKeyboardRestoration()
+        if collectionView.isKeyboardVisible {
+          collectionView.preserveContextMenuViewportForKeyboardRestoration()
+        }
         collectionView.contextMenuConfiguration = configuration
         collectionView.contextMenuPhase = .presented
         contextMenuSourceItem = contextMenuPreview?.configuration === configuration ? contextMenuPreview?.item : nil
@@ -1471,6 +1542,11 @@ private extension MessagesCollectionView {
         collectionView.setContentOffset(
           CGPoint(x: offset.x, y: min(maxY, max(minY, offset.y))), animated: false
         )
+        collectionView.restoreContextMenuViewport()
+        if collectionView.contextMenuKeyboardViewport?.keyboardSettled == true,
+           !collectionView.isReactionPickerPresented {
+          collectionView.cancelContextMenuKeyboardRestoration()
+        }
         if self?.contextMenuPreview?.configuration === configuration {
           self?.contextMenuPreview = nil
         }
@@ -1602,6 +1678,7 @@ private extension MessagesCollectionView {
 
       // Sections are newest-first and the collection is inverted. The last item
       // is the day's first message; physical `.bottom` aligns it with the visual top.
+      (collectionView as? MessagesCollectionView)?.cancelContextMenuKeyboardRestoration()
       dateSeparatorHideWorkItem?.cancel()
       setDateSeparators(hidden: false, animated: false)
       let animated = !UIAccessibility.isReduceMotionEnabled
@@ -4046,9 +4123,18 @@ private extension MessagesCollectionView {
         presenter: presenter,
         over: collectionView.isContextMenuInteractionActive ? sourceWindow : nil,
         tintColor: theme.primary.uiColor,
-        onDismiss: { [weak self] in self?.reactionPickerPresentation = nil }
+        onDismiss: { [weak self, weak collectionView] in
+          self?.reactionPickerPresentation = nil
+          // Selection can close the menu while the picker still owns the key
+          // window. Retry compose restoration after that window is returned.
+          if let collectionView, !collectionView.isContextMenuInteractionActive {
+            collectionView.onContextMenuDidEnd?()
+          }
+        }
       )
     }
+
+    var isReactionPickerPresented: Bool { reactionPickerPresentation != nil }
 
     private func createReactionButton(
       reaction: String,

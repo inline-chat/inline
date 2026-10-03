@@ -8,8 +8,8 @@ import Vision
 @Suite("Message context-menu keyboard lifecycle", .serialized)
 @MainActor
 struct ContextMenuKeyboardTests {
-  @Test("More reactions opens immediately over the live menu and can reopen after dismissal")
-  func reactionSheetKeepsNativeMenu() async throws {
+  @Test("More reactions retains the menu and restores its window after selection dismissal", arguments: [false, true])
+  func reactionSheetKeepsNativeMenu(endMenuWhilePickerOpen: Bool) async throws {
     let fixture = try await Fixture()
     defer { fixture.close() }
     fixture.window.makeKeyAndVisible()
@@ -35,7 +35,11 @@ struct ContextMenuKeyboardTests {
     let scene = try #require(fixture.window.windowScene)
     let originalWindows = Set(scene.windows.map(ObjectIdentifier.init))
     var menuDismissals = 0
-    list.onContextMenuDidEnd = { menuDismissals += 1 }
+    var restoredKeyWindow = false
+    list.onContextMenuDidEnd = {
+      menuDismissals += 1
+      restoredKeyWindow = fixture.window.isKeyWindow
+    }
     defer { list.onContextMenuDidEnd = nil }
 
     for attempt in 0 ..< 2 {
@@ -71,14 +75,25 @@ struct ContextMenuKeyboardTests {
       try await Task.sleep(for: .milliseconds(400))
       #expect(list.isContextMenuInteractionActive)
       #expect(menuDismissals == 0)
+      let selecting = endMenuWhilePickerOpen && attempt == 1
+      if selecting {
+        // Exercise the ordering caused by selecting an emoji without sending a
+        // reaction to a real account: the menu ends before its picker sheet.
+        interaction.dismissMenu()
+        try await Task.sleep(for: .seconds(1))
+        #expect(!list.isContextMenuInteractionActive)
+        #expect(menuDismissals == 1)
+        #expect(!restoredKeyWindow)
+      }
       await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
         presenter.dismiss(animated: false) { continuation.resume() }
       }
       #expect(overlay.isHidden)
       #expect(overlay.rootViewController == nil)
       #expect(fixture.window.isKeyWindow)
-      #expect(list.isContextMenuInteractionActive)
-      #expect(menuDismissals == 0)
+      #expect(list.isContextMenuInteractionActive == !selecting)
+      #expect(menuDismissals == (selecting ? 2 : 0))
+      if selecting { #expect(restoredKeyWindow) }
     }
   }
 
@@ -682,6 +697,158 @@ struct ContextMenuKeyboardTests {
     #expect(!fixture.list.isKeyboardVisible)
   }
 
+  @Test("Menu viewport survives intermediate keyboard frames", arguments: [false, true], [0.0, 20.0, 180.0])
+  func intermediateKeyboardRestoration(usesV2: Bool, distance: Double) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    fixture.keyboard(height: 300)
+    let original = CGPoint(x: 0, y: -list.contentInset.top + distance)
+    list.setContentOffset(original, animated: false)
+    let configuration = fixture.beginMenu()
+    fixture.keyboard(height: 0)
+    fixture.endMenu(configuration, animator: nil)
+    // No explicit focus-restoration callback: UIKit can keep the composer focused.
+    fixture.keyboard(height: 80)
+    fixture.keyboard(height: 0, didChange: true) // stale hide completion
+    fixture.keyboard(height: 300)
+    fixture.keyboard(height: 300, didChange: true)
+    #expect(abs(list.contentOffset.y - original.y) < 0.5)
+
+    // Once settled, a later ordinary keyboard transition must not restore stale state.
+    let scrolled = CGPoint(x: 0, y: original.y + 200)
+    list.setContentOffset(scrolled, animated: false)
+    fixture.keyboard(height: 300)
+    #expect(abs(list.contentOffset.y - scrolled.y) < 0.5)
+  }
+
+  @Test("Late focus restoration keeps the viewport captured before menu dismissal")
+  func focusRestorationAfterOffsetClamp() async throws {
+    let fixture = try await Fixture(usesV2: false)
+    defer { fixture.close() }
+    let list = fixture.list
+    fixture.keyboard(height: 300)
+    let original = CGPoint(x: 0, y: -list.contentInset.top)
+    list.setContentOffset(original, animated: false)
+    let configuration = fixture.beginMenu()
+    fixture.keyboard(height: 0)
+    let animator = MenuAnimator()
+    fixture.endMenu(configuration, animator: animator)
+    animator.animate()
+    // A self-sizing/layout pass may clamp the offset before focus is restored.
+    list.setContentOffset(CGPoint(x: 0, y: -list.contentInset.top), animated: false)
+    list.onContextMenuDidEnd = { list.preserveContextMenuViewportForKeyboardRestoration() }
+    animator.complete()
+    fixture.keyboard(height: 100)
+    fixture.keyboard(height: 300)
+    fixture.keyboard(height: 300, didChange: true)
+    #expect(abs(list.contentOffset.y - original.y) < 0.5)
+  }
+
+  @Test("Settled keyboard during menu dismissal restores before releasing the viewport")
+  func keyboardSettlesBeforeMenuCompletion() async throws {
+    let fixture = try await Fixture(usesV2: false)
+    defer { fixture.close() }
+    let list = fixture.list
+    fixture.keyboard(height: 300)
+    let original = CGPoint(x: 0, y: -list.contentInset.top)
+    list.setContentOffset(original, animated: false)
+    let configuration = fixture.beginMenu()
+    fixture.keyboard(height: 0)
+    let animator = MenuAnimator()
+    fixture.endMenu(configuration, animator: animator)
+    animator.animate()
+    fixture.keyboard(height: 80)
+    fixture.keyboard(height: 300)
+    fixture.keyboard(height: 300, didChange: true)
+    animator.complete()
+    #expect(abs(list.contentOffset.y - original.y) < 0.5)
+  }
+
+  @Test("Last-message reaction resizing stays above the restored keyboard", arguments: [false, true])
+  func reactionResizesDuringKeyboardRestoration(removing: Bool) async throws {
+    let fixture = try await Fixture(usesV2: false)
+    defer { fixture.close() }
+    let list = fixture.list
+    var message = try #require(fixture.model.messages.first)
+    let reactions = [FullReaction(reaction: Reaction(
+      messageId: message.message.messageId, userId: 9_017, emoji: "❤️",
+      date: message.message.date, chatId: message.message.chatId
+    ))]
+    message.reactions = removing ? reactions : []
+    fixture.publisher.publisher.send(.update(.init(message: message, animated: false, peer: fixture.peer)))
+    try await fixture.settleUpdates()
+    fixture.keyboard(height: 300)
+    list.setContentOffset(CGPoint(x: 0, y: -list.contentInset.top), animated: false)
+    let configuration = fixture.beginMenu()
+    fixture.keyboard(height: 0)
+    let animator = MenuAnimator()
+    fixture.endMenu(configuration, animator: animator)
+    animator.animate()
+    message.reactions = removing ? [] : reactions
+    fixture.publisher.publisher.send(.update(.init(message: message, animated: true, peer: fixture.peer)))
+    try await fixture.settleUpdates()
+    animator.complete()
+    fixture.keyboard(height: 80)
+    fixture.keyboard(height: 300)
+    fixture.keyboard(height: 300, didChange: true)
+    try await fixture.settleUpdates()
+    #expect(abs(list.contentOffset.y + list.adjustedContentInset.top) < 0.5)
+    let cell = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == message.id })
+    #expect(cell.message?.reactions == message.reactions)
+    let bottom = cell.convert(cell.bounds, to: fixture.window).maxY
+    let visibleBottom = list.convert(list.bounds, to: fixture.window).maxY - list.adjustedContentInset.top
+    #expect(bottom <= visibleBottom + 0.5)
+  }
+
+  @Test("Reply navigation supersedes menu keyboard restoration", arguments: [false, true], [false, true])
+  func navigationAfterMenuWithoutKeyboardTransition(usesV2: Bool, hideKeyboard: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    fixture.keyboard(height: 300)
+    list.setContentOffset(CGPoint(x: 0, y: -list.contentInset.top), animated: false)
+    let configuration = fixture.beginMenu()
+    if hideKeyboard { fixture.keyboard(height: 0) }
+    fixture.endMenu(configuration, animator: nil)
+    list.scrollToMessageWhenAvailable(10)
+    try await Task.sleep(for: .milliseconds(600))
+    list.layoutIfNeeded()
+    let navigated = list.contentOffset.y
+    #expect(navigated + list.contentInset.top > 100)
+    fixture.keyboard(height: 300)
+    #expect(abs(list.contentOffset.y - navigated) < 0.5)
+  }
+
+  @Test("Older-message viewport survives arrivals during menu keyboard restoration", arguments: [false, true])
+  func olderMessageAnchorSurvivesArrival(usesV2: Bool) async throws {
+    let fixture = try await Fixture(usesV2: usesV2)
+    defer { fixture.close() }
+    let list = fixture.list
+    fixture.keyboard(height: 300)
+    list.setContentOffset(CGPoint(x: 0, y: -list.contentInset.top + 250), animated: false)
+    list.layoutIfNeeded()
+    let anchor = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .filter { cell in
+        let rect = cell.convert(cell.bounds, to: fixture.window)
+        return rect.minY > 100 && rect.maxY < fixture.window.bounds.maxY - list.contentInset.top
+      }.min { $0.frame.minY < $1.frame.minY })
+    let anchorID = try #require(anchor.message?.id)
+    let originalY = anchor.convert(anchor.bounds, to: fixture.window).maxY
+    let configuration = fixture.beginMenu()
+    fixture.keyboard(height: 0)
+    _ = try fixture.addMessage(id: 31)
+    try await fixture.settleUpdates()
+    fixture.endMenu(configuration, animator: nil)
+    fixture.keyboard(height: 300)
+    fixture.keyboard(height: 300, didChange: true)
+    try await fixture.settleUpdates()
+    let restored = try #require(list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+      .first { $0.message?.id == anchorID })
+    #expect(abs(restored.convert(restored.bounds, to: fixture.window).maxY - originalY) < 1)
+  }
+
   @MainActor private final class Fixture {
     let window: UIWindow
     let list: MessagesCollectionView
@@ -754,14 +921,15 @@ struct ContextMenuKeyboardTests {
       model.dispose()
     }
 
-    func keyboard(height: CGFloat, floating: Bool = false) {
+    func keyboard(height: CGFloat, floating: Bool = false, didChange: Bool = false) {
       let viewport = list.convert(list.bounds, to: window)
       let frame = CGRect(
         x: viewport.minX, y: viewport.maxY - height - (floating ? 100 : 0),
         width: viewport.width, height: height == 0 ? 300 : height
       )
       NotificationCenter.default.post(
-        name: UIResponder.keyboardWillChangeFrameNotification, object: nil,
+        name: didChange ? UIResponder.keyboardDidChangeFrameNotification : UIResponder.keyboardWillChangeFrameNotification,
+        object: nil,
         userInfo: [
           UIResponder.keyboardFrameEndUserInfoKey: window.convert(frame, to: window.screen.coordinateSpace),
           UIResponder.keyboardAnimationDurationUserInfoKey: 0.0,
