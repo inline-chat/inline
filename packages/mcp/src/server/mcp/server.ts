@@ -85,6 +85,12 @@ class InsufficientScopeError extends Error {
   }
 }
 
+class ProfileAuthenticationError extends Error {
+  constructor() {
+    super("Inline account authentication failed. Reconnect Inline and try again.")
+  }
+}
+
 function requireScope(scopes: string[], needed: string): void {
   if (!scopes.includes(needed)) {
     throw new InsufficientScopeError(needed)
@@ -116,7 +122,12 @@ function toolExecutionError(error: unknown, resourceMetadataUrl: string): CallTo
       "mcp/www_authenticate": [wwwAuthenticateChallenge(resourceMetadataUrl, error.neededScope)],
     }
   }
-  if (error instanceof InsufficientScopeError || error instanceof InlineAccessDeniedError || error instanceof InlineSdkAuthenticationError ||
+  if (error instanceof ProfileAuthenticationError) {
+    result._meta = {
+      "mcp/www_authenticate": [`Bearer resource_metadata="${escapeAuthParam(resourceMetadataUrl)}", error="invalid_token", error_description="Reconnect Inline to identify this account."`],
+    }
+  }
+  if (error instanceof ProfileAuthenticationError || error instanceof InsufficientScopeError || error instanceof InlineAccessDeniedError || error instanceof InlineSdkAuthenticationError ||
     (error instanceof ProtocolClientError && error.code === "rpc-error" && error.rpcCode !== undefined &&
       [RpcError_Code.UNAUTHENTICATED, RpcError_Code.PEER_ID_INVALID, RpcError_Code.CHAT_ID_INVALID, RpcError_Code.SPACE_ID_INVALID].includes(error.rpcCode))) {
     result._meta = { ...result._meta, inline: { accessDenied: true } }
@@ -1507,6 +1518,13 @@ const accountContextOutputSchema = z.object({
   hints: z.array(z.string()),
 })
 
+const accountProfileOutputSchema = z.strictObject({
+  id: z.string().min(1).regex(/\S/).describe("Immutable Inline user ID, unchanged across reconnection, token refresh, scope upgrades, and display metadata changes; never reassigned."),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  nickname: z.string().optional(),
+})
+
 const conversationsListOutputSchema = z.object({
   query: z.string().nullable(),
   sort: z.enum(["relevance", "recent", "unread", "id"]),
@@ -1857,6 +1875,39 @@ export function createInlineMcpServer(params: {
       }
     },
   )
+
+  registerInlineTool(server, resourceMetadataUrl, "account.profile", {
+    title: "Get Connected Inline Profile",
+    description: "Return the Inline profile represented by this request's authenticated connection. The immutable user ID is stable across token refresh, reconnection, scope upgrades, and name or email changes.",
+    inputSchema: z.strictObject({}),
+    outputSchema: accountProfileOutputSchema,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _meta: { ...toolMeta([], "Identifying connected Inline account...", "Inline account identified"), "openai/profile": true },
+  }, async (_args: {}, extra: { authInfo?: AuthInfo }) => {
+    const auth = extra.authInfo
+    if (!auth || auth.clientId !== params.grant.clientId ||
+      auth.extra?.grantId !== params.grant.id || auth.extra?.inlineUserId !== params.grant.inlineUserId.toString()) {
+      throw new ProfileAuthenticationError()
+    }
+    let profile
+    try {
+      profile = await params.inline.getProfile()
+    } catch (error) {
+      if (error instanceof InlineSdkAuthenticationError ||
+        (error instanceof ProtocolClientError && error.code === "rpc-error" && error.rpcCode === RpcError_Code.UNAUTHENTICATED)) {
+        throw new ProfileAuthenticationError()
+      }
+      throw error
+    }
+    if (profile.id <= 0n || profile.id !== params.grant.inlineUserId) throw new ProfileAuthenticationError()
+    const payload = {
+      id: profile.id.toString(),
+      ...(profile.name !== undefined ? { name: profile.name } : {}),
+      ...(profile.email !== undefined ? { email: profile.email } : {}),
+      ...(profile.nickname !== undefined ? { nickname: profile.nickname } : {}),
+    }
+    return { isError: false, structuredContent: payload, content: [jsonText(payload)] }
+  })
 
   registerMessageResultsUi(server)
 

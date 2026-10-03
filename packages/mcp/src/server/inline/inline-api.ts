@@ -9,6 +9,7 @@ import {
   GetChatsInput,
   GetChatInput,
   GetMessagesInput,
+  GetMeInput,
   GetSpaceMembersInput,
   InputChatParticipant,
   InputPeer,
@@ -30,6 +31,13 @@ export type InlineAllowedContext = {
 }
 
 export class InlineAccessDeniedError extends Error {}
+
+export type InlineAccountProfile = {
+  id: bigint
+  name?: string
+  email?: string
+  nickname?: string
+}
 
 export type InlineEligibleChat = {
   chatId: bigint
@@ -178,6 +186,7 @@ export type InlineUploadFileResult = {
 
 export type InlineApi = {
   close(): Promise<void>
+  getProfile(): Promise<InlineAccountProfile>
   listSpaces(params: { query?: string; limit?: number }): Promise<InlineSpaceSummary[]>
   searchPeople(params: { query?: string; limit?: number }): Promise<{ query: string | null; bestMatch: InlinePersonCandidate | null; items: InlinePersonCandidate[] }>
   getEligibleChats(params?: { includeSubthreads?: boolean }): Promise<InlineEligibleChat[]>
@@ -887,6 +896,22 @@ export function createInlineApi(params: {
     async close() {
       await client.close()
       await eventDrain
+    },
+
+    async getProfile() {
+      await ensureConnected()
+      const result = await client.invoke(Method.GET_ME, { oneofKind: "getMe", getMe: GetMeInput.create({}) })
+      const user = result.getMe.user
+      if (!user || user.id <= 0n) throw new Error("Authenticated Inline profile is unavailable")
+      const name = [user.firstName?.trim(), user.lastName?.trim()].filter(Boolean).join(" ")
+      const email = user.email?.trim()
+      const nickname = user.username?.trim()
+      return {
+        id: user.id,
+        ...(name ? { name } : {}),
+        ...(email ? { email } : {}),
+        ...(nickname ? { nickname } : {}),
+      }
     },
 
     async listSpaces({ query, limit }) {

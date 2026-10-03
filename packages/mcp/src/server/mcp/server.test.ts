@@ -104,6 +104,118 @@ const grant: McpGrant = {
   allowHomeThreads: false,
 }
 
+describe("connected account profile", () => {
+  function profileAuth(selectedGrant = grant, scopes: string[] = []): AuthInfo {
+    return { ...createAuthInfo(scopes), clientId: selectedGrant.clientId, extra: { grantId: selectedGrant.id, inlineUserId: selectedGrant.inlineUserId.toString() } }
+  }
+
+  async function requestProfile(server: ReturnType<typeof createInlineMcpServer>, authInfo: AuthInfo | undefined, args: Record<string, unknown> = {}) {
+    const connection = await connectAndInitialize(server, authInfo ?? profileAuth())
+    await sendRequest(connection.transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "account.profile", arguments: args } }, { authInfo })
+    const response = await waitForResponse(connection.sent, 2)
+    await server.close()
+    return response
+  }
+
+  it.each(["legacy", "submission-v2"] as const)("declares one strict authenticated profile tool for %s", async (contractVersion) => {
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion })
+    const authInfo = profileAuth()
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { authInfo })
+    const tools = (await waitForResponse(sent, 2)).result.tools
+    expect(tools.filter((tool: any) => tool._meta?.["openai/profile"] === true).map((tool: any) => tool.name)).toEqual(["account.profile"])
+    const profile = tools.find((tool: any) => tool.name === "account.profile")
+    expect(profile.inputSchema).toMatchObject({ type: "object", properties: {}, additionalProperties: false })
+    expect(profile.outputSchema).toMatchObject({ type: "object", required: ["id"], additionalProperties: false })
+    expect(Object.keys(profile.outputSchema.properties)).toEqual(["id", "name", "email", "nickname"])
+    expect(profile.outputSchema.properties.id).toMatchObject({ type: "string", minLength: 1, pattern: "\\S" })
+    expect(profile._meta.securitySchemes).toEqual([{ type: "oauth2", scopes: [] }])
+    expect(profile.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false })
+    expect(tools.find((tool: any) => tool.name === "account.me")._meta["openai/profile"]).toBeUndefined()
+    await server.close()
+  })
+
+  it.each([[], ["offline_access"], ["messages:write"], ["messages:read", "spaces:read"]].map((scopes) => ({ scopes })))("identifies self with normal permissions $scopes and no chat or people reads", async ({ scopes }) => {
+    const selectedGrant = { ...grant, inlineUserId: 42n, scope: scopes.join(" "), spaceIds: [], allowDms: false, allowHomeThreads: false }
+    const getProfile = vi.fn<InlineApi["getProfile"]>().mockResolvedValue({ id: 42n, name: "Jonny", email: "jonny@example.test", nickname: "jonny" })
+    const forbidden = vi.fn(async (): Promise<never> => { throw new Error("Profile must not use catalog identity") })
+    const inline = createInlineStub({ getProfile, getEligibleChats: forbidden, searchPeople: forbidden, listSpaces: forbidden })
+    const response = await requestProfile(createInlineMcpServer({ grant: selectedGrant, inline }), profileAuth(selectedGrant, scopes))
+    const expected = { id: "42", name: "Jonny", email: "jonny@example.test", nickname: "jonny" }
+    expect(response.result.isError).toBe(false)
+    expect(response.result.structuredContent).toEqual(expected)
+    expect(response.result.content).toEqual([{ type: "text", text: JSON.stringify(expected) }])
+    expect(getProfile).toHaveBeenCalledWith()
+    expect(forbidden).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { id: "g1", inlineUserId: 42n, scopes: ["messages:read"], token: "original", name: "Jonny", email: "jonny@example.test" },
+    { id: "reconnected", inlineUserId: 42n, scopes: ["messages:write", "spaces:read"], token: "refreshed", name: "Renamed", email: "new@example.test" },
+    { id: "other-account", inlineUserId: 63n, scopes: [], token: "other", name: "Other", email: "other@example.test" },
+  ])("uses persistent self ID for connection $id independently of grants and labels", async ({ id, inlineUserId, scopes, token, name, email }) => {
+    const selectedGrant = { ...grant, id, inlineUserId, scope: scopes.join(" ") }
+    const getProfile = vi.fn<InlineApi["getProfile"]>().mockResolvedValue({ id: inlineUserId, name, email })
+    const response = await requestProfile(createInlineMcpServer({ grant: selectedGrant, inline: createInlineStub({ getProfile }) }), { ...profileAuth(selectedGrant, scopes), token })
+    expect(response.result.structuredContent).toEqual({ id: inlineUserId.toString(), name, email })
+  })
+
+  it.each(["userId", "email", "accountId", "id"])("rejects caller-supplied %s before any identity lookup", async (selector) => {
+    const getProfile = vi.fn<InlineApi["getProfile"]>()
+    const response = await requestProfile(createInlineMcpServer({ grant, inline: createInlineStub({ getProfile }) }), profileAuth(), { [selector]: "other" })
+    expect(response.error || response.result?.isError).toBeTruthy()
+    expect(getProfile).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    undefined,
+    { ...profileAuth(), clientId: "different-client" },
+    { ...profileAuth(), extra: { grantId: "other-grant", inlineUserId: "1" } },
+    { ...profileAuth(), extra: { grantId: "g1", inlineUserId: "63" } },
+  ])("requires the authenticated connection to match this grant before self lookup (%j)", async (authInfo) => {
+    const getProfile = vi.fn<InlineApi["getProfile"]>()
+    const response = await requestProfile(createInlineMcpServer({ grant, inline: createInlineStub({ getProfile }) }), authInfo)
+    expect(response.result.isError).toBe(true)
+    expect(response.result).not.toHaveProperty("structuredContent")
+    expect(response.result._meta["mcp/www_authenticate"][0]).toContain('error="invalid_token"')
+    expect(getProfile).not.toHaveBeenCalled()
+  })
+
+  it("does not disclose a different SDK self account when credential and grant identity disagree", async () => {
+    const getProfile = vi.fn<InlineApi["getProfile"]>().mockResolvedValue({ id: 63n, name: "Other private person", email: "other-private@example.test" })
+    const response = await requestProfile(createInlineMcpServer({ grant, inline: createInlineStub({ getProfile }) }), profileAuth())
+    expect(response.result.isError).toBe(true)
+    expect(response.result).not.toHaveProperty("structuredContent")
+    expect(response.result._meta).toMatchObject({ inline: { accessDenied: true } })
+    expect(response.result._meta["mcp/www_authenticate"][0]).toContain('error="invalid_token"')
+    expect(JSON.stringify(response)).not.toContain("other-private")
+    expect(JSON.stringify(response)).not.toContain("Other private")
+  })
+
+  it.each([
+    new InlineSdkAuthenticationError("SESSION_REVOKED", ConnectionError_Reason.SESSION_REVOKED),
+    new ProtocolClientError("rpc-error", { code: RpcError_Code.UNAUTHENTICATED }),
+    new Error("Self service unavailable"),
+  ])("never falls back to a cached profile after self read fails (%s)", async (failure) => {
+    const getProfile = vi.fn<InlineApi["getProfile"]>().mockResolvedValueOnce({ id: 1n, email: "private@example.test" }).mockRejectedValueOnce(failure)
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getProfile }) })
+    const authInfo = profileAuth()
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "account.profile", arguments: {} } }, { authInfo })
+    expect((await waitForResponse(sent, 2)).result.structuredContent).toEqual({ id: "1", email: "private@example.test" })
+    await sendRequest(transport, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "account.profile", arguments: {} } }, { authInfo })
+    const response = await waitForResponse(sent, 3)
+    expect(response.result.isError).toBe(true)
+    expect(response.result).not.toHaveProperty("structuredContent")
+    expect(JSON.stringify(response)).not.toContain("private@example.test")
+    if (failure instanceof InlineSdkAuthenticationError || failure instanceof ProtocolClientError) {
+      expect(response.result._meta["mcp/www_authenticate"][0]).toContain('error="invalid_token"')
+    } else expect(response.result._meta?.["mcp/www_authenticate"]).toBeUndefined()
+    expect(getProfile).toHaveBeenCalledTimes(2)
+    await server.close()
+  })
+})
+
 describe("minimal thread workflows", () => {
   function createConsultationStub(overrides: Partial<InlineApi>): InlineApi {
     return createInlineStub({
@@ -312,6 +424,7 @@ function defaultEligibleChat(overrides: Partial<InlineEligibleChat> = {}): Inlin
 function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
   return {
     async close() {},
+    async getProfile() { return { id: 1n } },
     async listSpaces() {
       return [
         {
@@ -509,6 +622,7 @@ describe("mcp tool server", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "conversations.mentions",
       "account.me",
+      "account.profile",
       "spaces.list",
       "people.search",
       "conversations.list",
@@ -534,6 +648,7 @@ describe("mcp tool server", () => {
     > = {
       "conversations.mentions": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "account.profile": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -638,6 +753,7 @@ describe("mcp tool server", () => {
 
     const expectedRequired: Record<string, string[]> = {
       "account.me": [],
+      "account.profile": [],
       "spaces.list": [],
       "people.search": [],
       "conversations.list": [],

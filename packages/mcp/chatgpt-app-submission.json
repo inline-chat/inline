@@ -8,6 +8,18 @@
     "category": "COLLABORATION"
   },
   "tools": {
+    "account.profile": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads the authenticated Inline self profile to identify the connected account without changing any state.",
+        "open_world_justification": "Does not contact other users or write to public internet or third-party systems.",
+        "destructive_justification": "Does not modify profiles, connections, permissions, or other account data."
+      }
+    },
     "account.me": {
       "annotations": {
         "readOnlyHint": true,

@@ -69,6 +69,7 @@ Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scop
 Legacy reads using `userId` resolve an existing approved DM from conversation metadata and fail when none exists. They do not create a DM. Explicit legacy sends using `userId` retain the backend's ability to create a destination DM.
 
 - `account.me` (read-only): inspect current MCP authorization, scopes, and allowed chat context.
+- `account.profile` (authenticated, read-only): identify the connected Inline account for ChatGPT's Connected accounts view. It accepts no arguments and returns the immutable Inline user ID plus available `name`, `email`, and `nickname` from authenticated `GET_ME`. The tool is designated with `_meta["openai/profile"] = true`; its top-level structured result and JSON text fallback match [OpenAI's profile contract](https://developers.openai.com/plugins/build/auth). It requires no message or space scope and never selects an identity from caller input or a people-search result. `account.me` remains unchanged.
   - Input: `{}`
   - Output: `{ user, session, allowed, hints[] }`
 - `spaces.list` (read-only): list spaces visible to the current MCP grant.

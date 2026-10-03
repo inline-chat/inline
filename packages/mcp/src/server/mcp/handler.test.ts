@@ -50,7 +50,7 @@ describe("/mcp", () => {
     const close = vi.fn(async () => {})
     const unused = async (): Promise<never> => { throw new Error("Unexpected tool execution during initialization") }
     vi.spyOn(inlineApi, "createInlineApi").mockReturnValue({
-      close, listSpaces: unused, searchPeople: unused, getEligibleChats: unused,
+      close, getProfile: unused, listSpaces: unused, searchPeople: unused, getEligibleChats: unused,
       resolveConversation: unused, getConversation: unused, messageContext: unused,
       getMessages: unused, recentMessages: unused, searchMessages: unused,
       unreadMessages: unused, createChat: unused, createSubthread: unused, forwardMessages: unused, uploadFile: unused,

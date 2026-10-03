@@ -47,6 +47,66 @@ const uiUri = "ui://inline/message-results-v1.html"
 const threadUiUri = "ui://inline/thread-v3.html"
 const scenarios = []
 
+// Exercise the packaged profile handler through the SDK, including strict
+// identity selection and the documented ChatGPT account-label response shape.
+async function checkCompiledAccountProfile() {
+  const { createInlineMcpServer } = await import(path.join(root, "packages/mcp/dist/server/mcp/server.js"))
+  let profile = { id: 1n, name: "Connected User", email: "connected@example.test", nickname: "connected" }
+  let reads = 0
+  const grant = { id: "profile-grant", clientId: "profile-client", inlineUserId: 1n, scope: "", spaceIds: [], allowDms: false, allowHomeThreads: false }
+  const server = createInlineMcpServer({ grant, contractVersion: "submission-v2", inline: {
+    getProfile: async () => { reads++; return profile }, close: async () => {},
+  } })
+  const authInfo = { token: "synthetic-profile-token", clientId: grant.clientId, scopes: [], extra: { grantId: grant.id, inlineUserId: "1" } }
+  const pending = new Map()
+  let requestId = 0
+  const transport = { start: async () => {}, close: async () => {}, send: async (message) => pending.get(message.id)?.(message) }
+  const request = async (method, params) => {
+    const id = ++requestId
+    let timer
+    const response = new Promise((resolve, reject) => {
+      pending.set(id, resolve)
+      timer = setTimeout(() => reject(new Error("Compiled profile timed out")), 5_000)
+    })
+    transport.onmessage({ jsonrpc: "2.0", id, method, params }, { authInfo })
+    try { return await response } finally { clearTimeout(timer); pending.delete(id) }
+  }
+  try {
+    await server.connect(transport)
+    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "profile-contract", version: "1" } })
+    transport.onmessage({ jsonrpc: "2.0", method: "notifications/initialized" }, { authInfo })
+    const catalog = await request("tools/list", {})
+    const tool = catalog.result.tools.find((item) => item.name === "account.profile")
+    assert.equal(tool?._meta?.["openai/profile"], true)
+    assert.deepEqual(tool._meta.securitySchemes, [{ type: "oauth2", scopes: [] }])
+    assert.equal(tool.annotations.readOnlyHint, true)
+    assert.deepEqual(Object.keys(tool.inputSchema.properties), [])
+    assert.equal(tool.inputSchema.additionalProperties, false)
+    assert.deepEqual(Object.keys(tool.outputSchema.properties).sort(), ["email", "id", "name", "nickname"])
+    assert.deepEqual(tool.outputSchema.required, ["id"])
+    assert.equal(tool.outputSchema.additionalProperties, false)
+    const validate = toolValidator.compile(tool.outputSchema)
+    const call = (args = {}) => request("tools/call", { name: "account.profile", arguments: args })
+    const result = (await call()).result
+    assert.equal(result.isError, false)
+    assert.ok(validate(result.structuredContent), JSON.stringify(validate.errors))
+    assert.deepEqual(result.structuredContent, { id: "1", name: "Connected User", email: "connected@example.test", nickname: "connected" })
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent)
+    profile = { id: 1n, name: "Renamed User" }
+    assert.deepEqual((await call()).result.structuredContent, { id: "1", name: "Renamed User" }, "profile ID stays stable and unavailable fields are omitted")
+    const beforeSelector = reads
+    const selector = await call({ userId: "2" })
+    assert.ok(selector.error || selector.result?.isError)
+    assert.equal(reads, beforeSelector, "caller cannot select another identity")
+    profile = { id: 2n, email: "other@example.test" }
+    const mismatch = (await call()).result
+    assert.equal(mismatch.isError, true)
+    assert.match(JSON.stringify(mismatch._meta), /invalid_token/)
+    assert.equal(mismatch.structuredContent, undefined)
+    assert.doesNotMatch(JSON.stringify(mismatch), /other@example.test/)
+  } finally { await server.close() }
+}
+
 // Use compiled tool handlers and their packaged HTML together. Domain fixtures
 // replace the upstream account; the wire result is produced by the real server.
 async function checkCompiledMessageCards() {
@@ -312,6 +372,7 @@ try {
   }
 
   assert.equal((await request("resources/read", { uri: uiUri }, false)).status, 401)
+  assert.equal((await request("tools/call", { name: "account.profile", arguments: {} }, false)).status, 401)
   scenarios.push("anonymous-resource-read-denied")
   await success("initialize", {
     protocolVersion: "2025-11-25", capabilities: {},
@@ -519,6 +580,7 @@ try {
   scenarios.push("consultation-write-scope-denied-before-side-effects")
   active = false
   assert.equal((await request("resources/read", { uri: uiUri })).status, 401)
+  assert.equal((await request("tools/call", { name: "account.profile", arguments: {} })).status, 401)
   const revokedModern = await fetch(endpoint, {
     method: "POST", signal: AbortSignal.timeout(10_000),
     headers: { ...headers, "mcp-protocol-version": modernVersion, "mcp-method": "resources/read", "mcp-name": threadUiUri },
@@ -530,6 +592,10 @@ try {
   assert.match(revokedModern.headers.get("www-authenticate") ?? "", /invalid_token/)
   scenarios.push("revoked-grant-denies-existing-session")
   assert.equal(upstreamRequests, 0, "metadata and scope-denial checks must not contact Inline")
+
+  await checkCompiledAccountProfile()
+  scenarios.push("compiled-profile-identifies-only-authenticated-self-with-strict-host-schema")
+  scenarios.push("anonymous-and-revoked-profile-requests-denied-before-upstream")
 
   await checkCompiledConsultationMentions()
   scenarios.push("compiled-consultation-preserves-recipient-mention-links-through-send-parser")

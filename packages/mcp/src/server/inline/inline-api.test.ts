@@ -53,6 +53,51 @@ describe("createInlineApi", () => {
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
   })
 
+  it("loads only the credential-bound self profile, including email, without catalog access", async () => {
+    const self = { ...user(42n, " Jonny ", " Person ", " jonny "), email: " jonny@example.test ", phoneNumber: "+123", bio: "Private bio" }
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      expect(method).toBe(Method.GET_ME)
+      expect(input).toEqual({ oneofKind: "getMe", getMe: {} })
+      return RpcResult.fromBinary(RpcResult.toBinary(RpcResult.create({ result: { oneofKind: "getMe", getMe: { user: self } } }))).result
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: false, allowHomeThreads: false } })
+    try {
+      await expect(api.getProfile()).resolves.toEqual({ id: 42n, name: "Jonny Person", email: "jonny@example.test", nickname: "jonny" })
+      expect(realtimeSdk.client.connect).toHaveBeenCalledTimes(1)
+      expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(1)
+    } finally { await api.close() }
+  })
+
+  it("omits unavailable labels and reads fresh metadata without changing identity", async () => {
+    realtimeSdk.client.invoke.mockResolvedValueOnce({ getMe: { user: { id: 42n, firstName: "  ", username: " " } } })
+      .mockResolvedValueOnce({ getMe: { user: { id: 42n, firstName: "New name", email: "new@example.test" } } })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [] } })
+    try {
+      await expect(api.getProfile()).resolves.toEqual({ id: 42n })
+      await expect(api.getProfile()).resolves.toEqual({ id: 42n, name: "New name", email: "new@example.test" })
+      expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(2)
+    } finally { await api.close() }
+  })
+
+  it.each([undefined, { id: 0n }, { id: -1n }])("rejects unavailable self identity without an invented profile", async (self) => {
+    realtimeSdk.client.invoke.mockResolvedValue({ getMe: { user: self } })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [] } })
+    try { await expect(api.getProfile()).rejects.toThrow("Authenticated Inline profile is unavailable") }
+    finally { await api.close() }
+  })
+
+  it("propagates a self read failure instead of using a prior profile or catalog", async () => {
+    const failure = new Error("Self read unavailable")
+    realtimeSdk.client.invoke.mockResolvedValueOnce({ getMe: { user: { id: 42n, email: "jonny@example.test" } } })
+      .mockRejectedValueOnce(failure)
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [] } })
+    try {
+      await expect(api.getProfile()).resolves.toEqual({ id: 42n, email: "jonny@example.test" })
+      await expect(api.getProfile()).rejects.toBe(failure)
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_ME, Method.GET_ME])
+    } finally { await api.close() }
+  })
+
   it("requests expanded discovery, filters grants, and keeps ordinary discovery unchanged", async () => {
     const root = spaceChat(1n, "Root", 10n, 1n)
     const child = { ...spaceChat(3n, "Hidden child", 10n, 2n), parentChatId: 1n }

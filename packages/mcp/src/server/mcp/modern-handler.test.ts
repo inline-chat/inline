@@ -35,6 +35,7 @@ function fixtureApi(): inlineApi.InlineApi {
   const unused = async (): Promise<never> => { throw new Error("Unexpected Inline operation") }
   return {
     close: vi.fn(async () => {}),
+    getProfile: unused,
     listSpaces: vi.fn(async () => [{ id: 10n, name: "Inline", creator: true, date: 100n, isPublic: false, chatCount: 1, unreadCount: 0, lastMessageDate: null }]),
     searchPeople: unused, getEligibleChats: unused, resolveConversation: unused, getConversation: unused,
     messageContext: unused, getMessages: unused, recentMessages: unused, searchMessages: unused,
@@ -52,6 +53,66 @@ describe("authenticated stateless MCP HTTP requests", () => {
   function app() {
     return createApp({ issuer: "http://localhost:8791", oauthInternalSharedSecret: "test-secret" })
   }
+
+  it("identifies the connection selected by validated OAuth credentials with minimal scopes", async () => {
+    const profiles = {
+      "42:self-token": { id: 42n, name: "Jonny", email: "jonny@example.test" },
+      "63:self-token": { id: 63n, name: "Other", email: "other@example.test" },
+    }
+    const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const { token } = JSON.parse(String(init?.body))
+      const second = token === "oauth-second-account"
+      return Response.json({ ...introspection(second ? "messages:write" : ""), grant_id: second ? "grant-2" : "grant-1", inline_user_id: second ? "63" : "42", inline_token: second ? "63:self-token" : "42:self-token", space_ids: [] })
+    })
+    const instances: inlineApi.InlineApi[] = []
+    const sdk = vi.spyOn(inlineApi, "createInlineApi").mockImplementation(({ token }) => {
+      const inline = fixtureApi()
+      inline.getProfile = vi.fn(async () => profiles[token as keyof typeof profiles])
+      instances.push(inline)
+      return inline
+    })
+    const server = app()
+    for (const [token, expected] of [
+      ["oauth-first-account", { id: "42", name: "Jonny", email: "jonny@example.test" }],
+      ["oauth-second-account", { id: "63", name: "Other", email: "other@example.test" }],
+      ["oauth-first-account", { id: "42", name: "Jonny", email: "jonny@example.test" }],
+    ] as const) {
+      const response = await server.fetch(modernRequest("tools/call", { name: "account.profile", arguments: {} }, { authorization: `Bearer ${token}` }))
+      expect(response.status).toBe(200)
+      const payload = await response.json() as { result: { resultType: string; isError: boolean; structuredContent: unknown; content: unknown } }
+      expect(payload.result).toMatchObject({ resultType: "complete", isError: false, structuredContent: expected, content: [{ type: "text", text: JSON.stringify(expected) }] })
+    }
+    expect(upstream).toHaveBeenCalledTimes(3)
+    expect(sdk.mock.calls.map(([params]) => params.token)).toEqual(["42:self-token", "63:self-token", "42:self-token"])
+    for (const inline of instances) {
+      expect(inline.getProfile).toHaveBeenCalledTimes(1)
+      expect(inline.listSpaces).not.toHaveBeenCalled()
+      expect(inline.close).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it("denies a mismatched SDK account and a revoked connection without cached identity", async () => {
+    const upstream = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ ...introspection(""), inline_user_id: "42", inline_token: "wrong:self-token" }))
+      .mockResolvedValueOnce(Response.json({ active: false }, { status: 401 }))
+    const inline = fixtureApi()
+    inline.getProfile = vi.fn(async () => ({ id: 63n, name: "Private other", email: "private-other@example.test" }))
+    const sdk = vi.spyOn(inlineApi, "createInlineApi").mockReturnValue(inline)
+    const server = app()
+    const response = await server.fetch(modernRequest("tools/call", { name: "account.profile", arguments: {} }))
+    expect(response.status).toBe(200)
+    const payload = await response.json()
+    expect(payload).toMatchObject({ result: { resultType: "complete", isError: true, _meta: { "mcp/www_authenticate": [expect.stringContaining('error="invalid_token"')] } } })
+    expect(JSON.stringify(payload)).not.toContain("private-other")
+    expect(JSON.stringify(payload)).not.toContain("Private other")
+    const revoked = await server.fetch(modernRequest("tools/call", { name: "account.profile", arguments: {} }))
+    expect(revoked.status).toBe(401)
+    expect(revoked.headers.get("www-authenticate")).toContain("invalid_token")
+    expect(upstream).toHaveBeenCalledTimes(2)
+    expect(sdk).toHaveBeenCalledTimes(1)
+    expect(inline.getProfile).toHaveBeenCalledTimes(1)
+    expect(inline.close).toHaveBeenCalledTimes(1)
+  })
 
   it("serves discovery and Events through auth without creating the Inline SDK", async () => {
     const sdk = vi.spyOn(inlineApi, "createInlineApi")
