@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import {
   chats, chatParticipants, chatParticipantGroups, dialogs, members, messages, spaces, updates,
@@ -53,6 +53,17 @@ const homeFixture = async () => {
     title: "Home recovery", participants: [{ userId: BigInt(participant.id) }],
   }, testUtils.functionContext({ userId: creator.id }))
   const chatId = Number(chat.id)
+  const initialDialogs = await db.query.dialogs.findMany({ where: { chatId } })
+  expect(initialDialogs.map(dialog => dialog.userId).toSorted((a, b) => a - b))
+    .toEqual([creator.id, participant.id].toSorted((a, b) => a - b))
+  const invitedDialog = initialDialogs.find(dialog => dialog.userId === participant.id)
+  expect(invitedDialog).toMatchObject({ open: true, followMode: "following", chatListHidden: null })
+  expect(invitedDialog?.order).toBeTruthy()
+
+  // Current invitations initialize Open/follow state. Retain recovery coverage
+  // for historical Home participant grants that have no personal Dialog yet.
+  await db.delete(dialogs).where(and(eq(dialogs.chatId, chatId), eq(dialogs.userId, participant.id)))
+  expect(await db.query.chatParticipants.findFirst({ where: { chatId, userId: participant.id } })).toBeDefined()
   expect(await db.query.dialogs.findMany({ where: { chatId } })).toMatchObject([{ userId: creator.id }])
   return { creator, participant, outsider, chatId }
 }
