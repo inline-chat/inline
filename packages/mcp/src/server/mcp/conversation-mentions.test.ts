@@ -4,8 +4,8 @@ import { Message, Method } from "@inline-chat/protocol/core"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
-import { createInlineMcpServer } from "./server"
-import { CONVERSATION_SNAPSHOT_MAX_BYTES, serializeRecentConversationSnapshot } from "./conversation-mentions"
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { CONVERSATION_SNAPSHOT_MAX_BYTES, registerConversationMentions, registerConversationSnapshot, serializeRecentConversationSnapshot } from "./conversation-mentions"
 import type { RecentConversationSnapshot } from "./conversation-mentions"
 import type { McpGrant } from "./grant"
 import { createInlineApi, type InlineApi, type InlineEligibleChat, type InlineRecentMessagesResult } from "../inline/inline-api"
@@ -49,14 +49,18 @@ function inlineStub(overrides: Partial<InlineApi> = {}): InlineApi {
   } as unknown as InlineApi
 }
 
-const servers: ReturnType<typeof createInlineMcpServer>[] = []
+const servers: McpServer[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
   vi.clearAllMocks()
 })
 
 async function harness(inline = inlineStub(), selectedGrant = grant) {
-  const server = createInlineMcpServer({ grant: selectedGrant, inline })
+  // The retained composer feature is intentionally absent from the production server.
+  const server = new McpServer({ name: "unused-conversation-mentions-test", version: "1" })
+  const params = { grant: selectedGrant, inline, resourceMetadataUrl: "https://mcp.inline.chat/.well-known/oauth-protected-resource" }
+  registerConversationSnapshot(server, params)
+  registerConversationMentions(server, params)
   servers.push(server)
   const pending = new Map<number, (message: any) => void>()
   const transport: Transport = {

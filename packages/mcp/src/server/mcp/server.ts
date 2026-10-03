@@ -24,7 +24,7 @@ import type {
 } from "../inline/inline-api"
 import { logMessagesSendAudit } from "./audit-log"
 import { MESSAGE_RESULTS_RESOURCE_URI, registerMessageResultsUi } from "./message-results-ui"
-import { registerConversationMentions } from "./conversation-mentions"
+import { registerConversationMentions, registerConversationSnapshot } from "./conversation-mentions"
 import type { EventsProxy } from "./events-proxy"
 import { THREAD_RESOURCE_URI, registerThreadUi } from "./thread-ui"
 
@@ -35,6 +35,9 @@ const UPLOAD_FETCH_TIMEOUT_MS = 15_000
 const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
+// Retained view implementations are intentionally unused until the app UI is enabled in source.
+// This is not configurable by a caller, environment variable, or connection.
+const APP_VIEWS_ENABLED = false
 export const INLINE_MCP_INSTRUCTIONS =
   "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.get/list/search/context/unread; send only after the target is clear. Address requested recipients by name using [@Name](inline://user?id=USER_ID) with their resolved user IDs; plain names are not mentions. For forwarding, resolve the source and destination separately, select source messages, then use messages.forward. Subthreads inherit root-chat access plus their own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. Creation inputs do not edit existing anchored reply threads. IDs are positive decimal strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds; calendar days use UTC. Use account.me to inspect scopes and allowed chat contexts."
 
@@ -58,7 +61,7 @@ export type McpToolContract = "legacy" | "submission-v2"
 
 export function inlineMcpInstructions(contractVersion: McpToolContract): string {
   return INLINE_MCP_INSTRUCTIONS + (contractVersion === "submission-v2"
-    ? " For teammate input, resolve the people and context first. Before sending an ask-and-wait request, establish that the originating host can subscribe and resume this task. OpenAI supports this in Work chats (Cloud on desktop) and dots, not regular ChatGPT chats. Server Events availability alone does not prove host continuation support. Explain an unsupported host before sending; proceed only if sending without automatic continuation satisfies the user. conversations.ask creates a private thread, mentions the recipients, sends one question and returns a message.created subscription selector and replay cursor. It does not itself subscribe or wait. Subscribe using events/subscribe from that cursor before waiting; monitoring starts only after subscription acknowledgement. On an event, read current message context and continue the originating task. Never repeat an uncertain write automatically. conversations.open opens the minimal Inline thread UI; its picker only remembers threads explicitly opened in this ChatGPT experience."
+    ? " For teammate input, resolve the people and context first. Before an ask-and-wait send, establish that the originating host can register Events and continue this task. OpenAI supports this in Work chats (Cloud on desktop) and dots, not regular ChatGPT chats; explain an unsupported host before sending and proceed only if send-only satisfies the user. Registration may use an Automations event trigger. events/subscribe is an MCP protocol method, not an Inline tool name; its absence from tools/list does not establish that Events is unavailable. conversations.ask creates a private thread, mentions recipients, sends one question and returns a message.created selector, replay cursor and question receipt; it does not register or wait. If the host accepts a replay cursor, pass the returned cursor exactly. Otherwise register the exact event and arguments, obtain host acknowledgement, then make one bounded messages.context read anchored at the confirmed question messageId (before: 0, after: 50, includeAnchor: false, content: all) to check pre-registration replies. Disclose limited coverage if this read fails or fills its window; do not poll. Deduplicate overlapping replies by chatId and messageId, and event deliveries by eventId. Claim waiting only after host registration for this task. Read current context on a reply and continue the originating task. Once a one-shot consultation is fulfilled, stop only this task's registration through the host mechanism. Never repeat an uncertain write automatically. conversations.open reads one resolved thread as structured data."
     : "")
 }
 
@@ -1826,7 +1829,9 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  registerConversationMentions(server, { grant: params.grant, inline: params.inline, resourceMetadataUrl })
+  const conversationResources = { grant: params.grant, inline: params.inline, resourceMetadataUrl }
+  registerConversationSnapshot(server, conversationResources)
+  if (APP_VIEWS_ENABLED) registerConversationMentions(server, conversationResources)
 
   registerInlineTool(
     server,
@@ -1909,20 +1914,22 @@ export function createInlineMcpServer(params: {
     return { isError: false, structuredContent: payload, content: [jsonText(payload)] }
   })
 
-  registerMessageResultsUi(server)
+  if (APP_VIEWS_ENABLED) registerMessageResultsUi(server)
 
   if (submissionV2) {
-    registerThreadUi(server)
+    if (APP_VIEWS_ENABLED) registerThreadUi(server)
     registerInlineTool(server, resourceMetadataUrl, "conversations.open", {
-      title: "Inline Threads",
-      description: "Open one resolved Inline thread with recent history, direct participants and a composer. Omit chatId to open the minimal picker of threads already viewed in this ChatGPT app; this does not list your workspace. Monitoring is reported only when the Events service confirms an active message subscription for this grant.",
-      inputSchema: { chatId: z.string().regex(/^[1-9]\d*$/).optional().describe("Resolved Inline chat ID; omit for the small thread picker") },
+      title: "Read Inline Thread",
+      description: "Read recent history and direct participants for one resolved Inline thread. Monitoring is reported only when the Events service confirms an active message subscription for this grant. Omit chatId to return an empty result; this does not list your workspace.",
+      inputSchema: { chatId: z.string().regex(/^[1-9]\d*$/).optional().describe("Resolved Inline chat ID; omit to return an empty result") },
       outputSchema: conversationOpenOutputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: {
-        ...toolMeta(["messages:read"], "Opening Inline thread...", "Inline thread opened"),
-        ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },
-        "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
+        ...toolMeta(["messages:read"], "Reading Inline thread...", "Inline thread read"),
+        ...(APP_VIEWS_ENABLED ? {
+          ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },
+          "openai/ui": { entrypoints: [{ type: "thread" }, { type: "global" }] },
+        } : {}),
       },
     }, async ({ chatId }: { chatId?: string }, extra) => {
       const auth = extra.authInfo
@@ -1963,7 +1970,7 @@ export function createInlineMcpServer(params: {
 
     registerInlineTool(server, resourceMetadataUrl, "conversations.ask", {
       title: "Ask Inline Teammates",
-      description: "Create a private Inline thread containing you and the resolved participants, address them with named mentions, send one question, and return a replay cursor. This tool does not subscribe or wait. For ask-and-wait requests, first establish that the originating host can subscribe and resume (ChatGPT Work or dots). Regular ChatGPT chats cannot automatically resume; explain that before sending and only proceed if a send without automatic continuation satisfies the user. Subscribe to the returned message.created event with events/subscribe, using its exact arguments and cursor; then wait and resume the originating task when a reply arrives. Creation and delivery are not idempotent: retain a confirmed chat ID and inspect any uncertain outcome before retrying. Monitoring is not active until the host acknowledges a subscription.",
+      description: "Create a private Inline thread containing you and the resolved participants, address them with named mentions, send one question, and return its receipt and replay cursor. This tool does not register Events or wait. Before an ask-and-wait send, establish host continuation support (ChatGPT Work or dots); regular ChatGPT chats require disclosing the limitation and accepting send-only. Use the host Events mechanism, which may be an Automations event trigger; events/subscribe is an MCP protocol method, not an Inline tool name. If the host accepts a replay cursor, use the returned cursor exactly. Otherwise register the exact message.created arguments, obtain host acknowledgement, then make one bounded messages.context read from the confirmed question messageId (before: 0, after: 50, includeAnchor: false, content: all) to check pre-registration replies. Disclose limited coverage if the read fails or fills its window; do not poll. Deduplicate overlapping replies by chatId/messageId and deliveries by eventId. Wait only after host registration, then read current context and continue the originating task. Stop this task's registration when a one-shot consultation is fulfilled. Creation and delivery are not idempotent; retain the chat ID and inspect uncertain outcomes before retrying.",
       inputSchema: {
         title: z.string().trim().min(1).max(200),
         question: z.string().trim().min(1).max(8000).describe(`Question delivered to the participants; Inline prepends a named mention of each resolved recipient. ${INLINE_MARKDOWN_HELP}`),
@@ -1974,7 +1981,7 @@ export function createInlineMcpServer(params: {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: {
         ...toolMeta(["messages:read", "messages:write"], "Asking Inline teammates...", "Inline question prepared"),
-        ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] },
+        ...(APP_VIEWS_ENABLED ? { ui: { resourceUri: THREAD_RESOURCE_URI, visibility: ["model", "app"] } } : {}),
       },
     }, async (args: { title: string; question: string; participantUserIds: string[]; spaceId?: string }, extra) => {
       const auth = extra.authInfo
@@ -2017,15 +2024,15 @@ export function createInlineMcpServer(params: {
         if (typeof checkpoint.cursor !== "string" || !checkpoint.cursor) throw new Error("Missing event cursor")
         cursor = checkpoint.cursor
       } catch {
-        return result("not_sent", null, null, "The private thread exists, but the question was not sent. Reuse this chatId. If the host supports continuation, activate a message.created subscription before using messages.send; otherwise disclose the limitation and send only if the user accepts sending without automatic continuation. Do not create another thread.")
+        return result("not_sent", null, null, "The private thread exists, but the question was not sent. Reuse this chatId. If the host supports continuation, register message.created with its Events mechanism (possibly an Automations event trigger), obtain acknowledgement, then send the question once with messages.send. Otherwise disclose the limitation and send only if the user accepts send-only. Do not create another thread.")
       }
       const event = { name: "message.created" as const, arguments: selector, cursor }
       try {
         const receipt = await params.inline.sendMessage({ chatId: created.chatId, text: question, sendMode: "normal", parseMarkdown: true })
-        if (receipt.messageId === null) return result("unknown", null, event, "Thread creation is confirmed; question delivery has no message receipt. Inspect this thread before retrying. If this host supports Events continuation, subscribe from the returned cursor to recover any reply; otherwise disclose that automatic continuation is unavailable.")
-        return result("sent", receipt.messageId.toString(), event, "The question was sent; no monitoring was installed by this tool. Open this chatId with conversations.open. If this host supports Events continuation, subscribe to message.created using the returned arguments and cursor and confirm registration before claiming to wait. On a reply, read current context and continue the originating task. In regular ChatGPT chats, explain that automatic continuation is unavailable; the user can read and reply in the thread view.")
+        if (receipt.messageId === null) return result("unknown", null, event, "Thread creation is confirmed; question delivery has no message receipt. Do not recreate or resend automatically. If the host supports Events, register the returned event with its mechanism (possibly Automations); pass the cursor only if supported. Obtain acknowledgement before one bounded messages.list read to inspect the existing thread and possible replies. Without a confirmed question receipt, do not invent an anchor or claim complete replay. Otherwise inspect the thread once and disclose that automatic continuation is unavailable.")
+        return result("sent", receipt.messageId.toString(), event, "The question was sent; no monitoring was installed by this tool. Use the host Events mechanism, possibly an Automations event trigger; events/subscribe is an MCP protocol method, not an Inline tool name. If the host accepts a replay cursor, pass event.cursor exactly. Otherwise register the returned event.name and event.arguments, obtain host acknowledgement, then make one bounded messages.context read with this chatId, anchorMessageId: messageId, before: 0, after: 50, includeAnchor: false, content: all to check pre-registration replies. Disclose limited coverage if the read fails or fills its window; do not poll. Deduplicate overlapping replies by chatId/messageId and deliveries by eventId. Claim waiting only after host registration for this task. Read current context on a reply and continue the originating task; stop this task's registration once a one-shot consultation is fulfilled. conversations.open reads the thread as structured data. Regular ChatGPT chats cannot automatically continue; explain the limitation.")
       } catch {
-        return result("unknown", null, event, "Thread creation is confirmed; question delivery is uncertain. Inspect this chat before retrying and do not recreate it. If this host supports Events continuation, subscribe from the returned cursor to recover any reply; otherwise disclose that automatic continuation is unavailable.")
+        return result("unknown", null, event, "Thread creation is confirmed; question delivery is uncertain. Do not recreate or resend automatically. If the host supports Events, register the returned event with its mechanism (possibly Automations); pass the cursor only if supported. Obtain acknowledgement before one bounded messages.list read to inspect the existing thread and possible replies. Without a confirmed question receipt, do not invent an anchor or claim complete replay. Otherwise inspect the thread once and disclose that automatic continuation is unavailable.")
       }
     })
   }
@@ -2975,7 +2982,7 @@ export function createInlineMcpServer(params: {
       },
       _meta: {
         ...toolMeta(["messages:read"], "Listing messages...", "Messages listed"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) },
+        ...(APP_VIEWS_ENABLED ? { ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) } } : {}),
       },
     },
     async (
@@ -3035,7 +3042,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
-        ...(Object.keys(recent.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: recent.senderAvatarUrls } } } : {}),
+        ...(APP_VIEWS_ENABLED && Object.keys(recent.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: recent.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -3168,7 +3175,7 @@ export function createInlineMcpServer(params: {
       },
       _meta: {
         ...toolMeta(["messages:read"], "Searching messages in chat...", "Message search complete"),
-        ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) },
+        ...(APP_VIEWS_ENABLED ? { ui: { resourceUri: MESSAGE_RESULTS_RESOURCE_URI, ...(submissionV2 ? { visibility: ["model", "app"] } : {}) } } : {}),
       },
     },
     async (
@@ -3233,7 +3240,7 @@ export function createInlineMcpServer(params: {
       return {
         structuredContent: payload,
         content: [jsonText(payload)],
-        ...(Object.keys(found.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: found.senderAvatarUrls } } } : {}),
+        ...(APP_VIEWS_ENABLED && Object.keys(found.senderAvatarUrls ?? {}).length ? { _meta: { inline: { senderAvatarUrls: found.senderAvatarUrls } } } : {}),
       }
     },
   )
@@ -3332,7 +3339,7 @@ export function createInlineMcpServer(params: {
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: { ...toolMeta(["messages:write"], "Sending Inline message...", "Message sent"), ...(submissionV2 ? { ui: { visibility: ["model", "app"] } } : {}) },
+      _meta: { ...toolMeta(["messages:write"], "Sending Inline message...", "Message sent"), ...(APP_VIEWS_ENABLED && submissionV2 ? { ui: { visibility: ["model", "app"] } } : {}) },
     },
     async (
       {

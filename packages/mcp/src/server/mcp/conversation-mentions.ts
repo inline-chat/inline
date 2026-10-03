@@ -193,6 +193,9 @@ export function registerConversationMentions(server: McpServer, params: MentionP
     }
   })
 
+}
+
+export function registerConversationSnapshot(server: McpServer, params: MentionParams): void {
   server.registerResource("inline-conversation-recent", new ResourceTemplate("inline://chat/{chatId}", { list: undefined }), {
     title: "Inline Conversation Recent Text",
     description: "Authorized recent-text snapshot: up to 20 messages and 32 KiB, with older-read continuation when available.",

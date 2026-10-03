@@ -232,6 +232,44 @@ describe("minimal thread workflows", () => {
     return { response: await waitForResponse(connection.sent, 2), connection }
   }
 
+  it.each(["legacy", "submission-v2"] as const)("keeps %s core reads available while app views and cached view resources are disabled", async (contractVersion) => {
+    const recentMessages = vi.fn<InlineApi["recentMessages"]>().mockResolvedValue({ chat: defaultEligibleChat(), direction: "all", scannedCount: 0, nextOffsetId: null, messages: [] })
+    const inline = createConsultationStub({ recentMessages })
+    const server = createInlineMcpServer({ grant, inline, contractVersion })
+    const { transport, sent } = await connectAndInitialize(server, auth)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { authInfo: auth })
+    const tools = (await waitForResponse(sent, 2)).result.tools
+    expect(tools.map((tool: any) => tool.name)).not.toContain("conversations.mentions")
+    for (const tool of tools) {
+      expect(tool._meta?.ui).toBeUndefined()
+      expect(tool._meta?.["openai/ui"]).toBeUndefined()
+      expect(tool._meta?.["openai/outputTemplate"]).toBeUndefined()
+      expect(tool._meta?.["openai/widgetAccessible"]).toBeUndefined()
+      expect(tool.description).not.toMatch(/thread UI|picker|composer|thread view/i)
+    }
+    await sendRequest(transport, { jsonrpc: "2.0", id: 3, method: "resources/list", params: {} }, { authInfo: auth })
+    expect((await waitForResponse(sent, 3)).result.resources).toEqual([])
+    await sendRequest(transport, { jsonrpc: "2.0", id: 4, method: "resources/templates/list", params: {} }, { authInfo: auth })
+    expect((await waitForResponse(sent, 4)).result.resourceTemplates.map((item: any) => item.uriTemplate)).toEqual(["inline://chat/{chatId}"])
+    const viewUris = ["ui://inline/thread-v1.html", "ui://inline/thread-v2.html", "ui://inline/thread-v3.html", "ui://inline/message-results-v1.html"]
+    for (const [index, uri] of viewUris.entries()) {
+      const id = 5 + index
+      await sendRequest(transport, { jsonrpc: "2.0", id, method: "resources/read", params: { uri } }, { authInfo: auth })
+      const response = await waitForResponse(sent, id)
+      expect(response.error || response.result?.isError).toBeTruthy()
+      expect(response.result?.contents).toBeUndefined()
+    }
+    await sendRequest(transport, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "conversations.mentions", arguments: { query: "" } } }, { authInfo: auth })
+    const mention = await waitForResponse(sent, 9)
+    expect(mention.error || mention.result?.isError).toBeTruthy()
+    expect(recentMessages).not.toHaveBeenCalled()
+    await sendRequest(transport, { jsonrpc: "2.0", id: 10, method: "resources/read", params: { uri: "inline://chat/7" } }, { authInfo: auth })
+    const snapshot = await waitForResponse(sent, 10)
+    expect(snapshot.result.contents).toMatchObject([{ uri: "inline://chat/7", mimeType: "application/json" }])
+    expect(recentMessages).toHaveBeenCalledWith({ chatId: 7n, limit: 20, freshChatAuthorization: true })
+    await server.close()
+  })
+
   it("keeps the legacy tool inventory free of new entrypoints", async () => {
     const server = createInlineMcpServer({ grant, inline: createConsultationStub({}) })
     const { transport, sent } = await connectAndInitialize(server, auth)
@@ -242,7 +280,29 @@ describe("minimal thread workflows", () => {
     await server.close()
   })
 
-  it("opens an empty picker without fetching a workspace catalog", async () => {
+  it("publishes host registration and cursorless catch-up guidance without requiring a named Inline subscribe tool", async () => {
+    const createChat = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat }), contractVersion: "submission-v2" })
+    const { transport, sent, initialize } = await connectAndInitialize(server, auth)
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { authInfo: auth })
+    const tools = (await waitForResponse(sent, 2)).result.tools
+    const ask = tools.find((tool: { name: string }) => tool.name === "conversations.ask")
+    expect(tools.map((tool: { name: string }) => tool.name)).not.toContain("events/subscribe")
+    for (const guidance of [initialize.result.instructions, ask.description]) {
+      expect(guidance).toContain("Automations event trigger")
+      expect(guidance).toContain("events/subscribe is an MCP protocol method, not an Inline tool name")
+      expect(guidance).toMatch(/If the host accepts a replay cursor/)
+      expect(guidance).toMatch(/Otherwise register.*acknowledgement, then make one bounded messages.context read/)
+      expect(guidance).toContain("before: 0, after: 50, includeAnchor: false, content: all")
+      expect(guidance).toContain("do not poll")
+      expect(guidance).toMatch(/Deduplicate overlapping replies by chatId[ /]?(?:and |\/)messageId/)
+      expect(guidance).toMatch(/one-shot consultation is fulfilled/)
+    }
+    expect(createChat).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it("returns empty thread data without fetching a workspace catalog when no target is supplied", async () => {
     const getEligibleChats = vi.fn(async () => [])
     const getConversation = vi.fn()
     const server = createInlineMcpServer({ grant, inline: createConsultationStub({ getEligibleChats, getConversation }), contractVersion: "submission-v2" })
@@ -323,6 +383,13 @@ describe("minimal thread workflows", () => {
     expect(sendMessage).toHaveBeenCalledWith({ chatId: 7n, text: "[@Mo](inline://user?id=2)\n\nWhat do you think?", sendMode: "normal", parseMarkdown: true })
     expect(response.result.structuredContent).toMatchObject({ questionStatus: "sent", messageId: "123", event: { name: "message.created", arguments: { chatId: "7", excludeSelf: true }, cursor: "before-question" } })
     expect(response.result.structuredContent).not.toHaveProperty("monitoring")
+    const guidance = response.result.structuredContent.nextStep
+    expect(guidance).toContain("Automations event trigger")
+    expect(guidance).toContain("If the host accepts a replay cursor, pass event.cursor exactly")
+    expect(guidance).toMatch(/Otherwise register.*acknowledgement, then make one bounded messages.context read/)
+    expect(guidance).toContain("anchorMessageId: messageId, before: 0, after: 50, includeAnchor: false, content: all")
+    expect(guidance).toContain("do not poll")
+    expect(guidance).toContain("stop this task's registration once a one-shot consultation is fulfilled")
     await server.close()
   })
 
@@ -382,6 +449,9 @@ describe("minimal thread workflows", () => {
     const { response } = await call(server, "conversations.ask", askArgs)
     expect(response.result.isError).toBe(true)
     expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, questionStatus: "unknown", event: { cursor: "checkpoint" } })
+    expect(response.result.structuredContent.nextStep).toContain("one bounded messages.list read")
+    expect(response.result.structuredContent.nextStep).toContain("do not invent an anchor or claim complete replay")
+    expect(response.result.structuredContent.nextStep).not.toContain("anchorMessageId: messageId")
     expect(createChat).toHaveBeenCalledTimes(1)
     expect(sendMessage).toHaveBeenCalledTimes(1)
     await server.close()
@@ -620,7 +690,6 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const tools = res.result.tools as Array<any>
     expect(tools.map((tool) => tool.name)).toEqual([
-      "conversations.mentions",
       "account.me",
       "account.profile",
       "spaces.list",
@@ -646,7 +715,6 @@ describe("mcp tool server", () => {
       string,
       { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }
     > = {
-      "conversations.mentions": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "account.profile": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
       "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -726,9 +794,9 @@ describe("mcp tool server", () => {
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
     expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
-    expect(list._meta.ui).toEqual({ resourceUri: "ui://inline/message-results-v1.html" })
+    expect(list._meta.ui).toBeUndefined()
     const search = tools.find((tool) => tool.name === "messages.search")
-    expect(search._meta.ui).toEqual(list._meta.ui)
+    expect(search._meta.ui).toBeUndefined()
     expect(search._meta.securitySchemes[0].scopes).toEqual(["messages:read"])
     expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
 
@@ -1580,7 +1648,7 @@ describe("mcp tool server", () => {
     expect(payload.messages[0].senderDisplayName).toBe("Dena Example")
     expect(res.result.structuredContent.messages[0].senderDisplayName).toBe("Dena Example")
     expect(JSON.stringify(payload)).not.toContain("Unrelated Person")
-    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(res.result._meta?.inline?.senderAvatarUrls).toBeUndefined()
     expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
     expect(payload.messages[0].chatId).toBe("7")
     expect(payload.messages[0].fromId).toBe("2")
@@ -1663,7 +1731,7 @@ describe("mcp tool server", () => {
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("14")
     expect(payload.messages[0].text).toBe("invoice is sent")
-    expect(res.result._meta.inline.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
+    expect(res.result._meta?.inline?.senderAvatarUrls).toBeUndefined()
     expect(JSON.stringify([res.result.structuredContent, res.result.content])).not.toContain("sig=fixture")
   })
 

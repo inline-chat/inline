@@ -1,6 +1,6 @@
 # Inline ChatGPT plugin
 
-Connect Inline to ChatGPT to work with your chats. The repository also includes a Codex plugin with the hosted Inline MCP connection and bundled Inline skill.
+Connect Inline to ChatGPT to work with your chats through core MCP tools and supported Events. The repository also includes a Codex plugin with the hosted Inline MCP connection and bundled Inline skill.
 
 ## Install in ChatGPT
 
@@ -37,7 +37,7 @@ You can also open `/plugins` in Codex CLI after adding the marketplace and insta
 - Find people, spaces, DMs, conversations, and messages.
 - Summarize recent or unread discussions with bounded context.
 - Ask resolved teammates in a private consultation, subscribe to their replies with MCP Events, and resume the originating task when the host supports continuation.
-- Inspect that thread in a focused Inline-style React view, reply directly, and pass selected excerpts back to ChatGPT. Its picker contains only threads opened in this app experience.
+- Inspect structured thread history and participants, then send an authorized reply through the core tools.
 - Create conversations or child/reply threads, inspect exact selected messages, forward messages, upload files, and send messages when explicitly requested.
 - Use the Inline CLI in shell-capable environments when it matches the available authentication and task.
 
@@ -55,9 +55,9 @@ Events cover durable chat, message, personal-dialog and space changes with verif
 
 ## Maintenance
 
-See [Updating and publishing](RELEASING.md) for the local validation commands, developer-mode refresh, hosted MCP deployment boundary, and public plugin release procedure. The `ChatGPT plugin` workflow checks the compiled MCP/UI contract and submission metadata; the existing `CI` workflow runs the MCP suite and plugin bundle checks. These automated checks do not establish signed-in ChatGPT host acceptance.
+See [Updating and publishing](RELEASING.md) for the local validation commands, developer-mode refresh, hosted MCP deployment boundary, and public plugin release procedure. The `ChatGPT plugin` workflow checks the compiled core MCP contract, authenticated JSON snapshots and absence of HTML app resources/UI metadata, and submission metadata; the existing `CI` workflow runs the MCP suite and plugin bundle checks. These automated checks do not establish signed-in ChatGPT host acceptance.
 
-The source includes desktop conversation mentions and passive cards for `messages.list` and `messages.search`. Availability depends on deployment, host support, and published tool metadata. Mention snapshots contain at most 20 recent messages and 32 KiB, with explicit coverage limits. Cards show already returned model-visible messages; expanding text performs no additional reads. Neither feature sends messages or marks them read.
+App views, passive message cards and desktop conversation mentions are deferred. Their source remains preserved in the repository, but the current MCP service exposes no HTML UI resources, app-only mention tool or UI entrypoints. The authenticated `inline://chat/{chatId}` JSON snapshot resource remains available. `conversations.open` returns structured thread data without opening a view. The core read, write, profile and Events tools remain available.
 
 The bundled `skills/inline/` directory mirrors the repository's canonical `/skills/inline/` skill because Codex plugin components must live inside the plugin package. Update the canonical skill first, copy it into this plugin, and verify the two trees match:
 

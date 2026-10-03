@@ -137,7 +137,7 @@ describe("authenticated stateless MCP HTTP requests", () => {
     expect(sdk).not.toHaveBeenCalled()
   })
 
-  it("runs the Inline SDK tools and UI resource registrations through stateless HTTP", async () => {
+  it("runs core tools through stateless HTTP and rejects unused cached app views", async () => {
     const inline = fixtureApi()
     const sdk = vi.spyOn(inlineApi, "createInlineApi").mockReturnValue(inline)
     const server = app()
@@ -148,13 +148,20 @@ describe("authenticated stateless MCP HTTP requests", () => {
     expect(listing.result.tools.find((tool) => tool.name === "spaces.list")).toMatchObject({
       name: "spaces.list", title: expect.any(String), inputSchema: expect.any(Object), outputSchema: expect.any(Object),
     })
+    expect(listing.result.tools.map((tool) => tool.name)).not.toContain("conversations.mentions")
+    for (const tool of listing.result.tools as Array<{ _meta?: Record<string, unknown> }>) {
+      expect(tool._meta?.ui).toBeUndefined()
+      expect(tool._meta?.["openai/ui"]).toBeUndefined()
+    }
     const called = await server.fetch(modernRequest("tools/call", { name: "spaces.list", arguments: {} }))
     expect(called.status).toBe(200)
     expect(await called.json()).toMatchObject({ result: { resultType: "complete", structuredContent: { items: [{ id: "10", name: "Inline" }] } } })
     expect(inline.listSpaces).toHaveBeenCalledTimes(1)
     const read = await server.fetch(modernRequest("resources/read", { uri: "ui://inline/thread-v1.html" }))
-    expect(read.status).toBe(200)
-    expect(await read.json()).toMatchObject({ result: { resultType: "complete", contents: [{ uri: "ui://inline/thread-v1.html", mimeType: "text/html;profile=mcp-app", text: expect.stringContaining("<html") }] } })
+    expect(read.status).toBe(400)
+    const disabledView = await read.json() as { error?: unknown; result?: { contents?: unknown } }
+    expect(disabledView.error).toBeDefined()
+    expect(disabledView.result?.contents).toBeUndefined()
     expect(sdk).toHaveBeenCalledTimes(3)
     expect(sdk).toHaveBeenLastCalledWith(expect.objectContaining({ token: "1:inline-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } }))
     expect(inline.close).toHaveBeenCalledTimes(3)

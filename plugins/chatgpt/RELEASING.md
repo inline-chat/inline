@@ -1,6 +1,6 @@
 # Updating and publishing Inline for ChatGPT
 
-This plugin has two release surfaces: the remote MCP service at `https://mcp.inline.chat/mcp/v2`, and the plugin package/listing. A Git commit, server deployment, developer-mode refresh, and public plugin publication are separate operations. This runbook does not perform any of them automatically.
+This plugin has two release surfaces: the remote MCP service at `https://mcp.inline.chat/mcp/v2`, and the plugin package/listing. A Git commit, server deployment, developer-mode refresh, and public plugin publication are separate operations. This runbook does not perform any of them automatically. The current release is core-only: app views, message cards and desktop conversation mentions are disabled, with source preserved. Authenticated JSON conversation snapshot resources remain enabled.
 
 ## Validate the candidate
 
@@ -12,10 +12,6 @@ bun --no-env-file scripts/check-codex-plugin.mjs
 bun run --cwd packages/protocol build
 bun run --cwd packages/oauth-core build
 bun run --cwd packages/sdk build
-bun run --cwd plugins/chatgpt/ui build
-bun run --cwd plugins/chatgpt/ui typecheck
-bun run --cwd plugins/chatgpt/ui lint
-bun run --cwd plugins/chatgpt/ui test
 bun run --cwd packages/mcp typecheck
 bun run --cwd packages/mcp lint
 bun run --cwd packages/mcp test
@@ -23,7 +19,7 @@ bun run --cwd packages/mcp build
 bun --no-env-file scripts/ci/check-chatgpt-plugin.mjs /tmp/inline-chatgpt-contract.json
 ```
 
-The `CI` workflow checks the MCP test suite and plugin package. The separate `ChatGPT plugin` workflow runs on relevant pull requests/main pushes and manual dispatch. It validates the manifest/skill mirror, builds the MCP distribution, runs type/lint/behavior checks, checks real HTTP/resource registration with synthetic local OAuth, and compares tool annotations with `packages/mcp/chatgpt-app-submission.json`. It saves a SHA-tagged receipt as `chatgpt-plugin-contract`. This checks packaging and protocol behavior, not the ChatGPT desktop application.
+The `CI` workflow checks the MCP test suite and plugin package. The separate `ChatGPT plugin` workflow runs on relevant pull requests/main pushes and manual dispatch. It validates the manifest/skill mirror, builds the MCP distribution, runs type/lint/behavior checks, checks real HTTP tool/Events registration, authenticated JSON snapshots and the absence of HTML app resources/UI metadata with synthetic local OAuth, and compares tool annotations with `packages/mcp/chatgpt-app-submission.json`. It saves a SHA-tagged receipt as `chatgpt-plugin-contract`. This checks packaging and protocol behavior, not the ChatGPT desktop application.
 
 For a pushed candidate, inspect both workflows at the exact candidate SHA:
 
@@ -40,21 +36,20 @@ For a remote developer-mode MCP connection: deploy/restart the test server, open
 
 Exercise these cases with a test account and approved test conversations:
 
-1. Search/select a desktop mention, distinguish duplicate titles, and ask about its recent text. Confirm the resource is read and the answer respects snapshot coverage.
-2. Test empty chats, long Unicode messages, denied scope, and revoked conversation access. A denial must not return cached content.
-3. Read recent messages and search within a conversation. Verify native bubbles, sender names, profile photos and expired/missing-photo fallbacks, local text expansion, visible filters, and an empty filtered page. Message-list and search results offer continuation when nextOffsetId is returned.
-4. Verify ordinary text/tool behavior in a client without UI. Neither mention selection nor card rendering should post messages or mark them read.
-5. In a supported Work/Cloud host, subscribe to an approved thread's `message.created`, receive a verified callback, read the actual reply and continue the waiting task. Renew before `refreshBefore`; qualify replay, restart, expiry, unsubscribe and revoked access. Do not equate a green proxy test with host continuation.
-6. With approved test recipients, call `conversations.ask`: check the private audience, one delivered question, pre-question replay cursor, subscription acknowledgement and resumed task. An uncertain create/send must retain its receipt and avoid an automatic duplicate.
-7. Open the React thread view from the tool and host entrypoints. Check light/dark, narrow layout, older history, read-only scope, confirmed/unconfirmed replies and selected context. Its picker must show only explicitly opened threads. Qualify actual media asset origins under the widget CSP.
+1. Identify the authenticated account with `account.profile` and inspect authorization with `account.me`. Resolve people and conversations through core tools, including duplicate names/titles.
+2. Read empty chats, long Unicode messages, denied scope and revoked conversation access. A denial must not return cached content. Search and history pagination must continue after an empty filtered page when `nextOffsetId` is returned.
+3. Inspect `conversations.open` as structured thread data and send an authorized reply with `messages.send`. Confirm canonical IDs and receipts; do not expect a composer, picker or rendered card.
+4. Read the authorized `inline://chat/{chatId}` JSON snapshot and respect its 20-message / 32-KiB coverage limits. Confirm discovery exposes core tools, Events and the JSON resource template, with no HTML app resources, app-only `conversations.mentions` or UI entrypoint metadata. Reads must not post messages or mark them read.
+5. In a supported Work/Cloud host, register an approved thread's `message.created` through the host Events mechanism, which may be an Automations event trigger. Receive a verified callback, read the actual reply and continue the originating task. Renew/stop through the host lifecycle; qualify replay, restart, expiry, unsubscribe and revoked access. Do not equate a green proxy test with host continuation.
+6. With approved recipients, call `conversations.ask`: check the private audience, exact named mentions, one delivered question, receipt, pre-question replay cursor, host registration acknowledgement and resumed task. Pass the cursor if supported; otherwise register first, then make one bounded anchored context read to check pre-registration replies. Deduplicate overlap and disclose coverage limits. An uncertain create/send must retain its receipt and avoid an automatic duplicate. Stop only this task's registration once the one-shot consultation is fulfilled.
 
-Record host name/build, candidate SHA, deployment identity, case outcomes, and actual screenshots. Do not publish screenshots or capability claims before these paths work. Use the submission JSON as review material; the picker case is host-driven, not a promise that the model chooses an app-only search tool.
+Record host name/build, candidate SHA, deployment identity and actual case outcomes. The retained UI source and any historical rendering tests do not establish a live app view. Before a later release enables app views, qualify their rendering, access revocation, uncertain delivery, selected context and asset CSP separately. Use the submission JSON as review material, not proof that a capability is live.
 
 ## Deploy the hosted MCP candidate
 
 This release also adds an API migration and owned delivery worker. First qualify and deploy the exact API candidate through `server-deploy.yml`; check the migration and worker before deploying MCP. The internal `/oauth/mcp-events` endpoint uses the existing shared-secret channel. Keep the original OAuth scopes, grant context and API/MCP secret pairing. Do not send real teammates test messages without their authorized test scope.
 
-The deployable artifact is `packages/mcp/Dockerfile`, built from the repository root, with runtime port `8791`. Its build invokes the MCP package build and copies MCP and `plugins/chatgpt/ui` distributions into the runtime image. The React UI must be present in that compiled output, not merely a local source file. Configure `MCP_UI_RESOURCE_DOMAINS` with exact HTTPS signed-media origins if needed; default photos use the API origin.
+The deployable artifact is `packages/mcp/Dockerfile`, built from the repository root, with runtime port `8791`. Its build still compiles and copies the retained `plugins/chatgpt/ui` dependency alongside MCP. The current service does not register that bundle or any other app view. `MCP_UI_RESOURCE_DOMAINS` is retained for deferred UI work and is not required for core tool or Events acceptance.
 
 In the deployment controller for `mcp.inline.chat`, verify the current service, repository, branch/commit selection, root build context, Dockerfile path, and OAuth/API configuration. Select the reviewed candidate through that service's existing deployment process; preserve the previous working image for rollback. The controller's current identity and permissions must be checked by the release operator: this repository does not contain an MCP-specific production deployment workflow, and the API server's deployment workflow is not a substitute.
 
@@ -70,11 +65,11 @@ coolify deploy get "$DEPLOYMENT_UUID"
 
 Resolve `MCP_APP_UUID` from the matching service and `DEPLOYMENT_UUID` from the deployment response. The installed CLI's deployment command has no commit override: it deploys the configured revision. Do not run it against moving `HEAD` when approval is limited to one SHA; first pin the candidate through the controller's supported settings, or obtain approval for the current branch revision. Verify the deployment's recorded commit against the approved candidate. These commands were checked through CLI help; no deployment was performed for this runbook.
 
-After an authorized deployment, check `/health`, OAuth discovery, anonymous-request denial, and an authenticated test-account tool/resource flow at `/mcp/v2`. A healthy endpoint alone does not prove OAuth, resource reading, or UI rendering. Then refresh the development connection and repeat the host cases above.
+After an authorized deployment, check `/health`, OAuth discovery, anonymous-request denial, and an authenticated test-account core tool and Events flow at `/mcp/v2`. Confirm the authenticated JSON snapshot still works and no HTML app resources, app-only mention tool or UI metadata are advertised. A healthy endpoint alone does not prove OAuth, authorized reads/writes or Events continuation. Then refresh the development connection and repeat the host cases above.
 
 ## Publish or update the public plugin
 
-For changes confined to hosted MCP tools/UI, deploy the reviewed revision, open the existing plugin in the [submission portal](https://platform.openai.com/plugins), select **MCPs → Inline → Rescan**, and inspect findings and live tool definitions. Repair scan-account authorization if requested. Eligible server updates pass automated checks without a new package release; held changes do not replace approved definitions. Keep approved schemas working. See [current submission and update instructions](https://developers.openai.com/plugins/deploy/submission).
+For changes confined to hosted MCP tools, Events or metadata, deploy the reviewed revision, open the existing plugin in the [submission portal](https://platform.openai.com/plugins), select **MCPs → Inline → Rescan**, and inspect findings and live tool definitions. Repair scan-account authorization if requested. Eligible server updates pass automated checks without a new package release; held changes do not replace approved definitions. Keep approved schemas working. See [current submission and update instructions](https://developers.openai.com/plugins/deploy/submission).
 
 For listing, assets, skills, or packaged configuration changes, download the existing published release ZIP first. Preserve its package identity, components and version history; the repository marketplace package may have a different identity/version. Edit that package, increment its version, upload the complete ZIP to the existing plugin, resolve findings, submit for review, then publish after approval. Changing an existing MCP URL requires support.
 

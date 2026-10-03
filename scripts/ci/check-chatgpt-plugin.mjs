@@ -46,6 +46,9 @@ const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatg
 const uiUri = "ui://inline/message-results-v1.html"
 const threadUiUri = "ui://inline/thread-v3.html"
 const scenarios = []
+// Retain deferred view acceptance code, but never exercise or advertise it as
+// part of the core-only release. Production registration is independently gated.
+const CHECK_DEFERRED_APP_VIEWS = false
 
 // Exercise the packaged profile handler through the SDK, including strict
 // identity selection and the documented ChatGPT account-label response shape.
@@ -247,44 +250,46 @@ async function checkCompiledConsultationMentions() {
     assert.equal(response.result.structuredContent.monitoring, undefined, "send must not claim monitoring")
     assert.match(response.result.structuredContent.nextStep, /no monitoring was installed/)
 
-    // Expansion may supply a launch snapshot without sending tool-result again.
-    // Mount the packaged app with the actual ask receipt and verify its read.
-    const resource = await request("resources/read", { uri: threadUiUri })
-    const html = resource.result.contents[0].text
-    const requireMcp = createRequire(path.join(root, "packages/mcp/package.json"))
-    const { Window } = await import(requireMcp.resolve("happy-dom"))
-    const { sampleThread } = await import(path.join(root, "plugins/chatgpt/ui/scripts/fixtures.ts"))
-    const snapshot = sampleThread("7", "Parser acceptance")
-    const window = new Window({ url: "https://mcp.inline.chat", settings: { enableJavaScriptEvaluation: true } })
-    const opened = []
-    const hostMethods = []
-    const receive = (data) => window.dispatchEvent(new window.MessageEvent("message", { source: parent, data: { jsonrpc: "2.0", ...data } }))
-    const parent = { postMessage: (message) => {
-      hostMethods.push(message.method)
-      if (message.method === "ui/initialize") queueMicrotask(() => receive({ id: message.id, result: { protocolVersion: "2026-01-26", hostCapabilities: {}, hostContext: { displayMode: "fullscreen" } } }))
-      if (message.method === "tools/call") {
-        assert.equal(message.params.name, "conversations.open")
-        assert.deepEqual(JSON.parse(JSON.stringify(message.params.arguments)), { chatId: "7" })
-        opened.push(message.params.arguments.chatId)
-        queueMicrotask(() => receive({ id: message.id, result: { structuredContent: snapshot } }))
-      }
-    } }
-    try {
-      Object.defineProperty(window, "parent", { value: parent })
-      window.openai = { toolOutput: response.result.structuredContent, toolResponseMetadata: { mcp_tool_result: response.result }, displayMode: "fullscreen", setWidgetState: (state) => { window.openai.widgetState = state } }
-      Object.defineProperty(window, "fetch", { value: () => { throw new Error("thread must read through the host") } })
-      const script = html.match(/<script type="module">([\s\S]+)<\/script>/)?.[1]
-      assert.ok(script, "packaged thread has its production bundle")
-      window.document.write(html.replace(/<script type="module">[\s\S]+<\/script>/, ""))
-      window.eval(script)
-      const deadline = Date.now() + 3_000
-      while (!window.document.querySelector("textarea") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10))
-      assert.deepEqual(opened, ["7"], `initial ask receipt must open its confirmed thread once without a later notification: ${JSON.stringify({ hostMethods, text: window.document.body.textContent })}`)
-      assert.ok(window.document.querySelector("textarea"), "the opened thread must have its working composer")
-      assert.equal(window.openai.widgetState.activeChatId, "7")
-      assert.match(window.document.body.textContent, /Parser acceptance/)
-      assert.ok(window.document.querySelector(".thread-sidebar"), "fullscreen must show the small remembered-thread sidebar even for one thread")
-    } finally { await window.happyDOM.close() }
+    if (CHECK_DEFERRED_APP_VIEWS) {
+      // Expansion may supply a launch snapshot without sending tool-result again.
+      // Mount the packaged app with the actual ask receipt and verify its read.
+      const resource = await request("resources/read", { uri: threadUiUri })
+      const html = resource.result.contents[0].text
+      const requireMcp = createRequire(path.join(root, "packages/mcp/package.json"))
+      const { Window } = await import(requireMcp.resolve("happy-dom"))
+      const { sampleThread } = await import(path.join(root, "plugins/chatgpt/ui/scripts/fixtures.ts"))
+      const snapshot = sampleThread("7", "Parser acceptance")
+      const window = new Window({ url: "https://mcp.inline.chat", settings: { enableJavaScriptEvaluation: true } })
+      const opened = []
+      const hostMethods = []
+      const receive = (data) => window.dispatchEvent(new window.MessageEvent("message", { source: parent, data: { jsonrpc: "2.0", ...data } }))
+      const parent = { postMessage: (message) => {
+        hostMethods.push(message.method)
+        if (message.method === "ui/initialize") queueMicrotask(() => receive({ id: message.id, result: { protocolVersion: "2026-01-26", hostCapabilities: {}, hostContext: { displayMode: "fullscreen" } } }))
+        if (message.method === "tools/call") {
+          assert.equal(message.params.name, "conversations.open")
+          assert.deepEqual(JSON.parse(JSON.stringify(message.params.arguments)), { chatId: "7" })
+          opened.push(message.params.arguments.chatId)
+          queueMicrotask(() => receive({ id: message.id, result: { structuredContent: snapshot } }))
+        }
+      } }
+      try {
+        Object.defineProperty(window, "parent", { value: parent })
+        window.openai = { toolOutput: response.result.structuredContent, toolResponseMetadata: { mcp_tool_result: response.result }, displayMode: "fullscreen", setWidgetState: (state) => { window.openai.widgetState = state } }
+        Object.defineProperty(window, "fetch", { value: () => { throw new Error("thread must read through the host") } })
+        const script = html.match(/<script type="module">([\s\S]+)<\/script>/)?.[1]
+        assert.ok(script, "packaged thread has its production bundle")
+        window.document.write(html.replace(/<script type="module">[\s\S]+<\/script>/, ""))
+        window.eval(script)
+        const deadline = Date.now() + 3_000
+        while (!window.document.querySelector("textarea") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10))
+        assert.deepEqual(opened, ["7"], `initial ask receipt must open its confirmed thread once without a later notification: ${JSON.stringify({ hostMethods, text: window.document.body.textContent })}`)
+        assert.ok(window.document.querySelector("textarea"), "the opened thread must have its working composer")
+        assert.equal(window.openai.widgetState.activeChatId, "7")
+        assert.match(window.document.body.textContent, /Parser acceptance/)
+        assert.ok(window.document.querySelector(".thread-sidebar"), "fullscreen must show the small remembered-thread sidebar even for one thread")
+      } finally { await window.happyDOM.close() }
+    }
   } finally { await server.close() }
 }
 
@@ -386,19 +391,19 @@ try {
   assert.equal(initialized.status, 202, "client initialization notification must be accepted")
   const { tools } = await success("tools/list")
   assert.ok(Array.isArray(tools))
-  const mentions = tools.find((tool) => tool.name === "conversations.mentions")
-  assert.ok(mentions, "mention search must be advertised")
-  assert.ok(mentions._meta?.["openai/extensions"]?.["mentions/search"], "mention search extension metadata")
-  assert.deepEqual(mentions._meta?.ui?.visibility, ["app"])
-  assert.ok(mentions._meta?.securitySchemes?.some((scheme) => scheme.type === "oauth2" && scheme.scopes.includes("messages:read")))
-  scenarios.push("mention-search-advertised-with-read-scope")
-
+  assert.ok(!tools.some((tool) => tool.name === "conversations.mentions"), "deferred app-only mention picker is not registered")
+  for (const tool of tools) {
+    assert.equal(tool._meta?.ui, undefined, `${tool.name} must not launch an app view`)
+    assert.equal(tool._meta?.["openai/ui"], undefined)
+    assert.equal(tool._meta?.["openai/outputTemplate"], undefined)
+  }
   for (const name of ["messages.list", "messages.search"]) {
     const tool = tools.find((tool) => tool.name === name)
-    assert.equal(tool?._meta?.ui?.resourceUri, uiUri, `${name} UI resource`)
     assert.equal(tool.annotations.readOnlyHint, true)
     assert.ok(tool.outputSchema, `${name} retains structured output schema`)
   }
+  scenarios.push("core-tools-have-no-app-view-metadata-or-app-only-picker")
+
   for (const tool of tools) {
     const declared = submission.tools[tool.name]
     assert.ok(declared, `submission annotations missing for ${tool.name}`)
@@ -414,43 +419,29 @@ try {
 
   const open = tools.find((tool) => tool.name === "conversations.open")
   const ask = tools.find((tool) => tool.name === "conversations.ask")
-  assert.equal(open?._meta?.ui?.resourceUri, threadUiUri)
-  assert.deepEqual(open?._meta?.["openai/ui"]?.entrypoints, [{ type: "thread" }, { type: "global" }])
-  assert.equal(ask?._meta?.ui?.resourceUri, threadUiUri)
+  assert.ok(open?.outputSchema, "thread read remains available as structured data")
   assert.equal(ask?.annotations.idempotentHint, false)
   for (const name of ["conversations.ask", "conversations.create", "messages.send", "messages.send_media", "messages.send_batch"]) {
     assert.equal(tools.find((tool) => tool.name === name)?.annotations.openWorldHint, true,
       `${name} communicates with independently controlled recipients, even in a private thread`)
   }
-  const emptyPicker = await success("tools/call", { name: "conversations.open", arguments: {} })
-  assert.equal(emptyPicker.structuredContent.chat, null)
-  assert.deepEqual(emptyPicker.structuredContent.messages, [])
-  assert.equal(emptyPicker.structuredContent.capabilities.canSend, false)
-  scenarios.push("minimal-thread-entrypoints-open-without-workspace-catalog")
+  const emptyThread = await success("tools/call", { name: "conversations.open", arguments: {} })
+  assert.equal(emptyThread.structuredContent.chat, null)
+  assert.deepEqual(emptyThread.structuredContent.messages, [])
+  assert.equal(emptyThread.structuredContent.capabilities.canSend, false)
+  scenarios.push("core-thread-read-without-id-does-not-fetch-workspace-catalog")
 
   const { resourceTemplates } = await success("resources/templates/list")
   assert.ok(resourceTemplates.some((resource) => resource.uriTemplate === "inline://chat/{chatId}"))
-  const { contents } = await success("resources/read", { uri: uiUri })
-  assert.equal(contents.length, 1)
-  assert.equal(contents[0].uri, uiUri)
-  assert.equal(contents[0].mimeType, "text/html;profile=mcp-app")
-  assert.match(contents[0].text, /<html[\s>]/i)
-  assert.match(contents[0].text, /ui\/initialize/)
-  assert.match(contents[0].text, /ui\/notifications\/tool-result/)
-  const csp = contents[0]._meta?.ui?.csp
-  assert.deepEqual(csp?.connectDomains, [], "passive cards must not request network connections")
-  assert.deepEqual(csp?.resourceDomains, ["https://api.inline.chat"], "only Inline profile images may load remotely")
-  scenarios.push("compiled-ui-resource-served-with-passive-csp")
-
-  const thread = await success("resources/read", { uri: threadUiUri })
-  assert.equal(thread.contents[0].mimeType, "text/html;profile=mcp-app")
-  assert.deepEqual(thread.contents[0]._meta["openai/ui"].availableDisplayModes, ["inline", "fullscreen"])
-  assert.match(thread.contents[0].text, /ui\/initialize/)
-  assert.match(thread.contents[0].text, /conversations\.open/)
-  assert.match(thread.contents[0].text, /messages\.send/)
-  assert.deepEqual(thread.contents[0]._meta.ui.csp.connectDomains, [])
-  assert.deepEqual(thread.contents[0]._meta.ui.csp.resourceDomains, ["https://api.inline.chat"])
-  scenarios.push("compiled-react-thread-resource-and-exact-asset-csp")
+  const parkedViews = [uiUri, "ui://inline/thread-v1.html", "ui://inline/thread-v2.html", threadUiUri]
+  const listedResources = (await success("resources/list")).resources
+  assert.ok(listedResources.every((resource) => !resource.uri.startsWith("ui://")), "no app HTML may be advertised")
+  for (const uri of parkedViews) {
+    const response = await request("resources/read", { uri })
+    assert.ok(response.message?.error, `${uri} must not remain readable through an old host reference`)
+    assert.equal(response.message?.result?.contents, undefined)
+  }
+  scenarios.push("all-deferred-view-resources-and-legacy-aliases-are-unavailable")
 
   const modernVersion = "2026-07-28"
   const modernRequest = async (method, params = {}) => {
@@ -527,6 +518,8 @@ try {
     ["unsupported version", "tools/list", {}, { "io.modelcontextprotocol/protocolVersion": "2026-07-27" }, { "mcp-protocol-version": "2026-07-27" }, 400, -32022],
     ["resource name mismatch", "resources/read", { uri: threadUiUri }, {}, { "mcp-name": "ui://wrong/resource.html" }, 400, -32020],
     ["unknown tool", "tools/call", { name: "not-a-tool", arguments: {} }, {}, { "mcp-name": "not-a-tool" }, 400, -32602],
+    ["deferred app picker", "tools/call", { name: "conversations.mentions", arguments: { query: "" } }, {}, { "mcp-name": "conversations.mentions" }, 400, -32602],
+    ...parkedViews.map((uri) => ["deferred app resource", "resources/read", { uri }, {}, { "mcp-name": uri }, 400, -32602]),
     ["unknown method", "not-a-method", {}, {}, {}, 404, -32601],
   ]) {
     const id = ++requestId
@@ -561,7 +554,7 @@ try {
   // Scope-denial paths must fail before any request to the Inline server.
   scope = "spaces:read"
   for (const [method, params] of [
-    ["tools/call", { name: "conversations.mentions", arguments: { query: "" } }],
+    ["tools/call", { name: "conversations.open", arguments: { chatId: "123" } }],
     ["resources/read", { uri: "inline://chat/123" }],
   ]) {
     const result = await request(method, params)
@@ -571,7 +564,7 @@ try {
       `${method} must deny missing messages:read`)
     assert.ok(!result.message?.result?.contents, "denial must not expose snapshot content")
   }
-  scenarios.push("mention-search-and-direct-resource-require-read-scope")
+  scenarios.push("thread-read-and-direct-resource-require-read-scope")
   scope = "messages:read spaces:read"
   const deniedAsk = await request("tools/call", { name: "conversations.ask", arguments: { title: "CI consultation", question: "Approved fixture question", participantUserIds: ["2"] } })
   assert.ok(deniedAsk.message?.result?.isError)
@@ -599,10 +592,11 @@ try {
 
   await checkCompiledConsultationMentions()
   scenarios.push("compiled-consultation-preserves-recipient-mention-links-through-send-parser")
-  scenarios.push("packaged-thread-opens-initial-ask-receipt-in-fullscreen-without-notification")
-
-  await checkCompiledMessageCards()
-  scenarios.push("compiled-list-and-search-results-render-in-packaged-card")
+  if (CHECK_DEFERRED_APP_VIEWS) {
+    scenarios.push("packaged-thread-opens-initial-ask-receipt-in-fullscreen-without-notification")
+    await checkCompiledMessageCards()
+    scenarios.push("compiled-list-and-search-results-render-in-packaged-card")
+  }
 
   const receipt = {
     sourceSha: process.env.GITHUB_SHA ?? null,

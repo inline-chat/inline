@@ -1,5 +1,9 @@
 # Inline thread UI for ChatGPT
 
+**Parked: this UI is preserved in source and disabled in the hosted MCP service.** The core-only release does not register thread HTML, message cards, app-only conversation mentions or UI entrypoint metadata. Core tools, Events and authenticated JSON conversation snapshots remain available.
+
+The real ChatGPT host exposed an unresolved failure: while sending, it replayed stale original `toolOutput`, rewinding or clearing the active thread view. This behavior is deferred, not fixed. Passing builds, component tests or compiled contract checks does not repair that host failure or enable the deployment's app-resource gates. The implementation notes below describe the parked component, not a live plugin capability. Do not enable or promise the view without a separately approved fix and real-host acceptance.
+
 A single React thread view bundled into a self-contained MCP Apps resource. It is isolated from the general web client and has no browser account token, direct Inline API connection, global workspace sidebar, or persistent message database.
 
 The exported `THREAD_RESOURCE_URI`, `THREAD_RESOURCE_MIME_TYPE`, and `THREAD_RESOURCE_HTML` constants come from `dist/index.js`; build this package before the MCP server. Every asset is embedded, so the runtime needs no asset copy or CDN for JavaScript/CSS.
@@ -33,7 +37,7 @@ Fullscreen shows a sidebar even when only one thread is remembered; inline keeps
 
 ## Resource policy and appearance
 
-Register the resource with `connectDomains: []` and `frameDomains: []`. Add only Inline’s verified media/avatar HTTPS origins to `resourceDomains`; images and media outside the host’s CSP fail to a named attachment. No wildcard CDN or third-party asset origin is required by this bundle.
+If a later release enables this resource, register it with `connectDomains: []` and `frameDomains: []`. Add only Inline’s verified media/avatar HTTPS origins to `resourceDomains`; images and media outside the host’s CSP fail to a named attachment. No wildcard CDN or third-party asset origin is required by this bundle.
 
 The appearance uses Inline native source values: 28-point avatars and 14-point bubble corners from `MacTheme.Theme`, system light/dark blue and incoming gray from `ThemeCatalog`, and the `InlineAvatarCore` initials palette/hash. Reusable thread, message, media and host-adapter components form the foundation; no full web-app routing or auth shell is included.
 
