@@ -105,6 +105,12 @@ const grant: McpGrant = {
 }
 
 describe("minimal thread workflows", () => {
+  function createConsultationStub(overrides: Partial<InlineApi>): InlineApi {
+    return createInlineStub({
+      searchPeople: async ({ query }) => ({ query: query ?? null, bestMatch: null, items: [{ userId: 2n, displayName: "Mo", username: "mo", firstName: "Mo", lastName: null, dmChatId: null, spaceIds: [10n], spaceNames: ["Inline"], score: 1000, matchReasons: ["id_exact"] }] }),
+      ...overrides,
+    })
+  }
   const auth = createAuthInfo(["messages:read", "messages:write"])
   const askArgs = { title: "Review", question: "What do you think?", participantUserIds: ["2"], spaceId: "10" }
 
@@ -115,7 +121,7 @@ describe("minimal thread workflows", () => {
   }
 
   it("keeps the legacy tool inventory free of new entrypoints", async () => {
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({}) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({}) })
     const { transport, sent } = await connectAndInitialize(server, auth)
     await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list" }, { authInfo: auth })
     const response = await waitForResponse(sent, 2)
@@ -127,7 +133,7 @@ describe("minimal thread workflows", () => {
   it("opens an empty picker without fetching a workspace catalog", async () => {
     const getEligibleChats = vi.fn(async () => [])
     const getConversation = vi.fn()
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getEligibleChats, getConversation }), contractVersion: "submission-v2" })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ getEligibleChats, getConversation }), contractVersion: "submission-v2" })
     const { response } = await call(server, "conversations.open", {})
     expect(response.result.structuredContent).toMatchObject({ chat: null, messages: [], participants: [], capabilities: { canSend: true } })
     expect(getEligibleChats).not.toHaveBeenCalled()
@@ -143,7 +149,7 @@ describe("minimal thread workflows", () => {
     ] }))
     const seenTokens: string[] = []
     const readAuth = { ...auth, token: "refreshed-token", scopes: ["messages:read"] }
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion: "submission-v2", events: (currentAuth) => {
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({}), contractVersion: "submission-v2", events: (currentAuth) => {
       seenTokens.push(currentAuth.token)
       return { request }
     } })
@@ -155,7 +161,7 @@ describe("minimal thread workflows", () => {
   })
 
   it("reads thread history when monitoring status is temporarily unavailable", async () => {
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({}), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("temporarily unavailable") } }) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({}), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("temporarily unavailable") } }) })
     const { response } = await call(server, "conversations.open", { chatId: "7" })
     expect(response.result.isError).not.toBe(true)
     expect(response.result.structuredContent.chat.chatId).toBe("7")
@@ -169,7 +175,7 @@ describe("minimal thread workflows", () => {
     new ProtocolClientError("rpc-error", { code: RpcError_Code.CHAT_ID_INVALID }),
     new ProtocolClientError("rpc-error", { code: RpcError_Code.UNAUTHENTICATED }),
   ])("marks explicit read denial for the UI without exposing cached content (%s)", async (error) => {
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
     const { response } = await call(server, "conversations.open", { chatId: "7" })
     expect(response.result).toMatchObject({ isError: true, _meta: { inline: { accessDenied: true } } })
     expect(response.result.structuredContent).toBeUndefined()
@@ -178,7 +184,7 @@ describe("minimal thread workflows", () => {
 
   it.each([new ProtocolClientError("timeout"), new ProtocolClientError("rpc-error", { code: RpcError_Code.INTERNAL_ERROR })])(
     "does not label temporary read failure as authorization denial (%s)", async (error) => {
-      const server = createInlineMcpServer({ grant, inline: createInlineStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
+      const server = createInlineMcpServer({ grant, inline: createConsultationStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
       const { response } = await call(server, "conversations.open", { chatId: "7" })
       expect(response.result.isError).toBe(true)
       expect(response.result._meta?.inline?.accessDenied).not.toBe(true)
@@ -198,20 +204,42 @@ describe("minimal thread workflows", () => {
       }
       return { events: [{ name: "message.created" }] }
     })
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request }) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request }) })
     const { response } = await call(server, "conversations.ask", { ...askArgs, participantUserIds: ["1", "2", "2"] })
     expect(order).toEqual(["events/list", "create", "events/cursor", "send"])
     expect(createChat).toHaveBeenCalledWith({ title: "Review", isPublic: false, participantUserIds: [2n], spaceId: 10n })
-    expect(sendMessage).toHaveBeenCalledWith({ chatId: 7n, text: "What do you think?", sendMode: "normal", parseMarkdown: true })
+    expect(sendMessage).toHaveBeenCalledWith({ chatId: 7n, text: "[@Mo](inline://user?id=2)\n\nWhat do you think?", sendMode: "normal", parseMarkdown: true })
     expect(response.result.structuredContent).toMatchObject({ questionStatus: "sent", messageId: "123", event: { name: "message.created", arguments: { chatId: "7", excludeSelf: true }, cursor: "before-question" } })
     expect(response.result.structuredContent).not.toHaveProperty("monitoring")
+    await server.close()
+  })
+
+  it("does not create or send for an unresolved exact recipient", async () => {
+    const createChat = vi.fn()
+    const sendMessage = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async () => ({}) }) })
+    const { response } = await call(server, "conversations.ask", { ...askArgs, participantUserIds: ["20"] })
+    expect(response.result.isError).toBe(true)
+    expect(createChat).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it("rejects an oversized addressed question before creating a thread", async () => {
+    const createChat = vi.fn()
+    const sendMessage = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async () => ({}) }) })
+    const { response } = await call(server, "conversations.ask", { ...askArgs, question: "x".repeat(8000) })
+    expect(response.result.isError).toBe(true)
+    expect(createChat).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
     await server.close()
   })
 
   it("fails before creating or sending if the Events service is unavailable", async () => {
     const createChat = vi.fn()
     const sendMessage = vi.fn()
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("Events unavailable") } }) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async () => { throw new Error("Events unavailable") } }) })
     const { response } = await call(server, "conversations.ask", askArgs)
     expect(response.result.isError).toBe(true)
     expect(createChat).not.toHaveBeenCalled()
@@ -222,7 +250,7 @@ describe("minimal thread workflows", () => {
   it("retains the created chat when cursor capture fails, without sending the question", async () => {
     const createChat = vi.fn(async () => defaultEligibleChat())
     const sendMessage = vi.fn()
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => {
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => {
       if (method === "events/cursor") throw new Error("unavailable")
       return { events: [] }
     } }) })
@@ -238,7 +266,7 @@ describe("minimal thread workflows", () => {
   it("returns a known thread and cursor for uncertain send outcomes without retrying", async () => {
     const createChat = vi.fn(async () => defaultEligibleChat())
     const sendMessage = vi.fn(async () => { throw new Error("delivery may have happened") })
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => method === "events/cursor" ? { cursor: "checkpoint" } : { events: [] } }) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat, sendMessage }), contractVersion: "submission-v2", events: () => ({ request: async (method) => method === "events/cursor" ? { cursor: "checkpoint" } : { events: [] } }) })
     const { response } = await call(server, "conversations.ask", askArgs)
     expect(response.result.isError).toBe(true)
     expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, questionStatus: "unknown", event: { cursor: "checkpoint" } })
@@ -250,7 +278,7 @@ describe("minimal thread workflows", () => {
   it("requires both read and write scopes before any consultation action", async () => {
     const createChat = vi.fn()
     const request = vi.fn<EventsProxy["request"]>()
-    const server = createInlineMcpServer({ grant, inline: createInlineStub({ createChat }), contractVersion: "submission-v2", events: () => ({ request }) })
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ createChat }), contractVersion: "submission-v2", events: () => ({ request }) })
     const { response } = await call(server, "conversations.ask", askArgs, createAuthInfo(["messages:write"]))
     expect(response.result.isError).toBe(true)
     expect(response.result._meta["mcp/www_authenticate"][0]).toContain("messages:read")

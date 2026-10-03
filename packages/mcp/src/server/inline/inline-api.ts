@@ -1407,8 +1407,16 @@ export function createInlineApi(params: {
         throw new Error("createSubthread returned no chat; inspect the parent before retrying because the child may have been created")
       }
       eligibleChatsCache = null
+      // The RPC already confirms the child. Later reads still authorize it,
+      // but their failure must not discard this creation receipt.
       return {
-        chat: await getAllowedChat({ chatId: result.createSubthread.chat.id }),
+        chat: toEligibleChat({
+          chat: result.createSubthread.chat,
+          dialogByChatId: new Map(),
+          spaceById: new Map(),
+          userById: new Map(),
+          lastMessageByChatId: new Map(),
+        }),
         parentChatId,
         parentMessageId: parentMessageId ?? null,
         anchorMessageId: result.createSubthread.anchorMessage?.id ?? null,

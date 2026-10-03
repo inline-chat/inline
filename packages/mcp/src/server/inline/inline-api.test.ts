@@ -444,6 +444,34 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
+  it.each(["unavailable", "denied"])("retains the subthread receipt when a subsequent read is %s", async (failure) => {
+    const { api } = fixtureApi()
+    const child = { ...spaceChat(777n, "Confirmed child", 10n, 0n), parentChatId: 7n, parentMessageId: 100n }
+    const wireResult = RpcResult.fromBinary(RpcResult.toBinary(RpcResult.create({ result: {
+      oneofKind: "createSubthread",
+      createSubthread: CreateSubthreadResult.create({ chat: child, anchorMessage: message(100n, 7n, 1n, "anchor") }),
+    } }))).result
+    let readsBeforeReceipt = 0
+    realtimeSdk.client.invokeRaw.mockImplementation(async () => {
+      readsBeforeReceipt = realtimeSdk.client.invoke.mock.calls.length
+      realtimeSdk.client.invoke.mockImplementation(async (method) => {
+        if (failure === "denied" && method === Method.GET_CHAT) return { getChat: { chat: { ...child, spaceId: 20n } } }
+        throw new Error("Read unavailable after confirmed subthread creation")
+      })
+      return wireResult
+    })
+    try {
+      await expect(api.createSubthread({ parentChatId: 7n, parentMessageId: 100n, title: "Confirmed child" }))
+        .resolves.toMatchObject({ chat: { chatId: 777n, title: "Confirmed child", spaceId: 10n, kind: "space_chat" }, parentChatId: 7n, parentMessageId: 100n, anchorMessageId: 100n })
+      expect(realtimeSdk.client.invokeRaw).toHaveBeenCalledTimes(1)
+      expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(readsBeforeReceipt)
+      // Creation invalidates discovery but never seeds an authorization bypass.
+      await expect(api.getEligibleChats()).rejects.toThrow("Read unavailable")
+      await expect(api.recentMessages({ chatId: 777n, freshChatAuthorization: true }))
+        .rejects.toThrow(failure === "denied" ? "allowed context" : "Read unavailable")
+    } finally { await api.close() }
+  })
+
   it("rejects DM child creation without home access before invoking a mutation", async () => {
     const { api, chats } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
     chats[0] = { ...chats[0]!, spaceId: undefined, peerId: { type: { oneofKind: "user", user: { userId: 2n } } } }

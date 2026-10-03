@@ -17,7 +17,7 @@ const html = `<!doctype html>
 
 await mkdir(`${root}dist`, { recursive: true })
 const constants = {
-  THREAD_RESOURCE_URI: "ui://inline/thread-v2.html",
+  THREAD_RESOURCE_URI: "ui://inline/thread-v3.html",
   THREAD_RESOURCE_MIME_TYPE: "text/html;profile=mcp-app",
   THREAD_RESOURCE_HTML: html,
 }

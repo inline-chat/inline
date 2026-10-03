@@ -159,7 +159,13 @@ export function App({ bridge }: { bridge: HostBridge }) {
 
   useEffect(() => {
     const unsubscribe = bridge.subscribe((event) => {
-      if (event.kind === "state") setHost(event.state)
+      if (event.kind === "state") {
+        setHost(event.state)
+        if (event.state.status === "ready" && !bridge.hasToolResult && !snapshotRef.current && !localOpen.current && !restored.current && !requireFreshHostRead.current) {
+          const chatId = bridge.initialChatId || (!bridge.hasInvocationResult ? widgetRef.current.activeChatId : null)
+          if (chatId) { restored.current = true; void openThread(chatId) }
+        }
+      }
       else {
         if (isAccessDenied(event.result)) { clearDeniedAccess(); return }
         const incoming = readThreadSnapshot(event.result)
@@ -186,6 +192,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
         } else {
           // A create/ask receipt can identify the thread without bundling history.
           if (receipt) {
+            if (localOpen.current === receipt.chatId) return
             localOpen.current = null
             saveWidget(rememberThread(widgetRef.current, receipt))
             void openThread(receipt.chatId)
@@ -350,12 +357,22 @@ export function App({ bridge }: { bridge: HostBridge }) {
   const people = snapshot?.participants?.map((person) => person.displayName).filter(Boolean).join(", ")
   const subtitle = snapshot ? (snapshot.chat.kind === "dm" ? "Direct message" : people ? `Direct participants: ${people}` : "Thread") : "Your team conversation"
   const unavailable = host.status === "failed" || host.status === "closed"
+  const expanded = host.displayMode === "fullscreen"
 
-  return <main className="thread-app" ref={app} aria-label="Inline thread">
+  return <main className={`thread-app${expanded ? " expanded" : ""}`} ref={app} aria-label="Inline thread">
+    {expanded && <nav className="thread-sidebar" aria-label="Threads opened in this view">
+      <h2>Threads</h2>
+      {widget.threads.length ? widget.threads.map((thread) => <button key={thread.chatId} type="button"
+        aria-current={(snapshot?.chat.chatId || widget.activeChatId) === thread.chatId ? "page" : undefined}
+        title={thread.title} onClick={() => void openThread(thread.chatId)} disabled={loading || sending || unavailable}>
+        <Icon name="thread" /><span>{thread.title}</span>
+      </button>) : <p>Opened threads appear here.</p>}
+    </nav>}
+    <section className="thread-content" aria-label="Conversation">
     <header className="thread-header">
       <span className="thread-icon" aria-hidden="true">{snapshot?.details?.emoji || <Icon name="thread" />}</span>
       <div className="thread-heading">
-        {widget.threads.length > 1 ? <label className="thread-picker">
+        {!expanded && widget.threads.length > 1 ? <label className="thread-picker">
           <span className="sr-only">Threads opened in ChatGPT</span>
           <select value={snapshot?.chat.chatId || widget.activeChatId || ""} onChange={(event) => void openThread(event.target.value)} disabled={loading || sending || unavailable}>
             {widget.threads.map((thread) => <option key={thread.chatId} value={thread.chatId}>{thread.title}</option>)}
@@ -405,5 +422,6 @@ export function App({ bridge }: { bridge: HostBridge }) {
       </div> : <p className="read-only">You have read access to this conversation.</p>}
       {sending && <p className="composer-status" role="status">{sendingChatId.current === snapshot.chat.chatId ? "Sending…" : "Finishing the previous message…"}</p>}
     </footer>}
+    </section>
   </main>
 }

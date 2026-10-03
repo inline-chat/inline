@@ -36,7 +36,7 @@ const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "i
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
 export const INLINE_MCP_INSTRUCTIONS =
-  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.get/list/search/context/unread; send only after the target is clear. For forwarding, resolve the source and destination separately, select source messages, then use messages.forward. Subthreads inherit root-chat access plus their own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. Creation inputs do not edit existing anchored reply threads. IDs are positive decimal strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds; calendar days use UTC. Use account.me to inspect scopes and allowed chat contexts."
+  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.get/list/search/context/unread; send only after the target is clear. Address requested recipients by name using [@Name](inline://user?id=USER_ID) with their resolved user IDs; plain names are not mentions. For forwarding, resolve the source and destination separately, select source messages, then use messages.forward. Subthreads inherit root-chat access plus their own direct/group grants; participants added only to an intermediate child are not automatically inherited by descendants. Creation inputs do not edit existing anchored reply threads. IDs are positive decimal strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds; calendar days use UTC. Use account.me to inspect scopes and allowed chat contexts."
 
 const INLINE_MARKDOWN_HELP =
   'Parsed as supported Inline Markdown: **bold**, *italic*, <u>underline</u>, ~~strikethrough~~, ==highlight==, `code`, fenced code (optional language), four-space indented code, [label](https://example.com), [Name](inline://user?id=42), [[Title]](inline://chat?id=123), # headings, - bullets, 1. numbered lists, - [ ] / - [x] checklists, > quotes, pipe tables with a header separator row, --- separators, and ![alt](https://example.com/image.png). Math uses $TeX$ inline or $$TeX$$ on separate lines for display. Disclosures use <details open> / <summary>Title</summary> / body / </details> on separate lines; omit open to start collapsed and use <summary kind="progress"> only while working. Use <footer>metadata</footer> on its own line. Preserve indentation/newlines; use backslash escapes or code for literal syntax. Do not fence the whole message or tables unless literal code is intended. Footnotes and arbitrary HTML are unsupported. Rich formatting and math rendering depend on the recipient client.'
@@ -58,7 +58,7 @@ export type McpToolContract = "legacy" | "submission-v2"
 
 export function inlineMcpInstructions(contractVersion: McpToolContract): string {
   return INLINE_MCP_INSTRUCTIONS + (contractVersion === "submission-v2"
-    ? " For teammate input, use conversations.ask after resolving the people and context. It creates a private thread, sends one question and returns a message.created subscription selector and replay cursor. Subscribe using events/subscribe from that cursor before waiting; monitoring starts only after subscription acknowledgement. On an event, read current message context and continue the originating task. Never repeat an uncertain write automatically. conversations.open opens the minimal Inline thread UI; its picker only remembers threads explicitly opened in this ChatGPT experience."
+    ? " For teammate input, resolve the people and context first. Before sending an ask-and-wait request, establish that the originating host can subscribe and resume this task. OpenAI supports this in Work chats (Cloud on desktop) and dots, not regular ChatGPT chats. Server Events availability alone does not prove host continuation support. Explain an unsupported host before sending; proceed only if sending without automatic continuation satisfies the user. conversations.ask creates a private thread, mentions the recipients, sends one question and returns a message.created subscription selector and replay cursor. It does not itself subscribe or wait. Subscribe using events/subscribe from that cursor before waiting; monitoring starts only after subscription acknowledgement. On an event, read current message context and continue the originating task. Never repeat an uncertain write automatically. conversations.open opens the minimal Inline thread UI; its picker only remembers threads explicitly opened in this ChatGPT experience."
     : "")
 }
 
@@ -1912,10 +1912,10 @@ export function createInlineMcpServer(params: {
 
     registerInlineTool(server, resourceMetadataUrl, "conversations.ask", {
       title: "Ask Inline Teammates",
-      description: "Create a private Inline thread containing you and the resolved participants, send one recipient-visible question, and return a replay cursor for waiting on their replies. Subscribe to the returned message.created event with events/subscribe, using its exact arguments and cursor; then wait and resume the originating task when a reply arrives. Creation and delivery are not idempotent: retain a confirmed chat ID and inspect any uncertain outcome before retrying. Monitoring is not active until the host acknowledges a subscription.",
+      description: "Create a private Inline thread containing you and the resolved participants, address them with named mentions, send one question, and return a replay cursor. This tool does not subscribe or wait. For ask-and-wait requests, first establish that the originating host can subscribe and resume (ChatGPT Work or dots). Regular ChatGPT chats cannot automatically resume; explain that before sending and only proceed if a send without automatic continuation satisfies the user. Subscribe to the returned message.created event with events/subscribe, using its exact arguments and cursor; then wait and resume the originating task when a reply arrives. Creation and delivery are not idempotent: retain a confirmed chat ID and inspect any uncertain outcome before retrying. Monitoring is not active until the host acknowledges a subscription.",
       inputSchema: {
         title: z.string().trim().min(1).max(200),
-        question: z.string().trim().min(1).max(8000).describe(`Question delivered to the participants. ${INLINE_MARKDOWN_HELP}`),
+        question: z.string().trim().min(1).max(8000).describe(`Question delivered to the participants; Inline prepends a named mention of each resolved recipient. ${INLINE_MARKDOWN_HELP}`),
         participantUserIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(10).describe("Resolved teammate or existing Inline agent user IDs; the connected user is added automatically"),
         spaceId: z.string().regex(/^[1-9]\d*$/).optional().describe("Authorized parent space; omit for an authorized home thread"),
       },
@@ -1933,6 +1933,17 @@ export function createInlineMcpServer(params: {
       if (!auth || !params.events) throw new Error("Inline Events is unavailable; the question was not sent.")
       const participants = [...new Set(args.participantUserIds.map((id) => parseUserId(id)))].filter((id) => id !== params.grant.inlineUserId)
       if (!participants.length) throw new Error("Choose at least one teammate other than yourself.")
+      // Resolve exact identities before any write. A display name is data, so
+      // escape it before composing Markdown; do not accept fuzzy ID matches.
+      const recipients = await Promise.all(participants.map(async (userId) => {
+        const result = await params.inline.searchPeople({ query: userId.toString(), limit: 50 })
+        const person = result.items.find((candidate) => candidate.userId === userId)
+        if (!person?.displayName.trim()) throw new Error("A participant could not be resolved. Resolve the requested people before creating the thread; nothing was sent.")
+        const label = person.displayName.replace(/\s+/g, " ").trim().replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g, "\\$&")
+        return `[@${label}](inline://user?id=${userId})`
+      }))
+      const question = `${recipients.join(" ")}\n\n${args.question}`
+      if (question.length > 8000) throw new Error("Shorten the question to leave room for recipient mentions; nothing was sent.")
       const spaceId = args.spaceId ? parseInlineId(args.spaceId, "spaceId") : undefined
       const events = params.events(auth)
       await events.request("events/list", {}) // Confirm Events before creating anything.
@@ -1955,15 +1966,15 @@ export function createInlineMcpServer(params: {
         if (typeof checkpoint.cursor !== "string" || !checkpoint.cursor) throw new Error("Missing event cursor")
         cursor = checkpoint.cursor
       } catch {
-        return result("not_sent", null, null, "The private thread exists, but the question was not sent. Reuse this chatId; activate a message.created subscription before using messages.send. Do not create another thread.")
+        return result("not_sent", null, null, "The private thread exists, but the question was not sent. Reuse this chatId. If the host supports continuation, activate a message.created subscription before using messages.send; otherwise disclose the limitation and send only if the user accepts sending without automatic continuation. Do not create another thread.")
       }
       const event = { name: "message.created" as const, arguments: selector, cursor }
       try {
-        const receipt = await params.inline.sendMessage({ chatId: created.chatId, text: args.question, sendMode: "normal", parseMarkdown: true })
-        if (receipt.messageId === null) return result("unknown", null, event, "Thread creation is confirmed; question delivery has no message receipt. Inspect this thread before retrying. Subscribe from the returned cursor to recover any reply.")
-        return result("sent", receipt.messageId.toString(), event, "Subscribe to message.created using the returned arguments and cursor, then wait. On a teammate reply, read its current context and continue the originating task. Open this chatId with conversations.open to inspect or reply directly.")
+        const receipt = await params.inline.sendMessage({ chatId: created.chatId, text: question, sendMode: "normal", parseMarkdown: true })
+        if (receipt.messageId === null) return result("unknown", null, event, "Thread creation is confirmed; question delivery has no message receipt. Inspect this thread before retrying. If this host supports Events continuation, subscribe from the returned cursor to recover any reply; otherwise disclose that automatic continuation is unavailable.")
+        return result("sent", receipt.messageId.toString(), event, "The question was sent; no monitoring was installed by this tool. Open this chatId with conversations.open. If this host supports Events continuation, subscribe to message.created using the returned arguments and cursor and confirm registration before claiming to wait. On a reply, read current context and continue the originating task. In regular ChatGPT chats, explain that automatic continuation is unavailable; the user can read and reply in the thread view.")
       } catch {
-        return result("unknown", null, event, "Thread creation is confirmed; question delivery is uncertain. Inspect this chat before retrying and do not recreate it. Subscribe from the returned cursor to recover any reply.")
+        return result("unknown", null, event, "Thread creation is confirmed; question delivery is uncertain. Inspect this chat before retrying and do not recreate it. If this host supports Events continuation, subscribe from the returned cursor to recover any reply; otherwise disclose that automatic continuation is unavailable.")
       }
     })
   }

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { HostBridge } from "./bridge"
 
 const bridges: HostBridge[] = []
-afterEach(() => { for (const bridge of bridges.splice(0)) bridge.dispose(); vi.useRealTimers() })
+afterEach(() => { for (const bridge of bridges.splice(0)) bridge.dispose(); delete window.openai; vi.useRealTimers() })
 function hostReply(id: number, result: unknown, source: MessageEventSource = window.parent) {
   window.dispatchEvent(new MessageEvent("message", { source, data: { jsonrpc: "2.0", id, result } }))
 }
@@ -65,4 +65,60 @@ it("preserves the canonical JSON-RPC denial data for the UI", async () => {
     data: { jsonrpc: "2.0", id: 2, error: { code: -32000, message: "Denied", data: { status: 403 } } },
   }))
   await rejected
+})
+
+it("replays an early standard result to a subscriber mounted after initialization", async () => {
+  const { bridge } = setup()
+  const result = { structuredContent: { chat: { chatId: "10", title: "Requested thread" } } }
+  window.openai = { toolOutput: { chat: { chatId: "11", title: "Older snapshot" } } }
+  const ready = bridge.initialize()
+  window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result } }))
+  window.dispatchEvent(new CustomEvent("openai:set_globals", { detail: { globals: { toolOutput: { chat: { chatId: "11", title: "Older snapshot" } } } } }))
+  hostReply(1, initialized)
+  await ready
+  const events: unknown[] = []
+  bridge.subscribe((event) => events.push(event))
+  expect(events).toEqual([{ kind: "state", state: bridge.hostState }, { kind: "result", result }])
+})
+
+it("prioritizes launch denial over a queued success and removes globals listeners on teardown", async () => {
+  const { bridge } = setup()
+  const denied = { isError: true, _meta: { inline: { accessDenied: true } } }
+  window.openai = { toolOutput: { chat: { chatId: "10", title: "Cached title" } }, toolResponseMetadata: { status: "error", mcp_tool_result: denied }, displayMode: "fullscreen",
+    widgetState: { version: 1, activeChatId: "10", threads: [{ chatId: "10", title: "Cached title" }], unconfirmed: { "10": { text: "An uncertain send" } } },
+  }
+  expect(bridge.widgetState).toEqual({ version: 1, activeChatId: null, threads: [], unconfirmed: { "10": { text: "An uncertain send" } } })
+  const events: Array<{ kind: string; result?: unknown }> = []
+  bridge.subscribe((event) => events.push(event))
+  const ready = bridge.initialize()
+  window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { structuredContent: { chat: { chatId: "10", title: "Cached title" } } } } }))
+  hostReply(1, initialized)
+  await ready
+  expect(events.filter((event) => event.kind === "result")).toEqual([{ kind: "result", result: denied }])
+  expect(bridge.hostState.displayMode).toBe("fullscreen")
+  bridge.dispose()
+  const count = events.length
+  window.dispatchEvent(new CustomEvent("openai:set_globals", { detail: { globals: { displayMode: "inline", toolOutput: {} } } }))
+  expect(events).toHaveLength(count)
+})
+
+it("cannot revive a disposed bridge when the initialize response resolves immediately before teardown", async () => {
+  const { bridge, requests } = setup()
+  const ready = bridge.initialize()
+  const rejected = expect(ready).rejects.toThrow("closed")
+  hostReply(1, initialized)
+  bridge.dispose()
+  await rejected
+  expect(bridge.hostState.status).toBe("closed")
+  expect(requests.filter((request) => request.method === "ui/notifications/initialized")).toHaveLength(0)
+})
+
+it("immediately replays a connecting denial to a later subscriber without waiting for readiness", () => {
+  const { bridge } = setup()
+  const denied = { isError: true, _meta: { inline: { accessDenied: true } } }
+  window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: denied } }))
+  const events: unknown[] = []
+  bridge.subscribe((event) => events.push(event))
+  expect(bridge.hostState.status).toBe("connecting")
+  expect(events).toEqual([{ kind: "result", result: denied }])
 })

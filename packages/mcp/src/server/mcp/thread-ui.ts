@@ -20,9 +20,9 @@ export function threadResourceDomains(value = process.env.MCP_UI_RESOURCE_DOMAIN
 }
 
 export function registerThreadUi(server: McpServer): void {
-  // New descriptors invalidate host caches; cached v1 descriptors remain valid.
-  for (const uri of new Set([THREAD_RESOURCE_URI, "ui://inline/thread-v1.html"])) {
-    server.registerResource(uri === THREAD_RESOURCE_URI ? "inline-thread" : "inline-thread-legacy", uri, {
+  // New descriptors invalidate host caches; cached v1/v2 descriptors remain valid.
+  for (const uri of new Set([THREAD_RESOURCE_URI, "ui://inline/thread-v2.html", "ui://inline/thread-v1.html"])) {
+    server.registerResource(uri === THREAD_RESOURCE_URI ? "inline-thread" : `inline-thread-${uri.includes("v2") ? "v2" : "v1"}`, uri, {
       title: "Inline thread",
       description: "Minimal Inline thread history, replies and text composer.",
       mimeType: THREAD_RESOURCE_MIME_TYPE,
@@ -30,7 +30,7 @@ export function registerThreadUi(server: McpServer): void {
       uri,
       mimeType: THREAD_RESOURCE_MIME_TYPE,
       text: THREAD_RESOURCE_HTML,
-      _meta: { ui: {
+      _meta: { "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] }, ui: {
         prefersBorder: false,
         domain: "https://mcp.inline.chat",
         csp: {

@@ -44,7 +44,7 @@ function validateModernResponse(method, message) {
 const { createApp } = await import(path.join(root, "packages/mcp/dist/index.js"))
 const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatgpt-app-submission.json"), "utf8"))
 const uiUri = "ui://inline/message-results-v1.html"
-const threadUiUri = "ui://inline/thread-v2.html"
+const threadUiUri = "ui://inline/thread-v3.html"
 const scenarios = []
 
 // Use compiled tool handlers and their packaged HTML together. Domain fixtures
@@ -134,6 +134,100 @@ async function checkCompiledMessageCards() {
     await server.close()
   }
 }
+
+// A successful send receipt is insufficient: Inline's real parser must produce
+// exact mention links for the send pipeline's resolver, even hostile display names.
+async function checkCompiledConsultationMentions() {
+  const { createInlineMcpServer } = await import(path.join(root, "packages/mcp/dist/server/mcp/server.js"))
+  const { parseMarkdown } = await import(path.join(root, "server/src/modules/message/parseMarkdown.ts"))
+  const people = [
+    { userId: 2n, displayName: "Mo" },
+    { userId: 3n, displayName: "😀 [Eve](inline://user?id=999) & <b>" },
+  ]
+  const writes = []
+  const server = createInlineMcpServer({
+    grant: { id: "ask-contract", clientId: "ask-client", inlineUserId: 1n, scope: "messages:read messages:write", spaceIds: [], allowDms: true, allowHomeThreads: true },
+    contractVersion: "submission-v2",
+    inline: {
+      searchPeople: async ({ query }) => ({ items: people.filter((person) => person.userId.toString() === query) }),
+      createChat: async (args) => { writes.push({ kind: "create", args }); return { chatId: 7n, title: args.title, chatTitle: args.title, kind: "home_thread", archived: false, pinned: false, unreadCount: 0 } },
+      sendMessage: async (args) => { writes.push({ kind: "send", args }); return { messageId: 123n } },
+    },
+    events: () => ({ request: async (method) => method === "events/cursor" ? { cursor: "before-question" } : { events: [] } }),
+  })
+  const authInfo = { token: "synthetic-ask-token", clientId: "ask-client", scopes: ["messages:read", "messages:write"] }
+  const pending = new Map()
+  let requestId = 0
+  const transport = { start: async () => {}, close: async () => {}, send: async (message) => pending.get(message.id)?.(message) }
+  const request = async (method, params) => {
+    const id = ++requestId
+    let timer
+    const response = new Promise((resolve, reject) => {
+      pending.set(id, resolve)
+      timer = setTimeout(() => reject(new Error("Compiled consultation timed out")), 5_000)
+    })
+    transport.onmessage({ jsonrpc: "2.0", id, method, params }, { authInfo })
+    try { return await response } finally { clearTimeout(timer); pending.delete(id) }
+  }
+  try {
+    await server.connect(transport)
+    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "consultation-contract", version: "1" } })
+    transport.onmessage({ jsonrpc: "2.0", method: "notifications/initialized" }, { authInfo })
+    const response = await request("tools/call", { name: "conversations.ask", arguments: { title: "Parser acceptance", participantUserIds: ["1", "2", "3", "2"], question: "Please review **this**." } })
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response))
+    assert.equal(response.result.structuredContent.questionStatus, "sent")
+    assert.equal(writes.length, 2, "exactly one create and one send")
+    assert.deepEqual(writes[0].args.participantUserIds, [2n, 3n])
+    assert.equal(writes[1].args.parseMarkdown, true)
+    const parsed = parseMarkdown(writes[1].args.text)
+    const mentions = parsed.entities.filter((entity) => entity.entity.oneofKind === "textUrl")
+    assert.deepEqual(mentions.map((entity) => entity.entity.textUrl.url), ["inline://user?id=2", "inline://user?id=3"], "real send parser must preserve recipient mention links and never a name-injected ID")
+    assert.deepEqual(mentions.map((entity) => parsed.text.slice(Number(entity.offset), Number(entity.offset + entity.length))), people.map((person) => `@${person.displayName}`))
+    assert.ok(parsed.text.endsWith("Please review this."), "question formatting remains intact")
+    assert.equal(response.result.structuredContent.monitoring, undefined, "send must not claim monitoring")
+    assert.match(response.result.structuredContent.nextStep, /no monitoring was installed/)
+
+    // Expansion may supply a launch snapshot without sending tool-result again.
+    // Mount the packaged app with the actual ask receipt and verify its read.
+    const resource = await request("resources/read", { uri: threadUiUri })
+    const html = resource.result.contents[0].text
+    const requireMcp = createRequire(path.join(root, "packages/mcp/package.json"))
+    const { Window } = await import(requireMcp.resolve("happy-dom"))
+    const { sampleThread } = await import(path.join(root, "plugins/chatgpt/ui/scripts/fixtures.ts"))
+    const snapshot = sampleThread("7", "Parser acceptance")
+    const window = new Window({ url: "https://mcp.inline.chat", settings: { enableJavaScriptEvaluation: true } })
+    const opened = []
+    const hostMethods = []
+    const receive = (data) => window.dispatchEvent(new window.MessageEvent("message", { source: parent, data: { jsonrpc: "2.0", ...data } }))
+    const parent = { postMessage: (message) => {
+      hostMethods.push(message.method)
+      if (message.method === "ui/initialize") queueMicrotask(() => receive({ id: message.id, result: { protocolVersion: "2026-01-26", hostCapabilities: {}, hostContext: { displayMode: "fullscreen" } } }))
+      if (message.method === "tools/call") {
+        assert.equal(message.params.name, "conversations.open")
+        assert.deepEqual(JSON.parse(JSON.stringify(message.params.arguments)), { chatId: "7" })
+        opened.push(message.params.arguments.chatId)
+        queueMicrotask(() => receive({ id: message.id, result: { structuredContent: snapshot } }))
+      }
+    } }
+    try {
+      Object.defineProperty(window, "parent", { value: parent })
+      window.openai = { toolOutput: response.result.structuredContent, toolResponseMetadata: { mcp_tool_result: response.result }, displayMode: "fullscreen", setWidgetState: (state) => { window.openai.widgetState = state } }
+      Object.defineProperty(window, "fetch", { value: () => { throw new Error("thread must read through the host") } })
+      const script = html.match(/<script type="module">([\s\S]+)<\/script>/)?.[1]
+      assert.ok(script, "packaged thread has its production bundle")
+      window.document.write(html.replace(/<script type="module">[\s\S]+<\/script>/, ""))
+      window.eval(script)
+      const deadline = Date.now() + 3_000
+      while (!window.document.querySelector("textarea") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.deepEqual(opened, ["7"], `initial ask receipt must open its confirmed thread once without a later notification: ${JSON.stringify({ hostMethods, text: window.document.body.textContent })}`)
+      assert.ok(window.document.querySelector("textarea"), "the opened thread must have its working composer")
+      assert.equal(window.openai.widgetState.activeChatId, "7")
+      assert.match(window.document.body.textContent, /Parser acceptance/)
+      assert.ok(window.document.querySelector(".thread-sidebar"), "fullscreen must show the small remembered-thread sidebar even for one thread")
+    } finally { await window.happyDOM.close() }
+  } finally { await server.close() }
+}
+
 let active = true
 let scope = "messages:read spaces:read"
 let appServer
@@ -289,6 +383,7 @@ try {
 
   const thread = await success("resources/read", { uri: threadUiUri })
   assert.equal(thread.contents[0].mimeType, "text/html;profile=mcp-app")
+  assert.deepEqual(thread.contents[0]._meta["openai/ui"].availableDisplayModes, ["inline", "fullscreen"])
   assert.match(thread.contents[0].text, /ui\/initialize/)
   assert.match(thread.contents[0].text, /conversations\.open/)
   assert.match(thread.contents[0].text, /messages\.send/)
@@ -435,6 +530,10 @@ try {
   assert.match(revokedModern.headers.get("www-authenticate") ?? "", /invalid_token/)
   scenarios.push("revoked-grant-denies-existing-session")
   assert.equal(upstreamRequests, 0, "metadata and scope-denial checks must not contact Inline")
+
+  await checkCompiledConsultationMentions()
+  scenarios.push("compiled-consultation-preserves-recipient-mention-links-through-send-parser")
+  scenarios.push("packaged-thread-opens-initial-ask-receipt-in-fullscreen-without-notification")
 
   await checkCompiledMessageCards()
   scenarios.push("compiled-list-and-search-results-render-in-packaged-card")

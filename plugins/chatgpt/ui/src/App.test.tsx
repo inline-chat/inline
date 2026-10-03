@@ -23,6 +23,14 @@ const text = async (value: string) => {
     input.dispatchEvent(new Event("input", { bubbles: true }))
   })
 }
+const globals = (value: Record<string, unknown>) => window.dispatchEvent(new CustomEvent("openai:set_globals", { detail: { globals: value } }))
+const remount = async (value: Window["openai"]) => {
+  await act(async () => { root.unmount(); bridge.dispose() })
+  window.openai = value
+  bridge = new HostBridge()
+  root = createRoot(container)
+  await act(async () => { root.render(<App bridge={bridge} />) })
+}
 
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -202,16 +210,148 @@ it("clears a previous watching indicator when a fresh thread snapshot cannot con
 })
 
 it("does not restore an old thread before the host supplies its requested initial context", async () => {
-  await act(async () => { root.unmount(); bridge.dispose() })
-  window.openai!.widgetState = { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: "Previous thread" }], unconfirmed: {} }
-  bridge = new HostBridge()
-  root = createRoot(container)
-  await act(async () => { root.render(<App bridge={bridge} />) })
-  expect(tools("conversations.open")).toHaveLength(0)
   const requested = sampleThread("804", "The thread ChatGPT requested")
-  await act(async () => { notify({ structuredContent: requested }) })
+  await remount({
+    widgetState: { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: "Previous thread" }], unconfirmed: {} },
+    toolOutput: requested,
+  })
   expect(container.querySelector("select")?.value).toBe("804")
   expect(container.querySelector('[data-message-id="80001"]')).toBeNull()
+  expect(tools("conversations.open")).toHaveLength(0)
+})
+
+it.each(["output", "canonical"])("opens the created thread from initial ChatGPT %s globals without a later notification", async (shape) => {
+  thread = sampleThread("805", "Catch up with Maya")
+  thread.messages = [
+    { ...thread.messages[0]!, id: "1", fromId: "1", text: "Maya, could you review the draft?" },
+    { ...thread.messages[1]!, id: "2", fromId: "2", senderDisplayName: "Maya", text: "The draft looks good." },
+  ]
+  const receipt = { chat: thread.chat, questionStatus: "sent", messageId: "1", event: null }
+  await remount({
+    displayMode: "fullscreen",
+    ...(shape === "output" ? { toolOutput: receipt } : { toolResponseMetadata: { status: "success", mcp_tool_result: { structuredContent: receipt } } }),
+  })
+  expect(tools("conversations.open")).toHaveLength(1)
+  expect(tools("conversations.open")[0]!.params.arguments).toEqual({ chatId: "805" })
+  expect(container.querySelectorAll(".message-row")).toHaveLength(2)
+  expect(container.textContent).toContain("The draft looks good.")
+  expect(container.querySelector("nav button")?.textContent).toBe("Catch up with Maya")
+  expect(container.querySelector("nav button")?.getAttribute("aria-current")).toBe("page")
+  expect(tools("messages.send")).toHaveLength(0)
+  expect(tools("conversations.list")).toHaveLength(0)
+})
+
+it("reopens saved active state on an expanded remount with no invocation result", async () => {
+  const saved = { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: thread.chat.title }], unconfirmed: { "800": { text: "An uncertain earlier send" } } }
+  await remount({ displayMode: "fullscreen", widgetState: saved })
+  expect(tools("conversations.open")).toHaveLength(1)
+  expect(container.querySelectorAll("nav button")).toHaveLength(1)
+  expect(container.querySelectorAll(".message-row")).toHaveLength(5)
+  expect(container.querySelector("textarea")?.value).toBe("An uncertain earlier send")
+  expect(button("Send message").disabled).toBe(true)
+  expect(tools("messages.send")).toHaveLength(0)
+})
+
+it("uses a launch target instead of stale saved active state and coalesces its pending receipt", async () => {
+  const target = sampleThread("804", "Requested target")
+  let readId: number | undefined
+  const previous = responder
+  responder = (request) => request.params?.name === "conversations.open" ? (readId = request.id, undefined) : previous(request)
+  await remount({ toolInput: { chatId: "804" }, widgetState: { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: "Previous thread" }], unconfirmed: {} } })
+  await act(async () => { globals({ toolOutput: { chat: target.chat, questionStatus: "sent", messageId: "1" } }) })
+  expect(tools("conversations.open")).toHaveLength(1)
+  expect(tools("conversations.open")[0]!.params.arguments.chatId).toBe("804")
+  expect(container.querySelectorAll(".message-row")).toHaveLength(0)
+  await act(async () => { reply(readId!, { structuredContent: target }) })
+  expect(container.querySelector("select")?.value).toBe("804")
+})
+
+it("waits for pending canonical launch metadata and accepts a later output without borrowing old metadata", async () => {
+  await remount({
+    widgetState: { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: "Previous thread" }], unconfirmed: {} },
+    toolOutput: thread,
+    toolResponseMetadata: { status: "pending", mcp_tool_result: null },
+  })
+  expect(tools("conversations.open")).toHaveLength(0)
+  expect(container.querySelectorAll(".message-row")).toHaveLength(0)
+  const other = sampleThread("801", "New result")
+  await act(async () => { globals({ toolOutput: other, displayMode: "fullscreen" }) })
+  expect(container.querySelector("h1")?.textContent).toBe("New result")
+  expect(container.querySelectorAll("nav button")).toHaveLength(2)
+  expect(container.querySelector('[data-message-id="80001"]')).toBeNull()
+})
+
+it("keeps repeated host results meaningful after a local thread switch", async () => {
+  await remount({ toolOutput: thread, widgetState: { version: 1, activeChatId: "800", threads: [thread.chat, { chatId: "801", title: "Other thread" }], unconfirmed: {} }, displayMode: "fullscreen" })
+  const original = thread
+  thread = sampleThread("801", "Other thread")
+  await click([...container.querySelectorAll("nav button")].find((node) => node.textContent === "Other thread")!)
+  expect(container.querySelector("h1")?.textContent).toBe("Other thread")
+  await act(async () => { notify({ structuredContent: original }) })
+  expect(container.querySelector("h1")?.textContent).toBe(original.chat.title)
+  await act(async () => { globals({ displayMode: "inline" }) })
+  expect(container.querySelector("nav")).toBeNull()
+  expect(container.querySelector("select")?.value).toBe("800")
+})
+
+it("keeps canonical launch denial ahead of stale output and saved state, including late globals", async () => {
+  const denied = { isError: true, _meta: { inline: { accessDenied: true } }, content: [] }
+  await remount({
+    toolOutput: thread,
+    toolResponseMetadata: { status: "error", mcp_tool_result: denied },
+    widgetState: { version: 1, activeChatId: "800", threads: [thread.chat], unconfirmed: { "800": { text: "Preserve the send fence" } } },
+    displayMode: "fullscreen",
+    setWidgetState: (value) => { storedState = value },
+  })
+  expect(container.querySelectorAll(".message-row")).toHaveLength(0)
+  expect(container.querySelectorAll("nav button")).toHaveLength(0)
+  expect(tools("conversations.open")).toHaveLength(0)
+  const previous = responder
+  responder = (request) => request.params?.name === "conversations.open" ? denied : previous(request)
+  await act(async () => { globals({ toolOutput: thread }) })
+  expect(container.querySelectorAll(".message-row")).toHaveLength(0)
+  expect((storedState as any).threads).toEqual([])
+  expect((storedState as any).unconfirmed["800"].text).toBe("Preserve the send fence")
+})
+
+it("retains an early standard launch result even when older compatibility globals arrive before initialization completes", async () => {
+  await act(async () => { root.unmount(); bridge.dispose() })
+  window.openai = { toolOutput: sampleThread("801", "Older compatibility snapshot") }
+  let initializeId: number | undefined
+  const previous = responder
+  responder = (request) => request.method === "ui/initialize" ? (initializeId = request.id, undefined) : previous(request)
+  bridge = new HostBridge()
+  root = createRoot(container)
+  await act(async () => { root.render(<App bridge={bridge} />); notify({ structuredContent: thread }) })
+  await act(async () => { globals({ toolOutput: sampleThread("801", "Older compatibility snapshot") }) })
+  await act(async () => { reply(initializeId!, { protocolVersion: "2026-01-26", hostCapabilities: {}, hostContext: { displayMode: "fullscreen" } }) })
+  expect(container.querySelector("h1")?.textContent).toBe(thread.chat.title)
+  expect(container.querySelectorAll("nav button")).toHaveLength(1)
+  expect(tools("conversations.open")).toHaveLength(0)
+})
+
+it("clears remembered private titles immediately on a connecting denial even when initialization then fails", async () => {
+  let initializeId: number | undefined
+  const previous = responder
+  responder = (request) => request.method === "ui/initialize" ? (initializeId = request.id, undefined) : previous(request)
+  await remount({
+    widgetState: { version: 1, activeChatId: "800", threads: [{ chatId: "800", title: "Private saved title" }, { chatId: "801", title: "Another private title" }], unconfirmed: { "800": { text: "Keep the send fence" } } },
+    setWidgetState: (value) => { storedState = value },
+  })
+  expect(container.textContent).toContain("Private saved title")
+  await act(async () => { notify({ isError: true, _meta: { inline: { accessDenied: true } } }) })
+  expect(bridge.hostState.status).toBe("connecting")
+  expect(container.textContent).not.toContain("Private saved title")
+  expect(container.textContent).not.toContain("Another private title")
+  expect(container.querySelector("select")).toBeNull()
+  expect((storedState as any).threads).toEqual([])
+  expect((storedState as any).unconfirmed["800"].text).toBe("Keep the send fence")
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { jsonrpc: "2.0", id: initializeId, error: { code: -32603, message: "Initialization failed" } } }))
+  })
+  expect(bridge.hostState.status).toBe("failed")
+  expect(container.textContent).not.toContain("Private saved title")
+  expect(container.textContent).not.toContain("Another private title")
   expect(tools("conversations.open")).toHaveLength(0)
 })
 
