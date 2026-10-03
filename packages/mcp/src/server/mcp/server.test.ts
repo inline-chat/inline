@@ -5,6 +5,9 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { createInlineMcpServer, isUnsafeRemoteAddress } from "./server"
 import type { EventsProxy } from "./events-proxy"
 import type { McpGrant } from "./grant"
+import { InlineAccessDeniedError } from "../inline/inline-api"
+import { InlineSdkAuthenticationError, ProtocolClientError } from "@inline-chat/realtime-sdk"
+import { ConnectionError_Reason, RpcError_Code } from "@inline-chat/protocol/core"
 import type {
   InlineApi,
   InlineConversationResolution,
@@ -158,6 +161,29 @@ describe("minimal thread workflows", () => {
     expect(response.result.structuredContent).not.toHaveProperty("monitoring")
     await server.close()
   })
+
+  it.each([
+    new InlineAccessDeniedError("chat is not in an allowed context"),
+    new InlineSdkAuthenticationError("SESSION_REVOKED", ConnectionError_Reason.SESSION_REVOKED),
+    new ProtocolClientError("rpc-error", { code: RpcError_Code.CHAT_ID_INVALID }),
+    new ProtocolClientError("rpc-error", { code: RpcError_Code.UNAUTHENTICATED }),
+  ])("marks explicit read denial for the UI without exposing cached content (%s)", async (error) => {
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
+    const { response } = await call(server, "conversations.open", { chatId: "7" })
+    expect(response.result).toMatchObject({ isError: true, _meta: { inline: { accessDenied: true } } })
+    expect(response.result.structuredContent).toBeUndefined()
+    await server.close()
+  })
+
+  it.each([new ProtocolClientError("timeout"), new ProtocolClientError("rpc-error", { code: RpcError_Code.INTERNAL_ERROR })])(
+    "does not label temporary read failure as authorization denial (%s)", async (error) => {
+      const server = createInlineMcpServer({ grant, inline: createInlineStub({ getConversation: async () => { throw error } }), contractVersion: "submission-v2" })
+      const { response } = await call(server, "conversations.open", { chatId: "7" })
+      expect(response.result.isError).toBe(true)
+      expect(response.result._meta?.inline?.accessDenied).not.toBe(true)
+      await server.close()
+    },
+  )
 
   it("captures the reply cursor before sending and keeps the connected user implicit", async () => {
     const order: string[] = []

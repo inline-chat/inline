@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { HostBridge, type HostState } from "./bridge"
 import { dayKey, dayLabel, Icon, MessageRow } from "./components"
-import { isId, isRecord, mergeMessages, mergeRecentMessages, readThreadSnapshot, rememberThread, resolvedChatRef, senderName, type Message, type ThreadSnapshot } from "./contracts"
+import { isAccessDenied, isId, isRecord, MAX_UNCONFIRMED_SENDS, mergeMessages, mergeRecentMessages, readThreadSnapshot, rememberThread, resolvedChatRef, senderName, type Message, type ThreadSnapshot } from "./contracts"
 
 const PAGE_SIZE = 50
 
@@ -21,6 +21,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [attaching, setAttaching] = useState(false)
   const [contextStatus, setContextStatus] = useState<string | null>(null)
+  const [, updateClock] = useState(0)
   const app = useRef<HTMLElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
@@ -31,6 +32,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
   const restored = useRef(false)
   const olderLoaded = useRef(false)
   const localOpen = useRef<string | null>(null)
+  const requireFreshHostRead = useRef(false)
   const drafts = useRef(new Map<string, { text: string; reply: Message | null }>())
   const scrollToBottom = useRef(true)
   const prepend = useRef<{ height: number; top: number } | null>(null)
@@ -41,6 +43,28 @@ export function App({ bridge }: { bridge: HostBridge }) {
     setWidget(next)
     bridge.saveWidgetState(next)
   }, [bridge])
+
+  const clearDeniedAccess = useCallback(() => {
+    requireFreshHostRead.current = true
+    generation.current += 1
+    localOpen.current = null
+    fetching.current = null
+    olderLoaded.current = false
+    prepend.current = null
+    snapshotRef.current = null
+    drafts.current.clear()
+    replyRef.current = null
+    setSnapshot(null)
+    setDraft("")
+    setReply(null)
+    setSelected(new Set())
+    setContextStatus(null)
+    setLoading(false)
+    setLoadingOlder(false)
+    // Keep authored send receipts fenced even when fetched conversation data is revoked.
+    saveWidget({ ...widgetRef.current, threads: [], activeChatId: null })
+    setError("Inline access was denied. Reauthorize Inline before opening this thread again.")
+  }, [saveWidget])
 
   const adopt = useCallback((incoming: ThreadSnapshot, recent = false) => {
     const previous = snapshotRef.current
@@ -91,17 +115,23 @@ export function App({ bridge }: { bridge: HostBridge }) {
     try {
       const response = await bridge.callTool("conversations.open", { chatId })
       if (generation.current !== requestGeneration) return
+      if (isAccessDenied(response)) { clearDeniedAccess(); return }
       const incoming = readThreadSnapshot(response)
       if (!incoming || incoming.chat.chatId !== chatId) throw new Error("Thread result did not match the requested chat")
       adopt(incoming)
       setLoading(false)
-    } catch {
-      if (generation.current === requestGeneration) setError("This thread couldn’t be opened. Ask ChatGPT to open it again.")
+    } catch (failure) {
+      if (generation.current === requestGeneration) {
+        if (isAccessDenied(failure)) clearDeniedAccess()
+        else setError("This thread couldn’t be opened. Ask ChatGPT to open it again.")
+      }
     } finally {
-      if (localOpen.current === chatId) localOpen.current = null
-      if (generation.current === requestGeneration) setLoading(false)
+      if (generation.current === requestGeneration) {
+        if (localOpen.current === chatId) localOpen.current = null
+        setLoading(false)
+      }
     }
-  }, [adopt, bridge, saveWidget])
+  }, [adopt, bridge, clearDeniedAccess, saveWidget])
 
   const refresh = useCallback(async (silent = false) => {
     const current = snapshotRef.current
@@ -112,23 +142,40 @@ export function App({ bridge }: { bridge: HostBridge }) {
     try {
       const response = await bridge.callTool("conversations.open", { chatId: current.chat.chatId })
       if (generation.current !== requestGeneration) return
+      if (isAccessDenied(response)) { clearDeniedAccess(); return }
       const incoming = readThreadSnapshot(response)
       if (!incoming || incoming.chat.chatId !== current.chat.chatId) throw new Error("Invalid message page")
       adopt(incoming, true)
-    } catch {
-      if (generation.current === requestGeneration) setError("The latest messages couldn’t be loaded. Refresh to try again.")
+    } catch (failure) {
+      if (generation.current === requestGeneration) {
+        if (isAccessDenied(failure)) clearDeniedAccess()
+        else setError("The latest messages couldn’t be loaded. Refresh to try again.")
+      }
     } finally {
       if (fetching.current === requestGeneration) fetching.current = null
       if (generation.current === requestGeneration) setLoading(false)
     }
-  }, [adopt, bridge])
+  }, [adopt, bridge, clearDeniedAccess])
 
   useEffect(() => {
     const unsubscribe = bridge.subscribe((event) => {
       if (event.kind === "state") setHost(event.state)
       else {
+        if (isAccessDenied(event.result)) { clearDeniedAccess(); return }
         const incoming = readThreadSnapshot(event.result)
-        if (incoming) {
+        const resolved = resolvedChatRef(event.result)
+        const data = isRecord(event.result) && isRecord(event.result.structuredContent) ? event.result.structuredContent : null
+        const receipt = resolved && data && (data.messages === undefined || typeof data.questionStatus === "string") ? resolved : null
+        // A notification has no request generation. After revocation, only a
+        // fresh tool read may restore content or remembered conversation labels.
+        if (requireFreshHostRead.current) {
+          const chatId = incoming?.capabilities ? incoming.chat.chatId : receipt?.chatId
+          // Hosts may mirror app-call results after fulfillment. The current
+          // authorized chat is updated by refresh/poll, not another opener.
+          if (chatId && snapshotRef.current?.chat.chatId !== chatId && localOpen.current !== chatId) void openThread(chatId)
+          return
+        }
+        if (incoming?.capabilities) {
           // Model-initiated render results take precedence over a stale local read.
           generation.current += 1
           localOpen.current = null
@@ -138,12 +185,10 @@ export function App({ bridge }: { bridge: HostBridge }) {
           setError(null)
         } else {
           // A create/ask receipt can identify the thread without bundling history.
-          const resolved = resolvedChatRef(event.result)
-          const data = isRecord(event.result) && isRecord(event.result.structuredContent) ? event.result.structuredContent : null
-          if (resolved && data && (data.messages === undefined || typeof data.questionStatus === "string")) {
+          if (receipt) {
             localOpen.current = null
-            saveWidget(rememberThread(widgetRef.current, resolved))
-            void openThread(resolved.chatId)
+            saveWidget(rememberThread(widgetRef.current, receipt))
+            void openThread(receipt.chatId)
           } else if (data?.chat === null && !snapshotRef.current && !restored.current && widgetRef.current.activeChatId) {
             restored.current = true
             void openThread(widgetRef.current.activeChatId)
@@ -153,7 +198,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
     })
     void bridge.initialize().catch(() => {})
     return unsubscribe
-  }, [adopt, bridge, openThread, saveWidget])
+  }, [adopt, bridge, clearDeniedAccess, openThread, saveWidget])
 
   useEffect(() => {
     if (host.theme) document.documentElement.dataset.theme = host.theme
@@ -210,6 +255,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
     try {
       const response = await bridge.callTool("messages.list", { chatId: current.chat.chatId, limit: PAGE_SIZE, offsetId: current.nextOffsetId })
       if (generation.current !== requestGeneration) return
+      if (isAccessDenied(response)) { clearDeniedAccess(); return }
       const incoming = readThreadSnapshot(response)
       if (!incoming || incoming.chat.chatId !== current.chat.chatId) throw new Error("Invalid older message page")
       if (list.current) prepend.current = { height: list.current.scrollHeight, top: list.current.scrollTop }
@@ -217,8 +263,11 @@ export function App({ bridge }: { bridge: HostBridge }) {
       const next = { ...snapshotRef.current!, messages: mergeMessages(snapshotRef.current!.messages, incoming.messages), nextOffsetId: incoming.nextOffsetId }
       snapshotRef.current = next
       setSnapshot(next)
-    } catch {
-      if (generation.current === requestGeneration) setError("Earlier messages couldn’t be loaded. Try again.")
+    } catch (failure) {
+      if (generation.current === requestGeneration) {
+        if (isAccessDenied(failure)) clearDeniedAccess()
+        else setError("Earlier messages couldn’t be loaded. Try again.")
+      }
     } finally {
       if (fetching.current === requestGeneration) fetching.current = null
       if (generation.current === requestGeneration) setLoadingOlder(false)
@@ -231,7 +280,9 @@ export function App({ bridge }: { bridge: HostBridge }) {
     if (!current?.capabilities?.canSend || !text || text.length > 8000 || sendingRef.current || host.status !== "ready") return
     const unconfirmed = widgetRef.current.unconfirmed[current.chat.chatId]
     if (unconfirmed) return
+    if (Object.keys(widgetRef.current.unconfirmed).length >= MAX_UNCONFIRMED_SENDS) return
     const replyToMsgId = reply?.id
+    const requestGeneration = generation.current
     setSending(true)
     sendingRef.current = true
     sendingChatId.current = current.chat.chatId
@@ -240,6 +291,10 @@ export function App({ bridge }: { bridge: HostBridge }) {
     saveWidget({ ...widgetRef.current, unconfirmed: { ...widgetRef.current.unconfirmed, [current.chat.chatId]: { text, ...(replyToMsgId ? { replyToMsgId } : {}) } } })
     try {
       const response = await bridge.callTool("messages.send", { chatId: current.chat.chatId, text, ...(replyToMsgId ? { replyToMsgId } : {}) })
+      if (isAccessDenied(response)) {
+        if (generation.current === requestGeneration) clearDeniedAccess()
+        return
+      }
       if (!isRecord(response) || response.isError === true || !isRecord(response.structuredContent)
         || response.structuredContent.ok !== true || response.structuredContent.chatId !== current.chat.chatId
         || !isId(response.structuredContent.messageId)) throw new Error("Send was not confirmed")
@@ -255,8 +310,10 @@ export function App({ bridge }: { bridge: HostBridge }) {
         scrollToBottom.current = true
         await refresh()
       }
-    } catch {
-      if (snapshotRef.current?.chat.chatId === current.chat.chatId) setError("Delivery couldn’t be confirmed. Check the latest messages before sending this text again.")
+    } catch (failure) {
+      if (isAccessDenied(failure)) {
+        if (generation.current === requestGeneration) clearDeniedAccess()
+      } else if (snapshotRef.current?.chat.chatId === current.chat.chatId) setError("Delivery couldn’t be confirmed. Check the latest messages before sending this text again.")
     } finally { sendingRef.current = false; sendingChatId.current = null; setSending(false) }
   }
 
@@ -280,10 +337,16 @@ export function App({ bridge }: { bridge: HostBridge }) {
 
   const selectedCount = snapshot?.messages.filter((message) => selected.has(message.id)).length || 0
   const hasUnconfirmed = !!snapshot && !!widget.unconfirmed[snapshot.chat.chatId]
+  const sendFenceLimit = Object.keys(widget.unconfirmed).length >= MAX_UNCONFIRMED_SENDS
   const canSend = host.status === "ready" && snapshot?.capabilities?.canSend === true
   const monitoringExpiry = snapshot?.monitoring?.expiresAt
   const expiry = monitoringExpiry ? (/^\d+$/.test(monitoringExpiry) ? Number(monitoringExpiry) * 1000 : Date.parse(monitoringExpiry)) : null
   const monitoring = snapshot?.monitoring?.active === true && (expiry === null || (Number.isFinite(expiry) && expiry > Date.now()))
+  useEffect(() => {
+    if (!snapshot?.monitoring?.active || expiry === null || !Number.isFinite(expiry) || expiry <= Date.now()) return
+    const timer = window.setTimeout(() => updateClock((value) => value + 1), expiry - Date.now())
+    return () => window.clearTimeout(timer)
+  }, [expiry, snapshot?.monitoring?.active])
   const people = snapshot?.participants?.map((person) => person.displayName).filter(Boolean).join(", ")
   const subtitle = snapshot ? (snapshot.chat.kind === "dm" ? "Direct message" : people ? `Direct participants: ${people}` : "Thread") : "Your team conversation"
   const unavailable = host.status === "failed" || host.status === "closed"
@@ -304,7 +367,7 @@ export function App({ bridge }: { bridge: HostBridge }) {
         <Icon name="refresh" />
       </button>}
     </header>
-    {monitoring && <div className="monitoring-status" role="status"><span />ChatGPT is watching for replies</div>}
+    {monitoring && <div className="monitoring-status" role="status"><span />Reply subscription active for this connection</div>}
     {error && <div className="notice error" role="alert">{error}</div>}
     {unavailable ? <div className="empty-state"><Icon name="thread" /><p>This thread view couldn’t connect.</p><span>Ask ChatGPT to open the Inline thread again.</span></div>
       : !snapshot ? <div className="empty-state" role="status"><Icon name="thread" /><p>{loading ? "Opening thread…" : "Open an Inline thread"}</p><span>{loading ? "" : "Ask ChatGPT to open a conversation with your team."}</span></div>
@@ -334,10 +397,11 @@ export function App({ bridge }: { bridge: HostBridge }) {
           setDraft(""); setReply(null); replyRef.current = null; setError(null)
         }}>Continue with a new message</button>
       </div>}
+      {!hasUnconfirmed && sendFenceLimit && <div className="delivery-warning" role="status">Open a thread with an unconfirmed send and resolve it before sending more messages.</div>}
       {snapshot.capabilities?.canSend === true ? <div className="composer">
         <textarea ref={composer} aria-label="Message this Inline thread" placeholder="Message…" value={draft} maxLength={8000} rows={1} disabled={!canSend || sending}
           onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} />
-        <button className="send-button" type="button" aria-label={sending ? "Sending message" : "Send message"} title="Send" disabled={!canSend || sending || !draft.trim() || hasUnconfirmed} onClick={() => void send()}><Icon name="send" /></button>
+        <button className="send-button" type="button" aria-label={sending ? "Sending message" : "Send message"} title="Send" disabled={!canSend || sending || !draft.trim() || hasUnconfirmed || sendFenceLimit} onClick={() => void send()}><Icon name="send" /></button>
       </div> : <p className="read-only">You have read access to this conversation.</p>}
       {sending && <p className="composer-status" role="status">{sendingChatId.current === snapshot.chat.chatId ? "Sending…" : "Finishing the previous message…"}</p>}
     </footer>}

@@ -51,6 +51,24 @@ describe("createInlineApi", () => {
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
   })
 
+  it("retains the confirmed creation receipt without a fallible catalog read", async () => {
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test", token: "test-token",
+      allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false },
+    })
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.CREATE_CHAT) return { createChat: { chat: spaceChat(777n, "Proposal review", 10n, 0n) } }
+      throw new Error("Catalog unavailable after confirmed creation")
+    })
+    try {
+      await expect(api.createChat({ title: "Proposal review", spaceId: 10n, isPublic: false, participantUserIds: [2n] }))
+        .resolves.toMatchObject({ chatId: 777n, title: "Proposal review", spaceId: 10n, kind: "space_chat" })
+      expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(1)
+      // The creation receipt does not become a bypass for subsequent access.
+      await expect(api.recentMessages({ chatId: 777n, freshChatAuthorization: true })).rejects.toThrow("Catalog unavailable")
+    } finally { await api.close() }
+  })
+
   it.each(["text", "caption", "blank caption"])("forwards %s through the SDK without changing Markdown", async (kind) => {
     const api = createInlineApi({
       baseUrl: "https://api.inline.test",
@@ -250,7 +268,24 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
-  it.each(["search", "filter-only search"])("%s preserves continuation before client-side filters remove every row", async (operation) => {
+  it("reports an exhausted short history page so refresh can remove deleted oldest messages", async () => {
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
+    let rows = [message(100n, 7n, 2n, "Newer"), message(99n, 7n, 2n, "Oldest")]
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: rows } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    try {
+      expect((await api.recentMessages({ chatId: 7n, limit: 50 })).nextOffsetId).toBeNull()
+      rows = rows.slice(0, 1)
+      const refreshed = await api.recentMessages({ chatId: 7n, limit: 50 })
+      expect(refreshed.messages.map((row) => row.id)).toEqual([100n])
+      expect(refreshed.nextOffsetId).toBeNull()
+    } finally { await api.close() }
+  })
+
+  it.each(["search", "filter-only search"])("%s reports continuation only when the source may have more rows", async (operation) => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     const rows = [message(100n, 7n, 2n, "Source"), message(99n, 7n, 2n, "Source")]
     realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
@@ -262,7 +297,7 @@ describe("createInlineApi", () => {
     try {
       const found = await api.searchMessages({ chatId: 7n, limit: 2, query: operation === "search" ? "Source" : undefined, until: 90n })
       expect(found.messages).toEqual([])
-      expect(found.nextOffsetId).toBe(99n)
+      expect(found.nextOffsetId).toBe(operation === "search" ? 99n : null)
     } finally { await api.close() }
   })
 })

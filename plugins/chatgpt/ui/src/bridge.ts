@@ -7,6 +7,10 @@ type OpenAIExtensions = {
 }
 declare global { interface Window { openai?: OpenAIExtensions } }
 
+class HostRequestError extends Error {
+  constructor(readonly rpcError: unknown) { super("Host could not complete the request") }
+}
+
 export type HostState = {
   status: "connecting" | "ready" | "failed" | "closed"
   theme?: "light" | "dark"
@@ -123,7 +127,7 @@ export class HostBridge {
       if (!pending) return
       this.pending.delete(message.id)
       this.hostWindow.clearTimeout(pending.timeout)
-      if (message.error !== undefined) pending.reject(new Error("Host could not complete the request"))
+      if (message.error !== undefined) pending.reject(new HostRequestError(message.error))
       else pending.resolve(message.result)
       return
     }

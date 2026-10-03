@@ -50,7 +50,7 @@ export async function executeEventMethod(principal: EventPrincipal, method: stri
   const url = callbackUrl(delivery["url"]).href
   const id = subscriptionId(principal.grant.id, name, selector, url)
   if (method === "events/unsubscribe") {
-    if (!await stopSubscription(id, principal.grant.id)) throw new McpEventsError({ code: -32011, message: "Subscription not found", data: { kind: "subscription" } })
+    await stopSubscription(id, principal.grant.id)
     return {}
   }
   await authorizeSelector(principal, name, selector)

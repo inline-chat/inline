@@ -20,22 +20,25 @@ export function threadResourceDomains(value = process.env.MCP_UI_RESOURCE_DOMAIN
 }
 
 export function registerThreadUi(server: McpServer): void {
-  server.registerResource("inline-thread", THREAD_RESOURCE_URI, {
-    title: "Inline thread",
-    description: "Minimal Inline thread history, replies and text composer.",
-    mimeType: THREAD_RESOURCE_MIME_TYPE,
-  }, async () => ({ contents: [{
-    uri: THREAD_RESOURCE_URI,
-    mimeType: THREAD_RESOURCE_MIME_TYPE,
-    text: THREAD_RESOURCE_HTML,
-    _meta: { ui: {
-      prefersBorder: false,
-      domain: "https://mcp.inline.chat",
-      csp: {
-        connectDomains: [],
-        resourceDomains: threadResourceDomains(),
-        frameDomains: [],
-      },
-    } },
-  }] }))
+  // New descriptors invalidate host caches; cached v1 descriptors remain valid.
+  for (const uri of new Set([THREAD_RESOURCE_URI, "ui://inline/thread-v1.html"])) {
+    server.registerResource(uri === THREAD_RESOURCE_URI ? "inline-thread" : "inline-thread-legacy", uri, {
+      title: "Inline thread",
+      description: "Minimal Inline thread history, replies and text composer.",
+      mimeType: THREAD_RESOURCE_MIME_TYPE,
+    }, async () => ({ contents: [{
+      uri,
+      mimeType: THREAD_RESOURCE_MIME_TYPE,
+      text: THREAD_RESOURCE_HTML,
+      _meta: { ui: {
+        prefersBorder: false,
+        domain: "https://mcp.inline.chat",
+        csp: {
+          connectDomains: [],
+          resourceDomains: threadResourceDomains(),
+          frameDomains: [],
+        },
+      } },
+    }] }))
+  }
 }

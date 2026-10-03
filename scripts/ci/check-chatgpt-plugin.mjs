@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const { createApp } = await import(path.join(root, "packages/mcp/dist/index.js"))
 const submission = JSON.parse(await readFile(path.join(root, "packages/mcp/chatgpt-app-submission.json"), "utf8"))
 const uiUri = "ui://inline/message-results-v1.html"
-const threadUiUri = "ui://inline/thread-v1.html"
+const threadUiUri = "ui://inline/thread-v2.html"
 const scenarios = []
 
 // Use compiled tool handlers and their packaged HTML together. Domain fixtures

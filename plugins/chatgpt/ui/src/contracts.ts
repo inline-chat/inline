@@ -44,6 +44,20 @@ export type WidgetState = {
   activeChatId: string | null
   unconfirmed: Record<string, { text: string; replyToMsgId?: string }>
 }
+export const MAX_UNCONFIRMED_SENDS = 12
+
+/** Auth failures have a typed signal; ordinary tool failures do not revoke a cached read. */
+export function isAccessDenied(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (value.status === 401 || value.status === 403 || value.code === 401 || value.code === 403) return true
+  if (isRecord(value.rpcError) && isAccessDenied(value.rpcError)) return true
+  if (isRecord(value.data) && (value.data.status === 401 || value.data.status === 403 || value.data.httpStatus === 401 || value.data.httpStatus === 403)) return true
+  const metadata = isRecord(value._meta) ? value._meta : isRecord(value.data) ? value.data : null
+  if (isRecord(metadata?.inline) && metadata.inline.accessDenied === true) return true
+  const challenge = metadata?.["mcp/www_authenticate"]
+  const challenges = Array.isArray(challenge) ? challenge : [challenge]
+  return challenges.some((item) => typeof item === "string" && /\berror="(?:invalid_token|insufficient_scope)"/.test(item))
+}
 
 /** Accept only a resolved, bounded thread result, never a workspace catalog. */
 export function readThreadSnapshot(result: unknown): ThreadSnapshot | null {
@@ -80,11 +94,10 @@ export function readWidgetState(value: unknown): WidgetState {
   const threads = [...new Map(value.threads.filter((item): item is ThreadRef => isRecord(item) && isId(item.chatId) && typeof item.title === "string")
     .slice(0, 12).map(({ chatId, title }) => [chatId, { chatId, title: title.slice(0, 200) }])).values()]
   const unconfirmed: WidgetState["unconfirmed"] = {}
-  if (isRecord(value.unconfirmed)) for (const thread of threads) {
-    const item = value.unconfirmed[thread.chatId]
-    if (isRecord(item) && typeof item.text === "string" && item.text.length <= 8000
+  if (isRecord(value.unconfirmed)) for (const [chatId, item] of Object.entries(value.unconfirmed).slice(0, MAX_UNCONFIRMED_SENDS)) {
+    if (isId(chatId) && isRecord(item) && typeof item.text === "string" && item.text.length <= 8000
       && (item.replyToMsgId === undefined || isId(item.replyToMsgId))) {
-      unconfirmed[thread.chatId] = { text: item.text, ...(typeof item.replyToMsgId === "string" ? { replyToMsgId: item.replyToMsgId } : {}) }
+      unconfirmed[chatId] = { text: item.text, ...(typeof item.replyToMsgId === "string" ? { replyToMsgId: item.replyToMsgId } : {}) }
     }
   }
   return { version: 1, threads, activeChatId: threads.some((item) => item.chatId === value.activeChatId) ? String(value.activeChatId) : null, unconfirmed }
@@ -93,12 +106,7 @@ export function readWidgetState(value: unknown): WidgetState {
 export function rememberThread(state: WidgetState, thread: ThreadRef): WidgetState {
   if (state.activeChatId === thread.chatId && state.threads[0]?.chatId === thread.chatId && state.threads[0].title === thread.title) return state
   const threads = [{ chatId: thread.chatId, title: thread.title }, ...state.threads.filter((item) => item.chatId !== thread.chatId)].slice(0, 12)
-  const unconfirmed: WidgetState["unconfirmed"] = {}
-  for (const item of threads) {
-    const value = state.unconfirmed[item.chatId]
-    if (value) unconfirmed[item.chatId] = value
-  }
-  return { ...state, activeChatId: thread.chatId, threads, unconfirmed }
+  return { ...state, activeChatId: thread.chatId, threads }
 }
 
 export function resolvedChatRef(result: unknown): ThreadRef | null {

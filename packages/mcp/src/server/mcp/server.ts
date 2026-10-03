@@ -7,7 +7,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import type { McpGrant } from "./grant"
-import { MessageEntity_Type, type Message, type UrlPreview } from "@inline-chat/protocol/core"
+import { MessageEntity_Type, RpcError_Code, type Message, type UrlPreview } from "@inline-chat/protocol/core"
+import { InlineSdkAuthenticationError, ProtocolClientError } from "@inline-chat/realtime-sdk"
+import { InlineAccessDeniedError } from "../inline/inline-api"
 import type {
   InlineApi,
   InlineConversationCandidate,
@@ -113,6 +115,11 @@ function toolExecutionError(error: unknown, resourceMetadataUrl: string): CallTo
     result._meta = {
       "mcp/www_authenticate": [wwwAuthenticateChallenge(resourceMetadataUrl, error.neededScope)],
     }
+  }
+  if (error instanceof InsufficientScopeError || error instanceof InlineAccessDeniedError || error instanceof InlineSdkAuthenticationError ||
+    (error instanceof ProtocolClientError && error.code === "rpc-error" && error.rpcCode !== undefined &&
+      [RpcError_Code.UNAUTHENTICATED, RpcError_Code.PEER_ID_INVALID, RpcError_Code.CHAT_ID_INVALID, RpcError_Code.SPACE_ID_INVALID].includes(error.rpcCode))) {
+    result._meta = { ...result._meta, inline: { accessDenied: true } }
   }
   return result
 }

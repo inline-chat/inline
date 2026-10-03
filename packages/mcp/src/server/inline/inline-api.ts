@@ -27,6 +27,8 @@ export type InlineAllowedContext = {
   allowHomeThreads?: boolean
 }
 
+export class InlineAccessDeniedError extends Error {}
+
 export type InlineEligibleChat = {
   chatId: bigint
   title: string
@@ -397,7 +399,7 @@ export function createInlineApi(params: {
 
   const ensureChatAllowed = (chat: Chat) => {
     if (isChatAllowed(chat)) return
-    throw new Error("chat is not in an allowed context")
+    throw new InlineAccessDeniedError("chat is not in an allowed context")
   }
 
   const getChats = async (): Promise<GetChatsResult> => {
@@ -725,7 +727,7 @@ export function createInlineApi(params: {
       const dmFromCache = context?.chats.find((chat) => chat.peerUserId === resolved.userId)
       if (dmFromCache) return dmFromCache
       if (!allowDms) {
-        throw new Error("DM access is not allowed for this grant")
+        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
     }
 
@@ -829,7 +831,10 @@ export function createInlineApi(params: {
 
       if (safeUnreadOnly && (readBoundaryReached || (chat.readMaxId != null && oldestMessage.id <= chat.readMaxId))) break
       if (params.since != null && oldestMessage.date < params.since) break
-      if (lastScannedMessage === historyPage[historyPage.length - 1] && historyPage.length < pageLimit) break
+      if (lastScannedMessage === historyPage[historyPage.length - 1] && historyPage.length < pageLimit) {
+        nextOffsetId = null
+        break
+      }
     }
 
     return {
@@ -1093,7 +1098,7 @@ export function createInlineApi(params: {
     async getConversation({ chatId, userId }) {
       const target = resolveTarget({ chatId, userId }, "getConversation")
       if (target.kind === "user" && !allowDms) {
-        throw new Error("DM access is not allowed for this grant")
+        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
       const peerId = target.kind === "chat" ? buildChatPeer(target.chatId) : buildUserPeer(target.userId)
       const result = await getChatResultByPeer(peerId)
@@ -1295,10 +1300,10 @@ export function createInlineApi(params: {
       const safeTitle = title.trim()
       if (!safeTitle) throw new Error("title is required")
       if (spaceId != null && !allowedSpaceIds.has(spaceId.toString())) {
-        throw new Error("space is not in allowed context")
+        throw new InlineAccessDeniedError("space is not in allowed context")
       }
       if (spaceId == null && !allowHomeThreads) {
-        throw new Error("home thread creation is not allowed for this grant")
+        throw new InlineAccessDeniedError("home thread creation is not allowed for this grant")
       }
 
       const participants = sanitizeParticipantUserIds(participantUserIds).map((userId) => InputChatParticipant.create({ userId }))
@@ -1318,7 +1323,16 @@ export function createInlineApi(params: {
       if (!createdChat) throw new Error("createChat returned no chat")
 
       eligibleChatsCache = null
-      return await getAllowedChat({ chatId: createdChat.id })
+      // CREATE_CHAT is the write receipt. Optional catalog enrichment must not
+      // turn a confirmed creation into an ambiguous failure and invite a retry.
+      // Subsequent reads/sends still perform their ordinary authorization.
+      return toEligibleChat({
+        chat: createdChat,
+        dialogByChatId: new Map(),
+        spaceById: new Map(),
+        userById: new Map(),
+        lastMessageByChatId: new Map(),
+      })
     },
 
     async uploadFile({ type, file, fileName, contentType, thumbnail, thumbnailFileName, thumbnailContentType, width, height, duration }) {
@@ -1347,7 +1361,7 @@ export function createInlineApi(params: {
     async sendMessage({ chatId, userId, text, replyToMsgId, sendMode, parseMarkdown }) {
       const target = resolveTarget({ chatId, userId }, "sendMessage")
       if (target.kind === "user" && !allowDms) {
-        throw new Error("DM access is not allowed for this grant")
+        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
 
       const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
@@ -1366,7 +1380,7 @@ export function createInlineApi(params: {
     async sendMediaMessage({ chatId, userId, media, text, replyToMsgId, sendMode, parseMarkdown }) {
       const target = resolveTarget({ chatId, userId }, "sendMediaMessage")
       if (target.kind === "user" && !allowDms) {
-        throw new Error("DM access is not allowed for this grant")
+        throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
 
       const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null

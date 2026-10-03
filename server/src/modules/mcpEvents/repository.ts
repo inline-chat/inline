@@ -70,7 +70,10 @@ async function persistSubscription(input: SaveInput): Promise<{ row: McpEventSub
       secretEncrypted: Encryption2.encrypt(Buffer.from(input.secret)), previousSecretEncrypted, previousSecretUntil,
       verifiedAt: input.verifiedAt, expiresAt: input.expiresAt, cursorSeq, gapSeq: null,
       generation: (existing?.generation ?? -1) + 1, stopped: false, leaseOwner: null, leaseUntil: null,
-      nextAttemptAt: now, attemptCount: existing?.pendingEncrypted && !existing.stopped ? existing.attemptCount : 0,
+      // Renewal extends expiry without bypassing a pending delivery's
+      // backoff/Retry-After. Explicit reactivation may restart exhausted work.
+      nextAttemptAt: active && existing.pendingEncrypted ? existing.nextAttemptAt : now,
+      attemptCount: existing?.pendingEncrypted && !existing.stopped ? existing.attemptCount : 0,
     }
     const rows = existing ? await tx.update(subscriptions).set(values).where(eq(subscriptions.id, input.id)).returning() :
       await tx.insert(subscriptions).values({ id: input.id, ...values }).returning()

@@ -27,6 +27,8 @@ Modern requests additionally carry the protocol's per-request `_meta` and mirror
 
 Use the identical event name, arguments and callback URL to unsubscribe, with `delivery: { "mode": "webhook", "url": "..." }`. No signing secret is needed for unsubscribe. Unsubscribe, expiry, token/session revocation and loss of resource access fence further claims and delivery.
 
+Unsubscribe is idempotent: an already absent or expired-and-purged identity succeeds with `{}`. It never affects another grant's matching selector/callback.
+
 The 18 advertised events are:
 
 - Messages: `message.created`, `message.updated`, `message.deleted`, `message.attachments.updated`, `message.history.cleared`, `message.acknowledgement.updated`.
@@ -36,6 +38,8 @@ The 18 advertised events are:
 - `inline.update`: the journaled message/chat or space changes above for one selected resource.
 
 Typing, presence and reactions currently have no durable journal replay and are excluded. Resource deletion or lost access stops delivery; it does not emit a terminal callback. Polling, push streams and webhook control messages are not advertised.
+
+The legacy `chat.created` name follows the journal's `newChat` marker, which also refreshes surviving chats after orphaning or detachment. It is not proof of a newly created chat. `chat.updated` includes these metadata snapshots as well as title, emoji and agent-context changes; no subscription names were removed.
 
 ## Receipt, recovery and authority
 
@@ -57,6 +61,8 @@ Read the current message with `messages.context`; callbacks never reconstruct hi
 
 Workers claim with `SKIP LOCKED`, finite leases and generation fences, so multiple API processes can deliver without sharing memory. A process restart preserves the pending occurrence and replay position. A retention gap pauses the subscription; renewal returns `truncated: true` and a fresh cursor. Read current thread state before waiting again. Never infer complete replay across that boundary.
 
+Ordinary renewal preserves a pending delivery's backoff and `Retry-After` deadline. Renewing the lease does not ask the callback to accept an earlier retry.
+
 The internal authenticated `POST /oauth/mcp-events` uses the existing MCP shared secret and derives authority from the supplied OAuth access token. Only the MCP service invokes internal `events/cursor` (capture the pre-question watermark) and `events/status` (confirmed active monitoring for a selected thread). Grants, sessions, current context, scopes and resource access are rechecked before callback connection and acknowledgement.
 
 ## Consultation and optional UI
@@ -64,6 +70,8 @@ The internal authenticated `POST /oauth/mcp-events` uses the existing MCP shared
 `conversations.ask` creates a private thread with the connected user and resolved participants, captures a `message.created` cursor **before** sending one question, and returns the exact subscription arguments/cursor. The host subscribes, waits, reads the current reply and resumes its originating task. A confirmed chat survives later failure; `questionStatus` distinguishes `sent`, `not_sent` and `unknown`. Neither the host nor the thread composer should automatically retry an uncertain write.
 
 `conversations.open` serves one React thread view with history, direct participants, a text composer, known media links and bounded selected excerpts for ChatGPT. Its small picker remembers only threads explicitly opened in that app experience. It has no workspace catalog, global unread sync, full sidebar or separate web login. Monitoring is displayed only after the API reports an active unexpired subscription; UI refresh is not background task continuation.
+
+Monitoring status covers the connected OAuth grant and Inline thread. It does not identify the originating ChatGPT task: another task using the same connection can own that subscription. Only the host's own subscription acknowledgement establishes that this task is waiting.
 
 OpenAI's current [MCP Events documentation](https://developers.openai.com/plugins/build/mcp-events) describes continuation for Work web, desktop Work with Cloud selected, and dots. Qualify ordinary ChatGPT Chat support separately. Real host refresh/consent, event receipts and resumed task behavior require signed-in host acceptance in addition to local persistence tests.
 

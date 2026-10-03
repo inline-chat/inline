@@ -52,3 +52,17 @@ it("never retries a timed-out write, and teardown rejects pending work", async (
   expect(requests.at(-1)).toMatchObject({ id: "teardown", result: {} })
   expect(vi.getTimerCount()).toBe(0)
 })
+
+it("preserves the canonical JSON-RPC denial data for the UI", async () => {
+  const { bridge } = setup()
+  const ready = bridge.initialize()
+  hostReply(1, initialized)
+  await ready
+  const read = bridge.callTool("conversations.open", { chatId: "10" })
+  const rejected = expect(read).rejects.toMatchObject({ rpcError: { code: -32000, data: { status: 403 } } })
+  await Promise.resolve()
+  window.dispatchEvent(new MessageEvent("message", { source: window.parent,
+    data: { jsonrpc: "2.0", id: 2, error: { code: -32000, message: "Denied", data: { status: 403 } } },
+  }))
+  await rejected
+})

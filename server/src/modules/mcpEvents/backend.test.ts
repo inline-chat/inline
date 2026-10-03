@@ -9,6 +9,7 @@ import { SessionsModel } from "@in/server/db/models/sessions"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { persistChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdates"
 import { authorizeSelector, validateGrant } from "./authorization"
 import { decodeCursor, encodeCursor, signature, subscriptionId } from "./crypto"
 import { claimSubscriptions, purgeExpiredSubscriptions, readSubscription } from "./repository"
@@ -114,6 +115,54 @@ describe("durable MCP events with real PostgreSQL and committed Inline messages"
     await f.reply()
     await Promise.all([runMcpEventsOnce(25, receiver()), runMcpEventsOnce(25, receiver())])
     expect(received).toHaveLength(1)
+  })
+
+  for (const status of [429, 503]) test(`active renewal preserves HTTP ${status} Retry-After and pending delivery`, async () => {
+    const f = await fixture()
+    const subscription = await f.subscribe(await f.checkpoint())
+    await f.reply()
+    const busy: CallbackTransport = async (input) => ({ ...await receiver(status)(input), retryAfter: "3600" })
+    await runMcpEventsOnce(25, busy)
+    const before = await readSubscription(subscription.id)
+    expect(before?.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 59 * 60_000)
+    await f.subscribe(subscription.cursor)
+    const after = await readSubscription(subscription.id)
+    expect(after?.nextAttemptAt).toEqual(before?.nextAttemptAt)
+    expect(after?.pendingEncrypted).toEqual(before?.pendingEncrypted)
+    expect(after?.attemptCount).toBe(1)
+    expect(await runMcpEventsOnce(25, receiver())).toBe(0)
+    expect(received).toHaveLength(1)
+  })
+
+  test("metadata refresh of an existing chat is available through chat.updated and the legacy chat.created event", async () => {
+    const f = await fixture()
+    const args = { chatId: String(f.chat.id) }
+    for (const name of ["chat.created", "chat.updated"]) {
+      const checkpoint = await executeEventMethod(f.principal, "events/cursor", { name, arguments: args }) as { cursor: string }
+      await executeEventMethod(f.principal, "events/subscribe", { name, arguments: args, delivery: destination, cursor: checkpoint.cursor }, receiver())
+    }
+    // Parent-message deletion and history clearing reuse this journal marker
+    // to refresh surviving orphaned/detached chats; they do not create a chat.
+    await db.transaction(async (tx) => { await persistChatMetadataUpdates(tx, [f.chat.id]) })
+    await runMcpEventsOnce(25, receiver())
+    expect(received.map((entry) => (JSON.parse(entry.body) as EventOccurrence).name).sort()).toEqual(["chat.created", "chat.updated"])
+    expect(received.every((entry) => (JSON.parse(entry.body) as EventOccurrence).data.kind === "newChat")).toBe(true)
+    expect((await db.select({ id: chats.id }).from(chats))).toEqual([{ id: f.chat.id }])
+  })
+
+  test("unsubscribe succeeds for absent identities and remains scoped to the authenticated grant", async () => {
+    const f = await fixture()
+    const params = { name: "message.created", arguments: f.args, delivery: { mode: "webhook", url: destination.url } }
+    expect(await executeEventMethod(f.principal, "events/unsubscribe", params)).toEqual({})
+    const subscription = await f.subscribe(await f.checkpoint())
+    const otherGrant = await OauthModel.createGrant({ id: "other-events-grant", clientId: "events-client", inlineUserId: f.owner.id,
+      scope: f.grant.scope, resource: f.grant.resource, spaceIds: [], allowDms: true, allowHomeThreads: true,
+      inlineTokenEncrypted: Encryption2.encrypt(Buffer.from(f.session.token)), nowMs: Date.now() })
+    expect(await executeEventMethod(await validateGrant(otherGrant), "events/unsubscribe", params)).toEqual({})
+    expect((await readSubscription(subscription.id))?.stopped).toBe(false)
+    expect(await executeEventMethod(f.principal, "events/unsubscribe", params)).toEqual({})
+    expect(await executeEventMethod(f.principal, "events/unsubscribe", params)).toEqual({})
+    expect((await readSubscription(subscription.id))?.stopped).toBe(true)
   })
 
   test("locked replay uses the same pool connection with all other query slots occupied", async () => {

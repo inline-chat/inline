@@ -27,3 +27,17 @@ it("refreshes the latest complete range without dropping older loaded pages", ()
   expect(rows.map((row) => row.id)).toEqual(["79999", "80001", "80002", "80003", "80004", "80005"])
   expect(rows.find((row) => row.id === updated.id)?.text).toBe("Updated reply")
 })
+
+it("retains unresolved receipt fences independently of the bounded picker", () => {
+  const state = readWidgetState({ version: 1, threads: [], activeChatId: null, unconfirmed: { "800": { text: "A previously attempted send", replyToMsgId: "80001" } } })
+  expect(state.unconfirmed).toEqual({ "800": { text: "A previously attempted send", replyToMsgId: "80001" } })
+  let remembered = state
+  for (let id = 801; id <= 812; id++) remembered = rememberThread(remembered, { chatId: String(id), title: "Opened thread" })
+  expect(readWidgetState(remembered).unconfirmed).toEqual(state.unconfirmed)
+})
+
+it("removes a deleted oldest row when the backend confirms the entire history was returned", () => {
+  const thread = sampleThread()
+  const current = thread.messages.slice(1)
+  expect(mergeRecentMessages(thread.messages, current, null)).toEqual(current)
+})
