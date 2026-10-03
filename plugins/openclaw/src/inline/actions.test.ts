@@ -1429,6 +1429,15 @@ describe("inline/actions", () => {
       params: { from: "7", to: "user:99", messageIds: ["10", "11"], shareForwardHeader: false },
     } as any)
 
+    const { ForwardMessagesInput } = await vi.importActual<typeof import("@inline-chat/realtime-sdk")>("@inline-chat/realtime-sdk")
+    const forwardCall = invokeRaw.mock.calls.find(([method]) => method === 29)?.[1] as {
+      forwardMessages: Parameters<typeof ForwardMessagesInput.toBinary>[0]
+    }
+    // Base e061f6d's InputPeer/ForwardMessagesInput field numbers; empty
+    // submissions preserve these pre-receipt bytes for ordinary forwarding.
+    expect(Buffer.from(ForwardMessagesInput.toBinary(forwardCall.forwardMessages)).toString("hex"))
+      .toBe("0a041a02080712020a0b1a04220208632000")
+
     await inlineMessageActions.handleAction?.({
       channel: "inline",
       action: "pin",
@@ -1846,6 +1855,7 @@ describe("inline/actions", () => {
             },
           },
           messageIds: [10n, 11n],
+          submissions: [],
           shareForwardHeader: false,
         },
       }),
@@ -2343,6 +2353,7 @@ describe("inline/actions", () => {
           },
         },
         messageIds: [10n],
+        submissions: [],
       },
     })
     expect(connect).toHaveBeenCalled()

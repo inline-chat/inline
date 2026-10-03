@@ -31,6 +31,7 @@ const baseMessage: DbMessage = {
   globalId: 77n,
   messageId: 7,
   randomId: null,
+  forwardIntentHash: null,
   text: null,
   textEncrypted: null,
   textIv: null,

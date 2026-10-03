@@ -19,10 +19,10 @@ impl InterruptionKind {
     fn message(self) -> &'static str {
         match self {
             Self::BridgeRestart => {
-                "This turn was interrupted when the bridge restarted. Send it again if you still want me to continue."
+                "The bridge restarted before this input was submitted. Send a new request if you still want me to continue."
             }
             Self::ProviderRestart => {
-                "This turn was interrupted when the local agent disconnected. Send it again after the agent reconnects."
+                "The local agent disconnected before this input was submitted. Send a new request after it reconnects."
             }
         }
     }
@@ -280,7 +280,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
         {
             store.attach_inbound_stream_message(&pending.event_id, message_id.get())?;
         }
-        let mutation = deliver_pending_final_with_attachments_transport(
+        let mutation = deliver_pending_final_with_receipts_transport(
             transport,
             &pending.event_id,
             pending.delivery_chat_id,
@@ -293,6 +293,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             &pending.final_text,
             &pending.output_attachments,
             retry_delay,
+            Some(store),
         )
         .await?;
         if pending.agent_output_session_id.is_some() {

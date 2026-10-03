@@ -213,8 +213,9 @@ public extension Photo {
   ///   - photo: The InlineProtocol.Photo to save
   /// - Returns: The saved Photo object (with local id and server photoId)
   @discardableResult
-  static func savePhotoFromProtocol(_ db: Database, photo protoPhoto: InlineProtocol.Photo) throws -> Photo {
-    try Photo.updateFromProtocol(db, protoPhoto: protoPhoto)
+  static func savePhotoFromProtocol(_ db: Database, photo protoPhoto: InlineProtocol.Photo,
+                                    publisher: MessagesPublisher? = nil) throws -> Photo {
+    try Photo.updateFromProtocol(db, protoPhoto: protoPhoto, publisher: publisher)
   }
 }
 
@@ -292,6 +293,11 @@ public extension AppDatabase {
 //    """, arguments: [serverId, oldPhotoId])
     msg?.photoId = serverId
     try msg?.save(db)
+    var changes = MessageProjectionDependencies()
+    changes.include(localPhoto)
+    changes.include(updatedPhoto)
+    if let msg { changes.include(msg) }
+    changes.publishAfterCommit(db)
   }
 
   // Update a video with the server-provided ID
@@ -320,6 +326,11 @@ public extension AppDatabase {
 
     msg?.videoId = serverId
     try msg?.save(db)
+    var changes = MessageProjectionDependencies()
+    changes.include(localVideo)
+    changes.include(updatedVideo)
+    if let msg { changes.include(msg) }
+    changes.publishAfterCommit(db)
   }
 
   // Update a document with the server-provided ID
@@ -348,6 +359,11 @@ public extension AppDatabase {
 
     msg?.documentId = serverId
     try msg?.save(db)
+    var changes = MessageProjectionDependencies()
+    changes.include(localDocument)
+    changes.include(updatedDocument)
+    if let msg { changes.include(msg) }
+    changes.publishAfterCommit(db)
 
     Log.shared.debug("Updated document with server ID \(serverId) \(updatedDocument)")
   }
@@ -629,7 +645,8 @@ public extension Document {
   static func updateFromProtocol(
     _ db: Database,
     protoDocument: InlineProtocol.Document,
-    thumbnailPhotoId: Int64?
+    thumbnailPhotoId: Int64?,
+    publisher: MessagesPublisher? = nil
   ) throws -> Document {
     // Try to find existing document
     if let existingDocument = try Document.filter(Column("documentId") == protoDocument.id).fetchOne(db) {
@@ -648,6 +665,12 @@ public extension Document {
       Log.shared.debug("Updating document with ID \(protoDocument.id) \(protoDocument.fileName) \(updatedDocument)")
 
       try updatedDocument.update(db)
+      if updatedDocument != existingDocument {
+        var changes = MessageProjectionDependencies()
+        changes.include(existingDocument)
+        changes.include(updatedDocument)
+        changes.publishAfterCommit(db, publisher: publisher)
+      }
       return updatedDocument
     } else {
       // Create new document if it doesn't exist
@@ -663,6 +686,9 @@ public extension Document {
       )
 
       let document = try newDocument.saveAndFetch(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(document)
+      changes.publishAfterCommit(db, publisher: publisher)
       return document
     }
   }
@@ -673,7 +699,8 @@ public extension Video {
   static func updateFromProtocol(
     _ db: Database,
     protoVideo: InlineProtocol.Video,
-    thumbnailPhotoId: Int64?
+    thumbnailPhotoId: Int64?,
+    publisher: MessagesPublisher? = nil
   ) throws -> Video {
     // Try to find existing video
     if let existingVideo = try Video.filter(Column("videoId") == protoVideo.id).fetchOne(db) {
@@ -694,11 +721,20 @@ public extension Video {
       )
 
       try updatedVideo.update(db)
+      if updatedVideo != existingVideo {
+        var changes = MessageProjectionDependencies()
+        changes.include(existingVideo)
+        changes.include(updatedVideo)
+        changes.publishAfterCommit(db, publisher: publisher)
+      }
       return updatedVideo
     } else {
       // Create new video if it doesn't exist
       let newVideo = Video.from(proto: protoVideo, localPhotoId: thumbnailPhotoId)
       let video = try newVideo.saveAndFetch(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(video)
+      changes.publishAfterCommit(db, publisher: publisher)
       return video
     }
   }
@@ -706,7 +742,8 @@ public extension Video {
 
 public extension Photo {
   // Add this method to update from protocol while preserving local paths in photo sizes
-  static func updateFromProtocol(_ db: Database, protoPhoto: InlineProtocol.Photo) throws -> Photo {
+  static func updateFromProtocol(_ db: Database, protoPhoto: InlineProtocol.Photo,
+                                 publisher: MessagesPublisher? = nil) throws -> Photo {
     // Try to find existing photo
     if let existingPhoto = try Photo.filter(Column("photoId") == protoPhoto.id).fetchOne(db) {
       // Create updated photo
@@ -719,10 +756,16 @@ public extension Photo {
 
       // REPLACE would cascade-delete photoSize rows, including cached localPath values.
       try updatedPhoto.update(db)
+      if updatedPhoto != existingPhoto {
+        var changes = MessageProjectionDependencies()
+        changes.include(existingPhoto)
+        changes.include(updatedPhoto)
+        changes.publishAfterCommit(db, publisher: publisher)
+      }
 
       // Update photo sizes while preserving local paths
       for protoSize in protoPhoto.sizes {
-        try PhotoSize.updateFromProtocol(db, protoSize: protoSize, photoId: updatedPhoto.id!)
+        try PhotoSize.updateFromProtocol(db, protoSize: protoSize, photoId: updatedPhoto.id!, publisher: publisher)
       }
 
       return updatedPhoto
@@ -736,7 +779,9 @@ public extension Photo {
         let photoSize = PhotoSize.from(proto: protoSize, photoId: photo.id!)
         try photoSize.save(db)
       }
-
+      var changes = MessageProjectionDependencies()
+      changes.include(photo)
+      changes.publishAfterCommit(db, publisher: publisher)
       return photo
     }
   }
@@ -744,7 +789,8 @@ public extension Photo {
 
 public extension PhotoSize {
   // Add this method to update from protocol while preserving local path
-  static func updateFromProtocol(_ db: Database, protoSize: InlineProtocol.PhotoSize, photoId: Int64) throws {
+  static func updateFromProtocol(_ db: Database, protoSize: InlineProtocol.PhotoSize, photoId: Int64,
+                                 publisher: MessagesPublisher? = nil) throws {
     // Try to find existing photo size
     if let existingSize = try PhotoSize.filter(Column("photoId") == photoId)
       .filter(Column("type") == protoSize.type)
@@ -763,10 +809,14 @@ public extension PhotoSize {
       )
 
       try updatedSize.update(db)
+      if updatedSize != existingSize {
+        MessageProjectionDependencies(identities: [.photo(photoId)]).publishAfterCommit(db, publisher: publisher)
+      }
     } else {
       // Create new photo size if it doesn't exist
       let newSize = PhotoSize.from(proto: protoSize, photoId: photoId)
       try newSize.save(db) // Is saveAndInsert needed?
+      MessageProjectionDependencies(identities: [.photo(photoId)]).publishAfterCommit(db, publisher: publisher)
     }
   }
 }

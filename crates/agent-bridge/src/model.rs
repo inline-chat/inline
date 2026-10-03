@@ -54,11 +54,31 @@ pub struct BindingKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceMessageVersion {
+    pub revision: i64,
+    #[serde(default)]
+    pub source_snapshot: Option<String>,
+    /// Bridge-owned digest of visible content and immutable media identity.
+    /// Missing legacy proof cannot authorize a newly submitted public input.
+    #[serde(default)]
+    pub visible_fingerprint: Option<String>,
+    /// An unmentioned public message in a conversation this worker already
+    /// participates in. The provider decides relevance before taking action.
+    #[serde(default)]
+    pub discretionary: bool,
+    /// The authenticated public source text, before trusted command lowering
+    /// or bot specialization wraps the provider instruction.
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Direction {
     pub id: DirectionId,
     pub text: String,
     #[serde(default)]
     pub attachments: Vec<InputAttachment>,
+    #[serde(default)]
+    pub source_version: Option<SourceMessageVersion>,
 }
 
 impl Direction {
@@ -67,12 +87,24 @@ impl Direction {
             id,
             text: text.into(),
             attachments: Vec::new(),
+            source_version: None,
         }
     }
 
     pub fn with_attachments(mut self, attachments: Vec<InputAttachment>) -> Self {
         self.attachments = attachments;
         self
+    }
+
+    pub fn with_source_version(mut self, source_version: Option<SourceMessageVersion>) -> Self {
+        self.source_version = source_version;
+        self
+    }
+
+    pub fn is_discretionary(&self) -> bool {
+        self.source_version
+            .as_ref()
+            .is_some_and(|source| source.discretionary)
     }
 }
 

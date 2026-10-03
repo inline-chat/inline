@@ -23,6 +23,7 @@ public struct Drafts2Snapshot: Sendable {
   public var attachments: [Drafts2Attachment]
   public var revision: Int64
   public var updatedAt: Int64
+  public var discussionCarryOver: DiscussionCarryOverDraft?
 
   public var isEmpty: Bool {
     text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
@@ -34,7 +35,8 @@ public struct Drafts2Snapshot: Sendable {
     entities: MessageEntities? = nil,
     attachments: [Drafts2Attachment] = [],
     revision: Int64 = 0,
-    updatedAt: Int64 = Drafts2.nowSeconds()
+    updatedAt: Int64 = Drafts2.nowSeconds(),
+    discussionCarryOver: DiscussionCarryOverDraft? = nil
   ) {
     self.peer = peer
     self.text = text
@@ -42,6 +44,7 @@ public struct Drafts2Snapshot: Sendable {
     self.attachments = attachments
     self.revision = revision
     self.updatedAt = updatedAt
+    self.discussionCarryOver = discussionCarryOver
   }
 }
 
@@ -99,6 +102,7 @@ struct Drafts2Row: Codable, FetchableRecord, PersistableRecord, TableRecord, Sen
   var attachments: Drafts2AttachmentBlob?
   var updatedAt: Int64
   var revision: Int64
+  var discussionCarryOver: DiscussionCarryOverDraft?
 
   enum Columns {
     static let peerKey = Column(CodingKeys.peerKey)
@@ -112,6 +116,7 @@ struct Drafts2Row: Codable, FetchableRecord, PersistableRecord, TableRecord, Sen
     attachments = snapshot.attachments.isEmpty ? nil : Drafts2AttachmentBlob(attachments: snapshot.attachments)
     updatedAt = snapshot.updatedAt
     revision = snapshot.revision
+    discussionCarryOver = snapshot.discussionCarryOver
   }
 
   func snapshot(peer: Peer) -> Drafts2Snapshot {
@@ -121,7 +126,8 @@ struct Drafts2Row: Codable, FetchableRecord, PersistableRecord, TableRecord, Sen
       entities: Drafts2.normalizedEntities(entities),
       attachments: attachments?.attachments ?? [],
       revision: revision,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
+      discussionCarryOver: discussionCarryOver
     )
   }
 }
@@ -531,17 +537,89 @@ public final class Drafts2: @unchecked Sendable {
   }
 
   public func clear(peer: Peer) {
+    _ = load(peer: peer)
     let peerKey = peer.toString()
     let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in
       let pendingIds = pendingAttachmentIdsByPeerKey.removeValue(forKey: peerKey) ?? []
       let tasks = pendingIds.compactMap { pendingAttachmentTasks.removeValue(forKey: Self.pendingTaskKey(peerKey: peerKey, id: $0)) }
       loadedPeerKeys.insert(peerKey)
-      cache.removeValue(forKey: peerKey)
+      if var draft = cache[peerKey], draft.discussionCarryOver != nil {
+        draft.text = ""
+        draft.entities = nil
+        draft.attachments = []
+        draft.revision = (latestRevisionByPeerKey[peerKey] ?? 0) + 1
+        cache[peerKey] = draft
+      } else {
+        cache.removeValue(forKey: peerKey)
+      }
       latestRevisionByPeerKey[peerKey] = (latestRevisionByPeerKey[peerKey] ?? 0) + 1
       return tasks
     }
     pendingTasks.forEach { $0.cancel() }
-    persistEmpty(peerKey: peerKey, revision: latestRevisionByPeerKeyValue(peerKey: peerKey))
+    if let snapshot = cached(peer: peer) { persist(snapshot) }
+    else { persistEmpty(peerKey: peerKey, revision: latestRevisionByPeerKeyValue(peerKey: peerKey)) }
+  }
+
+  /// Confirm durability before creating/forwarding. An ordinary composer clear
+  /// preserves this independent pending intent in the same draft record.
+  public func saveDiscussionCarryOver(peer: Peer, draft: DiscussionCarryOverDraft?, expectedReservationId: Int64? = nil,
+                                     replacing: DiscussionCarryOverDraft? = nil) async throws {
+    try await saveDiscussionCarryOver(peer: peer, draft: draft, expectedReservationId: expectedReservationId,
+      replacing: replacing, verificationRead: nil)
+  }
+
+  // The optional read only gates an actual durable verification in tests.
+  // It cannot bypass staging, the writer, flushing, or account admission.
+  func saveDiscussionCarryOver(peer: Peer, draft: DiscussionCarryOverDraft?, expectedReservationId: Int64? = nil,
+                               replacing: DiscussionCarryOverDraft? = nil,
+                               verificationRead: (@Sendable () async throws -> DiscussionCarryOverDraft?)?) async throws {
+    let token = try auth?.beginAccountMutation()
+    if let draft {
+      guard draft.hasValidIdentity, draft.sourcePeer == peer, token == nil || draft.authorUserId == token?.userID else {
+        throw DiscussionCarryOverPersistenceError.invalidIntent
+      }
+    }
+    _ = load(peer: peer)
+    let snapshot = try stage(peer: peer) { snapshot in
+      var admitted = draft
+      if let replacing, let existing = snapshot.discussionCarryOver, let draft {
+        guard replacing.hasSameSubmission(as: existing), draft.reservedChatId != replacing.reservedChatId,
+              draft.activationRandomId != replacing.activationRandomId,
+              Set(draft.forwardingRandomIds).isDisjoint(with: replacing.forwardingRandomIds) else {
+          throw DiscussionCarryOverPersistenceError.anotherSubmissionInProgress
+        }
+      } else if replacing != nil {
+        throw DiscussionCarryOverPersistenceError.anotherSubmissionInProgress
+      } else if let existing = snapshot.discussionCarryOver, let candidate = admitted {
+        guard existing.hasSameSubmission(as: candidate) else { throw DiscussionCarryOverPersistenceError.anotherSubmissionInProgress }
+        if existing.seedComplete { admitted?.seedComplete = true }
+      }
+      if let expectedReservationId, snapshot.discussionCarryOver?.reservedChatId != expectedReservationId {
+        throw DiscussionCarryOverPersistenceError.anotherSubmissionInProgress
+      }
+      snapshot.discussionCarryOver = admitted
+    }
+    persist(snapshot)
+    await writer.flush()
+    if let token { try auth?.validateAccountMutation(token) }
+    let persisted: DiscussionCarryOverDraft?
+    if let verificationRead { persisted = try await verificationRead() }
+    else {
+      persisted = try await database.reader.read { db in
+        try Drafts2Row.fetchOne(db, key: peer.toString())?.discussionCarryOver
+      }
+    }
+    if let token { try auth?.validateAccountMutation(token) }
+    guard persisted == snapshot.discussionCarryOver else { throw DiscussionCarryOverPersistenceError.notPersisted }
+  }
+
+  /// The same draft owner admits each next dependent operation. A replacement
+  /// in another window retires the old continuation without deleting its chat.
+  public func requireCurrentDiscussionCarryOver(peer: Peer, draft: DiscussionCarryOverDraft) throws {
+    let current = cached(peer: peer)?.discussionCarryOver
+    guard current?.hasSameSubmission(as: draft) == true else {
+      throw DiscussionCarryOverPersistenceError.anotherSubmissionInProgress
+    }
   }
 
   public func prepareSend(peer: Peer) async throws -> Drafts2SendSnapshot {
@@ -726,16 +804,16 @@ public final class Drafts2: @unchecked Sendable {
     }
   }
 
-  private func stage(peer: Peer, mutate: (inout Drafts2Snapshot) -> Void) -> Drafts2Snapshot {
-    stateQueue.sync {
+  private func stage(peer: Peer, mutate: (inout Drafts2Snapshot) throws -> Void) rethrows -> Drafts2Snapshot {
+    try stateQueue.sync {
       let peerKey = peer.toString()
       var draft = cache[peerKey] ?? Drafts2Snapshot(peer: peer, revision: latestRevisionByPeerKey[peerKey] ?? 0)
-      mutate(&draft)
+      try mutate(&draft)
       draft.revision = (latestRevisionByPeerKey[peerKey] ?? draft.revision) + 1
       draft.updatedAt = Self.nowSeconds()
       loadedPeerKeys.insert(peerKey)
       latestRevisionByPeerKey[peerKey] = draft.revision
-      if draft.isEmpty {
+      if draft.isEmpty && draft.discussionCarryOver == nil {
         cache.removeValue(forKey: peerKey)
       } else {
         cache[peerKey] = draft
@@ -760,7 +838,7 @@ public final class Drafts2: @unchecked Sendable {
 
   private func persist(_ snapshot: Drafts2Snapshot) {
     let peerKey = snapshot.peer.toString()
-    if snapshot.isEmpty {
+    if snapshot.isEmpty && snapshot.discussionCarryOver == nil {
       persistEmpty(peerKey: peerKey, revision: snapshot.revision)
       return
     }
@@ -775,5 +853,19 @@ public final class Drafts2: @unchecked Sendable {
 
   private static func pendingTaskKey(peerKey: String, id: String) -> String {
     "\(peerKey):\(id)"
+  }
+}
+
+public enum DiscussionCarryOverPersistenceError: LocalizedError {
+  case invalidIntent
+  case notPersisted
+  case anotherSubmissionInProgress
+
+  public var errorDescription: String? {
+    switch self {
+    case .invalidIntent: "The discussion no longer has a complete reviewed selection. Reload its preview."
+    case .notPersisted: "The discussion could not be saved. Retry before creating the chat."
+    case .anotherSubmissionInProgress: "A saved chat is already in progress for this discussion. Reopen it to finish that chat first."
+    }
   }
 }

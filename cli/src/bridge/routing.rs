@@ -27,14 +27,78 @@ pub(super) fn with_agent_session_thread_addressing(
 pub(super) async fn message_sender_is_bot(
     bot_store: &SqliteStore,
     message: &MessageRecord,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<Option<bool>, Box<dyn std::error::Error>> {
     if let Some(sender_is_bot) = message.metadata.sender_is_bot {
-        return Ok(sender_is_bot);
+        return Ok(Some(sender_is_bot));
     }
     Ok(bot_store
         .user(message.sender_id)
         .await?
-        .is_some_and(|user| user.is_bot == Some(true)))
+        .and_then(|user| user.is_bot))
+}
+
+#[derive(Debug)]
+pub(super) struct UnverifiedMessageActor;
+
+impl std::fmt::Display for UnverifiedMessageActor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("message actor or reply recipient could not be verified; retry after directory hydration")
+    }
+}
+
+impl std::error::Error for UnverifiedMessageActor {}
+
+/// Use the existing authenticated participant RPC only when the synchronized
+/// actor proof is absent. An arbitrary cached record with no kind stays unknown.
+pub(super) async fn require_message_sender_kind(
+    bot: &InlineClient,
+    bot_store: &SqliteStore,
+    message: &MessageRecord,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if let Some(kind) = message_sender_is_bot(bot_store, message).await? {
+        return Ok(kind);
+    }
+    let page = bot
+        .chat_participants(inline_client::ChatParticipantsRequest {
+            chat_id: message.chat_id,
+        })
+        .await
+        .map_err(|_| UnverifiedMessageActor)?;
+    // The private SDK decoder marks kind only for a received server User.
+    // Other backends and legacy cached profiles may still return None.
+    if let Some(kind) = page
+        .users
+        .iter()
+        .find(|user| user.user_id == message.sender_id)
+        .and_then(|user| user.is_bot)
+    {
+        bot_store.record_users(page.users).await?;
+        return Ok(kind);
+    }
+    if let Some(kind) = message_sender_is_bot(bot_store, message).await? {
+        return Ok(kind);
+    }
+    // DMs have no chatParticipants rows. GetChats already carries their
+    // authoritative peer profiles and records all sidecar users in the SDK.
+    let dialogs = bot
+        .dialogs(inline_client::DialogsRequest {
+            limit: Some(1),
+            ..Default::default()
+        })
+        .await
+        .map_err(|_| UnverifiedMessageActor)?;
+    if let Some(kind) = dialogs
+        .users
+        .iter()
+        .find(|user| user.user_id == message.sender_id)
+        .and_then(|user| user.is_bot)
+    {
+        bot_store.record_users(dialogs.users).await?;
+        return Ok(kind);
+    }
+    message_sender_is_bot(bot_store, message)
+        .await?
+        .ok_or_else(|| UnverifiedMessageActor.into())
 }
 
 /// Resolves message-local addressing from the bot-visible record and joins it
@@ -75,7 +139,9 @@ pub(super) async fn resolve_message_route(
         });
     }
 
-    let sender_is_bot = message_sender_is_bot(bot_store, message).await?;
+    let sender_is_bot = message_sender_is_bot(bot_store, message)
+        .await?
+        .ok_or(UnverifiedMessageActor)?;
     let owner_dm_conversation =
         is_owner_dm_conversation(bot_store, message.chat_id.get(), owner_dm_chat_id).await?;
     let exact_mention = message.metadata.entities.iter().any(|entity| {
@@ -199,8 +265,44 @@ mod tests {
                 text: "fix it".to_string(),
             },
             reply_to_message_id: None,
-            metadata: MessageMetadata::default(),
+            metadata: MessageMetadata {
+                sender_is_bot: Some(sender_id == 99),
+                ..Default::default()
+            },
             transaction: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_and_legacy_cached_sender_kind_remain_unknown_even_with_a_mention() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        let mut incoming = message(11, 8);
+        incoming.metadata.sender_is_bot = None;
+        incoming.metadata.mentioned = Some(true);
+        for legacy_profile in [false, true] {
+            if legacy_profile {
+                store
+                    .record_users(vec![inline_client::UserRecord {
+                        user_id: incoming.sender_id,
+                        display_name: Some("Known name".into()),
+                        username: None,
+                        first_name: None,
+                        last_name: None,
+                        avatar_url: None,
+                        is_bot: None,
+                    }])
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(
+                message_sender_is_bot(&store, &incoming).await.unwrap(),
+                None
+            );
+            assert!(
+                resolve_message_route(&incoming, 11, 99, &store, None)
+                    .await
+                    .is_err()
+            );
         }
     }
 
@@ -539,6 +641,7 @@ mod tests {
             .await
             .expect("bot user");
         let mut other_bot = message(11, 77);
+        other_bot.metadata.sender_is_bot = None;
 
         let route = resolve_message_route(&other_bot, 11, 99, &store, None)
             .await

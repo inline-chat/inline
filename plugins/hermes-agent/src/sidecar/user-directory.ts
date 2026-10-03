@@ -2,6 +2,7 @@ import { Method, ProtocolClientError, type User } from "@inline-chat/realtime-sd
 
 const DEFAULT_PROFILE_TTL_MS = 10 * 60_000
 const DEFAULT_MAX_PROFILES = 5_000
+const MISSING_SENDER_REFRESH_MS = 1_000
 
 export type InlineSenderProfile = {
   id: string
@@ -19,6 +20,7 @@ export type InlineUserResolution = {
 type CachedProfile = {
   profile: InlineSenderProfile
   expiresAt: number
+  kindVerifiedUntil: number
 }
 
 type UserDirectoryClient = {
@@ -65,53 +67,63 @@ export class InlineUserDirectory {
   ): Promise<InlineUserResolution> {
     const userId = params.userId.toString()
     const cached = this.getFresh(userId)
-    if (cached?.bot != null) {
+    if (cached && this.hasVerifiedKind(userId) && (cached.bot === true || hasDisplayIdentity(cached))) {
       return { profile: cached, provenanceVerified: true }
     }
 
     if (params.direct) {
-      const directoryHydrated = await this.hydrateDirectory()
+      await this.hydrateDirectory(userId)
       const resolved = this.getFresh(userId)
       return {
-        ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
-        provenanceVerified: directoryHydrated,
+        ...(resolved && (hasDisplayIdentity(resolved) || resolved.bot != null) ? { profile: resolved } : {}),
+        provenanceVerified: this.hasVerifiedKind(userId),
       }
     } else {
-      const chatHydrated = await this.hydrateChat(params.chatId)
+      await this.hydrateChat(params.chatId, userId)
       const participant = this.getFresh(userId)
-      if (participant?.bot != null || hasDisplayIdentity(participant)) {
+      if (participant && this.hasVerifiedKind(userId) && (participant.bot === true || hasDisplayIdentity(participant))) {
         return {
           profile: participant,
-          provenanceVerified: chatHydrated || participant.bot != null,
+          provenanceVerified: true,
         }
       }
       // Participant payloads can be partial (especially for reply threads), so
       // this deliberate extra directory fetch fills the miss. Both RPC paths
       // are TTL-cached and in-flight deduplicated to avoid a per-message fetch.
-      const directoryHydrated = await this.hydrateDirectory()
+      await this.hydrateDirectory(userId)
       const resolved = this.getFresh(userId)
       return {
-        ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
-        provenanceVerified: directoryHydrated && (chatHydrated || hasDisplayIdentity(resolved)),
+        ...(resolved && (hasDisplayIdentity(resolved) || resolved.bot != null) ? { profile: resolved } : {}),
+        provenanceVerified: this.hasVerifiedKind(userId),
       }
     }
   }
 
-  remember(users: readonly User[]): void {
+  remember(users: readonly User[], authoritativeKind = false): void {
     const expiresAt = this.now() + this.ttlMs
     for (const user of users) {
       const id = user.id?.toString()
       if (!id || id === "0") continue
-      const previous = this.profiles.get(id)?.profile
+      const previousRecord = this.profiles.get(id)
+      const previous = previousRecord?.profile
       const profile: InlineSenderProfile = {
         id,
         ...readProfileField(user.firstName, previous?.firstName, "firstName"),
         ...readProfileField(user.lastName, previous?.lastName, "lastName"),
         ...readProfileField(user.username, previous?.username, "username"),
-        ...readBooleanProfileField(user.bot, previous?.bot, "bot"),
+        // Canonical encodeUser always emits true for bots, including min
+        // profiles. Omission is human only in these authenticated directory
+        // RPCs; arbitrary partial remembers retain the previous/unknown kind.
+        ...readBooleanProfileField(authoritativeKind && user.bot == null ? false : user.bot, previous?.bot, "bot"),
+      }
+      const changedKind = typeof user.bot === "boolean" && user.bot !== previous?.bot
+      const kindVerifiedUntil = authoritativeKind ? expiresAt : changedKind ? 0 : previousRecord?.kindVerifiedUntil ?? 0
+      if (!authoritativeKind && changedKind) {
+        this.hydratedChats.clear()
+        this.directoryExpiresAt = 0
       }
       this.profiles.delete(id)
-      this.profiles.set(id, { profile, expiresAt })
+      this.profiles.set(id, { profile, expiresAt, kindVerifiedUntil })
     }
     let evicted = false
     while (this.profiles.size > this.maxProfiles) {
@@ -138,10 +150,24 @@ export class InlineUserDirectory {
     return cached.profile
   }
 
-  private async hydrateChat(chatId: bigint): Promise<boolean> {
+  private hasVerifiedKind(userId: string): boolean {
+    const cached = this.profiles.get(userId)
+    return Boolean(cached && cached.kindVerifiedUntil > this.now() && typeof cached.profile.bot === "boolean")
+  }
+
+  private hydrationIsFresh(expiresAt: number, userId: string): boolean {
+    const now = this.now()
+    // A successful collection fetch proves only the users it actually contains.
+    // Keep positive profiles cheap, but let a held new/partial sender refresh
+    // after one retry interval instead of waiting for the positive ten-minute TTL.
+    // Derive the last fetch from the existing expiry; no separate negative cache.
+    return expiresAt > now && (this.hasVerifiedKind(userId) || now < expiresAt - this.ttlMs + MISSING_SENDER_REFRESH_MS)
+  }
+
+  private async hydrateChat(chatId: bigint, userId: string): Promise<boolean> {
     const key = chatId.toString()
     const hydratedUntil = this.hydratedChats.get(key) ?? 0
-    if (hydratedUntil > this.now()) {
+    if (this.hydrationIsFresh(hydratedUntil, userId)) {
       this.hydratedChats.delete(key)
       this.hydratedChats.set(key, hydratedUntil)
       return true
@@ -155,7 +181,7 @@ export class InlineUserDirectory {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId },
       })
-      this.remember(readUsers(result, "getChatParticipants"))
+      this.remember(readUsers(result, "getChatParticipants"), true)
       this.hydratedChats.delete(key)
       this.hydratedChats.set(key, this.now() + this.ttlMs)
       while (this.hydratedChats.size > this.maxProfiles) {
@@ -189,8 +215,8 @@ export class InlineUserDirectory {
     }
   }
 
-  private async hydrateDirectory(): Promise<boolean> {
-    if (this.directoryExpiresAt > this.now()) return true
+  private async hydrateDirectory(userId: string): Promise<boolean> {
+    if (this.hydrationIsFresh(this.directoryExpiresAt, userId)) return true
     if (this.directoryFetch) return this.directoryFetch
 
     const fetch = (async () => {
@@ -198,7 +224,7 @@ export class InlineUserDirectory {
         oneofKind: "getChats",
         getChats: {},
       })
-      this.remember(readUsers(result, "getChats"))
+      this.remember(readUsers(result, "getChats"), true)
       this.directoryExpiresAt = this.now() + this.ttlMs
       return true
     })()
@@ -215,8 +241,8 @@ export class InlineUserDirectory {
   }
 }
 
-function hasDisplayIdentity(profile: InlineSenderProfile | undefined): profile is InlineSenderProfile {
-  return Boolean(profile?.firstName || profile?.lastName || profile?.username || profile?.bot != null)
+function hasDisplayIdentity(profile: InlineSenderProfile | undefined): boolean {
+  return Boolean(profile?.firstName || profile?.lastName || profile?.username)
 }
 
 function readProfileField<K extends "firstName" | "lastName" | "username">(

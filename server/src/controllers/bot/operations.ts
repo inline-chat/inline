@@ -5,6 +5,9 @@ import type {
   BotCommand,
   BotSkill,
   BotMessage,
+  BotMedia,
+  BotFile,
+  BotAttachment,
   BotPeer,
   BotPeerId,
   BotTargetInput,
@@ -48,6 +51,7 @@ import type {
 } from "@inline-chat/bot-api-types"
 import {
   InputPeer,
+  BlockContent,
   MessageAction,
   MessageActionCallback,
   MessageActionCopyText,
@@ -61,6 +65,8 @@ import {
   Peer,
   SearchMessagesFilter,
   UpdateComposeAction_ComposeAction,
+  type Message,
+  type Photo,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -84,7 +90,7 @@ import { searchMessages as searchMessagesFn } from "@in/server/functions/message
 import { createChat as createChatFn } from "@in/server/functions/messages.createChat"
 import { createSubthread as createSubthreadFn } from "@in/server/functions/messages.createSubthread"
 import { sendMessage as sendMessageFn } from "@in/server/functions/messages.sendMessage"
-import { forwardMessages as forwardMessagesFn } from "@in/server/functions/messages.forwardMessages"
+import { forwardMessages as forwardMessagesFn, projectForwardedVisibleContext } from "@in/server/functions/messages.forwardMessages"
 import { pinMessage as pinMessageFn } from "@in/server/functions/messages.pinMessage"
 import { getChatParticipants as getChatParticipantsFn } from "@in/server/functions/messages.getChatParticipants"
 import { addChatParticipant as addChatParticipantFn } from "@in/server/functions/messages.addChatParticipant"
@@ -152,6 +158,9 @@ type BotMessageSource = {
   readonly fromId: number | bigint
   readonly date: number | Date
   readonly editDate?: number | Date | null | undefined
+  readonly rev?: number
+  readonly forwardIntentHash?: Uint8Array | null
+  readonly fwdFromMessageId?: number | null
   readonly text?: string | null | undefined
   readonly entities?: MessageEntities | null | undefined
   readonly blockContent?: DbFullMessage["blockContent"]
@@ -764,27 +773,57 @@ const loadUsersByIds = async (
   return map
 }
 
+const protoPhotoFile = (photo: Photo | undefined): BotFile | undefined => {
+  const sizes = photo?.sizes.filter((value) => value.fileUniqueId) ?? []
+  const size = sizes.length ? sizes.reduce((best, candidate) =>
+    candidate.w * candidate.h >= best.w * best.h ? candidate : best) : undefined
+  return size?.fileUniqueId ? {
+    file_id: size.fileUniqueId, width: size.w, height: size.h, file_size: size.size,
+  } : undefined
+}
+
+const protoBotMedia = (message: Message): BotMedia | undefined => {
+  const media = message.media?.media
+  switch (media?.oneofKind) {
+    case "photo": {
+      const file = protoPhotoFile(media.photo.photo)
+      return file ? { type: "photo", file } : undefined
+    }
+    case "video": {
+      const video = media.video.video
+      return video?.fileUniqueId ? { type: "video", file: {
+        file_id: video.fileUniqueId, file_size: video.size, width: video.w, height: video.h, duration: video.duration,
+      }, thumbnail: protoPhotoFile(video.photo), is_animated: video.isAnimated, has_audio: video.hasAudio } : undefined
+    }
+    case "document": {
+      const document = media.document.document
+      return document?.fileUniqueId ? { type: "document", file: {
+        file_id: document.fileUniqueId, file_name: document.fileName, mime_type: document.mimeType, file_size: document.size,
+      }, thumbnail: protoPhotoFile(document.photo) } : undefined
+    }
+    case "voice": {
+      const voice = media.voice.voice
+      return voice?.fileUniqueId ? { type: "voice", file: {
+        file_id: voice.fileUniqueId, mime_type: voice.mimeType, file_size: voice.size, duration: voice.duration,
+      }, waveform_base64: Buffer.from(voice.waveform).toString("base64") } : undefined
+    }
+    case "nudge": return { type: "nudge" }
+  }
+  return undefined
+}
+
 const toBotMessageLiteFromProto = (
-  message: {
-    readonly id: number | bigint
-    readonly chatId: number | bigint
-    readonly fromId: number | bigint
-    readonly date: number | bigint
-    readonly editDate?: number | bigint | undefined
-    readonly message?: string | undefined
-    readonly entities?: MessageEntities | undefined
-    readonly blockContent?: DbFullMessage["blockContent"] | undefined
-    readonly peerId?: Peer | undefined
-    readonly replyToMsgId?: number | bigint | undefined
-  },
+  message: Message,
   inputPeer: InputPeer,
   usersById?: Map<number, BotUserJson>,
 ): BotMessageReference => {
   const fromId = Number(message.fromId)
+  const projection = projectForwardedVisibleContext(message, message.blockContent
+    ? BlockContent.fromBinary(BlockContent.toBinary(message.blockContent)) : undefined)
   const richMessage = encodeBotRichMessage({
-    text: message.message,
-    blockContent: message.blockContent,
-    entities: message.entities,
+    text: projection.text,
+    blockContent: projection.blockContent,
+    entities: projection.entities,
     usersById,
   })
   return {
@@ -797,12 +836,23 @@ const toBotMessageLiteFromProto = (
       usersById?.get(fromId) ??
       minimalUnknownUser(fromId),
     date: Number(message.date),
+    rev: message.rev != null ? Number(message.rev) : undefined,
+    is_forwarded: message.isForwarded || undefined,
+    source_snapshot: message.sourceSnapshot,
     edit_date: message.editDate
       ? Number(message.editDate)
       : undefined,
-    text: message.message ?? undefined,
-    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    text: projection.text,
+    entities: richMessage ? undefined : encodeBotEntities(projection.entities, { usersById }),
     rich_message: richMessage,
+    media: protoBotMedia(message),
+    actions: encodeBotActions(message.actions),
+    attachments: message.attachments?.attachments.flatMap<BotAttachment>((attachment) => {
+      if (attachment.attachment.oneofKind !== "urlPreview") return []
+      const preview = attachment.attachment.urlPreview
+      return preview.url ? [{ type: "url_preview", url: preview.url, title: preview.title,
+        description: preview.description, image: protoPhotoFile(preview.photo) }] : []
+    }),
   }
 }
 
@@ -829,6 +879,8 @@ const toBotMessageLiteFromDb = (
       usersById?.get(fromId) ??
       minimalUnknownUser(fromId),
     date: dateSeconds(message.date),
+    rev: message.rev,
+    is_forwarded: message.forwardIntentHash != null || message.fwdFromMessageId != null || undefined,
     edit_date: message.editDate
       ? dateSeconds(message.editDate)
       : undefined,
@@ -1635,6 +1687,10 @@ const forwardMessages = async (
   if (!Array.isArray(input.message_ids) || input.message_ids.length < 1 || input.message_ids.length > 100) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
+  if ((input.share_forward_header !== undefined && typeof input.share_forward_header !== "boolean") ||
+    (input.submissions !== undefined && !Array.isArray(input.submissions))) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
   const destinationPeer = await makeInputPeerFromBotTarget(
     { chat_id: input.chat_id },
     context.currentUserId,
@@ -1644,6 +1700,36 @@ const forwardMessages = async (
     context.currentUserId,
   )
   const messageIds = normalizeOrderedInputIds(input.message_ids)
+  if (input.submissions !== undefined) {
+    // Stable submissions must retain the original request, including already
+    // committed/deleted sources. Filtering missing IDs breaks prefix recovery.
+    if (messageIds.length !== input.message_ids.length || input.submissions.length !== messageIds.length) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    let submissions
+    try {
+      submissions = input.submissions.map((item) => {
+        if (!item || typeof item.random_id !== "string" || !/^-?[1-9][0-9]{0,18}$/.test(item.random_id) ||
+          typeof item.expected_source_revision !== "number" || !Number.isInteger(item.expected_source_revision)) {
+          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+        }
+        return { randomId: BigInt(item.random_id), expectedSourceRevision: BigInt(item.expected_source_revision),
+          expectedSourceSnapshot: item.expected_source_snapshot }
+      })
+    } catch {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    const result = await forwardMessagesFn({
+      fromPeerId: sourcePeer, toPeerId: destinationPeer,
+      messageIds: messageIds.map(BigInt), submissions,
+      shareForwardHeader: input.share_forward_header,
+    }, context)
+    return { message_ids: result.messageIds, receipts: result.receipts.map((item) => ({
+      source_message_id: Number(item.sourceMessageId), random_id: item.randomId.toString(),
+      message_id: Number(item.messageId), source_revision: Number(item.sourceRevision),
+      message_deleted: item.messageDeleted || undefined,
+    })) }
+  }
   const source = await ChatModel.getChatFromInputPeer(sourcePeer, context)
   await AccessGuards.ensureChatAccess(source, context.currentUserId)
   const existing = await MessageModel.getMessagesByIds(
@@ -1658,6 +1744,7 @@ const forwardMessages = async (
       fromPeerId: sourcePeer,
       toPeerId: destinationPeer,
       messageIds: forwardable.map(BigInt),
+      shareForwardHeader: input.share_forward_header,
     },
     context,
   )
@@ -1752,13 +1839,14 @@ const setThreadTitle = async (input: SetThreadTitleParams, context: BotOperation
   const chatId = normalizeInputId(input.chat_id)
   if (
     !chatId ||
-    (input.title === undefined && input.emoji === undefined) ||
+    (input.title === undefined && input.emoji === undefined && input.generate_emoji !== true) ||
     (input.title !== undefined && typeof input.title !== "string") ||
-    (input.emoji !== undefined && typeof input.emoji !== "string")
+    (input.emoji !== undefined && typeof input.emoji !== "string") ||
+    (input.generate_emoji !== undefined && typeof input.generate_emoji !== "boolean")
   ) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  await updateChatInfoFn({ chatId, title: input.title, emoji: input.emoji }, context)
+  await updateChatInfoFn({ chatId, title: input.title, emoji: input.emoji, generateEmoji: input.generate_emoji }, context)
   return {}
 }
 

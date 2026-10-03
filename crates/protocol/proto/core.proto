@@ -672,6 +672,15 @@ message Message {
 
   // Canonical card projection for anchored replies and materialized subthreads.
   optional MessageSubthread subthread = 25;
+
+  // Server-owned carried context, including forwards whose visible header is
+  // suppressed. Historical mentions in this row are not new bot directions.
+  optional bool is_forwarded = 26;
+
+  // Opaque token for this hydrated, visible forwarding snapshot. Unlike rev,
+  // it also covers attachment text and asynchronous media readiness. Delivery
+  // URLs, reactions, unread decoration, and agent-session linkage are excluded.
+  optional string source_snapshot = 27;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -3190,9 +3199,40 @@ message ForwardMessagesInput {
 
   // Whether to include forward header (defaults to true on server)
   optional bool share_forward_header = 4;
+
+  // Retry-safe submissions, aligned one-for-one with message_ids. Persist the
+  // complete ordered request before sending and retain it unchanged on retry.
+  // Omission preserves legacy forwarding without caller-controlled retry IDs.
+  repeated ForwardMessageSubmission submissions = 5;
 }
 
-message ForwardMessagesResult { repeated Update updates = 1; }
+message ForwardMessageSubmission {
+  // Sender-scoped nonzero int64, shared with SendMessage.random_id.
+  int64 random_id = 1;
+  // Source revision observed in the selection preview. New sends reject a
+  // changed revision; a committed retry returns its original receipt.
+  int64 expected_source_revision = 2;
+  // Token captured from the exact authorized preview. New promotions require
+  // it; legacy callers may omit it. A committed retry uses the bound intent.
+  optional string expected_source_snapshot = 3;
+}
+
+message ForwardMessageReceipt {
+  int64 source_message_id = 1;
+  int64 random_id = 2;
+  int64 message_id = 3;
+  int64 source_revision = 4;
+  // The identity committed previously but its destination row was deleted.
+  // The server does not recreate it; a promotion must not activate without it.
+  bool message_deleted = 5;
+}
+
+message ForwardMessagesResult {
+  repeated Update updates = 1;
+  // One receipt per submitted source, in the original request order. A failed
+  // call can already have committed a prefix; retry the same complete request.
+  repeated ForwardMessageReceipt receipts = 2;
+}
 
 enum GetChatHistoryMode {
   HISTORY_MODE_UNSPECIFIED = 0;
@@ -3609,6 +3649,10 @@ message CreateSubthreadInput {
   // Explicit copied or newly selected Agent preset for this independent child.
   // Parent lineage alone never inherits it.
   optional AgentThreadContext agent_context = 7;
+
+  // Optional previously reserved id for replay-safe creation. An existing
+  // anchored reply thread is returned instead; a different id means reuse.
+  optional int64 reserved_chat_id = 8;
 }
 
 message CreateSubthreadResult {
@@ -4231,6 +4275,9 @@ message UpdateChatInfoInput {
   optional string title = 2;
   optional string emoji = 3;
   optional AgentThreadContext agent_context = 4;
+  // Explicitly generate a missing emoji without changing the title. Existing
+  // chosen emojis are preserved; this is not an automatic refill policy.
+  optional bool generate_emoji = 5;
 }
 
 message UpdateChatInfoResult { Chat chat = 1; }

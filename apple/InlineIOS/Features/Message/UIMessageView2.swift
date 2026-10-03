@@ -1070,10 +1070,8 @@ final class UIMessageView2: UIMessageView {
         spacing: flowNodes.isEmpty ? 0 : 1
       )
     }
-    var primaryMediaWidth: CGFloat?
     if bubbleNodeViews[NodeID.legacyFile] != nil {
       let size = measuredSize(of: photoView, nodeID: NodeID.legacyFile, maximumWidth: maximumContentWidth)
-      primaryMediaWidth = size.width
       append(
         NodeID.legacyFile,
         size: size,
@@ -1082,12 +1080,10 @@ final class UIMessageView2: UIMessageView {
     }
     if bubbleNodeViews[NodeID.photo] != nil {
       let size = measuredSize(of: newPhotoView, nodeID: NodeID.photo, maximumWidth: maximumContentWidth)
-      primaryMediaWidth = max(primaryMediaWidth ?? 0, size.width)
       append(NodeID.photo, size: size, spacing: 0)
     }
     if bubbleNodeViews[NodeID.video] != nil {
       let size = measuredSize(of: videoView, nodeID: NodeID.video, maximumWidth: maximumContentWidth)
-      primaryMediaWidth = max(primaryMediaWidth ?? 0, size.width)
       append(NodeID.video, size: size, spacing: 0)
     }
     if bubbleNodeViews[NodeID.voice] != nil {
@@ -1109,7 +1105,7 @@ final class UIMessageView2: UIMessageView {
     let attributedText = attributedMessageText() ?? NSAttributedString(string: "")
     let plainTextMaximumWidth = max(
       1,
-      min(maximumContentWidth, primaryMediaWidth ?? maximumContentWidth) - 24
+      maximumContentWidth - 24
     )
     var textMeasurement: (size: CGSize, isSingleLine: Bool) = if let currentRichPlan {
       (currentRichPlan.size, false)

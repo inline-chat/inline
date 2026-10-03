@@ -1,3 +1,5 @@
+import { ProtocolClientError, RpcError_Code } from "@inline-chat/realtime-sdk"
+
 export type Target = { chatId: bigint; userId?: never } | { userId: bigint; chatId?: never }
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 export type ErrorKind = "too_long" | "bad_format" | "forbidden" | "not_found" | "rate_limited" | "transient" | "unknown"
@@ -73,6 +75,14 @@ export function normalizeError(
     }
   }
   const message = redact(error)
+  if (error instanceof ProtocolClientError) {
+    const rpcKind: ErrorKind | undefined = error.code === "rpc-error"
+      ? errorKindForRpcCode(error.rpcCode)
+      : error.code === "not-authorized" ? "forbidden"
+      : ["timeout", "not-connected", "stopped", "capacity-exceeded"].includes(error.code) ? "transient"
+      : undefined
+    if (rpcKind) return { status: statusForErrorKind(rpcKind), errorKind: rpcKind, message }
+  }
   const lower = message.toLowerCase()
   if (lower.includes("rate") && lower.includes("limit")) {
     return { status: 429, errorKind: "rate_limited", message }
@@ -87,6 +97,37 @@ export function normalizeError(
     return { status: 503, errorKind: "transient", message }
   }
   return { status: 500, errorKind: "unknown", message }
+}
+
+function errorKindForRpcCode(code: number | undefined): ErrorKind | undefined {
+  switch (code) {
+    case RpcError_Code.UNAUTHENTICATED:
+    case RpcError_Code.SPACE_ADMIN_REQUIRED:
+    case RpcError_Code.SPACE_OWNER_REQUIRED:
+    case RpcError_Code.AGENT_SESSION_MESSAGE_IMMUTABLE:
+      return "forbidden"
+    case RpcError_Code.RATE_LIMIT:
+      return "rate_limited"
+    case RpcError_Code.CHAT_ID_INVALID:
+    case RpcError_Code.MESSAGE_ID_INVALID:
+    case RpcError_Code.PEER_ID_INVALID:
+    case RpcError_Code.USER_ID_INVALID:
+      return "not_found"
+    case RpcError_Code.BAD_REQUEST:
+    case RpcError_Code.USER_ALREADY_MEMBER:
+    case RpcError_Code.SPACE_ID_INVALID:
+    case RpcError_Code.EMAIL_INVALID:
+    case RpcError_Code.PHONE_NUMBER_INVALID:
+    case RpcError_Code.USERNAME_INVALID:
+    case RpcError_Code.USERNAME_TAKEN:
+    case RpcError_Code.FIRST_NAME_INVALID:
+    case RpcError_Code.SPACE_INVITE_INVALID:
+      return "bad_format"
+    case RpcError_Code.INTERNAL_ERROR:
+      return "unknown"
+    default:
+      return undefined
+  }
 }
 
 function statusForErrorKind(errorKind: ErrorKind): number {
@@ -154,6 +195,7 @@ export function normalizeMessage(message: Record<string, unknown>): Record<strin
     message: message.message ?? null,
     out: Boolean(message.out),
     date: message.date,
+    editDate: message.editDate,
     mentioned: Boolean(message.mentioned),
     replyToMsgId: message.replyToMsgId ?? null,
     entities: message.entities ?? null,
@@ -161,6 +203,11 @@ export function normalizeMessage(message: Record<string, unknown>): Record<strin
     attachments: message.attachments ?? null,
     reactions: message.reactions ?? null,
     replies: message.replies ?? null,
+    subthread: message.subthread ?? null,
+    blockContent: message.blockContent ?? null,
+    isForwarded: message.isForwarded,
+    fwdFrom: message.fwdFrom ?? null,
+    sourceSnapshot: message.sourceSnapshot,
     actions: message.actions ?? null,
     rev: message.rev ?? null,
     raw: message,

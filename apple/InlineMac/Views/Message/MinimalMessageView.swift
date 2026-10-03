@@ -3644,6 +3644,11 @@ class MinimalMessageViewAppKit: NSView {
     }
   }
 
+  @objc private func startChatWithDiscussion() {
+    dependencies?.forwardMessages?.presentDiscussion(messages: [fullMessage],
+      availableMessages: MessageSelectionCoordinator.loadedDiscussion(from: self))
+  }
+
   @objc private func selectMessagesForForwarding() {
     MessageSelectionCoordinator.beginSelection(from: self)
   }
@@ -4955,6 +4960,14 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
           menu.addItem(selectItem)
         }
       }
+    }
+
+    if regularMessage, message.messageId > 0, dependencies?.forwardMessages != nil,
+       message.status == nil || message.status == .sent {
+      let startChat = NSMenuItem(title: "Start Chat with Discussion…", action: #selector(startChatWithDiscussion), keyEquivalent: "")
+      startChat.target = self
+      startChat.image = NSImage(systemSymbolName: "bubble.left.and.bubble.right", accessibilityDescription: nil)
+      menu.addItem(startChat)
     }
 
     // Edit

@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { botAgents, type DbBotAgent } from "@in/server/db/schema"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import type { BotAgent, BotAgentProfile } from "@inline-chat/protocol/core"
@@ -78,8 +79,8 @@ const create = async (input: CreateBotAgent): Promise<BotAgent> => {
   return encode(row)
 }
 
-const get = async (agentId: number): Promise<BotAgent | undefined> => {
-  const [row] = await db.select().from(botAgents).where(eq(botAgents.id, agentId)).limit(1)
+const get = async (agentId: number, options?: { tx?: Transaction }): Promise<BotAgent | undefined> => {
+  const [row] = await (options?.tx ?? db).select().from(botAgents).where(eq(botAgents.id, agentId)).limit(1)
   return row ? encode(row) : undefined
 }
 

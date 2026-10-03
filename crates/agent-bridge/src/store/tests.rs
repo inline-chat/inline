@@ -478,7 +478,7 @@ fn equal_timestamp_directions_keep_durable_ingest_order() {
 }
 
 #[test]
-fn inbound_lease_recovers_crash_before_terminal_commit() {
+fn inbound_lease_never_replays_a_provider_accepted_turn() {
     let store = BridgeStore::open_in_memory().expect("store");
     store
         .accept_inbound(&inbound("event-1", 10))
@@ -520,19 +520,18 @@ fn inbound_lease_recovers_crash_before_terminal_commit() {
             .expect("renew")
     );
     assert_eq!(store.recover_expired_inbound(399).expect("not expired"), 0);
-    assert_eq!(store.recover_expired_inbound(400).expect("recover"), 1);
-
-    let second = store
-        .take_next_inbound(&binding(), 500)
-        .expect("retake")
-        .expect("inbound item");
-    assert_eq!(second.event_id, first.event_id);
-    assert_eq!(second.attempt_count, 2);
-    assert!(store.complete_inbound(&second.event_id).expect("complete"));
-    assert!(
-        !store
-            .complete_inbound(&second.event_id)
-            .expect("complete twice")
+    assert_eq!(store.recover_expired_inbound(400).expect("recover"), 0);
+    assert!(store.take_next_inbound(&binding(), 500).unwrap().is_none());
+    assert_eq!(
+        store
+            .interrupt_started_inbound(&binding(), "restart lost live provider handle")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store.get_inbound(&first.event_id).unwrap().unwrap().state,
+        InboundState::Failed
     );
 }
 
@@ -887,7 +886,7 @@ fn on_disk_migration_preserves_a_private_pre_upgrade_backup() {
 
     let backup = directory
         .path()
-        .join("bridge.sqlite.pre-schema-30-from-23.backup");
+        .join("bridge.sqlite.pre-schema-31-from-23.backup");
     let backup_connection = Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("migration backup");
     let version: i64 = backup_connection
@@ -951,7 +950,7 @@ fn repeated_old_schema_upgrade_preserves_a_fresh_backup_generation() {
     drop(BridgeStore::open(&database).expect("first upgrade"));
     let stable_backup = directory
         .path()
-        .join("bridge.sqlite.pre-schema-30-from-27.backup");
+        .join("bridge.sqlite.pre-schema-31-from-27.backup");
     assert!(stable_backup.is_file());
 
     let connection = Connection::open(&database).expect("downgraded connection");
@@ -968,7 +967,7 @@ fn repeated_old_schema_upgrade_preserves_a_fresh_backup_generation() {
     drop(connection);
 
     drop(BridgeStore::open(&database).expect("second upgrade"));
-    let backup_prefix = "bridge.sqlite.pre-schema-30-from-27.backup.";
+    let backup_prefix = "bridge.sqlite.pre-schema-31-from-27.backup.";
     let generated_backup = fs::read_dir(directory.path())
         .expect("backup directory")
         .filter_map(Result::ok)
@@ -1026,7 +1025,7 @@ fn version_twenty_six_database_adds_restart_safe_session_pickers() {
     assert!(
         directory
             .path()
-            .join("bridge.sqlite.pre-schema-30-from-26.backup")
+            .join("bridge.sqlite.pre-schema-31-from-26.backup")
             .is_file()
     );
 }
@@ -1062,7 +1061,7 @@ fn version_twenty_seven_database_adds_picker_projection_repair() {
     assert!(
         directory
             .path()
-            .join("bridge.sqlite.pre-schema-30-from-27.backup")
+            .join("bridge.sqlite.pre-schema-31-from-27.backup")
             .is_file()
     );
 }
@@ -1105,7 +1104,7 @@ fn version_twenty_eight_database_adds_agent_output_link_repair() {
     assert!(
         directory
             .path()
-            .join("bridge.sqlite.pre-schema-30-from-28.backup")
+            .join("bridge.sqlite.pre-schema-31-from-28.backup")
             .is_file()
     );
 }
@@ -1242,14 +1241,17 @@ fn version_twenty_nine_preserves_data_and_adds_catalog_cursor() {
 fn newer_schema_version_is_rejected() {
     let connection = Connection::open_in_memory().expect("connection");
     connection
-        .execute_batch("PRAGMA user_version = 31;")
+        .execute_batch(&format!(
+            "PRAGMA user_version = {};",
+            CURRENT_SCHEMA_VERSION + 1
+        ))
         .expect("set schema version");
     assert!(matches!(
         migrate(&connection),
         Err(StoreError::UnsupportedSchemaVersion {
-            found: 31,
+            found,
             supported: CURRENT_SCHEMA_VERSION
-        })
+        }) if found == CURRENT_SCHEMA_VERSION + 1
     ));
 }
 

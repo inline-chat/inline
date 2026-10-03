@@ -58,12 +58,7 @@ public struct DeleteReactionTransaction: Transaction2 {
     do {
       let currentUserId = Auth.shared.getCurrentUserId()
       try await AppDatabase.shared.dbWriter.write { db in
-        _ = try Reaction
-          .filter(Column("messageId") == messageId)
-          .filter(Column("chatId") == chatId)
-          .filter(Column("emoji") == emoji)
-          .filter(Column("userId") == currentUserId)
-          .deleteAll(db)
+        try applyOptimisticRemoval(db, currentUserId: currentUserId)
       }
 
       Task(priority: .userInitiated) { @MainActor in
@@ -76,6 +71,20 @@ public struct DeleteReactionTransaction: Transaction2 {
       }
     } catch {
       log.error("Failed to delete reaction \(error)")
+    }
+  }
+
+  // The optimistic transaction and held-SQL gates share this exact row owner.
+  func applyOptimisticRemoval(_ db: Database, currentUserId: Int64?, publisher: MessagesPublisher? = nil) throws {
+    let removed = try Reaction
+      .filter(Column("messageId") == messageId)
+      .filter(Column("chatId") == chatId)
+      .filter(Column("emoji") == emoji)
+      .filter(Column("userId") == currentUserId)
+      .deleteAll(db)
+    if removed > 0 {
+      MessageProjectionDependencies(identities: [.message(chatId: chatId, messageId: messageId)])
+        .publishAfterCommit(db, publisher: publisher)
     }
   }
 

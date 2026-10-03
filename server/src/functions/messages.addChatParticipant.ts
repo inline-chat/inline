@@ -42,6 +42,9 @@ import {
   getEffectiveChatAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
 
+import { initializeInvitedDialogs } from "@in/server/modules/dialogInvitations"
+import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
+
 type AddChatParticipantOutput = {
   participant?: ChatParticipant
   groupParticipant?: ChatParticipantGroup
@@ -73,13 +76,15 @@ export async function addChatParticipant(
 
     const result = await retryParticipantMutation(() => db.transaction(async (tx): Promise<{
       participant: ChatParticipant
+      user: User
       update: UpdateSeqAndDate | null
       chatSeq: number
       accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      // Check if chat exists
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      // Membership writers still serialize with each other; leave dialog
+      // readers' KEY SHARE compatible while recipient user owners are acquired.
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
@@ -93,14 +98,17 @@ export async function addChatParticipant(
       await ensureUserCanParticipateInChat(chat, userId)
 
       // Check if user exists
-      const user = await tx
+      const [user] = await tx
         .select()
         .from(users)
         .where(and(eq(users.id, userId), userNotDeleted()))
         .limit(1)
-      if (!user || user.length === 0) {
+      if (!user) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${userId} not found`, 404)
       }
+      // Membership results must be self-contained for a client that has not
+      // cached the target yet, including a retry after the add already committed.
+      const participantUser = encodePublicUser({ user })
 
       // check if user is already a participant return the participant
       const [participant] = await tx
@@ -110,6 +118,7 @@ export async function addChatParticipant(
 
       if (participant != null) {
         return {
+          user: participantUser,
           participant: {
             userId: BigInt(participant.userId),
             date: encodeDateStrict(participant.date),
@@ -135,6 +144,8 @@ export async function addChatParticipant(
       if (!newParticipant) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat participant", 500)
       }
+
+      await initializeInvitedDialogs(tx, { chat, userIds: [userId] })
 
       const participantForUpdate: ChatParticipant = {
         userId: BigInt(newParticipant.userId),
@@ -190,6 +201,7 @@ export async function addChatParticipant(
       )
 
       return {
+        user: participantUser,
         participant: participantForUpdate,
         update,
         chatSeq: update.seq,
@@ -237,7 +249,7 @@ export async function addChatParticipant(
       })
     }
 
-    return { participant: result.participant, users: [] }
+    return { participant: result.participant, users: [result.user] }
   } catch (error) {
     Log.shared.error(`Failed to add participant to chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
@@ -259,7 +271,7 @@ async function addChatParticipantGroup(
       accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)

@@ -10,6 +10,7 @@ public struct CreateChatTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .createChat
   public var context: Context
   public var type: TransactionKindType = .mutation()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { context.reservedChatId == nil ? nil : .replaySafe }
 
   public struct Context: Sendable, Codable {
     public var title: String?
@@ -101,6 +102,14 @@ public struct CreateChatTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        if var existing = try Chat.fetchOne(db, id: reservedChatId) {
+          // A retry of the same reservation must not replace a confirmed chat
+          // or erase the messages/title already projected by its first attempt.
+          guard existing.createState != nil else { return }
+          existing.createState = .pending
+          try existing.update(db)
+          return
+        }
         try chat.save(db)
         try dialog.save(db)
       }
@@ -126,7 +135,8 @@ public struct CreateChatTransaction: Transaction2 {
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(
     TransactionExecutionError
   ) {
-    guard case let .createChat(response) = result else {
+    guard case let .createChat(response) = result,
+          context.reservedChatId == nil || context.reservedChatId == response.chat.id else {
       throw TransactionExecutionError.invalid
     }
 
@@ -168,7 +178,7 @@ public struct CreateChatTransaction: Transaction2 {
     do {
       _ = try await AppDatabase.shared.dbWriter.write { db in
         try Chat
-          .filter(Chat.Columns.id == reservedChatId)
+          .filter(Chat.Columns.id == reservedChatId && Chat.Columns.createState != nil)
           .updateAll(db, Chat.Columns.createState.set(to: ChatCreateState.failed.rawValue))
       }
     } catch {

@@ -1079,6 +1079,34 @@
       "when": 1790951215908,
       "tag": "0153_mcp-events",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1790951215909,
+      "tag": "0154_forward-submission-intent",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1790951215910,
+      "tag": "0155_chat-creation-replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1790951215911,
+      "tag": "0156_message-submission-receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1790951215912,
+      "tag": "0157_chat-reservation-resolution",
+      "breakpoints": true
     }
   ]
 }

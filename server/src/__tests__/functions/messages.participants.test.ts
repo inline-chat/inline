@@ -11,6 +11,8 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { addChatParticipant as addChatParticipantHandler } from "@in/server/realtime/handlers/messages.addChatParticipant"
+import { AddChatParticipantResult } from "@inline-chat/protocol/core"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -97,6 +99,52 @@ describe("home thread participant management", () => {
       addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(creator.id)),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
+
+  for (const alreadyParticipant of [false, true]) {
+    test(`participant result hydrates a fresh bot profile on ${alreadyParticipant ? "committed retry" : "first add"}`, async () => {
+      const creator = await testUtils.createUser("participant-hydration-owner@example.com")
+      const target = await testUtils.createUser("participant-hydration-bot@example.com")
+      await db.update(schema.users).set({
+        bot: true,
+        botCreatorId: creator.id,
+        firstName: "Scout",
+        username: "participant_hydration_scout",
+        phoneNumber: "+15550001234",
+        bio: "private account biography",
+        pendingSetup: true,
+        online: true,
+        timeZone: "Pacific/Honolulu",
+      }).where(eq(schema.users.id, target.id))
+      const chat = await testUtils.createChat(null, "Saved promotion", "thread", false, creator.id)
+      if (!chat) throw new Error("Chat not created")
+      await testUtils.addParticipant(chat.id, creator.id)
+      if (alreadyParticipant) await testUtils.addParticipant(chat.id, target.id)
+      const initialSeq = chat.updateSeq ?? 0
+
+      const result = await addChatParticipantHandler({ chatId: BigInt(chat.id), userId: BigInt(target.id) }, {
+        userId: creator.id,
+        sessionId: defaultTestContext.sessionId,
+        connectionId: defaultTestContext.connectionId,
+        sendRaw: () => {},
+        sendRpcReply: () => {},
+      })
+      const received = AddChatParticipantResult.fromBinary(AddChatParticipantResult.toBinary(result))
+      expect(received.participant?.userId).toBe(BigInt(target.id))
+      expect(received.users).toHaveLength(1)
+      expect(received.users[0]).toMatchObject({
+        id: BigInt(target.id), firstName: "Scout", username: "participant_hydration_scout", bot: true, min: true,
+      })
+      for (const privateField of ["email", "phoneNumber", "bio", "pendingSetup", "status", "timeZone"] as const) {
+        expect(received.users[0]?.[privateField]).toBeUndefined()
+      }
+      const participants = await db.select().from(schema.chatParticipants)
+        .where(and(eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id)))
+      expect(participants).toHaveLength(1)
+      const [savedChat] = await db.select().from(schema.chats).where(eq(schema.chats.id, chat.id))
+      if (alreadyParticipant) expect(savedChat?.updateSeq).toBe(initialSeq)
+      else expect(savedChat?.updateSeq).toBeGreaterThan(initialSeq)
+    })
+  }
 
   test("only creator can remove participants from home thread", async () => {
     const creator = await testUtils.createUser("home-remove-creator@example.com")

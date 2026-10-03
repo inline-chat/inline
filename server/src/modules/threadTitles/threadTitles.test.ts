@@ -3,6 +3,8 @@ import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/
 import { eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
+import { UpdatesModel } from "@in/server/db/models/updates"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { setupTestLifecycle, testUtils } from "../../__tests__/setup"
 
 const parseCompletion = mock()
@@ -71,6 +73,63 @@ describe("thread title generation", () => {
     expect(canAutoTitleThread({ ...placeholderThread, autoTitleGenerated: true })).toBe(false)
     expect(canAutoTitleThread({ ...placeholderThread, isUntitled: null })).toBe(false)
   })
+
+  for (const explicitTopic of [false, true]) {
+    test(`carried DM history before the task starter ${explicitTopic ? "preserves the explicit topic" : "cannot name the new task"}`, async () => {
+      const { createChat } = await import("@in/server/functions/messages.createChat")
+      const { forwardMessages } = await import("@in/server/functions/messages.forwardMessages")
+      const { sendMessage } = await import("@in/server/functions/messages.sendMessage")
+      const { applicationBackgroundWork } = await import("@in/server/lifecycle/backgroundWork")
+      const owner = await testUtils.createUser(`title-carry-owner-${explicitTopic}@example.com`)
+      const oldPeer = await testUtils.createUser(`title-carry-peer-${explicitTopic}@example.com`)
+      const dm = await testUtils.createPrivateChat(owner, oldPeer)
+      if (!dm) throw new Error("Source DM missing")
+      const historicalText = "OLD_DM_SUBJECT: Find restaurant reservations for the Barcelona trip"
+      await testUtils.createTestMessage({ chatId: dm.id, messageId: 1, fromId: owner.id, text: historicalText })
+      const starter = "Review the payment retry bug and propose a fix for duplicate charges"
+      const context = testUtils.functionContext({ userId: owner.id })
+      const { chat } = await createChat({
+        participants: [],
+        ...(explicitTopic ? { title: "Billing workbench" } : { placeholderTitle: starter }),
+      }, context)
+      const peer = { type: { oneofKind: "chat" as const, chat: { chatId: chat.id } } }
+      parseCompletion.mockResolvedValue(completion("Payment retry duplicates"))
+
+      await forwardMessages({
+        fromPeerId: { type: { oneofKind: "user", user: { userId: BigInt(oldPeer.id) } } },
+        toPeerId: peer,
+        messageIds: [1n],
+        shareForwardHeader: false,
+        submissions: [{ randomId: 7001n, expectedSourceRevision: 0n }],
+      }, context)
+      await applicationBackgroundWork.waitForIdle()
+      expect(parseCompletion).not.toHaveBeenCalled()
+      const [carried] = await db.select().from(schema.messages).where(eq(schema.messages.chatId, Number(chat.id)))
+      expect(carried?.forwardIntentHash).not.toBeNull()
+      expect(carried?.fwdFromMessageId).toBeNull()
+      expect(carried?.fwdFromSenderId).toBeNull()
+      const beforeStarter = await db._query.chats.findFirst({ where: eq(schema.chats.id, Number(chat.id)) })
+      expect(beforeStarter?.title).toBe(chat.title)
+
+      await sendMessage({ peerId: peer, message: starter, randomId: 7002n }, context)
+      await applicationBackgroundWork.waitForIdle()
+      const saved = await db._query.chats.findFirst({ where: eq(schema.chats.id, Number(chat.id)) })
+      if (explicitTopic) {
+        expect(saved?.title).toBe("Billing workbench")
+        expect(saved?.autoTitleGenerated).toBe(false)
+        expect(parseCompletion).not.toHaveBeenCalled()
+      } else {
+        expect(parseCompletion).toHaveBeenCalledTimes(1)
+        const request = parseCompletion.mock.calls[0]?.[0] as { messages: { role: string; content: string }[] }
+        const transcript = request.messages.find((message) => message.role === "user")!.content
+        expect(transcript).toContain(starter)
+        expect(transcript).not.toContain(historicalText)
+        expect(transcript).not.toContain("OLD_DM_SUBJECT")
+        expect(saved?.title).toBe("Payment retry duplicates")
+        expect(saved?.autoTitleGenerated).toBe(true)
+      }
+    })
+  }
 
   test("requires substantial non-entity text", async () => {
     const { getThreadTitleSourceText } = await import("@in/server/modules/threadTitles")
@@ -941,6 +1000,131 @@ describe("thread title generation", () => {
     await waitForChatTitle(chat.id, "Stable pending title")
     await generation
     expect(parseCompletion).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("explicit chat emoji generation", () => {
+  setupTestLifecycle()
+
+  afterEach(() => parseCompletion.mockReset())
+
+  async function namedChat(label: string, values: Partial<typeof schema.chats.$inferInsert> = {}) {
+    const owner = await testUtils.createUser(`emoji-${label}@example.test`)
+    const [chat] = await db.insert(schema.chats).values({
+      type: "thread", title: "Launch checklist", createdBy: owner.id, publicThread: false, ...values,
+    }).returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+    return { owner, chat, context: testUtils.functionContext({ userId: owner.id }) }
+  }
+
+  test("a named chat gets only an emoji, using its bounded visible discussion", async () => {
+    const { chat, owner, context } = await namedChat("named", { autoTitleGenerated: true, messageIdCounter: 2 })
+    await db.insert(schema.messages).values([
+      { chatId: chat.id, fromId: owner.id, messageId: 1, text: "Plan the mobile launch checklist" },
+      { chatId: chat.id, fromId: owner.id, messageId: 2, text: "Track the app release milestones" },
+      { chatId: chat.id, fromId: owner.id, messageId: 3, text: "FUTURE_EMOJI_MESSAGE_SENTINEL" },
+    ])
+    parseCompletion.mockResolvedValueOnce(completion("IGNORED_RENAMING", "🚀"))
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    const { canAutoTitleThread } = await import("@in/server/modules/threadTitles")
+    expect(canAutoTitleThread(chat)).toBe(false)
+    const result = await updateChatInfo({ chatId: chat.id, generateEmoji: true }, context)
+    expect(result.chat.emoji).toBe("🚀")
+    expect(result.chat.title).toBe(chat.title)
+    expect(result.chat.isUntitled).toBe(chat.isUntitled)
+    expect(result.chat.autoTitleGenerated).toBe(true)
+    const request = parseCompletion.mock.calls[0]?.[0] as { messages: { role: string; content: string }[] }
+    const transcript = request.messages.find((message) => message.role === "user")!.content
+    expect(transcript).toContain("Current chat title: Launch checklist")
+    expect(transcript).toContain("Track the app release milestones")
+    expect(transcript).not.toContain("FUTURE_EMOJI_MESSAGE_SENTINEL")
+    const rows = await db.select().from(schema.updates).where(eq(schema.updates.entityId, chat.id))
+    const update = rows.map((row) => UpdatesModel.decrypt(row).payload.update).find((update) => update.oneofKind === "chatInfo")
+    const chatInfo = update?.oneofKind === "chatInfo" ? update.chatInfo : undefined
+    expect(chatInfo).toMatchObject({ chatId: BigInt(chat.id), emoji: "🚀" })
+    expect(chatInfo?.title).toBeUndefined()
+  })
+
+  test("chosen emojis and invalid mixed requests never invoke the provider", async () => {
+    const { chat, context } = await namedChat("chosen", { emoji: "📚" })
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    const result = await updateChatInfo({ chatId: chat.id, generateEmoji: true }, context)
+    expect(result.chat.emoji).toBe("📚")
+    await expect(updateChatInfo({ chatId: chat.id, generateEmoji: true, title: "Another title" }, context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    await expect(updateChatInfo({ chatId: chat.id, generateEmoji: true, emoji: "" }, context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    expect(parseCompletion).not.toHaveBeenCalled()
+  })
+
+  test("an in-flight generation cannot overwrite a human emoji or use a changed title", async () => {
+    const { chat, context } = await namedChat("changed")
+    let resolve: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(() => new Promise<ReturnType<typeof completion>>((done) => { resolve = done }))
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    const generation = updateChatInfo({ chatId: chat.id, generateEmoji: true }, context)
+    await waitForParseCallCount(1)
+    await updateChatInfo({ chatId: chat.id, title: "Human's research notes", emoji: "📚" }, context)
+    resolve(completion(null, "🚀"))
+    const result = await generation
+    expect(result.chat.title).toBe("Human's research notes")
+    expect(result.chat.emoji).toBe("📚")
+
+    const second = await namedChat("changed-title")
+    const titleGeneration = updateChatInfo({ chatId: second.chat.id, generateEmoji: true }, second.context)
+    await waitForParseCallCount(2)
+    await updateChatInfo({ chatId: second.chat.id, title: "Budget review" }, second.context)
+    resolve(completion(null, "🚀"))
+    expect((await titleGeneration).chat.emoji).toBeNull()
+  })
+
+  test("blank cards, anchored replies and unauthorized requests fail before provider work", async () => {
+    const blank = await namedChat("blank", { title: null })
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    await expect(updateChatInfo({ chatId: blank.chat.id, generateEmoji: true }, blank.context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    const parent = await namedChat("parent")
+    await db.insert(schema.messages).values({ chatId: parent.chat.id, fromId: parent.owner.id, messageId: 1, text: "Anchor" })
+    const anchored = await namedChat("anchor", { parentChatId: parent.chat.id, parentMessageId: 1 })
+    // A linked reply inherits access from the parent.
+    await testUtils.addParticipant(parent.chat.id, anchored.owner.id)
+    await expect(updateChatInfo({ chatId: anchored.chat.id, generateEmoji: true }, anchored.context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    await expect(updateChatInfo({ chatId: parent.chat.id, generateEmoji: true }, blank.context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
+    expect(parseCompletion).not.toHaveBeenCalled()
+  })
+
+  test("current permissions are rechecked after a provider response", async () => {
+    const { chat } = await namedChat("revoked")
+    const actor = await testUtils.createUser("emoji-revoked-actor@example.test")
+    await testUtils.addParticipant(chat.id, actor.id)
+    let resolve: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(() => new Promise<ReturnType<typeof completion>>((done) => { resolve = done }))
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    const generation = updateChatInfo({ chatId: chat.id, generateEmoji: true }, testUtils.functionContext({ userId: actor.id }))
+    await waitForParseCallCount(1)
+    await db.delete(schema.chatParticipants).where(eq(schema.chatParticipants.userId, actor.id))
+    resolve(completion(null, "🚀"))
+    await expect(generation).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
+    expect((await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) }))?.emoji).toBeNull()
+  })
+
+  test("invalid or declined emojis preserve the card and provider failures are actionable", async () => {
+    const { chat, context } = await namedChat("declined", { isUntitled: true, autoTitleGenerated: false })
+    const { updateChatInfo } = await import("@in/server/functions/messages.updateChatInfo")
+    for (const emoji of [null, "launch", "🚀📚"]) {
+      parseCompletion.mockResolvedValueOnce(completion(null, emoji))
+      const result = await updateChatInfo({ chatId: chat.id, generateEmoji: true }, context)
+      expect(result.chat.title).toBe(chat.title)
+      expect(result.chat.emoji).toBeNull()
+      expect(result.chat.isUntitled).toBe(true)
+      expect(result.chat.autoTitleGenerated).toBe(false)
+    }
+    parseCompletion.mockRejectedValueOnce(new Error("synthetic provider failure"))
+    await expect(updateChatInfo({ chatId: chat.id, generateEmoji: true }, context))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.INTERNAL_ERROR, message: "Failed to generate chat emoji" })
   })
 })
 

@@ -201,7 +201,22 @@ public extension File {
     _ db: Database,
     apiPhoto photo: ApiPhoto,
     forMessageLocalId: Int64? = nil,
-    forUserId: Int64? = nil
+    forUserId: Int64? = nil,
+    publisher: MessagesPublisher? = nil
+  ) throws -> File {
+    try save(db, apiPhoto: photo, forMessageLocalId: forMessageLocalId, forUserId: forUserId,
+             publisher: publisher, beforeAsyncNotification: nil)
+  }
+
+  // Internal scheduling seam: the actual row writer and commit callback remain
+  // identical, while a regression can delay only asynchronous notification.
+  internal static func save(
+    _ db: Database,
+    apiPhoto photo: ApiPhoto,
+    forMessageLocalId: Int64? = nil,
+    forUserId: Int64? = nil,
+    publisher: MessagesPublisher? = nil,
+    beforeAsyncNotification: (@Sendable () async -> Void)?
   ) throws -> File {
     // fetch
     guard
@@ -221,9 +236,15 @@ public extension File {
       }
 
       // insert
-      return try file.insertAndFetch(db)
+      let saved = try file.insertAndFetch(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(saved)
+      changes.publishAfterCommit(db, publisher: publisher, beforeAsyncNotification: beforeAsyncNotification)
+      return saved
     }
 
+    var changes = MessageProjectionDependencies()
+    changes.include(existing)
     // update
     existing.temporaryUrl = photo.temporaryUrl
     existing.temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
@@ -240,7 +261,10 @@ public extension File {
       existing.profileForUserId = forUserId
     }
 
-    return try existing.updateAndFetch(db)
+    let saved = try existing.updateAndFetch(db)
+    changes.include(saved)
+    changes.publishAfterCommit(db, publisher: publisher, beforeAsyncNotification: beforeAsyncNotification)
+    return saved
   }
 }
 
@@ -250,7 +274,8 @@ public extension File {
     _ db: Database,
     protocolPhoto photo: InlineProtocol.Photo,
     forMessageLocalId: Int64? = nil,
-    forUserId: Int64? = nil
+    forUserId: Int64? = nil,
+    publisher: MessagesPublisher? = nil
   ) throws -> File {
     // fetch
     guard
@@ -270,12 +295,17 @@ public extension File {
       }
 
       // insert
-      return try file.insertAndFetch(db)
+      let saved = try file.insertAndFetch(db)
+      var changes = MessageProjectionDependencies()
+      changes.include(saved)
+      changes.publishAfterCommit(db, publisher: publisher)
+      return saved
     }
 
     // a new one to fill in existing one
     var newFile = try File(from: photo)
-
+    var changes = MessageProjectionDependencies()
+    changes.include(existing)
     // update
     existing.temporaryUrl = newFile.temporaryUrl
     existing.temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
@@ -292,7 +322,10 @@ public extension File {
       existing.profileForUserId = forUserId
     }
 
-    return try existing.updateAndFetch(db)
+    let saved = try existing.updateAndFetch(db)
+    changes.include(saved)
+    changes.publishAfterCommit(db, publisher: publisher)
+    return saved
   }
 }
 

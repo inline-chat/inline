@@ -41,7 +41,9 @@ export async function moveThread(
 
   try {
     const result = await db.transaction(async (tx): Promise<{ chat: DbChat; updatePayload?: ServerUpdate["update"] }> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+      // Moving to home acquires the creator's user number owner below. Keep
+      // KEY SHARE readers compatible until that owner precedes the key update.
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw RealtimeRpcError.ChatIdInvalid()

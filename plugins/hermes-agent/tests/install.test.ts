@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, lstat, writeFile } from "node:fs/promises"
+import { chmod, cp, mkdir, mkdtemp, readFile, realpath, readdir, rename, rm, lstat, symlink, writeFile } from "node:fs/promises"
 import { spawnSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
@@ -69,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.21",
-      "@inline-chat/hermes-agent-adapter@0.0.21",
-      "@inline-chat/hermes-agent-adapter@0.0.21",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
+      "@inline-chat/hermes-agent-adapter@0.0.22",
     ])
   })
 
@@ -202,6 +202,82 @@ describe("inline-hermes installer", () => {
     expect(payload.sourceValid).toBe(true)
     expect(await realpath(payload.source || "")).toBe(await realpath(path.join(pkgDir, "plugin", "inline")))
   })
+
+  it("inspects the actual packed install once after every runtime byte is copied", async () => {
+    // Retain this small packed fixture so a matching-core CLI can also exercise
+    // the exact shipped installer, independently of the probe observer below.
+    const dir = await mkdtemp(path.join(os.tmpdir(), "inline-hermes-install-proof-"))
+    const pkgDir = path.join(dir, "pkg")
+    const extracted = path.join(dir, "extracted")
+    const consumer = path.join(dir, "consumer")
+    const home = path.join(dir, "hermes")
+    await mkdir(path.join(pkgDir, "dist"), { recursive: true })
+    await mkdir(path.join(pkgDir, "plugin"), { recursive: true })
+    await mkdir(extracted)
+    const built = spawnSync("bun", ["build", "./src/install.ts", "--outdir", path.join(pkgDir, "dist"),
+      "--entry-naming", "install.js", "--target=node", "--format=esm", "--packages=bundle"],
+    { cwd: packageRoot, encoding: "utf8" })
+    expect(built.status, "The current installer must bundle successfully").toBe(0)
+    await cp(path.join(packageRoot, "package.json"), path.join(pkgDir, "package.json"))
+    await cp(path.join(packageRoot, "plugin", "inline"), path.join(pkgDir, "plugin", "inline"), { recursive: true })
+    const packed = spawnSync("npm", ["pack", "--ignore-scripts", "--json", "--silent", "--pack-destination", dir],
+      { cwd: pkgDir, encoding: "utf8", env: { ...process.env, npm_config_dry_run: "false" } })
+    expect(packed.status, "The current installer fixture must pack successfully").toBe(0)
+    const tarball = path.join(dir, JSON.parse(packed.stdout)[0].filename)
+    const unpacked = spawnSync("tar", ["-xzf", tarball, "-C", extracted], { encoding: "utf8" })
+    expect(unpacked.status).toBe(0)
+    const shipped = path.join(consumer, "node_modules", "@inline-chat", "hermes-agent-adapter")
+    await mkdir(path.dirname(shipped), { recursive: true })
+    await rename(path.join(extracted, "package"), shipped)
+    await mkdir(path.join(consumer, "node_modules", ".bin"))
+    await symlink(path.join(shipped, "dist", "install.js"), path.join(consumer, "node_modules", ".bin", "inline-hermes"))
+    const source = path.join(shipped, "plugin", "inline")
+    const probeLog = path.join(dir, "probes.jsonl")
+    const hermes = path.join(dir, "observe-hermes")
+    await writeFile(hermes, `#!${nodeBin}\n` + String.raw`
+const { appendFileSync, readFileSync, readdirSync } = require("node:fs");
+const path = require("node:path");
+const source = ${JSON.stringify(source)};
+const target = path.join(process.env.HERMES_HOME, "plugins", "inline");
+const files = [];
+function visit(directory, prefix = "") {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const name = path.join(prefix, entry.name);
+    if (entry.isDirectory()) visit(path.join(directory, entry.name), name);
+    else files.push(name);
+  }
+}
+visit(source);
+const equal = files.every(name => {
+  try { return readFileSync(path.join(source, name)).equals(readFileSync(path.join(target, name))); }
+  catch { return false; }
+});
+appendFileSync(${JSON.stringify(probeLog)}, JSON.stringify({ args: process.argv.slice(2), allRuntimeBytesMatch: equal }) + "\n");
+console.log(JSON.stringify({ action: "inline.status", setupProtocolVersion: 1, configured: false }));
+`)
+    await chmod(hermes, 0o755)
+    const bin = path.join(shipped, "dist", "install.js")
+    const result = spawnSync(nodeBin, [bin, "install", "--hermes-home", home, "--json"], {
+      encoding: "utf8", timeout: 30_000,
+      env: { ...process.env, INLINE_NODE_BIN: nodeBin, INLINE_HERMES_BIN: hermes },
+    })
+    expect(result.status, "The packed installer must complete normally").toBe(0)
+    const probes = (await readFile(probeLog, "utf8")).trim().split("\n").map(line => JSON.parse(line))
+    expect(probes).toEqual([{ args: ["inline", "status", "--json"], allRuntimeBytesMatch: true }])
+    const files = await readdir(source, { recursive: true, withFileTypes: true })
+    for (const file of files.filter(entry => entry.isFile())) {
+      const relative = path.relative(source, path.join(file.parentPath, file.name))
+      expect(await readFile(path.join(home, "plugins", "inline", relative)))
+        .toEqual(await readFile(path.join(source, relative)))
+    }
+    if (process.env.INLINE_HERMES_INSTALL_TEST_REPORT) {
+      await writeFile(process.env.INLINE_HERMES_INSTALL_TEST_REPORT, JSON.stringify({
+        case: "packed-installer-single-post-copy-inspection", bin, tarball, source, consumer,
+        hermesHome: home, probes, runtimeFiles: files.filter(entry => entry.isFile()).length,
+        allRuntimeBytesMatch: true, canonicalProbeExecutedBy: "test observer; real host is a separate assertion",
+      }, null, 2) + "\n")
+    }
+  }, 30_000)
 
   it("copies only runtime plugin files from an installed package layout", async () => {
     const dir = await tempDir()
@@ -349,6 +425,7 @@ describe("inline-hermes installer", () => {
     const text = String(log.mock.calls.at(-1)?.[0])
     const payload = JSON.parse(text)
     expect(payload.activation).toMatchObject({
+      hermesReceivingSupported: true,
       hermesCredentialStoreChecked: true,
       hermesCredentialStoreTokenConfigured: true,
       credentialState: "verified",
@@ -358,6 +435,28 @@ describe("inline-hermes installer", () => {
     })
     expect(payload.warnings).toEqual([])
     expect(text).not.toContain("secret-token")
+  })
+
+  it.each([
+    ["missing core attestation", undefined],
+    ["stock host", { supported: false, requiredIntakeVersion: 1, reason: "durable_intake_required" }],
+    ["wrong capability version", { supported: true, requiredIntakeVersion: 2 }],
+  ])("fails receiving doctor with %s while preserving verified sender readiness", async (_name, receivingCapability) => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await useFakeHermes(home, {
+      action: "inline.status", setupProtocolVersion: 1, configured: true,
+      receivingCapability, probe: { ok: true, botUserId: "42" },
+    })
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(payload.activation).toMatchObject({
+      hermesCompatibilityVerified: true, hermesReceivingSupported: false,
+      credentialState: "verified", credentialBotUserId: "42",
+    })
+    expect(payload.issues.join(" ")).toContain("Hermes durable receiving support is unavailable")
   })
 
   it.each([
@@ -904,7 +1003,11 @@ async function writeTopLevelInlineConfig(home: string, token: string): Promise<v
 
 async function useFakeHermes(home: string, payload: Record<string, unknown>, exitCode = 0): Promise<void> {
   const executable = path.join(home, "fake-hermes")
-  const response = { compatibility: { ok: true, pluginPath: path.join(await realpath(home), "plugins", "inline") }, ...payload }
+  const response = {
+    compatibility: { ok: true, pluginPath: path.join(await realpath(home), "plugins", "inline") },
+    receivingCapability: { supported: true, requiredIntakeVersion: 1, reason: "core_capability_available" },
+    ...payload,
+  }
   const encoded = JSON.stringify(response).replaceAll("'", "'\\''")
   await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' 'secret-token' >&2\nprintf '%s\\n' '${encoded}'\nexit ${exitCode}\n`)
   await chmod(executable, 0o755)

@@ -62,7 +62,9 @@ export async function removeChatParticipant(
       accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      // Membership writers still serialize with each other; leave dialog
+      // readers' KEY SHARE compatible while recipient user owners are acquired.
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
@@ -179,7 +181,7 @@ async function removeChatParticipantGroup(
       accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)

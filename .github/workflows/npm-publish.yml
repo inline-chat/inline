@@ -36,6 +36,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -214,21 +215,21 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install latest stable Hermes for release gate
+      - name: Install stock Hermes for loader/tool/send compatibility
         if: inputs.package == 'hermes-agent'
         id: hermes-host
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
 
-      - name: Validate exact Hermes release artifact against real host
+      - name: Validate exact Hermes artifact stock compatibility and receive refusal
         if: inputs.package == 'hermes-agent'
         env:
           HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
           HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.hermes-host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT" "$HERMES_BIN" "$HERMES_PYTHON"
-      - name: Validate native Hermes source installation
+      - name: Validate native Hermes source loader and mock sidecar smoke
         if: inputs.package == 'hermes-agent'
         env:
           HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
@@ -240,6 +241,34 @@ jobs:
         env:
           HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
         run: bash scripts/ci/check-umbrel-hermes.sh --plugin-only
+
+      - name: Select receiving proof for the exact Inline source
+        if: inputs.package == 'hermes-agent'
+        id: hermes-proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/integrations.yml/runs" \
+            -f head_sha="$RELEASE_COMMIT" -f event=push -f status=success -f branch=main -f per_page=20 \
+            > "$RUNNER_TEMP/hermes-proof-runs.json"
+          node scripts/ci/hermes-receiving-proof.mjs select-run "$RUNNER_TEMP/hermes-proof-runs.json" "$RELEASE_COMMIT" "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+
+      - name: Download existing receiving receipt
+        if: inputs.package == 'hermes-agent'
+        uses: actions/download-artifact@v4
+        with:
+          name: local-integration-receipts
+          path: ${{ runner.temp }}/hermes-receiving-proof
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.hermes-proof.outputs.run-id }}
+
+      - name: Require receiving proof for the exact Hermes release bytes
+        if: inputs.package == 'hermes-agent'
+        env:
+          HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: node scripts/ci/hermes-receiving-proof.mjs verify "$RUNNER_TEMP/hermes-receiving-proof/hermes-flow-receipt.json" "$HERMES_ARTIFACT" "$RELEASE_COMMIT"
 
       - name: Pack and install exact public artifact
         if: inputs.package != 'hermes-agent'

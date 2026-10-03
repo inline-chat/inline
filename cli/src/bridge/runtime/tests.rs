@@ -254,6 +254,192 @@ fn projected_agent_session_history_is_rejected_before_idle_or_active_handling() 
     ));
 }
 
+#[tokio::test]
+async fn two_bot_task_admission_uses_exact_recipient_and_ignores_carried_mentions() {
+    use inline_client::{
+        DialogRecord, MessageContent, MessageEntityRecord, MessageMetadata, MessageRecord,
+    };
+    let workspace = tempfile::tempdir().unwrap();
+    let store = Arc::new(BridgeStore::open_in_memory().unwrap());
+    let installation_id = InstallationId::new("guest-worker").unwrap();
+    let provider_id = ProviderId::new("codex").unwrap();
+    store
+        .put_installation(&InstallationRecord {
+            installation_id: installation_id.clone(),
+            provider_id: provider_id.clone(),
+            display_name: "Guest".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    store
+        .select_workspace(
+            &installation_id,
+            &WorkspaceId::new("guest-workspace").unwrap(),
+            workspace.path(),
+            1,
+        )
+        .unwrap();
+    let route = InboundRoute {
+        store,
+        installation_id,
+        provider_id,
+        policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
+        owner_user_id: 7,
+        host_label: "Test Mac".to_string(),
+        owner_dm_chat_id: 706,
+        bot_user_id: 17,
+        bot_username: "guest_bot".to_string(),
+        bot_store: SqliteStore::open_in_memory().unwrap(),
+        attachment_cache_dir: workspace.path().to_path_buf(),
+        owner_control: None,
+        accept_messages_after: 0,
+        deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
+        pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
+    };
+    route
+        .bot_store
+        .record_dialog(DialogRecord {
+            agent_context: Some(inline_client::AgentThreadContext {
+                bot_user_id: InlineId::new(98),
+                agent_id: Some(InlineId::new(88)),
+                configuration: Some(inline_client::AgentThreadConfiguration {
+                    project_id: Some("another-worker-project".to_string()),
+                    model_id: Some("another-model".to_string()),
+                    reasoning_effort_id: None,
+                }),
+            }),
+            ..DialogRecord::new(InlineId::new(10))
+        })
+        .await
+        .unwrap();
+    route.bot_agent_resolver.store(
+        88,
+        Some(proto::BotAgent {
+            id: 88,
+            bot_user_id: 98,
+            instructions: Some("Foreign specialization".to_string()),
+            ..proto::BotAgent::default()
+        }),
+    );
+    route.bot_agent_resolver.store(
+        77,
+        Some(proto::BotAgent {
+            id: 77,
+            bot_user_id: 17,
+            instructions: Some("Own specialization".to_string()),
+            ..proto::BotAgent::default()
+        }),
+    );
+    let bot = InlineClient::builder().build().spawn();
+    bot.connect(inline_client::ConnectRequest::new(
+        inline_client::AuthCredential::AccessToken {
+            token: inline_client::AuthToken::try_new("local-test-only").unwrap(),
+        },
+    ))
+    .await
+    .unwrap();
+    let mut request = MessageRecord {
+        chat_id: InlineId::new(10),
+        message_id: InlineId::new(2),
+        sender_id: InlineId::new(98),
+        timestamp: 100,
+        is_outgoing: false,
+        content: MessageContent::Text {
+            text: "@guest inspect this".to_string(),
+        },
+        reply_to_message_id: None,
+        metadata: MessageMetadata {
+            sender_is_bot: Some(true),
+            entities: vec![MessageEntityRecord {
+                kind: "TYPE_MENTION".to_string(),
+                offset: 0,
+                length: 6,
+                user_id: Some(InlineId::new(17)),
+                agent_id: Some(InlineId::new(77)),
+                group_id: None,
+                chat_id: None,
+                value: None,
+            }],
+            ..MessageMetadata::default()
+        },
+        transaction: None,
+    };
+    let admitted = inbound_from_message(&bot, &request, &route, true)
+        .await
+        .unwrap()
+        .expect("explicit bot-to-bot direction");
+    assert_eq!(admitted.sender_user_id, 98);
+    assert_eq!(admitted.binding.installation_id, route.installation_id);
+    assert_eq!(admitted.binding.workspace_id.as_str(), "guest-workspace");
+    assert!(admitted.direction.text.contains("Own specialization"));
+    assert!(!admitted.direction.text.contains("Foreign specialization"));
+    request.metadata.is_forwarded = true;
+    assert!(
+        inbound_from_message(&bot, &request, &route, true)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    request.metadata.is_forwarded = false;
+    request.metadata.entities[0].user_id = Some(InlineId::new(98));
+    assert!(
+        inbound_from_message(&bot, &request, &route, true)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    request.metadata.entities[0].user_id = Some(InlineId::new(17));
+    request.metadata.entities[0].agent_id = Some(InlineId::new(88));
+    assert!(
+        inbound_from_message(&bot, &request, &route, true)
+            .await
+            .unwrap()
+            .is_none(),
+        "Agent preset cannot cross its backing bot authority"
+    );
+    let mut other_bot_output = request.clone();
+    other_bot_output.message_id = InlineId::new(1);
+    other_bot_output.metadata.entities.clear();
+    route
+        .bot_store
+        .record_message(other_bot_output.clone())
+        .await
+        .unwrap();
+    request.sender_id = InlineId::new(7);
+    request.metadata.sender_is_bot = Some(false);
+    request.metadata.entities.clear();
+    request.reply_to_message_id = Some(InlineId::new(1));
+    assert!(
+        inbound_from_message(&bot, &request, &route, true)
+            .await
+            .unwrap()
+            .is_none(),
+        "reply to the other bot must not wake this worker"
+    );
+    other_bot_output.sender_id = InlineId::new(17);
+    other_bot_output.message_id = InlineId::new(3);
+    route
+        .bot_store
+        .record_message(other_bot_output)
+        .await
+        .unwrap();
+    request.message_id = InlineId::new(4);
+    request.reply_to_message_id = Some(InlineId::new(3));
+    assert!(
+        inbound_from_message(&bot, &request, &route, true)
+            .await
+            .unwrap()
+            .is_some(),
+        "human reply to this bot retains its own binding"
+    );
+    bot.shutdown().await.unwrap();
+}
+
 #[test]
 fn bot_progress_updates_do_not_feed_the_active_turn_control_queue() {
     let mut own = voice_message(Some("Working"), None);
@@ -451,6 +637,24 @@ fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
             .workspace_id,
         snapshot.binding.workspace_id
     );
+
+    let own_settings = store.chat_settings(&snapshot.binding, 2).unwrap();
+    let foreign_preset = proto::AgentThreadContext {
+        bot_user_id: 98,
+        agent_id: Some(88),
+        configuration: Some(proto::AgentThreadConfiguration {
+            project_id: Some("foreign-project-not-registered-here".to_string()),
+            model_id: Some("foreign-model".to_string()),
+            reasoning_effort_id: Some("foreign-reasoning".to_string()),
+        }),
+    };
+    let guest = conversation_for_chat_with_agent_context(&route, 706, Some(&foreign_preset), true)
+        .expect("another authorized bot keeps its own binding")
+        .snapshot();
+    assert_eq!(guest.binding, snapshot.binding);
+    let guest_settings = store.chat_settings(&guest.binding, 3).unwrap();
+    assert_eq!(guest_settings.model, own_settings.model);
+    assert_eq!(guest_settings.reasoning, own_settings.reasoning);
 }
 
 #[test]
@@ -1097,6 +1301,7 @@ impl StreamMessageTransport for FaultingStreamTransport {
     ) -> Result<MessageMutation, Box<dyn std::error::Error>> {
         self.sends.fetch_add(1, Ordering::Relaxed);
         self.media_sends.fetch_add(1, Ordering::Relaxed);
+        let media_message_id = InlineId::new(self.normal_message_id.get() + 1);
         if Self::fail_once(&self.remaining_send_failures) {
             return Err(
                 io::Error::new(io::ErrorKind::ConnectionReset, "injected send failure").into(),
@@ -1108,9 +1313,9 @@ impl StreamMessageTransport for FaultingStreamTransport {
                 request.external_id,
                 request.random_id.unwrap_or(RandomId::new(1)),
             )
-            .with_final_message_id(self.normal_message_id),
+            .with_final_message_id(media_message_id),
             message_id: (!Self::fail_once(&self.remaining_unconfirmed_sends))
-                .then_some(self.normal_message_id),
+                .then_some(media_message_id),
             state: None,
             failure: None,
         })
@@ -1161,7 +1366,81 @@ async fn final_delivery_uploads_a_verified_generated_image_before_text() {
     };
     let transport = FaultingStreamTransport::new(0, 0, 40);
 
-    let mutation = deliver_pending_final_with_attachments_transport(
+    let store = BridgeStore::open_in_memory().unwrap();
+    let binding = BindingKey {
+        installation_id: InstallationId::new("output-worker").unwrap(),
+        chat_id: 42,
+        workspace_id: WorkspaceId::new("output-workspace").unwrap(),
+    };
+    let session = inline_agent_bridge::ProviderSessionId::new("output-session").unwrap();
+    store
+        .put_binding(&binding, &ProviderId::new("acp").unwrap(), &session, 1)
+        .unwrap();
+    let record = InboundRecord {
+        event_id: "event-1".to_string(),
+        binding: binding.clone(),
+        message_id: 1,
+        delivery_chat_id: 42,
+        sender_user_id: 7,
+        direction: Direction::new(
+            DirectionId::new("output-direction").unwrap(),
+            "make an image",
+        )
+        .with_source_version(Some(inline_agent_bridge::SourceMessageVersion {
+            revision: 0,
+            source_snapshot: None,
+            visible_fingerprint: Some("a".repeat(64)),
+            discretionary: false,
+            text: "make an image".into(),
+        })),
+        state: InboundState::Accepted,
+        accepted_at: 1,
+        started_at: None,
+        lease_expires_at: None,
+        attempt_count: 0,
+        provider_turn_id: None,
+        stream_message_id: None,
+        failure: None,
+    };
+    store.accept_inbound(&record).unwrap();
+    store.start_inbound(&record.event_id, 2).unwrap();
+    store
+        .prepare_context_input(
+            &record.event_id,
+            &inline_agent_bridge::ContextInputSnapshot {
+                binding: binding.clone(),
+                provider_session_id: session.clone(),
+                generation: store.context_receipt(&binding).unwrap().generation,
+                input: TurnInput {
+                    text: record.direction.text,
+                    attachments: vec![],
+                    client_message_id: Some("output-direction".into()),
+                },
+                messages: vec![inline_agent_bridge::ContextMessageRef {
+                    chat_id: 42,
+                    message_id: 1,
+                    revision: 0,
+                    source_snapshot: None,
+                    visible_fingerprint: Some("a".repeat(64)),
+                }],
+                trigger: Some(inline_agent_bridge::ContextTriggerProof {
+                    chat_id: 42,
+                    message_id: 1,
+                    timestamp: 1,
+                }),
+            },
+        )
+        .unwrap();
+    store
+        .begin_context_input(&record.event_id, &binding, &session)
+        .unwrap();
+    store
+        .accept_context_input(
+            &record.event_id,
+            &inline_agent_bridge::TurnId::new("output-turn").unwrap(),
+        )
+        .unwrap();
+    let mutation = deliver_pending_final_with_receipts_transport(
         &transport,
         "event-1",
         42,
@@ -1171,6 +1450,7 @@ async fn final_delivery_uploads_a_verified_generated_image_before_text() {
         "Done.",
         &[attachment],
         |_| Duration::ZERO,
+        Some(&store),
     )
     .await
     .expect("deliver output and text");
@@ -1178,6 +1458,14 @@ async fn final_delivery_uploads_a_verified_generated_image_before_text() {
     assert_eq!(transport.media_sends.load(Ordering::Relaxed), 1);
     assert_eq!(transport.sends.load(Ordering::Relaxed), 2);
     assert_eq!(mutation.message_id, Some(transport.normal_message_id));
+    assert_eq!(
+        store.context_receipt(&binding).unwrap().represented_outputs,
+        HashSet::from([
+            (42, transport.normal_message_id.get()),
+            (42, transport.normal_message_id.get() + 1)
+        ]),
+        "ordinary unlinked text and media both need scoped public output receipts"
+    );
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { ModelError } from "@in/server/db/models/_errors"
 import {
   documents,
@@ -47,13 +48,16 @@ async function cloneFileFromExisting({
   file,
   newOwnerId,
   fileType,
+  transaction,
 }: {
   file: DbFile
   newOwnerId: number
   fileType: FileTypes
+  transaction?: Transaction
 }): Promise<DbFile> {
+  const database = transaction ?? db
   const fileUniqueId = generateFileUniqueId(fileType)
-  const [newFile] = await db
+  const [newFile] = await database
     .insert(files)
     .values({
       fileUniqueId,
@@ -136,8 +140,9 @@ export function processFullPhoto(photo: InputDbFullPhoto): DbFullPhoto {
   return processed
 }
 
-async function getPhotoById(photoId: bigint): Promise<DbFullPhoto | undefined> {
-  let result = await db._query.photos.findFirst({
+async function getPhotoById(photoId: bigint, transaction?: Transaction): Promise<DbFullPhoto | undefined> {
+  const database = transaction ?? db
+  let result = await database._query.photos.findFirst({
     where: eq(photos.id, Number(photoId)),
     with: {
       photoSizes: {
@@ -155,7 +160,8 @@ async function getPhotoById(photoId: bigint): Promise<DbFullPhoto | undefined> {
   return processFullPhoto(result)
 }
 
-export async function getPhotosByIds(photoIds: bigint[]): Promise<DbFullPhoto[]> {
+export async function getPhotosByIds(photoIds: bigint[], transaction?: Transaction): Promise<DbFullPhoto[]> {
+  const database = transaction ?? db
   const ids = [...new Set(
     photoIds
       .map(Number)
@@ -163,7 +169,7 @@ export async function getPhotosByIds(photoIds: bigint[]): Promise<DbFullPhoto[]>
   )]
   if (ids.length === 0) return []
 
-  const results = await db._query.photos.findMany({
+  const results = await database._query.photos.findMany({
     where: inArray(photos.id, ids),
     with: {
       photoSizes: {
@@ -177,8 +183,9 @@ export async function getPhotosByIds(photoIds: bigint[]): Promise<DbFullPhoto[]>
   return results.map(processFullPhoto)
 }
 
-export async function clonePhotoById(photoId: number, newOwnerId: number): Promise<number> {
-  const photo = await db._query.photos.findFirst({
+export async function clonePhotoById(photoId: number, newOwnerId: number, transaction?: Transaction): Promise<number> {
+  const database = transaction ?? db
+  const photo = await database._query.photos.findFirst({
     where: eq(photos.id, photoId),
     with: {
       photoSizes: {
@@ -193,7 +200,7 @@ export async function clonePhotoById(photoId: number, newOwnerId: number): Promi
     throw ModelError.PhotoInvalid
   }
 
-  const [newPhoto] = await db
+  const [newPhoto] = await database
     .insert(photos)
     .values({
       format: photo.format,
@@ -218,9 +225,10 @@ export async function clonePhotoById(photoId: number, newOwnerId: number): Promi
       file: size.file,
       newOwnerId,
       fileType: FileTypes.PHOTO,
+      transaction,
     })
 
-    await db.insert(photoSizes).values({
+    await database.insert(photoSizes).values({
       fileId: newFile.id,
       photoId: newPhoto.id,
       size: size.size,
@@ -256,8 +264,9 @@ export type DbFullVideo = DbVideo & {
   photo: DbFullPhoto | null
 }
 
-async function getVideoById(videoId: bigint): Promise<DbFullVideo | undefined> {
-  const result = await db._query.videos.findFirst({
+async function getVideoById(videoId: bigint, transaction?: Transaction): Promise<DbFullVideo | undefined> {
+  const database = transaction ?? db
+  const result = await database._query.videos.findFirst({
     where: eq(videos.id, Number(videoId)),
     with: {
       file: true,
@@ -280,8 +289,9 @@ async function getVideoById(videoId: bigint): Promise<DbFullVideo | undefined> {
   return processFullVideo(result)
 }
 
-export async function cloneVideoById(videoId: number, newOwnerId: number): Promise<number> {
-  const video = await db._query.videos.findFirst({
+export async function cloneVideoById(videoId: number, newOwnerId: number, transaction?: Transaction): Promise<number> {
+  const database = transaction ?? db
+  const video = await database._query.videos.findFirst({
     where: eq(videos.id, videoId),
     with: {
       file: true,
@@ -305,11 +315,12 @@ export async function cloneVideoById(videoId: number, newOwnerId: number): Promi
     file: video.file,
     newOwnerId,
     fileType: FileTypes.VIDEO,
+    transaction,
   })
 
-  const newPhotoId = video.photo ? BigInt(await clonePhotoById(video.photo.id, newOwnerId)) : null
+  const newPhotoId = video.photo ? BigInt(await clonePhotoById(video.photo.id, newOwnerId, transaction)) : null
 
-  const [newVideo] = await db
+  const [newVideo] = await database
     .insert(videos)
     .values({
       fileId: newFile.id,
@@ -359,8 +370,9 @@ export type DbFullDocument = DbPlainDocument & {
   photo: DbFullPhoto | null
 }
 
-async function getDocumentById(documentId: bigint): Promise<DbFullDocument | undefined> {
-  const result = await db._query.documents.findFirst({
+async function getDocumentById(documentId: bigint, transaction?: Transaction): Promise<DbFullDocument | undefined> {
+  const database = transaction ?? db
+  const result = await database._query.documents.findFirst({
     where: eq(documents.id, Number(documentId)),
     with: {
       file: true,
@@ -383,8 +395,9 @@ async function getDocumentById(documentId: bigint): Promise<DbFullDocument | und
   return processFullDocument(result)
 }
 
-export async function cloneDocumentById(documentId: number, newOwnerId: number): Promise<number> {
-  const document = await db._query.documents.findFirst({
+export async function cloneDocumentById(documentId: number, newOwnerId: number, transaction?: Transaction): Promise<number> {
+  const database = transaction ?? db
+  const document = await database._query.documents.findFirst({
     where: eq(documents.id, documentId),
     with: {
       file: true,
@@ -408,11 +421,12 @@ export async function cloneDocumentById(documentId: number, newOwnerId: number):
     file: document.file,
     newOwnerId,
     fileType: FileTypes.DOCUMENT,
+    transaction,
   })
 
-  const newPhotoId = document.photo ? BigInt(await clonePhotoById(document.photo.id, newOwnerId)) : null
+  const newPhotoId = document.photo ? BigInt(await clonePhotoById(document.photo.id, newOwnerId, transaction)) : null
 
-  const [newDocument] = await db
+  const [newDocument] = await database
     .insert(documents)
     .values({
       fileId: newFile.id,
@@ -449,8 +463,9 @@ function processFullVoice(voice: InputDbFullVoice): DbFullVoice {
   }
 }
 
-async function getVoiceById(voiceId: bigint): Promise<DbFullVoice | undefined> {
-  const result = await db._query.voices.findFirst({
+async function getVoiceById(voiceId: bigint, transaction?: Transaction): Promise<DbFullVoice | undefined> {
+  const database = transaction ?? db
+  const result = await database._query.voices.findFirst({
     where: eq(voices.id, Number(voiceId)),
     with: {
       file: true,
@@ -464,8 +479,9 @@ async function getVoiceById(voiceId: bigint): Promise<DbFullVoice | undefined> {
   return processFullVoice(result)
 }
 
-export async function cloneVoiceById(voiceId: number, newOwnerId: number): Promise<number> {
-  const voice = await db._query.voices.findFirst({
+export async function cloneVoiceById(voiceId: number, newOwnerId: number, transaction?: Transaction): Promise<number> {
+  const database = transaction ?? db
+  const voice = await database._query.voices.findFirst({
     where: eq(voices.id, voiceId),
     with: {
       file: true,
@@ -480,9 +496,10 @@ export async function cloneVoiceById(voiceId: number, newOwnerId: number): Promi
     file: voice.file,
     newOwnerId,
     fileType: FileTypes.VOICE,
+    transaction,
   })
 
-  const [newVoice] = await db
+  const [newVoice] = await database
     .insert(voices)
     .values({
       fileId: newFile.id,

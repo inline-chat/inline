@@ -8,7 +8,7 @@ const read = (relative: string) => readFileSync(path.join(root, relative), "utf8
 const workflow = (name: string) => parse(read(`.github/workflows/${name}`)) as {
   on: Record<string, unknown>
   permissions: Record<string, string>
-  jobs: Record<string, { runs_on?: string; steps?: Array<{ run?: string }> }>
+  jobs: Record<string, { runs_on?: string; steps?: Array<{ run?: string; env?: Record<string, string> }> }>
 }
 
 describe("public CI contracts", () => {
@@ -105,9 +105,36 @@ describe("public CI contracts", () => {
     expect(integration).not.toContain('pip" install "hermes-agent==')
     const publish = read(".github/workflows/npm-publish.yml")
     expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
-    expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
+    expect(publish.indexOf("Validate exact Hermes artifact stock compatibility and receive refusal")).toBeLessThan(
       publish.indexOf("HERMES_ARTIFACT_SHA256:"),
     )
+  })
+
+  it("qualifies receiving with the pinned core and gates publication on the exact CI artifact", () => {
+    const integration = workflow("integrations.yml")
+    const receiveSteps = integration.jobs["local-integration"]!.steps!
+    const matchingInstall = receiveSteps.find((step) => step.run?.includes("install-hermes-host.sh"))!.run!
+    expect(matchingInstall).toContain("inlineHermes.testedHermesRepository")
+    expect(matchingInstall).toContain("inlineHermes.testedHermesCommit")
+    expect(matchingInstall).toContain('"$host_sha" "$host_repository"')
+    expect(matchingInstall).not.toContain(" latest")
+    const receivingStep = receiveSteps.find((step) => step.run?.includes("scripts/ci/local-bot-flow.mjs"))!
+    expect(receivingStep.env?.HERMES_PREPARED_HOME_ROOT).toBe("${{ steps.hermes-host.outputs.hermes-home-root }}")
+    expect(receivingStep.env?.HERMES_PREPARED_RUNTIME_DIR).toBe("${{ steps.hermes-host.outputs.hermes-runtime-dir }}")
+    expect(read("scripts/ci/hermes-local-flow.py")).toContain('assert adapter.durable_intake is True and adapter._durable_intake_available()')
+    expect(read("scripts/ci/local-bot-flow.mjs")).toContain("assertHermesReceivingHost(hermesReceivingPin(installedHermesManifest), receivingHost)")
+    const publish = workflow("npm-publish.yml")
+    expect(publish.permissions.actions).toBe("read")
+    const runs = publish.jobs.publish!.steps!.map((step) => step.run ?? "")
+    const select = runs.findIndex((run) => run.includes("hermes-receiving-proof.mjs select-run"))
+    const verify = runs.findIndex((run) => run.includes("hermes-receiving-proof.mjs verify"))
+    const send = runs.findIndex((run) => run.includes("npm publish --ignore-scripts"))
+    expect(select).toBeGreaterThan(-1)
+    expect(verify).toBeGreaterThan(select)
+    expect(send).toBeGreaterThan(verify)
+    expect(read(".github/workflows/npm-publish.yml")).toContain("name: local-integration-receipts")
+    expect(read(".github/workflows/npm-publish.yml")).toContain("run-id: ${{ steps.hermes-proof.outputs.run-id }}")
+    expect(read("scripts/ci/check-hermes-admission.mjs")).toContain("unwired durable receive refusal passed (offline)")
   })
 
 })

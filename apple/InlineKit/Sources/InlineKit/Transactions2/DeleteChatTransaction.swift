@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -7,6 +8,9 @@ import RealtimeV2
 public struct DeleteChatTransaction: Transaction2 {
   // Private
   private var log = Log.scoped("Transactions/DeleteChat")
+  // The persisted queue already belongs to one account. The transient lease
+  // also fences a completion waiting on its writer during an account change.
+  private var accountToken: AuthAccountMutationToken? = try? Auth.shared.handle.beginAccountMutation()
 
   // Properties
   public var method: InlineProtocol.Method = .deleteChat
@@ -19,6 +23,11 @@ public struct DeleteChatTransaction: Transaction2 {
 
   public init(peerId: Peer) {
     context = Context(peerId: peerId)
+  }
+
+  init(peerId: Peer, accountToken: AuthAccountMutationToken) {
+    context = Context(peerId: peerId)
+    self.accountToken = accountToken
   }
 
   public var executionKey: TransactionExecutionKey? {
@@ -38,64 +47,43 @@ public struct DeleteChatTransaction: Transaction2 {
   // MARK: - Transaction Methods
 
   public func optimistic() async {
-    log.debug("Optimistic delete chat")
-
-    do {
-      // Optimistically hide the chat from UI by marking as deleted
-      // or removing from dialogs list
-      try await AppDatabase.shared.dbWriter.write { db in
-        try SyncRemovalRevision.advance(db)
-        // Find and remove the dialog for this peer
-        let dialogId = Dialog.getDialogId(peerId: context.peerId)
-        try Dialog.deleteOne(db, key: dialogId)
-
-        // Could also mark chat as deleted if we have a flag for that
-        if let chat = try Chat.getByPeerId(db: db, peerId: context.peerId) {
-          // Note: This is optimistic - if the server fails, this will be reverted
-          try Chat.deleteOne(db, key: chat.id)
-        }
-      }
-
-      // Update UI immediately
-      Task { @MainActor in
-        // Notify UI that the dialog was removed
-        // This would need to be implemented based on your UI notification system
-        log.debug("Chat optimistically deleted from UI")
-      }
-    } catch {
-      log.error("Failed to optimistically delete chat", error: error)
-    }
+    // A refused parent deletion must retain its children and their parent FK.
+    // There is no reversible local mutation to make before server confirmation.
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
-    guard case .deleteChat = result else {
+    guard let accountToken, (try? Auth.shared.handle.validateAccountMutation(accountToken)) != nil else {
       throw TransactionExecutionError.invalid
     }
+    try await apply(result, database: .shared, auth: Auth.shared.handle)
+  }
 
-    log.trace("deleteChat completed successfully")
-    // The server confirms the deletion was successful
-    // The optimistic updates should already be in place
+  func apply(_ result: RpcResult.OneOf_Result?, database: AppDatabase, auth: AuthHandle,
+             beforeWrite: @Sendable () -> Void = {}) async throws(TransactionExecutionError) {
+    guard case .deleteChat = result, case let .thread(chatId) = context.peerId, let accountToken else {
+      throw TransactionExecutionError.invalid
+    }
+    do {
+      try auth.validateAccountMutation(accountToken)
+      beforeWrite()
+      try await database.dbWriter.write { db in
+        try auth.validateAccountMutation(accountToken)
+        // The empty RPC result and durable delete push confirm the same action.
+        // The existing removal owner handles either arrival order and replay.
+        try deleteLocalChatData(db, chatId: chatId)
+      }
+      try auth.validateAccountMutation(accountToken)
+    } catch {
+      log.error("Failed to apply confirmed chat deletion", error: error)
+      throw TransactionExecutionError.invalid
+    }
   }
 
   public func failed(error: TransactionError2) async {
     log.error("Failed to delete chat", error: error)
-
-    // Restore the chat/dialog if the deletion failed
-    // This is complex as we'd need to restore from a backup or refetch
-    // For now, we could trigger a refresh of the dialogs list
-    log.debug("Chat deletion failed - would need to restore optimistic changes")
-
-    // A simple approach is to reload the chats to get back to consistent state
-    // This would need to trigger a GetChats transaction or similar
   }
 
-  public func cancelled() async {
-    log.debug("Cancelled delete chat")
-
-    // Similar to failed() - restore the optimistic changes
-    log.debug("Chat deletion cancelled - would need to restore optimistic changes")
-    // Restore logic would go here
-  }
+  public func cancelled() async { log.debug("Cancelled delete chat") }
 }
 
 // MARK: - Helper

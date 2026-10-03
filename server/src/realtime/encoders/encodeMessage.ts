@@ -33,6 +33,7 @@ import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import type { SystemMessage } from "@in/server/modules/systemMessages"
 import { projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
+import { messageSourceSnapshot } from "@in/server/modules/message/sourceSnapshot"
 
 type EncodableMessage = DbMessage & {
   systemMessage?: SystemMessage | null
@@ -225,7 +226,8 @@ export const encodeMessage = ({
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
     rev: BigInt(message.rev ?? 0),
-    mentioned: entities ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
+    mentioned: message.forwardIntentHash == null && message.fwdFromMessageId == null && entities
+      ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker || undefined,
@@ -235,12 +237,14 @@ export const encodeMessage = ({
     fwdFrom: fwdFrom,
     replies,
     subthread,
+    isForwarded: message.forwardIntentHash != null || message.fwdFromMessageId != null || undefined,
     actions,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: message.blockContent ?? undefined,
     agentSession: message.agentSession,
   }
 
+  messageProto.sourceSnapshot = messageSourceSnapshot(messageProto)
   return messageProto
 }
 
@@ -368,7 +372,8 @@ export const encodeFullMessage = ({
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
     rev: BigInt(message.rev ?? 0),
-    mentioned: message.entities ? isUserMentioned(message.entities, encodingForUserId) : false,
+    mentioned: message.forwardIntentHash == null && message.fwdFromMessageId == null && message.entities
+      ? isUserMentioned(message.entities, encodingForUserId) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
@@ -385,11 +390,13 @@ export const encodeFullMessage = ({
     fwdFrom: fwdFrom,
     replies,
     subthread,
+    isForwarded: message.forwardIntentHash != null || message.fwdFromMessageId != null || undefined,
     actions: message.actions ?? undefined,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: blockContent ?? undefined,
     agentSession: message.agentSession,
   }
 
+  messageProto.sourceSnapshot = messageSourceSnapshot(messageProto)
   return messageProto
 }

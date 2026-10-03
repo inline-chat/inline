@@ -60,6 +60,15 @@ final class ForwardMessagesPresenter {
     request = ForwardMessagesRequest(messages: messages, reviewBeforeSending: reviewBeforeSending, onComplete: onComplete)
   }
 
+  func presentDiscussion(messages: [FullMessage], availableMessages: [FullMessage], onComplete: (() -> Void)? = nil) {
+    guard let source = messages.first, messages.allSatisfy({
+      $0.chatId == source.chatId && $0.peerId == source.peerId && $0.message.messageId > 0
+        && !$0.message.isServiceMessage && ($0.message.status == nil || $0.message.status == .sent)
+    }) else { return }
+    request = ForwardMessagesRequest(messages: messages, reviewBeforeSending: true,
+      onComplete: onComplete, discussionCandidates: availableMessages)
+  }
+
   func dismiss() {
     request = nil
   }
@@ -70,6 +79,15 @@ struct ForwardMessagesRequest: Identifiable {
   let messages: [FullMessage]
   let reviewBeforeSending: Bool
   let onComplete: (() -> Void)?
+  let discussionCandidates: [FullMessage]?
+
+  init(messages: [FullMessage], reviewBeforeSending: Bool, onComplete: (() -> Void)?,
+       discussionCandidates: [FullMessage]? = nil) {
+    self.messages = messages
+    self.reviewBeforeSending = reviewBeforeSending
+    self.onComplete = onComplete
+    self.discussionCandidates = discussionCandidates
+  }
 }
 
 struct ForwardMessagesPresentation: ViewModifier {
@@ -81,7 +99,18 @@ struct ForwardMessagesPresentation: ViewModifier {
         get: { presenter.request },
         set: { presenter.request = $0 }
       )) { request in
-        if request.reviewBeforeSending || ExperimentalFeatureFlags.quickForwardEnabled {
+        if let candidates = request.discussionCandidates {
+          DiscussionCarryOverSheet(messages: request.messages, availableMessages: candidates, dependencies: dependencies) { outcome in
+            let peer: Peer
+            switch outcome {
+            case let .created(created): peer = created
+            case let .openedExisting(existing): peer = existing
+            }
+            dependencies.requestOpenChat(peer: peer)
+            SidebarCleanup.shared.markOpened(peer)
+            request.onComplete?()
+          }
+        } else if request.reviewBeforeSending || ExperimentalFeatureFlags.quickForwardEnabled {
           QuickForwardMessagesSheet(
             messages: request.messages,
             database: dependencies.database,

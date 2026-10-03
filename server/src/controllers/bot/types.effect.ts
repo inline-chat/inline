@@ -643,6 +643,11 @@ export const BotMessageReference = Schema.Struct({
     description:
       "Time the message was sent, as Unix time in seconds.",
   }),
+  rev: Schema.optionalKey(WireNonNegativeInteger),
+  is_forwarded: Schema.optionalKey(Schema.Boolean).annotateKey({
+    description: "Historical carried context, even when its forward header is hidden. Mentions do not activate bots.",
+  }),
+  source_snapshot: OptionalString.annotateKey({ description: "Opaque token for the exact hydrated public forwarding preview." }),
   edit_date: Schema.optionalKey(WireNonNegativeInteger).annotateKey({
     description: "Time of the latest edit, as Unix time in seconds.",
   }),
@@ -1110,6 +1115,12 @@ export const ForwardMessageInput = Schema.Struct({
 export const ForwardMessagesInput = Schema.Struct({
   chat_id: ChatId,
   from_chat_id: ChatId,
+  share_forward_header: Schema.optionalKey(Schema.Boolean),
+  submissions: Schema.optionalKey(Schema.Array(Schema.Struct({
+    random_id: Schema.String.check(Schema.isPattern(/^-?[1-9][0-9]{0,18}$/)),
+    expected_source_revision: WireNonNegativeInteger,
+    expected_source_snapshot: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+  })).check(Schema.isMinLength(1), Schema.isMaxLength(100))),
   message_ids: Schema.Array(MessageId).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(100),
@@ -1117,7 +1128,7 @@ export const ForwardMessagesInput = Schema.Struct({
 }).annotate({
   identifier: "ForwardMessagesInput",
   description:
-    "Forwards up to 100 messages and returns the new IDs. Missing source IDs are skipped.",
+    "Forwards up to 100 messages. Legacy requests skip missing IDs. Retry-safe submissions bind the full ordered request and selected revisions; retry it unchanged after an ambiguous response.",
 })
 
 export const PinMessageInput = Schema.Struct({
@@ -1143,6 +1154,7 @@ export const SetThreadTitleInput = Schema.Struct({
   chat_id: ChatId,
   title: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
   emoji: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20))),
+  generate_emoji: Schema.optionalKey(Schema.Boolean),
 }).annotate({ identifier: "SetThreadTitleInput" })
 
 export const GetSpaceInput = Schema.Struct({
@@ -1271,6 +1283,13 @@ export const BotMessageRuntimeResult = Schema.Struct({
 })
 export const BotForwardMessagesResult = Schema.Struct({
   message_ids: Schema.mutable(Schema.Array(MessageId)),
+  receipts: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.Struct({
+    source_message_id: MessageId,
+    random_id: Schema.String,
+    message_id: MessageId,
+    source_revision: WireNonNegativeInteger,
+    message_deleted: Schema.optionalKey(Schema.Boolean),
+  })))),
 }).annotate({
   identifier: "BotForwardMessagesResult",
   description: "New message IDs, in the same order as the source messages that were forwarded.",

@@ -45,7 +45,8 @@ public struct Acknowledgement: Codable, FetchableRecord, PersistableRecord, Hash
 
   /// Returns the target rows affected by an accepted cursor change.
   @discardableResult
-  public static func save(_ db: Database, cursor: InlineProtocol.ChatAcknowledgement) throws -> [Int64] {
+  public static func save(_ db: Database, cursor: InlineProtocol.ChatAcknowledgement,
+                          publisher: MessagesPublisher? = nil) throws -> [Int64] {
     guard cursor.chatID > 0, cursor.userID > 0, cursor.maxID > 0, cursor.revision >= 0 else { return [] }
     guard try Chat.fetchOne(db, id: cursor.chatID) != nil else {
       throw AcknowledgementPersistenceError.missingChat(cursor.chatID)
@@ -64,7 +65,7 @@ public struct Acknowledgement: Codable, FetchableRecord, PersistableRecord, Hash
             cursor.maxID > (previous?.maxId ?? 0) else { return [] }
     }
     if cursor.hasUser, cursor.user.id == cursor.userID {
-      _ = try User.save(db, user: cursor.user)
+      _ = try User.save(db, user: cursor.user, publisher: publisher)
     }
 
     let next = Acknowledgement(
@@ -75,6 +76,10 @@ public struct Acknowledgement: Codable, FetchableRecord, PersistableRecord, Hash
       cleared: cursor.cleared
     )
     try next.save(db)
+    // Current-user cursor state is joined across the chat, including snapshots
+    // saved without a visible acknowledgement event during catch-up.
+    MessageProjectionDependencies(identities: [.peer(.thread(id: cursor.chatID))])
+      .publishAfterCommit(db, publisher: publisher)
 
     let oldTarget = previous.flatMap { $0.cleared ? nil : $0.maxId }
     let newTarget: Int64? = next.maxId
@@ -94,7 +99,7 @@ public struct Acknowledgement: Codable, FetchableRecord, PersistableRecord, Hash
     var affected: Set<Int64> = []
     var accepted: [InlineProtocol.ChatAcknowledgement] = []
     for cursor in cursors where cursor.chatID == chatId {
-      let changed = try save(db, cursor: cursor)
+      let changed = try save(db, cursor: cursor, publisher: publisher)
       if !changed.isEmpty {
         affected.formUnion(changed)
         accepted.append(cursor)

@@ -1363,6 +1363,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("reviewed public message snapshot") { db in
+      try db.alter(table: "message") { $0.add(column: "sourceSnapshot", .text) }
+    }
+
+    migrator.registerMigration("discussion carry-over draft") { db in
+      try db.alter(table: "draft2") { table in
+        table.add(column: "discussionCarryOver", .blob)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

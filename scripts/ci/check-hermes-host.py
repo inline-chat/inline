@@ -1,7 +1,7 @@
 """Real Hermes host contract test; fake HTTP transport and deterministic reply handler.
 
 No Hermes modules are stubbed. This is offline host integration, not live messaging
-or an LLM-provider test. Run with an isolated HERMES_HOME containing the installed plugin.
+or an LLM-provider test. Run with isolated HERMES_HOME containing the installed plugin.
 """
 import asyncio
 import importlib.util
@@ -23,6 +23,10 @@ except ModuleNotFoundError as exc:
     import yaml
 
 home = Path(os.environ["HERMES_HOME"])
+# Every HTTP request below uses an offline transport. Register the configured
+# platform without depending on a CI secret or an operator's inherited token.
+os.environ["INLINE_TOKEN"] = "offline-test-token"
+os.environ["INLINE_BOT_TOKEN"] = ""
 plugin = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else home / "plugins" / "inline"
 manifest = yaml.safe_load((plugin / "plugin.yaml").read_text())
 assert "inline" in manifest.get("provides_tools", []), "inline tool missing from plugin.yaml"
@@ -56,6 +60,8 @@ adapter = platform_registry.create_adapter("inline", PlatformConfig(
     enabled=True, token="offline-test-token", extra={
         "dm_policy": "open", "reply_threads": "off", "context_backfill": "off",
         "reactions": False, "sync_commands": False, "text_debounce_seconds": 0,
+        "state_path": str(home / "inline" / "sdk-state.json"),
+        "settings_path": str(home / "inline" / "adapter-settings.json"),
     },
 ))
 assert adapter is not None, "Hermes rejected the adapter factory"
@@ -66,6 +72,50 @@ cli = importlib.import_module(type(adapter).__module__.rsplit(".", 1)[0] + ".cli
 if hasattr(cli, "_compatibility_status"):
     compatibility = cli._compatibility_status()
     assert compatibility.get("ok") is True, compatibility
+
+
+async def exercise_candidate_loader_and_send_only():
+    """Stock-host compatibility is separate from the matching intake core gate."""
+    from gateway.platforms.base import BasePlatformAdapter
+    capability = cli._receiving_capability_status()
+    assert capability["requiredIntakeVersion"] == 1
+    assert capability["supported"] is (getattr(BasePlatformAdapter, "durable_intake_version", None) == 1), capability
+    assert not await adapter.connect(), "An unwired host advertised receiving"
+    assert adapter.fatal_error_code == "DURABLE_INTAKE_REQUIRED"
+    assert not adapter.is_connected and adapter._sidecar_proc is None and adapter._inbound_task is None
+    sender = type(adapter)(PlatformConfig(enabled=True, token="offline-test-token", extra={
+        "sidecar_autostart": False, "sync_commands": False,
+    }), send_only=True)
+    writes = []
+    real_client = httpx.AsyncClient
+
+    def response(request):
+        if request.url.path == "/healthz":
+            return httpx.Response(200, json={"ok": True, "result": {
+                "connected": True, "meId": "999", "baseUrl": sender._base_url, "sendOnly": True,
+            }})
+        assert request.url.path == "/send", "Send-only contacted an intake or settings writer"
+        writes.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": "202"}})
+
+    def client(*args, **kwargs):
+        return real_client(*args, **kwargs, transport=httpx.MockTransport(response))
+
+    with patch("httpx.AsyncClient", side_effect=client):
+        assert await sender.connect()
+        try:
+            result = await sender.send("user:42", "Offline send-only compatibility")
+            assert result.success and result.message_id == "202"
+            assert writes[0]["target"] == {"userId": "42"}
+            assert sender._inbound_task is None and not sender._state_file_locks
+        finally:
+            await sender.disconnect()
+
+
+if getattr(adapter, "durable_intake", False) is True:
+    asyncio.run(exercise_candidate_loader_and_send_only())
+    print("Real Hermes loader/tool/send-only compatibility and actionable unwired receive refusal passed. Receiving requires the separately tested matching core, gateway handlers, and profile StateDB.")
+    sys.exit(0)
 
 
 async def exercise():
@@ -119,10 +169,9 @@ async def exercise():
             return httpx.Response(200, content=b"offline-image", headers={"content-type": "image/png"})
         def media_client(*args, **kwargs):
             return real_client(*args, **kwargs, transport=httpx.MockTransport(media_response))
-        adapter_module = sys.modules[type(adapter).__module__]
         public_dns = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         cache = Path(tempfile.mkdtemp(prefix="inline-hermes-media-"))
-        with patch("socket.getaddrinfo", return_value=public_dns), patch("httpx.AsyncClient", side_effect=media_client), patch.object(adapter_module, "_MEDIA_CACHE_DIR", cache):
+        with patch("socket.getaddrinfo", return_value=public_dns), patch("httpx.AsyncClient", side_effect=media_client), patch.object(adapter, "_media_cache_dir", cache):
             result = await adapter._download_inline_media_url("https://example.org/image.png", mime="image/png", file_name="test.png")
         assert Path(result).read_bytes() == b"offline-image"
         assert downloads == ["https://example.org/image.png"]
@@ -335,6 +384,8 @@ async def exercise_receipt_recovery():
         enabled=True, token="offline-test-token", extra={
             "dm_policy": "open", "reply_threads": "off", "context_backfill": "off",
             "sync_commands": False, "text_debounce_seconds": 0,
+            "state_path": str(home / "workflow" / "sdk-state.json"),
+            "settings_path": str(home / "workflow" / "adapter-settings.json"),
         },
     ))
     assert recovered is not None
@@ -431,4 +482,306 @@ async def exercise_receipt_recovery():
 
 
 asyncio.run(exercise_receipt_recovery())
+
+
+def exercise_profile_defaults():
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    fixtures = Path(tempfile.mkdtemp(prefix="inline-hermes-profile-defaults-"))
+    profiles = []
+    for name in ("a", "b"):
+        profile_home = fixtures / name
+        token = set_hermes_home_override(profile_home)
+        try:
+            profile = type(adapter)(PlatformConfig(enabled=True, token="offline-test-token", extra={"sync_commands": False}))
+        finally:
+            reset_hermes_home_override(token)
+        assert profile._state_path == profile_home / "inline" / "sdk-state.json"
+        assert profile._settings_path == profile_home / "inline" / "adapter-settings.json"
+        assert profile._media_cache_dir == profile_home / "inline" / "media-cache"
+        profiles.append(profile)
+    profiles[0]._set_reply_threads_for_chat("101", "off")
+    assert profiles[0]._reply_thread_mode_for_chat("101") == "off"
+    assert profiles[1]._reply_thread_mode_for_chat("101") == "auto"
+    assert profiles[0]._settings_path != profiles[1]._settings_path
+    assert profiles[0]._settings_path.exists() and not profiles[1]._settings_path.exists()
+
+
+exercise_profile_defaults()
+
+
+async def exercise_thread_workflow():
+    from gateway.session import build_session_key
+    from gateway.platforms.base import _reply_anchor_for_event, _thread_metadata_for_event
+
+    workflow = platform_registry.create_adapter("inline", PlatformConfig(
+        enabled=True, token="offline-test-token", extra={
+            "dm_policy": "allowlist", "allow_from": "42",
+            "group_policy": "open", "group_allow_from": "42",
+            "reply_threads": "off", "context_backfill": "off",
+            "require_mention": False, "reactions": True,
+            "sync_commands": False, "text_debounce_seconds": 0,
+        },
+    ))
+    workflow._me_id = "999"
+    workflow.set_authorization_check(lambda *_args, **_kwargs: True)
+    received, sent = [], []
+    state = {"parent_outage": False, "missing_peer": False, "reaction_child": False}
+    parents = {"99": "10", "100": "10", "201": "20", "202": "20", "301": "201", "109": "99"}
+
+    def transport(request):
+        body = json.loads(request.content)
+        if request.url.path == "/chat":
+            chat = body["target"]["chatId"]
+            if chat == "20" and state["parent_outage"]:
+                state["parent_outage"] = False
+                return httpx.Response(503, json={"ok": False, "error": {"kind": "transient", "message": "offline"}})
+            result = {"chatId": chat, "title": "Offline fixture", "peer": {"type": {"oneofKind": "user" if chat == "20" else "chat"}}}
+            if chat in parents:
+                result.update(parentChatId=parents[chat], parentMessageId="7")
+            if chat == "20" and state["missing_peer"]:
+                result.pop("peer")
+            return httpx.Response(200, json={"ok": True, "result": result})
+        if request.url.path == "/messages":
+            msg = {"id": body["messageIds"][0], "chatId": body["target"]["chatId"],
+                   "fromId": "999", "message": "Fixture bot reply", "peerId": {"peer": {"oneofKind": "chat"}}}
+            if state["reaction_child"]:
+                msg["replies"] = {"chatId": "99"}
+            return httpx.Response(200, json={"ok": True, "result": {"messages": [msg]}})
+        if request.url.path in ("/send", "/send-attachment"):
+            # The real sidecar accepts chat-scoped positive numeric IDs only.
+            reply_id = body.get("replyToMsgId")
+            assert reply_id is None or (reply_id.isdecimal() and int(reply_id) > 0), body
+        sent.append((request.url.path, body))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": "80"}})
+
+    async def receive(event):
+        received.append(event)
+
+    def message(chat, seq, replies=None, user="42"):
+        msg = {"id": str(seq), "chatId": chat, "fromId": user, "message": "Offline thread turn",
+               "peerId": {"peer": {"oneofKind": "user" if chat == "20" else "chat"}}}
+        if replies:
+            msg["replies"] = {"chatId": replies}
+        return {"kind": "message.new", "seq": seq, "chatId": chat, "message": msg}
+
+    workflow._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    workflow.handle_message = receive
+    try:
+        for chat, seq, child in [("10", 1, "99"), ("99", 2, None), ("10", 3, "100"),
+                                 ("20", 4, "201"), ("201", 5, None), ("20", 6, "202"), ("20", 7, None)]:
+            await workflow._dispatch_message(message(chat, seq, child))
+        assert len(received) == 7
+        keys = [build_session_key(event.source) for event in received]
+        assert keys[0] == keys[1] and keys[0] != keys[2], keys
+        assert keys[3] == keys[4] and len(set(keys[3:])) == 3, keys
+        assert received[3].source.chat_type == received[4].source.chat_type == "dm"
+        assert [e.metadata["inline"]["chat_id"] for e in received] == ["10", "99", "10", "20", "201", "20", "20"]
+        # The opening turn and child follow-up use the same cached instructions,
+        # while message actions receive the actual transport tuple per turn.
+        for opening, followup in ((0, 1), (3, 4)):
+            assert received[opening].channel_prompt == received[followup].channel_prompt
+            assert "Triggering Inline message:" not in received[opening].channel_prompt
+            assert "Current Inline sender" not in received[opening].channel_prompt
+            assert "return NO_REPLY" in received[opening].channel_prompt
+        assert "Triggering Inline message: `1` in chat `10`" in received[0].channel_context
+        assert "Triggering Inline message: `2` in chat `99`" in received[1].channel_context
+        assert "Triggering Inline message: `4` in chat `20`" in received[3].channel_context
+        assert "Triggering Inline message: `5` in chat `201`" in received[4].channel_context
+        for index, target in [(0, "10"), (1, "99"), (3, "20"), (4, "201")]:
+            await workflow.on_processing_start(received[index])
+            assert sent[-1][0] == "/reaction" and sent[-1][1]["target"] == {"chatId": target}, sent[-1]
+        for index, target in [(0, "99"), (4, "201")]:
+            event = received[index]
+            assert (await workflow.send(event.source.chat_id, "Offline reply",
+                                       reply_to=_reply_anchor_for_event(event), metadata=_thread_metadata_for_event(event))).success
+            assert sent[-1][1]["target"] == {"chatId": target}, sent[-1]
+            assert sent[-1][1].get("replyToMsgId") == (None if index == 0 else "5"), sent[-1]
+        media = Path(tempfile.mkdtemp(prefix="inline-hermes-reply-media-")) / "photo.png"
+        media.write_bytes(b"offline photo")
+        for index, target in [(0, "99"), (4, "201")]:
+            event = received[index]
+            assert (await workflow.send_image_file(event.source.chat_id, str(media),
+                reply_to=_reply_anchor_for_event(event), metadata=_thread_metadata_for_event(event))).success
+            assert sent[-1][0] == "/send-attachment", sent[-1]
+            assert sent[-1][1]["target"] == {"chatId": target}, sent[-1]
+            assert sent[-1][1].get("replyToMsgId") == (None if index == 0 else "5"), sent[-1]
+
+        equal = message("99", 901)
+        equal["message"]["id"] = "7"
+        await workflow._dispatch_message(equal)
+        assert "[Inline parent message]" in received[-1].channel_context
+        event = received[-1]
+        assert (await workflow.send(event.source.chat_id, "Equal ID reply",
+            reply_to=_reply_anchor_for_event(event), metadata=_thread_metadata_for_event(event))).success
+        assert sent[-1][1]["replyToMsgId"] == "7", sent[-1]
+        for chat, seq, child in (("99", 902, False), ("10", 903, True)):
+            state["reaction_child"] = child
+            await workflow._dispatch_reaction({"kind": "reaction.add", "seq": seq, "chatId": chat,
+                "messageId": "80", "userId": "42", "emoji": "ok"}, added=True)
+            event = received[-1]
+            assert event.message_id.startswith("reaction.add:")
+            assert (await workflow.send(event.source.chat_id, "Reaction reply",
+                reply_to=_reply_anchor_for_event(event), metadata=_thread_metadata_for_event(event))).success
+            assert sent[-1][1]["target"] == {"chatId": "99"}
+            assert sent[-1][1].get("replyToMsgId") == (None if child else "80"), sent[-1]
+        state["reaction_child"] = False
+        workflow._system_events = True
+        await workflow._dispatch_system_event({"kind": "message.delete", "seq": 904, "chatId": "99", "messageIds": ["80"]})
+        event = received[-1]
+        assert not _reply_anchor_for_event(event)
+        assert (await workflow.send(event.source.chat_id, "System reply",
+            reply_to=_reply_anchor_for_event(event), metadata=_thread_metadata_for_event(event))).success
+        assert "replyToMsgId" not in sent[-1][1]
+        for chat, index in (("99", 1), ("201", 4)):
+            delivery_source = await workflow.resolve_delivery_source(chat, user_id="42")
+            assert build_session_key(delivery_source) == keys[index]
+
+        # Nested threads inherit root policy while retaining immediate edges.
+        nested_start = len(received)
+        for chat, seq, child in (("201", 610, "301"), ("301", 611, None), ("99", 612, "109"), ("109", 613, None)):
+            await workflow._dispatch_message(message(chat, seq, child))
+        nested = received[nested_start:]
+        assert len(nested) == 4
+        nested_keys = [build_session_key(event.source) for event in nested]
+        assert nested_keys[0] == nested_keys[1] and nested_keys[2] == nested_keys[3], nested_keys
+        assert [event.source.chat_type for event in nested] == ["dm", "dm", "group", "group"]
+        assert nested[0].source.chat_id == nested[1].source.chat_id == "201"
+        assert nested[0].source.parent_chat_id == nested[1].source.parent_chat_id == "201"
+        assert nested[2].source.chat_id == nested[3].source.chat_id == "109"
+        assert nested[0].channel_prompt == nested[1].channel_prompt
+        count = len(received)
+        await workflow._dispatch_message(message("301", 614, user="43"))
+        assert len(received) == count, "DM grandchild replaced root DM policy with open group policy"
+        assert not await workflow._action_allowed({"chatId": "301", "messageId": "80", "actorUserId": "43"})
+
+        # Controls and reaction-triggered turns must share the DM policy/session.
+        count = len(received)
+        await workflow._dispatch_reaction({"kind": "reaction.add", "seq": 100, "chatId": "201",
+                                           "messageId": "80", "userId": "42", "emoji": "👍"}, added=True)
+        assert len(received) == count + 1
+        assert build_session_key(received[-1].source) == keys[4]
+        assert received[-1].channel_prompt == received[4].channel_prompt
+        assert "Triggering Inline message: `80` in chat `201`" in received[-1].channel_context
+        await workflow._dispatch_reaction({"kind": "reaction.add", "seq": 101, "chatId": "201",
+                                           "messageId": "80", "userId": "43", "emoji": "👍"}, added=True)
+        assert len(received) == count + 1, "DM restriction was replaced by open group policy"
+        assert not await workflow._action_allowed({"chatId": "201", "messageId": "80", "actorUserId": "43"})
+        workflow._system_events = True
+        await workflow._dispatch_system_event({"kind": "chat.participant.add", "seq": 102, "chatId": "201", "userId": "42"})
+        assert len(received) == count + 2
+        assert build_session_key(received[-1].source) == keys[4]
+        assert received[-1].channel_prompt == received[4].channel_prompt
+        await workflow._dispatch_message(message("201", 103))
+        assert len(received) == count + 3
+        assert received[-1].channel_prompt == received[4].channel_prompt
+        with patch.object(workflow, "_bot_settings_runner", return_value=None):
+            settings = await workflow._bot_settings_context({"chatId": "201", "actorUserId": "42"})
+            assert settings["access"] == "full", settings
+            assert build_session_key(settings["source"]) == keys[4]
+            assert settings["following"] is False, "DM child lost its native follow control"
+            root_settings = await workflow._bot_settings_context({"chatId": "20", "actorUserId": "42"})
+            assert root_settings["following"] is None, root_settings
+            denied = await workflow._bot_settings_context({"chatId": "201", "actorUserId": "43"})
+            assert denied["access"] == "guideOnly", denied
+
+        for chat, seq, expected in (("201", 700, {"chatId": "201"}), ("20", 701, {"userId": "42"})):
+            sent.clear()
+            follow = message(chat, seq)
+            follow["message"]["message"] = "/follow"
+            await workflow._dispatch_message(follow)
+            follow_requests = [body for path, body in sent if path == "/follow-mode"]
+            assert len(follow_requests) == 1 and follow_requests[0]["target"] == expected, sent
+
+        # A required parent dependency cannot consume dedup or acknowledge the turn.
+        module = sys.modules[type(workflow).__module__]
+        for chat, expected_key, base_seq in (("201", keys[4], 500), ("301", nested_keys[1], 510)):
+            for offset, flag in enumerate(("parent_outage", "missing_peer")):
+                state[flag] = True
+                workflow._invalidate_chat_info("20")
+                seq = base_seq + offset
+                count = len(received)
+                try:
+                    await workflow._dispatch_message(message(chat, seq))
+                except module.InlineInboundDeferred:
+                    pass
+                else:
+                    raise AssertionError(f"{chat} {flag} was accepted or silently dropped")
+                assert len(received) == count
+                state[flag] = False
+                await workflow._dispatch_message(message(chat, seq))
+                assert len(received) == count + 1, "repaired ancestry could not replay the turn"
+                assert build_session_key(received[-1].source) == expected_key
+        parents["201"] = "301"
+        workflow._invalidate_chat_info("201")
+        count = len(received)
+        try:
+            await workflow._dispatch_message(message("301", 800))
+        except module.InlineInboundDeferred:
+            pass
+        else:
+            raise AssertionError("cyclic ancestry was accepted or silently dropped")
+        assert len(received) == count
+        parents["201"] = "20"
+        await workflow._dispatch_message(message("301", 800))
+        assert len(received) == count + 1 and build_session_key(received[-1].source) == nested_keys[1]
+        for ancestor in range(400, 418):
+            parents[str(ancestor)] = str(ancestor + 1) if ancestor < 417 else "20"
+        count = len(received)
+        try:
+            await workflow._dispatch_message(message("400", 801))
+        except module.InlineInboundDeferred:
+            pass
+        else:
+            raise AssertionError("unbounded ancestry was accepted or silently dropped")
+        assert len(received) == count
+        parents["415"] = "20"
+        await workflow._dispatch_message(message("400", 801))
+        assert len(received) == count + 1 and received[-1].source.chat_type == "dm"
+        assert received[-1].source.chat_id == "401" and received[-1].source.thread_id == "400"
+        sent.clear()
+        assert await workflow.create_handoff_thread("201", "Offline cron") is None
+        assert not sent, "scheduled delivery created an automatic subthread"
+    finally:
+        await workflow._http_client.aclose()
+
+
+def exercise_profile_upgrade():
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    legacy = home / "inline"
+    legacy.mkdir(parents=True, exist_ok=True)
+    legacy_files = {legacy / "adapter-settings.json": b'{"version":1,"reply_threads":{"99":"on"}}\n',
+                    legacy / "sdk-state.json": b'{"fixture":"legacy shared SDK"}\n'}
+    for path, payload in legacy_files.items():
+        path.write_bytes(payload)
+    profiles = {p: home / "profiles" / p for p in ("upgrade-chief", "upgrade-scout")}
+    paths = []
+    for profile, profile_home in profiles.items():
+        profile_home.mkdir(parents=True, exist_ok=True)
+        token = set_hermes_home_override(str(profile_home))
+        try:
+            config = PlatformConfig(enabled=True, token="offline-test-token", extra={"reply_threads":"off", "sync_commands":False})
+            # Reuse the class admitted above; the isolated fixture homes have no
+            # plugin activation config and therefore no per-home registry entry.
+            first = type(adapter)(config)
+            assert first._state_path == profile_home / "inline" / "sdk-state.json"
+            assert first._settings_path == profile_home / "inline" / "adapter-settings.json"
+            assert first._media_cache_dir == profile_home / "inline" / "media-cache"
+            assert first._reply_thread_mode_for_chat("99") == "off", "legacy overrides were silently shared"
+            first._set_reply_threads_for_chat("99", "on" if profile == "upgrade-chief" else "off")
+            first._state_path.write_text("{\"fixture\":\"profile SDK\"}\n")
+            sdk_bytes = first._state_path.read_bytes()
+            restarted = type(adapter)(config)
+            assert restarted._reply_thread_mode_for_chat("99") == ("on" if profile == "upgrade-chief" else "off")
+            assert restarted._state_path.read_bytes() == sdk_bytes
+            paths.append((first._state_path, first._settings_path, first._media_cache_dir))
+        finally:
+            reset_hermes_home_override(token)
+    assert all(a != b for a, b in zip(paths[0], paths[1]))
+    assert all(path.read_bytes() == payload for path, payload in legacy_files.items())
+    print("Named-profile upgrade/restart: legacy SDK and /threads settings preserved; named profiles start with configured defaults and own SDK/settings/media paths.")
+
+exercise_profile_upgrade()
+
+asyncio.run(exercise_thread_workflow())
 print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")

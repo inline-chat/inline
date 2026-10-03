@@ -5,8 +5,8 @@ import {
   MessageEntities,
   MessageSendMode,
   Update,
-  type AgentThreadContext,
-  type BlockContent,
+  AgentThreadContext,
+  BlockContent,
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
@@ -14,14 +14,17 @@ import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
-import { chats, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
+import type { Transaction } from "@in/server/db/types"
+import { createHash } from "node:crypto"
+import { Encryption2 } from "@in/server/modules/encryption/encryption2"
+import { chats, messageAttachments, messages, messageSubmissions, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
+import { encodePeerFromChat, encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
@@ -41,6 +44,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { lockChatAndAncestors } from "@in/server/modules/authorization/chatAccessProjection"
 import { getCachedUserProfilePhoto } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
@@ -131,6 +135,10 @@ type Input = {
 
   /** Trusted Bot API provenance for an explicit same-bot cross-Chat handoff. */
   sourceChatId?: number
+
+  /** Server-owned immutable forwarding intent; never accepted from SendMessage RPC input. */
+  forwardIntentHash?: Buffer
+  forwardSourceRevision?: number
 }
 
 type Output = {
@@ -150,7 +158,88 @@ export const shouldPublishSendMessageToCurrentSession = ({
   hasAttachments: boolean
 }): boolean => !isRealtimeV3Session && (currentUserLayer < 2 || hasAttachments)
 
-export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
+const submissionIntentHash = (input: Input, chatId: number): Buffer => input.forwardIntentHash ??
+  createHash("sha256").update(JSON.stringify({
+    version: 1, chatId,
+    message: input.message ?? null,
+    replyToMessageId: input.replyToMessageId?.toString() ?? null,
+    photoId: input.photoId?.toString() ?? null,
+    videoId: input.videoId?.toString() ?? null,
+    documentId: input.documentId?.toString() ?? null,
+    voiceId: input.voiceId?.toString() ?? null,
+    nudge: input.nudge ?? false,
+    isSticker: input.isSticker ?? false,
+    sendDate: input.sendDate ?? null,
+    sendMode: input.sendMode ?? 0,
+    parseMarkdown: input.parseMarkdown ?? false,
+    skipLinkProcessing: input.skipLinkProcessing ?? false,
+    entities: input.entities ? Buffer.from(MessageEntities.toBinary(input.entities)).toString("base64") : null,
+    actions: input.actions ? Buffer.from(MessageActions.toBinary(input.actions)).toString("base64") : null,
+    blockContent: input.blockContent ? Buffer.from(BlockContent.toBinary(input.blockContent)).toString("base64") : null,
+    attachments: input.messageAttachments?.map((value) => ({
+      externalTaskId: value.externalTaskId?.toString() ?? null,
+      urlPreviewId: value.urlPreviewId?.toString() ?? null,
+    })) ?? [],
+    initialAgentContext: input.initialAgentContext ? Buffer.from(AgentThreadContext.toBinary(input.initialAgentContext)).toString("base64") : null,
+    sourceChatId: input.sourceChatId ?? null,
+  })).digest()
+
+const recoverSubmission = async (input: {
+  randomId: bigint; currentUserId: number; chatId: number; intentHash: Buffer
+}, transaction?: Transaction): Promise<Update[] | undefined> => {
+  const identity = and(
+    eq(messageSubmissions.fromId, input.currentUserId), eq(messageSubmissions.randomId, input.randomId),
+  )
+  if (!transaction) {
+    // Fresh sends have no receipt. Do not take chat locks or open another
+    // transaction until a submitted identity actually needs reconciliation.
+    const [known] = await db.select({ id: messageSubmissions.randomId }).from(messageSubmissions).where(identity).limit(1)
+    if (!known) return undefined
+  }
+  const recover = async (tx: Transaction): Promise<Update[] | undefined> => {
+    const [receipt] = await tx.select().from(messageSubmissions).where(identity).limit(1)
+    if (!receipt) return undefined
+    if (receipt.chatId !== input.chatId || receipt.sourceRevision !== null ||
+      !Encryption2.decryptBinary(receipt.intentHash).equals(input.intentHash)) throw RealtimeRpcError.BadRequest()
+    const chat = await lockChatAndAncestors(tx, receipt.chatId, "share")
+    if (!chat) throw RealtimeRpcError.PeerIdInvalid()
+    await AccessGuards.ensureChatAccess(chat, input.currentUserId, tx)
+    const result: Update[] = [{ update: { oneofKind: "updateMessageId", updateMessageId: {
+      messageId: BigInt(receipt.messageId), randomId: input.randomId,
+    } } }]
+    const [existing] = await tx.select({ id: messages.globalId }).from(messages).where(and(
+      eq(messages.chatId, receipt.chatId), eq(messages.messageId, receipt.messageId),
+      eq(messages.fromId, input.currentUserId), eq(messages.randomId, input.randomId),
+    )).limit(1)
+    if (!existing) {
+      result.push({ update: { oneofKind: "deleteMessages", deleteMessages: {
+        peerId: encodeOutputPeerFromChat(chat, { currentUserId: input.currentUserId }),
+        messageIds: [BigInt(receipt.messageId)],
+      } } })
+    }
+    return result
+  }
+  return transaction ? recover(transaction) : db.transaction(recover)
+}
+
+/** Internal callers can commit media, attachments and the message together,
+ * then run ordinary delivery only after the outer transaction commits. */
+export type MessageSendTransaction = {
+  transaction: Transaction
+  onCommitted: (deliver: () => Promise<Output>) => void
+}
+
+export const sendMessage = async (
+  input: Input,
+  context: FunctionContext,
+  submission?: MessageSendTransaction,
+): Promise<Output> => {
+  if (input.randomId !== undefined && (input.randomId === 0n || input.randomId < -(1n << 63n) || input.randomId >= (1n << 63n))) {
+    throw RealtimeRpcError.BadRequest()
+  }
+  const transaction = submission?.transaction
+  const database = transaction ?? db
+  const isForwarded = input.forwardIntentHash !== undefined
   // input data
   const date = input.sendDate ? new Date(input.sendDate * 1000) : new Date()
   const fromId = context.currentUserId
@@ -160,6 +249,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const chatId = chat.id
+  const intentHash = submissionIntentHash(input, chatId)
+  if (input.randomId && !isForwarded) {
+    const recovered = await recoverSubmission({ randomId: input.randomId, currentUserId, chatId, intentHash }, transaction)
+    if (recovered) return { updates: recovered }
+  }
   if (input.sourceChatId !== undefined) {
     const sourceChatId = Number(input.sourceChatId)
     if (!Number.isSafeInteger(sourceChatId) || sourceChatId <= 0 || sourceChatId === chatId) {
@@ -185,7 +279,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       currentUserId,
       randomId: input.randomId,
       expectedContext: normalizedRetryContext,
-    })
+      intentHash,
+    }, transaction)
     if (recovered) return { updates: recovered }
   }
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
@@ -200,8 +295,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     ({ version }) => version === ConnVersion.REALTIME_V3,
   )
 
-  const outgoingText = input.message
-    ? await processOutgoingText({
+  const outgoingText: Awaited<ReturnType<typeof processOutgoingText>> | undefined = input.message
+    ? isForwarded ? { text: input.message, entities: input.entities } : await processOutgoingText({
         text: input.message,
         entities: input.entities,
         parseMarkdown: input.parseMarkdown,
@@ -210,11 +305,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let text = outgoingText?.text
   let entities: MessageEntities | undefined
   try {
-    entities = await resolveThreadTitleLinks({
+    entities = isForwarded ? input.entities : await resolveThreadTitleLinks({
       entities: outgoingText?.entities,
       context,
     })
-    if (text) {
+    if (text && !isForwarded) {
       entities = await resolveBotCommandTargets({
         text,
         entities,
@@ -236,12 +331,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     isUrgentNudge: input.nudge === true && text?.trim() === URGENT_NUDGE_TEXT,
   })
 
-  const groupMentions = await resolveGroupMentions({
-    text: text ?? "",
-    entities,
-    chat,
-    currentUserId,
-  })
+  const groupMentions = isForwarded
+    ? { entities, mentionedUserIds: [] }
+    : await resolveGroupMentions({
+        text: text ?? "",
+        entities,
+        chat,
+        currentUserId,
+      })
   entities = groupMentions.entities
   const destinationAgentContext = chatAgentContext(chat)
   const selfMentionsExactBoundAgent = Number(destinationAgentContext?.botUserId) === currentUserId &&
@@ -250,10 +347,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       const mention = entity.entity.mention
       return Number(mention.userId) === currentUserId && mention.agentId === destinationAgentContext?.agentId
     })
-  if (selfMentionsExactBoundAgent && input.sourceChatId === undefined) {
+  if (selfMentionsExactBoundAgent && !isForwarded && input.sourceChatId === undefined) {
     throw RealtimeRpcError.BadRequest()
   }
-  const mentionedUserIds = new Set<number>([
+  const mentionedUserIds = new Set<number>(isForwarded ? [] : [
     ...getMentionedUserIds(entities),
     ...groupMentions.mentionedUserIds,
   ])
@@ -309,16 +406,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   if (input.nudge) {
     mediaType = "nudge"
   } else if (input.photoId) {
-    dbFullPhoto = await FileModel.getPhotoById(input.photoId)
+    dbFullPhoto = await FileModel.getPhotoById(input.photoId, transaction)
     mediaType = "photo"
   } else if (input.videoId) {
-    dbFullVideo = await FileModel.getVideoById(input.videoId)
+    dbFullVideo = await FileModel.getVideoById(input.videoId, transaction)
     mediaType = "video"
   } else if (input.documentId) {
-    dbFullDocument = await FileModel.getDocumentById(input.documentId)
+    dbFullDocument = await FileModel.getDocumentById(input.documentId, transaction)
     mediaType = "document"
   } else if (input.voiceId) {
-    dbFullVoice = await FileModel.getVoiceById(input.voiceId)
+    dbFullVoice = await FileModel.getVoiceById(input.voiceId, transaction)
     mediaType = "voice"
   }
 
@@ -338,7 +435,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       try {
         const existing = await MessageModel.getMessageByRandomId(input.randomId, currentUserId)
         if (existing.chatId !== chatId) throw RealtimeRpcError.BadRequest()
-        return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
+        return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId, chatId, intentHash, transaction) }
       } catch (error) {
         if (error instanceof RealtimeRpcError) throw error
         throw RealtimeRpcError.BadRequest()
@@ -403,6 +500,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       fwdFromMessageId: fwdFromMessageId,
       fwdFromSenderId: fwdFromSenderId,
       randomId: input.randomId,
+      forwardIntentHash: input.forwardIntentHash ?? null,
       date: date,
       mediaType: mediaType,
       photoId: dbFullPhoto?.id ?? null,
@@ -417,8 +515,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       actionsEncrypted: encryptedActions?.encrypted ?? null,
       actionsIv: encryptedActions?.iv ?? null,
       actionsTag: encryptedActions?.authTag ?? null,
-    }, preparedBlockContent, undefined, initialAgentContext && encodedInitialAgentContext
+    }, preparedBlockContent, transaction, initialAgentContext && encodedInitialAgentContext
       ? { value: initialAgentContext, encoded: encodedInitialAgentContext }
+      : undefined, input.randomId !== undefined
+      ? { intentHash, sourceRevision: input.forwardSourceRevision }
       : undefined))
   } catch (error) {
     if (error instanceof ModelError && error.code === ModelError.Codes.AGENT_CONTEXT_ALREADY_SET) {
@@ -428,31 +528,24 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           currentUserId,
           randomId: input.randomId,
           expectedContext: initialAgentContext,
-        })
+          intentHash,
+        }, transaction)
         if (recovered) return { updates: recovered }
       }
       throw RealtimeRpcError.BadRequest()
     }
-    if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {
+    if (error instanceof Error && (error.message.includes("random_id_per_sender_unique") || error.message.includes("message_submissions_identity")) && input.randomId) {
       log.debug("duplicate random id recovered from existing message", { currentUserId })
 
-      // Just fetch the message from the database
-      return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
+      // Forwarding owns a stricter intent check before cloning. A constraint
+      // conflict inside its transaction must roll back every clone.
+      if (isForwarded || transaction) throw RealtimeRpcError.BadRequest()
+      return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId, chatId, intentHash) }
     } else {
       log.error("error inserting message", error)
       throw RealtimeRpcError.InternalError()
     }
   }
-
-  queueMessageThreadLinkMaterialization({
-    sourceChat: chat,
-    sourceChatId: chat.id,
-    sourceMessageGlobalId: newMessage.globalId,
-    sourceMessageId: newMessage.messageId,
-    sourceMessageFromId: newMessage.fromId,
-    sourceMessageRevision: newMessage.rev,
-    entities,
-  })
 
   if (input.messageAttachments && input.messageAttachments.length > 0) {
     const attachmentRows = input.messageAttachments
@@ -464,260 +557,280 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       .filter((attachment) => attachment.externalTaskId !== null || attachment.urlPreviewId !== null)
 
     if (attachmentRows.length > 0) {
-      await db.insert(messageAttachments).values(attachmentRows)
+      await database.insert(messageAttachments).values(attachmentRows)
     }
   }
 
-  const titleAttachments = documentTitleContext(dbFullDocument)
-
-  const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
-    userId: currentUserId,
-    sessionId: context.currentSessionId,
-    connectionId: context.currentConnectionId,
-    chatId,
-  })
-
-  // encode message info
-  const messageInfo: MessageInfo = {
-    message: newMessage,
-    photo: dbFullPhoto,
-    video: dbFullVideo,
-    document: dbFullDocument,
-    voice: dbFullVoice,
-    sendMode: input.sendMode,
-    mentionedUserIds,
-  }
-
-  //await debugDelay(5000)
-
-  const hasAttachments =
-    messageInfo.photo !== undefined ||
-    messageInfo.video !== undefined ||
-    messageInfo.document !== undefined ||
-    messageInfo.voice !== undefined
-
-  // send new updates
-  // TODO: need to create the update, use the sequence number
-  // we probably need to create the update and message in one transaction
-  // to avoid multiple times locking the chat row for last message and pts.
-  // we can also separate the sequence caching. this will speed up and
-  // remove the need to lock the chat row. then we should deliver the update
-  // with sequence number so we can ensure gap-free delivery.
-  const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
-  let initialAgentContextRealtimeUpdate: Update | undefined
-  if (initialAgentContext && agentContextUpdate) {
-    initialAgentContextRealtimeUpdate = {
-      update: {
-        oneofKind: "chatInfo",
-        chatInfo: { chatId: BigInt(chat.id), agentContext: initialAgentContext },
-      },
-      seq: agentContextUpdate.seq,
-      date: encodeDateStrict(agentContextUpdate.date),
-    }
-    updateGroup.userIds.forEach((userId) => {
-      RealtimeUpdates.pushToUser(userId, [initialAgentContextRealtimeUpdate!], {
-        skipSessionId: userId === currentUserId ? context.currentSessionId : undefined,
-      })
+  const deliver = async (): Promise<Output> => {
+    queueMessageThreadLinkMaterialization({
+      sourceChat: chat,
+      sourceChatId: chat.id,
+      sourceMessageGlobalId: newMessage.globalId,
+      sourceMessageId: newMessage.messageId,
+      sourceMessageFromId: newMessage.fromId,
+      sourceMessageRevision: newMessage.rev,
+      entities,
     })
-  }
-  await autoFollowThreadMessage({
-    chat,
-    currentUserId,
-    updateGroup,
-    newMessageId: newMessage.messageId,
-  })
 
-  const sidebarOpenUserIds = await getSidebarOpenUserIds({
-    chat,
-    currentUserId,
-    replyToMessageId: replyToMsgIdNumber ?? undefined,
-    mentionedUserIds,
-    updateGroup,
-  })
-  if (sidebarOpenUserIds.length > 0) {
-    const { changedDialogs } = isLinkedSubthread(chat)
-      ? await showAndOpenLinkedSubthreadDialogs({
-          chat,
-          userIds: sidebarOpenUserIds,
-        })
-      : await setDialogOpenForUsers({
-          chat,
-          userIds: sidebarOpenUserIds,
-          open: true,
-          showInChatList: true,
-        })
+    const titleAttachments = documentTitleContext(dbFullDocument)
 
-    await emitChatListOpenUpdates({
-      chat,
-      dialogs: changedDialogs,
-    })
-  }
-  const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
-    chat,
-    updateGroup,
-    senderUserId: currentUserId,
-    userIds: isReplyThread(chat) ? sidebarOpenUserIds : undefined,
-  })
-
-  unarchiveUpdates.forEach(({ userId, update }) => {
-    RealtimeUpdates.pushToUser(userId, [update])
-  })
-
-  await recordDesktopChatActivityPromise
-
-  const publishToSelfSession = shouldPublishSendMessageToCurrentSession({
-    isRealtimeV3Session,
-    currentUserLayer,
-    hasAttachments,
-  })
-  let { selfUpdates } = await pushUpdates({
-    inputPeer,
-    messageInfo,
-    currentUserId,
-    update,
-    currentSessionId: context.currentSessionId,
-    publishToSelfSession,
-    updateGroup,
-  })
-  publishDurableReference({
-    bucket: { kind: "chat", chatId },
-    frontier: update.seq,
-    senderUserId: currentUserId,
-    ...(!publishToSelfSession ? { excludeSessionId: context.currentSessionId } : {}),
-  })
-  if (initialAgentContextRealtimeUpdate) selfUpdates.unshift(initialAgentContextRealtimeUpdate)
-
-  BotUpdateProjector.messageCreated({
-    chat,
-    messageId: newMessage.messageId,
-    updateGroup,
-    sourceChatId: input.sourceChatId,
-  })
-
-  // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
-  if (previewRoutes.length > 0) {
-    const previewWork = processUrlPreviews({
-      message: newMessage,
-      previewRoutes,
+    const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
+      userId: currentUserId,
+      sessionId: context.currentSessionId,
+      connectionId: context.currentConnectionId,
       chatId,
-      spaceId: chat.spaceId,
-      currentUserId,
-      inputPeer,
-      chat,
-      messageText: text,
-      messageEntities: entities,
-      titleAttachments,
-    }).catch((error) => {
-      log.error("Failed to process message URL previews", {
-        error,
-        chatId,
-        messageId: newMessage.messageId,
-      })
     })
-    applicationBackgroundWork.track(previewWork)
-  }
 
-  if (dbFullVoice && !text) {
-    VoiceTranscriptionModule.schedule({
+    // encode message info
+    const messageInfo: MessageInfo = {
       message: newMessage,
+      photo: dbFullPhoto,
+      video: dbFullVideo,
+      document: dbFullDocument,
       voice: dbFullVoice,
-      inputPeer,
-      context,
-    })
-  }
+      sendMode: input.sendMode,
+      mentionedUserIds,
+    }
 
-  // send notification
-  const notificationWork = sendNotifications({
-    updateGroup,
-    messageInfo,
-    currentUserId,
-    chat,
-    unencryptedEntities: entities,
-    mentionedUserIds,
-    unencryptedText: text,
-    inputPeer,
-    sendMode: input.sendMode,
-  }).catch((error) => {
-    log.error("Failed to send message notifications", {
-      error,
-      chatId,
-      messageId: newMessage.messageId,
+    //await debugDelay(5000)
+
+    const hasAttachments =
+      messageInfo.photo !== undefined ||
+      messageInfo.video !== undefined ||
+      messageInfo.document !== undefined ||
+      messageInfo.voice !== undefined
+
+    // send new updates
+    // TODO: need to create the update, use the sequence number
+    // we probably need to create the update and message in one transaction
+    // to avoid multiple times locking the chat row for last message and pts.
+    // we can also separate the sequence caching. this will speed up and
+    // remove the need to lock the chat row. then we should deliver the update
+    // with sequence number so we can ensure gap-free delivery.
+    const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+    let initialAgentContextRealtimeUpdate: Update | undefined
+    if (initialAgentContext && agentContextUpdate) {
+      initialAgentContextRealtimeUpdate = {
+        update: {
+          oneofKind: "chatInfo",
+          chatInfo: { chatId: BigInt(chat.id), agentContext: initialAgentContext },
+        },
+        seq: agentContextUpdate.seq,
+        date: encodeDateStrict(agentContextUpdate.date),
+      }
+      updateGroup.userIds.forEach((userId) => {
+        RealtimeUpdates.pushToUser(userId, [initialAgentContextRealtimeUpdate!], {
+          skipSessionId: userId === currentUserId ? context.currentSessionId : undefined,
+        })
+      })
+    }
+    await autoFollowThreadMessage({
+      chat,
       currentUserId,
+      updateGroup,
+      newMessageId: newMessage.messageId,
     })
-  })
-  applicationBackgroundWork.track(notificationWork)
 
-  if (previewRoutes.length === 0) {
-    if (input.messageAttachments && input.messageAttachments.length > 0) {
-      const titleContextWork = scheduleThreadTitleGenerationWithMessageAttachments({
+    const sidebarOpenUserIds = await getSidebarOpenUserIds({
+      chat,
+      currentUserId,
+      replyToMessageId: replyToMsgIdNumber ?? undefined,
+      mentionedUserIds,
+      updateGroup,
+    })
+    if (sidebarOpenUserIds.length > 0) {
+      const { changedDialogs } = isLinkedSubthread(chat)
+        ? await showAndOpenLinkedSubthreadDialogs({
+            chat,
+            userIds: sidebarOpenUserIds,
+          })
+        : await setDialogOpenForUsers({
+            chat,
+            userIds: sidebarOpenUserIds,
+            open: true,
+            showInChatList: true,
+          })
+
+      await emitChatListOpenUpdates({
         chat,
+        dialogs: changedDialogs,
+      })
+    }
+    const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
+      chat,
+      updateGroup,
+      senderUserId: currentUserId,
+      userIds: isReplyThread(chat) ? sidebarOpenUserIds : undefined,
+    })
+
+    unarchiveUpdates.forEach(({ userId, update }) => {
+      RealtimeUpdates.pushToUser(userId, [update])
+    })
+
+    await recordDesktopChatActivityPromise
+
+    const publishToSelfSession = shouldPublishSendMessageToCurrentSession({
+      isRealtimeV3Session,
+      currentUserLayer,
+      hasAttachments,
+    })
+    let { selfUpdates } = await pushUpdates({
+      inputPeer,
+      messageInfo,
+      currentUserId,
+      update,
+      currentSessionId: context.currentSessionId,
+      publishToSelfSession,
+      updateGroup,
+    })
+    publishDurableReference({
+      bucket: { kind: "chat", chatId },
+      frontier: update.seq,
+      senderUserId: currentUserId,
+      ...(!publishToSelfSession ? { excludeSessionId: context.currentSessionId } : {}),
+    })
+    if (initialAgentContextRealtimeUpdate) selfUpdates.unshift(initialAgentContextRealtimeUpdate)
+
+    BotUpdateProjector.messageCreated({
+      chat,
+      messageId: newMessage.messageId,
+      updateGroup,
+      sourceChatId: input.sourceChatId,
+    })
+
+    // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
+    if (previewRoutes.length > 0) {
+      const previewWork = processUrlPreviews({
         message: newMessage,
-        text,
-        entities,
-        attachments: titleAttachments,
+        previewRoutes,
+        chatId,
+        spaceId: chat.spaceId,
         currentUserId,
+        inputPeer,
+        chat,
+        messageText: text,
+        messageEntities: entities,
+        titleAttachments,
       }).catch((error) => {
-        log.error("Failed to schedule message thread title generation", {
+        log.error("Failed to process message URL previews", {
           error,
           chatId,
           messageId: newMessage.messageId,
         })
       })
-      applicationBackgroundWork.track(titleContextWork)
-    } else {
-      maybeScheduleThreadTitleGeneration({
-        chat,
+      applicationBackgroundWork.track(previewWork)
+    }
+
+    if (dbFullVoice && !text) {
+      VoiceTranscriptionModule.schedule({
         message: newMessage,
-        text,
-        entities,
-        attachments: titleAttachments,
-        currentUserId,
+        voice: dbFullVoice,
+        inputPeer,
+        context,
       })
     }
-  }
 
-  queueFirstMessageExperience({
-    chat,
-    message: newMessage,
-    text,
-    entities,
-    attachments: titleAttachments,
-    currentUserId,
-  })
-
-  if (input.messageAttachments && input.messageAttachments.length > 0) {
-    try {
-      const attachmentUpdates = await buildAttachmentUpdates({
-        message: newMessage,
-        chatId,
-        inputPeer,
-        currentUserId,
-        updateGroup,
-      })
-      if (attachmentUpdates.length > 0) {
-        selfUpdates.push(...attachmentUpdates)
-      }
-    } catch (error) {
-      log.error("Failed to push message attachment updates", {
+    // send notification
+    const notificationWork = sendNotifications({
+      updateGroup,
+      messageInfo,
+      currentUserId,
+      chat,
+      unencryptedEntities: entities,
+      mentionedUserIds,
+      unencryptedText: text,
+      inputPeer,
+      sendMode: input.sendMode,
+    }).catch((error) => {
+      log.error("Failed to send message notifications", {
         error,
         chatId,
         messageId: newMessage.messageId,
+        currentUserId,
+      })
+    })
+    applicationBackgroundWork.track(notificationWork)
+
+    if (previewRoutes.length === 0) {
+      if (input.messageAttachments && input.messageAttachments.length > 0) {
+        const titleContextWork = scheduleThreadTitleGenerationWithMessageAttachments({
+          chat,
+          message: newMessage,
+          text,
+          entities,
+          attachments: titleAttachments,
+          currentUserId,
+        }).catch((error) => {
+          log.error("Failed to schedule message thread title generation", {
+            error,
+            chatId,
+            messageId: newMessage.messageId,
+          })
+        })
+        applicationBackgroundWork.track(titleContextWork)
+      } else {
+        maybeScheduleThreadTitleGeneration({
+          chat,
+          message: newMessage,
+          text,
+          entities,
+          attachments: titleAttachments,
+          currentUserId,
+        })
+      }
+    }
+
+    queueFirstMessageExperience({
+      chat,
+      message: newMessage,
+      text,
+      entities,
+      attachments: titleAttachments,
+      currentUserId,
+    })
+
+    if (input.messageAttachments && input.messageAttachments.length > 0) {
+      try {
+        const attachmentUpdates = await buildAttachmentUpdates({
+          message: newMessage,
+          chatId,
+          inputPeer,
+          currentUserId,
+          updateGroup,
+        })
+        if (attachmentUpdates.length > 0) {
+          selfUpdates.push(...attachmentUpdates)
+        }
+      } catch (error) {
+        log.error("Failed to push message attachment updates", {
+          error,
+          chatId,
+          messageId: newMessage.messageId,
+        })
+      }
+    }
+
+    if (isReplyThread(chat)) {
+      await emitMessageSubthreadUpdateIfNeeded({ chatId: chat.id, currentUserId })
+    } else if (isLinkedSubthread(chat)) {
+      queueSubthreadParentUpdate({
+        chatId: chat.id,
+        currentUserId,
+        reason: "message send",
       })
     }
-  }
 
-  if (isReplyThread(chat)) {
-    await emitMessageSubthreadUpdateIfNeeded({ chatId: chat.id, currentUserId })
-  } else if (isLinkedSubthread(chat)) {
-    queueSubthreadParentUpdate({
-      chatId: chat.id,
-      currentUserId,
-      reason: "message send",
-    })
+    // return new updates
+    return { updates: selfUpdates }
   }
-
-  // return new updates
-  return { updates: selfUpdates }
+  if (submission) {
+    submission.onCommitted(deliver)
+    return { updates: [{ update: {
+      oneofKind: "updateMessageId",
+      updateMessageId: { messageId: BigInt(newMessage.messageId), randomId: input.randomId ?? 0n },
+    } }] }
+  }
+  return deliver()
 }
 
 async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: number): Promise<void> {
@@ -1199,23 +1312,30 @@ const buildAttachmentUpdates = async ({
   return selfUpdates
 }
 
-async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: number): Promise<Update[]> {
-  const message = await MessageModel.getMessageByRandomId(randomId, currentUserId)
-  return [
-    {
-      update: {
-        oneofKind: "updateMessageId",
-        updateMessageId: { messageId: BigInt(message.messageId), randomId: randomId },
-      },
-    },
-
-    // Note(@mo): No need for this, this will be fetched by the sync engine once it detects missing PTS
-    // Moreover we don't have access to the exact update caused by this message
-    // so we can't send it to the user.
-    // {
-    //   update: {
-    //     oneofKind: "newMessage",
-  ]
+async function selfUpdatesFromExistingMessage(
+  randomId: bigint, currentUserId: number, chatId: number, intentHash: Buffer, transaction?: Transaction,
+): Promise<Update[]> {
+  const recovered = await recoverSubmission({ randomId, currentUserId, chatId, intentHash }, transaction)
+  if (recovered) return recovered
+  const recoverLegacy = async (tx: Transaction): Promise<Update[]> => {
+    const chat = await lockChatAndAncestors(tx, chatId, "share")
+    if (!chat) throw RealtimeRpcError.PeerIdInvalid()
+    await AccessGuards.ensureChatAccess(chat, currentUserId, tx)
+    const [message] = await tx.select({
+      chatId: messages.chatId, messageId: messages.messageId,
+      forwardIntentHash: messages.forwardIntentHash, fwdFromMessageId: messages.fwdFromMessageId,
+    }).from(messages).where(and(eq(messages.randomId, randomId), eq(messages.fromId, currentUserId))).limit(1)
+    if (!message) throw ModelError.MessageInvalid
+    // Pre-ledger rows retain ID-only compatibility, not retrospective content
+    // proof. They still require current authority, and cannot cross forwarding.
+    if (message.chatId !== chatId || message.forwardIntentHash != null || message.fwdFromMessageId != null) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    return [{ update: { oneofKind: "updateMessageId", updateMessageId: {
+      messageId: BigInt(message.messageId), randomId,
+    } } }]
+  }
+  return transaction ? recoverLegacy(transaction) : db.transaction(recoverLegacy)
 }
 
 async function recoverInitialAgentMessageRetry(input: {
@@ -1223,17 +1343,22 @@ async function recoverInitialAgentMessageRetry(input: {
   currentUserId: number
   randomId: bigint
   expectedContext: AgentThreadContext
-}): Promise<Update[] | undefined> {
+  intentHash: Buffer
+}, transaction?: Transaction): Promise<Update[] | undefined> {
   let message: DbMessage
   try {
-    message = await MessageModel.getMessageByRandomId(input.randomId, input.currentUserId)
+    const [existing] = await (transaction ?? db).select().from(messages).where(and(
+      eq(messages.randomId, input.randomId), eq(messages.fromId, input.currentUserId),
+    )).limit(1)
+    if (!existing) throw ModelError.MessageInvalid
+    message = existing
   } catch (error) {
     if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) {
       return undefined
     }
     throw error
   }
-  const persistedChat = await db._query.chats.findFirst({ where: eq(chats.id, input.chatId) })
+  const persistedChat = await (transaction ?? db)._query.chats.findFirst({ where: eq(chats.id, input.chatId) })
   const persistedContext = persistedChat ? chatAgentContext(persistedChat) : undefined
   // The committed message already owns its optional Agent/configuration. Retry
   // identity is anchored by sender, random ID, Chat, and the required bot target.
@@ -1243,7 +1368,7 @@ async function recoverInitialAgentMessageRetry(input: {
   ) {
     throw RealtimeRpcError.BadRequest()
   }
-  return selfUpdatesFromExistingMessage(input.randomId, input.currentUserId)
+  return selfUpdatesFromExistingMessage(input.randomId, input.currentUserId, input.chatId, input.intentHash, transaction)
 }
 
 // ------------------------------------------------------------
@@ -1416,7 +1541,8 @@ async function sendNotificationToUser({
   const isDM = inputPeer.type.oneofKind === "user"
   const isReplyToUser = replyMentionUserIds.has(userId)
   const isExplicitlyMentioned =
-    mentionedUserIds.has(userId) || (messageEntities ? isUserMentioned(messageEntities, userId, mentionedUserIds) : false)
+    messageInfo.message.forwardIntentHash == null && messageInfo.message.fwdFromMessageId == null &&
+    (mentionedUserIds.has(userId) || (messageEntities ? isUserMentioned(messageEntities, userId, mentionedUserIds) : false))
 
   const decision = decideNotification({
     mode: effectiveMode,

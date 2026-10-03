@@ -103,7 +103,9 @@ export async function updateChatVisibility(
 
   try {
     const result = await db.transaction(async (tx): Promise<UpdateChatVisibilityOutput> => {
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+      // Visibility/grant writers serialize without blocking a dialog reader
+      // that already owns a recipient user before asking for chat KEY SHARE.
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("no key update").limit(1)
 
       if (!chat) {
         throw RealtimeRpcError.ChatIdInvalid()
@@ -135,6 +137,25 @@ export async function updateChatVisibility(
         tx,
         existingGroupGrants.map((grant) => grant.groupId),
       )
+
+      // Dialog removal and user-frontier allocation share users -> dialogs.
+      // Cover current public members, all existing personal rows, revocations,
+      // and the submitted next private grants before touching any dialog row.
+      const personalUsers = await tx.select({ userId: dialogs.userId }).from(dialogs).where(eq(dialogs.chatId, chatId))
+      const nextPublicUsers = isPublic ? await tx.select({ userId: members.userId }).from(members)
+        .innerJoin(users, eq(users.id, members.userId))
+        .where(and(eq(members.spaceId, chat.spaceId), or(isNull(members.canAccessPublicChats), eq(members.canAccessPublicChats, true)), userNotDeleted())) : []
+      const ownerIds = uniqueIds([
+        ...Array.from(accessBefore.values()).flatMap((ids) => Array.from(ids)),
+        ...personalUsers.map(({ userId }) => userId),
+        ...groupMemberRows.map(({ userId }) => userId),
+        ...nextPublicUsers.map(({ userId }) => userId),
+        ...(input.participants ?? []),
+        context.currentUserId,
+      ]).sort((a, b) => a - b)
+      for (const userId of ownerIds) {
+        await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
+      }
 
       if (isPublic) {
         if (input.participants && input.participants.length > 0) {
@@ -274,6 +295,17 @@ export async function updateChatVisibility(
           kind: "removed" as const,
         })),
       ])
+      const ownedUserIds = new Set(ownerIds)
+      const finalRecipientIds = uniqueIds([
+        ...transitions.map(({ userId }) => userId),
+        ...removedUserIds,
+        ...groupRevocations.flatMap(({ memberIds }) => memberIds),
+      ])
+      // Space membership may commit while these owners are acquired. Roll back
+      // rather than acquire a newly discovered user out of the established order.
+      if (finalRecipientIds.some((userId) => !ownedUserIds.has(userId))) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Space membership changed; retry visibility update", 400)
+      }
       const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
         transitions.map((transition) => ({
           userId: transition.userId,

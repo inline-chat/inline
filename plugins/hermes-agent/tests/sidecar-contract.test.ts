@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { ProtocolClientError, RpcError_Code } from "@inline-chat/realtime-sdk"
 import {
   SidecarError,
   inboundEventNeedsSenderResolution,
@@ -112,6 +113,28 @@ describe("sidecar contract helpers", () => {
     expect(normalizeError(new Error("weird failure")).errorKind).toBe("unknown")
   })
 
+  it("classifies canonical SDK error codes before ambiguous server wording", () => {
+    const denied = new ProtocolClientError("rpc-error", {
+      code: RpcError_Code.UNAUTHENTICATED,
+      message: "Missing permission to change this chat",
+    })
+    expect(normalizeError(denied)).toEqual({
+      status: 403, errorKind: "forbidden", message: denied.message,
+    })
+    expect(normalizeError(new ProtocolClientError("rpc-error", {
+      code: RpcError_Code.BAD_REQUEST, message: "Add a title or discussion first",
+    }))).toMatchObject({ status: 400, errorKind: "bad_format" })
+    expect(normalizeError(new ProtocolClientError("rpc-error", {
+      code: RpcError_Code.INTERNAL_ERROR, message: "Provider missing result",
+    }))).toMatchObject({ status: 500, errorKind: "unknown" })
+    expect(normalizeError(new ProtocolClientError("rpc-error", {
+      code: RpcError_Code.RATE_LIMIT, message: "Try later",
+    }))).toMatchObject({ status: 429, errorKind: "rate_limited" })
+    expect(normalizeError(new ProtocolClientError("not-authorized"))).toMatchObject({ status: 403, errorKind: "forbidden" })
+    expect(normalizeError(new ProtocolClientError("timeout"))).toMatchObject({ status: 503, errorKind: "transient" })
+    expect(normalizeError(new ProtocolClientError("commit-outcome-unknown"))).toMatchObject({ errorKind: "unknown" })
+  })
+
   it("redacts configured secrets without treating empty secrets as matches", () => {
     expect(redactText("token before inline-secret after", [
       { value: "", label: "[EMPTY]" },
@@ -181,6 +204,9 @@ describe("sidecar contract helpers", () => {
         attachments: null,
         reactions: null,
         replies: { chatId: "11" },
+        subthread: null,
+        blockContent: null,
+        fwdFrom: null,
         actions: null,
         rev: null,
         raw: {
@@ -225,6 +251,20 @@ describe("sidecar contract helpers", () => {
       meId: "1600",
       meUsername: "inlinebot",
     })
+  })
+
+  it("keeps forwarding, source version, edit time and rich context visible to the receiving adapter", () => {
+    const event = normalizeInboundEvent({ kind: "message.new", chatId: 42n, message: {
+      id: 5n, fromId: 20n, chatId: 42n, message: "@worker historical instruction",
+      isForwarded: true, sourceSnapshot: "a".repeat(64), editDate: 1700000001n,
+      subthread: { chatId: 43n }, blockContent: { blocks: [{ text: "Current public card" }] },
+      fwdFrom: { fromChatId: 41n },
+    } }, "10")
+    expect(event).toMatchObject({ message: {
+      isForwarded: true, sourceSnapshot: "a".repeat(64), editDate: "1700000001",
+      subthread: { chatId: "43" }, blockContent: { blocks: [{ text: "Current public card" }] },
+      fwdFrom: { fromChatId: "41" },
+    } })
   })
 
   it("reads primitive request fields conservatively", () => {

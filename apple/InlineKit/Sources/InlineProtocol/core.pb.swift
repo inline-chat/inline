@@ -4520,6 +4520,29 @@ public nonisolated struct Message: @unchecked Sendable {
   /// Clears the value of `subthread`. Subsequent reads from it will return its default value.
   public mutating func clearSubthread() {_uniqueStorage()._subthread = nil}
 
+  /// Server-owned carried context, including forwards whose visible header is
+  /// suppressed. Historical mentions in this row are not new bot directions.
+  public var isForwarded: Bool {
+    get {_storage._isForwarded ?? false}
+    set {_uniqueStorage()._isForwarded = newValue}
+  }
+  /// Returns true if `isForwarded` has been explicitly set.
+  public var hasIsForwarded: Bool {_storage._isForwarded != nil}
+  /// Clears the value of `isForwarded`. Subsequent reads from it will return its default value.
+  public mutating func clearIsForwarded() {_uniqueStorage()._isForwarded = nil}
+
+  /// Opaque token for this hydrated, visible forwarding snapshot. Unlike rev,
+  /// it also covers attachment text and asynchronous media readiness. Delivery
+  /// URLs, reactions, unread decoration, and agent-session linkage are excluded.
+  public var sourceSnapshot: String {
+    get {_storage._sourceSnapshot ?? String()}
+    set {_uniqueStorage()._sourceSnapshot = newValue}
+  }
+  /// Returns true if `sourceSnapshot` has been explicitly set.
+  public var hasSourceSnapshot: Bool {_storage._sourceSnapshot != nil}
+  /// Clears the value of `sourceSnapshot`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceSnapshot() {_uniqueStorage()._sourceSnapshot = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -14888,6 +14911,11 @@ public nonisolated struct ForwardMessagesInput: Sendable {
   /// Clears the value of `shareForwardHeader`. Subsequent reads from it will return its default value.
   public mutating func clearShareForwardHeader() {self._shareForwardHeader = nil}
 
+  /// Retry-safe submissions, aligned one-for-one with message_ids. Persist the
+  /// complete ordered request before sending and retain it unchanged on retry.
+  /// Omission preserves legacy forwarding without caller-controlled retry IDs.
+  public var submissions: [ForwardMessageSubmission] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -14897,12 +14925,68 @@ public nonisolated struct ForwardMessagesInput: Sendable {
   fileprivate var _shareForwardHeader: Bool? = nil
 }
 
+public nonisolated struct ForwardMessageSubmission: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Sender-scoped nonzero int64, shared with SendMessage.random_id.
+  public var randomID: Int64 = 0
+
+  /// Source revision observed in the selection preview. New sends reject a
+  /// changed revision; a committed retry returns its original receipt.
+  public var expectedSourceRevision: Int64 = 0
+
+  /// Token captured from the exact authorized preview. New promotions require
+  /// it; legacy callers may omit it. A committed retry uses the bound intent.
+  public var expectedSourceSnapshot: String {
+    get {_expectedSourceSnapshot ?? String()}
+    set {_expectedSourceSnapshot = newValue}
+  }
+  /// Returns true if `expectedSourceSnapshot` has been explicitly set.
+  public var hasExpectedSourceSnapshot: Bool {self._expectedSourceSnapshot != nil}
+  /// Clears the value of `expectedSourceSnapshot`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedSourceSnapshot() {self._expectedSourceSnapshot = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _expectedSourceSnapshot: String? = nil
+}
+
+public nonisolated struct ForwardMessageReceipt: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var sourceMessageID: Int64 = 0
+
+  public var randomID: Int64 = 0
+
+  public var messageID: Int64 = 0
+
+  public var sourceRevision: Int64 = 0
+
+  /// The identity committed previously but its destination row was deleted.
+  /// The server does not recreate it; a promotion must not activate without it.
+  public var messageDeleted: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct ForwardMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var updates: [Update] = []
+
+  /// One receipt per submitted source, in the original request order. A failed
+  /// call can already have committed a prefix; retry the same complete request.
+  public var receipts: [ForwardMessageReceipt] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -16458,6 +16542,17 @@ public nonisolated struct CreateSubthreadInput: Sendable {
   /// Clears the value of `agentContext`. Subsequent reads from it will return its default value.
   public mutating func clearAgentContext() {self._agentContext = nil}
 
+  /// Optional previously reserved id for replay-safe creation. An existing
+  /// anchored reply thread is returned instead; a different id means reuse.
+  public var reservedChatID: Int64 {
+    get {_reservedChatID ?? 0}
+    set {_reservedChatID = newValue}
+  }
+  /// Returns true if `reservedChatID` has been explicitly set.
+  public var hasReservedChatID: Bool {self._reservedChatID != nil}
+  /// Clears the value of `reservedChatID`. Subsequent reads from it will return its default value.
+  public mutating func clearReservedChatID() {self._reservedChatID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -16467,6 +16562,7 @@ public nonisolated struct CreateSubthreadInput: Sendable {
   fileprivate var _description_p: String? = nil
   fileprivate var _emoji: String? = nil
   fileprivate var _agentContext: AgentThreadContext? = nil
+  fileprivate var _reservedChatID: Int64? = nil
 }
 
 public nonisolated struct CreateSubthreadResult: Sendable {
@@ -19227,6 +19323,17 @@ public nonisolated struct UpdateChatInfoInput: Sendable {
   /// Clears the value of `agentContext`. Subsequent reads from it will return its default value.
   public mutating func clearAgentContext() {self._agentContext = nil}
 
+  /// Explicitly generate a missing emoji without changing the title. Existing
+  /// chosen emojis are preserved; this is not an automatic refill policy.
+  public var generateEmoji: Bool {
+    get {_generateEmoji ?? false}
+    set {_generateEmoji = newValue}
+  }
+  /// Returns true if `generateEmoji` has been explicitly set.
+  public var hasGenerateEmoji: Bool {self._generateEmoji != nil}
+  /// Clears the value of `generateEmoji`. Subsequent reads from it will return its default value.
+  public mutating func clearGenerateEmoji() {self._generateEmoji = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -19234,6 +19341,7 @@ public nonisolated struct UpdateChatInfoInput: Sendable {
   fileprivate var _title: String? = nil
   fileprivate var _emoji: String? = nil
   fileprivate var _agentContext: AgentThreadContext? = nil
+  fileprivate var _generateEmoji: Bool? = nil
 }
 
 public nonisolated struct UpdateChatInfoResult: Sendable {
@@ -25685,7 +25793,7 @@ nonisolated extension BlockTableRow: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{4}W]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}is_forwarded\0\u{3}source_snapshot\0\u{4}U]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -25714,6 +25822,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _blockContent: BlockContent? = nil
     var _agentSession: AgentSessionMessageInfo? = nil
     var _subthread: MessageSubthread? = nil
+    var _isForwarded: Bool? = nil
+    var _sourceSnapshot: String? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -25750,6 +25860,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _blockContent = source._blockContent
       _agentSession = source._agentSession
       _subthread = source._subthread
+      _isForwarded = source._isForwarded
+      _sourceSnapshot = source._sourceSnapshot
     }
   }
 
@@ -25793,6 +25905,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 23: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
         case 24: try { try decoder.decodeSingularMessageField(value: &_storage._agentSession) }()
         case 25: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
+        case 26: try { try decoder.decodeSingularBoolField(value: &_storage._isForwarded) }()
+        case 27: try { try decoder.decodeSingularStringField(value: &_storage._sourceSnapshot) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -25881,6 +25995,12 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._subthread {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
       } }()
+      try { if let v = _storage._isForwarded {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 26)
+      } }()
+      try { if let v = _storage._sourceSnapshot {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 27)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -25919,6 +26039,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._blockContent != rhs_storage._blockContent {return false}
         if _storage._agentSession != rhs_storage._agentSession {return false}
         if _storage._subthread != rhs_storage._subthread {return false}
+        if _storage._isForwarded != rhs_storage._isForwarded {return false}
+        if _storage._sourceSnapshot != rhs_storage._sourceSnapshot {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -42351,7 +42473,7 @@ nonisolated extension AnswerMessageActionResult: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ForwardMessagesInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}from_peer_id\0\u{3}message_ids\0\u{3}to_peer_id\0\u{3}share_forward_header\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}from_peer_id\0\u{3}message_ids\0\u{3}to_peer_id\0\u{3}share_forward_header\0\u{1}submissions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42363,6 +42485,7 @@ nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf
       case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._toPeerID) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self._shareForwardHeader) }()
+      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.submissions) }()
       default: break
       }
     }
@@ -42385,6 +42508,9 @@ nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._shareForwardHeader {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
     } }()
+    if !self.submissions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.submissions, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -42393,6 +42519,101 @@ nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf
     if lhs.messageIds != rhs.messageIds {return false}
     if lhs._toPeerID != rhs._toPeerID {return false}
     if lhs._shareForwardHeader != rhs._shareForwardHeader {return false}
+    if lhs.submissions != rhs.submissions {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ForwardMessageSubmission: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ForwardMessageSubmission"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}random_id\0\u{3}expected_source_revision\0\u{3}expected_source_snapshot\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.randomID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.expectedSourceRevision) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._expectedSourceSnapshot) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.randomID != 0 {
+      try visitor.visitSingularInt64Field(value: self.randomID, fieldNumber: 1)
+    }
+    if self.expectedSourceRevision != 0 {
+      try visitor.visitSingularInt64Field(value: self.expectedSourceRevision, fieldNumber: 2)
+    }
+    try { if let v = self._expectedSourceSnapshot {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ForwardMessageSubmission, rhs: ForwardMessageSubmission) -> Bool {
+    if lhs.randomID != rhs.randomID {return false}
+    if lhs.expectedSourceRevision != rhs.expectedSourceRevision {return false}
+    if lhs._expectedSourceSnapshot != rhs._expectedSourceSnapshot {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ForwardMessageReceipt: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ForwardMessageReceipt"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}source_message_id\0\u{3}random_id\0\u{3}message_id\0\u{3}source_revision\0\u{3}message_deleted\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.sourceMessageID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.randomID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.sourceRevision) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.messageDeleted) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.sourceMessageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.sourceMessageID, fieldNumber: 1)
+    }
+    if self.randomID != 0 {
+      try visitor.visitSingularInt64Field(value: self.randomID, fieldNumber: 2)
+    }
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    }
+    if self.sourceRevision != 0 {
+      try visitor.visitSingularInt64Field(value: self.sourceRevision, fieldNumber: 4)
+    }
+    if self.messageDeleted != false {
+      try visitor.visitSingularBoolField(value: self.messageDeleted, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ForwardMessageReceipt, rhs: ForwardMessageReceipt) -> Bool {
+    if lhs.sourceMessageID != rhs.sourceMessageID {return false}
+    if lhs.randomID != rhs.randomID {return false}
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.sourceRevision != rhs.sourceRevision {return false}
+    if lhs.messageDeleted != rhs.messageDeleted {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -42400,7 +42621,7 @@ nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ForwardMessagesResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0\u{1}receipts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42409,6 +42630,7 @@ nonisolated extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobu
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.receipts) }()
       default: break
       }
     }
@@ -42418,11 +42640,15 @@ nonisolated extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobu
     if !self.updates.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
     }
+    if !self.receipts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.receipts, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ForwardMessagesResult, rhs: ForwardMessagesResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
+    if lhs.receipts != rhs.receipts {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -44410,7 +44636,7 @@ nonisolated extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateSubthreadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}title\0\u{1}description\0\u{1}emoji\0\u{1}participants\0\u{3}agent_context\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}title\0\u{1}description\0\u{1}emoji\0\u{1}participants\0\u{3}agent_context\0\u{3}reserved_chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -44425,6 +44651,7 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
       case 5: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._agentContext) }()
+      case 8: try { try decoder.decodeSingularInt64Field(value: &self._reservedChatID) }()
       default: break
       }
     }
@@ -44456,6 +44683,9 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._agentContext {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._reservedChatID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -44467,6 +44697,7 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
     if lhs._emoji != rhs._emoji {return false}
     if lhs.participants != rhs.participants {return false}
     if lhs._agentContext != rhs._agentContext {return false}
+    if lhs._reservedChatID != rhs._reservedChatID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -48686,7 +48917,7 @@ nonisolated extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatInfoInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}title\0\u{1}emoji\0\u{3}agent_context\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}title\0\u{1}emoji\0\u{3}agent_context\0\u{3}generate_emoji\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -48698,6 +48929,7 @@ nonisolated extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf.
       case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._agentContext) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._generateEmoji) }()
       default: break
       }
     }
@@ -48720,6 +48952,9 @@ nonisolated extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf.
     try { if let v = self._agentContext {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._generateEmoji {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -48728,6 +48963,7 @@ nonisolated extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs._title != rhs._title {return false}
     if lhs._emoji != rhs._emoji {return false}
     if lhs._agentContext != rhs._agentContext {return false}
+    if lhs._generateEmoji != rhs._generateEmoji {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

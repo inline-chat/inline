@@ -1,6 +1,8 @@
 import type { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
-import { sql } from "drizzle-orm"
+import { chats, type DbChat } from "@in/server/db/schema"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { asc, eq, inArray, sql } from "drizzle-orm"
 
 type ChatAccessRow = {
   chatId: number
@@ -17,6 +19,39 @@ export type ChatAccessMap = Map<number, Set<number>>
 export type ChatAccessQuery = Pick<typeof db, "execute">
 
 type ChatIdRow = { chatId: number }
+
+/** Share forwarding's ID order when a mutation also owns inherited authority.
+ * Re-read the locked chain before granting access; structural changes during
+ * discovery must never leave a new authority owner outside the lock set. */
+export async function lockChatAndAncestors(
+  tx: Transaction,
+  chatId: number,
+  mode: "update" | "no key update" | "share" = "update",
+): Promise<DbChat | undefined> {
+  const ids = new Set<number>()
+  let nextId: number | null = chatId
+  while (nextId !== null) {
+    if (ids.has(nextId)) throw RealtimeRpcError.ChatIdInvalid()
+    ids.add(nextId)
+    const [row] = await tx.select({ parentId: chats.parentChatId }).from(chats).where(eq(chats.id, nextId)).limit(1)
+    if (!row) return undefined
+    nextId = row.parentId
+  }
+  const locked = await tx.select().from(chats).where(inArray(chats.id, [...ids])).orderBy(asc(chats.id)).for(mode)
+  const byId = new Map(locked.map((chat) => [chat.id, chat]))
+  const chat = byId.get(chatId)
+  if (!chat) return undefined
+  const checked = new Set<number>()
+  let current: DbChat | undefined = chat
+  while (current) {
+    if (checked.has(current.id)) throw RealtimeRpcError.ChatIdInvalid()
+    checked.add(current.id)
+    if (current.parentChatId === null) break
+    current = byId.get(current.parentChatId)
+    if (!current) throw RealtimeRpcError.ChatIdInvalid()
+  }
+  return chat
+}
 
 /**
  * Durable user access events are limited to independent/top-level chats.

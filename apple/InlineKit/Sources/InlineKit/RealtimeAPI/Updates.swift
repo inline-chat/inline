@@ -2280,7 +2280,8 @@ func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
     .deleteAll(db)
 }
 
-func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
+func deleteLocalChatData(_ db: Database, chatId: Int64, publisher: MessagesPublisher? = nil,
+                         beforeAsyncNotification: (@Sendable () async -> Void)? = nil) throws {
   // `chat(id, lastMsgId)` is a composite foreign key to
   // `message(chatId, messageId)`. Its SET NULL action would otherwise try to
   // clear the chat's primary key when the referenced last message is deleted.
@@ -2294,7 +2295,9 @@ func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
   try deleteChatSyncBucket(db, chatId: chatId)
 
   db.afterNextTransaction { _ in
+    (publisher ?? .shared).projectionRowsCommitted(.init(identities: [.peer(.thread(id: chatId))]))
     Task.detached {
+      await beforeAsyncNotification?()
       NotificationCenter.default.post(
         name: Notification.Name("chatDeletedNotification"),
         object: nil,
@@ -2483,32 +2486,91 @@ extension InlineProtocol.UpdateNewMessageNotification {
 }
 
 extension InlineProtocol.UpdateMessageId {
-  func apply(_ db: Database) throws {
-    Log.shared.debug("update message id \(randomID) \(messageID)")
-    let currentUserId = Auth.shared.getCurrentUserId()
-    // FIXME: optimize this to update in one go OR to make a faster fetch
-    let message = try Message
-      .fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID])
+  func apply(
+    _ db: Database,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId(),
+    publisher: MessagesPublisher? = nil,
+    publish: @escaping @MainActor @Sendable (Int64, Int64, Int64, Peer) async -> Void = {
+      await MessagesPublisher.shared.messageReconciled(messageId: $0, chatId: $1, replacingGlobalId: $2, peer: $3)
+    }
+  ) throws {
+    try apply(db, currentUserId: currentUserId, publisher: publisher,
+      beforeAsyncNotification: nil, publish: publish)
+  }
 
-    if var message {
-      message.status = .sent
-      message.messageId = messageID
-      message.randomId = nil // should we do this?
+  func apply(
+    _ db: Database,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId(),
+    publisher: MessagesPublisher? = nil,
+    beforeAsyncNotification: (@Sendable () async -> Void)?,
+    publish: @escaping @MainActor @Sendable (Int64, Int64, Int64, Peer) async -> Void
+  ) throws {
+    guard let currentUserId, messageID > 0,
+          var pending = try Message.fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID]),
+          let pendingGlobalId = pending.globalId else { return }
 
-      try message
-        .saveMessage(
-          db,
-          onConflict: .replace,
-          publishChanges: true
-        )
+    let previousMessageId = pending.messageId
+    let peer = pending.peerId
+    let chatId = pending.chatId
+    try db.inSavepoint {
+      let repairsLastPointer = try Chat.fetchOne(db, id: chatId)?.lastMsgId == previousMessageId
+      if var confirmed = try Message.fetchOne(db, key: ["messageId": messageID, "chatId": pending.chatId]),
+         confirmed.globalId != pendingGlobalId {
+        guard confirmed.fromId == pending.fromId else {
+          throw MessageIDReconciliationError.confirmedSenderMismatch
+        }
+        // History and catch-up can materialize the server row before this ACK.
+        // Keep its authoritative content and identity, including its references.
+        try confirmed.preserveLocalSendingState(from: pending, db: db, publisher: publisher)
+        confirmed.status = .sent
+        confirmed.randomId = nil
+        try confirmed.update(db)
+        if repairsLastPointer {
+          // The legacy composite FK includes chat.id. Move its tail before
+          // deletion so ON DELETE SET NULL cannot try to null that primary key.
+          try Chat.filter(Chat.Columns.id == chatId).updateAll(db, Chat.Columns.lastMsgId.set(to: messageID))
+        }
+        guard try Message.deleteOne(db, key: pendingGlobalId) else {
+          throw MessageIDReconciliationError.pendingRowMissing
+        }
+      } else {
+        // A legacy confirmed row can still retain randomId. Never delete itself.
+        pending.status = .sent
+        pending.messageId = messageID
+        pending.randomId = nil
+        try pending.update(db)
+      }
 
-      try Chat.updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
+      if repairsLastPointer {
+        let newest = try Message.filter(Message.Columns.chatId == pending.chatId)
+          .order(Message.Columns.date.desc, Message.Columns.messageId.desc).fetchOne(db)
+        try Chat.filter(Chat.Columns.id == pending.chatId)
+          .updateAll(db, Chat.Columns.lastMsgId.set(to: newest?.messageId))
+      }
+      return .commit
+    }
+    // Publish a single committed identity change. Separate delete/add events can
+    // cancel a loaded chat's pending reload and leave its confirmed row absent.
+    db.afterNextTransaction { _ in
+      (publisher ?? .shared).projectionRowsCommitted(.init(identities: [
+        .message(chatId: chatId, messageId: previousMessageId),
+        .message(chatId: chatId, messageId: messageID),
+      ]))
+      Task { @MainActor in
+        await beforeAsyncNotification?()
+        await publish(messageID, chatId, pendingGlobalId, peer)
+      }
     }
   }
 }
 
+private enum MessageIDReconciliationError: Error {
+  case confirmedSenderMismatch
+  case pendingRowMissing
+}
+
 extension InlineProtocol.UpdateUserStatus {
-  func apply(_ db: Database) throws {
+  func apply(_ db: Database, publisher: MessagesPublisher? = nil) throws {
     let onlineBoolean: Bool? = switch status.online {
       case .offline:
         false
@@ -2528,13 +2590,16 @@ extension InlineProtocol.UpdateUserStatus {
       lastOnline = nil
     }
 
-    try User.filter(id: userID).updateAll(
+    let updated = try User.filter(id: userID).updateAll(
       db,
       [
         Column("online").set(to: onlineBoolean),
         Column("lastOnline").set(to: lastOnline),
       ]
     )
+    if updated > 0 {
+      MessageProjectionDependencies(identities: [.user(userID)]).publishAfterCommit(db, publisher: publisher)
+    }
   }
 }
 
@@ -2569,7 +2634,8 @@ extension InlineProtocol.UpdateDeleteMessages {
     try apply(db, publishChanges: true)
   }
 
-  func apply(_ db: Database, publishChanges: Bool) throws {
+  func apply(_ db: Database, publishChanges: Bool, publisher: MessagesPublisher? = nil,
+             beforeAsyncNotification: (@Sendable () async -> Void)? = nil) throws {
     guard let chat = try Chat.getByPeerId(db: db, peerId: peerID.toPeer()) else {
       Log.shared.error("Failed to find chat for peer \(peerID.toPeer())")
       throw RealtimeUpdateApplyError.missingChat(peerID.toPeer())
@@ -2605,10 +2671,14 @@ extension InlineProtocol.UpdateDeleteMessages {
         .deleteAll(db)
     }
 
+    MessageProjectionDependencies(identities: Set(messageIds.map { .message(chatId: chatId, messageId: $0) }))
+      .publishAfterCommit(db, publisher: publisher)
+
     if publishChanges {
       db.afterNextTransaction { _ in
         Task(priority: .userInitiated) { @MainActor in
-          MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+          await beforeAsyncNotification?()
+          (publisher ?? .shared).messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
         }
       }
     }
@@ -2617,7 +2687,12 @@ extension InlineProtocol.UpdateDeleteMessages {
 
 extension InlineProtocol.UpdateMessageAttachment {
   @discardableResult
-  func apply(_ db: Database, publishChanges: Bool = true) throws -> Peer? {
+  func apply(_ db: Database, publishChanges: Bool = true, publisher: MessagesPublisher? = nil) throws -> Peer? {
+    var changedSharedRows = MessageProjectionDependencies(identities: [.message(chatId: chatID, messageId: messageID)])
+    // Incremental cards cannot certify a complete reviewed message snapshot.
+    // Only a new full server projection may install its next opaque identity.
+    try Message.filter(Message.Columns.chatId == chatID && Message.Columns.messageId == messageID)
+      .updateAll(db, Message.Columns.sourceSnapshot.set(to: nil))
     if attachment.attachment == nil {
       let attachmentId = attachment.id
 
@@ -2625,13 +2700,16 @@ extension InlineProtocol.UpdateMessageAttachment {
         .filter(Column("attachmentId") == attachmentId)
         .fetchOne(db)
       {
+        if let id = existing.id { changedSharedRows.identities.insert(.attachment(id)) }
         if let externalTaskId = existing.externalTaskId {
+          changedSharedRows.identities.insert(.task(externalTaskId))
           try ExternalTask
             .filter(Column("id") == externalTaskId)
             .deleteAll(db)
         }
 
         if let urlPreviewId = existing.urlPreviewId {
+          changedSharedRows.identities.insert(.urlPreview(urlPreviewId))
           try UrlPreview
             .filter(Column("id") == urlPreviewId)
             .deleteAll(db)
@@ -2643,6 +2721,7 @@ extension InlineProtocol.UpdateMessageAttachment {
 
         Log.shared.debug("Deleted attachment (attachmentId: \(attachmentId))")
       } else {
+        changedSharedRows.identities.insert(.task(attachmentId))
         // Legacy fallback: older servers used the externalTaskId as the MessageAttachment.id for deletion updates.
         try Attachment
           .filter(Column("externalTaskId") == attachmentId)
@@ -2664,7 +2743,7 @@ extension InlineProtocol.UpdateMessageAttachment {
         .fetchOne(db)
 
       if let message {
-        _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+        _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!, publisher: publisher)
         Log.shared.debug("Saved message attachment (attachmentId: \(attachment.id)) for message \(messageID) in chat \(chatID)")
       } else {
         Log.shared.warning("Message not found for attachment update")
@@ -2674,14 +2753,19 @@ extension InlineProtocol.UpdateMessageAttachment {
     let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
       .fetchOne(db)
 
-    if let message {
-      if publishChanges {
-        db.afterNextTransaction { _ in
-          Task(priority: .userInitiated) { @MainActor in
-            MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
-          }
+    let changes = changedSharedRows
+    // Catch-up suppresses visible events, not the committed read fence.
+    changes.publishAfterCommit(db, publisher: publisher)
+    if publishChanges {
+      db.afterNextTransaction { _ in
+        Task { @MainActor in
+          let publisher = publisher ?? .shared
+          if let message { publisher.messageUpdatedSync(message: message, peer: message.peerId, animated: true) }
         }
       }
+    }
+
+    if let message {
       return message.peerId
     }
 
@@ -2710,14 +2794,18 @@ extension InlineProtocol.UpdateReaction {
 }
 
 extension InlineProtocol.UpdateDeleteReaction {
-  func apply(_ db: Database) throws {
-    _ = try Reaction.filter(
+  func apply(_ db: Database, publisher: MessagesPublisher? = nil) throws {
+    let removed = try Reaction.filter(
       Column("messageId") == messageID
     ).filter(Column("chatId") == chatID)
       .filter(Column("emoji") == emoji)
       .filter(
         Column("userId") == userID
       ).deleteAll(db)
+    if removed > 0 {
+      MessageProjectionDependencies(identities: [.message(chatId: chatID, messageId: messageID)])
+        .publishAfterCommit(db, publisher: publisher)
+    }
 
     let message = try Message
       .filter(Column("messageId") == messageID)
@@ -2729,7 +2817,7 @@ extension InlineProtocol.UpdateDeleteReaction {
     if let message {
       db.afterNextTransaction { _ in
         Task(priority: .userInitiated) { @MainActor in
-          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+          (publisher ?? .shared).messageUpdatedSync(message: message, peer: message.peerId, animated: true)
         }
       }
     }
@@ -3081,7 +3169,7 @@ extension InlineProtocol.UpdateChatVisibility {
 }
 
 extension InlineProtocol.UpdateChatInfo {
-  func apply(_ db: Database) throws {
+  func apply(_ db: Database, publisher: MessagesPublisher? = nil) throws {
     Log.shared.debug("update chat info \(chatID)")
 
     if var chat = try Chat.fetchOne(db, id: chatID) {
@@ -3098,6 +3186,7 @@ extension InlineProtocol.UpdateChatInfo {
         chat.agentContext = Chat.serializedAgentContext(agentContext)
       }
       try chat.save(db)
+      chat.registerProjectionMutationAfterCommit(db, publisher: publisher)
     }
   }
 }

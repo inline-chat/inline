@@ -319,6 +319,12 @@ pub(super) async fn sync_turn_progress(
     chunks: &[String],
     hidden_continuation_text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if store
+        .get_inbound(event_id)?
+        .is_some_and(|record| record.direction.is_discretionary())
+    {
+        return Ok(());
+    }
     if message_ids.is_empty() {
         message_ids.extend(
             store
@@ -426,6 +432,7 @@ pub(super) async fn sync_progress_with_transport<T: StreamMessageTransport>(
         };
         update_progress_with_transport(transport, chat_id, Some(message_id), text, retry_delay)
             .await?;
+        store.record_context_output_message(event_id, message_id.get())?;
     }
     for message_id in message_ids.iter().skip(chunks.len()).copied() {
         update_progress_with_transport(
@@ -525,6 +532,14 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
     state: InboundState,
     failure: Option<&str>,
 ) -> Result<Option<InlineId>, Box<dyn std::error::Error>> {
+    if state == InboundState::Failed
+        && store
+            .get_inbound(event_id)?
+            .is_some_and(|record| record.direction.is_discretionary())
+    {
+        store.fail_inbound(event_id, failure.unwrap_or("discretionary turn failed"))?;
+        return Ok(None);
+    }
     if !store.stage_inbound_final_send_with_attachments_and_link(
         event_id,
         state,
@@ -546,6 +561,7 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
         .ok_or_else(|| io::Error::other("staged final send is missing its random identity"))?;
     let mutation = deliver_pending_final_send_with_attachments(
         bot,
+        store,
         event_id,
         chat_id,
         progress_message_id,
@@ -580,6 +596,7 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn deliver_pending_final_send_with_attachments(
     bot: &InlineClient,
+    store: &BridgeStore,
     event_id: &str,
     chat_id: i64,
     progress_message_id: Option<InlineId>,
@@ -588,7 +605,7 @@ pub(super) async fn deliver_pending_final_send_with_attachments(
     final_text: &str,
     output_attachments: &[OutputAttachment],
 ) -> Result<inline_client::MessageMutation, Box<dyn std::error::Error>> {
-    deliver_pending_final_with_attachments_transport(
+    deliver_pending_final_with_receipts_transport(
         &InlineStreamMessageTransport(bot),
         event_id,
         chat_id,
@@ -598,6 +615,7 @@ pub(super) async fn deliver_pending_final_send_with_attachments(
         final_text,
         output_attachments,
         message_retry_delay,
+        Some(store),
     )
     .await
 }
@@ -628,6 +646,7 @@ pub(super) async fn deliver_pending_final_with_transport<T: StreamMessageTranspo
     .await
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMessageTransport>(
     transport: &T,
@@ -639,6 +658,34 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
     final_text: &str,
     output_attachments: &[OutputAttachment],
     retry_delay: impl Fn(u32) -> Duration,
+) -> Result<inline_client::MessageMutation, Box<dyn std::error::Error>> {
+    deliver_pending_final_with_receipts_transport(
+        transport,
+        event_id,
+        chat_id,
+        progress_message_id,
+        progress_status,
+        random_id,
+        final_text,
+        output_attachments,
+        retry_delay,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn deliver_pending_final_with_receipts_transport<T: StreamMessageTransport>(
+    transport: &T,
+    event_id: &str,
+    chat_id: i64,
+    progress_message_id: Option<InlineId>,
+    progress_status: &str,
+    random_id: RandomId,
+    final_text: &str,
+    output_attachments: &[OutputAttachment],
+    retry_delay: impl Fn(u32) -> Duration,
+    store: Option<&BridgeStore>,
 ) -> Result<inline_client::MessageMutation, Box<dyn std::error::Error>> {
     if let Some(message_id) = progress_message_id {
         let request = EditMessageRequest {
@@ -688,6 +735,9 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
         for attempt in 0..3 {
             match transport.send_media(request.clone(), bytes.clone()).await {
                 Ok(mutation) if mutation.message_id.is_some() => {
+                    if let (Some(store), Some(message_id)) = (store, mutation.message_id) {
+                        store.record_context_output_message(event_id, message_id.get())?;
+                    }
                     last_error = None;
                     break;
                 }
@@ -719,7 +769,12 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
     let mut last_error = None;
     for attempt in 0..3 {
         match transport.send(request.clone()).await {
-            Ok(mutation) if mutation.message_id.is_some() => return Ok(mutation),
+            Ok(mutation) if mutation.message_id.is_some() => {
+                if let (Some(store), Some(message_id)) = (store, mutation.message_id) {
+                    store.record_context_output_message(event_id, message_id.get())?;
+                }
+                return Ok(mutation);
+            }
             Ok(_) => {
                 last_error = Some(Box::new(io::Error::other(
                     "Inline final send was acknowledged without a message identity",
@@ -818,6 +873,14 @@ impl<'a, T: TypingTransport> TypingIndicator<'a, T> {
         };
         indicator.send(true).await;
         indicator
+    }
+
+    pub(super) fn quiet(transport: &'a T, chat_id: i64) -> Self {
+        Self {
+            transport,
+            chat_id: InlineId::new(chat_id),
+            active: false,
+        }
     }
 
     pub(super) async fn heartbeat(&self) {

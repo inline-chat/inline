@@ -1202,6 +1202,12 @@ pub struct MessageMetadata {
     /// Monotonic server edit revision, when present.
     #[serde(default)]
     pub revision: Option<i64>,
+    /// Server-owned carried context, even when the visible forward header is hidden.
+    #[serde(default)]
+    pub is_forwarded: bool,
+    /// Opaque forwarding snapshot of public visible content; not an agent direction.
+    #[serde(default)]
+    pub source_snapshot: Option<String>,
     /// Whether the sender is known to be a bot from the durable user record.
     #[serde(default)]
     pub sender_is_bot: Option<bool>,

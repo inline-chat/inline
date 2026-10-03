@@ -61,6 +61,7 @@ type ActivationInfo = {
   platformConfigured: boolean
   configTokenConfigured: boolean
   hermesCompatibilityVerified: boolean
+  hermesReceivingSupported: boolean
   hermesCredentialStoreChecked: boolean
   hermesCredentialStoreTokenConfigured: boolean
   credentialState: "not_configured" | "configured_unverified" | "verified" | "invalid" | "unknown"
@@ -159,33 +160,36 @@ async function installPlugin(params: {
   opts: InstallOptions
   pkg: PackageInfo
 }): Promise<InstallResult> {
-  const before = await inspectInstall(params)
-  if (!before.sourceValid) return { ...before, action: "install", installed: false }
-  if (params.opts.dryRun) {
+  // Preflight the artifact and replacement policy without invoking runtime
+  // probes against a plugin that has not been installed yet.
+  const sourceValid = await hasPluginFiles(params.source)
+  const targetExists = await exists(params.target)
+  if (!sourceValid || params.opts.dryRun || (targetExists && !params.opts.force)) {
+    const before = await inspectInstall(params)
+    if (!sourceValid) return { ...before, action: "install", installed: false }
+    if (params.opts.dryRun) {
+      return {
+        ...before,
+        ok: before.sourceReady,
+        action: "install",
+        installed: false,
+        issues: before.sourceReady ? [] : before.issues,
+      }
+    }
     return {
       ...before,
-      ok: before.sourceReady,
+      ok: false,
       action: "install",
       installed: false,
-      issues: before.sourceReady ? [] : before.issues,
+      issues: [
+        ...before.issues,
+        `target already exists: ${params.target}. Re-run with --force to replace it.`,
+      ],
     }
   }
 
   await mkdir(path.dirname(params.target), { recursive: true })
-
-  if (before.targetExists) {
-    if (!params.opts.force) {
-      return {
-        ...before,
-        ok: false,
-        action: "install",
-        installed: false,
-        issues: [
-          ...before.issues,
-          `target already exists: ${params.target}. Re-run with --force to replace it.`,
-        ],
-      }
-    }
+  if (targetExists) {
     await rm(params.target, { recursive: true, force: true })
   }
 
@@ -263,6 +267,9 @@ async function inspectInstall(params: {
   }
   if (params.opts.command === "doctor" && !activation.hermesCompatibilityVerified) {
     issues.push("Hermes could not validate the installed plugin compatibility; check `hermes inline status --json --check-compatibility` and update or repair the plugin")
+  }
+  if (params.opts.command === "doctor" && !activation.hermesReceivingSupported) {
+    issues.push("Hermes durable receiving support is unavailable; install the matching durable-intake core. A valid credential and loader compatibility qualify sending, not receiving")
   }
   if (params.opts.command === "doctor" && !activation.hermesCredentialStoreChecked) {
     issues.push("Hermes credential verification is unavailable; doctor cannot confirm runtime readiness")
@@ -705,6 +712,7 @@ async function inspectActivation(hermesHome: string, target: string, probeCreden
     platformConfigured: readConfigBoolean(config, ["platforms", defaultPluginId, "enabled"]) || readConfigBoolean(config, [defaultPluginId, "enabled"]),
     configTokenConfigured,
     hermesCompatibilityVerified: machineCredential.compatible === true,
+    hermesReceivingSupported: machineCredential.receivingSupported === true,
     hermesCredentialStoreChecked: machineCredential.checked,
     hermesCredentialStoreTokenConfigured: machineCredential.configured === true,
     credentialState,
@@ -768,6 +776,7 @@ async function chownTree(target: string, uid: number, gid: number): Promise<void
 
 type HermesCredentialInspection = {
   compatible?: boolean
+  receivingSupported?: boolean
   checked: boolean
   configured: boolean | null
   state: ActivationInfo["credentialState"]
@@ -809,11 +818,18 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
   const compatibility = record.compatibility as Record<string, unknown> | undefined
   const compatible = result.status === 0 && compatibility?.ok === true
     && compatibility.pluginPath === safeRealpathSync(target)
+  const receivingCapability = record.receivingCapability && typeof record.receivingCapability === "object" && !Array.isArray(record.receivingCapability)
+    ? record.receivingCapability as Record<string, unknown>
+    : null
+  const qualification = {
+    compatible,
+    receivingSupported: receivingCapability?.supported === true && receivingCapability.requiredIntakeVersion === 1,
+  }
   if (!record.configured) {
-    return { compatible, checked: true, configured: false, state: "not_configured" }
+    return { ...qualification, checked: true, configured: false, state: "not_configured" }
   }
   if (!probe) {
-    return { compatible, checked: true, configured: true, state: "configured_unverified" }
+    return { ...qualification, checked: true, configured: true, state: "configured_unverified" }
   }
   const probeResult = record.probe && typeof record.probe === "object" && !Array.isArray(record.probe)
     ? record.probe as Record<string, unknown>
@@ -827,7 +843,7 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
       ? probeResult.botUsername.trim()
       : undefined
     return {
-      compatible,
+      ...qualification,
       checked: true,
       configured: true,
       state: "verified",
@@ -836,9 +852,9 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
     }
   }
   if (probeResult?.errorKind === "invalid_credential") {
-    return { compatible, checked: true, configured: true, state: "invalid" }
+    return { ...qualification, checked: true, configured: true, state: "invalid" }
   }
-  return { compatible, checked: true, configured: true, state: "unknown" }
+  return { ...qualification, checked: true, configured: true, state: "unknown" }
 }
 
 function safeRealpathSync(target: string): string | null {
@@ -1299,7 +1315,7 @@ Options:
     console.log(`Usage: inline-hermes ${topic} [options]
 
 ${topic === "doctor" ? "Diagnose" : "Inspect"} the installed Inline plugin, sidecar integrity, and Node runtime.
-${topic === "doctor" ? "Doctor also requires a successful Hermes loader compatibility check and credential probe." : ""}
+${topic === "doctor" ? "Doctor also requires a successful Hermes loader compatibility check, credential probe and durable receiving core capability. Connected gateway delivery is reported separately by `hermes inline status --json`." : ""}
 
 Options:
   --hermes-home <path>  Hermes home directory. Defaults to HERMES_HOME or ~/.hermes.

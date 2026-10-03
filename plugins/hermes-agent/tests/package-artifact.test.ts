@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import { Message, UpdateChatInfoInput } from "@inline-chat/realtime-sdk"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageRoot, "..", "..")
@@ -27,6 +28,19 @@ type PackEntry = {
 }
 
 describe("packed artifact", () => {
+  it("retains promoted-history provenance and emoji-only requests on the source build wire", () => {
+    const message = Message.create({ id: 4n, chatId: 123n, isForwarded: true, sourceSnapshot: "carried public context" })
+    const decoded = Message.fromBinary(Message.toBinary(message))
+    expect(decoded.isForwarded).toBe(true)
+    expect(decoded.sourceSnapshot).toBe("carried public context")
+    const request = UpdateChatInfoInput.fromBinary(UpdateChatInfoInput.toBinary(
+      UpdateChatInfoInput.create({ chatId: 123n, generateEmoji: true }),
+    ))
+    expect(request.generateEmoji).toBe(true)
+    expect(request.title).toBeUndefined()
+    expect(request.emoji).toBeUndefined()
+  })
+
   it("ships only runtime files and license text needed by the external Hermes plugin", async () => {
     const raw = execFileSync("npm", ["pack", "--dry-run", "--json", "--silent"], {
       cwd: packageRoot,
@@ -62,6 +76,7 @@ describe("packed artifact", () => {
       inlineHermes?: Record<string, unknown>
       repository?: { directory?: string }
       scripts?: Record<string, string>
+      dependencies?: Record<string, string>
     }
     expect(pkg.bin?.["inline-hermes"]).toBe("dist/install.js")
     expect(pkg.engines?.node).toBe(">=20")
@@ -69,14 +84,16 @@ describe("packed artifact", () => {
     expect(pkg.scripts?.prepublishOnly).toBe("bun run check")
     expect(pkg.scripts?.["release:preflight"]).toBe("node ./scripts/release-stage.mjs --dry-run")
     expect(pkg.scripts?.["release:stage"]).toBe("node ./scripts/release-stage.mjs --prepare-only")
+    expect(pkg.dependencies?.["@inline-chat/realtime-sdk"]).toBe("0.0.19-alpha.1")
     expect(pkg.inlineHermes).toMatchObject({
       pluginId: "inline",
       pluginPath: "plugin/inline",
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.21.3",
-      testedHermesVersion: "0.21.5",
-      testedHermesCommit: "f97608f178d1ffeca59860195ab7da295f7c8e5f",
+      testedHermesVersion: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      testedHermesRepository: "morajabi/hermes-agent",
+      testedHermesCommit: expect.stringMatching(/^[0-9a-f]{40}$/),
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -134,11 +151,18 @@ describe("packed artifact", () => {
       const pack = parsePackOutput(raw)
       const tarball = path.join(packDir, pack.filename)
 
-      // Source CI has unreleased workspace dependencies. Install local packed
-      // prerequisites so this still exercises a clean npm tree. The isolated
-      // release stage has no sibling packages and resolves published versions.
+      // Source CI packs workspace prerequisites. Candidate release staging
+      // supplies its exact artifacts; registry-only staging supplies neither.
+      // Each path still installs a clean npm tree and verifies its wire graph.
       const localPrerequisites: string[] = []
-      if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
+      const sdkTarball = process.env.INLINE_HERMES_TEST_SDK_TARBALL
+      const protocolTarball = process.env.INLINE_HERMES_TEST_PROTOCOL_TARBALL
+      if (Boolean(sdkTarball) !== Boolean(protocolTarball)) {
+        throw new Error("artifact tests require both candidate SDK and protocol tarballs")
+      }
+      if (sdkTarball && protocolTarball) {
+        localPrerequisites.push(path.resolve(protocolTarball), path.resolve(sdkTarball))
+      } else if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
         for (const directory of ["protocol", "sdk"]) {
           const prerequisiteDir = path.join(repoRoot, "packages", directory)
           const prerequisitePack = parsePackOutput(execFileSync("npm", [
@@ -176,6 +200,50 @@ describe("packed artifact", () => {
         expect(protocol.manifest.version).toBe(protocolSpec)
       }
 
+      // Resolve from this actual npm-installed package, without the monorepo's
+      // workspace overrides. Matching version labels alone do not prove that
+      // the dependency graph can carry the new public wire fields.
+      const wire = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+const require = createRequire(process.argv[1]);
+const sdkEntry = require.resolve("@inline-chat/realtime-sdk");
+const { Message, UpdateChatInfoInput, ForwardMessagesInput } = await import(pathToFileURL(sdkEntry).href);
+const snapshot = "a".repeat(64);
+const message = Message.fromBinary(Message.toBinary(Message.create({
+  id: 4n, chatId: 123n, isForwarded: true, sourceSnapshot: snapshot,
+})));
+assert.equal(message.isForwarded, true);
+assert.equal(message.sourceSnapshot, snapshot);
+const emoji = UpdateChatInfoInput.fromBinary(UpdateChatInfoInput.toBinary(
+  UpdateChatInfoInput.create({ chatId: 123n, generateEmoji: true }),
+));
+assert.equal(emoji.generateEmoji, true);
+assert.equal(emoji.title, undefined);
+assert.equal(emoji.emoji, undefined);
+const forward = ForwardMessagesInput.fromBinary(ForwardMessagesInput.toBinary(
+  ForwardMessagesInput.create({ messageIds: [4n], shareForwardHeader: false,
+    submissions: [{ randomId: 7n, expectedSourceRevision: 2n, expectedSourceSnapshot: snapshot }],
+  }),
+));
+assert.deepEqual(forward.messageIds, [4n]);
+assert.equal(forward.shareForwardHeader, false);
+assert.equal(forward.submissions[0]?.randomId, 7n);
+assert.equal(forward.submissions[0]?.expectedSourceRevision, 2n);
+assert.equal(forward.submissions[0]?.expectedSourceSnapshot, snapshot);
+console.log(JSON.stringify({ sdkEntry, publicProvenance: true, emojiOnly: true, forwardingSubmission: true }));
+`, hermesManifestPath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) as {
+        sdkEntry: string; publicProvenance: boolean; emojiOnly: boolean; forwardingSubmission: boolean
+      }
+      const installedModules = await realpath(globalModules)
+      for (const entry of [wire.sdkEntry, protocol.path]) {
+        const relative = path.relative(installedModules, await realpath(entry))
+        expect(relative).not.toMatch(/^\.\.(?:[\\/]|$)/)
+        expect(path.isAbsolute(relative)).toBe(false)
+      }
+      expect(wire).toMatchObject({ publicProvenance: true, emojiOnly: true, forwardingSubmission: true })
+
       const bin = process.platform === "win32"
         ? path.join(prefix, "inline-hermes.cmd")
         : path.join(prefix, "bin", "inline-hermes")
@@ -195,7 +263,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.21")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.22")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

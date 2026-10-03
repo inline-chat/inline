@@ -227,6 +227,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var currentEmbedMessageId: Int64?
   private var currentEmbedMode: ComposeEmbedViewContent.Mode?
   private var currentEmbedMessageChatId: Int64?
+  private var embedTransitionGeneration: UInt64 = 0
 
   // MARK: - Initialization
 
@@ -1676,6 +1677,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     mode: ComposeEmbedViewContent.Mode,
     animated: Bool
   ) {
+    embedTransitionGeneration &+= 1
     let needsNewView = embedView == nil ||
       currentEmbedMessageId != messageId ||
       currentEmbedMode != mode ||
@@ -1723,14 +1725,17 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func hideEmbedView(animated: Bool) {
-    guard embedView != nil else { return }
+    guard let dismissedView = embedView else { return }
+    embedTransitionGeneration &+= 1
+    let generation = embedTransitionGeneration
 
     let shouldUpdateHeight = embedContainerHeightConstraint?.constant != 0
     embedContainerHeightConstraint?.constant = 0
 
     let finish: () -> Void = { [weak self] in
-      guard let self else { return }
-      self.embedView?.removeFromSuperview()
+      guard let self, self.embedTransitionGeneration == generation,
+            self.embedView === dismissedView else { return }
+      dismissedView.removeFromSuperview()
       self.embedView = nil
       self.currentEmbedMessageId = nil
       self.currentEmbedMode = nil

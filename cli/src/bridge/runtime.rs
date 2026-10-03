@@ -26,8 +26,8 @@ pub(super) async fn send_inbound_response(
         )
         .await?;
     let sender_is_bot = match source_message.as_ref() {
-        Some(message) => message_sender_is_bot(&route.bot_store, message).await?,
-        None => false,
+        Some(message) => message_sender_is_bot(&route.bot_store, message).await? != Some(false),
+        None => true,
     };
     if sender_is_bot {
         send_text_message(bot, chat_id, text, external_id, notification_class).await
@@ -52,6 +52,7 @@ pub(super) use admission::{accept_provider_unavailable_delivery, recover_failed_
 mod conversation;
 pub(in crate::bridge) use conversation::*;
 mod content;
+pub(super) use content::normalize_inbound_content;
 use content::*;
 mod settings_recovery;
 use settings_recovery::*;
@@ -294,7 +295,7 @@ impl BotAgentResolver {
         (loaded_at.elapsed() < ttl).then(|| agent.clone())
     }
 
-    fn store(&self, agent_id: i64, agent: Option<proto::BotAgent>) {
+    pub(super) fn store(&self, agent_id: i64, agent: Option<proto::BotAgent>) {
         let mut cache = self.cache.write().expect("bot Agent cache poisoned");
         if !cache.contains_key(&agent_id)
             && cache.len() >= BOT_AGENT_CACHE_MAX_ENTRIES
@@ -427,7 +428,10 @@ async fn event_chat_uses_agent_context_settings(
         | ClientEvent::MessageActionInvoked { chat_id, .. } => chat_id.get(),
         _ => return Ok(false),
     };
-    Ok(route.chat_agent_context(chat_id).await?.is_some())
+    Ok(route
+        .chat_agent_context(chat_id)
+        .await?
+        .is_some_and(|context| context.bot_user_id == route.bot_user_id))
 }
 
 async fn reject_agent_context_settings_command(
@@ -449,7 +453,7 @@ async fn reject_agent_context_settings_command(
         .chat_agent_context(record.delivery_chat_id)
         .await
         .map_err(io::Error::other)?;
-    if context.is_none() {
+    if context.is_none_or(|context| context.bot_user_id != route.bot_user_id) {
         return Ok(false);
     }
     send_inbound_response(
@@ -463,6 +467,216 @@ async fn reject_agent_context_settings_command(
     )
     .await?;
     Ok(true)
+}
+
+/// Fetch through the authenticated bot at the input boundary, then freeze the
+/// exact public representation. Cached history alone is not a read grant.
+async fn prepare_public_context_input<D: AgentDriver + 'static>(
+    bot: &InlineClient,
+    sessions: &ProviderSessionManager<D>,
+    route: &InboundRoute,
+    record: &InboundRecord,
+    binding: &BindingKey,
+    instruction: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let snapshot =
+        verify_public_context_input(bot, sessions, route, record, binding, instruction).await?;
+    route
+        .store
+        .prepare_context_input(&record.event_id, &snapshot)?;
+    Ok(())
+}
+
+/// Verifies and builds one input without adopting a new direction. In-flight
+/// source edits use this before inbox deduplication so an unknown recipient
+/// remains retryable and cannot interrupt or steer already admitted work.
+async fn verify_public_context_input<D: AgentDriver + 'static>(
+    bot: &InlineClient,
+    sessions: &ProviderSessionManager<D>,
+    route: &InboundRoute,
+    record: &InboundRecord,
+    binding: &BindingKey,
+    instruction: &str,
+) -> Result<inline_agent_bridge::ContextInputSnapshot, Box<dyn std::error::Error>> {
+    for chat_id in [record.binding.chat_id, binding.chat_id] {
+        if route
+            .store
+            .bound_chat_workspace(&binding.installation_id, chat_id)?
+            .is_some_and(|workspace| workspace.workspace_id != binding.workspace_id)
+        {
+            return Err(
+                io::Error::other("queued direction belongs to an old workspace binding").into(),
+            );
+        }
+    }
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(record.binding.chat_id),
+            limit: Some(MAX_CONTEXT_MESSAGES),
+            before_message_id: record.message_id.checked_add(1).map(InlineId::new),
+            after_message_id: None,
+        })
+        .await?;
+    let trigger = history
+        .messages
+        .iter()
+        .find(|message| {
+            message.chat_id.get() == record.binding.chat_id
+                && message.message_id.get() == record.message_id
+        })
+        .ok_or_else(|| io::Error::other("authenticated source message is unavailable"))?;
+    validate_public_source_version(record, trigger)?;
+    let bot_authored = trigger.is_outgoing
+        || trigger.sender_id.get() == route.bot_user_id
+        || require_message_sender_kind(bot, &route.bot_store, trigger).await?;
+    if trigger.sender_id.get() != record.sender_user_id
+        || trigger.metadata.is_forwarded
+        || (!bot_authored && !route.allows(record.sender_user_id))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "current direction is no longer authorized",
+        )
+        .into());
+    }
+    if bot_authored
+        && !trigger.metadata.entities.iter().any(|entity| {
+            entity.kind == "TYPE_MENTION"
+                && entity
+                    .user_id
+                    .is_some_and(|id| id.get() == route.bot_user_id)
+        })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "bot input is no longer explicitly addressed",
+        )
+        .into());
+    }
+    if binding.chat_id != record.binding.chat_id {
+        bot.history(HistoryRequest {
+            chat_id: InlineId::new(binding.chat_id),
+            limit: Some(1),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await?;
+    }
+    let verified_reply =
+        if let Some(reply_id) = trigger.reply_to_message_id {
+            if let Some(reply) = history.messages.iter().find(|message| {
+                message.chat_id == trigger.chat_id && message.message_id == reply_id
+            }) {
+                Some(reply.clone())
+            } else {
+                let reply_page = bot
+                    .history(HistoryRequest {
+                        chat_id: trigger.chat_id,
+                        limit: Some(1),
+                        before_message_id: reply_id.get().checked_add(1).map(InlineId::new),
+                        after_message_id: None,
+                    })
+                    .await?;
+                reply_page.messages.into_iter().find(|message| {
+                    message.chat_id == trigger.chat_id && message.message_id == reply_id
+                })
+            }
+        } else {
+            None
+        };
+    let exact_mention = trigger.metadata.entities.iter().any(|entity| {
+        entity.kind == "TYPE_MENTION"
+            && entity
+                .user_id
+                .is_some_and(|id| id.get() == route.bot_user_id)
+    });
+    if !exact_mention && starts_with_other_user_mention(trigger, route.bot_user_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "this direction is addressed to another participant",
+        )
+        .into());
+    }
+    if !exact_mention
+        && let Some(reply) = verified_reply.as_ref()
+        && reply.sender_id.get() != route.bot_user_id
+        && require_message_sender_kind(bot, &route.bot_store, reply).await?
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "this reply is addressed to another bot",
+        )
+        .into());
+    }
+    if record.direction.is_discretionary()
+        && trigger.reply_to_message_id.is_some()
+        && verified_reply.is_none()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cannot verify the recipient of this discretionary reply",
+        )
+        .into());
+    }
+    let session = sessions.ensure_session(binding, now_seconds()).await?;
+    validate_public_trigger_reset(trigger, &route.store.context_receipt(binding)?)?;
+    if let Some((snapshot, state)) = route.store.context_input(&record.event_id)? {
+        if state != inline_agent_bridge::ContextInputState::Prepared
+            || snapshot.binding != *binding
+            || snapshot.provider_session_id != *session.session_id()
+        {
+            return Err(io::Error::other(
+                "previous input acceptance is uncertain or belongs to an old session",
+            )
+            .into());
+        }
+        for source in &snapshot.messages {
+            if !history
+                .messages
+                .iter()
+                .chain(verified_reply.iter())
+                .any(|message| {
+                    message.chat_id.get() == source.chat_id
+                        && message.message_id.get() == source.message_id
+                        && context_message_ref(message) == *source
+                })
+            {
+                return Err(io::Error::other("frozen context is no longer readable at its admitted version; send a new request").into());
+            }
+        }
+        // The exact previous bytes remain authoritative after a definitive
+        // rejection. Re-read the scope above; never rebuild a retry snapshot.
+        return Ok(snapshot);
+    }
+    let context = build_turn_instruction(
+        route,
+        record,
+        instruction,
+        binding,
+        &history,
+        verified_reply.as_ref(),
+    )
+    .await?;
+    Ok(inline_agent_bridge::ContextInputSnapshot {
+        binding: binding.clone(),
+        provider_session_id: session.session_id().clone(),
+        generation: context.generation,
+        input: TurnInput {
+            text: context.text,
+            attachments: materialize_inbound_attachments(
+                &record.direction.attachments,
+                &route.attachment_cache_dir,
+            )
+            .await,
+            client_message_id: Some(record.direction.id.to_string()),
+        },
+        messages: context.messages,
+        trigger: Some(inline_agent_bridge::ContextTriggerProof {
+            chat_id: trigger.chat_id.get(),
+            message_id: trigger.message_id.get(),
+            timestamp: trigger.timestamp,
+        }),
+    })
 }
 
 pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
@@ -618,13 +832,27 @@ pub(super) async fn inbound_from_delivery(
     inbound_from_message(bot, message, route, false).await
 }
 
-async fn inbound_from_message(
+pub(super) async fn inbound_from_message(
     bot: &InlineClient,
     message: &MessageRecord,
     route: &InboundRoute,
     retry: bool,
 ) -> Result<Option<InboundRecord>, Box<dyn std::error::Error>> {
-    if is_agent_session_projection(message) {
+    if is_agent_session_projection(message) || message.metadata.is_forwarded {
+        return Ok(None);
+    }
+    if (message.sender_id.get() == route.bot_user_id
+        && message
+            .metadata
+            .agent_session
+            .as_ref()
+            .is_some_and(|link| link.role == proto::AgentSessionMessageRole::Assistant as i32))
+        || route.store.is_represented_context_output(
+            &route.installation_id,
+            message.chat_id.get(),
+            message.message_id.get(),
+        )?
+    {
         return Ok(None);
     }
     let response_not_before = tokio::time::Instant::now() + INITIAL_RESPONSE_DELAY;
@@ -637,7 +865,7 @@ async fn inbound_from_message(
     // forcing bots into the human operator allowlist.
     let sender_is_bot = message.is_outgoing
         || message.sender_id.get() == route.bot_user_id
-        || message_sender_is_bot(&route.bot_store, message).await?;
+        || require_message_sender_kind(bot, &route.bot_store, message).await?;
     if !sender_is_bot && !route.allows(message.sender_id.get()) {
         return Ok(None);
     }
@@ -691,6 +919,7 @@ async fn inbound_from_message(
     };
     let text = content.text;
     let attachments = content.attachments;
+    let mut source_version = public_source_version(message, &text);
     let mut message_route = resolve_message_route(
         message,
         route.owner_dm_chat_id,
@@ -703,18 +932,71 @@ async fn inbound_from_message(
         .chat_agent_context(message.chat_id.get())
         .await
         .map_err(io::Error::other)?;
+    let exact_mention = message.metadata.entities.iter().any(|entity| {
+        entity.kind == "TYPE_MENTION"
+            && entity
+                .user_id
+                .is_some_and(|id| id.get() == route.bot_user_id)
+    });
+    let reply_to_other_bot = if !exact_mention && let Some(reply_id) = message.reply_to_message_id {
+        match route.bot_store.message(message.chat_id, reply_id).await? {
+            Some(reply) if reply.sender_id.get() != route.bot_user_id && !reply.is_outgoing => {
+                require_message_sender_kind(bot, &route.bot_store, &reply).await?
+            }
+            Some(_) => false,
+            None => {
+                let page = bot
+                    .history(HistoryRequest {
+                        chat_id: message.chat_id,
+                        limit: Some(1),
+                        before_message_id: reply_id.get().checked_add(1).map(InlineId::new),
+                        after_message_id: None,
+                    })
+                    .await?;
+                let reply = page
+                    .messages
+                    .into_iter()
+                    .find(|reply| reply.chat_id == message.chat_id && reply.message_id == reply_id)
+                    .ok_or(UnverifiedMessageActor)?;
+                reply.sender_id.get() != route.bot_user_id
+                    && !reply.is_outgoing
+                    && require_message_sender_kind(bot, &route.bot_store, &reply).await?
+            }
+        }
+    } else {
+        false
+    };
+    if reply_to_other_bot {
+        message_route.addressing = Addressing::None;
+    }
     if message_route.addressing == Addressing::None
         && !starts_with_other_user_mention(message, route.bot_user_id)
+        && !reply_to_other_bot
     {
+        let explicitly_unfollowed = match route.owner_control.as_ref() {
+            Some(owner) => {
+                owner.follow_mode(message.chat_id.get()).await?
+                    == Some(DialogFollowMode::Unfollowed)
+            }
+            None => false,
+        };
         message_route = with_agent_session_thread_addressing(
             message_route,
-            chat_agent_context
-                .as_ref()
-                .is_some_and(|context| context.bot_user_id == route.bot_user_id)
-                || route
-                    .store
-                    .session_thread_binding_for_chat(&route.installation_id, message.chat_id.get())?
-                    .is_some(),
+            !explicitly_unfollowed
+                && (chat_agent_context
+                    .as_ref()
+                    .is_some_and(|context| context.bot_user_id == route.bot_user_id)
+                    || route
+                        .store
+                        .session_thread_binding_for_chat(
+                            &route.installation_id,
+                            message.chat_id.get(),
+                        )?
+                        .is_some()
+                    || route.store.has_bound_session_for_chat(
+                        &route.installation_id,
+                        message.chat_id.get(),
+                    )?),
         );
     }
     let event_id = format!("inline-message-{}-{}", message.chat_id, message.message_id);
@@ -783,9 +1065,12 @@ async fn inbound_from_message(
         ),
         _ => return Ok(None),
     };
+    source_version.discretionary = !is_command && message_route.addressing == Addressing::Followed;
+    direction.source_version = Some(source_version);
     if !is_command
         && let Some(agent_id) = chat_agent_context
             .as_ref()
+            .filter(|context| context.bot_user_id == route.bot_user_id)
             .and_then(|context| context.agent_id)
             .or_else(|| mentioned_agent_id(message, route.bot_user_id))
     {
@@ -864,18 +1149,6 @@ async fn inbound_from_message(
         Ok(conversation) => conversation.snapshot(),
         Err(ConversationResolutionError::MissingWorkspace) => {
             send_workspace_recovery(bot, message, &event_id).await?;
-            return Ok(None);
-        }
-        Err(ConversationResolutionError::InvalidAgentContext(notice)) => {
-            send_text_reply(
-                bot,
-                message.chat_id.get(),
-                message.message_id.get(),
-                &notice,
-                &format!("{event_id}-invalid-agent-context"),
-                BridgeNotificationClass::ImportantFailure,
-            )
-            .await?;
             return Ok(None);
         }
         Err(error) => return Err(error.into()),
@@ -1038,7 +1311,11 @@ pub(super) fn agent_specialization_instruction(agent: &proto::BotAgent, task: &s
 }
 
 pub(super) fn is_agent_session_projection(message: &inline_client::MessageRecord) -> bool {
-    message.metadata.agent_session.is_some()
+    message
+        .metadata
+        .agent_session
+        .as_ref()
+        .is_some_and(|link| link.relation == proto::AgentSessionMessageRelation::Imported as i32)
 }
 
 pub(super) fn is_agent_session_projection_event(event: &ClientEvent) -> bool {
@@ -1070,6 +1347,7 @@ pub(super) fn should_wait_for_voice_transcript(message: &inline_client::MessageR
 }
 
 async fn steer_active_source_edit<D: AgentDriver + 'static>(
+    bot: &InlineClient,
     message: &inline_client::MessageRecord,
     sessions: &ProviderSessionManager<D>,
     session_id: &inline_agent_bridge::ProviderSessionId,
@@ -1089,6 +1367,7 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
         sessions.driver().capabilities().steering,
         SteeringSupport::Native | SteeringSupport::Extension
     ) || !route.allows(message.sender_id.get())
+        || message.metadata.is_forwarded
     {
         return Ok(false);
     }
@@ -1101,10 +1380,28 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
     {
         return Ok(false);
     }
+    if source
+        .direction
+        .source_version
+        .as_ref()
+        .is_some_and(|version| edit_version <= version.revision)
+    {
+        // Card/block enrichment or a linkage echo can update a public row
+        // without a new source revision. It is not fresh steering intent.
+        return Ok(true);
+    }
     let Some(content) = normalize_inbound_content(&message.content) else {
         return Ok(false);
     };
-    if content.text == source.direction.text && content.attachments == source.direction.attachments
+    if content.text
+        == source
+            .direction
+            .source_version
+            .as_ref()
+            .map_or(source.direction.text.as_str(), |version| {
+                version.text.as_str()
+            })
+        && content.attachments == source.direction.attachments
     {
         return Ok(false);
     }
@@ -1115,19 +1412,62 @@ async fn steer_active_source_edit<D: AgentDriver + 'static>(
     if store.event_processed(&event_id)? {
         return Ok(true);
     }
-    sessions
-        .driver()
-        .steer_turn(
-            session_id,
-            turn_id,
-            TurnInput {
-                text: content.text,
-                attachments: content.attachments,
-                client_message_id: Some(event_id.clone()),
-            },
-        )
-        .await?;
-    store.claim_event(&event_id, now_seconds())?;
+    let binding = BindingKey {
+        chat_id: source.delivery_chat_id,
+        ..source.binding.clone()
+    };
+    let mut record = source.clone();
+    record.event_id = event_id.clone();
+    let mut source_version = public_source_version(message, &content.text);
+    source_version.discretionary = source.direction.is_discretionary();
+    record.direction = Direction::new(DirectionId::new(event_id.clone())?, content.text)
+        .with_attachments(content.attachments)
+        .with_source_version(Some(source_version));
+    record.state = InboundState::Accepted;
+    record.accepted_at = now_seconds();
+    record.started_at = None;
+    record.lease_expires_at = None;
+    record.attempt_count = 0;
+    record.provider_turn_id = None;
+    record.stream_message_id = None;
+    record.failure = None;
+    let snapshot = match verify_public_context_input(
+        bot,
+        sessions,
+        route,
+        &record,
+        &binding,
+        &record.direction.text,
+    )
+    .await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            if error
+                .downcast_ref::<io::Error>()
+                .is_some_and(|error| error.kind() == io::ErrorKind::PermissionDenied)
+            {
+                // An edit can retarget its original request. Ignore that edit
+                // without interrupting the work that was already admitted.
+                return Ok(true);
+            }
+            return Err(error);
+        }
+    };
+    if !store.accept_inbound_source_edit(&record)?
+        || !store.start_inbound(&event_id, now_seconds())?
+    {
+        return Ok(true);
+    }
+    store.prepare_context_input(&event_id, &snapshot)?;
+    let result = sessions
+        .steer_admitted_turn(&event_id, &binding, session_id, turn_id)
+        .await;
+    if let Err(error) = result {
+        store.fail_inbound(&event_id, &safe_diagnostic(&error.to_string()))?;
+        return Err(error.into());
+    }
+    store.complete_inbound(&event_id)?;
     log::trace!(
         target: "inline::bridge::media",
         "phase=source_edit_steered event_id={event_id:?} source_event_id={:?} revision={} attachment_count={}",
@@ -1417,14 +1757,19 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let acknowledgement_text = initial_progress
         .render_chunks(VisibilityMode::Normal, WORKING_STATUS, None)
         .remove(0);
-    let acknowledgement = send_silent_text(
-        bot,
-        binding.chat_id,
-        &acknowledgement_text,
-        &format!("{}-working", record.event_id),
-    )
-    .await?;
-    let stream_message_id = acknowledgement.message_id;
+    let discretionary = record.direction.is_discretionary();
+    let stream_message_id = if discretionary {
+        None
+    } else {
+        send_silent_text(
+            bot,
+            binding.chat_id,
+            &acknowledgement_text,
+            &format!("{}-working", record.event_id),
+        )
+        .await?
+        .message_id
+    };
     if let Some(message_id) = stream_message_id
         && !store.attach_inbound_stream_message(&record.event_id, message_id.get())?
     {
@@ -1434,21 +1779,22 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         )
         .into());
     }
-    let mut typing = TypingIndicator::start(bot, binding.chat_id).await;
-    let instruction = if is_compaction {
-        instruction
+    let mut typing = if discretionary {
+        TypingIndicator::quiet(bot, binding.chat_id)
     } else {
-        match build_turn_instruction(route, &record, &instruction).await {
-            Ok(instruction) => instruction,
-            Err(error) => {
-                eprintln!(
-                    "Inline context resolution failed: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-                instruction
-            }
-        }
+        TypingIndicator::start(bot, binding.chat_id).await
     };
+    if !is_compaction
+        && let Err(error) =
+            prepare_public_context_input(bot, sessions, route, &record, binding, &instruction).await
+    {
+        typing.stop().await;
+        let diagnostic = safe_diagnostic(&error.to_string());
+        publish_inbound_final_send(bot, store, &record.event_id, binding.chat_id, stream_message_id,
+            "Failed.", "I couldn’t verify this current message and its conversation context. Nothing was sent to the provider. Check the message and chat access, then send a new request.",
+            InboundState::Failed, Some(&diagnostic)).await?;
+        return Ok(());
+    }
     let settings = match store.chat_settings(binding, now_seconds()) {
         Ok(settings) => settings,
         Err(error) => {
@@ -1478,20 +1824,11 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let started = if is_compaction {
         sessions.compact_session(binding, now_seconds()).await
     } else {
-        let provider_attachments = materialize_inbound_attachments(
-            &record.direction.attachments,
-            &route.attachment_cache_dir,
-        )
-        .await;
         sessions
-            .start_turn(
+            .start_admitted_turn(
+                &record.event_id,
                 binding,
                 now_seconds(),
-                TurnInput {
-                    text: instruction,
-                    attachments: provider_attachments,
-                    client_message_id: Some(record.direction.id.to_string()),
-                },
                 TurnOptions {
                     cwd: None,
                     model: settings.model,
@@ -1515,7 +1852,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             let diagnostic = safe_diagnostic(&error.to_string());
             eprintln!("Agent turn start failed: {}", diagnostic);
             typing.stop().await;
+            let acceptance_uncertain =
+                store.context_input(&record.event_id).map_or(true, |input| {
+                    input.is_some_and(|(_, state)| {
+                        matches!(
+                            state,
+                            inline_agent_bridge::ContextInputState::Submitting
+                                | inline_agent_bridge::ContextInputState::Uncertain
+                        )
+                    })
+                });
             let message = match &error {
+                _ if acceptance_uncertain => "The provider may have accepted this request, but its acknowledgement was lost. I won’t replay it automatically. Check the result before sending another request.".to_string(),
                 SessionManagerError::Driver(DriverError::AuthenticationRequired(required)) => {
                     failure_message(
                         BridgeNotice::AuthenticationRequired,
@@ -1560,11 +1908,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         session_open,
         turn_started_at.elapsed().as_millis()
     );
-    let tracked = store.attach_inbound_turn(
-        &record.event_id,
-        &turn.turn_id,
-        stream_message_id.map(InlineId::get),
-    );
+    // Admitted turns atomically recorded acceptance and turn identity before
+    // returning their live handle. Only control compaction uses the older
+    // tracking path; avoid a second fallible receipt after acceptance.
+    let tracked = if is_compaction {
+        store.attach_inbound_turn(
+            &record.event_id,
+            &turn.turn_id,
+            stream_message_id.map(InlineId::get),
+        )
+    } else {
+        Ok(true)
+    };
     if !matches!(tracked, Ok(true)) {
         typing.stop().await;
         if let Err(cancel_error) = sessions
@@ -1639,7 +1994,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let mut last_lease_renewal = now_seconds();
     let mut turn_timing = TurnTiming::default();
     let terminal_result: Result<_, Box<dyn std::error::Error>> = async {
-        if let Some(notice) = session_open_notice(&session_open) {
+        if !discretionary && let Some(notice) = session_open_notice(&session_open) {
             send_text_reply(
                 bot,
                 binding.chat_id,
@@ -2304,11 +2659,26 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         let _ =
             presenter.replace_snapshot_with_priority(now_millis(), text, UpdatePriority::Terminal);
     }
+    if discretionary
+        && terminal.0 == TurnOutcome::Completed
+        && files.is_empty()
+        && output_attachments.is_empty()
+        && matches!(presenter.content().trim(), "" | SILENT_RESPONSE)
+    {
+        // Acceptance consumed the exact context before the provider decided
+        // to stay quiet. No synthetic answer, progress row, or replay.
+        store.complete_inbound(&record.event_id)?;
+        return Ok(());
+    }
     let final_text = if is_compaction && terminal.0 == TurnOutcome::Completed {
         "Compacted the current agent session.".to_string()
     } else {
         final_turn_text(
-            presenter.content(),
+            if discretionary && presenter.content().trim() == SILENT_RESPONSE {
+                ""
+            } else {
+                presenter.content()
+            },
             terminal.0,
             &files,
             workspace,
@@ -2535,7 +2905,12 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
     stop_confirmed: &mut bool,
     steering: SteeringSupport,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if is_agent_session_projection_event(delivery.event()) {
+    let linked_source_edit = matches!(delivery.event(), ClientEvent::MessageStored { message }
+        if message.metadata.agent_session.as_ref().is_some_and(|link|
+            link.relation == proto::AgentSessionMessageRelation::Linked as i32
+            && link.role == proto::AgentSessionMessageRole::User as i32)
+        && message.metadata.revision.or(message.metadata.edit_timestamp).is_some_and(|version| version > 0));
+    if is_agent_session_projection_event(delivery.event()) && !linked_source_edit {
         delivery.ack().await?;
         return Ok(());
     }
@@ -2803,12 +3178,30 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
             delivery.ack().await?;
         }
         ClientEvent::MessageStored { message } => {
-            if steering != SteeringSupport::Unsupported
-                && steer_active_source_edit(message, sessions, session_id, turn_id, store, route)
-                    .await?
-            {
-                delivery.ack().await?;
-                return Ok(());
+            if steering != SteeringSupport::Unsupported {
+                match steer_active_source_edit(
+                    bot, message, sessions, session_id, turn_id, store, route,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        delivery.ack().await?;
+                        return Ok(());
+                    }
+                    Ok(false) => {}
+                    Err(error) if error.is::<UnverifiedMessageActor>() => {
+                        recover_failed_delivery(
+                            bot,
+                            &delivery,
+                            route,
+                            "active-source-edit",
+                            error.as_ref(),
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             let reply_to_message_id = match message.reply_to_message_id {
                 Some(message_id) => Some(message_id),
@@ -2818,7 +3211,22 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                     .await?
                     .and_then(|stored| stored.reply_to_message_id),
             };
-            if let Some(mut record) = inbound_from_delivery(bot, &delivery, route).await? {
+            let inbound = match inbound_from_delivery(bot, &delivery, route).await {
+                Ok(inbound) => inbound,
+                Err(error) if error.is::<UnverifiedMessageActor>() => {
+                    recover_failed_delivery(
+                        bot,
+                        &delivery,
+                        route,
+                        "active-message-admission",
+                        error.as_ref(),
+                    )
+                    .await;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(mut record) = inbound {
                 if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
                     delivery.ack().await?;
                     return Ok(());
@@ -3349,9 +3757,13 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                 }
                 let queue_id = QueueItemId::new(record.event_id.clone())?;
                 let was_already_queued = coordinator.has_queued_direction(&queue_id);
+                let separate_turn = record.direction.is_discretionary()
+                    || store
+                        .inbound_for_provider_turn(turn_id)?
+                        .is_some_and(|active| active.direction.is_discretionary());
                 let (disposition, _) = coordinator.accept_direction(
                     record.direction.clone(),
-                    false,
+                    separate_turn,
                     steering,
                     queue_id.clone(),
                 );
@@ -3398,30 +3810,31 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     return Ok(());
                                 }
                             };
+                            if let Err(error) = prepare_public_context_input(
+                                bot,
+                                sessions,
+                                route,
+                                &record,
+                                binding,
+                                &record.direction.text,
+                            )
+                            .await
+                            {
+                                store.fail_inbound(
+                                    &record.event_id,
+                                    &safe_diagnostic(&error.to_string()),
+                                )?;
+                                send_text_reply(bot, binding.chat_id, record.message_id,
+                                    "I couldn’t verify this current message and its conversation context. Nothing was sent to the provider. Check the message and chat access, then send a new request.",
+                                    &format!("{}-context-failed", record.event_id), BridgeNotificationClass::ImportantFailure).await?;
+                                delivery.ack().await?;
+                                return Ok(());
+                            }
                             let steered = sessions
-                                .driver()
-                                .steer_turn(
-                                    session_id,
-                                    turn_id,
-                                    TurnInput {
-                                        text: record.direction.text.clone(),
-                                        attachments: record.direction.attachments.clone(),
-                                        client_message_id: Some(record.direction.id.to_string()),
-                                    },
-                                )
+                                .steer_admitted_turn(&record.event_id, binding, session_id, turn_id)
                                 .await;
                             match steered {
                                 Ok(()) => {
-                                    if !store.attach_inbound_turn(
-                                        &record.event_id,
-                                        turn_id,
-                                        None,
-                                    )? {
-                                        return Err(io::Error::other(
-                                            "accepted steering input lost its durable record",
-                                        )
-                                        .into());
-                                    }
                                     if let Some(prepared) = prepared.as_ref()
                                         && let Err(error) = link_accepted_agent_session_input(
                                             bot,
@@ -3440,6 +3853,22 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     store.complete_inbound(&record.event_id)?;
                                 }
                                 Err(error) => {
+                                    let error = match error {
+                                        SessionManagerError::Driver(error) => error,
+                                        error => {
+                                            store.fail_inbound(
+                                                &record.event_id,
+                                                &safe_diagnostic(&error.to_string()),
+                                            )?;
+                                            send_text_reply(bot, binding.chat_id, record.message_id,
+                                                "This direction could not be admitted to the running session. Nothing was sent to the provider; send a new request.",
+                                                &format!("{}-steer-admission-failed", record.event_id), BridgeNotificationClass::ImportantFailure).await?;
+                                            delivery.ack().await?;
+                                            return Ok(());
+                                        }
+                                    };
+                                    let rejected =
+                                        store.reject_context_input(&record.event_id, &error)?;
                                     if error.ends_epoch() {
                                         let diagnostic = safe_diagnostic(&error.to_string());
                                         store.fail_inbound(&record.event_id, &diagnostic)?;
@@ -3447,7 +3876,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                             bot,
                                             binding.chat_id,
                                             record.message_id,
-                                            BridgeNotice::AgentConnectionLost.message(),
+                                            "The provider connection ended before this direction’s acceptance could be confirmed. Check the running result before sending it again; I won’t replay it automatically.",
                                             &format!("{}-steer-failed", record.event_id),
                                             BridgeNotificationClass::ImportantFailure,
                                         )
@@ -3457,6 +3886,17 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                             "local agent connection epoch ended during steering",
                                         )
                                         .into());
+                                    }
+                                    if !rejected {
+                                        store.fail_inbound(
+                                            &record.event_id,
+                                            &safe_diagnostic(&error.to_string()),
+                                        )?;
+                                        send_text_reply(bot, binding.chat_id, record.message_id,
+                                            "The provider may have accepted this direction, but its acknowledgement was lost. I won’t replay it automatically. Check the running result before sending another request.",
+                                            &format!("{}-steer-uncertain", record.event_id), BridgeNotificationClass::ImportantFailure).await?;
+                                        delivery.ack().await?;
+                                        return Ok(());
                                     }
                                     let _ = coordinator.queue_after_failed_steer(
                                         record.direction.clone(),

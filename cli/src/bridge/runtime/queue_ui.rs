@@ -42,6 +42,9 @@ pub(super) async fn send_queue_confirmation(
     record: &InboundRecord,
     message_text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if record.direction.is_discretionary() {
+        return Ok(());
+    }
     let data = serde_json::to_vec(&QueueUndoCallback {
         version: 1,
         event_id: record.event_id.clone(),

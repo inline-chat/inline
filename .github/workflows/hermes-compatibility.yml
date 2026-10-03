@@ -1,4 +1,4 @@
-name: Hermes stable compatibility
+name: Hermes stock loader/tool/send compatibility
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   stable:
-    name: npm latest / Hermes ${{ matrix.host }}
+    name: npm latest / stock Hermes ${{ matrix.host }} (receive refusal)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -31,7 +31,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HERMES_REF: ${{ matrix.host }}
         run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" "$HERMES_REF"
-      - name: Test npm latest through real Hermes (offline transport)
+      - name: Test stock loader/tools/send and durable receive refusal (offline)
         env:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}

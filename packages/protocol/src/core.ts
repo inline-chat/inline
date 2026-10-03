@@ -1810,6 +1810,21 @@ export interface Message {
      * @generated from protobuf field: optional MessageSubthread subthread = 25;
      */
     subthread?: MessageSubthread;
+    /**
+     * Server-owned carried context, including forwards whose visible header is
+     * suppressed. Historical mentions in this row are not new bot directions.
+     *
+     * @generated from protobuf field: optional bool is_forwarded = 26;
+     */
+    isForwarded?: boolean;
+    /**
+     * Opaque token for this hydrated, visible forwarding snapshot. Unlike rev,
+     * it also covers attachment text and asynchronous media readiness. Delivery
+     * URLs, reactions, unread decoration, and agent-session linkage are excluded.
+     *
+     * @generated from protobuf field: optional string source_snapshot = 27;
+     */
+    sourceSnapshot?: string;
 }
 /**
  * @generated from protobuf message AgentSessionMessageInfo
@@ -8816,6 +8831,67 @@ export interface ForwardMessagesInput {
      * @generated from protobuf field: optional bool share_forward_header = 4;
      */
     shareForwardHeader?: boolean;
+    /**
+     * Retry-safe submissions, aligned one-for-one with message_ids. Persist the
+     * complete ordered request before sending and retain it unchanged on retry.
+     * Omission preserves legacy forwarding without caller-controlled retry IDs.
+     *
+     * @generated from protobuf field: repeated ForwardMessageSubmission submissions = 5;
+     */
+    submissions: ForwardMessageSubmission[];
+}
+/**
+ * @generated from protobuf message ForwardMessageSubmission
+ */
+export interface ForwardMessageSubmission {
+    /**
+     * Sender-scoped nonzero int64, shared with SendMessage.random_id.
+     *
+     * @generated from protobuf field: int64 random_id = 1;
+     */
+    randomId: bigint;
+    /**
+     * Source revision observed in the selection preview. New sends reject a
+     * changed revision; a committed retry returns its original receipt.
+     *
+     * @generated from protobuf field: int64 expected_source_revision = 2;
+     */
+    expectedSourceRevision: bigint;
+    /**
+     * Token captured from the exact authorized preview. New promotions require
+     * it; legacy callers may omit it. A committed retry uses the bound intent.
+     *
+     * @generated from protobuf field: optional string expected_source_snapshot = 3;
+     */
+    expectedSourceSnapshot?: string;
+}
+/**
+ * @generated from protobuf message ForwardMessageReceipt
+ */
+export interface ForwardMessageReceipt {
+    /**
+     * @generated from protobuf field: int64 source_message_id = 1;
+     */
+    sourceMessageId: bigint;
+    /**
+     * @generated from protobuf field: int64 random_id = 2;
+     */
+    randomId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 3;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: int64 source_revision = 4;
+     */
+    sourceRevision: bigint;
+    /**
+     * The identity committed previously but its destination row was deleted.
+     * The server does not recreate it; a promotion must not activate without it.
+     *
+     * @generated from protobuf field: bool message_deleted = 5;
+     */
+    messageDeleted: boolean;
 }
 /**
  * @generated from protobuf message ForwardMessagesResult
@@ -8825,6 +8901,13 @@ export interface ForwardMessagesResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+    /**
+     * One receipt per submitted source, in the original request order. A failed
+     * call can already have committed a prefix; retry the same complete request.
+     *
+     * @generated from protobuf field: repeated ForwardMessageReceipt receipts = 2;
+     */
+    receipts: ForwardMessageReceipt[];
 }
 /**
  * @generated from protobuf message GetChatHistoryInput
@@ -9782,6 +9865,13 @@ export interface CreateSubthreadInput {
      * @generated from protobuf field: optional AgentThreadContext agent_context = 7;
      */
     agentContext?: AgentThreadContext;
+    /**
+     * Optional previously reserved id for replay-safe creation. An existing
+     * anchored reply thread is returned instead; a different id means reuse.
+     *
+     * @generated from protobuf field: optional int64 reserved_chat_id = 8;
+     */
+    reservedChatId?: bigint;
 }
 /**
  * @generated from protobuf message CreateSubthreadResult
@@ -11552,6 +11642,13 @@ export interface UpdateChatInfoInput {
      * @generated from protobuf field: optional AgentThreadContext agent_context = 4;
      */
     agentContext?: AgentThreadContext;
+    /**
+     * Explicitly generate a missing emoji without changing the title. Existing
+     * chosen emojis are preserved; this is not an automatic refill policy.
+     *
+     * @generated from protobuf field: optional bool generate_emoji = 5;
+     */
+    generateEmoji?: boolean;
 }
 /**
  * @generated from protobuf message UpdateChatInfoResult
@@ -18707,7 +18804,9 @@ class Message$Type extends MessageType<Message> {
             { no: 22, name: "service_message", kind: "message", T: () => MessageService },
             { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
             { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
-            { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread }
+            { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread },
+            { no: 26, name: "is_forwarded", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 27, name: "source_snapshot", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -18804,6 +18903,12 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageSubthread subthread */ 25:
                     message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
                     break;
+                case /* optional bool is_forwarded */ 26:
+                    message.isForwarded = reader.bool();
+                    break;
+                case /* optional string source_snapshot */ 27:
+                    message.sourceSnapshot = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -18894,6 +18999,12 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageSubthread subthread = 25; */
         if (message.subthread)
             MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_forwarded = 26; */
+        if (message.isForwarded !== undefined)
+            writer.tag(26, WireType.Varint).bool(message.isForwarded);
+        /* optional string source_snapshot = 27; */
+        if (message.sourceSnapshot !== undefined)
+            writer.tag(27, WireType.LengthDelimited).string(message.sourceSnapshot);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37390,12 +37501,14 @@ class ForwardMessagesInput$Type extends MessageType<ForwardMessagesInput> {
             { no: 1, name: "from_peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "to_peer_id", kind: "message", T: () => InputPeer },
-            { no: 4, name: "share_forward_header", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 4, name: "share_forward_header", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "submissions", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ForwardMessageSubmission }
         ]);
     }
     create(value?: PartialMessage<ForwardMessagesInput>): ForwardMessagesInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.messageIds = [];
+        message.submissions = [];
         if (value !== undefined)
             reflectionMergePartial<ForwardMessagesInput>(this, message, value);
         return message;
@@ -37420,6 +37533,9 @@ class ForwardMessagesInput$Type extends MessageType<ForwardMessagesInput> {
                     break;
                 case /* optional bool share_forward_header */ 4:
                     message.shareForwardHeader = reader.bool();
+                    break;
+                case /* repeated ForwardMessageSubmission submissions */ 5:
+                    message.submissions.push(ForwardMessageSubmission.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -37449,6 +37565,9 @@ class ForwardMessagesInput$Type extends MessageType<ForwardMessagesInput> {
         /* optional bool share_forward_header = 4; */
         if (message.shareForwardHeader !== undefined)
             writer.tag(4, WireType.Varint).bool(message.shareForwardHeader);
+        /* repeated ForwardMessageSubmission submissions = 5; */
+        for (let i = 0; i < message.submissions.length; i++)
+            ForwardMessageSubmission.internalBinaryWrite(message.submissions[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37460,15 +37579,158 @@ class ForwardMessagesInput$Type extends MessageType<ForwardMessagesInput> {
  */
 export const ForwardMessagesInput = new ForwardMessagesInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ForwardMessageSubmission$Type extends MessageType<ForwardMessageSubmission> {
+    constructor() {
+        super("ForwardMessageSubmission", [
+            { no: 1, name: "random_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "expected_source_revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "expected_source_snapshot", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ForwardMessageSubmission>): ForwardMessageSubmission {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.randomId = 0n;
+        message.expectedSourceRevision = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ForwardMessageSubmission>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ForwardMessageSubmission): ForwardMessageSubmission {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 random_id */ 1:
+                    message.randomId = reader.int64().toBigInt();
+                    break;
+                case /* int64 expected_source_revision */ 2:
+                    message.expectedSourceRevision = reader.int64().toBigInt();
+                    break;
+                case /* optional string expected_source_snapshot */ 3:
+                    message.expectedSourceSnapshot = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ForwardMessageSubmission, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 random_id = 1; */
+        if (message.randomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.randomId);
+        /* int64 expected_source_revision = 2; */
+        if (message.expectedSourceRevision !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.expectedSourceRevision);
+        /* optional string expected_source_snapshot = 3; */
+        if (message.expectedSourceSnapshot !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.expectedSourceSnapshot);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ForwardMessageSubmission
+ */
+export const ForwardMessageSubmission = new ForwardMessageSubmission$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ForwardMessageReceipt$Type extends MessageType<ForwardMessageReceipt> {
+    constructor() {
+        super("ForwardMessageReceipt", [
+            { no: 1, name: "source_message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "random_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "source_revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "message_deleted", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ForwardMessageReceipt>): ForwardMessageReceipt {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.sourceMessageId = 0n;
+        message.randomId = 0n;
+        message.messageId = 0n;
+        message.sourceRevision = 0n;
+        message.messageDeleted = false;
+        if (value !== undefined)
+            reflectionMergePartial<ForwardMessageReceipt>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ForwardMessageReceipt): ForwardMessageReceipt {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 source_message_id */ 1:
+                    message.sourceMessageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 random_id */ 2:
+                    message.randomId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 source_revision */ 4:
+                    message.sourceRevision = reader.int64().toBigInt();
+                    break;
+                case /* bool message_deleted */ 5:
+                    message.messageDeleted = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ForwardMessageReceipt, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 source_message_id = 1; */
+        if (message.sourceMessageId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.sourceMessageId);
+        /* int64 random_id = 2; */
+        if (message.randomId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.randomId);
+        /* int64 message_id = 3; */
+        if (message.messageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* int64 source_revision = 4; */
+        if (message.sourceRevision !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.sourceRevision);
+        /* bool message_deleted = 5; */
+        if (message.messageDeleted !== false)
+            writer.tag(5, WireType.Varint).bool(message.messageDeleted);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ForwardMessageReceipt
+ */
+export const ForwardMessageReceipt = new ForwardMessageReceipt$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class ForwardMessagesResult$Type extends MessageType<ForwardMessagesResult> {
     constructor() {
         super("ForwardMessagesResult", [
-            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update },
+            { no: 2, name: "receipts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ForwardMessageReceipt }
         ]);
     }
     create(value?: PartialMessage<ForwardMessagesResult>): ForwardMessagesResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.updates = [];
+        message.receipts = [];
         if (value !== undefined)
             reflectionMergePartial<ForwardMessagesResult>(this, message, value);
         return message;
@@ -37480,6 +37742,9 @@ class ForwardMessagesResult$Type extends MessageType<ForwardMessagesResult> {
             switch (fieldNo) {
                 case /* repeated Update updates */ 1:
                     message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated ForwardMessageReceipt receipts */ 2:
+                    message.receipts.push(ForwardMessageReceipt.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -37496,6 +37761,9 @@ class ForwardMessagesResult$Type extends MessageType<ForwardMessagesResult> {
         /* repeated Update updates = 1; */
         for (let i = 0; i < message.updates.length; i++)
             Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated ForwardMessageReceipt receipts = 2; */
+        for (let i = 0; i < message.receipts.length; i++)
+            ForwardMessageReceipt.internalBinaryWrite(message.receipts[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -40284,7 +40552,8 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
             { no: 4, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
-            { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext }
+            { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext },
+            { no: 8, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<CreateSubthreadInput>): CreateSubthreadInput {
@@ -40321,6 +40590,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
                 case /* optional AgentThreadContext agent_context */ 7:
                     message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
                     break;
+                case /* optional int64 reserved_chat_id */ 8:
+                    message.reservedChatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -40354,6 +40626,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
         /* optional AgentThreadContext agent_context = 7; */
         if (message.agentContext)
             AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 reserved_chat_id = 8; */
+        if (message.reservedChatId !== undefined)
+            writer.tag(8, WireType.Varint).int64(message.reservedChatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45533,7 +45808,8 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext }
+            { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext },
+            { no: 5, name: "generate_emoji", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateChatInfoInput>): UpdateChatInfoInput {
@@ -45560,6 +45836,9 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
                 case /* optional AgentThreadContext agent_context */ 4:
                     message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
                     break;
+                case /* optional bool generate_emoji */ 5:
+                    message.generateEmoji = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45584,6 +45863,9 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
         /* optional AgentThreadContext agent_context = 4; */
         if (message.agentContext)
             AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool generate_emoji = 5; */
+        if (message.generateEmoji !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.generateEmoji);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

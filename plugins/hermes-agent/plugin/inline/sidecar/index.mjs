@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
 var require_json_typings = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.isJsonObject = exports.typeofJsonValue = undefined;
@@ -55,7 +55,7 @@ var require_json_typings = __commonJS(function(exports) {
   exports.isJsonObject = isJsonObject;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
 var require_base64 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.base64encode = exports.base64decode = undefined;
@@ -147,7 +147,7 @@ var require_base64 = __commonJS(function(exports) {
   exports.base64encode = base64encode;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
 var require_protobufjs_utf8 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.utf8read = undefined;
@@ -184,7 +184,7 @@ var require_protobufjs_utf8 = __commonJS(function(exports) {
   exports.utf8read = utf8read;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
 var require_binary_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
@@ -224,7 +224,7 @@ var require_binary_format_contract = __commonJS(function(exports) {
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
 var require_goog_varint = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.varint32read = exports.varint32write = exports.int64toString = exports.int64fromString = exports.varint64write = exports.varint64read = undefined;
@@ -391,7 +391,7 @@ var require_goog_varint = __commonJS(function(exports) {
   exports.varint32read = varint32read;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
 var require_pb_long = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.PbLong = exports.PbULong = exports.detectBi = undefined;
@@ -575,7 +575,7 @@ var require_pb_long = __commonJS(function(exports) {
   PbLong.ZERO = new PbLong(0, 0);
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
 var require_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryReader = exports.binaryReadOptions = undefined;
@@ -697,7 +697,7 @@ var require_binary_reader = __commonJS(function(exports) {
   exports.BinaryReader = BinaryReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
 var require_assert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assertFloat32 = exports.assertUInt32 = exports.assertInt32 = exports.assertNever = exports.assert = undefined;
@@ -741,7 +741,7 @@ var require_assert = __commonJS(function(exports) {
   exports.assertFloat32 = assertFloat32;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
 var require_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryWriter = exports.binaryWriteOptions = undefined;
@@ -896,7 +896,7 @@ var require_binary_writer = __commonJS(function(exports) {
   exports.BinaryWriter = BinaryWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
 var require_json_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.mergeJsonOptions = exports.jsonWriteOptions = exports.jsonReadOptions = undefined;
@@ -926,14 +926,14 @@ var require_json_format_contract = __commonJS(function(exports) {
   exports.mergeJsonOptions = mergeJsonOptions;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
 var require_message_type_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MESSAGE_TYPE = undefined;
   exports.MESSAGE_TYPE = Symbol.for("protobuf-ts/message-type");
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
 var require_lower_camel_case = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.lowerCamelCase = undefined;
@@ -961,7 +961,7 @@ var require_lower_camel_case = __commonJS(function(exports) {
   exports.lowerCamelCase = lowerCamelCase;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
 var require_reflection_info = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
@@ -1035,7 +1035,7 @@ var require_reflection_info = __commonJS(function(exports) {
   exports.readMessageOption = readMessageOption;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
 var require_oneof = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSelectedOneofValue = exports.clearOneofValue = exports.setUnknownOneofValue = exports.setOneofValue = exports.getOneofValue = exports.isOneofGroup = undefined;
@@ -1095,7 +1095,7 @@ var require_oneof = __commonJS(function(exports) {
   exports.getSelectedOneofValue = getSelectedOneofValue;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
 var require_reflection_type_check = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionTypeCheck = undefined;
@@ -1296,7 +1296,7 @@ var require_reflection_type_check = __commonJS(function(exports) {
   exports.ReflectionTypeCheck = ReflectionTypeCheck;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
 var require_reflection_long_convert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionLongConvert = undefined;
@@ -1314,7 +1314,7 @@ var require_reflection_long_convert = __commonJS(function(exports) {
   exports.reflectionLongConvert = reflectionLongConvert;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
 var require_reflection_json_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonReader = undefined;
@@ -1588,7 +1588,7 @@ var require_reflection_json_reader = __commonJS(function(exports) {
   exports.ReflectionJsonReader = ReflectionJsonReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
 var require_reflection_json_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonWriter = undefined;
@@ -1791,7 +1791,7 @@ var require_reflection_json_writer = __commonJS(function(exports) {
   exports.ReflectionJsonWriter = ReflectionJsonWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
 var require_reflection_scalar_default = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionScalarDefault = undefined;
@@ -1823,7 +1823,7 @@ var require_reflection_scalar_default = __commonJS(function(exports) {
   exports.reflectionScalarDefault = reflectionScalarDefault;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
 var require_reflection_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryReader = undefined;
@@ -1983,7 +1983,7 @@ var require_reflection_binary_reader = __commonJS(function(exports) {
   exports.ReflectionBinaryReader = ReflectionBinaryReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
 var require_reflection_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryWriter = undefined;
@@ -2181,7 +2181,7 @@ var require_reflection_binary_writer = __commonJS(function(exports) {
   exports.ReflectionBinaryWriter = ReflectionBinaryWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
 var require_reflection_create = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionCreate = undefined;
@@ -2215,7 +2215,7 @@ var require_reflection_create = __commonJS(function(exports) {
   exports.reflectionCreate = reflectionCreate;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
 var require_reflection_merge_partial = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionMergePartial = undefined;
@@ -2282,7 +2282,7 @@ var require_reflection_merge_partial = __commonJS(function(exports) {
   exports.reflectionMergePartial = reflectionMergePartial;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
 var require_reflection_equals = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionEquals = undefined;
@@ -2350,7 +2350,7 @@ var require_reflection_equals = __commonJS(function(exports) {
   }
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
 var require_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MessageType = undefined;
@@ -2456,7 +2456,7 @@ var require_message_type = __commonJS(function(exports) {
   exports.MessageType = MessageType;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
 var require_reflection_contains_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.containsMessageType = undefined;
@@ -2467,7 +2467,7 @@ var require_reflection_contains_message_type = __commonJS(function(exports) {
   exports.containsMessageType = containsMessageType;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
 var require_enum_object = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.listEnumNumbers = exports.listEnumNames = exports.listEnumValues = exports.isEnumObject = undefined;
@@ -2519,7 +2519,7 @@ var require_enum_object = __commonJS(function(exports) {
   exports.listEnumNumbers = listEnumNumbers;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/index.js
+// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/index.js
 var require_commonjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var json_typings_1 = require_json_typings();
@@ -2702,7 +2702,7 @@ var require_commonjs = __commonJS(function(exports) {
   } });
 });
 
-// node_modules/ws/lib/constants.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2722,7 +2722,7 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
@@ -2800,7 +2800,7 @@ var require_buffer_util = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS(function(exports, module) {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2832,7 +2832,7 @@ var require_limiter = __commonJS(function(exports, module) {
   module.exports = Limiter;
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS(function(exports, module) {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -3096,7 +3096,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/validation.js
 var require_validation = __commonJS(function(exports, module) {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3283,7 +3283,7 @@ var require_validation = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS(function(exports, module) {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3677,7 +3677,7 @@ var require_receiver = __commonJS(function(exports, module) {
   module.exports = Receiver;
 });
 
-// node_modules/ws/lib/sender.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/sender.js
 var require_sender = __commonJS(function(exports, module) {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -4036,7 +4036,7 @@ var require_sender = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS(function(exports, module) {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4187,7 +4187,7 @@ var require_event_target = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/extension.js
 var require_extension = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4352,7 +4352,7 @@ var require_extension = __commonJS(function(exports, module) {
   module.exports = { format, parse };
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -4409,23 +4409,11 @@ var require_websocket = __commonJS(function(exports, module) {
         this._isServer = false;
         this._redirects = 0;
         if (protocols === undefined) {
-          if (!options || options.protocols === undefined) {
-            protocols = [];
-          } else if (Array.isArray(options.protocols)) {
-            protocols = options.protocols;
-          } else {
-            protocols = [options.protocols];
-          }
+          protocols = [];
         } else if (!Array.isArray(protocols)) {
           if (typeof protocols === "object" && protocols !== null) {
             options = protocols;
-            if (options.protocols === undefined) {
-              protocols = [];
-            } else if (Array.isArray(options.protocols)) {
-              protocols = options.protocols;
-            } else {
-              protocols = [options.protocols];
-            }
+            protocols = [];
           } else {
             protocols = [protocols];
           }
@@ -4544,6 +4532,7 @@ var require_websocket = __commonJS(function(exports, module) {
         }
         return;
       }
+      this._readyState = WebSocket.CLOSING;
       this._sender.close(code, data, !this._isServer, (err) => {
         if (err)
           return;
@@ -4552,7 +4541,6 @@ var require_websocket = __commonJS(function(exports, module) {
           this._socket.end();
         }
       });
-      this._readyState = WebSocket.CLOSING;
       setCloseTimer(this);
     }
     pause() {
@@ -4740,7 +4728,6 @@ var require_websocket = __commonJS(function(exports, module) {
       socketPath: undefined,
       hostname: undefined,
       protocol: undefined,
-      protocols: undefined,
       timeout: undefined,
       method: "GET",
       host: undefined,
@@ -5137,7 +5124,7 @@ var require_websocket = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/stream.js
 var require_stream = __commonJS(function(exports, module) {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5240,7 +5227,7 @@ var require_stream = __commonJS(function(exports, module) {
   module.exports = createWebSocketStream;
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5285,7 +5272,7 @@ var require_subprotocol = __commonJS(function(exports, module) {
   module.exports = { parse };
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -5607,11 +5594,8 @@ class InboundStream {
   changed = new Set;
   pending = new Map;
   attach(consumer) {
-    if (this.stopped) {
-      consumer.end();
-      return;
-    }
-    const previous = this.consumer;
+    if (this.stopped || this.consumer && !this.consumer.destroyed && !this.consumer.writableEnded)
+      return false;
     this.consumer = consumer;
     const retired = () => {
       if (this.consumer === consumer) {
@@ -5622,7 +5606,7 @@ class InboundStream {
     consumer.once("close", retired);
     consumer.on("error", retired);
     this.wake();
-    previous?.end();
+    return true;
   }
   acknowledge(deliveryId) {
     const receipt = this.pending.get(deliveryId);
@@ -5682,366 +5666,12 @@ class InboundStream {
   }
 }
 
-// src/sidecar/inbound-delivery.ts
-import { setTimeout as delay } from "node:timers/promises";
-
-// src/sidecar/contract.ts
-var MAX_INLINE_ID = 9223372036854775807n;
-var MAX_UINT64 = 18446744073709551615n;
-var sensitiveUrlParams = new Set([
-  "access_token",
-  "auth",
-  "authorization",
-  "key",
-  "token"
-]);
-var botSettingsEventKinds = new Set([
-  "bot.chatSettings.request",
-  "bot.chatSettings.item.invoke"
-]);
-function inboundEventNeedsSenderResolution(event) {
-  return !botSettingsEventKinds.has(event.kind ?? "");
-}
-
-class SidecarError extends Error {
-  errorKind;
-  constructor(message, errorKind) {
-    super(message);
-    this.errorKind = errorKind;
-  }
-}
-function parseTarget(record) {
-  const targetRecord = asOptionalRecord(record.target) ?? record;
-  const chatId = readOptionalInlineId(targetRecord, "chatId");
-  const userId = readOptionalInlineId(targetRecord, "userId");
-  if (chatId && userId)
-    throw new SidecarError("target cannot include both chatId and userId", "bad_format");
-  if (chatId)
-    return { chatId };
-  if (userId)
-    return { userId };
-  throw new SidecarError("target requires chatId or userId", "bad_format");
-}
-function normalizeUploadKind(raw, filePath) {
-  if (raw === "photo" || raw === "image")
-    return "photo";
-  if (raw === "video")
-    return "video";
-  if (raw === "voice")
-    return "voice";
-  if (raw === "document" || raw === "file")
-    return "document";
-  const lower = filePath.toLowerCase();
-  if (/\.(png|jpg|jpeg|gif|webp|heic|heif)$/.test(lower))
-    return "photo";
-  if (/\.(mp4|mov|webm)$/.test(lower))
-    return "video";
-  return "document";
-}
-function normalizeError(error, redact = defaultErrorText) {
-  if (error instanceof SidecarError) {
-    return {
-      status: statusForErrorKind(error.errorKind),
-      errorKind: error.errorKind,
-      message: redact(error)
-    };
-  }
-  const message = redact(error);
-  const lower = message.toLowerCase();
-  if (lower.includes("rate") && lower.includes("limit")) {
-    return { status: 429, errorKind: "rate_limited", message };
-  }
-  if (lower.includes("forbidden") || lower.includes("unauthorized")) {
-    return { status: 403, errorKind: "forbidden", message };
-  }
-  if (lower.includes("not found") || lower.includes("missing")) {
-    return { status: 404, errorKind: "not_found", message };
-  }
-  if (lower.includes("timeout") || lower.includes("network") || lower.includes("closed")) {
-    return { status: 503, errorKind: "transient", message };
-  }
-  return { status: 500, errorKind: "unknown", message };
-}
-function statusForErrorKind(errorKind) {
-  switch (errorKind) {
-    case "bad_format":
-      return 400;
-    case "forbidden":
-      return 403;
-    case "not_found":
-      return 404;
-    case "too_long":
-      return 413;
-    case "rate_limited":
-      return 429;
-    case "transient":
-      return 503;
-    case "unknown":
-      return 500;
-  }
-}
-function normalizeInboundEvent(event, meId, sender, meUsername) {
-  if (event.kind === "message.new" || event.kind === "message.edit") {
-    const message = asOptionalRecord(event.message);
-    return safeJson({
-      kind: event.kind,
-      chatId: event.chatId,
-      seq: event.seq,
-      date: event.date,
-      meId,
-      meUsername,
-      ...sender ? { sender } : {},
-      message: message ? normalizeMessage(message) : null
-    });
-  }
-  if (event.kind === "message.action.invoke") {
-    return safeJson({
-      ...event,
-      meId,
-      meUsername,
-      ...sender ? { sender } : {},
-      dataBase64: event.data instanceof Uint8Array ? Buffer.from(event.data).toString("base64") : typeof event.data === "string" ? event.data : ""
-    });
-  }
-  return safeJson({ ...event, meId, meUsername, ...sender ? { sender } : {} });
-}
-function normalizeMessage(message) {
-  return {
-    id: message.id,
-    fromId: message.fromId,
-    chatId: message.chatId,
-    peerId: message.peerId,
-    message: message.message ?? null,
-    out: Boolean(message.out),
-    date: message.date,
-    mentioned: Boolean(message.mentioned),
-    replyToMsgId: message.replyToMsgId ?? null,
-    entities: message.entities ?? null,
-    media: message.media ?? null,
-    attachments: message.attachments ?? null,
-    reactions: message.reactions ?? null,
-    replies: message.replies ?? null,
-    actions: message.actions ?? null,
-    rev: message.rev ?? null,
-    raw: message
-  };
-}
-function redactText(value, secrets) {
-  let text = value instanceof Error ? value.message : String(value);
-  for (const secret of secrets) {
-    const raw = typeof secret.value === "string" ? secret.value : "";
-    if (!raw)
-      continue;
-    text = text.split(raw).join(secret.label);
-  }
-  return text;
-}
-function redactUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return value;
-  }
-  if (url.username)
-    url.username = "redacted";
-  if (url.password)
-    url.password = "redacted";
-  const keys = Array.from(url.searchParams.keys());
-  for (const key of keys) {
-    const normalized = key.toLowerCase();
-    if (sensitiveUrlParams.has(normalized) || normalized.includes("token")) {
-      url.searchParams.set(key, "redacted");
-    }
-  }
-  return url.toString();
-}
-function safeJson(value) {
-  if (value == null)
-    return null;
-  if (typeof value === "string" || typeof value === "boolean")
-    return value;
-  if (typeof value === "number")
-    return Number.isFinite(value) ? value : null;
-  if (typeof value === "bigint")
-    return value.toString();
-  if (value instanceof Uint8Array)
-    return Buffer.from(value).toString("base64");
-  if (Array.isArray(value))
-    return value.map(safeJson);
-  if (typeof value === "object") {
-    const out = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (item !== undefined)
-        out[key] = safeJson(item);
-    }
-    return out;
-  }
-  return String(value);
-}
-function asRecord(value) {
-  const record = asOptionalRecord(value);
-  if (!record)
-    throw new SidecarError("expected JSON object", "bad_format");
-  return record;
-}
-function asOptionalRecord(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return null;
-  return value;
-}
-function readRequiredString(record, key) {
-  const value = readOptionalString(record, key);
-  if (!value)
-    throw new SidecarError(`missing ${key}`, "bad_format");
-  return value;
-}
-function readOptionalString(record, key) {
-  const value = record[key];
-  if (typeof value === "string")
-    return value.trim() || undefined;
-  if (typeof value === "bigint" || typeof value === "number")
-    return String(value);
-  return;
-}
-function readOptionalBoolean(record, key) {
-  const value = record[key];
-  if (typeof value === "boolean")
-    return value;
-  if (typeof value === "string") {
-    if (/^(1|true|yes|on)$/i.test(value))
-      return true;
-    if (/^(0|false|no|off)$/i.test(value))
-      return false;
-  }
-  return;
-}
-function readOptionalNumber(record, key) {
-  const value = record[key];
-  if (typeof value === "number" && Number.isFinite(value))
-    return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed))
-      return parsed;
-  }
-  return;
-}
-function readRequiredInlineId(record, key) {
-  const value = readOptionalInlineId(record, key);
-  if (value == null)
-    throw new SidecarError(`missing ${key}`, "bad_format");
-  return value;
-}
-function readOptionalInlineId(record, key) {
-  const value = record[key];
-  if (value == null || value === "")
-    return;
-  return parseInlineId(value, key);
-}
-function readInlineIdArray(record, key, maxItems, required = false) {
-  const value = record[key];
-  if (value == null) {
-    if (required)
-      throw new SidecarError(`missing ${key}`, "bad_format");
-    return [];
-  }
-  if (!Array.isArray(value))
-    throw new SidecarError(`${key} must be an array`, "bad_format");
-  if (value.length === 0 && required)
-    throw new SidecarError(`${key} must not be empty`, "bad_format");
-  if (value.length > maxItems)
-    throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format");
-  const ids = [];
-  const seen = new Set;
-  for (let index = 0;index < value.length; index += 1) {
-    const id = parseInlineId(value[index], `${key}[${index}]`);
-    const normalized = id.toString();
-    if (seen.has(normalized))
-      continue;
-    seen.add(normalized);
-    ids.push(id);
-  }
-  return ids;
-}
-function parseOptionalInt(value) {
-  const raw = (value || "").trim();
-  if (!raw || !/^\d+$/.test(raw))
-    return;
-  const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
-function parseInlineId(value, field) {
-  try {
-    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
-      throw new Error("unsafe number");
-    }
-    const raw = typeof value === "string" ? value.trim() : value;
-    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
-      throw new Error("invalid digits");
-    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
-      throw new Error("invalid type");
-    }
-    const parsed = BigInt(raw);
-    if (parsed <= 0n || parsed > MAX_INLINE_ID)
-      throw new Error("out of range");
-    return parsed;
-  } catch {
-    throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format");
-  }
-}
-function parseUnsigned64Id(value, field) {
-  try {
-    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
-      throw new Error("unsafe number");
-    }
-    const raw = typeof value === "string" ? value.trim() : value;
-    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
-      throw new Error("invalid digits");
-    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
-      throw new Error("invalid type");
-    }
-    const parsed = BigInt(raw);
-    if (parsed <= 0n || parsed > MAX_UINT64)
-      throw new Error("out of range");
-    return parsed;
-  } catch {
-    throw new SidecarError(`${field} must be a positive unsigned 64-bit integer`, "bad_format");
-  }
-}
-function defaultErrorText(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-// src/sidecar/inbound-delivery.ts
-function explicitlyMentionsSelf(event, meId) {
-  if (!meId || event.kind !== "message.new" && event.kind !== "message.edit")
-    return false;
-  const message = event.message;
-  return message?.entities?.entities?.some((e) => e.entity?.oneofKind === "mention" && e.entity.mention?.userId?.toString() === meId) ?? false;
-}
-async function deliverInboundEvent(event, owner) {
-  const explicitMention = explicitlyMentionsSelf(event, owner.meId);
-  while (!owner.signal.aborted) {
-    const resolution = explicitMention ? { provenanceVerified: false } : inboundEventNeedsSenderResolution(event) ? await owner.resolveSender(event) : { provenanceVerified: true };
-    owner.signal.throwIfAborted();
-    if (!explicitMention && !resolution.provenanceVerified && (event.kind === "message.new" || event.kind === "message.edit")) {
-      await delay(1000, undefined, { signal: owner.signal });
-      continue;
-    }
-    const normalized = normalizeInboundEvent(event, owner.meId, resolution.profile, owner.meUsername);
-    await owner.deliver(resolution.provenanceVerified ? normalized : { ...normalized, _inlineSenderProvenanceVerified: false });
-    return;
-  }
-  owner.signal.throwIfAborted();
-}
-
-// src/sidecar/index.ts
-import { timingSafeEqual } from "node:crypto";
-import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
+// src/sidecar/account-state-store.ts
+import { readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import path from "node:path";
 
-// node_modules/@inline-chat/protocol/dist/core.js
+// ../../packages/protocol/dist/core.js
 var import_runtime = __toESM(require_commonjs(), 1);
 var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
@@ -6088,6 +5718,20 @@ var BlockDisclosure_Kind;
   BlockDisclosure_Kind2[BlockDisclosure_Kind2["DEFAULT"] = 0] = "DEFAULT";
   BlockDisclosure_Kind2[BlockDisclosure_Kind2["PROGRESS"] = 1] = "PROGRESS";
 })(BlockDisclosure_Kind || (BlockDisclosure_Kind = {}));
+var BlockDisclosure_ActivityKind;
+(function(BlockDisclosure_ActivityKind2) {
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["REASONING"] = 1] = "REASONING";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["EXPLORE"] = 2] = "EXPLORE";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["READ"] = 3] = "READ";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["SEARCH"] = 4] = "SEARCH";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["EDIT"] = 5] = "EDIT";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["DELETE"] = 6] = "DELETE";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["MOVE"] = 7] = "MOVE";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["COMMAND"] = 8] = "COMMAND";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["WEB"] = 9] = "WEB";
+  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["TOOL"] = 10] = "TOOL";
+})(BlockDisclosure_ActivityKind || (BlockDisclosure_ActivityKind = {}));
 var BlockTable_Alignment;
 (function(BlockTable_Alignment2) {
   BlockTable_Alignment2[BlockTable_Alignment2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -6286,6 +5930,20 @@ var UploadFailure_Code;
   UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_PROCESSING"] = 3] = "UPLOAD_FAILURE_PROCESSING";
   UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_STORAGE"] = 4] = "UPLOAD_FAILURE_STORAGE";
 })(UploadFailure_Code || (UploadFailure_Code = {}));
+var RequestBotFilesystemInput_Operation;
+(function(RequestBotFilesystemInput_Operation2) {
+  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["OPERATION_UNSPECIFIED"] = 0] = "OPERATION_UNSPECIFIED";
+  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["LIST"] = 1] = "LIST";
+  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["REGISTER_FOLDER"] = 2] = "REGISTER_FOLDER";
+})(RequestBotFilesystemInput_Operation || (RequestBotFilesystemInput_Operation = {}));
+var BotFilesystemEntry_Kind;
+(function(BotFilesystemEntry_Kind2) {
+  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["FILE"] = 1] = "FILE";
+  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["DIRECTORY"] = 2] = "DIRECTORY";
+  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["SYMLINK"] = 3] = "SYMLINK";
+  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["OTHER"] = 4] = "OTHER";
+})(BotFilesystemEntry_Kind || (BotFilesystemEntry_Kind = {}));
 var DialogFollowMode;
 (function(DialogFollowMode2) {
   DialogFollowMode2[DialogFollowMode2["DIALOG_FOLLOW_MODE_UNSPECIFIED"] = 0] = "DIALOG_FOLLOW_MODE_UNSPECIFIED";
@@ -6484,6 +6142,11 @@ var Method;
   Method2[Method2["GET_USERS"] = 138] = "GET_USERS";
   Method2[Method2["GET_BOT_SKILLS"] = 139] = "GET_BOT_SKILLS";
   Method2[Method2["GET_BOT_CONFIGURATION_CATALOG"] = 140] = "GET_BOT_CONFIGURATION_CATALOG";
+  Method2[Method2["UPDATE_DIALOG_TRANSLATION"] = 141] = "UPDATE_DIALOG_TRANSLATION";
+  Method2[Method2["TRANSCRIBE_VOICE_DRAFT"] = 142] = "TRANSCRIBE_VOICE_DRAFT";
+  Method2[Method2["REQUEST_BOT_FILESYSTEM"] = 143] = "REQUEST_BOT_FILESYSTEM";
+  Method2[Method2["ANSWER_BOT_FILESYSTEM"] = 144] = "ANSWER_BOT_FILESYSTEM";
+  Method2[Method2["SET_SPACE_PHOTO"] = 145] = "SET_SPACE_PHOTO";
 })(Method || (Method = {}));
 var GridConnectionUnavailableReason;
 (function(GridConnectionUnavailableReason2) {
@@ -6952,7 +6615,8 @@ class BotEvent$Type extends import_runtime4.MessageType {
   constructor() {
     super("BotEvent", [
       { no: 1, name: "chat_settings_requested", kind: "message", oneof: "event", T: () => BotChatSettingsRequested },
-      { no: 2, name: "chat_settings_item_invoked", kind: "message", oneof: "event", T: () => BotChatSettingsItemInvoked }
+      { no: 2, name: "chat_settings_item_invoked", kind: "message", oneof: "event", T: () => BotChatSettingsItemInvoked },
+      { no: 3, name: "filesystem_requested", kind: "message", oneof: "event", T: () => BotFilesystemRequested }
     ]);
   }
   create(value) {
@@ -6979,6 +6643,12 @@ class BotEvent$Type extends import_runtime4.MessageType {
             chatSettingsItemInvoked: BotChatSettingsItemInvoked.internalBinaryRead(reader, reader.uint32(), options, message.event.chatSettingsItemInvoked)
           };
           break;
+        case 3:
+          message.event = {
+            oneofKind: "filesystemRequested",
+            filesystemRequested: BotFilesystemRequested.internalBinaryRead(reader, reader.uint32(), options, message.event.filesystemRequested)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -6995,6 +6665,8 @@ class BotEvent$Type extends import_runtime4.MessageType {
       BotChatSettingsRequested.internalBinaryWrite(message.event.chatSettingsRequested, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.event.oneofKind === "chatSettingsItemInvoked")
       BotChatSettingsItemInvoked.internalBinaryWrite(message.event.chatSettingsItemInvoked, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "filesystemRequested")
+      BotFilesystemRequested.internalBinaryWrite(message.event.filesystemRequested, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8151,7 +7823,8 @@ class Dialog$Type extends import_runtime4.MessageType {
       { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 },
       { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] },
       { no: 17, name: "collapsed_max_id", kind: "scalar", opt: true, T: 3, L: 0 },
-      { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3, L: 0 }
+      { no: 18, name: "folder_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 19, name: "translation_enabled", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -8219,6 +7892,9 @@ class Dialog$Type extends import_runtime4.MessageType {
         case 18:
           message.folderId = reader.int64().toBigInt();
           break;
+        case 19:
+          message.translationEnabled = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8267,6 +7943,8 @@ class Dialog$Type extends import_runtime4.MessageType {
       writer.tag(17, import_runtime.WireType.Varint).int64(message.collapsedMaxId);
     if (message.folderId !== undefined)
       writer.tag(18, import_runtime.WireType.Varint).int64(message.folderId);
+    if (message.translationEnabled !== undefined)
+      writer.tag(19, import_runtime.WireType.Varint).bool(message.translationEnabled);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10007,13 +9685,15 @@ class BlockDisclosure$Type extends import_runtime4.MessageType {
       { no: 2, name: "kind", kind: "enum", T: () => ["BlockDisclosure.Kind", BlockDisclosure_Kind, "KIND_"] },
       { no: 3, name: "initially_open", kind: "scalar", opt: true, T: 8 },
       { no: 4, name: "children", kind: "message", repeat: 1, T: () => Block },
-      { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+      { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 },
+      { no: 6, name: "activity_kind", kind: "enum", T: () => ["BlockDisclosure.ActivityKind", BlockDisclosure_ActivityKind, "ACTIVITY_KIND_"] }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.kind = 0;
     message.children = [];
+    message.activityKind = 0;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -10038,6 +9718,9 @@ class BlockDisclosure$Type extends import_runtime4.MessageType {
         case 5:
           message.isRtl = reader.bool();
           break;
+        case 6:
+          message.activityKind = reader.int32();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10060,6 +9743,8 @@ class BlockDisclosure$Type extends import_runtime4.MessageType {
       Block.internalBinaryWrite(message.children[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.isRtl !== undefined)
       writer.tag(5, import_runtime.WireType.Varint).bool(message.isRtl);
+    if (message.activityKind !== 0)
+      writer.tag(6, import_runtime.WireType.Varint).int32(message.activityKind);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10252,7 +9937,9 @@ class Message$Type extends import_runtime4.MessageType {
       { no: 22, name: "service_message", kind: "message", T: () => MessageService },
       { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
       { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
-      { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread }
+      { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread },
+      { no: 26, name: "is_forwarded", kind: "scalar", opt: true, T: 8 },
+      { no: 27, name: "source_snapshot", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -10349,6 +10036,12 @@ class Message$Type extends import_runtime4.MessageType {
         case 25:
           message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
           break;
+        case 26:
+          message.isForwarded = reader.bool();
+          break;
+        case 27:
+          message.sourceSnapshot = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10413,6 +10106,10 @@ class Message$Type extends import_runtime4.MessageType {
       AgentSessionMessageInfo.internalBinaryWrite(message.agentSession, writer.tag(24, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.subthread)
       MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(25, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.isForwarded !== undefined)
+      writer.tag(26, import_runtime.WireType.Varint).bool(message.isForwarded);
+    if (message.sourceSnapshot !== undefined)
+      writer.tag(27, import_runtime.WireType.LengthDelimited).string(message.sourceSnapshot);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11271,7 +10968,10 @@ class Space$Type extends import_runtime4.MessageType {
       { no: 4, name: "date", kind: "scalar", T: 3, L: 0 },
       { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 },
       { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 },
-      { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 }
+      { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 },
+      { no: 8, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 },
+      { no: 9, name: "photo_url", kind: "scalar", opt: true, T: 9 },
+      { no: 10, name: "is_pro", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -11310,6 +11010,15 @@ class Space$Type extends import_runtime4.MessageType {
         case 7:
           message.seq = reader.int32();
           break;
+        case 8:
+          message.photoFileUniqueId = reader.string();
+          break;
+        case 9:
+          message.photoUrl = reader.string();
+          break;
+        case 10:
+          message.isPro = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11336,6 +11045,12 @@ class Space$Type extends import_runtime4.MessageType {
       writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.handle);
     if (message.seq !== undefined)
       writer.tag(7, import_runtime.WireType.Varint).int32(message.seq);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
+    if (message.photoUrl !== undefined)
+      writer.tag(9, import_runtime.WireType.LengthDelimited).string(message.photoUrl);
+    if (message.isPro !== undefined)
+      writer.tag(10, import_runtime.WireType.Varint).bool(message.isPro);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14392,7 +14107,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
       { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
       { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
-      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
+      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput },
+      { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "input", T: () => UpdateDialogTranslationInput },
+      { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "input", T: () => TranscribeVoiceDraftInput },
+      { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
+      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput },
+      { no: 146, name: "setSpacePhoto", kind: "message", oneof: "input", T: () => SetSpacePhotoInput }
     ]);
   }
   create(value) {
@@ -15245,6 +14965,36 @@ class RpcCall$Type extends import_runtime4.MessageType {
             getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getBotConfigurationCatalog)
           };
           break;
+        case 142:
+          message.input = {
+            oneofKind: "updateDialogTranslation",
+            updateDialogTranslation: UpdateDialogTranslationInput.internalBinaryRead(reader, reader.uint32(), options, message.input.updateDialogTranslation)
+          };
+          break;
+        case 143:
+          message.input = {
+            oneofKind: "transcribeVoiceDraft",
+            transcribeVoiceDraft: TranscribeVoiceDraftInput.internalBinaryRead(reader, reader.uint32(), options, message.input.transcribeVoiceDraft)
+          };
+          break;
+        case 144:
+          message.input = {
+            oneofKind: "requestBotFilesystem",
+            requestBotFilesystem: RequestBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, message.input.requestBotFilesystem)
+          };
+          break;
+        case 145:
+          message.input = {
+            oneofKind: "answerBotFilesystem",
+            answerBotFilesystem: AnswerBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, message.input.answerBotFilesystem)
+          };
+          break;
+        case 146:
+          message.input = {
+            oneofKind: "setSpacePhoto",
+            setSpacePhoto: SetSpacePhotoInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setSpacePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -15537,6 +15287,16 @@ class RpcCall$Type extends import_runtime4.MessageType {
       GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "getBotConfigurationCatalog")
       GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "updateDialogTranslation")
+      UpdateDialogTranslationInput.internalBinaryWrite(message.input.updateDialogTranslation, writer.tag(142, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "transcribeVoiceDraft")
+      TranscribeVoiceDraftInput.internalBinaryWrite(message.input.transcribeVoiceDraft, writer.tag(143, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "requestBotFilesystem")
+      RequestBotFilesystemInput.internalBinaryWrite(message.input.requestBotFilesystem, writer.tag(144, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "answerBotFilesystem")
+      AnswerBotFilesystemInput.internalBinaryWrite(message.input.answerBotFilesystem, writer.tag(145, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setSpacePhoto")
+      SetSpacePhotoInput.internalBinaryWrite(message.input.setSpacePhoto, writer.tag(146, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15687,7 +15447,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
       { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
       { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
-      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
+      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult },
+      { no: 142, name: "updateDialogTranslation", kind: "message", oneof: "result", T: () => UpdateDialogTranslationResult },
+      { no: 143, name: "transcribeVoiceDraft", kind: "message", oneof: "result", T: () => TranscribeVoiceDraftResult },
+      { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
+      { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult },
+      { no: 146, name: "setSpacePhoto", kind: "message", oneof: "result", T: () => SetSpacePhotoResult }
     ]);
   }
   create(value) {
@@ -16540,6 +16305,36 @@ class RpcResult$Type extends import_runtime4.MessageType {
             getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getBotConfigurationCatalog)
           };
           break;
+        case 142:
+          message.result = {
+            oneofKind: "updateDialogTranslation",
+            updateDialogTranslation: UpdateDialogTranslationResult.internalBinaryRead(reader, reader.uint32(), options, message.result.updateDialogTranslation)
+          };
+          break;
+        case 143:
+          message.result = {
+            oneofKind: "transcribeVoiceDraft",
+            transcribeVoiceDraft: TranscribeVoiceDraftResult.internalBinaryRead(reader, reader.uint32(), options, message.result.transcribeVoiceDraft)
+          };
+          break;
+        case 144:
+          message.result = {
+            oneofKind: "requestBotFilesystem",
+            requestBotFilesystem: RequestBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, message.result.requestBotFilesystem)
+          };
+          break;
+        case 145:
+          message.result = {
+            oneofKind: "answerBotFilesystem",
+            answerBotFilesystem: AnswerBotFilesystemResult.internalBinaryRead(reader, reader.uint32(), options, message.result.answerBotFilesystem)
+          };
+          break;
+        case 146:
+          message.result = {
+            oneofKind: "setSpacePhoto",
+            setSpacePhoto: SetSpacePhotoResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setSpacePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -16832,6 +16627,16 @@ class RpcResult$Type extends import_runtime4.MessageType {
       GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "getBotConfigurationCatalog")
       GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "updateDialogTranslation")
+      UpdateDialogTranslationResult.internalBinaryWrite(message.result.updateDialogTranslation, writer.tag(142, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "transcribeVoiceDraft")
+      TranscribeVoiceDraftResult.internalBinaryWrite(message.result.transcribeVoiceDraft, writer.tag(143, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "requestBotFilesystem")
+      RequestBotFilesystemResult.internalBinaryWrite(message.result.requestBotFilesystem, writer.tag(144, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "answerBotFilesystem")
+      AnswerBotFilesystemResult.internalBinaryWrite(message.result.answerBotFilesystem, writer.tag(145, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setSpacePhoto")
+      SetSpacePhotoResult.internalBinaryWrite(message.result.setSpacePhoto, writer.tag(146, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20396,6 +20201,153 @@ class UpdateDialogFollowModeResult$Type extends import_runtime4.MessageType {
 }
 var UpdateDialogFollowModeResult = new UpdateDialogFollowModeResult$Type;
 
+class UpdateDialogTranslationInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateDialogTranslationInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "enabled", kind: "scalar", opt: true, T: 8 },
+      { no: 3, name: "import_legacy_enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.importLegacyEnabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        case 3:
+          message.importLegacyEnabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.enabled !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    if (message.importLegacyEnabled !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.importLegacyEnabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateDialogTranslationInput = new UpdateDialogTranslationInput$Type;
+
+class UpdateDialogTranslationResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateDialogTranslationResult", [
+      { no: 1, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateDialogTranslationResult = new UpdateDialogTranslationResult$Type;
+
+class UpdateDialogTranslation$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateDialogTranslation", [
+      { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+      { no: 2, name: "enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.enabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      Peer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.enabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateDialogTranslation = new UpdateDialogTranslation$Type;
+
 class CollapseHistoryInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CollapseHistoryInput", [
@@ -23879,7 +23831,8 @@ class UserSettings$Type extends import_runtime4.MessageType {
     super("UserSettings", [
       { no: 1, name: "notification_settings", kind: "message", T: () => NotificationSettings },
       { no: 2, name: "privacy_settings", kind: "message", T: () => PrivacySettings },
-      { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings }
+      { no: 3, name: "compose_settings", kind: "message", T: () => ComposeSettings },
+      { no: 4, name: "message_gesture_settings", kind: "message", T: () => MessageGestureSettings }
     ]);
   }
   create(value) {
@@ -23902,6 +23855,9 @@ class UserSettings$Type extends import_runtime4.MessageType {
         case 3:
           message.composeSettings = ComposeSettings.internalBinaryRead(reader, reader.uint32(), options, message.composeSettings);
           break;
+        case 4:
+          message.messageGestureSettings = MessageGestureSettings.internalBinaryRead(reader, reader.uint32(), options, message.messageGestureSettings);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -23920,6 +23876,8 @@ class UserSettings$Type extends import_runtime4.MessageType {
       PrivacySettings.internalBinaryWrite(message.privacySettings, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.composeSettings)
       ComposeSettings.internalBinaryWrite(message.composeSettings, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.messageGestureSettings)
+      MessageGestureSettings.internalBinaryWrite(message.messageGestureSettings, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23927,6 +23885,60 @@ class UserSettings$Type extends import_runtime4.MessageType {
   }
 }
 var UserSettings = new UserSettings$Type;
+
+class MessageGestureSettings$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageGestureSettings", [
+      { no: 1, name: "double_tap_action", kind: "scalar", opt: true, T: 9 },
+      { no: 2, name: "hold_action", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "swipe_to_reply_direction", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.doubleTapAction = reader.string();
+          break;
+        case 2:
+          message.holdAction = reader.string();
+          break;
+        case 3:
+          message.swipeToReplyDirection = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.doubleTapAction !== undefined)
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.doubleTapAction);
+    if (message.holdAction !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.holdAction);
+    if (message.swipeToReplyDirection !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.swipeToReplyDirection);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageGestureSettings = new MessageGestureSettings$Type;
 
 class ComposeSettings$Type extends import_runtime4.MessageType {
   constructor() {
@@ -26814,12 +26826,14 @@ class ForwardMessagesInput$Type extends import_runtime4.MessageType {
       { no: 1, name: "from_peer_id", kind: "message", T: () => InputPeer },
       { no: 2, name: "message_ids", kind: "scalar", repeat: 1, T: 3, L: 0 },
       { no: 3, name: "to_peer_id", kind: "message", T: () => InputPeer },
-      { no: 4, name: "share_forward_header", kind: "scalar", opt: true, T: 8 }
+      { no: 4, name: "share_forward_header", kind: "scalar", opt: true, T: 8 },
+      { no: 5, name: "submissions", kind: "message", repeat: 1, T: () => ForwardMessageSubmission }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.messageIds = [];
+    message.submissions = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -26845,6 +26859,9 @@ class ForwardMessagesInput$Type extends import_runtime4.MessageType {
         case 4:
           message.shareForwardHeader = reader.bool();
           break;
+        case 5:
+          message.submissions.push(ForwardMessageSubmission.internalBinaryRead(reader, reader.uint32(), options));
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -26869,6 +26886,8 @@ class ForwardMessagesInput$Type extends import_runtime4.MessageType {
       InputPeer.internalBinaryWrite(message.toPeerId, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.shareForwardHeader !== undefined)
       writer.tag(4, import_runtime.WireType.Varint).bool(message.shareForwardHeader);
+    for (let i = 0;i < message.submissions.length; i++)
+      ForwardMessageSubmission.internalBinaryWrite(message.submissions[i], writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26877,15 +26896,144 @@ class ForwardMessagesInput$Type extends import_runtime4.MessageType {
 }
 var ForwardMessagesInput = new ForwardMessagesInput$Type;
 
+class ForwardMessageSubmission$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ForwardMessageSubmission", [
+      { no: 1, name: "random_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "expected_source_revision", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "expected_source_snapshot", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.randomId = 0n;
+    message.expectedSourceRevision = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.randomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.expectedSourceRevision = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.expectedSourceSnapshot = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.randomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.randomId);
+    if (message.expectedSourceRevision !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.expectedSourceRevision);
+    if (message.expectedSourceSnapshot !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.expectedSourceSnapshot);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ForwardMessageSubmission = new ForwardMessageSubmission$Type;
+
+class ForwardMessageReceipt$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ForwardMessageReceipt", [
+      { no: 1, name: "source_message_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "random_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "message_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "source_revision", kind: "scalar", T: 3, L: 0 },
+      { no: 5, name: "message_deleted", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.sourceMessageId = 0n;
+    message.randomId = 0n;
+    message.messageId = 0n;
+    message.sourceRevision = 0n;
+    message.messageDeleted = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.sourceMessageId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.randomId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.messageId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.sourceRevision = reader.int64().toBigInt();
+          break;
+        case 5:
+          message.messageDeleted = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.sourceMessageId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.sourceMessageId);
+    if (message.randomId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.randomId);
+    if (message.messageId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.messageId);
+    if (message.sourceRevision !== 0n)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.sourceRevision);
+    if (message.messageDeleted !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.messageDeleted);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ForwardMessageReceipt = new ForwardMessageReceipt$Type;
+
 class ForwardMessagesResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("ForwardMessagesResult", [
-      { no: 1, name: "updates", kind: "message", repeat: 1, T: () => Update }
+      { no: 1, name: "updates", kind: "message", repeat: 1, T: () => Update },
+      { no: 2, name: "receipts", kind: "message", repeat: 1, T: () => ForwardMessageReceipt }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.updates = [];
+    message.receipts = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -26897,6 +27045,9 @@ class ForwardMessagesResult$Type extends import_runtime4.MessageType {
       switch (fieldNo) {
         case 1:
           message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.receipts.push(ForwardMessageReceipt.internalBinaryRead(reader, reader.uint32(), options));
           break;
         default:
           let u = options.readUnknownField;
@@ -26912,6 +27063,8 @@ class ForwardMessagesResult$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     for (let i = 0;i < message.updates.length; i++)
       Update.internalBinaryWrite(message.updates[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.receipts.length; i++)
+      ForwardMessageReceipt.internalBinaryWrite(message.receipts[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28693,7 +28846,8 @@ var CreateExternalTaskResult = new CreateExternalTaskResult$Type;
 class CreateSpaceInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CreateSpaceInput", [
-      { no: 1, name: "name", kind: "scalar", T: 9 }
+      { no: 1, name: "name", kind: "scalar", T: 9 },
+      { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -28711,6 +28865,9 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
         case 1:
           message.name = reader.string();
           break;
+        case 2:
+          message.photoFileUniqueId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -28725,6 +28882,8 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.name !== "")
       writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28732,6 +28891,167 @@ class CreateSpaceInput$Type extends import_runtime4.MessageType {
   }
 }
 var CreateSpaceInput = new CreateSpaceInput$Type;
+
+class SetSpacePhotoInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpacePhotoInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "file_unique_id", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.fileUniqueId = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.fileUniqueId = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.fileUniqueId !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpacePhotoInput = new SetSpacePhotoInput$Type;
+
+class SetSpacePhotoResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpacePhotoResult", [
+      { no: 1, name: "space", kind: "message", T: () => Space },
+      { no: 2, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+          break;
+        case 2:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.space)
+      Space.internalBinaryWrite(message.space, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpacePhotoResult = new SetSpacePhotoResult$Type;
+
+class UpdateSpaceProfile$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateSpaceProfile", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "photo_url", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "is_pro", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.isPro = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.photoFileUniqueId = reader.string();
+          break;
+        case 3:
+          message.photoUrl = reader.string();
+          break;
+        case 4:
+          message.isPro = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.photoFileUniqueId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
+    if (message.photoUrl !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.photoUrl);
+    if (message.isPro !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.isPro);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateSpaceProfile = new UpdateSpaceProfile$Type;
 
 class CreateSpaceResult$Type extends import_runtime4.MessageType {
   constructor() {
@@ -29256,7 +29576,8 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
       { no: 4, name: "description", kind: "scalar", opt: true, T: 9 },
       { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 },
       { no: 6, name: "participants", kind: "message", repeat: 1, T: () => InputChatParticipant },
-      { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext }
+      { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext },
+      { no: 8, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -29293,6 +29614,9 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
         case 7:
           message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
           break;
+        case 8:
+          message.reservedChatId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -29319,6 +29643,8 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
       InputChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.agentContext)
       AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.reservedChatId !== undefined)
+      writer.tag(8, import_runtime.WireType.Varint).int64(message.reservedChatId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29428,7 +29754,8 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetSpaceMembersResult", [
       { no: 1, name: "members", kind: "message", repeat: 1, T: () => Member },
-      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User },
+      { no: 3, name: "seq", kind: "scalar", opt: true, T: 5 }
     ]);
   }
   create(value) {
@@ -29450,6 +29777,9 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
         case 2:
           message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 3:
+          message.seq = reader.int32();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -29466,6 +29796,8 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
       Member.internalBinaryWrite(message.members[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
     for (let i = 0;i < message.users.length; i++)
       User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.seq !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.seq);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29922,7 +30254,10 @@ class Update$Type extends import_runtime4.MessageType {
       { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
       { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
       { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
-      { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
+      { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
+      { no: 50, name: "dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
+      { no: 51, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile },
+      { no: 52, name: "user_has_new_updates", kind: "message", oneof: "update", T: () => UpdateUserHasNewUpdates }
     ]);
   }
   create(value) {
@@ -30219,6 +30554,24 @@ class Update$Type extends import_runtime4.MessageType {
             acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, message.update.acknowledgement)
           };
           break;
+        case 50:
+          message.update = {
+            oneofKind: "dialogTranslation",
+            dialogTranslation: UpdateDialogTranslation.internalBinaryRead(reader, reader.uint32(), options, message.update.dialogTranslation)
+          };
+          break;
+        case 51:
+          message.update = {
+            oneofKind: "spaceProfile",
+            spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, message.update.spaceProfile)
+          };
+          break;
+        case 52:
+          message.update = {
+            oneofKind: "userHasNewUpdates",
+            userHasNewUpdates: UpdateUserHasNewUpdates.internalBinaryRead(reader, reader.uint32(), options, message.update.userHasNewUpdates)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -30327,6 +30680,12 @@ class Update$Type extends import_runtime4.MessageType {
       UpdateUserRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(48, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.update.oneofKind === "acknowledgement")
       ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "dialogTranslation")
+      UpdateDialogTranslation.internalBinaryWrite(message.update.dialogTranslation, writer.tag(50, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "spaceProfile")
+      UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(51, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "userHasNewUpdates")
+      UpdateUserHasNewUpdates.internalBinaryWrite(message.update.userHasNewUpdates, writer.tag(52, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30446,6 +30805,49 @@ class UpdateSpaceHasNewUpdates$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateSpaceHasNewUpdates = new UpdateSpaceHasNewUpdates$Type;
+
+class UpdateUserHasNewUpdates$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateUserHasNewUpdates", [
+      { no: 1, name: "update_seq", kind: "scalar", T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updateSeq = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.updateSeq = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.updateSeq !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.updateSeq);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateUserHasNewUpdates = new UpdateUserHasNewUpdates$Type;
 
 class UpdateChatHasNewUpdates$Type extends import_runtime4.MessageType {
   constructor() {
@@ -31057,7 +31459,8 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
   constructor() {
     super("UpdateSpaceMemberDelete", [
       { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "member_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -31079,6 +31482,9 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
         case 2:
           message.userId = reader.int64().toBigInt();
           break;
+        case 3:
+          message.memberId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -31095,6 +31501,8 @@ class UpdateSpaceMemberDelete$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
     if (message.userId !== 0n)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.memberId !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.memberId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33930,7 +34338,8 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
       { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
       { no: 2, name: "title", kind: "scalar", opt: true, T: 9 },
       { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 },
-      { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext }
+      { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext },
+      { no: 5, name: "generate_emoji", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -33957,6 +34366,9 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
         case 4:
           message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
           break;
+        case 5:
+          message.generateEmoji = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -33977,6 +34389,8 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.emoji);
     if (message.agentContext)
       AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.generateEmoji !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.generateEmoji);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -34326,7 +34740,8 @@ class AgentProjectCatalog$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentProjectCatalog", [
       { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentProjectOption },
-      { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 }
+      { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 },
+      { no: 3, name: "default_project_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -34347,6 +34762,9 @@ class AgentProjectCatalog$Type extends import_runtime4.MessageType {
         case 2:
           message.canSelectFolder = reader.bool();
           break;
+        case 3:
+          message.defaultProjectId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -34363,6 +34781,8 @@ class AgentProjectCatalog$Type extends import_runtime4.MessageType {
       AgentProjectOption.internalBinaryWrite(message.options[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.canSelectFolder !== undefined)
       writer.tag(2, import_runtime.WireType.Varint).bool(message.canSelectFolder);
+    if (message.defaultProjectId !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.defaultProjectId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -34476,7 +34896,8 @@ class AgentModelOption$Type extends import_runtime4.MessageType {
       { no: 1, name: "id", kind: "scalar", T: 9 },
       { no: 2, name: "label", kind: "scalar", T: 9 },
       { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
-      { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2, T: 9 }
+      { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2, T: 9 },
+      { no: 5, name: "default_reasoning_effort_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -34505,6 +34926,9 @@ class AgentModelOption$Type extends import_runtime4.MessageType {
         case 4:
           message.reasoningEffortIds.push(reader.string());
           break;
+        case 5:
+          message.defaultReasoningEffortId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -34525,6 +34949,8 @@ class AgentModelOption$Type extends import_runtime4.MessageType {
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
     for (let i = 0;i < message.reasoningEffortIds.length; i++)
       writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.reasoningEffortIds[i]);
+    if (message.defaultReasoningEffortId !== undefined)
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.defaultReasoningEffortId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -34536,7 +34962,8 @@ var AgentModelOption = new AgentModelOption$Type;
 class AgentModelCatalog$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentModelCatalog", [
-      { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentModelOption }
+      { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentModelOption },
+      { no: 2, name: "default_model_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -34554,6 +34981,9 @@ class AgentModelCatalog$Type extends import_runtime4.MessageType {
         case 1:
           message.options.push(AgentModelOption.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 2:
+          message.defaultModelId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -34568,6 +34998,8 @@ class AgentModelCatalog$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     for (let i = 0;i < message.options.length; i++)
       AgentModelOption.internalBinaryWrite(message.options[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.defaultModelId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.defaultModelId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35454,7 +35886,8 @@ class BotChatSettingsFolder$Type extends import_runtime4.MessageType {
       { no: 4, name: "host_label", kind: "scalar", T: 9 },
       { no: 5, name: "allows_local_picker", kind: "scalar", T: 8 },
       { no: 6, name: "local_picker_port", kind: "scalar", opt: true, T: 13 },
-      { no: 7, name: "local_picker_capability", kind: "scalar", opt: true, T: 9 }
+      { no: 7, name: "local_picker_capability", kind: "scalar", opt: true, T: 9 },
+      { no: 8, name: "remote_browser_version", kind: "scalar", opt: true, T: 13 }
     ]);
   }
   create(value) {
@@ -35494,6 +35927,9 @@ class BotChatSettingsFolder$Type extends import_runtime4.MessageType {
         case 7:
           message.localPickerCapability = reader.string();
           break;
+        case 8:
+          message.remoteBrowserVersion = reader.uint32();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -35520,6 +35956,8 @@ class BotChatSettingsFolder$Type extends import_runtime4.MessageType {
       writer.tag(6, import_runtime.WireType.Varint).uint32(message.localPickerPort);
     if (message.localPickerCapability !== undefined)
       writer.tag(7, import_runtime.WireType.LengthDelimited).string(message.localPickerCapability);
+    if (message.remoteBrowserVersion !== undefined)
+      writer.tag(8, import_runtime.WireType.Varint).uint32(message.remoteBrowserVersion);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38764,7 +39202,543 @@ class ChatAcknowledgements$Type extends import_runtime4.MessageType {
 }
 var ChatAcknowledgements = new ChatAcknowledgements$Type;
 
-// node_modules/@noble/hashes/esm/utils.js
+class TranscribeVoiceDraftInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("TranscribeVoiceDraftInput", [
+      { no: 1, name: "audio", kind: "scalar", T: 12 },
+      { no: 2, name: "mime_type", kind: "scalar", T: 9 },
+      { no: 3, name: "duration", kind: "scalar", T: 13 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.audio = new Uint8Array(0);
+    message.mimeType = "";
+    message.duration = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.audio = reader.bytes();
+          break;
+        case 2:
+          message.mimeType = reader.string();
+          break;
+        case 3:
+          message.duration = reader.uint32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.audio.length)
+      writer.tag(1, import_runtime.WireType.LengthDelimited).bytes(message.audio);
+    if (message.mimeType !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.mimeType);
+    if (message.duration !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).uint32(message.duration);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var TranscribeVoiceDraftInput = new TranscribeVoiceDraftInput$Type;
+
+class TranscribeVoiceDraftResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("TranscribeVoiceDraftResult", [
+      { no: 1, name: "text", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.text = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.text = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.text !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.text);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var TranscribeVoiceDraftResult = new TranscribeVoiceDraftResult$Type;
+
+class RequestBotFilesystemInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("RequestBotFilesystemInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "host_installation_id", kind: "scalar", T: 9 },
+      { no: 4, name: "operation", kind: "enum", T: () => ["RequestBotFilesystemInput.Operation", RequestBotFilesystemInput_Operation] },
+      { no: 5, name: "path", kind: "scalar", T: 9 },
+      { no: 6, name: "after", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    message.hostInstallationId = "";
+    message.operation = 0;
+    message.path = "";
+    message.after = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.hostInstallationId = reader.string();
+          break;
+        case 4:
+          message.operation = reader.int32();
+          break;
+        case 5:
+          message.path = reader.string();
+          break;
+        case 6:
+          message.after = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.botUserId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.hostInstallationId !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.hostInstallationId);
+    if (message.operation !== 0)
+      writer.tag(4, import_runtime.WireType.Varint).int32(message.operation);
+    if (message.path !== "")
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.path);
+    if (message.after !== "")
+      writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.after);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var RequestBotFilesystemInput = new RequestBotFilesystemInput$Type;
+
+class BotFilesystemEntry$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotFilesystemEntry", [
+      { no: 1, name: "name", kind: "scalar", T: 9 },
+      { no: 2, name: "kind", kind: "enum", T: () => ["BotFilesystemEntry.Kind", BotFilesystemEntry_Kind] },
+      { no: 3, name: "size", kind: "scalar", T: 4, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.name = "";
+    message.kind = 0;
+    message.size = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.name = reader.string();
+          break;
+        case 2:
+          message.kind = reader.int32();
+          break;
+        case 3:
+          message.size = reader.uint64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.name !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.kind !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.kind);
+    if (message.size !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).uint64(message.size);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotFilesystemEntry = new BotFilesystemEntry$Type;
+
+class BotFilesystemListing$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotFilesystemListing", [
+      { no: 1, name: "path", kind: "scalar", T: 9 },
+      { no: 2, name: "parent_path", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "entries", kind: "message", repeat: 1, T: () => BotFilesystemEntry },
+      { no: 4, name: "next_after", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.path = "";
+    message.entries = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.path = reader.string();
+          break;
+        case 2:
+          message.parentPath = reader.string();
+          break;
+        case 3:
+          message.entries.push(BotFilesystemEntry.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 4:
+          message.nextAfter = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.path !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.path);
+    if (message.parentPath !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.parentPath);
+    for (let i = 0;i < message.entries.length; i++)
+      BotFilesystemEntry.internalBinaryWrite(message.entries[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.nextAfter !== undefined)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.nextAfter);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotFilesystemListing = new BotFilesystemListing$Type;
+
+class BotFilesystemResponse$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotFilesystemResponse", [
+      { no: 1, name: "listing", kind: "message", oneof: "result", T: () => BotFilesystemListing },
+      { no: 2, name: "workspace_id", kind: "scalar", oneof: "result", T: 9 },
+      { no: 3, name: "problem", kind: "scalar", oneof: "result", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.result = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.result = {
+            oneofKind: "listing",
+            listing: BotFilesystemListing.internalBinaryRead(reader, reader.uint32(), options, message.result.listing)
+          };
+          break;
+        case 2:
+          message.result = {
+            oneofKind: "workspaceId",
+            workspaceId: reader.string()
+          };
+          break;
+        case 3:
+          message.result = {
+            oneofKind: "problem",
+            problem: reader.string()
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.result.oneofKind === "listing")
+      BotFilesystemListing.internalBinaryWrite(message.result.listing, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "workspaceId")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.result.workspaceId);
+    if (message.result.oneofKind === "problem")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.result.problem);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotFilesystemResponse = new BotFilesystemResponse$Type;
+
+class RequestBotFilesystemResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("RequestBotFilesystemResult", [
+      { no: 1, name: "response", kind: "message", T: () => BotFilesystemResponse }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.response = BotFilesystemResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.response)
+      BotFilesystemResponse.internalBinaryWrite(message.response, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var RequestBotFilesystemResult = new RequestBotFilesystemResult$Type;
+
+class BotFilesystemRequested$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotFilesystemRequested", [
+      { no: 1, name: "request_id", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "actor_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "input", kind: "message", T: () => RequestBotFilesystemInput }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.requestId = 0n;
+    message.actorUserId = 0n;
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.requestId = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.actorUserId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.input = RequestBotFilesystemInput.internalBinaryRead(reader, reader.uint32(), options, message.input);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.requestId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.requestId);
+    if (message.actorUserId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.actorUserId);
+    if (message.chatId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.input)
+      RequestBotFilesystemInput.internalBinaryWrite(message.input, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotFilesystemRequested = new BotFilesystemRequested$Type;
+
+class AnswerBotFilesystemInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AnswerBotFilesystemInput", [
+      { no: 1, name: "request_id", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "response", kind: "message", T: () => BotFilesystemResponse }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.requestId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.requestId = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.response = BotFilesystemResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.requestId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.requestId);
+    if (message.response)
+      BotFilesystemResponse.internalBinaryWrite(message.response, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AnswerBotFilesystemInput = new AnswerBotFilesystemInput$Type;
+
+class AnswerBotFilesystemResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AnswerBotFilesystemResult", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AnswerBotFilesystemResult = new AnswerBotFilesystemResult$Type;
+
+// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
 /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -38824,7 +39798,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE);
@@ -38945,7 +39919,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// node_modules/@noble/hashes/esm/sha2.js
+// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -39085,11 +40059,11 @@ class SHA256 extends HashMD {
 }
 var sha256 = /* @__PURE__ */ createHasher(() => new SHA256);
 
-// node_modules/@inline-chat/protocol/dist/transfers.js
+// ../../packages/protocol/dist/transfers.js
 var INLINE_TRANSFER_PART_SIZE = 512 * 1024;
 var INLINE_UPLOAD_MAX_PARTS = 1000;
 
-// node_modules/@inline-chat/protocol/dist/uploads.js
+// ../../packages/protocol/dist/uploads.js
 var HASH_READ_SIZE = 1024 * 1024;
 var DEFAULT_GLOBAL_CONCURRENCY = 3;
 var DEFAULT_UPLOAD_CONCURRENCY = 2;
@@ -39151,7 +40125,7 @@ var reportProgress = (job) => {
     job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount });
   } catch {}
 };
-var delay2 = async (seconds, signal) => {
+var delay = async (seconds, signal) => {
   if (signal?.aborted)
     throw new NativeUploadError("canceled", "Upload was canceled");
   await new Promise((resolve, reject) => {
@@ -39434,7 +40408,7 @@ class NativeUploadClient {
     }
   }
   #resumeFinishAfter(job, seconds) {
-    delay2(seconds, job.input.signal).then(() => {
+    delay(seconds, job.input.signal).then(() => {
       if (job.settled)
         return;
       job.active = 0;
@@ -39522,7 +40496,7 @@ class NativeUploadError extends Error {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/ids.js
+// ../../packages/sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
     super(message);
@@ -39541,7 +40515,7 @@ var asInlineId = (value, fieldName = "id") => {
   return BigInt(value);
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
+// ../../packages/sdk/dist/utils/async-channel.js
 class ChannelConsumerError extends Error {
   constructor(message) {
     super(message);
@@ -39843,7 +40817,7 @@ class AcknowledgedAsyncChannel {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
+// ../../packages/sdk/dist/realtime/ping-pong.js
 class PingPongService {
   log;
   crypto;
@@ -39972,7 +40946,7 @@ class PingPongService {
 }
 var isCrypto = (value) => typeof value === "object" && value !== null && ("getRandomValues" in value) && typeof value.getRandomValues === "function";
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
+// ../../packages/sdk/dist/realtime/transport.js
 class TransportError extends Error {
   code;
   constructor(message, code = "generic") {
@@ -39994,7 +40968,7 @@ class TransportError extends Error {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/errors.js
+// ../../packages/sdk/dist/sdk/errors.js
 class InlineSdkAuthenticationError extends Error {
   code;
   reason;
@@ -40019,7 +40993,7 @@ function authenticationErrorFromConnectionReason(reason) {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
+// ../../packages/sdk/dist/realtime/protocol-client.js
 var emptyRpcInput = { oneofKind: undefined };
 var defaultRpcTimeoutMs = 30000;
 var defaultMaxPendingRpcRequests = 64;
@@ -40534,7 +41508,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// node_modules/ws/wrapper.mjs
+// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -40544,7 +41518,7 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
+// ../../packages/sdk/dist/realtime/ws-transport.js
 class WebSocketTransport {
   events = new AsyncChannel;
   url;
@@ -40783,10 +41757,10 @@ function redactUrlForDiagnostics(raw) {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
+// ../../packages/sdk/dist/realtime/v3-connection.js
 import { randomBytes } from "node:crypto";
 
-// node_modules/@inline-chat/protocol/dist/secure/bytes.js
+// ../../packages/protocol/dist/secure/bytes.js
 var MAX_PACKET_BYTES = 16 * 1024 * 1024;
 var concatBytes = (...parts) => {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
@@ -40838,7 +41812,7 @@ var hexToBytes = (hex) => {
     throw new RangeError("Invalid hexadecimal bytes");
   return Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
 };
-// node_modules/@noble/ciphers/esm/utils.js
+// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/utils.js
 /*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) */
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -40930,7 +41904,7 @@ function copyBytes(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// node_modules/@noble/ciphers/esm/aes.js
+// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/aes.js
 var BLOCK_SIZE = 16;
 var POLY = 283;
 function mul2(n) {
@@ -41163,7 +42137,7 @@ var ecb = /* @__PURE__ */ wrapCipher({ blockSize: 16 }, function aesecb(key, opt
   };
 });
 
-// node_modules/@noble/hashes/esm/legacy.js
+// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/legacy.js
 var SHA1_IV = /* @__PURE__ */ Uint32Array.from([
   1732584193,
   4023233417,
@@ -41238,7 +42212,7 @@ class SHA1 extends HashMD {
 }
 var sha1 = /* @__PURE__ */ createHasher(() => new SHA1);
 
-// node_modules/@inline-chat/protocol/dist/secure/crypto.js
+// ../../packages/protocol/dist/secure/crypto.js
 var BLOCK_BYTES = 16;
 var assertLength = (name, bytes, length) => {
   if (bytes.length !== length)
@@ -41342,7 +42316,7 @@ class AesCtrStream {
   }
 }
 
-// node_modules/@inline-chat/protocol/dist/secure/tl.js
+// ../../packages/protocol/dist/secure/tl.js
 var TL_VECTOR_CONSTRUCTOR = 481674261;
 var encodeTlBytes = (value) => {
   if (value.length > 16777215 || value.length > MAX_PACKET_BYTES)
@@ -41428,7 +42402,7 @@ class TlReader {
   }
 }
 
-// node_modules/@inline-chat/protocol/dist/secure/binding.js
+// ../../packages/protocol/dist/secure/binding.js
 var BindingConstructor = {
   bindAuthKeyInner: 1973679973,
   bindTempAuthKey: 3453233669
@@ -41468,7 +42442,7 @@ var createTemporaryKeyBindingProof = (input) => {
   const { key, iv } = deriveV1Aes(input.permanentAuthKey, messageKey);
   return concatBytes(authKeyId(input.permanentAuthKey), messageKey, aesIgeEncrypt(concatBytes(plaintextWithoutPadding, input.randomPadding), key, iv));
 };
-// node_modules/@inline-chat/protocol/dist/secure/application.js
+// ../../packages/protocol/dist/secure/application.js
 var INLINE_RESULT_CONSTRUCTOR = 2889735252;
 var INLINE_UPDATE_CONSTRUCTOR = 3695258776;
 var INLINE_INVOKE_CONSTRUCTOR = 3950856870;
@@ -41493,7 +42467,7 @@ var decodeInlineApplicationObject = (bytes) => {
     return { kind: "update", payload };
   throw new RangeError("Unknown Inline application constructor");
 };
-// node_modules/@inline-chat/protocol/dist/secure/carrier.js
+// ../../packages/protocol/dist/secure/carrier.js
 var FORBIDDEN_PREFIXES = new Set([1145128264, 1414745936, 542393671, 1230262351, 4008636142, 3722304989, 33620758]);
 var encodeAbridgedPacket = (payload, quickAckRequested = false) => {
   if (payload.length === 0 || payload.length > MAX_PACKET_BYTES || payload.length % 4 !== 0)
@@ -41548,7 +42522,7 @@ var createObfuscatedClientHeader = (randomHeader, dc = 1) => {
   const encryptedHeader = outbound.process(plaintext);
   return { wireHeader: concatBytes(plaintext.slice(0, 56), encryptedHeader.slice(56)), outbound, inbound };
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshake.js
+// ../../packages/protocol/dist/secure/handshake.js
 var TELEGRAM_DH_PRIME = hexToBytes("c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" + "48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372" + "0fd51f69458705ac68cd4fe6b6b13abdc9746512969328454f18faf8c595f642" + "477fe96bb2a941d5bcd1d4ac8cc49880708fa9b378e3c4f3a9060bee67cf9a4a" + "4a695811051907e162753b56b0f6b410dba74d8a84b2a14b3144e0ef1284754f" + "d17ed950d5965b4b9dd46582db1178d169c6bc465b0d6ff9ca3928fef5b9ae4e" + "418fc15e83ebea0f87fa9ff5eed70050ded2849f47bf959d956850ce929851f0d" + "8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b");
 
 class RsaPadRetry extends Error {
@@ -41767,7 +42741,7 @@ var factorPq = (pqBytes, randomBytes, maximumAttempts = 32) => {
   }
   throw new RangeError("Unable to factor pq challenge");
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshakeSchema.js
+// ../../packages/protocol/dist/secure/handshakeSchema.js
 var HandshakeConstructor = {
   resPq: 85337187,
   pQInnerDataDc: 2851430293,
@@ -41871,7 +42845,7 @@ var constructorReaderPrefix = (body, expected) => {
     throw new RangeError("Unexpected TL constructor");
   return new TlReader(body.slice(4));
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshakeState.js
+// ../../packages/protocol/dist/secure/handshakeState.js
 var PQ = hexToBytes("17ed48941a08f981");
 var P = hexToBytes("494c553b");
 var Q = hexToBytes("53911073");
@@ -42041,7 +43015,7 @@ var makeRsaPublicKey = (modulus, exponent) => ({
   exponent,
   fingerprint: rsaPublicKeyFingerprint(modulus, exponent)
 });
-// node_modules/@inline-chat/protocol/dist/secure/record.js
+// ../../packages/protocol/dist/secure/record.js
 class InvalidEncryptedRecord extends Error {
   constructor() {
     super("Invalid Inline Protocol encrypted record");
@@ -42115,7 +43089,7 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
   }
 };
 var decryptRecord = (record, authKey, validation) => decryptRecordWithMetadata(record, authKey, validation).fields;
-// node_modules/@inline-chat/protocol/dist/secure/session.js
+// ../../packages/protocol/dist/secure/session.js
 class MessageIdGenerator {
   #last = 0n;
   next(estimatedServerUnixMillis, randomLowBits, modulo) {
@@ -42128,6 +43102,8 @@ class MessageIdGenerator {
     candidate = candidate & ~3n | BigInt(modulo);
     if (candidate <= this.#last)
       candidate = this.#last + 4n & ~3n | BigInt(modulo);
+    if (modulo === 0 && (candidate & 0xffffffffn) === 0n)
+      candidate += 4n;
     this.#last = candidate;
     return candidate;
   }
@@ -42175,7 +43151,7 @@ class AuthenticatedServerClock {
     return this.#serverUnixMilliseconds + elapsed;
   }
 }
-// node_modules/@inline-chat/protocol/dist/secure/service.js
+// ../../packages/protocol/dist/secure/service.js
 var MAX_SERVICE_MESSAGE_IDS = 8192;
 var ServiceConstructor = {
   rpcResult: 4082920705,
@@ -42276,7 +43252,7 @@ var readerFor = (body, expected) => {
     throw new RangeError("Unexpected service constructor");
   return new TlReader(body.slice(4));
 };
-// node_modules/@inline-chat/protocol/dist/secure/serverSession.js
+// ../../packages/protocol/dist/secure/serverSession.js
 var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.msgContainer,
   ServiceConstructor.msgsAck,
@@ -42291,7 +43267,7 @@ var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.pong,
   ServiceConstructor.httpWait
 ]);
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
+// ../../packages/sdk/dist/realtime/v3-connection.js
 var BOOL_TRUE = 2574415285;
 var CONNECT_TIMEOUT_MS = 30000;
 var REQUEST_TIMEOUT_MS = 60000;
@@ -42673,15 +43649,15 @@ class InlineProtocolV3Connection {
     if (!authorization?.temporary || authorization.expiresAt === undefined || this.#closing)
       return;
     const boundary = authorization.expiresAt * 1000 - TEMPORARY_KEY_ROTATION_MILLISECONDS;
-    const delay3 = boundary - this.#clock.nowMilliseconds();
-    if (!Number.isFinite(delay3) || delay3 <= 0) {
+    const delay2 = boundary - this.#clock.nowMilliseconds();
+    if (!Number.isFinite(delay2) || delay2 <= 0) {
       this.#markRotationDue();
       return;
     }
     const timer = setTimeout(() => {
       this.#rotationTimer = undefined;
       this.#scheduleRotationTimer();
-    }, Math.min(delay3, 2147000000));
+    }, Math.min(delay2, 2147000000));
     if (typeof timer !== "number" && typeof timer.unref === "function")
       timer.unref();
     this.#rotationTimer = timer;
@@ -43064,7 +44040,7 @@ class InlineProtocolV3Connection {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-transport.js
+// ../../packages/sdk/dist/realtime/v3-transport.js
 var pendingUpdateCapacity = 256;
 var pendingUpdateByteCapacity = 8 * 1024 * 1024;
 var transportEventByteCapacity = 8 * 1024 * 1024;
@@ -43516,7 +44492,7 @@ class InlineProtocolV3Transport {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/production-trust-roots.js
+// ../../packages/sdk/dist/realtime/production-trust-roots.js
 var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   {
     modulus: "y4mCEOAFrQU02g6WBGLvsy6hBh9jOfV6Hg6lvKvnRKj2vybdLTISXilcYbN2ItUfXhFf7Tk660OLhD7lBv2Pme9YVmWswHJ9j7PyyIa6klTiBLSADPPCuknvID1X7bX-Ut5IwmJDciSITHy0Qxf5yGnhRWPWOgxWDt4EdwHiOd9uHwCxLn9k8LfIXN2DOT8aPH306IB0IWMsTlnXBZ7om8nZniJG0NWG1u-BJDEk4Hz8eko1cF4wc-naVY4qcDh9zD9iXrbMJ5b8aw2JG11dvJGEBmWqjPcPJy1VqFNAZOxGUf-LXWRTnNuwECRpgvqm5oO_CFfwXUvM5W1Tw7lIVQ",
@@ -43530,7 +44506,7 @@ var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   }
 ];
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
+// ../../packages/sdk/dist/sdk/types.js
 var rpcInputKindByMethod = {
   0: undefined,
   1: "getMe",
@@ -43670,10 +44646,10 @@ var rpcResultKindByMethod = {
   132: "deleteBotAgent"
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
+// ../../packages/sdk/dist/sdk/logger.js
 var noopLogger = {};
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
+// ../../packages/sdk/dist/sdk/sdk-version.js
 import { readFileSync } from "node:fs";
 var cached = null;
 var getSdkVersion = () => {
@@ -43697,7 +44673,7 @@ var getSdkVersion = () => {
   return cached;
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
+// ../../packages/sdk/dist/sdk/inline-sdk-client.js
 var nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 var sdkLayer = 1;
 var defaultApiBaseUrl = "https://api.inline.chat";
@@ -43867,6 +44843,7 @@ class InlineSdkClient {
   catchUpInFlightBySpaceId = new Map;
   catchUpRequestedBySpaceId = new Map;
   userCatchUpInFlight = null;
+  userCatchUpRequested = null;
   peerResolutionInFlightByChatId = new Map;
   peerResolutionRequestedByChatId = new Map;
   recoveryReconnectInFlight = null;
@@ -44839,7 +45816,7 @@ class InlineSdkClient {
         if (options?.source === "live" && seq > 0) {
           this.fenceLiveCursor({ kind: "user" });
           this.registerDiscoveryHint({ kind: "user" }, seq);
-          this.requestCatchUpUser(true);
+          this.requestCatchUpUser(true, seq);
           return Promise.resolve(true);
         }
         const payload = update.update.userAddedToChat;
@@ -44927,6 +45904,15 @@ class InlineSdkClient {
           ...payload.updateSeq > 0 ? { updateSeq: payload.updateSeq } : {}
         });
         return delivery;
+      }
+      case "userHasNewUpdates": {
+        const payload = update.update.userHasNewUpdates;
+        if (!Number.isSafeInteger(payload.updateSeq) || payload.updateSeq <= 0) {
+          return Promise.resolve(true);
+        }
+        this.registerDiscoveryHint({ kind: "user" }, payload.updateSeq);
+        this.requestCatchUpUser(true, payload.updateSeq > 0 ? payload.updateSeq : undefined);
+        return Promise.resolve(true);
       }
       default:
         return null;
@@ -45115,7 +46101,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...updateSeq != null ? { updateSeq } : {} });
         return;
       case "user":
-        this.requestCatchUpUser(true);
+        this.requestCatchUpUser(true, updateSeq);
         return;
     }
   }
@@ -45152,8 +46138,8 @@ class InlineSdkClient {
   requestCatchUpForDegradedBucket(bucket) {
     switch (bucket.kind) {
       case "chat": {
-        const request = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
-        const updateSeq = request && !request.toLatest ? request.endSeq : undefined;
+        const request2 = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
+        const updateSeq = request2 && !request2.toLatest ? request2.endSeq : undefined;
         const peer = bucket.peer ?? this.persistedChatPeer(bucket.chatId);
         if (peer && this.isReliableChatPeer(peer)) {
           this.requestCatchUpChat({ chatId: bucket.chatId, peer, updateSeq });
@@ -45163,15 +46149,16 @@ class InlineSdkClient {
         return;
       }
       case "space": {
-        const request = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
+        const request2 = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
         this.requestCatchUpSpace({
           spaceId: bucket.spaceId,
-          updateSeq: request && !request.toLatest ? request.endSeq : undefined
+          updateSeq: request2 && !request2.toLatest ? request2.endSeq : undefined
         });
         return;
       }
       case "user":
-        this.requestCatchUpUser(true);
+        const request = this.userCatchUpRequested;
+        this.requestCatchUpUser(true, request && !request.toLatest ? request.endSeq : undefined);
         return;
     }
   }
@@ -45192,7 +46179,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...updateSeq != null ? { updateSeq } : {} });
         return;
       case "user":
-        this.requestCatchUpUser(true);
+        this.requestCatchUpUser(true, updateSeq);
         return;
     }
   }
@@ -45207,6 +46194,7 @@ class InlineSdkClient {
       case "newMessageNotification":
       case "chatHasNewUpdates":
       case "spaceHasNewUpdates":
+      case "userHasNewUpdates":
       case "botPresence":
         return true;
       case undefined:
@@ -45288,6 +46276,8 @@ class InlineSdkClient {
       }
       case "spaceSettings":
         return [{ kind: "space", spaceId: update.update.spaceSettings.spaceId }];
+      case "spaceProfile":
+        return [{ kind: "space", spaceId: update.update.spaceProfile.spaceId }];
       case "dialogArchived":
       case "joinSpace":
       case "updateReadMaxId":
@@ -45408,10 +46398,21 @@ class InlineSdkClient {
     }
     this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq);
   }
-  requestCatchUpUser(forceFromStart = false) {
+  requestCatchUpUser(forceFromStart = false, updateSeq) {
     const lastUserSeq = this.state.lastUserSeq;
     if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
       return null;
+    }
+    const cursor = lastUserSeq ?? 0;
+    if (updateSeq != null && updateSeq <= cursor)
+      return this.userCatchUpInFlight;
+    const previous = this.userCatchUpRequested;
+    const demandAlreadyCoversHint = updateSeq != null && (previous?.endSeq ?? 0) >= updateSeq;
+    if (!demandAlreadyCoversHint) {
+      this.userCatchUpRequested = {
+        ...updateSeq != null || previous?.endSeq != null ? { endSeq: Math.max(previous?.endSeq ?? 0, updateSeq ?? 0) } : {},
+        toLatest: previous?.toLatest === true || updateSeq == null
+      };
     }
     if (this.userCatchUpInFlight) {
       return this.userCatchUpInFlight;
@@ -45419,21 +46420,54 @@ class InlineSdkClient {
     if (this.recoveryRetries.get("user")?.timer)
       return null;
     this.fenceLiveCursor({ kind: "user" });
-    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0).catch((error) => {
-      this.recordCatchUpFailure({ kind: "user" }, error);
+    return this.startUserCatchUp();
+  }
+  startUserCatchUp() {
+    const initialDemand = this.userCatchUpRequested;
+    const task = this.drainCatchUpUser().catch((error) => {
+      this.recordCatchUpFailure({ kind: "user" }, error, this.userCatchUpRequested !== initialDemand);
       this.log.warn?.("GET_UPDATES user catch-up failed; bucket remains degraded", {
         error: extractErrorMessage(error)
       });
     }).finally(() => {
       this.userCatchUpInFlight = null;
+      if (this.userCatchUpRequested && !this.degradedUpdateBuckets.has("user")) {
+        this.startUserCatchUp();
+        return;
+      }
       this.scheduleRecoveryRetry({ kind: "user" });
     });
-    return this.userCatchUpInFlight;
+    this.userCatchUpInFlight = task;
+    return task;
   }
-  async doCatchUpUser(startSeq) {
-    let cursor = startSeq;
+  async drainCatchUpUser() {
     while (true) {
-      const requestEndSeq = this.catchUpRequestEndSeq(cursor);
+      const request = this.userCatchUpRequested;
+      if (!request)
+        return;
+      const startSeq = this.state.lastUserSeq ?? 0;
+      const endSeq = request.toLatest ? undefined : request.endSeq;
+      if (endSeq != null && endSeq <= startSeq) {
+        this.satisfyDiscoveryThroughCursor({ kind: "user" }, startSeq);
+        this.clearUpdateBucketDegraded({ kind: "user" });
+        this.userCatchUpRequested = null;
+        return;
+      }
+      const stop = await this.doCatchUpUser(startSeq, endSeq);
+      if (stop) {
+        if (this.userCatchUpRequested !== request)
+          continue;
+        if (this.degradedUpdateBuckets.has("user"))
+          return;
+        this.userCatchUpRequested = null;
+        return;
+      }
+    }
+  }
+  async doCatchUpUser(startSeq, endSeq) {
+    let cursor = startSeq;
+    while (endSeq == null || cursor < endSeq) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor, endSeq);
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -45454,24 +46488,32 @@ class InlineSdkClient {
       if (!Number.isSafeInteger(deliveredSeq)) {
         this.markUpdateBucketDegraded({ kind: "user" });
         this.log.warn?.("GET_UPDATES user catch-up returned non-integer seq; aborting", { deliveredSeq });
-        return;
+        return true;
       }
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq !== requestEndSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" });
+          this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested user target", {
+            requestedEndSeq: requestEndSeq,
+            deliveredSeq
+          });
+          return true;
+        }
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq);
         const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date, !shouldContinue);
         if (repaired && shouldContinue) {
           cursor = deliveredSeq;
           continue;
         }
-        return;
+        return true;
       }
       const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "user" });
       if (requiresSnapshotRepair == null)
-        return;
+        return true;
       if (requiresSnapshotRepair) {
         if (this.options.repairUpdatesBucket) {
           await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date);
-          return;
+          return true;
         }
         this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
           bucket: "user",
@@ -45484,23 +46526,32 @@ class InlineSdkClient {
           cursor,
           deliveredSeq
         });
-        return;
+        return true;
       }
       if (!await this.acceptCatchUpUpdates(payload.updates, "user", { kind: "user" }))
-        return;
+        return true;
       this.bumpUserSeq(deliveredSeq);
       this.scheduleStateSave();
       if (payload.final) {
-        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq)) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)) {
           cursor = deliveredSeq;
           continue;
         }
+        if (endSeq != null && deliveredSeq < endSeq) {
+          this.markUpdateBucketDegraded({ kind: "user" }, "target_not_reached");
+          this.log.warn?.("GET_UPDATES final user page remained behind the requested target", {
+            requestedEndSeq: endSeq,
+            deliveredSeq
+          });
+          return true;
+        }
         this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq);
         this.clearUpdateBucketDegraded({ kind: "user" });
-        return;
+        return true;
       }
       cursor = deliveredSeq;
     }
+    return false;
   }
   requestCatchUpChat(params) {
     if (params.peer)
@@ -46443,7 +47494,7 @@ var resolveRealtimeV3Url = (baseUrl) => {
   return url.toString();
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
+// ../../packages/sdk/dist/sdk/bot-capabilities.js
 async function registerBotCapabilitiesWithRetry(params) {
   const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
   const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -46462,10 +47513,7 @@ async function registerBotCapabilitiesWithRetry(params) {
     }
   }
 }
-// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
-import { readFile, rename, writeFile } from "node:fs/promises";
-
-// node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
+// ../../packages/sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
   const json = {
     version: 1,
@@ -46523,29 +47571,7 @@ var isStateJsonV1 = (value) => {
     return false;
   return true;
 };
-
-// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
-class JsonFileStateStore {
-  path;
-  constructor(path) {
-    this.path = path;
-  }
-  async load() {
-    try {
-      const raw = await readFile(this.path, "utf8");
-      return deserializeStateV1(raw);
-    } catch {
-      return null;
-    }
-  }
-  async save(next) {
-    const tempPath = `${this.path}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const payload = serializeStateV1(next);
-    await writeFile(tempPath, payload, "utf8");
-    await rename(tempPath, this.path);
-  }
-}
-// node_modules/@inline-chat/protocol/dist/vectors.js
+// ../../packages/protocol/dist/vectors.js
 var portableCoreV1Vector = {
   authKeyHex: Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0")).join(""),
   direction: "client-to-server",
@@ -46561,9 +47587,460 @@ var portableCoreV1Vector = {
   aesIvHex: "a32285aa1fc31b5b3a6c5e75843de0d48393f2350d23d7ccbbc3cb7b34ce7e6c",
   recordHex: "32d1586ea457dfc80b016bab73824ee1e75f00f0fa824908302fa5dab375c8029b169848525548f61add2955845b9810fe817fcc7581efd11aaac110560a2cc78ae6a20cc6216a0b86fa0d061a57f84bacbf84af84ec31b4"
 };
+// src/sidecar/account-state-store.ts
+class AccountStateStore {
+  filePath;
+  botUserId;
+  origin;
+  constructor(filePath, token, baseUrl) {
+    this.filePath = filePath;
+    const fileName = path.basename(filePath).toLowerCase();
+    if (fileName === ".env" || fileName.startsWith(".env.") || fileName.endsWith(".env")) {
+      throw new Error("Inline state cannot use an environment file");
+    }
+    this.botUserId = /^([1-9]\d*):/.exec(token)?.[1] ?? null;
+    const endpoint = new URL(baseUrl);
+    this.origin = endpoint.origin + endpoint.pathname.replace(/\/$/, "");
+  }
+  bindAccount(botUserId) {
+    if (this.botUserId && this.botUserId !== botUserId) {
+      throw new Error("Inline authenticated account differs from the configured account");
+    }
+    this.botUserId = botUserId;
+  }
+  async load() {
+    let raw;
+    try {
+      raw = await readFile(this.filePath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT")
+        return null;
+      throw error;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed.inlineAccount && (parsed.inlineAccount.botUserId !== this.botUserId || parsed.inlineAccount.origin !== this.origin)) {
+      throw new Error("Inline state file belongs to another account or API origin; configure a separate state_path");
+    }
+    return deserializeStateV1(raw);
+  }
+  async save(next) {
+    if (!this.botUserId)
+      throw new Error("Inline account is not resolved; refusing an unowned checkpoint");
+    const payload = JSON.parse(serializeStateV1(next));
+    payload.inlineAccount = { botUserId: this.botUserId, origin: this.origin };
+    const temporaryPath = `${this.filePath}.tmp-${randomUUID2()}`;
+    await writeFile(temporaryPath, JSON.stringify(payload, null, 2), { mode: 384 });
+    await rename(temporaryPath, this.filePath);
+  }
+}
+
+// src/sidecar/inbound-delivery.ts
+import { setTimeout as delay2 } from "node:timers/promises";
+
+// src/sidecar/contract.ts
+var MAX_INLINE_ID = 9223372036854775807n;
+var MAX_UINT64 = 18446744073709551615n;
+var sensitiveUrlParams = new Set([
+  "access_token",
+  "auth",
+  "authorization",
+  "key",
+  "token"
+]);
+var botSettingsEventKinds = new Set([
+  "bot.chatSettings.request",
+  "bot.chatSettings.item.invoke"
+]);
+function inboundEventNeedsSenderResolution(event) {
+  return !botSettingsEventKinds.has(event.kind ?? "");
+}
+
+class SidecarError extends Error {
+  errorKind;
+  constructor(message, errorKind) {
+    super(message);
+    this.errorKind = errorKind;
+  }
+}
+function parseTarget(record2) {
+  const targetRecord = asOptionalRecord(record2.target) ?? record2;
+  const chatId = readOptionalInlineId(targetRecord, "chatId");
+  const userId = readOptionalInlineId(targetRecord, "userId");
+  if (chatId && userId)
+    throw new SidecarError("target cannot include both chatId and userId", "bad_format");
+  if (chatId)
+    return { chatId };
+  if (userId)
+    return { userId };
+  throw new SidecarError("target requires chatId or userId", "bad_format");
+}
+function normalizeUploadKind(raw, filePath) {
+  if (raw === "photo" || raw === "image")
+    return "photo";
+  if (raw === "video")
+    return "video";
+  if (raw === "voice")
+    return "voice";
+  if (raw === "document" || raw === "file")
+    return "document";
+  const lower = filePath.toLowerCase();
+  if (/\.(png|jpg|jpeg|gif|webp|heic|heif)$/.test(lower))
+    return "photo";
+  if (/\.(mp4|mov|webm)$/.test(lower))
+    return "video";
+  return "document";
+}
+function normalizeError(error, redact = defaultErrorText) {
+  if (error instanceof SidecarError) {
+    return {
+      status: statusForErrorKind(error.errorKind),
+      errorKind: error.errorKind,
+      message: redact(error)
+    };
+  }
+  const message = redact(error);
+  if (error instanceof ProtocolClientError) {
+    const rpcKind = error.code === "rpc-error" ? errorKindForRpcCode(error.rpcCode) : error.code === "not-authorized" ? "forbidden" : ["timeout", "not-connected", "stopped", "capacity-exceeded"].includes(error.code) ? "transient" : undefined;
+    if (rpcKind)
+      return { status: statusForErrorKind(rpcKind), errorKind: rpcKind, message };
+  }
+  const lower = message.toLowerCase();
+  if (lower.includes("rate") && lower.includes("limit")) {
+    return { status: 429, errorKind: "rate_limited", message };
+  }
+  if (lower.includes("forbidden") || lower.includes("unauthorized")) {
+    return { status: 403, errorKind: "forbidden", message };
+  }
+  if (lower.includes("not found") || lower.includes("missing")) {
+    return { status: 404, errorKind: "not_found", message };
+  }
+  if (lower.includes("timeout") || lower.includes("network") || lower.includes("closed")) {
+    return { status: 503, errorKind: "transient", message };
+  }
+  return { status: 500, errorKind: "unknown", message };
+}
+function errorKindForRpcCode(code) {
+  switch (code) {
+    case RpcError_Code.UNAUTHENTICATED:
+    case RpcError_Code.SPACE_ADMIN_REQUIRED:
+    case RpcError_Code.SPACE_OWNER_REQUIRED:
+    case RpcError_Code.AGENT_SESSION_MESSAGE_IMMUTABLE:
+      return "forbidden";
+    case RpcError_Code.RATE_LIMIT:
+      return "rate_limited";
+    case RpcError_Code.CHAT_ID_INVALID:
+    case RpcError_Code.MESSAGE_ID_INVALID:
+    case RpcError_Code.PEER_ID_INVALID:
+    case RpcError_Code.USER_ID_INVALID:
+      return "not_found";
+    case RpcError_Code.BAD_REQUEST:
+    case RpcError_Code.USER_ALREADY_MEMBER:
+    case RpcError_Code.SPACE_ID_INVALID:
+    case RpcError_Code.EMAIL_INVALID:
+    case RpcError_Code.PHONE_NUMBER_INVALID:
+    case RpcError_Code.USERNAME_INVALID:
+    case RpcError_Code.USERNAME_TAKEN:
+    case RpcError_Code.FIRST_NAME_INVALID:
+    case RpcError_Code.SPACE_INVITE_INVALID:
+      return "bad_format";
+    case RpcError_Code.INTERNAL_ERROR:
+      return "unknown";
+    default:
+      return;
+  }
+}
+function statusForErrorKind(errorKind) {
+  switch (errorKind) {
+    case "bad_format":
+      return 400;
+    case "forbidden":
+      return 403;
+    case "not_found":
+      return 404;
+    case "too_long":
+      return 413;
+    case "rate_limited":
+      return 429;
+    case "transient":
+      return 503;
+    case "unknown":
+      return 500;
+  }
+}
+function normalizeInboundEvent(event, meId, sender, meUsername) {
+  if (event.kind === "message.new" || event.kind === "message.edit") {
+    const message = asOptionalRecord(event.message);
+    return safeJson({
+      kind: event.kind,
+      chatId: event.chatId,
+      seq: event.seq,
+      date: event.date,
+      meId,
+      meUsername,
+      ...sender ? { sender } : {},
+      message: message ? normalizeMessage(message) : null
+    });
+  }
+  if (event.kind === "message.action.invoke") {
+    return safeJson({
+      ...event,
+      meId,
+      meUsername,
+      ...sender ? { sender } : {},
+      dataBase64: event.data instanceof Uint8Array ? Buffer.from(event.data).toString("base64") : typeof event.data === "string" ? event.data : ""
+    });
+  }
+  return safeJson({ ...event, meId, meUsername, ...sender ? { sender } : {} });
+}
+function normalizeMessage(message) {
+  return {
+    id: message.id,
+    fromId: message.fromId,
+    chatId: message.chatId,
+    peerId: message.peerId,
+    message: message.message ?? null,
+    out: Boolean(message.out),
+    date: message.date,
+    editDate: message.editDate,
+    mentioned: Boolean(message.mentioned),
+    replyToMsgId: message.replyToMsgId ?? null,
+    entities: message.entities ?? null,
+    media: message.media ?? null,
+    attachments: message.attachments ?? null,
+    reactions: message.reactions ?? null,
+    replies: message.replies ?? null,
+    subthread: message.subthread ?? null,
+    blockContent: message.blockContent ?? null,
+    isForwarded: message.isForwarded,
+    fwdFrom: message.fwdFrom ?? null,
+    sourceSnapshot: message.sourceSnapshot,
+    actions: message.actions ?? null,
+    rev: message.rev ?? null,
+    raw: message
+  };
+}
+function redactText(value, secrets) {
+  let text = value instanceof Error ? value.message : String(value);
+  for (const secret of secrets) {
+    const raw = typeof secret.value === "string" ? secret.value : "";
+    if (!raw)
+      continue;
+    text = text.split(raw).join(secret.label);
+  }
+  return text;
+}
+function redactUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.username)
+    url.username = "redacted";
+  if (url.password)
+    url.password = "redacted";
+  const keys = Array.from(url.searchParams.keys());
+  for (const key of keys) {
+    const normalized = key.toLowerCase();
+    if (sensitiveUrlParams.has(normalized) || normalized.includes("token")) {
+      url.searchParams.set(key, "redacted");
+    }
+  }
+  return url.toString();
+}
+function safeJson(value) {
+  if (value == null)
+    return null;
+  if (typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (typeof value === "number")
+    return Number.isFinite(value) ? value : null;
+  if (typeof value === "bigint")
+    return value.toString();
+  if (value instanceof Uint8Array)
+    return Buffer.from(value).toString("base64");
+  if (Array.isArray(value))
+    return value.map(safeJson);
+  if (typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (item !== undefined)
+        out[key] = safeJson(item);
+    }
+    return out;
+  }
+  return String(value);
+}
+function asRecord(value) {
+  const record2 = asOptionalRecord(value);
+  if (!record2)
+    throw new SidecarError("expected JSON object", "bad_format");
+  return record2;
+}
+function asOptionalRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return null;
+  return value;
+}
+function readRequiredString(record2, key) {
+  const value = readOptionalString(record2, key);
+  if (!value)
+    throw new SidecarError(`missing ${key}`, "bad_format");
+  return value;
+}
+function readOptionalString(record2, key) {
+  const value = record2[key];
+  if (typeof value === "string")
+    return value.trim() || undefined;
+  if (typeof value === "bigint" || typeof value === "number")
+    return String(value);
+  return;
+}
+function readOptionalBoolean(record2, key) {
+  const value = record2[key];
+  if (typeof value === "boolean")
+    return value;
+  if (typeof value === "string") {
+    if (/^(1|true|yes|on)$/i.test(value))
+      return true;
+    if (/^(0|false|no|off)$/i.test(value))
+      return false;
+  }
+  return;
+}
+function readOptionalNumber(record2, key) {
+  const value = record2[key];
+  if (typeof value === "number" && Number.isFinite(value))
+    return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed))
+      return parsed;
+  }
+  return;
+}
+function readRequiredInlineId(record2, key) {
+  const value = readOptionalInlineId(record2, key);
+  if (value == null)
+    throw new SidecarError(`missing ${key}`, "bad_format");
+  return value;
+}
+function readOptionalInlineId(record2, key) {
+  const value = record2[key];
+  if (value == null || value === "")
+    return;
+  return parseInlineId(value, key);
+}
+function readInlineIdArray(record2, key, maxItems, required = false) {
+  const value = record2[key];
+  if (value == null) {
+    if (required)
+      throw new SidecarError(`missing ${key}`, "bad_format");
+    return [];
+  }
+  if (!Array.isArray(value))
+    throw new SidecarError(`${key} must be an array`, "bad_format");
+  if (value.length === 0 && required)
+    throw new SidecarError(`${key} must not be empty`, "bad_format");
+  if (value.length > maxItems)
+    throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format");
+  const ids = [];
+  const seen = new Set;
+  for (let index = 0;index < value.length; index += 1) {
+    const id = parseInlineId(value[index], `${key}[${index}]`);
+    const normalized = id.toString();
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    ids.push(id);
+  }
+  return ids;
+}
+function parseOptionalInt(value) {
+  const raw = (value || "").trim();
+  if (!raw || !/^\d+$/.test(raw))
+    return;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+function parseInlineId(value, field) {
+  try {
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number");
+    }
+    const raw = typeof value === "string" ? value.trim() : value;
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
+      throw new Error("invalid digits");
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type");
+    }
+    const parsed = BigInt(raw);
+    if (parsed <= 0n || parsed > MAX_INLINE_ID)
+      throw new Error("out of range");
+    return parsed;
+  } catch {
+    throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format");
+  }
+}
+function parseUnsigned64Id(value, field) {
+  try {
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number");
+    }
+    const raw = typeof value === "string" ? value.trim() : value;
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
+      throw new Error("invalid digits");
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type");
+    }
+    const parsed = BigInt(raw);
+    if (parsed <= 0n || parsed > MAX_UINT64)
+      throw new Error("out of range");
+    return parsed;
+  } catch {
+    throw new SidecarError(`${field} must be a positive unsigned 64-bit integer`, "bad_format");
+  }
+}
+function defaultErrorText(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// src/sidecar/inbound-delivery.ts
+function explicitlyMentionsSelf(event, meId) {
+  if (!meId || event.kind !== "message.new" && event.kind !== "message.edit")
+    return false;
+  const message = event.message;
+  return message?.entities?.entities?.some((e) => e.entity?.oneofKind === "mention" && e.entity.mention?.userId?.toString() === meId) ?? false;
+}
+async function deliverInboundEvent(event, owner) {
+  const explicitMention = explicitlyMentionsSelf(event, owner.meId);
+  while (!owner.signal.aborted) {
+    const resolution = explicitMention ? { provenanceVerified: false } : inboundEventNeedsSenderResolution(event) ? await owner.resolveSender(event) : { provenanceVerified: true };
+    owner.signal.throwIfAborted();
+    if (!explicitMention && !resolution.provenanceVerified && (event.kind === "message.new" || event.kind === "message.edit")) {
+      await delay2(1000, undefined, { signal: owner.signal });
+      continue;
+    }
+    const normalized = normalizeInboundEvent(event, owner.meId, resolution.profile, owner.meUsername);
+    await owner.deliver({
+      ...normalized,
+      _inlineSenderProvenanceVerified: resolution.provenanceVerified
+    });
+    return;
+  }
+  owner.signal.throwIfAborted();
+}
+
+// src/sidecar/index.ts
+import { timingSafeEqual } from "node:crypto";
+import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
+import path2 from "node:path";
+
 // src/sidecar/user-directory.ts
 var DEFAULT_PROFILE_TTL_MS = 10 * 60000;
 var DEFAULT_MAX_PROFILES = 5000;
+var MISSING_SENDER_REFRESH_MS = 1000;
 
 class InlineUserDirectory {
   client;
@@ -46593,49 +48070,56 @@ class InlineUserDirectory {
   async resolveWithProvenance(params) {
     const userId = params.userId.toString();
     const cached2 = this.getFresh(userId);
-    if (cached2?.bot != null) {
+    if (cached2 && this.hasVerifiedKind(userId) && (cached2.bot === true || hasDisplayIdentity(cached2))) {
       return { profile: cached2, provenanceVerified: true };
     }
     if (params.direct) {
-      const directoryHydrated = await this.hydrateDirectory();
+      await this.hydrateDirectory(userId);
       const resolved = this.getFresh(userId);
       return {
-        ...hasDisplayIdentity(resolved) ? { profile: resolved } : {},
-        provenanceVerified: directoryHydrated
+        ...resolved && (hasDisplayIdentity(resolved) || resolved.bot != null) ? { profile: resolved } : {},
+        provenanceVerified: this.hasVerifiedKind(userId)
       };
     } else {
-      const chatHydrated = await this.hydrateChat(params.chatId);
+      await this.hydrateChat(params.chatId, userId);
       const participant = this.getFresh(userId);
-      if (participant?.bot != null || hasDisplayIdentity(participant)) {
+      if (participant && this.hasVerifiedKind(userId) && (participant.bot === true || hasDisplayIdentity(participant))) {
         return {
           profile: participant,
-          provenanceVerified: chatHydrated || participant.bot != null
+          provenanceVerified: true
         };
       }
-      const directoryHydrated = await this.hydrateDirectory();
+      await this.hydrateDirectory(userId);
       const resolved = this.getFresh(userId);
       return {
-        ...hasDisplayIdentity(resolved) ? { profile: resolved } : {},
-        provenanceVerified: directoryHydrated && (chatHydrated || hasDisplayIdentity(resolved))
+        ...resolved && (hasDisplayIdentity(resolved) || resolved.bot != null) ? { profile: resolved } : {},
+        provenanceVerified: this.hasVerifiedKind(userId)
       };
     }
   }
-  remember(users) {
+  remember(users, authoritativeKind = false) {
     const expiresAt = this.now() + this.ttlMs;
     for (const user of users) {
       const id = user.id?.toString();
       if (!id || id === "0")
         continue;
-      const previous = this.profiles.get(id)?.profile;
+      const previousRecord = this.profiles.get(id);
+      const previous = previousRecord?.profile;
       const profile = {
         id,
         ...readProfileField(user.firstName, previous?.firstName, "firstName"),
         ...readProfileField(user.lastName, previous?.lastName, "lastName"),
         ...readProfileField(user.username, previous?.username, "username"),
-        ...readBooleanProfileField(user.bot, previous?.bot, "bot")
+        ...readBooleanProfileField(authoritativeKind && user.bot == null ? false : user.bot, previous?.bot, "bot")
       };
+      const changedKind = typeof user.bot === "boolean" && user.bot !== previous?.bot;
+      const kindVerifiedUntil = authoritativeKind ? expiresAt : changedKind ? 0 : previousRecord?.kindVerifiedUntil ?? 0;
+      if (!authoritativeKind && changedKind) {
+        this.hydratedChats.clear();
+        this.directoryExpiresAt = 0;
+      }
       this.profiles.delete(id);
-      this.profiles.set(id, { profile, expiresAt });
+      this.profiles.set(id, { profile, expiresAt, kindVerifiedUntil });
     }
     let evicted = false;
     while (this.profiles.size > this.maxProfiles) {
@@ -46662,10 +48146,18 @@ class InlineUserDirectory {
     this.profiles.set(userId, cached2);
     return cached2.profile;
   }
-  async hydrateChat(chatId) {
+  hasVerifiedKind(userId) {
+    const cached2 = this.profiles.get(userId);
+    return Boolean(cached2 && cached2.kindVerifiedUntil > this.now() && typeof cached2.profile.bot === "boolean");
+  }
+  hydrationIsFresh(expiresAt, userId) {
+    const now = this.now();
+    return expiresAt > now && (this.hasVerifiedKind(userId) || now < expiresAt - this.ttlMs + MISSING_SENDER_REFRESH_MS);
+  }
+  async hydrateChat(chatId, userId) {
     const key = chatId.toString();
     const hydratedUntil = this.hydratedChats.get(key) ?? 0;
-    if (hydratedUntil > this.now()) {
+    if (this.hydrationIsFresh(hydratedUntil, userId)) {
       this.hydratedChats.delete(key);
       this.hydratedChats.set(key, hydratedUntil);
       return true;
@@ -46679,7 +48171,7 @@ class InlineUserDirectory {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId }
       });
-      this.remember(readUsers(result, "getChatParticipants"));
+      this.remember(readUsers(result, "getChatParticipants"), true);
       this.hydratedChats.delete(key);
       this.hydratedChats.set(key, this.now() + this.ttlMs);
       while (this.hydratedChats.size > this.maxProfiles) {
@@ -46707,8 +48199,8 @@ class InlineUserDirectory {
       throw error;
     }
   }
-  async hydrateDirectory() {
-    if (this.directoryExpiresAt > this.now())
+  async hydrateDirectory(userId) {
+    if (this.hydrationIsFresh(this.directoryExpiresAt, userId))
       return true;
     if (this.directoryFetch)
       return this.directoryFetch;
@@ -46717,7 +48209,7 @@ class InlineUserDirectory {
         oneofKind: "getChats",
         getChats: {}
       });
-      this.remember(readUsers(result, "getChats"));
+      this.remember(readUsers(result, "getChats"), true);
       this.directoryExpiresAt = this.now() + this.ttlMs;
       return true;
     })().catch((error) => {
@@ -46731,7 +48223,7 @@ class InlineUserDirectory {
   }
 }
 function hasDisplayIdentity(profile) {
-  return Boolean(profile?.firstName || profile?.lastName || profile?.username || profile?.bot != null);
+  return Boolean(profile?.firstName || profile?.lastName || profile?.username);
 }
 function readProfileField(value, previous, key) {
   const normalized = typeof value === "string" ? value.trim() : "";
@@ -46754,7 +48246,7 @@ function readUsers(result, kind) {
 }
 
 // src/sidecar/telemetry.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 var TELEMETRY_TIMEOUT_MS = 2000;
 var TELEMETRY_DEDUP_MS = 5 * 60000;
@@ -46815,7 +48307,7 @@ function buildHermesTelemetryEvent(operation, error, options = {}) {
   const exception = error instanceof Error ? error : new Error(String(error ?? "Unknown error"));
   const frames = parseStack(exception, env);
   return {
-    event_id: randomUUID2().replaceAll("-", ""),
+    event_id: randomUUID3().replaceAll("-", ""),
     timestamp: new Date().toISOString(),
     platform: "javascript",
     level: "error",
@@ -46933,7 +48425,8 @@ var baseUrl = process.env.INLINE_BASE_URL || "https://api.inline.chat";
 var sidecarToken = process.env.INLINE_SIDECAR_TOKEN || "";
 var port = normalizeSidecarPort(process.env.INLINE_SIDECAR_PORT);
 var bind = normalizeSidecarBind(process.env.INLINE_SIDECAR_BIND);
-var statePath = process.env.INLINE_STATE_PATH || path.join(process.cwd(), "inline-sdk-state.json");
+var statePath = process.env.INLINE_STATE_PATH || path2.join(process.cwd(), "inline-sdk-state.json");
+var sendOnly = process.env.INLINE_SIDECAR_SEND_ONLY === "1";
 var rpcTimeoutMs = parseOptionalInt(process.env.INLINE_RPC_TIMEOUT_MS);
 var uploadMaxBytes = Math.floor(normalizePositiveMb(process.env.INLINE_UPLOAD_MAX_MB, 300, "INLINE_UPLOAD_MAX_MB") * 1024 * 1024);
 var connectRetryInitialMs = clampRetryMs(parseOptionalInt(process.env.INLINE_CONNECT_RETRY_INITIAL_MS), 1000);
@@ -46942,7 +48435,8 @@ if (!token || !sidecarToken) {
   console.error("inline-sidecar: INLINE_TOKEN/INLINE_BOT_TOKEN and INLINE_SIDECAR_TOKEN are required.");
   process.exit(2);
 }
-await mkdir(path.dirname(statePath), { recursive: true }).catch(() => {});
+if (!sendOnly)
+  await mkdir(path2.dirname(statePath), { recursive: true }).catch(() => {});
 var connected = false;
 var connecting = false;
 var stopping = false;
@@ -46953,10 +48447,11 @@ var connectAttempts = 0;
 var nextConnectRetryAt = null;
 var inboundStream = new InboundStream;
 var inboundAbort = new AbortController;
+var stateStore = sendOnly ? null : new AccountStateStore(statePath, token, baseUrl);
 var clientOptions = {
   token,
   baseUrl,
-  state: new JsonFileStateStore(statePath),
+  ...stateStore ? { state: stateStore } : {},
   onAuthenticationError: (error) => {
     reportHermesPluginError("sdk.authentication", error);
     connected = false;
@@ -46965,6 +48460,7 @@ var clientOptions = {
     nextConnectRetryAt = null;
     process.exitCode = 3;
     console.error(`inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`);
+    shutdown(3);
   },
   ...rpcTimeoutMs != null ? { rpcTimeoutMs } : {},
   logger: {
@@ -46990,17 +48486,19 @@ async function connectClientLoop() {
       if (me?.id == null)
         throw new Error("getMe: missing user");
       meId = String(me.id);
+      stateStore?.bindAccount(meId);
       meUsername = normalizeOwnUsername(me.username);
-      registerBotCapabilitiesWithRetry({
-        register: () => client.setMyBotCapabilities({
-          capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
-        }),
-        isCancelled: () => stopping,
-        onFailure: (error, willRetry) => {
-          reportHermesPluginError("sdk.capability_registration", error);
-          console.error(`inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`);
-        }
-      });
+      if (!sendOnly)
+        registerBotCapabilitiesWithRetry({
+          register: () => client.setMyBotCapabilities({
+            capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
+          }),
+          isCancelled: () => stopping,
+          onFailure: (error, willRetry) => {
+            reportHermesPluginError("sdk.capability_registration", error);
+            console.error(`inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`);
+          }
+        });
       connected = true;
       connecting = false;
       connectError = null;
@@ -47037,6 +48535,8 @@ async function consumeEvents() {
         deliver
       });
     });
+    if (!stopping)
+      throw new Error("Inline realtime inbound stream ended before shutdown");
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false });
@@ -47064,6 +48564,7 @@ async function handleRequest(req, res) {
         meUsername,
         baseUrl: redactUrl(baseUrl),
         statePath,
+        sendOnly,
         version: await packageVersion(),
         connectAttempts,
         connectRetryInitialMs,
@@ -47073,6 +48574,11 @@ async function handleRequest(req, res) {
         ...connectError ? { connectError } : {}
       }
     });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/test/authentication-error" && client instanceof MockInlineClient) {
+    writeJson(res, 200, { ok: true, result: {} });
+    client.triggerAuthenticationError();
     return;
   }
   if (req.method === "GET" && url.pathname === "/inbound") {
@@ -47131,6 +48637,9 @@ async function handleRequest(req, res) {
     case "/messages":
       await endpointMessages(res, body);
       return;
+    case "/sender":
+      await endpointSender(res, body);
+      return;
     case "/history":
       await endpointHistory(res, body);
       return;
@@ -47155,6 +48664,19 @@ async function handleRequest(req, res) {
     case "/create-chat":
       await endpointCreateChat(res, body);
       return;
+    case "/add-participant":
+    case "/remove-participant":
+      await endpointParticipant(res, body, url.pathname === "/remove-participant");
+      return;
+    case "/rename-chat":
+      await endpointRenameChat(res, body);
+      return;
+    case "/delete-chat":
+      await endpointDeleteChat(res, body);
+      return;
+    case "/generate-chat-emojis":
+      await endpointGenerateChatEmojis(res, body);
+      return;
     case "/create-agent":
       await endpointCreateAgent(res, body);
       return;
@@ -47166,6 +48688,9 @@ async function handleRequest(req, res) {
       return;
     case "/update-agent":
       await endpointUpdateAgent(res, body);
+      return;
+    case "/update-profile":
+      await endpointUpdateProfile(res, body);
       return;
     case "/delete-agent":
       await endpointDeleteAgent(res, body);
@@ -47242,11 +48767,13 @@ async function endpointTyping(res, body) {
   const record2 = asRecord(body);
   const target = parseTarget(record2);
   const typing = (readOptionalString(record2, "state") ?? "start") !== "stop";
-  if ("userId" in target) {
-    writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } });
-    return;
-  }
-  await client.sendTyping({ chatId: target.chatId, typing });
+  await client.invoke(Method.SEND_COMPOSE_ACTION, {
+    oneofKind: "sendComposeAction",
+    sendComposeAction: {
+      peerId: inputPeerFromTarget(target),
+      ...typing ? { action: UpdateComposeAction_ComposeAction.TYPING } : {}
+    }
+  });
   writeJson(res, 200, { ok: true, result: {} });
 }
 async function endpointPresence(res, body) {
@@ -47269,7 +48796,7 @@ async function endpointSendAttachment(res, body) {
   const caption = readOptionalString(record2, "caption");
   const parseMarkdown = readOptionalBoolean(record2, "parseMarkdown") ?? true;
   const replyToMsgId = readOptionalInlineId(record2, "replyToMsgId");
-  const fileName = readOptionalString(record2, "fileName") || path.basename(filePath);
+  const fileName = readOptionalString(record2, "fileName") || path2.basename(filePath);
   const contentType = readOptionalString(record2, "mimeType");
   const info = await statAttachment(filePath);
   if (info.size > uploadMaxBytes) {
@@ -47299,7 +48826,7 @@ async function endpointSendAttachment(res, body) {
   });
 }
 async function statAttachment(filePath) {
-  if (!path.isAbsolute(filePath)) {
+  if (!path2.isAbsolute(filePath)) {
     throw new SidecarError("attachment path must be absolute", "bad_format");
   }
   let info;
@@ -47358,6 +48885,7 @@ async function endpointChat(res, body) {
       ...chat.createdBy != null ? { createdBy: chat.createdBy.toString() } : {},
       ...chat.untitled != null ? { untitled: chat.untitled } : {},
       ...chat.number != null ? { number: chat.number } : {},
+      ...chat.agentContext != null ? { agentContext: safeJson(chat.agentContext) } : {},
       ...snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {},
       ...snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {},
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
@@ -47391,16 +48919,29 @@ async function endpointMessages(res, body) {
   const ordered = orderMessagesByRequestedIds(result.messages, messageIds);
   writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(ordered, target)) } });
 }
+async function endpointSender(res, body) {
+  const record2 = asRecord(body);
+  const userId = readRequiredInlineId(record2, "userId");
+  const chatId = readRequiredInlineId(record2, "chatId");
+  const result = await userDirectory.resolveWithProvenance({
+    userId,
+    chatId,
+    direct: readOptionalBoolean(record2, "direct") ?? false
+  });
+  writeJson(res, 200, { ok: true, result: safeJson(result) });
+}
 async function endpointHistory(res, body) {
   const record2 = asRecord(body);
   const target = parseTarget(record2);
   const limit = readOptionalNumber(record2, "limit") ?? 20;
   const anchorId = readOptionalInlineId(record2, "anchorId");
+  const offsetId = readOptionalInlineId(record2, "offsetId");
   const result = await client.invoke(Method.GET_CHAT_HISTORY, {
     oneofKind: "getChatHistory",
     getChatHistory: {
       peerId: inputPeerFromTarget(target),
       limit,
+      ...offsetId ? { offsetId } : {},
       ...anchorId ? { anchorId, includeAnchor: true } : {}
     }
   });
@@ -47541,7 +49082,10 @@ async function endpointCreateChat(res, body) {
   const emoji = readOptionalString(record2, "emoji");
   const spaceId = readOptionalInlineId(record2, "spaceId");
   const isPublic = readOptionalBoolean(record2, "isPublic") ?? false;
-  const participantUserIds = readInlineIdArray(record2, "participantUserIds", 50);
+  if (Object.hasOwn(record2, "participantUserIds") && !Array.isArray(record2.participantUserIds)) {
+    throw new SidecarError("participantUserIds must be an explicit array; use [] for a bot-only chat", "bad_format");
+  }
+  let participantUserIds = readInlineIdArray(record2, "participantUserIds", 50);
   if (title.length > 200)
     throw new SidecarError("create-chat title is too long", "bad_format");
   if (description && description.length > 1000) {
@@ -47554,6 +49098,22 @@ async function endpointCreateChat(res, body) {
   }
   if (isPublic && participantUserIds.length > 0) {
     throw new SidecarError("public create-chat cannot include participantUserIds", "bad_format");
+  }
+  if (!isPublic && !Object.hasOwn(record2, "participantUserIds")) {
+    const userId = readOptionalInlineId(record2, "initiatingUserId");
+    const chatId = readOptionalInlineId(record2, "initiatingChatId");
+    if (!userId || !chatId) {
+      throw new SidecarError("create-chat needs explicit participantUserIds when no current Inline person is available; use [] for a bot-only chat", "bad_format");
+    }
+    const resolved = await userDirectory.resolveWithProvenance({
+      userId,
+      chatId,
+      direct: readOptionalBoolean(record2, "initiatingDirect") ?? false
+    });
+    if (!resolved.provenanceVerified || resolved.profile?.id !== String(userId) || resolved.profile.bot !== false) {
+      throw new SidecarError("The current Inline sender is a bot or cannot be verified; pass explicit participantUserIds (use [] for a bot-only chat)", "bad_format");
+    }
+    participantUserIds = [userId];
   }
   const result = await client.invokeUncheckedRaw(Method.CREATE_CHAT, {
     oneofKind: "createChat",
@@ -47596,6 +49156,76 @@ async function callBotApi(methodName, method, body, query) {
     throw new SidecarError(String(payload?.description ?? `Bot API HTTP ${response.status}`), "unknown");
   }
   return asOptionalRecord(payload.result) ?? {};
+}
+async function endpointParticipant(res, body, remove) {
+  const record2 = asRecord(body);
+  const chatId = readRequiredInlineId(record2, "chatId");
+  const userId = readRequiredInlineId(record2, "userId");
+  if (remove) {
+    await client.invoke(Method.REMOVE_CHAT_PARTICIPANT, {
+      oneofKind: "removeChatParticipant",
+      removeChatParticipant: RemoveChatParticipantInput.create({ chatId, userId })
+    });
+  } else {
+    await client.invoke(Method.ADD_CHAT_PARTICIPANT, {
+      oneofKind: "addChatParticipant",
+      addChatParticipant: AddChatParticipantInput.create({ chatId, userId })
+    });
+  }
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), userId: String(userId), removed: remove } });
+}
+async function endpointRenameChat(res, body) {
+  const record2 = asRecord(body);
+  const chatId = readRequiredInlineId(record2, "chatId");
+  const title = readRequiredString(record2, "title").trim();
+  if (!title || title.length > 128)
+    throw new SidecarError("title must have 1 to 128 characters", "bad_format");
+  await client.invoke(Method.UPDATE_CHAT_INFO, {
+    oneofKind: "updateChatInfo",
+    updateChatInfo: UpdateChatInfoInput.create({ chatId, title })
+  });
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), title } });
+}
+async function endpointDeleteChat(res, body) {
+  const chatId = readRequiredInlineId(asRecord(body), "chatId");
+  await client.invoke(Method.DELETE_CHAT, {
+    oneofKind: "deleteChat",
+    deleteChat: DeleteChatInput.create({ peerId: inputPeerFromTarget({ chatId }) })
+  });
+  writeJson(res, 200, { ok: true, result: { chatId: String(chatId), deleted: true } });
+}
+async function endpointGenerateChatEmojis(res, body) {
+  const chatIds = readInlineIdArray(asRecord(body), "chatIds", 5, true);
+  const outcomes = await Promise.all(chatIds.map(async (chatId) => {
+    const observed = (chat) => ({ chatId: String(chatId), title: chat.title ?? "", emoji: chat.emoji ?? "" });
+    try {
+      const before = (await getRawChatSnapshot(chatId, 1e4)).chat;
+      if (before.emoji?.trim())
+        return { ...observed(before), status: "skipped_existing" };
+      if (before.parentMessageId != null)
+        return { ...observed(before), status: "skipped_reply_thread" };
+      await client.invoke(Method.UPDATE_CHAT_INFO, {
+        oneofKind: "updateChatInfo",
+        updateChatInfo: UpdateChatInfoInput.create({ chatId, generateEmoji: true })
+      }, { timeoutMs: 30000 });
+      const after = (await getRawChatSnapshot(chatId, 1e4)).chat;
+      return { ...observed(after), status: after.emoji?.trim() ? "emoji_present" : "unchanged" };
+    } catch (error) {
+      const normalized = normalizeError(error, redactError);
+      let current;
+      try {
+        current = (await getRawChatSnapshot(chatId, 1e4)).chat;
+      } catch {}
+      return {
+        chatId: String(chatId),
+        status: "failed",
+        error: normalized.message,
+        errorKind: normalized.errorKind,
+        ...current ? observed(current) : {}
+      };
+    }
+  }));
+  writeJson(res, 200, { ok: true, result: { outcomes } });
 }
 async function endpointCreateAgent(res, body) {
   const record2 = asRecord(body);
@@ -47673,11 +49303,76 @@ async function endpointDeleteAgent(res, body) {
   const result = await callBotApi("deleteAgent", "POST", { agent_id: String(agentId) });
   writeJson(res, 200, { ok: true, result: safeJson(result) });
 }
-async function getRawChatSnapshot(chatId) {
+async function endpointUpdateProfile(res, body) {
+  const record2 = asRecord(body);
+  const name = readAgentPatchString(record2, "name");
+  const photoPath = readAgentPatchString(record2, "photoPath");
+  const existingPhotoFileUniqueId = readAgentPatchString(record2, "photoFileUniqueId");
+  if (name !== undefined && !name) {
+    throw new SidecarError("name cannot be empty", "bad_format");
+  }
+  if (photoPath !== undefined && !photoPath) {
+    throw new SidecarError("photoPath cannot be empty", "bad_format");
+  }
+  if (existingPhotoFileUniqueId !== undefined && !existingPhotoFileUniqueId) {
+    throw new SidecarError("photoFileUniqueId cannot be empty", "bad_format");
+  }
+  if (photoPath !== undefined && existingPhotoFileUniqueId !== undefined) {
+    throw new SidecarError("update-profile accepts only one photo source", "bad_format");
+  }
+  if (name === undefined && photoPath === undefined && existingPhotoFileUniqueId === undefined) {
+    throw new SidecarError("update-profile requires name and/or a photo source", "bad_format");
+  }
+  if (!meId)
+    throw new SidecarError("bot identity is unavailable", "transient");
+  let photoFileUniqueId = existingPhotoFileUniqueId;
+  if (photoPath) {
+    const contentType = profilePhotoContentType(photoPath);
+    const info = await statAttachment(photoPath);
+    if (info.size > uploadMaxBytes) {
+      throw new SidecarError(`profile photo exceeds Inline upload cap (${info.size} > ${uploadMaxBytes} bytes)`, "too_long");
+    }
+    const upload = await client.uploadFile({
+      type: "photo",
+      file: await readFile3(photoPath),
+      fileName: path2.basename(photoPath),
+      contentType
+    });
+    if (!upload.fileUniqueId || upload.photoId == null) {
+      throw new SidecarError("profile photo upload did not return a photo", "unknown");
+    }
+    photoFileUniqueId = upload.fileUniqueId;
+  }
+  const result = await client.invokeUncheckedRaw(Method.UPDATE_BOT_PROFILE, {
+    oneofKind: "updateBotProfile",
+    updateBotProfile: {
+      botUserId: BigInt(meId),
+      ...name !== undefined ? { name } : {},
+      ...photoFileUniqueId !== undefined ? { photoFileUniqueId } : {}
+    }
+  });
+  const typed = result;
+  if (typed.oneofKind !== "updateBotProfile" || !typed.updateBotProfile?.bot) {
+    throw new SidecarError("update-profile returned no bot profile", "unknown");
+  }
+  writeJson(res, 200, { ok: true, result: { bot: safeJson(typed.updateBotProfile.bot) } });
+}
+function profilePhotoContentType(filePath) {
+  switch (path2.extname(filePath).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    default:
+      throw new SidecarError("profile photo path must be a JPEG or PNG image", "bad_format");
+  }
+}
+async function getRawChatSnapshot(chatId, timeoutMs) {
   const result = await client.invoke(Method.GET_CHAT, {
     oneofKind: "getChat",
     getChat: GetChatInput.create({ peerId: inputPeerFromTarget({ chatId }) })
-  });
+  }, timeoutMs == null ? undefined : { timeoutMs });
   const typed = result;
   const chat = typed.getChat?.chat;
   if (!chat)
@@ -47795,7 +49490,7 @@ async function endpointAnswerBotSettings(res, body) {
 }
 function createClient(options) {
   if (testMockEnabled(options)) {
-    return new MockInlineClient;
+    return new MockInlineClient(options);
   }
   return new InlineSdkClient(options);
 }
@@ -47835,6 +49530,8 @@ function normalizeSidecarPort(value) {
   const raw = (value || "").trim();
   if (!raw)
     return 8794;
+  if (raw === "0")
+    return 0;
   if (!/^\d+$/.test(raw)) {
     console.error("inline-sidecar: INLINE_SIDECAR_PORT must be an integer from 1 to 65535");
     process.exit(2);
@@ -47859,10 +49556,18 @@ function normalizePositiveMb(value, fallback, name) {
 }
 
 class MockInlineClient {
+  options;
   closed = false;
   messageId = 9000n;
   uploadId = 7000n;
   calls = [];
+  chatOverrides = new Map;
+  constructor(options) {
+    this.options = options;
+  }
+  triggerAuthenticationError() {
+    this.options.onAuthenticationError?.(new InlineSdkAuthenticationError("SESSION_REVOKED", ConnectionError_Reason.SESSION_REVOKED));
+  }
   async connect() {
     this.record("connect");
   }
@@ -47959,9 +49664,6 @@ class MockInlineClient {
       return { fileUniqueId, voiceId: this.uploadId };
     return { fileUniqueId, documentId: this.uploadId };
   }
-  async sendTyping(params) {
-    this.record("sendTyping", params);
-  }
   async setBotPresenceState(params) {
     this.record("setBotPresenceState", params);
   }
@@ -47990,8 +49692,11 @@ class MockInlineClient {
         untitled: true
       } : {
         id: chatId,
-        title: `Mock chat ${chatId.toString()}`
+        title: `Mock chat ${chatId.toString()}`,
+        agentContext: { botUserId: 999n, agentId: 73n },
+        ...chatId === 555n ? { emoji: "\uD83D\uDEE1️" } : {}
       };
+      Object.assign(chat, this.chatOverrides.get(String(chatId)));
       return {
         getChat: {
           chat,
@@ -48006,6 +49711,25 @@ class MockInlineClient {
           }
         }
       };
+    }
+    if (method === Method.UPDATE_CHAT_INFO) {
+      const parameters = asOptionalRecord(asOptionalRecord(input)?.updateChatInfo);
+      const chatId = asPositiveBigInt(parameters?.chatId);
+      if (!chatId)
+        throw new SidecarError("chat ID missing", "bad_format");
+      if (chatId === 777n)
+        throw new ProtocolClientError("rpc-error", {
+          code: RpcError_Code.UNAUTHENTICATED,
+          message: "Only the chat creator or an authorized admin can change this chat"
+        });
+      const previous = this.chatOverrides.get(String(chatId)) ?? {};
+      const next = { ...previous };
+      if (typeof parameters?.title === "string")
+        next.title = parameters.title;
+      if (parameters?.generateEmoji === true && chatId !== 888n && !next.emoji)
+        next.emoji = "\uD83E\uDDED";
+      this.chatOverrides.set(String(chatId), next);
+      return { updateChatInfo: {} };
     }
     if (method === Method.GET_CHAT_HISTORY) {
       return {
@@ -48070,6 +49794,20 @@ class MockInlineClient {
         }
       };
     }
+    if (method === Method.UPDATE_BOT_PROFILE) {
+      const inputRecord = asOptionalRecord(input);
+      const update = asOptionalRecord(inputRecord?.updateBotProfile);
+      return {
+        oneofKind: "updateBotProfile",
+        updateBotProfile: {
+          bot: {
+            id: update?.botUserId,
+            firstName: update?.name ?? "Mock Inline Bot",
+            ...update?.photoFileUniqueId ? { profilePhoto: { fileUniqueId: update.photoFileUniqueId } } : {}
+          }
+        }
+      };
+    }
     if (method === Method.SEARCH_MESSAGES) {
       const inputRecord = asOptionalRecord(input);
       const searchMessages = asOptionalRecord(inputRecord?.searchMessages);
@@ -48106,7 +49844,8 @@ class MockInlineClient {
         getChats: {
           users: [
             { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
-            { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" }
+            { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" },
+            { id: 999n, firstName: "Mock bot", username: "mock_inline_bot", bot: true }
           ]
         }
       };
@@ -48161,7 +49900,8 @@ var userDirectory = new InlineUserDirectory(client, {
   }
 });
 connectClientLoop();
-consumeEvents();
+if (!sendOnly)
+  consumeEvents();
 var server = http.createServer((req, res) => {
   handleRequest(req, res).catch((error) => {
     const err = normalizeError(error, redactError);
@@ -48176,16 +49916,24 @@ var server = http.createServer((req, res) => {
   });
 });
 server.listen(port, bind, () => {
-  console.error(`inline-sidecar: listening on ${bind}:${port}`);
+  const address = server.address();
+  if (address && typeof address !== "string") {
+    console.log(JSON.stringify({ inlineSidecarListening: { port: address.port } }));
+    console.error(`inline-sidecar: listening on ${bind}:${address.port}`);
+  }
 });
 setupShutdown();
 function attachConsumer(res) {
+  if (sendOnly || !inboundStream.attach(res)) {
+    writeJson(res, 409, { ok: false, error: "Inline sidecar already has a receiver or is send-only", errorKind: "forbidden" });
+    return;
+  }
   res.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-cache",
     connection: "keep-alive"
   });
-  inboundStream.attach(res);
+  res.flushHeaders();
 }
 async function deliver(event) {
   await inboundStream.deliver(event);

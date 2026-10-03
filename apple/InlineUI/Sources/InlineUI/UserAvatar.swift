@@ -16,6 +16,7 @@ public struct UserAvatar: View, Equatable {
       && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
       && lhs.hasConfiguredPhoto == rhs.hasConfiguredPhoto
       && lhs.localUrl == rhs.localUrl
+      && lhs.remoteUrl == rhs.remoteUrl
       && lhs.prefersExplicitLocalSource == rhs.prefersExplicitLocalSource
       && Self.avatarIdentity(
         stableAvatarIdentity: lhs.stableAvatarIdentity,

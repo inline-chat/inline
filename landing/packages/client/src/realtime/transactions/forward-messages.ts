@@ -45,6 +45,7 @@ export class ForwardMessagesTransaction
       toPeerId: context.toPeerId,
       messageIds: context.messageIds.map(protocolId),
       shareForwardHeader: context.shareForwardHeader,
+      submissions: [],
     }
     const input: RpcCall["input"] = {
       oneofKind: "forwardMessages",

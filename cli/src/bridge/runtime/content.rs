@@ -11,13 +11,15 @@ use tokio::io::AsyncWriteExt;
 const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub(super) struct InboundContent {
+pub(in crate::bridge) struct InboundContent {
     pub text: String,
     pub unsupported_notice: Option<String>,
     pub attachments: Vec<InputAttachment>,
 }
 
-pub(super) fn normalize_inbound_content(content: &MessageContent) -> Option<InboundContent> {
+pub(in crate::bridge) fn normalize_inbound_content(
+    content: &MessageContent,
+) -> Option<InboundContent> {
     let normalized = match content {
         MessageContent::Text { text } => InboundContent {
             text: text.trim().to_string(),

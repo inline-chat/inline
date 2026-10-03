@@ -67,5 +67,5 @@ it("unverified input stays pending until real directory recovery instead of beco
   available = true
   await vi.advanceTimersByTimeAsync(1_001)
   await pending
-  expect(delivered).toMatchObject([{ sender: { id: "42", bot: false } }])
+  expect(delivered).toMatchObject([{ sender: { id: "42", bot: false }, _inlineSenderProvenanceVerified: true }])
 })

@@ -5,9 +5,11 @@ import type { HandlerContext } from "../../controllers/helpers"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { db } from "../../db"
-import { chats, dialogs as dialogsTable, messages } from "../../db/schema"
+import { chats, dialogs as dialogsTable, messages, updates } from "../../db/schema"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { and, eq } from "drizzle-orm"
+
+import { InlineError } from "@in/server/types/errors"
 
 describe("updateDialog", () => {
   setupTestLifecycle()
@@ -16,6 +18,53 @@ describe("updateDialog", () => {
     currentUserId: userId,
     currentSessionId: 0,
     ip: "127.0.0.1",
+  })
+
+  test("an authorized empty group can be archived before a dialog exists, while outsiders cannot materialize it", async () => {
+    const owner = await testUtils.createUser("empty-archive-owner@example.test")
+    const invited = await testUtils.createUser("empty-archive-invited@example.test")
+    const outsider = await testUtils.createUser("empty-archive-outsider@example.test")
+    const chat = await testUtils.createChat(null, "Empty group", "thread", false, owner.id)
+    if (!chat) throw new Error("Archive group missing")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, invited.id)
+    await expect(
+      handler({ peerThreadId: String(chat.id), archived: true }, makeContext(outsider.id)),
+    ).rejects.toMatchObject({ type: InlineError.ApiError.PEER_INVALID[0] })
+    expect(await db.select().from(dialogsTable).where(eq(dialogsTable.chatId, chat.id))).toHaveLength(0)
+    const result = await handler({ peerThreadId: String(chat.id), archived: true }, makeContext(invited.id))
+    expect(result.dialog.archived).toBe(true)
+    const [stored] = await db
+      .select()
+      .from(dialogsTable)
+      .where(and(eq(dialogsTable.chatId, chat.id), eq(dialogsTable.userId, invited.id)))
+    expect(stored?.archived).toBe(true)
+    expect(stored?.followMode).toBeNull()
+    const rows = await db.query.updates.findMany({ where: { bucket: UpdateBucket.User, entityId: invited.id } })
+    expect(rows.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual(["userDialogArchived"])
+  })
+
+  test("a retained dialog does not preserve access after private participation is removed", async () => {
+    const owner = await testUtils.createUser("archive-revoke-owner@example.test")
+    const former = await testUtils.createUser("archive-revoke-former@example.test")
+    const chat = await testUtils.createChat(null, "Private group", "thread", false, owner.id)
+    if (!chat) throw new Error("Archive group missing")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(dialogsTable).values({ chatId: chat.id, userId: former.id, archived: false })
+    await expect(
+      handler({ peerThreadId: String(chat.id), archived: true }, makeContext(former.id)),
+    ).rejects.toMatchObject({ type: InlineError.ApiError.PEER_INVALID[0] })
+    const [stored] = await db
+      .select()
+      .from(dialogsTable)
+      .where(and(eq(dialogsTable.chatId, chat.id), eq(dialogsTable.userId, former.id)))
+    expect(stored?.archived).toBe(false)
+    expect(
+      await db
+        .select()
+        .from(updates)
+        .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, former.id))),
+    ).toHaveLength(0)
   })
 
   test("archives and unarchives dialogs while enqueuing user updates", async () => {

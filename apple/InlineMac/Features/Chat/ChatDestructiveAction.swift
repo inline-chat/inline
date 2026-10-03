@@ -124,15 +124,21 @@ enum ChatDestructiveActionRunner {
     dependencies: AppDependencies?,
     navigateOut: @escaping @MainActor () -> Void
   ) {
-    let currentUserId = dependencies?.auth.getCurrentUserId() ?? Auth.shared.getCurrentUserId()
+    let auth = dependencies?.auth.handle ?? Auth.shared.handle
+    guard let accountToken = try? auth.beginAccountMutation() else { return }
+    let currentUserId = accountToken.userID
     ToastCenter.shared.showLoading(action.loadingTitle)
 
     Task(priority: .userInitiated) {
       do {
+        try auth.validateAccountMutation(accountToken)
         try await send(action, peer: peer, currentUserId: currentUserId)
-        try await deleteLocalChat(peer: peer)
+        try auth.validateAccountMutation(accountToken)
+        // Confirmed deleteChat is projected by its transaction/removal owner.
+        if action == .leave { try await deleteLocalChat(peer: peer) }
 
-        await MainActor.run {
+        try await MainActor.run {
+          try auth.validateAccountMutation(accountToken)
           ToastCenter.shared.dismiss()
           if dependencies?.removeChatFromNavigation(peer: peer) != true {
             navigateOut()
@@ -143,6 +149,7 @@ enum ChatDestructiveActionRunner {
         log.error(action.failureTitle, error: error)
 
         await MainActor.run {
+          guard (try? auth.validateAccountMutation(accountToken)) != nil else { return }
           ToastCenter.shared.dismiss()
           ToastCenter.shared.showError(action.failureTitle)
         }

@@ -21,6 +21,7 @@ export const forwardMessagesHandler = async (
       toPeerId: input.toPeerId,
       messageIds: input.messageIds,
       shareForwardHeader: input.shareForwardHeader,
+      submissions: input.submissions,
     },
     {
       currentUserId: handlerContext.userId,
@@ -28,5 +29,5 @@ export const forwardMessagesHandler = async (
     },
   )
 
-  return { updates: result.updates }
+  return { updates: result.updates, receipts: result.receipts }
 }

@@ -436,6 +436,8 @@ private struct StartupLoadingDetails: View {
 }
 
 private struct MainWindowRoot: View {
+  @State private var windowWidth: CGFloat = 0
+  @State private var sidebarCollapsedForWidth = false
   @Binding var columnVisibility: NavigationSplitViewVisibility
 
   let nav3: Nav3
@@ -464,14 +466,20 @@ private struct MainWindowRoot: View {
       CommandBar()
     }
     .modifier(ForwardMessagesPresentation(dependencies: dependencies))
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+      windowWidth = width
+      fitSidebar(to: width)
+    }
     .onAppear {
       PerformanceTrace.event("MainWindowMainRouteAppear", category: .launch)
       updateWindowMinSize()
     }
-    .onChange(of: isSidebarCollapsed) { _, _ in
+    .onChange(of: isSidebarCollapsed) { _, collapsed in
+      if !collapsed { sidebarCollapsedForWidth = false }
       updateWindowMinSize()
     }
     .onChange(of: nav3.currentReplyThreadPeer) { _, _ in
+      fitSidebar(to: windowWidth)
       updateWindowMinSize()
     }
   }
@@ -483,15 +491,28 @@ private struct MainWindowRoot: View {
     return false
   }
 
+  private func fitSidebar(to width: CGFloat) {
+    guard width > 0 else { return }
+    let expandedMinimum = nav3.currentReplyThreadPeer == nil
+      ? MainWindowController.minSizeWithSidebar.width
+      : ReplyThreadPaneMetrics.minimumWindowWidth(isSidebarCollapsed: false)
+    if width < expandedMinimum, !isSidebarCollapsed {
+      sidebarCollapsedForWidth = true
+      columnVisibility = .detailOnly
+    } else if width >= expandedMinimum, sidebarCollapsedForWidth {
+      sidebarCollapsedForWidth = false
+      columnVisibility = .all
+    }
+  }
+
   private func updateWindowMinSize() {
-    var size = isSidebarCollapsed
-      ? MainWindowController.minSizeWithoutSidebar
-      : MainWindowController.minSizeWithSidebar
+    // Allow the window to reach the narrow layout that collapses the sidebar.
+    var size = MainWindowController.minSizeWithoutSidebar
 
     if nav3.currentReplyThreadPeer != nil {
       size.width = max(
         size.width,
-        ReplyThreadPaneMetrics.minimumWindowWidth(isSidebarCollapsed: isSidebarCollapsed)
+        ReplyThreadPaneMetrics.minimumWindowWidth(isSidebarCollapsed: true)
       )
     }
 

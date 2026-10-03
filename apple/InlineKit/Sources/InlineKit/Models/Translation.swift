@@ -80,7 +80,8 @@ public extension Translation {
     _ db: Database,
     protocolTranslation: InlineProtocol.MessageTranslation,
     chatId: Int64,
-    publishChanges: Bool = false
+    publishChanges: Bool = false,
+    publisher: MessagesPublisher? = nil
   ) throws -> Translation? {
     let translation = Translation(from: protocolTranslation, chatId: chatId)
     let hasMessage = try Message
@@ -91,6 +92,8 @@ public extension Translation {
     guard hasMessage else { return nil }
 
     try translation.save(db, onConflict: .replace)
+    MessageProjectionDependencies(identities: [.message(chatId: translation.chatId, messageId: translation.messageId)])
+      .publishAfterCommit(db, publisher: publisher)
     return translation
   }
 

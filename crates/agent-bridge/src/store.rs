@@ -14,6 +14,7 @@ use crate::{
 
 mod approval;
 mod command_choice;
+mod context_input;
 mod history_import;
 mod host_tool;
 mod inbound_scan;
@@ -38,6 +39,9 @@ pub use approval::{
 pub use command_choice::{
     CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
     CommandChoiceRequest, CommandChoiceState, PendingCommandChoiceRequest,
+};
+pub use context_input::{
+    ContextInputSnapshot, ContextInputState, ContextMessageRef, ContextReceipt, ContextTriggerProof,
 };
 pub use history_import::HistoryImportState;
 pub use host_tool::{HostToolCallClaim, HostToolCallRecord};
@@ -69,7 +73,7 @@ pub use workspace::{
     WorkspaceRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: i64 = 30;
+const CURRENT_SCHEMA_VERSION: i64 = 31;
 const DEFAULT_QUEUE_LEASE_SECONDS: i64 = 300;
 const DEFAULT_INBOUND_LEASE_SECONDS: i64 = 300;
 
@@ -91,6 +95,8 @@ pub enum StoreError {
     InvalidMigrationBackupIntegrity { path: String, result: String },
     #[error("bridge state serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("public context input cannot be admitted: {0}")]
+    InvalidContextInput(&'static str),
     #[error("bridge state contains an invalid {kind}: {value}")]
     InvalidIdentifier { kind: &'static str, value: String },
     #[error("bridge state contains an unknown queue state: {0}")]
@@ -293,6 +299,8 @@ pub struct BridgeStore {
     connection: Mutex<Connection>,
 }
 
+pub(crate) type StoredBindingConfiguration = (ProviderId, ProviderSessionId, Option<String>, bool);
+
 impl std::fmt::Debug for BridgeStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -349,22 +357,35 @@ impl BridgeStore {
     /// only after this method succeeds. Duplicate event IDs or stable Inline
     /// message identities are not inserted.
     pub fn accept_inbound(&self, record: &InboundRecord) -> StoreResult<bool> {
-        self.accept_inbound_inner(record, false)
+        self.accept_inbound_inner(record, false, false)
+    }
+
+    /// A server-versioned edit is a new input for the same physical message.
+    /// Its event identity, not the original message identity, deduplicates it.
+    pub fn accept_inbound_source_edit(&self, record: &InboundRecord) -> StoreResult<bool> {
+        self.accept_inbound_inner(record, false, true)
     }
 
     /// Accepts an explicit handoff and cancels earlier queued work in this
     /// conversation atomically. Retains every record and leaves running work,
     /// other conversations, and later user input untouched.
     pub fn accept_session_handoff(&self, record: &InboundRecord) -> StoreResult<bool> {
-        self.accept_inbound_inner(record, true)
+        self.accept_inbound_inner(record, true, false)
     }
 
     fn accept_inbound_inner(
         &self,
         record: &InboundRecord,
         cancel_earlier_pending: bool,
+        source_edit: bool,
     ) -> StoreResult<bool> {
         let attachments_json = serde_json::to_string(&record.direction.attachments)?;
+        let source_json = record
+            .direction
+            .source_version
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         let mut connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.transaction()?;
         let already_processed = transaction.query_row(
@@ -391,7 +412,7 @@ impl BridgeStore {
             ],
             |row| row.get::<_, bool>(0),
         )?;
-        if duplicate_message {
+        if duplicate_message && !source_edit {
             transaction.commit()?;
             return Ok(false);
         }
@@ -401,11 +422,11 @@ impl BridgeStore {
                 delivery_chat_id, sender_user_id, direction_id, direction_text,
                 direction_attachments_json, state, accepted_at,
                 started_at, lease_expires_at, attempt_count, provider_turn_id,
-                stream_message_id, failure, ingest_order
+                stream_message_id, failure, ingest_order, direction_source_json
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18,
-                (SELECT COALESCE(MAX(ingest_order), 0) + 1 FROM inbound_directions)
+                (SELECT COALESCE(MAX(ingest_order), 0) + 1 FROM inbound_directions), ?19
              )",
             params![
                 record.event_id,
@@ -426,6 +447,7 @@ impl BridgeStore {
                 record.provider_turn_id.as_ref().map(TurnId::as_str),
                 record.stream_message_id,
                 record.failure,
+                source_json,
             ],
         )?;
         if changed == 1 {
@@ -500,7 +522,7 @@ impl BridgeStore {
                         delivery_chat_id, sender_user_id, direction_id, direction_text,
                         direction_attachments_json, state,
                         accepted_at, started_at, lease_expires_at, attempt_count,
-                        provider_turn_id, stream_message_id, failure
+                        provider_turn_id, stream_message_id, failure, direction_source_json
                  FROM inbound_directions WHERE event_id = ?1",
                 params![event_id],
                 |row| {
@@ -522,6 +544,7 @@ impl BridgeStore {
                         row.get::<_, Option<String>>(14)?,
                         row.get::<_, Option<i64>>(15)?,
                         row.get::<_, Option<String>>(16)?,
+                        row.get::<_, Option<String>>(17)?,
                     ))
                 },
             )
@@ -544,6 +567,7 @@ impl BridgeStore {
             provider_turn_id,
             stream_message_id,
             failure,
+            source_json,
         )) = raw
         else {
             return Ok(None);
@@ -559,7 +583,13 @@ impl BridgeStore {
             delivery_chat_id,
             sender_user_id,
             direction: Direction::new(parse_direction_id(direction_id)?, direction_text)
-                .with_attachments(serde_json::from_str(&direction_attachments_json)?),
+                .with_attachments(serde_json::from_str(&direction_attachments_json)?)
+                .with_source_version(
+                    source_json
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?,
+                ),
             state: InboundState::parse(state)?,
             accepted_at,
             started_at,
@@ -734,7 +764,7 @@ impl BridgeStore {
             .query_row(
                 "SELECT event_id, message_id, delivery_chat_id, sender_user_id, direction_id,
                         direction_text, direction_attachments_json, accepted_at,
-                        attempt_count, stream_message_id
+                        attempt_count, stream_message_id, direction_source_json
                  FROM inbound_directions
                  WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
                    AND state = 'accepted'
@@ -757,6 +787,7 @@ impl BridgeStore {
                         row.get::<_, i64>(7)?,
                         row.get::<_, i64>(8)?,
                         row.get::<_, Option<i64>>(9)?,
+                        row.get::<_, Option<String>>(10)?,
                     ))
                 },
             )
@@ -772,6 +803,7 @@ impl BridgeStore {
             accepted_at,
             attempt_count,
             stream_message_id,
+            source_json,
         )) = raw
         else {
             transaction.commit()?;
@@ -797,7 +829,13 @@ impl BridgeStore {
             delivery_chat_id,
             sender_user_id,
             direction: Direction::new(parse_direction_id(direction_id)?, direction_text)
-                .with_attachments(serde_json::from_str(&direction_attachments_json)?),
+                .with_attachments(serde_json::from_str(&direction_attachments_json)?)
+                .with_source_version(
+                    source_json
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?,
+                ),
             state: InboundState::Started,
             accepted_at,
             started_at: Some(started_at),
@@ -942,7 +980,8 @@ impl BridgeStore {
             "UPDATE inbound_directions SET
                 state = 'accepted', started_at = NULL, lease_expires_at = NULL,
                 provider_turn_id = NULL
-             WHERE event_id = ?1 AND state = 'started'",
+             WHERE event_id = ?1 AND state = 'started'
+               AND (context_input_state IS NULL OR context_input_state = 'prepared')",
             params![event_id],
         )?;
         Ok(changed == 1)
@@ -983,7 +1022,9 @@ impl BridgeStore {
                 state = 'accepted', started_at = NULL, lease_expires_at = NULL,
                 provider_turn_id = NULL
              WHERE state = 'started' AND terminal_state IS NULL
-               AND lease_expires_at <= ?1",
+               AND lease_expires_at <= ?1
+               AND provider_turn_id IS NULL
+               AND (context_input_state IS NULL OR context_input_state = 'prepared')",
             params![now],
         )?;
         Ok(changed)
@@ -1062,6 +1103,25 @@ impl BridgeStore {
         session_configuration_fingerprint: Option<&str>,
         updated_at: i64,
     ) -> StoreResult<()> {
+        self.put_binding_with_configuration_and_reset(
+            key,
+            provider_id,
+            provider_session_id,
+            session_configuration_fingerprint,
+            updated_at,
+            false,
+        )
+    }
+
+    pub(crate) fn put_binding_with_configuration_and_reset(
+        &self,
+        key: &BindingKey,
+        provider_id: &ProviderId,
+        provider_session_id: &ProviderSessionId,
+        session_configuration_fingerprint: Option<&str>,
+        updated_at: i64,
+        reset_context: bool,
+    ) -> StoreResult<()> {
         let mut connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.transaction()?;
         match session_thread::read_by_chat(&transaction, &key.installation_id, key.chat_id)? {
@@ -1079,13 +1139,24 @@ impl BridgeStore {
         transaction.execute(
             "INSERT INTO session_bindings (
                 installation_id, chat_id, workspace_id, provider_id, provider_session_id,
-                updated_at, session_configuration_fingerprint
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                updated_at, session_configuration_fingerprint, context_reset_at,
+                context_reset_after_message_id
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                (SELECT COALESCE(MAX(context_reset_at), 0) FROM session_bindings
+                 WHERE installation_id = ?1 AND chat_id = ?2),
+                (SELECT COALESCE(MAX(context_reset_after_message_id), 0) FROM session_bindings
+                 WHERE installation_id = ?1 AND chat_id = ?2))
              ON CONFLICT (installation_id, chat_id, workspace_id) DO UPDATE SET
                 provider_id = excluded.provider_id,
                 provider_session_id = excluded.provider_session_id,
                 updated_at = excluded.updated_at,
-                session_configuration_fingerprint = excluded.session_configuration_fingerprint",
+                session_configuration_fingerprint = excluded.session_configuration_fingerprint,
+                context_session_invalidated = 0,
+                context_generation = CASE
+                    WHEN session_bindings.provider_id != excluded.provider_id
+                      OR session_bindings.provider_session_id != excluded.provider_session_id
+                    THEN session_bindings.context_generation + 1
+                    ELSE session_bindings.context_generation END",
             params![
                 key.installation_id.as_str(),
                 key.chat_id,
@@ -1096,6 +1167,9 @@ impl BridgeStore {
                 session_configuration_fingerprint,
             ],
         )?;
+        if reset_context {
+            context_input::reset_in_transaction(&transaction, key, updated_at)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -1127,14 +1201,24 @@ impl BridgeStore {
         .transpose()
     }
 
+    #[cfg(test)]
     pub(crate) fn get_binding_with_configuration(
         &self,
         key: &BindingKey,
     ) -> StoreResult<Option<(ProviderId, ProviderSessionId, Option<String>)>> {
+        Ok(self
+            .get_binding_with_configuration_state(key)?
+            .map(|(provider, session, fingerprint, _)| (provider, session, fingerprint)))
+    }
+
+    pub(crate) fn get_binding_with_configuration_state(
+        &self,
+        key: &BindingKey,
+    ) -> StoreResult<Option<StoredBindingConfiguration>> {
         let connection = self.connection.lock().expect("bridge store poisoned");
         let raw = connection
             .query_row(
-                "SELECT provider_id, provider_session_id, session_configuration_fingerprint
+                "SELECT provider_id, provider_session_id, session_configuration_fingerprint, context_session_invalidated
                  FROM session_bindings
                  WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3",
                 params![
@@ -1147,15 +1231,17 @@ impl BridgeStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, bool>(3)?,
                     ))
                 },
             )
             .optional()?;
-        raw.map(|(provider, session, fingerprint)| {
+        raw.map(|(provider, session, fingerprint, invalidated)| {
             Ok((
                 parse_provider_id(provider)?,
                 parse_provider_session_id(session)?,
                 fingerprint,
+                invalidated,
             ))
         })
         .transpose()
@@ -1541,6 +1627,10 @@ fn migrate(connection: &Connection) -> StoreResult<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 29 {
         session_picker::migrate_v30(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 30 {
+        context_input::migrate_v31(connection)?;
     }
     Ok(())
 }

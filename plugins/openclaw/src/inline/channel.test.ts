@@ -154,6 +154,7 @@ describe("inline/channel", () => {
     expect(messageToolHints).toContain("inline_forward")
     expect(messageToolHints).toContain("channelData.inline.botPresence")
     expect(messageToolHints).toContain("inline_update_profile")
+    expect(messageToolHints).toContain("ask the user to attach an image")
     expect(messageToolHints).toContain("inline_bot_avatar")
     expect(messageToolHints).toContain("inline_bot_commands")
     expect(messageToolHints).toContain("inline_bot_presence")

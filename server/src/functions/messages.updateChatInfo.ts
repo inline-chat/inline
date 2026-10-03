@@ -31,6 +31,7 @@ type UpdateChatInfoInput = {
   title?: string | null
   emoji?: string | null
   agentContext?: AgentThreadContext
+  generateEmoji?: boolean
 }
 
 type UpdateChatInfoOutput = {
@@ -51,6 +52,7 @@ type UpdateThreadInfoInput = {
     | { kind: "untitledExact"; currentTitle: string | null }
   isUntitled?: boolean
   autoTitleGenerated?: boolean
+  emojiGuard?: { title: string | null; description: string | null; emoji: string | null }
 }
 
 export async function updateChatInfo(
@@ -60,6 +62,21 @@ export async function updateChatInfo(
   const chatId = Number(input.chatId)
   if (!Number.isSafeInteger(chatId) || chatId <= 0) {
     throw RealtimeRpcError.ChatIdInvalid()
+  }
+
+  if (input.generateEmoji === true) {
+    if (input.title !== undefined || input.emoji !== undefined || input.agentContext !== undefined) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    const { generateAndApplyThreadEmoji } = await import("@in/server/modules/threadTitles")
+    try {
+      const result = await generateAndApplyThreadEmoji({ chatId, currentUserId: context.currentUserId })
+      return { chat: result.chat }
+    } catch (error) {
+      if (error instanceof RealtimeRpcError) throw error
+      log.warn("Chat emoji generation failed", { chatId })
+      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to generate chat emoji", 500)
+    }
   }
 
   const titleProvided = input.title !== undefined
@@ -174,6 +191,14 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       if (!titleGuardMatches || (input.autoTitleGenerated === true && chat.autoTitleGenerated === true)) {
         return { chat, didUpdate: false }
       }
+    }
+
+    if (input.emojiGuard && (
+      chat.title !== input.emojiGuard.title ||
+      chat.description !== input.emojiGuard.description ||
+      chat.emoji !== input.emojiGuard.emoji
+    )) {
+      return { chat, didUpdate: false }
     }
 
     const normalizedEmoji = emojiProvided ? (nextEmoji && nextEmoji.length > 0 ? nextEmoji : null) : undefined

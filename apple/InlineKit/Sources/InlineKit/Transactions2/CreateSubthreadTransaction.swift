@@ -10,6 +10,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .createSubthread
   public var context: Context
   public var type: TransactionKindType = .mutation()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { context.reservedChatId == nil ? nil : .replaySafe }
 
   public struct Context: Sendable, Codable {
     public var parentChatId: Int64
@@ -18,6 +19,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
     public var description: String?
     public var emoji: String?
     public var participants: [Int64]
+    public var reservedChatId: Int64?
     public var agentContext: Data?
   }
 
@@ -32,6 +34,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
     description: String? = nil,
     emoji: String? = nil,
     participants: [Int64] = [],
+    reservedChatId: Int64? = nil,
     agentContext: InlineProtocol.AgentThreadContext? = nil
   ) {
     context = Context(
@@ -41,6 +44,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
       description: description,
       emoji: emoji,
       participants: participants,
+      reservedChatId: reservedChatId,
       agentContext: Chat.serializedAgentContext(agentContext)
     )
   }
@@ -48,6 +52,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .createSubthread(.with {
       $0.parentChatID = context.parentChatId
+      if let reservedChatId = context.reservedChatId { $0.reservedChatID = reservedChatId }
       if let parentMessageId = context.parentMessageId {
         $0.parentMessageID = parentMessageId
       }
@@ -113,6 +118,7 @@ public extension Transaction2 where Self == CreateSubthreadTransaction {
     description: String? = nil,
     emoji: String? = nil,
     participants: [Int64] = [],
+    reservedChatId: Int64? = nil,
     agentContext: InlineProtocol.AgentThreadContext? = nil
   ) -> CreateSubthreadTransaction {
     CreateSubthreadTransaction(
@@ -122,6 +128,7 @@ public extension Transaction2 where Self == CreateSubthreadTransaction {
       description: description,
       emoji: emoji,
       participants: participants,
+      reservedChatId: reservedChatId,
       agentContext: agentContext
     )
   }

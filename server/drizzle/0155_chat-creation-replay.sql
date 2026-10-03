@@ -1,0 +1,1 @@
+ALTER TABLE "chat_id_reservation" ADD COLUMN "creation_intent_hash" text;

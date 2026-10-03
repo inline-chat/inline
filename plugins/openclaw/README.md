@@ -53,12 +53,18 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
+| `0.0.71-alpha.1` | `>=2026.8.2` | `0.0.19-alpha.1` | Candidate | Pins the new generated wire fields; package and host qualification remain pending. Publish protocol and SDK prerequisites first. |
 | `0.0.71-alpha.0` | `>=2026.8.2` | `0.0.19-alpha.0` | Prerelease | Reports install provenance safely, avoids false reconnect-loop status, and keeps autonomous sync-recovery diagnostics non-sticky. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Stable | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 | `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
-| `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+
+### Candidate 0.0.71-alpha.1
+
+Pins realtime SDK `0.0.19-alpha.1` and its protocol `0.0.11-alpha.1`
+prerequisite. The candidate needs separate package and host qualification before
+publication; the published `0.0.71-alpha.0` instructions below remain historical.
 
 ### Prerelease 0.0.71-alpha.0
 
@@ -378,6 +384,7 @@ The plugin also registers dedicated tools outside the `message` action surface.
 `inline_bot_presence` updates the bot's on-screen body state in Inline without sending a chat message. Use `action: "get"` to inspect the current avatar/state for a chat or user target.
 
 `inline_update_profile` updates the authenticated bot's Inline display name and/or profile photo. Use it only for explicit profile-setup requests.
+For a requested photo change, the bot can upload an image attached to the current Inline message using its saved local path or attachment URL. If the user has not supplied an image, it asks them to attach one; the user's original Inline file ID cannot be reused by the bot.
 
 `inline_bot_avatar` installs, replaces, or clears the bot's on-screen avatar. Set/install uses a local or remote `.zip` avatar package; clearing uses `action: "clear"` or `clear: true`. It is for avatar setup/removal, not mood or presence changes.
 

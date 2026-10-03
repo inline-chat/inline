@@ -224,6 +224,14 @@ describe("sidecar runtime", () => {
         target: { chatId: "123" },
         state: "start",
       }, auth))
+      await expectOk(post(port, "/typing", {
+        target: { userId: "42" },
+        state: "start",
+      }, auth))
+      await expectOk(post(port, "/typing", {
+        target: { userId: "42" },
+        state: "stop",
+      }, auth))
       await expectOk(post(port, "/presence", {
         target: { userId: "42" },
         kind: "running",
@@ -247,6 +255,38 @@ describe("sidecar runtime", () => {
         fileUniqueId: "mock-file-7001",
       })
 
+      const profile = await post(port, "/update-profile", {
+        name: "Hermes Inline",
+        photoPath,
+      }, auth)
+      expect(profile.status).toBe(200)
+      expect(resultOf(profile.body)).toMatchObject({
+        bot: {
+          id: "999",
+          firstName: "Hermes Inline",
+          profilePhoto: { fileUniqueId: "mock-file-7002" },
+        },
+      })
+
+      const profileByFileId = await post(port, "/update-profile", {
+        photoFileUniqueId: "mock-file-7002",
+      }, auth)
+      expect(profileByFileId.status).toBe(200)
+      expect(resultOf(profileByFileId.body)).toMatchObject({
+        bot: { id: "999", profilePhoto: { fileUniqueId: "mock-file-7002" } },
+      })
+
+      for (const invalidBody of [{}, { name: " " }, { photoPath: "relative.png" }, {
+        photoPath: path.join(dir, "notes.txt"),
+      }, {
+        photoPath,
+        photoFileUniqueId: "mock-file-7002",
+      }]) {
+        const invalid = await post(port, "/update-profile", invalidBody, auth)
+        expect(invalid.status).toBe(400)
+        expect(invalid.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
+
       const voicePath = path.join(dir, "voice.ogg")
       await writeFile(voicePath, Buffer.from("fake voice"))
       const voiceAttachment = await post(port, "/send-attachment", {
@@ -258,15 +298,37 @@ describe("sidecar runtime", () => {
       expect(voiceAttachment.status).toBe(200)
       expect(resultOf(voiceAttachment.body)).toMatchObject({
         messageId: "9005",
-        fileUniqueId: "mock-file-7002",
+        fileUniqueId: "mock-file-7003",
       })
 
       const healthAfterAttachments = await post(port, "/healthz", {}, auth)
       const attachmentDiagnostics = resultOf(healthAfterAttachments.body).diagnostics as {
         calls: Array<{ method: string; params?: Record<string, unknown> }>
       }
+      const profileCalls = attachmentDiagnostics.calls.filter((call) => call.method === "invokeUncheckedRaw:UPDATE_BOT_PROFILE")
+      expect(profileCalls.map((call) => call.params)).toEqual([
+        { oneofKind: "updateBotProfile", updateBotProfile: {
+          botUserId: "999", name: "Hermes Inline", photoFileUniqueId: "mock-file-7002",
+        } },
+        { oneofKind: "updateBotProfile", updateBotProfile: {
+          botUserId: "999", photoFileUniqueId: "mock-file-7002",
+        } },
+      ])
+      const profileCallIndex = attachmentDiagnostics.calls.indexOf(profileCalls[0]!)
+      expect(attachmentDiagnostics.calls[profileCallIndex - 1]).toEqual({
+        method: "uploadFile", params: {
+          type: "photo", fileName: "photo.png", contentType: "image/png", size: 10,
+        },
+      })
+      // One attachment, one bot-owned profile copy, and one voice upload. The
+      // existing-file request and all invalid profile requests cause no upload.
+      expect(attachmentDiagnostics.calls.filter((call) => call.method === "uploadFile")).toHaveLength(3)
       expect(attachmentDiagnostics.calls).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            method: "uploadFile",
+            params: expect.objectContaining({ fileName: "photo.png", contentType: "image/png", type: "photo" }),
+          }),
           expect.objectContaining({
             method: "sendMessage",
             params: expect.objectContaining({
@@ -276,7 +338,7 @@ describe("sidecar runtime", () => {
           }),
           expect.objectContaining({
             method: "sendMessage",
-            params: expect.objectContaining({ media: { kind: "voice", voiceId: "7002" } }),
+            params: expect.objectContaining({ media: { kind: "voice", voiceId: "7003" } }),
           }),
           expect.objectContaining({
             method: "sendMessage",
@@ -295,11 +357,12 @@ describe("sidecar runtime", () => {
       expect(resultOf(chat.body)).toMatchObject({
         chatId: "123",
         title: "Mock chat 123",
+        agentContext: { botUserId: "999", agentId: "73" },
         pinnedMessageIds: ["8805", "8801"],
         anchorMessage: expect.objectContaining({
           id: "8801",
           message: "mock pinned message",
-          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada", bot: false },
         }),
       })
 
@@ -375,7 +438,7 @@ describe("sidecar runtime", () => {
         expect.objectContaining({
           id: "9002",
           message: "mock message 9002",
-          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada", bot: false },
         }),
         expect.objectContaining({ id: "9001", message: "mock message 9001" }),
       ])
@@ -405,7 +468,7 @@ describe("sidecar runtime", () => {
         expect.objectContaining({
           id: "8700",
           message: "mock history server-first",
-          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada", bot: false },
         }),
         expect.objectContaining({ id: "8801", message: "mock history server-second" }),
       ])
@@ -421,7 +484,7 @@ describe("sidecar runtime", () => {
         expect.objectContaining({
           id: "8802",
           message: "mock search first deploy",
-          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada", bot: false },
         }),
         expect.objectContaining({ id: "8702", message: "mock search second deploy" }),
       ])
@@ -534,6 +597,72 @@ describe("sidecar runtime", () => {
       expect(invalidParticipant.status).toBe(400)
       expect(invalidParticipant.body).toMatchObject({ ok: false, errorKind: "bad_format" })
 
+      const personalTask = await post(port, "/create-chat", {
+        title: "Verified person's task", initiatingUserId: "42", initiatingChatId: "123", initiatingDirect: true,
+      }, auth)
+      expect(personalTask.status).toBe(200)
+      const person = await post(port, "/sender", { userId: "42", chatId: "123", direct: true }, auth)
+      expect(person.status).toBe(200)
+      expect(resultOf(person.body)).toMatchObject({ provenanceVerified: true, profile: { id: "42" } })
+      const botSender = await post(port, "/sender", { userId: "999", chatId: "123", direct: true }, auth)
+      expect(resultOf(botSender.body)).toMatchObject({ provenanceVerified: true, profile: { id: "999", bot: true } })
+      const unknownSender = await post(port, "/sender", { userId: "987", chatId: "123", direct: true }, auth)
+      expect(resultOf(unknownSender.body).profile).toBeUndefined()
+      const botOnlyTask = await post(port, "/create-chat", { title: "Explicit bot task", participantUserIds: [] }, auth)
+      expect(botOnlyTask.status).toBe(200)
+      for (const body of [
+        { title: "No current person" },
+        { title: "Invalid participants", participantUserIds: null },
+        { title: "Unknown current person", initiatingUserId: "987", initiatingChatId: "123", initiatingDirect: true },
+        { title: "Bot request", initiatingUserId: "999", initiatingChatId: "123", initiatingDirect: true },
+      ]) {
+        const invalid = await post(port, "/create-chat", body, auth)
+        expect(invalid.status).toBe(400)
+        expect(invalid.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
+
+      const addParticipant = await post(port, "/add-participant", { chatId: "123", userId: "42" }, auth)
+      expect(addParticipant.status).toBe(200)
+      expect(resultOf(addParticipant.body)).toEqual({ chatId: "123", userId: "42", removed: false })
+      const removeParticipant = await post(port, "/remove-participant", { chatId: "123", userId: "42" }, auth)
+      expect(removeParticipant.status).toBe(200)
+      expect(resultOf(removeParticipant.body)).toEqual({ chatId: "123", userId: "42", removed: true })
+      const renamed = await post(port, "/rename-chat", { chatId: "123", title: "Human task title" }, auth)
+      expect(renamed.status).toBe(200)
+      expect(resultOf(renamed.body)).toEqual({ chatId: "123", title: "Human task title" })
+      const deniedRename = await post(port, "/rename-chat", { chatId: "777", title: "Restricted task" }, auth)
+      expect(deniedRename.status).toBe(403)
+      expect(deniedRename.body).toMatchObject({ ok: false, errorKind: "forbidden" })
+      const deletedChat = await post(port, "/delete-chat", { chatId: "321" }, auth)
+      expect(deletedChat.status).toBe(200)
+      expect(resultOf(deletedChat.body)).toEqual({ chatId: "321", deleted: true })
+
+      const emojiBatch = await post(port, "/generate-chat-emojis", {
+        chatIds: ["555", "456", "123", "888", "777"],
+      }, auth)
+      expect(emojiBatch.status).toBe(200)
+      expect(resultOf(emojiBatch.body).outcomes).toEqual([
+        { chatId: "555", title: "Mock chat 555", emoji: "🛡️", status: "skipped_existing" },
+        { chatId: "456", title: "Mock reply thread 456", emoji: "", status: "skipped_reply_thread" },
+        { chatId: "123", title: "Human task title", emoji: "🧭", status: "emoji_present" },
+        { chatId: "888", title: "Mock chat 888", emoji: "", status: "unchanged" },
+        expect.objectContaining({ chatId: "777", status: "failed", errorKind: "forbidden" }),
+      ])
+      for (const chatIds of [[], ["invalid"], Array.from({ length: 6 }, () => "123")]) {
+        const invalidBatch = await post(port, "/generate-chat-emojis", { chatIds }, auth)
+        expect(invalidBatch.status).toBe(400)
+        expect(invalidBatch.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
+      for (const [endpoint, body] of [
+        ["/rename-chat", { chatId: "123", title: " " }],
+        ["/delete-chat", { target: { userId: "42" } }],
+        ["/add-participant", { chatId: "123", userId: "-1" }],
+      ] as const) {
+        const invalid = await post(port, endpoint, body, auth)
+        expect(invalid.status).toBe(400)
+        expect(invalid.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
+
       await expectOk(post(port, "/answer-action", {
         interactionId: "77",
         toast: "Recorded",
@@ -550,6 +679,34 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("setMyBotCapabilities")
       expect(callsJson).toContain("answerBotChatSettings")
       expect(callsJson).toContain("invoke:GET_CHAT")
+      const managementCalls = (diagnostics as { calls: Array<{ method: string; params: Record<string, unknown> }> }).calls
+      const personalCreate = managementCalls.filter((call) => call.method === "invokeUncheckedRaw:CREATE_CHAT")
+        .map((call) => call.params.createChat as Record<string, unknown>)
+      expect(personalCreate).toContainEqual({ title: "Verified person's task", isPublic: false, participants: [{ userId: "42" }] })
+      expect(personalCreate).toContainEqual({ title: "Explicit bot task", isPublic: false, participants: [] })
+      expect(personalCreate.some((params) => ["Bot request", "No current person", "Unknown current person", "Invalid participants"].includes(String(params.title)))).toBe(false)
+      expect(managementCalls).toEqual(expect.arrayContaining([
+        { method: "invoke:ADD_CHAT_PARTICIPANT", params: { oneofKind: "addChatParticipant", addChatParticipant: { chatId: "123", userId: "42" } } },
+        { method: "invoke:REMOVE_CHAT_PARTICIPANT", params: { oneofKind: "removeChatParticipant", removeChatParticipant: { chatId: "123", userId: "42" } } },
+        { method: "invoke:DELETE_CHAT", params: { oneofKind: "deleteChat", deleteChat: { peerId: { type: { oneofKind: "chat", chat: { chatId: "321" } } } } } },
+      ]))
+      const updates = managementCalls.filter((call) => call.method === "invoke:UPDATE_CHAT_INFO")
+        .map((call) => call.params.updateChatInfo as Record<string, unknown>)
+      expect(updates.filter((params) => params.title != null)).toEqual([
+        { chatId: "123", title: "Human task title" },
+        { chatId: "777", title: "Restricted task" },
+      ])
+      expect(updates.filter((params) => params.generateEmoji === true)).toEqual([
+        { chatId: "123", generateEmoji: true },
+        { chatId: "888", generateEmoji: true },
+        { chatId: "777", generateEmoji: true },
+      ])
+      const composeCalls = attachmentDiagnostics.calls.filter((call) => call.method === "invoke:SEND_COMPOSE_ACTION")
+      expect(composeCalls.map((call) => call.params)).toEqual([
+        { oneofKind: "sendComposeAction", sendComposeAction: { peerId: { type: { oneofKind: "chat", chat: { chatId: "123" } } }, action: 1 } },
+        { oneofKind: "sendComposeAction", sendComposeAction: { peerId: { type: { oneofKind: "user", user: { userId: "42" } } }, action: 1 } },
+        { oneofKind: "sendComposeAction", sendComposeAction: { peerId: { type: { oneofKind: "user", user: { userId: "42" } } } } },
+      ])
       expect(callsJson).toContain("invoke:GET_CHAT_HISTORY")
       expect(callsJson).toContain("invokeUncheckedRaw:SEARCH_MESSAGES")
       expect(callsJson).toContain("invokeUncheckedRaw:ADD_REACTION")
@@ -557,6 +714,8 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_CHAT")
+      expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_BOT_PROFILE")
+      expect(callsJson).toContain("Hermes Inline")
       expect(callsJson).toContain("Private planning")
       expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
       expect(callsJson.match(/invokeUncheckedRaw:GET_CHAT_PARTICIPANTS/g)).toHaveLength(1)

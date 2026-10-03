@@ -2,12 +2,15 @@ import Auth
 import Combine
 import CryptoKit
 import Foundation
+import GRDB
 import InlineConfig
 import InlineKit
 import Logger
 import Security
 import Sentry
 import UIKit
+
+private enum DeepLinkResolutionError: Error { case invalidChat }
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, ObservableObject {
   let notificationHandler = NotificationHandler()
@@ -18,6 +21,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
   @MainActor private var spaceJoinGeneration: UInt64 = 0
+  @MainActor private var chatLinkTask: Task<Void, Never>?
+  @MainActor private var chatLinkGeneration: UInt64 = 0
 
   func application(
     _ application: UIApplication,
@@ -77,15 +82,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   @MainActor
   func handleDeepLink(_ url: URL, router: Router) -> Bool {
     guard let deepLink = InlineDeepLink(url: url) else { return false }
+    chatLinkGeneration &+= 1
+    chatLinkTask?.cancel()
+    chatLinkTask = nil
 
     let request: AppNavigationRequest
     switch deepLink {
     case let .user(id):
       request = .chat(peer: .user(id: id))
     case let .chat(id):
-      request = .chat(peer: .thread(id: id))
+      openChatLink(chatId: id, messageId: nil, router: router)
+      return true
     case let .message(chatId, messageId):
-      request = .message(peer: .thread(id: chatId), messageID: messageId)
+      openChatLink(chatId: chatId, messageId: messageId, router: router)
+      return true
     case .publicSpace, .spaceInvite:
       guard let reference = SpaceJoinReference(deepLink: deepLink) else { return false }
       spaceJoinGeneration &+= 1
@@ -98,6 +108,44 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     router.navigate(request)
     openInInboxAfterExternalNavigation(request.peer)
     return true
+  }
+
+  @MainActor
+  private func openChatLink(chatId: Int64, messageId: Int64?, router: Router) {
+    let generation = chatLinkGeneration
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else {
+      ToastManager.shared.showToast("Sign in to open this chat.", type: .error)
+      return
+    }
+    chatLinkTask = Task { @MainActor [weak self] in
+      defer {
+        if self?.chatLinkGeneration == generation { self?.chatLinkTask = nil }
+      }
+      do {
+        let cached = try await AppDatabase.shared.reader.read { db in try Chat.fetchOne(db, id: chatId) }
+        let chat: Chat
+        if let cached, cached.deepLinkPeer != nil {
+          chat = cached
+        } else {
+          // InputPeer.chat is a stable table-ID lookup, including private chats.
+          let result = try await Api.realtime.send(.getChat(peer: .thread(id: chatId)), expectedAccount: account)
+          guard case let .getChat(response) = result, response.hasChat else { throw DeepLinkResolutionError.invalidChat }
+          chat = Chat(from: response.chat)
+        }
+        guard !Task.isCancelled, self?.chatLinkGeneration == generation else { return }
+        try Auth.shared.handle.validateAccountMutation(account)
+        guard let peer = chat.deepLinkPeer else { throw DeepLinkResolutionError.invalidChat }
+        let request: AppNavigationRequest = messageId.map { .message(peer: peer, messageID: $0) } ?? .chat(peer: peer)
+        router.navigate(request)
+        self?.openInInboxAfterExternalNavigation(peer)
+      } catch is CancellationError {
+        return
+      } catch {
+        guard !Task.isCancelled, self?.chatLinkGeneration == generation,
+              (try? Auth.shared.handle.validateAccountMutation(account)) != nil else { return }
+        ToastManager.shared.showToast("This chat is unavailable or you don't have access.", type: .error)
+      }
+    }
   }
 
   @MainActor

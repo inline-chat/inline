@@ -1,12 +1,13 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { assertLocalTestDatabaseUrl, prepareTestDatabaseTemplate } from "../../server/scripts/test-database-template.ts"
+import { assertHermesReceivingHost, hermesReceivingPin, makeHermesReceivingReceipt } from "./hermes-receiving-proof.mjs"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const serverRoot = path.join(repoRoot, "server")
@@ -17,6 +18,50 @@ if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
 const hermesBin = process.env.HERMES_BIN
 const hermesPython = process.env.HERMES_PYTHON_BIN
 if (!hermesBin || !hermesPython) throw new Error("HERMES_BIN and HERMES_PYTHON_BIN are required for the real Hermes transport test")
+const preparedHome = process.env.HERMES_PREPARED_HOME_ROOT
+const preparedTools = process.env.HERMES_PREPARED_RUNTIME_DIR
+if (!preparedHome || !preparedTools) throw new Error("Explicit host-admitted HERMES_PREPARED_HOME_ROOT and HERMES_PREPARED_RUNTIME_DIR are required")
+const preparedEnv = { ...process.env, HERMES_HOME: preparedHome, HERMES_RUNTIME_DIR: preparedTools }
+const sourceHermesManifest = JSON.parse(await readFile(path.join(repoRoot, "plugins/hermes-agent/package.json"), "utf8"))
+const receivingPin = hermesReceivingPin(sourceHermesManifest)
+// Inspect the actual imported host, not a caller's claimed repository/version.
+const hostRuntime = JSON.parse(execFileSync(hermesPython, ["-c", `
+import json
+from pathlib import Path
+from gateway.platforms import base
+import hermes_state
+from hermes_state import SessionDB
+from hermes_cli import version_info
+assert callable(getattr(SessionDB, "adopt_gateway_intake", None)), "Matching durable intake StateDB is required"
+source = Path(base.__file__).resolve().parents[2]
+assert Path(hermes_state.__file__).resolve().parent == source, "Gateway and StateDB must come from the same core"
+assert Path(version_info.__file__).resolve().parents[1] == source, "Version provenance must come from the loaded core"
+version = version_info.get_version_info()
+print(json.dumps({"source": str(source), "intakeVersion": getattr(base.BasePlatformAdapter, "durable_intake_version", None),
+    "version": {"baseVersion": version.base_version, "derivedVersion": version.derived_version,
+                "commit": version.commit, "source": version.source}}))
+`], { encoding: "utf8", timeout: 30_000, env: preparedEnv }))
+const hostSource = hostRuntime.source
+const hostSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: hostSource, encoding: "utf8" }).trim()
+const hostOrigin = execFileSync("git", ["remote", "get-url", "origin"], { cwd: hostSource, encoding: "utf8" }).trim()
+for (const stage of [[], ["--cached"]]) {
+  const trackedDiff = execFileSync("git", ["diff", ...stage, "--no-ext-diff", "--no-textconv", "--name-only"],
+    { cwd: hostSource, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 })
+  assert.equal(trackedDiff, "", "Loaded Hermes tracked worktree and index must be clean")
+}
+if (hostOrigin !== `https://github.com/${receivingPin.repository}.git`) {
+  throw new Error("Imported Hermes source does not have the reviewed GitHub origin")
+}
+const receivingHost = { repository: receivingPin.repository, sha: hostSha, intakeVersion: hostRuntime.intakeVersion, version: hostRuntime.version }
+assertHermesReceivingHost(receivingPin, receivingHost)
+const preparedRuntime = JSON.parse(execFileSync(hermesPython, ["-I", "-B",
+  path.join(repoRoot, "scripts/ci/hermes-host-runtime.py"), "inspect", "--source", hostSource,
+  "--sha", hostSha, "--repository", receivingPin.repository,
+  "--home-root", preparedHome, "--tools-root", preparedTools],
+  { encoding: "utf8", timeout: 45_000, env: preparedEnv }))
+assert.equal(preparedRuntime.source, hostSource, "Prepared runtime must load the qualified Git core")
+assert.equal(preparedRuntime.version.commit, hostSha, "Prepared runtime version provenance")
+assert.equal(preparedRuntime.intakeVersion, receivingHost.intakeVersion, "Prepared runtime intake capability")
 const provisioningUrl = process.env.TEST_DATABASE_URL
 if (!provisioningUrl) throw new Error("TEST_DATABASE_URL is required")
 assertLocalTestDatabaseUrl(provisioningUrl)
@@ -66,16 +111,19 @@ try {
   const { users } = await import("../../server/src/db/schema/users.ts")
   const { generateToken, hashToken } = await import("../../server/src/utils/auth.ts")
   const { SessionsModel } = await import("../../server/src/db/models/sessions.ts")
-  const [bot, human] = await db.insert(users).values([
+  const [bot, human, otherBot] = await db.insert(users).values([
     { firstName: "CI Bot", username: `ci_bot_${process.pid}`, bot: true, emailVerified: false, phoneVerified: false, pendingSetup: false },
     { firstName: "CI Human", username: `ci_human_${process.pid}`, bot: false, emailVerified: false, phoneVerified: false, pendingSetup: false },
+    { firstName: "CI Other Bot", username: `ci_other_bot_${process.pid}`, bot: true, emailVerified: false, phoneVerified: false, pendingSetup: false },
   ]).returning()
-  assert.ok(bot && human)
+  assert.ok(bot && human && otherBot)
   const { token } = await generateToken(bot.id)
   await SessionsModel.create({ userId: bot.id, tokenHash: hashToken(token), personalData: {}, clientType: "api" })
 
   const { token: humanToken } = await generateToken(human.id)
   await SessionsModel.create({ userId: human.id, tokenHash: hashToken(humanToken), personalData: {}, clientType: "api" })
+  const { token: otherBotToken } = await generateToken(otherBot.id)
+  await SessionsModel.create({ userId: otherBot.id, tokenHash: hashToken(otherBotToken), personalData: {}, clientType: "api" })
 
   let ready
   const readyPromise = new Promise((resolve) => { ready = resolve })
@@ -121,6 +169,13 @@ try {
   execFileSync("npm", ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund"], {
     cwd: consumer, stdio: "inherit", timeout: 180_000,
   })
+  // Exercise the actual prepared core and packed constructor guards before
+  // receiving; these checks do not connect a bot or qualify any scenario.
+  execFileSync(hermesPython, ["-I", "-B", path.join(repoRoot, "scripts/ci/hermes-host-runtime.test.py"),
+    "--source", hostSource, "--sha", hostSha,
+    "--home-root", preparedRuntime.homeRoot, "--tools-root", preparedRuntime.toolsRoot,
+    "--plugin", path.join(consumer, "node_modules/@inline-chat/hermes-agent-adapter/plugin")],
+    { cwd: consumer, env: preparedEnv, stdio: "inherit", timeout: 45_000 })
   const flow = path.join(consumer, "flow.mjs")
   await writeFile(flow, await readFile(path.join(repoRoot, "scripts/ci/local-packed-flow.mjs")))
   execFileSync("bun", ["--no-env-file", flow], {
@@ -136,26 +191,42 @@ try {
       INLINE_E2E_BOT_ID: String(bot.id), INLINE_E2E_CHAT_ID: String(flowReceipt.chatId),
       INLINE_E2E_RECEIPT: path.join(artifactDir, "mcp-flow-receipt.json") },
   })
-  const hermesHome = path.join(consumer, "hermes-home")
-  await mkdir(hermesHome)
+  const hermesHome = preparedRuntime.homeRoot
+  const hermesArtifact = manifest.packages.find((entry) => entry.name === sourceHermesManifest.name)
+  assert.ok(hermesArtifact, "receiving-qualified adapter artifact must exist")
+  const hermesReport = path.join(consumer, "hermes-observed-report.json")
   const hermesEnv = {
-    ...process.env, HERMES_HOME: hermesHome, HOME: consumer,
+    ...process.env, HERMES_HOME: hermesHome, HERMES_RUNTIME_DIR: preparedRuntime.toolsRoot,
+    HERMES_PREPARED_HOME_ROOT: hermesHome, HERMES_PREPARED_RUNTIME_DIR: preparedRuntime.toolsRoot,
+    INLINE_HERMES_BIN: hermesBin,
     INLINE_NODE_BIN: execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim(), INLINE_BASE_URL: baseUrl, INLINE_TOKEN: token,
     INLINE_E2E_BASE_URL: baseUrl, INLINE_E2E_HUMAN_TOKEN: humanToken,
     INLINE_E2E_HUMAN_ID: String(human.id), INLINE_E2E_BOT_ID: String(bot.id),
+    INLINE_E2E_OTHER_BOT_ID: String(otherBot.id), INLINE_E2E_OTHER_BOT_TOKEN: otherBotToken,
     INLINE_E2E_CONSUMER: consumer,
+    INLINE_E2E_SOURCE_SHA: manifest.sourceSha,
+    INLINE_E2E_HERMES_ARTIFACT_SHA256: hermesArtifact.sha256,
+    INLINE_E2E_HERMES_REPORT: hermesReport,
   }
   // Never allow the mock sidecar transport to make this lane pass accidentally.
   delete hermesEnv.INLINE_SIDECAR_TEST_MOCK
-  const runHermes = (bin, args) => execFileSync(bin, args, {
-    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout: 90_000,
+  const runHermes = (bin, args, timeout = 90_000) => execFileSync(bin, args, {
+    cwd: consumer, env: hermesEnv, stdio: "inherit", timeout,
   })
   runHermes(path.join(consumer, "node_modules/.bin/inline-hermes"), ["install", "--hermes-home", hermesHome, "--force", "--json"])
+  const installedHermesManifest = JSON.parse(await readFile(path.join(consumer,
+    "node_modules/@inline-chat/hermes-agent-adapter/package.json"), "utf8"))
+  assertHermesReceivingHost(hermesReceivingPin(installedHermesManifest), receivingHost)
   runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
   await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
-  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
-  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify({ sourceSha: manifest.sourceSha,
-    scenarios: [{ scenario: "hermes-real-host-inbound-and-persisted-reply", status: "passed" }] }, null, 2) + "\n")
+  runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")], 240_000)
+  // A successful child exit cannot stand in for the observed failure/recovery matrix.
+  const report = JSON.parse(await readFile(hermesReport, "utf8"))
+  const receipt = makeHermesReceivingReceipt({
+    sourceSha: manifest.sourceSha, host: receivingHost, artifactSha256: hermesArtifact.sha256, report,
+  })
+  await writeFile(path.join(artifactDir, "hermes-flow-report.json"), JSON.stringify(report, null, 2) + "\n")
+  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify(receipt, null, 2) + "\n")
   await closeDb()
   closeDb = undefined
   await stopServer()

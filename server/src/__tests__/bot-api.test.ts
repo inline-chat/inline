@@ -5,7 +5,10 @@ import { users } from "@in/server/db/schema/users"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { MessageModel } from "@in/server/db/models/messages"
-import { setupTestLifecycle } from "./setup"
+import { externalTasks, files, messageAttachments, messages, voices } from "@in/server/db/schema"
+import { encrypt } from "@in/server/modules/encryption/encryption"
+import { eq } from "drizzle-orm"
+import { setupTestLifecycle, testUtils } from "./setup"
 
 async function createBotSession(username: string) {
   const [bot] = await db
@@ -35,6 +38,80 @@ async function createBotSession(username: string) {
 
 describe("Bot HTTP API", () => {
   setupTestLifecycle()
+
+  it("exposes the hydrated forwarding preview and recovers stable forwarding receipts through HTTP", async () => {
+    const { bot, token } = await createBotSession("stableforwardbot")
+    const human = await testUtils.createUser("forward-preview-human@example.test")
+    const call = async (method: string, input: unknown) => {
+      const response = await app.handle(new Request(`http://localhost/bot/${method}`, { method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(input),
+      }))
+      expect(response.status).toBe(200)
+      const payload = await response.json()
+      expect(payload.ok).toBe(true)
+      return payload.result
+    }
+    const source = (await call("createThread", { title: "Source preview", participants: [human.id] })).chat.chat_id
+    const destination = (await call("createThread", { title: "Carried context", participants: [human.id] })).chat.chat_id
+    const sent = (await call("sendMessage", { chat_id: source, text: "Captured body", actions: [[{
+      action_id: "approve", text: "Approve", type: "callback", callback_data: "private callback payload",
+    }]] })).message
+    const stored = await MessageModel.getMessage(sent.message_id, source)
+    const title = encrypt("Visible provider card")
+    const [task] = await db.insert(externalTasks).values({ application: "linear", taskId: "task-preview", number: "INL-8",
+      status: "todo", url: "https://linear.example.test/INL-8", title: title.encrypted, titleIv: title.iv, titleTag: title.authTag,
+    }).returning()
+    const [file] = await db.insert(files).values({ fileUniqueId: "VOICE_HTTP_PREVIEW", userId: bot.id,
+      fileType: "voice", fileSize: 123, mimeType: "audio/ogg",
+    }).returning()
+    if (!task || !file) throw new Error("missing fixtures")
+    const [voice] = await db.insert(voices).values({ fileId: file.id, duration: 8, waveform: Buffer.from([1, 2]) }).returning()
+    if (!voice) throw new Error("missing voice")
+    await db.insert(messageAttachments).values({ messageId: stored.globalId, externalTaskId: BigInt(task.id) })
+    await db.update(messages).set({ mediaType: "voice", voiceId: voice.id }).where(eq(messages.globalId, stored.globalId))
+    const preview = (await call("getMessages", { chat_id: source, message_ids: [sent.message_id] })).messages[0]
+    expect(preview.source_snapshot).toMatch(/^[a-f0-9]{64}$/)
+    expect(preview.media.type).toBe("voice")
+    expect(preview.actions[0][0].text).toBe("Approve")
+    expect(preview.text).toContain("Visible provider card")
+    expect(preview.text).toContain("https://linear.example.test/INL-8")
+    const intent = { chat_id: destination, from_chat_id: source, message_ids: [sent.message_id], share_forward_header: false,
+      submissions: [{ random_id: "987654321", expected_source_revision: preview.rev, expected_source_snapshot: preview.source_snapshot }],
+    }
+    for (const malformed of [
+      { ...intent, share_forward_header: "false" },
+      { ...intent, submissions: [{ ...intent.submissions[0], random_id: 987654321 }] },
+      { ...intent, submissions: [{ ...intent.submissions[0], expected_source_revision: "0" }] },
+    ]) {
+      const response = await app.handle(new Request("http://localhost/bot/forwardMessages", { method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(malformed),
+      }))
+      expect(response.status).toBe(400)
+      expect((await response.json()).ok).toBe(false)
+    }
+    expect(await db.select().from(messages).where(eq(messages.chatId, destination))).toHaveLength(0)
+    const forwarded = await call("forwardMessages", intent)
+    expect((await call("forwardMessages", intent)).receipts).toEqual(forwarded.receipts)
+    expect(forwarded.receipts).toEqual([{ source_message_id: sent.message_id, random_id: "987654321",
+      message_id: forwarded.message_ids[0], source_revision: preview.rev,
+    }])
+    const copied = (await call("getMessages", { chat_id: destination, message_ids: forwarded.message_ids })).messages[0]
+    expect(copied.is_forwarded).toBe(true)
+    expect(copied.media.type).toBe("voice")
+    expect(copied.actions).toBeUndefined()
+    expect(copied.text).toContain("Approve")
+    expect(copied.text).not.toContain("private callback payload")
+    const historyResponse = await app.handle(new Request(`http://localhost/bot/getChatHistory?chat_id=${destination}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }))
+    expect(historyResponse.status).toBe(200)
+    const history = (await historyResponse.json()).result.messages[0]
+    expect(history.is_forwarded).toBe(true)
+    expect(history.source_snapshot).toBe(copied.source_snapshot)
+    expect(history.media.type).toBe("voice")
+    expect(history.text).toContain("Approve")
+    expect(await db.select().from(messages).where(eq(messages.chatId, destination))).toHaveLength(1)
+  })
 
   it("documents only canonical Bot API fields", async () => {
     const res = await app.handle(new Request("http://localhost/bot-api-reference/json"))

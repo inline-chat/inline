@@ -52,11 +52,9 @@ export async function deliverInboundEvent(
       continue
     }
     const normalized = normalizeInboundEvent(event, owner.meId, resolution.profile, owner.meUsername)
-    await owner.deliver(
-      resolution.provenanceVerified
-        ? normalized
-        : { ...(normalized as Record<string, Json>), _inlineSenderProvenanceVerified: false }
-    )
+    await owner.deliver({
+      ...(normalized as Record<string, Json>), _inlineSenderProvenanceVerified: resolution.provenanceVerified,
+    })
     return
   }
   owner.signal.throwIfAborted()

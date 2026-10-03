@@ -309,8 +309,14 @@ describe("messages.createChat", () => {
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, otherUser.id)))
 
-    expect(otherUpdates).toHaveLength(1)
-    const update = UpdatesModel.decrypt(otherUpdates[0]!)
+    const payloads = otherUpdates.map((row) => UpdatesModel.decrypt(row).payload.update)
+
+    expect(payloads.map((update) => update.oneofKind).sort()).toEqual([
+      "userAddedToChat",
+      "userChatOpen",
+      "userDialogFollowMode",
+    ])
+    const update = UpdatesModel.decrypt(otherUpdates.find((row) => UpdatesModel.decrypt(row).payload.update.oneofKind === "userAddedToChat")!,)
     expect(update.payload.update.oneofKind).toBe("userAddedToChat")
     if (update.payload.update.oneofKind !== "userAddedToChat") {
       throw new Error("Expected userAddedToChat update")
@@ -322,7 +328,10 @@ describe("messages.createChat", () => {
       .select()
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, currentUser.id)))
-    expect(currentUserUpdates).toHaveLength(0)
+    expect(currentUserUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind).sort()).toEqual([
+      "userChatOpen",
+      "userDialogFollowMode",
+    ])
   })
 
   test("allows duplicate home thread titles (not unique)", async () => {
