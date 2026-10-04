@@ -1,3 +1,4 @@
+import { formatQuietTimeline, activityAttention, activityLifecycleOutcome, preserveActivityTitles, ACTIVITY_MESSAGE_MAX_CHARS, type ActivityOutcome } from "./quiet-timeline.js"
 import { reportOpenClawPluginError } from "../telemetry.js"
 import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
@@ -52,9 +53,10 @@ import {
   buildChannelProgressDraftLineForEntry,
   createChannelProgressDraftGate,
   formatChannelProgressDraftText,
+  resolveChannelProgressDraftMaxLines,
   isChannelProgressDraftWorkToolName,
   mergeChannelProgressDraftLine,
-  resolveChannelProgressDraftMaxLines,
+  resolveChannelProgressDraftMaxLineChars,
   resolveChannelStreamingPreviewToolProgress,
   type AgentPlanStep,
   type ChannelProgressDraftLine,
@@ -90,6 +92,7 @@ import {
   type MessageActions,
   type MessageActionResponseUi,
   type User,
+  type UpdateComposeAction_ComposeAction,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
@@ -364,12 +367,25 @@ type InlinePartialMediaDeliveryResult = {
   commitOutcomeUnknown: boolean
 }
 
+type InlineClosedProgressRow = {
+  messageId: bigint
+  chatId: bigint
+  lines: Array<string | ChannelProgressDraftLine>
+  elapsed: number
+  toolFailed: boolean
+  outcome: ActivityOutcome
+}
+
 type InlineProgressPlaceholderState = {
   messageId: bigint | null
   text: string
   lines: Array<string | ChannelProgressDraftLine>
   opChain: Promise<void>
   closing: boolean
+  startedAt: number | null
+  toolFailed: boolean
+  lastClosed: InlineClosedProgressRow | null
+  pendingClosures: Set<InlineClosedProgressRow>
 }
 
 type InlinePendingHistoryEntry = {
@@ -418,6 +434,7 @@ type InlineReplyDeliveryResult = {
 }
 
 type InlineReplyPayload = {
+  isError?: boolean | undefined
   text?: string | undefined
   mediaUrl?: string | undefined
   mediaUrls?: string[] | undefined
@@ -495,8 +512,9 @@ function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallba
 }
 
 async function sendInlineTypingToChats(params: {
-  client: Pick<InlineSdkClient, "sendTyping">
+  client: Pick<InlineSdkClient, "invokeRaw" | "sendTyping">
   chatIds: bigint[]
+  agentActivityEnabled?: boolean
   typing: boolean
   onPartialError?: (chatId: bigint, error: unknown) => void
 }): Promise<void> {
@@ -506,7 +524,18 @@ async function sendInlineTypingToChats(params: {
   await Promise.all(
     params.chatIds.map(async (chatId) => {
       try {
-        await params.client.sendTyping({ chatId, typing: params.typing })
+        if (!params.agentActivityEnabled) {
+          await params.client.sendTyping({ chatId, typing: params.typing })
+          return
+        }
+        // WORKING = 6; only explicitly opted-in accounts emit this signal.
+        await params.client.invokeRaw(Method.SEND_COMPOSE_ACTION, {
+          oneofKind: "sendComposeAction",
+          sendComposeAction: {
+            peerId: buildChatPeer(chatId),
+            ...(params.typing ? { action: 6 as UpdateComposeAction_ComposeAction } : {}),
+          },
+        })
       } catch (error) {
         failures.push({ chatId, error })
       }
@@ -622,6 +651,7 @@ async function sendInlineBotPresenceToChats(params: {
 async function sendInlineTypingAndBotPresenceToChats(params: {
   client: Pick<InlineSdkClient, "invokeRaw" | "sendTyping">
   chatIds: bigint[]
+  agentActivityEnabled?: boolean
   typing: boolean
   presenceKind: InlineBotPresenceKind
   onTypingPartialError?: (chatId: bigint, error: unknown) => void
@@ -634,6 +664,7 @@ async function sendInlineTypingAndBotPresenceToChats(params: {
       client: params.client,
       chatIds: params.chatIds,
       typing: params.typing,
+      agentActivityEnabled: params.agentActivityEnabled === true,
       ...(params.onTypingPartialError ? { onPartialError: params.onTypingPartialError } : {}),
     }).catch((error) => {
       typingError = error
@@ -4879,6 +4910,7 @@ export async function monitorInlineProvider(params: {
       parentThreadCreationTyping = typing
       await sendInlineTypingAndBotPresenceToChats({
         client,
+        agentActivityEnabled: account.config.experimentalAgentActivity === true,
         chatIds: [effectiveChatId],
         typing,
         presenceKind: typing ? "running" : "idle",
@@ -5034,6 +5066,7 @@ export async function monitorInlineProvider(params: {
         .catch(() => {})
         .then(() => sendInlineTypingToChats({
           client,
+          agentActivityEnabled: account.config.experimentalAgentActivity === true,
           chatIds: [targetChatId],
           typing,
           onPartialError: (failedChatId, error) =>
@@ -5333,6 +5366,7 @@ export async function monitorInlineProvider(params: {
           }).catch(() => null)
         : null
 
+    const agentActivityEnabled = account.config.experimentalAgentActivity === true
     const inlineStreamingMode = resolveInlineStreamingMode(account.config)
     const streamViaEditMessage =
       inlineStreamingMode === "partial" &&
@@ -5374,27 +5408,33 @@ export async function monitorInlineProvider(params: {
       lines: [],
       opChain: Promise.resolve(),
       closing: false,
+      startedAt: null,
+      toolFailed: false,
+      lastClosed: null,
+      pendingClosures: new Set(),
     }
+    const progressMaxLineChars = resolveChannelProgressDraftMaxLineChars(account.config)
+    const formatProgress = (lines: Array<string | ChannelProgressDraftLine>, working: boolean, elapsed?: number, outcome?: ActivityOutcome, toolFailed?: boolean) =>
+      agentActivityEnabled
+        ? formatQuietTimeline(lines, working, elapsed, outcome, toolFailed, progressMaxLineChars)
+        : sanitizeInlineDeliveryText(formatChannelProgressDraftText({
+            entry: account.config, lines, seed: progressSeed,
+          })).trim()
     const renderInlineProgressPlaceholder = async (): Promise<void> => {
       if (abortSignal.aborted || !progressPlaceholderEnabled || progressState.closing || adoptingThread) return
-      const text = sanitizeInlineDeliveryText(
-        formatChannelProgressDraftText({
-          entry: account.config,
-          lines: progressState.lines,
-          seed: progressSeed,
-        }),
-      ).trim()
+      const text = formatProgress(progressState.lines, true)
       if (!text || text === progressState.text) return
 
       progressState.opChain = progressState.opChain
         .then(async () => {
           if (abortSignal.aborted || progressState.closing || text === progressState.text) return
           if (progressState.messageId == null) {
+            progressState.startedAt ??= performance.now()
             const sent = await client.sendMessage({
               chatId: deliveryChatId,
               text,
               sendMode: "silent",
-              parseMarkdown,
+              parseMarkdown: agentActivityEnabled || parseMarkdown,
             })
             if (sent.messageId == null) {
               throw new Error("inline progress placeholder: sendMessage returned no messageId")
@@ -5412,7 +5452,7 @@ export async function monitorInlineProvider(params: {
                 messageId: progressState.messageId,
                 peerId: buildChatPeer(deliveryChatId),
                 text,
-                parseMarkdown,
+                parseMarkdown: agentActivityEnabled || parseMarkdown,
               },
             })
             if (result.oneofKind !== "editMessage") {
@@ -5433,62 +5473,138 @@ export async function monitorInlineProvider(params: {
     let progressDraftGate = createChannelProgressDraftGate({
       onStart: renderInlineProgressPlaceholder,
     })
+    let activityOperationTail: Promise<void> = Promise.resolve()
+    const enqueueActivityOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+      if (!agentActivityEnabled) return operation()
+      const pending = activityOperationTail.then(operation)
+      // Keep later operations runnable after a failed visible send.
+      activityOperationTail = pending.then(() => undefined, () => undefined)
+      return pending
+    }
+    const drainActivityOperations = async (): Promise<void> => {
+      let pending: Promise<void>
+      do {
+        pending = activityOperationTail
+        await pending
+      } while (pending !== activityOperationTail)
+    }
     const pushInlineProgressPlaceholder = async (
       line?: string | ChannelProgressDraftLine,
       options?: { toolName?: string; startImmediately?: boolean },
     ): Promise<void> => {
-      if (!progressPlaceholderEnabled || progressState.closing) return
-      if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
-        return
-      }
-
-      const normalized = typeof line === "string" ? line.replace(/\s+/g, " ").trim() : line?.text.trim()
-      if (line && !normalized) return
-      if (progressToolProgressEnabled && line && normalized) {
-        const nextLines = mergeChannelProgressDraftLine(progressState.lines, line, {
-          maxLines: resolveChannelProgressDraftMaxLines(account.config),
-        })
-        if (nextLines !== progressState.lines) {
-          progressState.lines = nextLines
+      const eventAt = performance.now()
+      return enqueueActivityOperation(async () => {
+        if (!progressPlaceholderEnabled || progressState.closing) return
+        if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
+          return
         }
-      }
 
-      const alreadyStarted = progressDraftGate.hasStarted
-      if (options?.startImmediately || shouldStartInlineProgressPlaceholderNow(line)) {
-        await progressDraftGate.startNow()
-      } else {
-        await progressDraftGate.noteWork()
-      }
-      if (alreadyStarted && progressDraftGate.hasStarted) {
-        await renderInlineProgressPlaceholder()
-      }
+        const normalized = typeof line === "string" ? line.replace(/\s+/g, " ").trim() : line?.text.trim()
+        if (line && !normalized) return
+        if (line) progressState.startedAt ??= eventAt
+        if (progressToolProgressEnabled && line && normalized) {
+          const toolFailed = agentActivityEnabled && activityAttention([line]).failed
+          const nextLines = mergeChannelProgressDraftLine(progressState.lines, line, {
+            maxLines: agentActivityEnabled ? Number.MAX_SAFE_INTEGER : resolveChannelProgressDraftMaxLines(account.config),
+          })
+          if (nextLines !== progressState.lines) {
+            if (agentActivityEnabled) preserveActivityTitles(progressState.lines, nextLines)
+            // Reserve room for the terminal title, and flush even if the initial
+            // delayed draft has not been sent yet. Individual previews are bounded.
+            if (agentActivityEnabled && nextLines.length > 1 && formatProgress(nextLines, true).length > ACTIVITY_MESSAGE_MAX_CHARS - 300) {
+              const rolloverLine = nextLines.find((entry, index) => entry !== progressState.lines[index]) ?? line
+              await progressDraftGate.startNow()
+              await cleanupInlineProgressPlaceholder("success", eventAt)
+              progressState.closing = false
+              progressState.lines = [rolloverLine]
+              progressState.startedAt = eventAt
+              progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+            } else {
+              progressState.lines = nextLines
+            }
+          }
+          progressState.toolFailed ||= toolFailed
+        }
+
+        const alreadyStarted = progressDraftGate.hasStarted
+        if (options?.startImmediately || shouldStartInlineProgressPlaceholderNow(line)) {
+          await progressDraftGate.startNow()
+        } else {
+          await progressDraftGate.noteWork()
+        }
+        if (alreadyStarted && progressDraftGate.hasStarted) {
+          await renderInlineProgressPlaceholder()
+        }
+      })
     }
-    const cleanupInlineProgressPlaceholder = async (): Promise<void> => {
+    const cleanupInlineProgressPlaceholder = async (outcome: ActivityOutcome = "success", endedAt = performance.now()): Promise<void> => {
       progressDraftGate.cancel()
       progressState.closing = true
+      // Freeze the endpoint before awaiting queued transport.
       await progressState.opChain
-
       const messageId = progressState.messageId
-      if (messageId == null) return
-
-      try {
-        const result = await client.invokeRaw(Method.DELETE_MESSAGES, {
-          oneofKind: "deleteMessages",
-          deleteMessages: {
-            peerId: buildChatPeer(deliveryChatId),
-            messageIds: [messageId],
-          },
-        })
-        if (result.oneofKind !== "deleteMessages") {
-          throw new Error(
-            `inline progress placeholder: expected deleteMessages result, got ${String(result.oneofKind)}`,
-          )
+      if (!agentActivityEnabled) {
+        if (messageId == null) return
+        try {
+          const result = await client.invokeRaw(Method.DELETE_MESSAGES, {
+            oneofKind: "deleteMessages",
+            deleteMessages: { peerId: buildChatPeer(deliveryChatId), messageIds: [messageId] },
+          })
+          if (result.oneofKind !== "deleteMessages") {
+            throw new Error(`inline progress placeholder: expected deleteMessages result, got ${String(result.oneofKind)}`)
+          }
+        } catch (error) {
+          runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
+        } finally {
+          progressState.messageId = null
+          progressState.text = ""
         }
-      } catch (error) {
-        runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
-      } finally {
+        return
+      }
+      if (messageId != null) {
+        progressState.lastClosed = {
+          messageId, chatId: deliveryChatId, lines: progressState.lines.slice(),
+          elapsed: Math.max(0, (endedAt - (progressState.startedAt ?? endedAt)) / 1000),
+          toolFailed: progressState.toolFailed,
+          outcome,
+        }
+        progressState.pendingClosures.add(progressState.lastClosed)
         progressState.messageId = null
-        progressState.text = ""
+      }
+      // A short block may close before its delayed first send. Its clock and
+      // attention still belong to that block, never the next conversational step.
+      progressState.text = ""
+      progressState.startedAt = null
+      progressState.toolFailed = false
+      const row = progressState.lastClosed
+      // A final dispatch error may arrive after the reply boundary closed its
+      // activity row. Correct that row using its frozen duration and peer.
+      if (row && messageId == null && outcome !== "success" && row.outcome !== outcome) {
+        row.outcome = outcome
+        progressState.pendingClosures.add(row)
+      }
+      for (const pending of progressState.pendingClosures) {
+        // Editing the same frozen payload is idempotent. Keep failed closures
+        // through rollovers and retry again at the reply/turn boundary.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+              oneofKind: "editMessage",
+              editMessage: {
+                peerId: buildChatPeer(pending.chatId), messageId: pending.messageId,
+                text: formatProgress(pending.lines, false, pending.elapsed, pending.outcome, pending.toolFailed),
+                parseMarkdown: true,
+              },
+            })
+            if (result.oneofKind !== "editMessage") {
+              throw new Error(`inline activity: expected editMessage result, got ${String(result.oneofKind)}`)
+            }
+            progressState.pendingClosures.delete(pending)
+            break
+          } catch (error) {
+            if (attempt === 1) runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
+          }
+        }
       }
     }
     let finalDeliveredForCurrentAssistantMessage = false
@@ -5891,8 +6007,20 @@ export async function monitorInlineProvider(params: {
     const buildInlineProgressLineForEntry = (
       input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
       options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
-    ): ChannelProgressDraftLine | undefined =>
-      buildChannelProgressDraftLineForEntry(account.config, input, options)
+    ): ChannelProgressDraftLine | undefined => {
+      const line = buildChannelProgressDraftLineForEntry(account.config, input, options)
+      // Item titles are host-generated strings such as `command ${command}`,
+      // not an agent description. Keep the description from the correlated start.
+      const description = input.event === "tool"
+        ? [input.args?.description, input.args?.title].find((value) => typeof value === "string" && value.trim())
+        : undefined
+      // Preserve an explicit agent description separately from the raw tool log.
+      // Mutate the existing line so the host's WeakMap correlation survives.
+      if (agentActivityEnabled && line && typeof description === "string" && description.trim()) {
+        Object.assign(line, { activityTitle: description })
+      }
+      return line
+    }
 
     let delivered = false
     const activeThreadRoute: ActiveInlineThreadRoute = {
@@ -5906,6 +6034,24 @@ export async function monitorInlineProvider(params: {
         id: isGroup ? String(effectiveChatId) : senderId,
       },
       threadId: deliveryReplyThreadContext?.childChatId,
+      ...(agentActivityEnabled ? { runVisibleReply: async <T>(send: () => Promise<T>) => {
+        const boundaryAt = performance.now()
+        return enqueueActivityOperation(async () => {
+          try {
+            // Flush a delayed first row before placing its conversational reply.
+            if (progressState.lines.length > 0 && !progressState.closing) await progressDraftGate.startNow()
+            await cleanupInlineProgressPlaceholder("success", boundaryAt)
+            const result = await send()
+            delivered = true
+            return result
+          } finally {
+            // Failed sends retain the closed logs and release later progress too.
+            progressState.closing = false
+            progressState.lines = []
+            progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+          }
+        })
+      } } : {}),
       onThreadAdopted: async (threadId: bigint) => {
         adoptingThread = true
         try {
@@ -5949,8 +6095,38 @@ export async function monitorInlineProvider(params: {
       },
     }
 
+    let activityRunId: string | undefined
+    let activityHostOutcome: ActivityOutcome | undefined
+    let activityHostEndedAt: number | undefined
+    let activityTerminal: Promise<void> | undefined
+    let resolveActivityTerminal: (() => void) | undefined
+    const resetActivityTerminal = () => {
+      activityHostOutcome = undefined
+      activityHostEndedAt = undefined
+      activityTerminal = new Promise<void>((resolve) => { resolveActivityTerminal = resolve })
+    }
+    const settleActivityTerminal = async () => {
+      if (!agentActivityEnabled || !activityTerminal || activityHostOutcome || !core.events?.onAgentEvent) return
+      if (progressState.messageId == null && !progressState.lastClosed && !progressDraftGate.hasStarted) return
+      // /stop can settle channel dispatch before the admitted run emits its
+      // terminal event. Drain that event before freezing the activity outcome.
+      // Bound a missing host event so teardown cannot retain this listener.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          activityTerminal,
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, 2_000) }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
     const replyOptions = {
       abortSignal,
+      ...(agentActivityEnabled ? { onAgentRunStart: (runId: string) => {
+        activityRunId = runId
+        resetActivityTerminal()
+      } } : {}),
       onObservedReplyDelivery: async () => {
         delivered = true
       },
@@ -5979,6 +6155,8 @@ export async function monitorInlineProvider(params: {
           }
         : {}),
       onToolStart: async (payload: {
+        itemId?: string
+        toolCallId?: string
         name?: string
         phase?: string
         args?: Record<string, unknown>
@@ -5991,11 +6169,13 @@ export async function monitorInlineProvider(params: {
 
         botPresenceLifecycle.busy("running")
         if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        await resetEditStreamOnBoundary()
+        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
         await pushInlineProgressPlaceholder(
           buildInlineProgressLineForEntry(
             {
               event: "tool",
+              ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
+              ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
               ...(toolName ? { name: toolName } : {}),
               ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
               ...(payload.args !== undefined ? { args: payload.args } : {}),
@@ -6034,6 +6214,8 @@ export async function monitorInlineProvider(params: {
         ? {
             onItemEvent: async (payload: {
               itemId?: string
+              toolCallId?: string
+              commandBearing?: boolean
               kind?: string
               title?: string
               name?: string
@@ -6047,6 +6229,8 @@ export async function monitorInlineProvider(params: {
                 buildInlineProgressLineForEntry({
                   event: "item",
                   ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
+                  ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
+                  ...(payload.commandBearing !== undefined ? { commandBearing: payload.commandBearing } : {}),
                   ...(payload.kind !== undefined ? { itemKind: payload.kind } : {}),
                   ...(payload.title !== undefined ? { title: payload.title } : {}),
                   ...(payload.name !== undefined ? { name: payload.name } : {}),
@@ -6077,6 +6261,8 @@ export async function monitorInlineProvider(params: {
               )
             },
             onCommandOutput: async (payload: {
+              itemId?: string
+              toolCallId?: string
               phase?: string
               title?: string
               name?: string
@@ -6087,6 +6273,8 @@ export async function monitorInlineProvider(params: {
               await pushInlineProgressPlaceholder(
                 buildChannelProgressDraftLine({
                   event: "command-output",
+                  ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
+                  ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
                   ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
                   ...(payload.title !== undefined ? { title: payload.title } : {}),
                   ...(payload.name !== undefined ? { name: payload.name } : {}),
@@ -6123,7 +6311,7 @@ export async function monitorInlineProvider(params: {
       onCompactionStart: async () => {
         botPresenceLifecycle.busy("review")
         if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        await resetEditStreamOnBoundary()
+        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
         await pushInlineProgressPlaceholder("Compacting context", {
           startImmediately: true,
         })
@@ -6131,7 +6319,7 @@ export async function monitorInlineProvider(params: {
       onCompactionEnd: async () => {
         botPresenceLifecycle.busy("running")
         if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        await resetEditStreamOnBoundary()
+        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
         await pushInlineProgressPlaceholder("Resuming", {
           startImmediately: true,
         })
@@ -6146,6 +6334,22 @@ export async function monitorInlineProvider(params: {
     }
 
     const endActiveThreadRoute = beginInlineActiveThreadRoute(activeThreadRoute)
+    // /stop aborts the host's run, not this channel's lifetime signal. Observe
+    // only the run admitted for this turn through the public runtime event API.
+    const unsubscribeActivity = agentActivityEnabled ? core.events?.onAgentEvent((event) => {
+      if (!activityRunId || event.runId !== activityRunId || event.stream !== "lifecycle") return
+      if (event.data.phase === "start") {
+        resetActivityTerminal()
+        return
+      }
+      const outcome = activityLifecycleOutcome(event.data)
+      if (outcome) {
+        activityHostOutcome = outcome
+        activityHostEndedAt = performance.now()
+        resolveActivityTerminal?.()
+      }
+    }) : undefined
+    let activityTurnCompleted = false
     try {
       let skippedNonSilent = false
       let skippedSilently = false
@@ -6180,7 +6384,15 @@ export async function monitorInlineProvider(params: {
                 delivered = true
                 payloadVisible = true
               }
-              const finishPayload = () => inlineReplyDeliveryResult(payloadVisible)
+              const finishPayload = () => {
+                // Later tool work belongs below this conversational reply.
+                if (agentActivityEnabled && payloadVisible && progressState.closing) {
+                  progressState.closing = false
+                  progressState.lines = []
+                  progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+                }
+                return inlineReplyDeliveryResult(payloadVisible)
+              }
               await activeThreadRoute.adoption
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
@@ -6189,7 +6401,8 @@ export async function monitorInlineProvider(params: {
 
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return finishPayload()
-              await cleanupInlineProgressPlaceholder()
+              await drainActivityOperations()
+              await cleanupInlineProgressPlaceholder(visiblePayload.isError || info?.kind === "error" ? "failure" : "success")
 
               const payloadRecord = visiblePayload as InlineReplyPayload & {
                 interactive?: unknown
@@ -6537,7 +6750,18 @@ export async function monitorInlineProvider(params: {
       if (partialMediaDelivered) {
         delivered = true
       }
-      await cleanupInlineProgressPlaceholder()
+      await drainActivityOperations()
+      await settleActivityTerminal()
+      const finalActivityOutcome = (): ActivityOutcome =>
+        abortSignal.aborted || activityHostOutcome === "cancelled" ? "cancelled"
+          : dispatchError != null || failedNonSilent || activityHostOutcome === "failure" ? "failure" : "success"
+      const closedOutcome = finalActivityOutcome()
+      await cleanupInlineProgressPlaceholder(closedOutcome, activityHostEndedAt)
+      // An event can arrive at the bounded wait's deadline while the terminal
+      // edit is in flight. Reconcile it against the same frozen row before exit.
+      if (finalActivityOutcome() !== closedOutcome) {
+        await cleanupInlineProgressPlaceholder(finalActivityOutcome(), activityHostEndedAt)
+      }
       if (
         !delivered &&
         streamViaEditMessage &&
@@ -6590,11 +6814,20 @@ export async function monitorInlineProvider(params: {
         })
         publishStatus({ lastOutboundAt: Date.now() })
       }
+      activityTurnCompleted = true
     } finally {
+      unsubscribeActivity?.()
       endActiveThreadRoute()
+      if (agentActivityEnabled && !activityTurnCompleted && !abortSignal.aborted) {
+        await cleanupInlineProgressPlaceholder("failure")
+      }
       if (abortSignal.aborted) {
+        if (agentActivityEnabled) await cleanupInlineProgressPlaceholder("cancelled")
         runTypingCleanup()
         botPresenceLifecycle.cleanup()
+      }
+      if (progressState.pendingClosures.size > 0) {
+        await cleanupInlineProgressPlaceholder()
       }
       if (adoptedThreadThisTurn) {
         await sendDeliveryTyping(deliveryChatId, false).catch((error) =>

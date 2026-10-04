@@ -27,7 +27,7 @@ type InlineStyle = { open: string; close: string }
 const literalHTMLToken = /<\/?[A-Za-z][A-Za-z0-9:-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>/y
 const literalHTMLDelimiters = [["<!--", "-->"], ["<?", "?>"], ["<![CDATA[", "]]>"]] as const
 const structuralTags = new Set(["<details>", "<details open>", "</details>", "<summary>", '<summary kind="progress">', "</summary>", "<footer>", "</footer>"])
-const disclosureSummaryTag = /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>$/
+const disclosureSummaryTag = /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>$/
 
 /** Keep unsupported HTML tokens literal, including known-looking style tags
  * inside quoted attributes/comments. Only the explicit style/block vocabulary

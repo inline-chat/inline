@@ -986,7 +986,7 @@ class MessageSizeCalculator {
     if richContentRendererEnabled,
        message.translationText == nil,
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
-       let blockContentPayload = message.message.blockContentPayload
+       let blockContentPayload = message.message.displayBlockContentPayload
     {
       let richContentInset = hasBubbleColor ? bubbleContentHorizontalInset : 0
       let richViewportWidth = max(1, availableWidth + richContentInset * 2)
@@ -1807,7 +1807,7 @@ class MessageSizeCalculator {
     if richContentRendererEnabled,
        message.translationText == nil,
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
-       let blockContentPayload = message.message.blockContentPayload
+       let blockContentPayload = message.message.displayBlockContentPayload
     {
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
         content: blockContentPayload.content,

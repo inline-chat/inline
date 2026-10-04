@@ -196,6 +196,8 @@ struct DirectChatItem: View {
   @ViewBuilder
   private func composeActionIndicator(_ action: ApiComposeAction?) -> some View {
     switch action {
+    case .working:
+      WorkingActivityIndicator()
     case .typing:
       TypingActivityIndicator(color: .accentColor)
     case .uploadingPhoto:
@@ -222,7 +224,7 @@ struct DirectChatItem: View {
 
   private func composeActionForegroundColor(_ action: ApiComposeAction?) -> Color {
     switch action {
-    case .typing, .recordingVoice:
+    case .typing, .working, .recordingVoice:
       .accentColor
     default:
       .secondary

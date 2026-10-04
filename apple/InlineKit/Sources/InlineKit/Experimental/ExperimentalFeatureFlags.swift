@@ -1,6 +1,10 @@
 import Foundation
+import InlineConfig
 
 public enum ExperimentalFeatureFlags {
+  public static let agentActivityKey = AgentActivityFeature.preferenceKey
+  public static var agentActivityEnabled: Bool { AgentActivityFeature.isEnabled }
+
   public static let newThreadAgentPickerKey = "experimental.newThreadAgentPicker"
 
   /// macOS-only, opt-in persistent agent selection for the new-thread composer.

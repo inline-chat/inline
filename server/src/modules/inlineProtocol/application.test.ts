@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { Method, RealtimeV3Request, RealtimeV3Response, RpcCall, RpcError_Code } from "@inline-chat/protocol/core"
 import { InlineProtocolApplicationOutputOverloaded, type LoadedServerAuthorizationKey } from "@inline-chat/protocol/server"
 import * as rpcHandlers from "@in/server/realtime/handlers/_rpc"
+import { ConnVersion, connectionManager } from "@in/server/ws/connections"
 import {
   InlineProtocolApplicationLanes,
   inlineProtocolRpcExecutionLane,
@@ -15,6 +16,69 @@ const deferred = () => {
 }
 
 describe("Inline Protocol application ordering", () => {
+  test("negotiates working only on the exact authorized V3 socket and rejects stale bindings", async () => {
+    const authorization = {
+      authKeyId: new Uint8Array(8).fill(1), permanentAuthKeyId: new Uint8Array(8).fill(2),
+      permanent: false, temporaryBound: true, userId: 82_010, accountSessionId: 91_020,
+    }
+    const active: LoadedServerAuthorizationKey = {
+      key: new Uint8Array(256), keyId: authorization.authKeyId, temporary: true, currentServerSalt: 1n,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      binding: { permanentAuthKeyId: authorization.permanentAuthKeyId, temporarySessionId: 3n, nonce: 4n,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600, userId: authorization.userId,
+        accountSessionId: authorization.accountSessionId },
+    }
+    const connectionId = "working-capability-v3"
+    const membershipReader = connectionManager as unknown as { getUserSpaceIds(userId: number): Promise<number[]> }
+    const memberships = spyOn(membershipReader, "getUserSpaceIds").mockResolvedValue([])
+    let stale = false, allowAdmission = true, executions = 0
+    connectionManager.addConnection({ id: connectionId, close() {}, subscribe() {} } as never, ConnVersion.REALTIME_V3)
+    const dispatcher = makeInlineProtocolApplicationDispatcher({
+      connectionId,
+      authorizationKeys: { load: async () => stale ? undefined : active },
+      operations: {
+        authBegin: async () => { throw new Error("unexpected auth") },
+        authComplete: async () => { throw new Error("unexpected auth") },
+        authBeginBrowser: async () => { throw new Error("unexpected auth") },
+        authBrowserStatus: async () => { throw new Error("unexpected auth") },
+      },
+      onAuthorized: () => allowAdmission && connectionManager.authenticateConnection(
+        connectionId, authorization.userId, authorization.accountSessionId, 3,
+      ),
+    })
+    const dispatch = async (supportsWorking: boolean | undefined) => {
+      const response = await dispatcher.dispatch({
+        payload: RealtimeV3Request.toBinary({ body: { oneofKind: "connectionInit", connectionInit: {
+          token: "ignored-v3-token", supportsWorking,
+        } } }),
+        authorization, messageId: 1n, sessionId: 2n, signal: new AbortController().signal,
+        markExecutionStarted: () => { executions++ }, sendUpdate() {},
+      })
+      if (response.kind !== "result") throw new Error("expected capability result")
+      return RealtimeV3Response.fromBinary(response.payload)
+    }
+    try {
+      expect((await dispatch(true)).body.oneofKind).toBe("connectionOpen")
+      expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(true)
+      expect((await dispatch(undefined)).body.oneofKind).toBe("connectionOpen")
+      expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(false)
+      expect(executions).toBe(2)
+
+      stale = true
+      expect((await dispatch(true)).body.oneofKind).toBe("rpcError")
+      expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(false)
+      stale = false
+      allowAdmission = false
+      expect((await dispatch(true)).body.oneofKind).toBe("rpcError")
+      expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(false)
+      expect(executions).toBe(2)
+    } finally {
+      connectionManager.removeConnection(connectionId)
+      await connectionManager.waitForBackgroundWork()
+      memberships.mockRestore()
+    }
+  })
+
   test("lets an authorized permanent key collect its browser-login result", async () => {
     let statusCalls = 0
     const dispatcher = makeInlineProtocolApplicationDispatcher({

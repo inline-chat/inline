@@ -37,6 +37,9 @@ message ConnectionInit {
   optional string device_name = 7;
   optional string client_type = 8;
   optional string time_zone = 9;
+
+  // Opt in per connection. Older clients interpret WORKING as cancellation.
+  optional bool supports_working = 10;
 }
 
 message ServerProtocolMessage {
@@ -561,6 +564,8 @@ message BlockDisclosure {
     ACTIVITY_KIND_COMMAND = 8;
     ACTIVITY_KIND_WEB = 9;
     ACTIVITY_KIND_TOOL = 10;
+    // Explicit quiet timeline row, emitted by integrations that opt into this presentation.
+    ACTIVITY_KIND_AGENT = 11;
   }
 
   BlockText summary = 1;
@@ -4025,6 +4030,8 @@ message UpdateComposeAction {
     UPLOADING_DOCUMENT = 3;
     UPLOADING_VIDEO = 4;
     RECORDING_VOICE = 5;
+    // Ephemeral agent work; same expiry and stop semantics as typing.
+    WORKING = 6;
   }
 
   // User ID of the user who is composing the message
@@ -4533,6 +4540,7 @@ message RealtimeV3Response {
     FinishHttpUploadResult finish_http_upload = 6 [deprecated = true];
     AuthBeginBrowserResult auth_begin_browser = 7;
     AuthBrowserStatusResult auth_browser_status = 8;
+    ConnectionOpen connection_open = 9;
   }
 }
 

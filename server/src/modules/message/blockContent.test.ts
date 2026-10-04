@@ -294,6 +294,22 @@ describe("block content parser", () => {
     expect(nested?.kind.oneofKind === "disclosure" ? nested.kind.disclosure.children.map(kind) : []).toEqual(["code"])
   })
 
+  test("round trips the explicit quiet agent row separately from ordinary tools", () => {
+    for (const working of [true, false]) {
+      const markdown = `<details>\n<summary${working ? ' kind="progress"' : ""} activity="agent">Activity</summary>\nRead proposal.md\n</details>`
+      const parsed = parseBlockContent(markdown)!
+      const block = parsed.blockContent.blocks[0]!
+      expect(block.kind.oneofKind).toBe("disclosure")
+      if (block.kind.oneofKind !== "disclosure") return
+      expect(block.kind.disclosure.activityKind).toBe(BlockDisclosure_ActivityKind.AGENT)
+      expect(block.kind.disclosure.initiallyOpen).toBe(false)
+      expect(block.kind.disclosure.kind).toBe(working ? BlockDisclosure_Kind.PROGRESS : BlockDisclosure_Kind.DEFAULT)
+      const encoded = encodeBlockContentToMarkdown({ text: parseMarkdown(markdown).text, blockContent: parsed.blockContent })
+      expect(encoded).toContain('activity="agent"')
+      expect(parseBlockContent(encoded)?.blockContent.blocks[0]?.kind.oneofKind).toBe("disclosure")
+    }
+  })
+
   test("preserves semantic activity disclosures through parsing and encoding", () => {
     const markdown = [
       "<details open>",

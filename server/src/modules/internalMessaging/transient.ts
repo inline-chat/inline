@@ -9,7 +9,7 @@ import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { outboundPublications, type OutboundPublication } from "./outbound"
 import { internalMessaging } from "./service"
 
-type ComposeAction = "none" | "typing" | "uploadingDocument" | "uploadingPhoto" | "uploadingVideo" | "recordingVoice"
+type ComposeAction = "none" | "typing" | "uploadingDocument" | "uploadingPhoto" | "uploadingVideo" | "recordingVoice" | "working"
 
 class ComposePublication implements OutboundPublication {
   readonly key: string
@@ -113,6 +113,7 @@ const composeValue: Record<ComposeAction, UpdateComposeAction_ComposeAction> = {
   uploadingPhoto: UpdateComposeAction_ComposeAction.UPLOADING_PHOTO,
   uploadingVideo: UpdateComposeAction_ComposeAction.UPLOADING_VIDEO,
   recordingVoice: UpdateComposeAction_ComposeAction.RECORDING_VOICE,
+  working: UpdateComposeAction_ComposeAction.WORKING,
 }
 
 export function subscribeTransientRealtime(): () => void {

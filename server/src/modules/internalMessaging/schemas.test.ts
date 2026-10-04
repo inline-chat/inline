@@ -36,6 +36,18 @@ describe("internal messaging contracts", () => {
     }))).toThrow()
   })
 
+  it("preserves working and stop across the transient broker wire", () => {
+    for (const action of ["working", "none"]) {
+      const envelope = {
+        version: 1, eventId: randomUUID(), originBootId: randomUUID(),
+        target: { kind: "user", userId: 2 },
+        event: { kind: "TransientRealtime", payload: { kind: "composeChanged", userId: 1, chatId: 7, action } },
+      }
+      const decoded = decodeEnvelope(JSON.stringify(envelope))
+      expect(JSON.parse(encodeEnvelope(decoded))).toEqual(envelope)
+    }
+  })
+
   it("rejects excess fields, incompatible targets, invalid IDs and versions", () => {
     expect(() => decodeEnvelope(JSON.stringify({ ...durable(), extra: "ignored?" }))).toThrow()
     expect(() => decodeEnvelope(JSON.stringify({ ...durable(), target: { kind: "user", userId: 1 } }))).toThrow()

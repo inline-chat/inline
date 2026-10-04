@@ -67,6 +67,7 @@ const ComposeAction = Schema.Literals([
   "uploadingPhoto",
   "uploadingVideo",
   "recordingVoice",
+  "working",
 ])
 const UpdateComposeAction = Schema.Struct({
   userId: WirePositiveInteger,

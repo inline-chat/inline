@@ -15,13 +15,14 @@ final class ChatRouteToolbarTitleModel {
     case none
     case text(String)
     case typing(String)
+    case working(String)
     case recordingVoice(String)
 
     var text: String? {
       switch self {
       case .none:
         nil
-      case let .text(text), let .typing(text), let .recordingVoice(text):
+      case let .text(text), let .typing(text), let .working(text), let .recordingVoice(text):
         text
       }
     }
@@ -33,6 +34,11 @@ final class ChatRouteToolbarTitleModel {
       return false
     }
 
+    var isWorking: Bool {
+      if case .working = self { return true }
+      return false
+    }
+
     var isRecordingVoice: Bool {
       if case .recordingVoice = self {
         return true
@@ -41,7 +47,7 @@ final class ChatRouteToolbarTitleModel {
     }
 
     var usesAccentColor: Bool {
-      isTyping || isRecordingVoice
+      isTyping || isWorking || isRecordingVoice
     }
   }
 
@@ -353,6 +359,9 @@ final class ChatRouteToolbarTitleModel {
     }
 
     if let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing {
+      if action == .working {
+        return .working("Working")
+      }
       if action == .recordingVoice {
         return .recordingVoice(Self.textForAnimatedStatus(action.toHumanReadable()))
       }

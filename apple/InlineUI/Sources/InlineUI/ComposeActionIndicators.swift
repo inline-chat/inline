@@ -3,6 +3,7 @@ import InlineKit
 import SwiftUI
 
 public enum ComposeActionAnimationKind: Equatable, Sendable {
+  case working
   case typing
   case upload
   case recordingVoice
@@ -11,6 +12,8 @@ public enum ComposeActionAnimationKind: Equatable, Sendable {
 public enum ComposeActionAnimationInventory {
   public static func animation(for action: ApiComposeAction) -> ComposeActionAnimationKind? {
     switch action {
+    case .working:
+      .working
     case .typing:
       .typing
     case .uploadingPhoto, .uploadingDocument, .uploadingVideo:
@@ -38,6 +41,8 @@ public struct ComposeActionActivityIndicator: View {
   @ViewBuilder
   public var body: some View {
     switch ComposeActionAnimationInventory.animation(for: action) {
+    case .working:
+      WorkingActivityIndicator(color: color)
     case .typing:
       TypingActivityIndicator(
         dotSize: 3,
@@ -62,6 +67,33 @@ public struct ComposeActionActivityIndicator: View {
     case nil:
       EmptyView()
     }
+  }
+}
+
+public struct WorkingActivityIndicator: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var isRotating = false
+  private let color: Color
+
+  public init(color: Color = .accentColor) {
+    self.color = color
+  }
+
+  public var body: some View {
+    Circle()
+      .trim(from: 0.16, to: 0.86)
+      .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+      .padding(0.75)
+      .frame(width: 12, height: 12)
+      .rotationEffect(.degrees(isRotating ? 360 : 0))
+      .animation(
+        reduceMotion ? nil : .linear(duration: 0.8).repeatForever(autoreverses: false),
+        value: isRotating
+      )
+      .onAppear { isRotating = !reduceMotion }
+      .onDisappear { isRotating = false }
+      .onChange(of: reduceMotion) { _, reduced in isRotating = !reduced }
+      .accessibilityHidden(true)
   }
 }
 

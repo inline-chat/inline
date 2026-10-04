@@ -254,26 +254,60 @@ platforms:
     enabled: true
 ```
 
-Inline follows Hermes' native work-chat defaults: show typing/presence while a
-turn is running, keep tool-call progress out of the room by default, and keep
-edit-based token streaming opt-in. If an older Hermes config has global
-`display.tool_progress: all`, add the per-platform override below so terminal
-and tool progress bubbles are not left in Inline chats:
+Agent activity is experimental and **off by default**. To opt in, set
+`INLINE_EXPERIMENTAL_AGENT_ACTIVITY=true` in the gateway process environment,
+then restart Hermes. Unset it or set it to `false` and restart to restore ordinary
+typing, disabled tool progress, cleaned-up progress messages, and no interim
+assistant messages (unless explicitly overridden in your display settings).
+
+In Inline on each device, enable **Settings → Experimental → Agents → Agent
+Activity** and restart the app. Expanded logs also need **Rich Content Renderer**
+on macOS or the existing **Message View 2** Debug setting on iOS. Without the
+app opt-in, Working falls back to Typing and saved agent rows use their text
+fallback. The app setting does not reconfigure a running gateway.
+
+When enabled, Inline uses a quiet activity timeline: conversational replies stay separate from
+collapsed tool logs, and the logs remain available after the turn. The toolbar
+uses Inline's `WORKING` compose action while the turn is running; updated Apple
+clients with Agent Activity enabled display **Working** with a thin rotating arc. This requires a server and
+client that understand the additive compose-action value `6`.
+
+Collapsed titles come from structured tool names and explicit descriptions.
+Commands stay inside the disclosure; a terminal call without a description says
+**Running a script**. Finished rows show **Worked for 18s**, **Failed after 18s**,
+or **Stopped after 18s**. Monotonic elapsed time runs from the first work event
+to the row's closing boundary and excludes final transport latency. Individual
+tool errors remain recorded even if a later step recovers. These are bounded
+progress previews, not complete tool-output logs or proof the task succeeded.
+
+When opted in, the adapter registers these display defaults. Existing explicit Hermes display
+settings still take precedence; use the per-platform settings below to adopt the
+timeline when an older global configuration disables tool progress:
 
 ```yaml
 display:
   platforms:
     inline:
-      tool_progress: off
-      cleanup_progress: true
+      tool_progress: all
+      tool_progress_grouping: accumulate
+      cleanup_progress: false
       streaming: false
-      interim_assistant_messages: false
+      interim_assistant_messages: true
 ```
 
-To temporarily show live tool progress, set `tool_progress: new` or
-`tool_progress: all` and leave `cleanup_progress: true` so Hermes deletes the
-progress message after a successful final reply. Token streaming requires both
-top-level `streaming.enabled: true` and
+The installed legacy Hermes gateway does not route tool events through the
+public `format_tool_event` adapter hook. A guarded Inline-only compatibility
+bridge connects `TurnRunner.progress_callback` and `send_progress_messages` to
+the existing host queue. The adapter renders structured starts and explicit
+tool errors, batches queued events, and closes rows at reply/rollover boundaries.
+The public `on_processing_complete` hook supplies the final processing outcome
+(including delivery failures). Normal sender-task cancellation is not treated
+as user cancellation. Hosts lacking either compatibility method retain their
+ordinary progress presentation and log a warning. Other platforms are untouched.
+Activity rows use silent, closed `activity="agent"` disclosures; updated clients
+retain their standard message bubbles and disclosure controls without decorative activity icons.
+Set `tool_progress: off` to disable tool logs. Token streaming remains opt-in
+through both `streaming.enabled: true` and
 `display.platforms.inline.streaming: true`.
 
 Hermes-native sends and scheduled deliveries accept Inline's explicit target

@@ -100,6 +100,9 @@ interface Connection {
 
   /** Realtime API layer */
   layer?: number
+
+  /** Explicit connection capability; absence keeps legacy compose actions. */
+  supportsWorking?: boolean
 }
 
 type AuthenticatedSessionConnections = {
@@ -269,6 +272,12 @@ class ConnectionManager {
     if (connection?.userId !== userId || connection.sessionId !== sessionId) return
     connection.clientType = clientType
     connectionDirectory.register({ connectionId: id, userId, sessionId, clientType, isBot: connection.isBot ?? false })
+  }
+
+  setSupportsWorking(id: string, userId: number, sessionId: number, supportsWorking: boolean): void {
+    const connection = this.connections.get(id)
+    if (connection?.userId !== userId || connection.sessionId !== sessionId) return
+    connection.supportsWorking = supportsWorking
   }
 
   /** Marks activity locally; persistence is batched by PresenceManager. */

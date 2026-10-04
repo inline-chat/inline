@@ -1,11 +1,68 @@
 import { describe, expect, mock, spyOn, test } from "bun:test"
-import { ServerProtocolMessage, type CreateChatInput } from "@inline-chat/protocol/core"
+import { ServerProtocolMessage, UpdateComposeAction_ComposeAction as ComposeAction, type CreateChatInput, type Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { createChatRejectionMetadata, sendMessageToRealtimeUserWithDelivery } from "@in/server/realtime/message"
+import { createChatRejectionMetadata, RealtimeUpdates, sendMessageToRealtimeUserWithDelivery } from "@in/server/realtime/message"
 import { ConnVersion, connectionManager } from "@in/server/ws/connections"
 
 describe("realtime createChat telemetry", () => {
+  test("projects working per socket across mixed V2/V3 clients without mutating the shared update", async () => {
+    const userId = 82_004
+    const membershipReader = connectionManager as unknown as { getUserSpaceIds(userId: number): Promise<number[]> }
+    const readMemberships = spyOn(membershipReader, "getUserSpaceIds").mockResolvedValue([])
+    const sockets = [
+      { id: "working-old-v2", version: ConnVersion.REALTIME_V1, supportsWorking: undefined },
+      { id: "working-new-v3", version: ConnVersion.REALTIME_V3, supportsWorking: true },
+      { id: "working-old-v3", version: ConnVersion.REALTIME_V3, supportsWorking: false },
+      { id: "working-new-v2", version: ConnVersion.REALTIME_V1, supportsWorking: true },
+    ].map((entry, index) => ({ ...entry, sessionId: 91_010 + index, sent: [] as ServerProtocolMessage[] }))
+    const updates: Update[] = [ComposeAction.WORKING, ComposeAction.TYPING, ComposeAction.NONE].map((action) => ({
+      update: { oneofKind: "updateComposeAction", updateComposeAction: {
+        action, userId: 50n, peerId: { type: { oneofKind: "chat", chat: { chatId: 70n } } },
+      } },
+    }))
+    const before = structuredClone(updates)
+    const actions = (frames: ServerProtocolMessage[]) => frames.flatMap((frame) => {
+      if (frame.body.oneofKind !== "message" || frame.body.message.payload.oneofKind !== "update") return []
+      return frame.body.message.payload.update.updates.map(({ update }) =>
+        update.oneofKind === "updateComposeAction" ? update.updateComposeAction.action : undefined)
+    })
+    try {
+      for (const socket of sockets) {
+        connectionManager.addConnection({ id: socket.id, close() {}, subscribe() {}, raw: {
+          sendBinary(bytes: Uint8Array) { socket.sent.push(ServerProtocolMessage.fromBinary(bytes)); return bytes.length },
+        } } as never, socket.version)
+        connectionManager.authenticateConnection(socket.id, userId, socket.sessionId)
+        if (socket.supportsWorking !== undefined) {
+          connectionManager.setSupportsWorking(socket.id, userId, socket.sessionId, socket.supportsWorking)
+        }
+      }
+      // Both local publishers and the transient broker subscriber use this fanout.
+      expect(await RealtimeUpdates.pushToUserWithDelivery(userId, updates)).toBe(4)
+      for (const socket of sockets) {
+        expect(actions(socket.sent)).toEqual([
+          socket.supportsWorking ? ComposeAction.WORKING : ComposeAction.TYPING, ComposeAction.TYPING, ComposeAction.NONE,
+        ])
+      }
+      expect(updates).toEqual(before)
+
+      // A reconnect has its own capability and must advertise again, even for
+      // the same account session; stale/wrong identity updates are ignored.
+      const old = sockets[0]!
+      connectionManager.setSupportsWorking(old.id, userId + 1, old.sessionId, true)
+      expect(connectionManager.getConnection(old.id)?.supportsWorking).toBeUndefined()
+      const modern = sockets[1]!
+      connectionManager.removeConnection(modern.id)
+      connectionManager.addConnection({ id: modern.id, close() {}, subscribe() {} } as never, modern.version)
+      connectionManager.authenticateConnection(modern.id, userId, modern.sessionId)
+      expect(connectionManager.getConnection(modern.id)?.supportsWorking).toBeUndefined()
+    } finally {
+      for (const socket of sockets) connectionManager.removeConnection(socket.id)
+      await connectionManager.waitForBackgroundWork()
+      readMemberships.mockRestore()
+    }
+  })
+
   test("records only the rejection class and request shape", () => {
     const input: CreateChatInput = {
       title: "Private incident title",

@@ -10,6 +10,9 @@ struct ExperimentalSettingsDetailView: View {
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.newThreadAgentPickerKey)
   private var newThreadAgentPickerEnabled = false
+  @AppStorage(ExperimentalFeatureFlags.agentActivityKey)
+  private var agentActivityEnabled = false
+
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
   @AppStorage(ExperimentalFeatureFlags.macMessageSelectionKey)
@@ -32,10 +35,17 @@ struct ExperimentalSettingsDetailView: View {
       }
     }
     .settingsFormStyle()
+    .onAppear { _ = ExperimentalFeatureFlags.agentActivityEnabled }
   }
 
   private var agentsSection: some View {
     Section {
+      Toggle(isOn: $agentActivityEnabled) {
+        SettingsRowLabel(
+          "Agent Activity",
+          description: "Show Working with a spinner and expandable agent steps. Requires an opted-in agent and Rich Content Renderer. Restart Inline after changing."
+        )
+      }
       if #available(macOS 26.0, *) {
         Toggle(isOn: $newThreadAgentPickerEnabled) {
           SettingsRowLabel(

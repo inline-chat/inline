@@ -31,6 +31,7 @@ import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import { Log } from "@in/server/utils/log"
 import { InlineError } from "@in/server/types/errors"
+import { connectionManager } from "@in/server/ws/connections"
 
 const log = new Log("InlineProtocol.V3.Application")
 
@@ -268,6 +269,27 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
         if (!authorization.temporaryBound || authorization.userId === undefined ||
             authorization.accountSessionId === undefined) {
           return { kind: "result", payload: unauthorizedResponse() }
+        }
+        if (request.body.oneofKind === "connectionInit") {
+          // V3 init advertises presentation capabilities; the bound key, never
+          // the legacy token in this payload, owns the authenticated identity.
+          const current = await input.authorizationKeys.load(authorization.authKeyId)
+          if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
+          if (!current?.temporary || !current.binding || !authorization.permanentAuthKeyId ||
+              current.binding.userId !== authorization.userId ||
+              current.binding.accountSessionId !== authorization.accountSessionId ||
+              !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId) ||
+              (input.onAuthorized && !input.onAuthorized(authorization))) {
+            throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+          }
+          markExecutionStarted()
+          connectionManager.setSupportsWorking(
+            input.connectionId, authorization.userId, authorization.accountSessionId,
+            request.body.connectionInit.supportsWorking === true,
+          )
+          return { kind: "result", payload: RealtimeV3Response.toBinary({ body: {
+            oneofKind: "connectionOpen", connectionOpen: {},
+          } }) }
         }
         if (request.body.oneofKind === "rpc") {
           const rpc = request.body.rpc

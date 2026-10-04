@@ -134,6 +134,25 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     blockContentPayload?.content
   }
 
+  /// Disabled experiments use the existing text fallback, without changing stored content.
+  public var displayBlockContentPayload: BlockContentPayload? {
+    displayBlockContentPayload(agentActivityEnabled: ExperimentalFeatureFlags.agentActivityEnabled)
+  }
+
+  public func displayBlockContentPayload(agentActivityEnabled: Bool) -> BlockContentPayload? {
+    !agentActivityEnabled && isQuietAgentActivity ? nil : blockContentPayload
+  }
+
+  /// Identifies explicitly marked, standalone agent activity.
+  /// Activity uses the same message bubble presentation as other disclosures.
+  public var isQuietAgentActivity: Bool {
+    guard photoId == nil, videoId == nil, documentId == nil,
+          let blocks = blockContent?.blocks, blocks.count == 1,
+          case let .disclosure(disclosure) = blocks[0].kind
+    else { return false }
+    return disclosure.activityKind == .agent
+  }
+
   public var actions: InlineProtocol.MessageActions? {
     get {
       guard let contentPayload, contentPayload.hasActions else { return nil }

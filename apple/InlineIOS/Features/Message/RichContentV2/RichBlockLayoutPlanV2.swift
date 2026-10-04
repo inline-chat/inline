@@ -18,7 +18,7 @@ enum RichBlockActivityKindV2: Hashable {
       case .command: self = .command
       case .web: self = .web
       case .tool: self = .tool
-      case .unspecified, .UNRECOGNIZED: return nil
+      case .agent, .unspecified, .UNRECOGNIZED: return nil
     }
   }
 

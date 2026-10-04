@@ -34,6 +34,7 @@ const disclosureActivityKinds: Record<string, BlockDisclosure_ActivityKind> = {
   command: BlockDisclosure_ActivityKind.COMMAND,
   web: BlockDisclosure_ActivityKind.WEB,
   tool: BlockDisclosure_ActivityKind.TOOL,
+  agent: BlockDisclosure_ActivityKind.AGENT,
 }
 
 export const blockContentLimits = {
@@ -275,7 +276,7 @@ function parseRegion(
     if (details) {
       const summaryLine = line.next < end ? readLine(markdown, line.next, end) : undefined
       const summary = summaryLine
-        ? /^<summary(?: kind="(progress)")?(?: activity="(reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>(.*)<\/summary>$/.exec(summaryLine.value)
+        ? /^<summary(?: kind="(progress)")?(?: activity="(reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>(.*)<\/summary>$/.exec(summaryLine.value)
         : undefined
 
       if (summaryLine && summary) {

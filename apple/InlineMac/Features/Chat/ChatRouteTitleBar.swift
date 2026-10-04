@@ -85,7 +85,7 @@ struct ChatRouteTitleBar: View {
 
   @ViewBuilder
   private var subtitleView: some View {
-    if model.status.isTyping {
+    if model.status.isTyping || model.status.isWorking {
       statusView(model.status)
     } else if agentThreadToolbarModel.presentation != nil {
       HStack(spacing: 4) {
@@ -291,7 +291,9 @@ struct ChatRouteTitleBar: View {
 
   @ViewBuilder
   private func statusIndicator(_ status: ChatRouteToolbarTitleModel.Status) -> some View {
-    if status.isTyping {
+    if status.isWorking {
+      WorkingActivityIndicator()
+    } else if status.isTyping {
       TypingActivityIndicator(color: .accentColor)
     } else if status.isRecordingVoice {
       VoiceRecordingActivityIndicator(

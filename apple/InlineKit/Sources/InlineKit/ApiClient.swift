@@ -2033,6 +2033,7 @@ public enum ApiComposeAction: String, Codable, Sendable {
   case uploadingDocument
   case uploadingVideo
   case recordingVoice
+  case working
 
   public func toHumanReadable() -> String {
     switch self {
@@ -2047,6 +2048,9 @@ public enum ApiComposeAction: String, Codable, Sendable {
 
       case .uploadingVideo:
         "uploading video..."
+
+      case .working:
+        "Working"
 
       case .recordingVoice:
         "recording voice..."
@@ -2066,6 +2070,9 @@ public enum ApiComposeAction: String, Codable, Sendable {
 
       case .uploadingVideo:
         "uploading video"
+
+      case .working:
+        "Working"
 
       case .recordingVoice:
         "recording voice"

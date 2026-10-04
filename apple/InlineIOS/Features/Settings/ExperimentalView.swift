@@ -3,6 +3,9 @@ import InlineIOSUI
 import SwiftUI
 
 struct ExperimentalView: View {
+  @AppStorage(ExperimentalFeatureFlags.agentActivityKey)
+  private var agentActivityEnabled = false
+
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
@@ -15,6 +18,14 @@ struct ExperimentalView: View {
   var body: some View {
     List {
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
+      Section {
+        Toggle("Agent Activity", isOn: $agentActivityEnabled)
+      } header: {
+        Text("Agents")
+      } footer: {
+        Text("Show Working with a spinner and expandable agent steps. Requires an opted-in agent; expandable steps also require Message View 2. Restart Inline after changing.")
+      }
+
       Section {
         LabeledContent {
           Text("Enabled")
@@ -73,6 +84,7 @@ struct ExperimentalView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .onAppear { _ = ExperimentalFeatureFlags.agentActivityEnabled }
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
   }

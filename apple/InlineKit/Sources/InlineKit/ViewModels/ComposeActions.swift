@@ -54,7 +54,11 @@ public class ComposeActions: ObservableObject {
   private var log = Log.scoped("ComposeActions", enableTracing: false)
   private var lastTypingSent: [Peer: Date] = [:]
 
-  public init() {}
+  private let agentActivityEnabled: Bool
+
+  public init(agentActivityEnabled: Bool = ExperimentalFeatureFlags.agentActivityEnabled) {
+    self.agentActivityEnabled = agentActivityEnabled
+  }
 
   // MARK: - New Group-Aware Methods
 
@@ -73,6 +77,7 @@ public class ComposeActions: ObservableObject {
 
   /// Add compose action for a specific user in a peer
   public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
+    let action: ApiComposeAction = action == .working && !agentActivityEnabled ? .typing : action
     log.trace("action \(action) added for user \(userId) in \(peer)")
 
     // Cancel existing task for this user in this peer

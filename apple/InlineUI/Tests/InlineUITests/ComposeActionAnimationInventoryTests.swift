@@ -7,6 +7,7 @@ import Testing
 struct ComposeActionAnimationInventoryTests {
   @Test("every current compose action has a standard animation")
   func currentComposeActionsHaveAnimations() {
+    #expect(ComposeActionAnimationInventory.animation(for: .working) == .working)
     #expect(ComposeActionAnimationInventory.animation(for: .typing) == .typing)
     #expect(ComposeActionAnimationInventory.animation(for: .recordingVoice) == .recordingVoice)
     #expect(ComposeActionAnimationInventory.animation(for: .uploadingPhoto) == .upload)

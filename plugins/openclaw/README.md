@@ -422,3 +422,38 @@ channels:
 - `Inline: SETUP / no token`
   - Ensure `channels.inline.token`, `INLINE_TOKEN`, or `INLINE_BOT_TOKEN` is set and plugin is updated (`openclaw plugins update inline`).
   - If using `dmPolicy: "open"`, ensure `allowFrom: ["*"]`.
+
+### Agent activity presentation
+
+Agent activity is experimental and **off by default**. Set
+`channels.inline.experimentalAgentActivity: true` (or the same field on an
+individual Inline account), then restart the gateway to opt in. Unset it or set
+it to `false` and restart to restore ordinary typing and the existing temporary
+progress placeholder, which is deleted when the reply arrives.
+
+In Inline on each device, enable **Settings → Experimental → Agents → Agent
+Activity** and restart the app. Expanded logs also need **Rich Content Renderer**
+on macOS or the existing **Message View 2** Debug setting on iOS. Without the
+app opt-in, Working falls back to Typing and saved agent rows use their text
+fallback. The app setting does not reconfigure a running gateway.
+
+When enabled, progress mode uses a quiet timeline: silent, collapsed activity
+rows stay separate from conversational replies and remain available afterward.
+They use `activity="agent"` to identify agent activity while retaining standard
+message bubbles and disclosure controls without decorative activity icons.
+Collapsed titles use structured descriptions and tool names, with **Running a
+script** as the fallback for terminal work. Commands are never parsed to guess
+purpose. Finished rows show **Worked for 18s**, **Failed after 18s**, or **Stopped
+after 18s** from explicit host outcomes. A recovered tool error remains visible
+without mislabeling the whole turn as failed. Monotonic time starts at the first
+work event and freezes at each reply/rollover boundary before final transport.
+Expanded details contain the host's progress previews, not full execution logs.
+Long activity histories continue in another row instead of dropping older steps.
+Existing explicit streaming settings still apply, including `streaming: false`
+to disable progress previews. Activity markup is parsed independently of the
+`parseMarkdown` setting for ordinary replies.
+
+When opted in, the integration emits `WORKING` (compose-action value `6`) through the existing
+short-lived compose activity lifecycle. Updated Inline Apple clients display
+**Working** with a thin rotating arc in the toolbar when Agent Activity is enabled. This needs a matching server
+and client; it does not change other agent integrations' typing signals.

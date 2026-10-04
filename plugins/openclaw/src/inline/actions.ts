@@ -3636,6 +3636,18 @@ export const inlineMessageActions = {
       ...(toolContext?.currentMessageId ? { sourceMessageId: String(toolContext.currentMessageId) } : {}),
     })
     await activeThreadRoute?.adoption
+    const sendVisibleReply = (
+      client: InlineSdkClient,
+      input: Parameters<InlineSdkClient["sendMessage"]>[0],
+    ): ReturnType<InlineSdkClient["sendMessage"]> => {
+      const sameChat = activeThreadRoute && (
+        input.chatId === (activeThreadRoute.threadId ?? activeThreadRoute.sourceChatId) ||
+        (input.userId != null && activeThreadRoute.threadId == null &&
+          activeThreadRoute.parentPeer.kind === "direct" && String(input.userId) === activeThreadRoute.parentPeer.id)
+      )
+      const send = () => client.sendMessage(input)
+      return sameChat && activeThreadRoute.runVisibleReply ? activeThreadRoute.runVisibleReply(send) : send()
+    }
     if (
       activeThreadRoute &&
       toolContext?.currentMessageId != null &&
@@ -3880,7 +3892,7 @@ export const inlineMessageActions = {
             if (visibleMessage.shouldSkip) {
               return suppressedInternalTextResult()
             }
-            const sent = await client.sendMessage({
+            const sent = await sendVisibleReply(client, {
               ...sendTarget,
               text: visibleMessage.text,
               ...(actions !== undefined ? { actions } : {}),
@@ -3914,7 +3926,7 @@ export const inlineMessageActions = {
               ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
               ...(mediaReadFile ? { mediaReadFile } : {}),
             })
-            lastSent = await client.sendMessage({
+            lastSent = await sendVisibleReply(client, {
               ...sendTarget,
               ...(index === 0 && !caption.shouldSkip && caption.text ? { text: caption.text } : {}),
               media,
@@ -4048,7 +4060,7 @@ export const inlineMessageActions = {
             if (visibleText.shouldSkip) {
               return suppressedInternalTextResult()
             }
-            const sent = await client.sendMessage({
+            const sent = await sendVisibleReply(client, {
               chatId,
               text: visibleText.text,
               ...(actions !== undefined ? { actions } : {}),
@@ -4092,7 +4104,7 @@ export const inlineMessageActions = {
           if (visibleText.shouldSkip) {
             return suppressedInternalTextResult()
           }
-          const sent = await client.sendMessage({
+          const sent = await sendVisibleReply(client, {
             chatId,
             text: visibleText.text,
             ...(actions !== undefined ? { actions } : {}),

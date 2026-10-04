@@ -7,6 +7,13 @@ import {
 } from "./config-schema"
 
 describe("inline/config-schema", () => {
+  it("requires a boolean opt-in for agent activity at channel and account scope", () => {
+    expect(InlineConfigSchema.parse({}).experimentalAgentActivity).toBeUndefined()
+    expect(InlineAccountSchema.parse({ experimentalAgentActivity: true }).experimentalAgentActivity).toBe(true)
+    expect(InlineConfigSchema.safeParse({ experimentalAgentActivity: "true" }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ accounts: { test: { experimentalAgentActivity: "true" } } }).success).toBe(false)
+  })
+
   it("defaults group access to open and effective mention gating to true", () => {
     const parsed = InlineConfigSchema.parse({})
 

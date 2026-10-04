@@ -9,6 +9,7 @@ import {
   ServerMessage,
   ServerProtocolMessage,
   UpdatesPayload,
+  UpdateComposeAction_ComposeAction,
 } from "@inline-chat/protocol/core"
 import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
@@ -344,6 +345,25 @@ const sendRaw = (ws: Ws, message: ServerProtocolMessage): boolean => {
   return ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true) !== 0
 }
 
+/** Only the recipient's connection can opt in; never mutate shared fanout data. */
+const legacyComposePayload = (payload: ServerMessage["payload"]): ServerMessage["payload"] => {
+  if (payload.oneofKind !== "update" || !payload.update.updates.some(({ update }) =>
+    update.oneofKind === "updateComposeAction" && update.updateComposeAction.action === UpdateComposeAction_ComposeAction.WORKING,
+  )) return payload
+  return {
+    oneofKind: "update",
+    update: {
+      ...payload.update,
+      updates: payload.update.updates.map((entry) => entry.update.oneofKind === "updateComposeAction" &&
+        entry.update.updateComposeAction.action === UpdateComposeAction_ComposeAction.WORKING
+        ? { ...entry, update: { oneofKind: "updateComposeAction", updateComposeAction: {
+          ...entry.update.updateComposeAction, action: UpdateComposeAction_ComposeAction.TYPING,
+        } } }
+        : entry),
+    },
+  }
+}
+
 /**
  * Internal delivery primitive for callers that must distinguish a current
  * transport acceptance from a frame rejected by Bun. It is still not a client
@@ -356,6 +376,7 @@ export const sendMessageToRealtimeUserWithDelivery = async (
 ) => {
   const connections = connectionManager.getUserConnections(userId)
   let accepted = 0
+  let compatiblePayload: ServerMessage["payload"] | undefined
   for (let conn of connections) {
     if (options?.skipSessionId && conn.sessionId === options.skipSessionId) {
       log.debug(`skipping session ${options.skipSessionId} for user ${userId}`)
@@ -369,7 +390,7 @@ export const sendMessageToRealtimeUserWithDelivery = async (
       id,
       body: {
         oneofKind: "message",
-        message: { payload },
+        message: { payload: conn.supportsWorking === true ? payload : (compatiblePayload ??= legacyComposePayload(payload)) },
       },
     })) {
       accepted += 1

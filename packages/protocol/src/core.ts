@@ -106,6 +106,12 @@ export interface ConnectionInit {
      * @generated from protobuf field: optional string time_zone = 9;
      */
     timeZone?: string;
+    /**
+     * Opt in per connection. Older clients interpret WORKING as cancellation.
+     *
+     * @generated from protobuf field: optional bool supports_working = 10;
+     */
+    supportsWorking?: boolean;
 }
 /**
  * @generated from protobuf message ServerProtocolMessage
@@ -1585,7 +1591,13 @@ export enum BlockDisclosure_ActivityKind {
     /**
      * @generated from protobuf enum value: ACTIVITY_KIND_TOOL = 10;
      */
-    TOOL = 10
+    TOOL = 10,
+    /**
+     * Explicit quiet timeline row, emitted by integrations that opt into this presentation.
+     *
+     * @generated from protobuf enum value: ACTIVITY_KIND_AGENT = 11;
+     */
+    AGENT = 11
 }
 /**
  * @generated from protobuf message BlockQuote
@@ -10992,7 +11004,13 @@ export enum UpdateComposeAction_ComposeAction {
     /**
      * @generated from protobuf enum value: RECORDING_VOICE = 5;
      */
-    RECORDING_VOICE = 5
+    RECORDING_VOICE = 5,
+    /**
+     * Ephemeral agent work; same expiry and stop semantics as typing.
+     *
+     * @generated from protobuf enum value: WORKING = 6;
+     */
+    WORKING = 6
 }
 /**
  * @generated from protobuf message UpdateMessageAttachment
@@ -12486,6 +12504,12 @@ export interface RealtimeV3Response {
          * @generated from protobuf field: AuthBrowserStatusResult auth_browser_status = 8;
          */
         authBrowserStatus: AuthBrowserStatusResult;
+    } | {
+        oneofKind: "connectionOpen";
+        /**
+         * @generated from protobuf field: ConnectionOpen connection_open = 9;
+         */
+        connectionOpen: ConnectionOpen;
     } | {
         oneofKind: undefined;
     };
@@ -14759,7 +14783,8 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
             { no: 6, name: "device_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "client_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 9, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 9, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "supports_working", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ConnectionInit>): ConnectionInit {
@@ -14801,6 +14826,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
                 case /* optional string time_zone */ 9:
                     message.timeZone = reader.string();
                     break;
+                case /* optional bool supports_working */ 10:
+                    message.supportsWorking = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14840,6 +14868,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         /* optional string time_zone = 9; */
         if (message.timeZone !== undefined)
             writer.tag(9, WireType.LengthDelimited).string(message.timeZone);
+        /* optional bool supports_working = 10; */
+        if (message.supportsWorking !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.supportsWorking);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -48221,7 +48252,8 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
             { no: 5, name: "create_http_upload", kind: "message", oneof: "body", T: () => CreateHttpUploadResult },
             { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult },
             { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserResult },
-            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusResult }
+            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusResult },
+            { no: 9, name: "connection_open", kind: "message", oneof: "body", T: () => ConnectionOpen }
         ]);
     }
     create(value?: PartialMessage<RealtimeV3Response>): RealtimeV3Response {
@@ -48284,6 +48316,12 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
                         authBrowserStatus: AuthBrowserStatusResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBrowserStatus)
                     };
                     break;
+                case /* ConnectionOpen connection_open */ 9:
+                    message.body = {
+                        oneofKind: "connectionOpen",
+                        connectionOpen: ConnectionOpen.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).connectionOpen)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -48320,6 +48358,9 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
         /* AuthBrowserStatusResult auth_browser_status = 8; */
         if (message.body.oneofKind === "authBrowserStatus")
             AuthBrowserStatusResult.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionOpen connection_open = 9; */
+        if (message.body.oneofKind === "connectionOpen")
+            ConnectionOpen.internalBinaryWrite(message.body.connectionOpen, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

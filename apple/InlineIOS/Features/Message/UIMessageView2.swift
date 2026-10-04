@@ -906,7 +906,7 @@ final class UIMessageView2: UIMessageView {
   /// UIKit measurement itself remains synchronous and on main.
   func prepareListMath() async {
     precondition(renderingMode == .fixtureMeasurement)
-    guard shouldRenderRichContentV2, let payload = message.blockContentPayload else { return }
+    guard shouldRenderRichContentV2, let payload = message.displayBlockContentPayload else { return }
     let text = attributedMessageText() ?? NSAttributedString(string: message.text ?? "")
     let snapshot = RichBlockLayoutPlannerV2.mathSnapshot(
       content: payload.content, text: text, fontSize: richBaseFontSize, primaryColor: richPalette.primary, secondaryColor: richPalette.secondary
@@ -944,7 +944,7 @@ final class UIMessageView2: UIMessageView {
     flatTextBinding.apply(prepared.rich == nil ? attributedMessageText() : nil, to: messageLabel)
     transitionOldRichPlan = oldRichPlan
     activeGeometryTransitionGeneration = geometryTransitionGeneration
-    if let rich = prepared.rich, let payload = message.blockContentPayload {
+    if let rich = prepared.rich, let payload = message.displayBlockContentPayload {
       richContentView.update(
         plan: rich,
         content: payload.content,
@@ -1452,7 +1452,7 @@ final class UIMessageView2: UIMessageView {
 
   private func ensureRichPlan(containerWidth: CGFloat) -> Bool {
     guard shouldRenderRichContentV2,
-          let payload = message.blockContentPayload
+          let payload = message.displayBlockContentPayload
     else {
       currentRichPlan = nil
       updateMessageLabelText()
@@ -1549,7 +1549,7 @@ final class UIMessageView2: UIMessageView {
 
   private var shouldRenderRichContentV2: Bool {
     // Structural ranges address canonical text, never service/voice display copy.
-    message.blockContentPayload != nil && fullMessage.translationText == nil
+    message.displayBlockContentPayload != nil && fullMessage.translationText == nil
       && (fullMessage.displayText ?? "").utf8.elementsEqual((message.text ?? "").utf8)
   }
 

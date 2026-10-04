@@ -167,6 +167,7 @@ export const InlineAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     enabled: z.boolean().optional(),
+    experimentalAgentActivity: z.boolean().optional(),
     baseUrl: z.string().optional(),
     token: SecretInputSchema.optional(),
     tokenFile: z.string().optional(),

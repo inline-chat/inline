@@ -14,6 +14,16 @@ import {
 } from "./accounts"
 
 describe("inline/accounts", () => {
+  it("keeps agent activity opt-in and lets an account disable an inherited experiment", () => {
+    const cfg = { channels: { inline: {
+      token: "test", experimentalAgentActivity: true,
+      accounts: { enabled: { token: "one" }, disabled: { token: "two", experimentalAgentActivity: false } },
+    } } } satisfies OpenClawConfig
+    expect(resolveInlineAccount({ cfg, accountId: "enabled" }).config.experimentalAgentActivity).toBe(true)
+    expect(resolveInlineAccount({ cfg, accountId: "disabled" }).config.experimentalAgentActivity).toBe(false)
+    expect(resolveInlineAccount({ cfg: { channels: { inline: { token: "test" } } } }).config.experimentalAgentActivity).toBeUndefined()
+  })
+
   it("lists default account when base config is present", () => {
     const cfg = {
       channels: {

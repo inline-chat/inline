@@ -3204,7 +3204,13 @@ private final class SidebarNativeComposeIndicatorView: NSView {
   }
 
   func refreshColor() {
-    indicatorLayers.forEach { $0.fillColor = Theme.accentColor.cgColor }
+    indicatorLayers.forEach {
+      if action == .working {
+        $0.strokeColor = Theme.accentColor.cgColor
+      } else {
+        $0.fillColor = Theme.accentColor.cgColor
+      }
+    }
   }
 
   override func layout() {
@@ -3222,16 +3228,34 @@ private final class SidebarNativeComposeIndicatorView: NSView {
     let count = switch kind {
     case .typing, .recordingVoice:
       3
-    case .upload:
+    case .working, .upload:
       1
     }
     for index in 0 ..< count {
       let shape = CAShapeLayer()
       SidebarNativeLayerUpdates.disableImplicitAnimations(on: shape)
-      shape.fillColor = Theme.accentColor.cgColor
+      if kind == .working {
+        shape.fillColor = nil
+        shape.strokeColor = Theme.accentColor.cgColor
+        shape.lineWidth = 1.5
+        shape.lineCap = .round
+        shape.strokeStart = 0.16
+        shape.strokeEnd = 0.86
+      } else {
+        shape.fillColor = Theme.accentColor.cgColor
+      }
       layer?.addSublayer(shape)
       indicatorLayers.append(shape)
       guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { continue }
+      if kind == .working {
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = Double.pi * 2
+        rotation.duration = 0.8
+        rotation.repeatCount = .infinity
+        shape.add(rotation, forKey: "sidebar-working-spin")
+        continue
+      }
       let animation = CABasicAnimation(keyPath: kind == .typing ? "transform.translation.y" : "transform.scale.y")
       animation.fromValue = kind == .typing ? 0 : 0.45
       animation.toValue = kind == .typing ? -2 : 1
@@ -3249,6 +3273,10 @@ private final class SidebarNativeComposeIndicatorView: NSView {
           let kind = ComposeActionAnimationInventory.animation(for: action)
     else { return }
     switch kind {
+    case .working:
+      guard let shape = indicatorLayers.first else { return }
+      shape.frame = CGRect(x: bounds.midX - 6, y: bounds.midY - 6, width: 12, height: 12)
+      shape.path = CGPath(ellipseIn: CGRect(x: 0.75, y: 0.75, width: 10.5, height: 10.5), transform: nil)
     case .typing:
       for (index, shape) in indicatorLayers.enumerated() {
         let rect = CGRect(x: CGFloat(index) * 5, y: bounds.midY - 1.5, width: 3, height: 3)

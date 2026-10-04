@@ -51,8 +51,9 @@ export const sendComposeAction = async (input: Input, context: FunctionContext):
 }
 
 function composeActionName(action: UpdateComposeAction_ComposeAction | undefined):
-  "none" | "typing" | "uploadingDocument" | "uploadingPhoto" | "uploadingVideo" | "recordingVoice" {
+  "none" | "typing" | "uploadingDocument" | "uploadingPhoto" | "uploadingVideo" | "recordingVoice" | "working" {
   switch (action) {
+    case UpdateComposeAction_ComposeAction.WORKING: return "working"
     case UpdateComposeAction_ComposeAction.TYPING: return "typing"
     case UpdateComposeAction_ComposeAction.UPLOADING_DOCUMENT: return "uploadingDocument"
     case UpdateComposeAction_ComposeAction.UPLOADING_PHOTO: return "uploadingPhoto"

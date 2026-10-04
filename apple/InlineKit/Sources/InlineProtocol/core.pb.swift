@@ -1787,6 +1787,16 @@ public nonisolated struct ConnectionInit: Sendable {
   /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
   public mutating func clearTimeZone() {self._timeZone = nil}
 
+  /// Opt in per connection. Older clients interpret WORKING as cancellation.
+  public var supportsWorking: Bool {
+    get {_supportsWorking ?? false}
+    set {_supportsWorking = newValue}
+  }
+  /// Returns true if `supportsWorking` has been explicitly set.
+  public var hasSupportsWorking: Bool {self._supportsWorking != nil}
+  /// Clears the value of `supportsWorking`. Subsequent reads from it will return its default value.
+  public mutating func clearSupportsWorking() {self._supportsWorking = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1799,6 +1809,7 @@ public nonisolated struct ConnectionInit: Sendable {
   fileprivate var _deviceName: String? = nil
   fileprivate var _clientType: String? = nil
   fileprivate var _timeZone: String? = nil
+  fileprivate var _supportsWorking: Bool? = nil
 }
 
 public nonisolated struct ServerProtocolMessage: Sendable {
@@ -4105,6 +4116,9 @@ public nonisolated struct BlockDisclosure: Sendable {
     case command // = 8
     case web // = 9
     case tool // = 10
+
+    /// Explicit quiet timeline row, emitted by integrations that opt into this presentation.
+    case agent // = 11
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -4124,6 +4138,7 @@ public nonisolated struct BlockDisclosure: Sendable {
       case 8: self = .command
       case 9: self = .web
       case 10: self = .tool
+      case 11: self = .agent
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -4141,6 +4156,7 @@ public nonisolated struct BlockDisclosure: Sendable {
       case .command: return 8
       case .web: return 9
       case .tool: return 10
+      case .agent: return 11
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -4158,6 +4174,7 @@ public nonisolated struct BlockDisclosure: Sendable {
       .command,
       .web,
       .tool,
+      .agent,
     ]
 
   }
@@ -18284,6 +18301,9 @@ public nonisolated struct UpdateComposeAction: Sendable {
     case uploadingDocument // = 3
     case uploadingVideo // = 4
     case recordingVoice // = 5
+
+    /// Ephemeral agent work; same expiry and stop semantics as typing.
+    case working // = 6
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -18298,6 +18318,7 @@ public nonisolated struct UpdateComposeAction: Sendable {
       case 3: self = .uploadingDocument
       case 4: self = .uploadingVideo
       case 5: self = .recordingVoice
+      case 6: self = .working
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -18310,6 +18331,7 @@ public nonisolated struct UpdateComposeAction: Sendable {
       case .uploadingDocument: return 3
       case .uploadingVideo: return 4
       case .recordingVoice: return 5
+      case .working: return 6
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -18322,6 +18344,7 @@ public nonisolated struct UpdateComposeAction: Sendable {
       .uploadingDocument,
       .uploadingVideo,
       .recordingVoice,
+      .working,
     ]
 
   }
@@ -20620,6 +20643,14 @@ public nonisolated struct RealtimeV3Response: Sendable {
     set {body = .authBrowserStatus(newValue)}
   }
 
+  public var connectionOpen: ConnectionOpen {
+    get {
+      if case .connectionOpen(let v)? = body {return v}
+      return ConnectionOpen()
+    }
+    set {body = .connectionOpen(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Body: Equatable, Sendable {
@@ -20633,6 +20664,7 @@ public nonisolated struct RealtimeV3Response: Sendable {
     case finishHTTPUpload(FinishHttpUploadResult)
     case authBeginBrowser(AuthBeginBrowserResult)
     case authBrowserStatus(AuthBrowserStatusResult)
+    case connectionOpen(ConnectionOpen)
 
   }
 
@@ -22274,7 +22306,7 @@ nonisolated extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionInit"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{3}build_number\0\u{1}layer\0\u{3}client_version\0\u{3}os_version\0\u{3}device_id\0\u{3}device_name\0\u{3}client_type\0\u{3}time_zone\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{3}build_number\0\u{1}layer\0\u{3}client_version\0\u{3}os_version\0\u{3}device_id\0\u{3}device_name\0\u{3}client_type\0\u{3}time_zone\0\u{3}supports_working\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22291,6 +22323,7 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 7: try { try decoder.decodeSingularStringField(value: &self._deviceName) }()
       case 8: try { try decoder.decodeSingularStringField(value: &self._clientType) }()
       case 9: try { try decoder.decodeSingularStringField(value: &self._timeZone) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._supportsWorking) }()
       default: break
       }
     }
@@ -22328,6 +22361,9 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._timeZone {
       try visitor.visitSingularStringField(value: v, fieldNumber: 9)
     } }()
+    try { if let v = self._supportsWorking {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -22341,6 +22377,7 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._deviceName != rhs._deviceName {return false}
     if lhs._clientType != rhs._clientType {return false}
     if lhs._timeZone != rhs._timeZone {return false}
+    if lhs._supportsWorking != rhs._supportsWorking {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -25576,7 +25613,7 @@ nonisolated extension BlockDisclosure.Kind: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension BlockDisclosure.ActivityKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ACTIVITY_KIND_UNSPECIFIED\0\u{1}ACTIVITY_KIND_REASONING\0\u{1}ACTIVITY_KIND_EXPLORE\0\u{1}ACTIVITY_KIND_READ\0\u{1}ACTIVITY_KIND_SEARCH\0\u{1}ACTIVITY_KIND_EDIT\0\u{1}ACTIVITY_KIND_DELETE\0\u{1}ACTIVITY_KIND_MOVE\0\u{1}ACTIVITY_KIND_COMMAND\0\u{1}ACTIVITY_KIND_WEB\0\u{1}ACTIVITY_KIND_TOOL\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ACTIVITY_KIND_UNSPECIFIED\0\u{1}ACTIVITY_KIND_REASONING\0\u{1}ACTIVITY_KIND_EXPLORE\0\u{1}ACTIVITY_KIND_READ\0\u{1}ACTIVITY_KIND_SEARCH\0\u{1}ACTIVITY_KIND_EDIT\0\u{1}ACTIVITY_KIND_DELETE\0\u{1}ACTIVITY_KIND_MOVE\0\u{1}ACTIVITY_KIND_COMMAND\0\u{1}ACTIVITY_KIND_WEB\0\u{1}ACTIVITY_KIND_TOOL\0\u{1}ACTIVITY_KIND_AGENT\0")
 }
 
 nonisolated extension BlockQuote: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -47320,7 +47357,7 @@ nonisolated extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf.
 }
 
 nonisolated extension UpdateComposeAction.ComposeAction: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NONE\0\u{1}TYPING\0\u{1}UPLOADING_PHOTO\0\u{1}UPLOADING_DOCUMENT\0\u{1}UPLOADING_VIDEO\0\u{1}RECORDING_VOICE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NONE\0\u{1}TYPING\0\u{1}UPLOADING_PHOTO\0\u{1}UPLOADING_DOCUMENT\0\u{1}UPLOADING_VIDEO\0\u{1}RECORDING_VOICE\0\u{1}WORKING\0")
 }
 
 nonisolated extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -50757,7 +50794,7 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RealtimeV3Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0\u{3}connection_open\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -50869,6 +50906,19 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
           self.body = .authBrowserStatus(v)
         }
       }()
+      case 9: try {
+        var v: ConnectionOpen?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .connectionOpen(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .connectionOpen(v)
+        }
+      }()
       default: break
       }
     }
@@ -50911,6 +50961,10 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
     case .authBrowserStatus?: try {
       guard case .authBrowserStatus(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .connectionOpen?: try {
+      guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     }()
     case nil: break
     }

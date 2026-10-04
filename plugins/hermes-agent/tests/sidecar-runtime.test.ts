@@ -220,10 +220,26 @@ describe("sidecar runtime", () => {
         target: { chatId: "123" },
         messageId: "9001",
       }, auth))
-      await expectOk(post(port, "/typing", {
-        target: { chatId: "123" },
-        state: "start",
-      }, auth))
+      // Unset/false uses the established typing API. Only an explicit boolean opts in.
+      for (const experimentalAgentActivity of [undefined, false]) {
+        await expectOk(post(port, "/typing", {
+          target: { chatId: "123" }, state: "start", experimentalAgentActivity,
+        }, auth))
+      }
+      for (const state of ["start", "stop"]) {
+        await expectOk(post(port, "/typing", {
+          target: { chatId: "123" }, state, experimentalAgentActivity: true,
+        }, auth))
+      }
+      const activityHealth = await post(port, "/healthz", {}, auth)
+      const allCalls = (resultOf(activityHealth.body).diagnostics as {
+        calls: Array<{ method: string; params?: { sendComposeAction?: { action?: number } } }>
+      }).calls
+      expect(allCalls.filter((call) => call.method === "sendTyping")).toHaveLength(2)
+      const activityCalls = allCalls.filter((call) => call.method === "invoke:SEND_COMPOSE_ACTION")
+      expect(activityCalls).toHaveLength(2)
+      expect(activityCalls[0]?.params?.sendComposeAction?.action).toBe(6)
+      expect(activityCalls[1]?.params?.sendComposeAction).not.toHaveProperty("action")
       await expectOk(post(port, "/presence", {
         target: { userId: "42" },
         kind: "running",

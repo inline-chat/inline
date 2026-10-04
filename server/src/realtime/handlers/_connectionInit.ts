@@ -71,6 +71,13 @@ export const handleConnectionInit = async (
     throw RealtimeRpcError.Unauthenticated()
   }
 
+  connectionManager.setSupportsWorking(
+    handlerContext.connectionId,
+    userIdFromToken.userId,
+    userIdFromToken.sessionId,
+    init.supportsWorking === true,
+  )
+
   // respond back with ack
   return {}
 }

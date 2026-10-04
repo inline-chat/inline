@@ -434,7 +434,18 @@ async function endpointTyping(res: ServerResponse, body: unknown) {
     writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } })
     return
   }
-  await client.sendTyping({ chatId: target.chatId, typing })
+  if (record.experimentalAgentActivity === true) {
+    // WORKING = 6 is additive; keep the wire value compatible with older SDK packages.
+    await client.invoke(Method.SEND_COMPOSE_ACTION, {
+      oneofKind: "sendComposeAction",
+      sendComposeAction: {
+        peerId: InputPeer.create({ type: { oneofKind: "chat", chat: { chatId: target.chatId } } }),
+        ...(typing ? { action: 6 } : {}),
+      },
+    })
+  } else {
+    await client.sendTyping({ chatId: target.chatId, typing })
+  }
   writeJson(res, 200, { ok: true, result: {} })
 }
 

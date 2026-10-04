@@ -185,6 +185,19 @@ public actor InlineProtocolV3Transport: Transport {
       }
       try requireCurrentStart(generation)
       guard let candidate else { throw InlineProtocolV3ConnectionError.invalidKey }
+      if AgentActivityFeature.isEnabled {
+        // V3 authenticates before the legacy handshake. Advertise per-socket
+        // presentation support here, including on reconnect with a cached key.
+        let capabilities = try await candidate.invoke(.with {
+          $0.body = .connectionInit(.with { $0.supportsWorking = true })
+        })
+        if case .rpcError = capabilities.body {
+          // Older servers do not handle this optional application message yet.
+          // Authentication was independently verified above; keep the connection.
+          log.debug("Server did not accept optional presentation capabilities")
+        }
+      }
+      try requireCurrentStart(generation)
       connection = candidate
       startUpdates(candidate)
       startRotationMonitor(candidate)

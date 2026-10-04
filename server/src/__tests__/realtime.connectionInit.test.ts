@@ -27,6 +27,7 @@ describe("handleConnectionInit", () => {
           buildNumber: 123,
           osVersion: "15.2.1",
           layer: 2,
+          supportsWorking: true,
         },
         {
           userId: 0,
@@ -49,6 +50,7 @@ describe("handleConnectionInit", () => {
 
       expect(updatedSession?.clientVersion).toBe("123")
       expect(updatedSession?.osVersion).toBe("15.2.1")
+      expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(true)
     } finally {
       connectionManager.removeConnection(connectionId)
     }

@@ -29,6 +29,7 @@ const disclosureActivityNames: Partial<Record<BlockDisclosure_ActivityKind, stri
   [BlockDisclosure_ActivityKind.COMMAND]: "command",
   [BlockDisclosure_ActivityKind.WEB]: "web",
   [BlockDisclosure_ActivityKind.TOOL]: "tool",
+  [BlockDisclosure_ActivityKind.AGENT]: "agent",
 }
 
 export type BlockContentMarkdownEncoderOptions = {

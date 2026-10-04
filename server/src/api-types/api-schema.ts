@@ -397,6 +397,7 @@ export const TComposeAction = Type.Union([
   Type.Literal("uploadingPhoto"),
   Type.Literal("uploadingVideo"),
   Type.Literal("recordingVoice"),
+  Type.Literal("working"),
 ])
 export type TComposeAction = StaticEncode<typeof TComposeAction>
 

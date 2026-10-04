@@ -444,7 +444,7 @@ private struct ChatToolbarComposeActionSubtitle: View {
   let presentation: ComposeActionPresentation
 
   private var usesAccentColor: Bool {
-    presentation.action == .typing || presentation.action == .recordingVoice
+    presentation.action == .typing || presentation.action == .working || presentation.action == .recordingVoice
   }
 
   var body: some View {
@@ -466,6 +466,8 @@ private struct ChatToolbarComposeActionIndicator: View {
   @ViewBuilder
   var body: some View {
     switch action {
+    case .working:
+      WorkingActivityIndicator()
     case .typing:
       TypingActivityIndicator(color: .accentColor)
     case .uploadingPhoto:

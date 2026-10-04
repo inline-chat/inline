@@ -254,6 +254,7 @@ const expectedFiles = [
   "plugin/inline/LICENSE",
   "plugin/inline/README.md",
   "plugin/inline/__init__.py",
+  "plugin/inline/activity.py",
   "plugin/inline/adapter.py",
   "plugin/inline/cli.py",
   "plugin/inline/message_actions.py",

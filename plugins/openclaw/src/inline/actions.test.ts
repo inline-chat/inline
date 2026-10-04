@@ -2,6 +2,35 @@ import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 
 describe("inline/actions", () => {
+  it("wraps only sends to the active turn's resolved chat in its visible reply boundary", async () => {
+    vi.resetModules()
+    const order: string[] = []
+    const sendMessage = vi.fn(async (input) => { order.push(`send:${input.chatId}`); return { messageId: 10n } })
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        sendMessage = sendMessage
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const runVisibleReply = vi.fn(async (send) => { order.push("before"); try { return await send() } finally { order.push("after") } })
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default", sessionKey: "agent:main:inline:group:676", sourceChatId: 676n, sourceMessageId: 22n,
+      parentPeer: { kind: "group", id: "676" }, onThreadAdopted: async () => {}, runVisibleReply,
+    })
+    try {
+      const context = { channel: "inline", action: "send", cfg: { channels: { inline: { token: "token" } } }, sessionKey: "agent:main:inline:group:676" }
+      await inlineMessageActions.handleAction?.({ ...context, params: { to: "676", message: "Public update" } } as any)
+      await inlineMessageActions.handleAction?.({ ...context, params: { to: "677", message: "Other chat" } } as any)
+      await inlineMessageActions.handleAction?.({ ...context, sessionKey: "agent:other:inline:group:676", params: { to: "676", message: "Other turn" } } as any)
+      expect(order).toEqual(["before", "send:676", "after", "send:677", "send:676"])
+      expect(runVisibleReply).toHaveBeenCalledTimes(1)
+    } finally { end() }
+  })
+
   it("allows thread-create from a DM parent", async () => {
     vi.resetModules()
     const invokeRaw = vi.fn(async () => ({

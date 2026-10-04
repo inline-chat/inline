@@ -8,6 +8,7 @@ export type ActiveInlineThreadRoute = {
   threadId?: bigint | undefined
   adoption?: Promise<void>
   onThreadAdopted: (threadId: bigint) => Promise<void>
+  runVisibleReply?: <T>(send: () => Promise<T>) => Promise<T>
 }
 
 // Like OpenClaw's Discord active-turn route: this is dispatch-scoped, never a
