@@ -187,12 +187,24 @@ describe("ordinary local recipient authorization", () => {
       await connectionManager.waitForBackgroundWork()
       const started = Promise.withResolvers<void>()
       const executeQuery = db.execute.bind(db)
-      const execute = spyOn(db, "execute").mockImplementation((async (...args: Parameters<typeof db.execute>) => {
-        const rows = await executeQuery(...args)
-        started.resolve()
-        await resume.promise
-        return rows
-      }) as typeof db.execute)
+      const restoreQueryExecutions: (() => void)[] = []
+      let heldQuery = false
+      const execute = spyOn(db, "execute").mockImplementation(
+        <TRow extends Record<string, unknown> = Record<string, unknown>>(query: Parameters<typeof db.execute>[0]) => {
+          const result = executeQuery<TRow>(query)
+          if (heldQuery) return result
+          heldQuery = true
+          const executeResult = result.execute.bind(result)
+          const delayed = spyOn(result, "execute").mockImplementation(async () => {
+            const rows = await executeResult()
+            started.resolve()
+            await resume.promise
+            return rows
+          })
+          restoreQueryExecutions.push(() => delayed.mockRestore())
+          return result
+        },
+      )
       const observe = spyOn(recentRealtimeRepair, "observeDelivery")
       process.env["INLINE_REALTIME_DISTRIBUTED"] = "1"
       let delivery: Promise<void> | undefined
@@ -211,8 +223,9 @@ describe("ordinary local recipient authorization", () => {
         expect(observe).not.toHaveBeenCalled()
       } finally {
         resume.resolve()
-        await delivery
+        await Promise.allSettled([delivery])
         observe.mockRestore()
+        for (const restore of restoreQueryExecutions) restore()
         execute.mockRestore()
       }
     } finally {
@@ -324,15 +337,22 @@ describe("ordinary local recipient authorization", () => {
       await connectionManager.waitForBackgroundWork()
       const started = Promise.withResolvers<void>()
       const executeQuery = db.execute.bind(db)
+      const restoreQueryExecutions: (() => void)[] = []
       let queryCount = 0
-      const execute = spyOn(db, "execute").mockImplementation((async (...args: Parameters<typeof db.execute>) => {
-        const first = ++queryCount === 1
-        if (first) {
-          started.resolve()
-          await resume.promise
-        }
-        return executeQuery(...args)
-      }) as typeof db.execute)
+      const execute = spyOn(db, "execute").mockImplementation(
+        <TRow extends Record<string, unknown> = Record<string, unknown>>(query: Parameters<typeof db.execute>[0]) => {
+          const result = executeQuery<TRow>(query)
+          if (++queryCount !== 1) return result
+          const executeResult = result.execute.bind(result)
+          const delayed = spyOn(result, "execute").mockImplementation(async () => {
+            started.resolve()
+            await resume.promise
+            return executeResult()
+          })
+          restoreQueryExecutions.push(() => delayed.mockRestore())
+          return result
+        },
+      )
       try {
         const first = content(chat.id, "first blocked-user payload")
         const second = content(chat.id, "second blocked-user payload")
@@ -368,6 +388,7 @@ describe("ordinary local recipient authorization", () => {
       } finally {
         resume.resolve()
         await Promise.allSettled(deliveries)
+        for (const restore of restoreQueryExecutions) restore()
         execute.mockRestore()
       }
     } finally {
@@ -399,11 +420,20 @@ describe("ordinary local recipient authorization", () => {
       await connectionManager.waitForBackgroundWork()
       const started = Promise.withResolvers<void>()
       const executeQuery = db.execute.bind(db)
-      const execute = spyOn(db, "execute").mockImplementation((async (...args: Parameters<typeof db.execute>) => {
-        started.resolve()
-        await resume.promise
-        return executeQuery(...args)
-      }) as typeof db.execute)
+      const restoreQueryExecutions: (() => void)[] = []
+      const execute = spyOn(db, "execute").mockImplementation(
+        <TRow extends Record<string, unknown> = Record<string, unknown>>(query: Parameters<typeof db.execute>[0]) => {
+          const result = executeQuery<TRow>(query)
+          const executeResult = result.execute.bind(result)
+          const delayed = spyOn(result, "execute").mockImplementation(async () => {
+            started.resolve()
+            await resume.promise
+            return executeResult()
+          })
+          restoreQueryExecutions.push(() => delayed.mockRestore())
+          return result
+        },
+      )
       const select = spyOn(db, "select")
       try {
         const chatUpdate = content(chat.id, "revoked chat content")
@@ -431,6 +461,7 @@ describe("ordinary local recipient authorization", () => {
         resume.resolve()
         await Promise.allSettled(deliveries)
         select.mockRestore()
+        for (const restore of restoreQueryExecutions) restore()
         execute.mockRestore()
       }
     } finally {

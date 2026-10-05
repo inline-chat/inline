@@ -1,8 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test"
 import { generateKeyPairSync, randomUUID, type KeyObject } from "node:crypto"
 import { and, eq } from "drizzle-orm"
-import { PgDialect } from "drizzle-orm/pg-core"
-import { ClientMessage, ServerProtocolMessage, Update, type Message } from "@inline-chat/protocol/core"
+import { ClientMessage, ServerProtocolMessage, Update, UpdateNewMessageNotification_Reason, type Message } from "@inline-chat/protocol/core"
 import { RealtimeDelivery } from "@in/server/protocol/server"
 import { db, schema } from "@in/server/db"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "@in/server/__tests__/setup"
@@ -282,7 +281,9 @@ function content(message: Message): Update[] {
   return [
     Update.create({ update: { oneofKind: "newMessage", newMessage: { message } } }),
     Update.create({ update: { oneofKind: "editMessage", editMessage: { message: { ...message, message: "stale edited content" } } } }),
-    Update.create({ update: { oneofKind: "newMessageNotification", newMessageNotification: { message } } }),
+    Update.create({ update: { oneofKind: "newMessageNotification", newMessageNotification: {
+      message, reason: UpdateNewMessageNotification_Reason.UNSPECIFIED,
+    } } }),
     Update.create({ update: { oneofKind: "deleteReaction", deleteReaction: {
       chatId: message.chatId, messageId: message.id, userId: message.fromId, emoji: "👍",
     } } }),
@@ -628,21 +629,27 @@ test("a mixed chat and Space batch reaches retained WebSockets from one final au
     } } })
     const starting = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
-    const dialect = new PgDialect()
     const executeQuery = db.execute.bind(db)
     const selectQuery = db.select.bind(db)
-    const restoreSpaceQueries: (() => void)[] = []
+    const restoreDelayedQueries: (() => void)[] = []
     // Gate the final resource read in both designs: before the combined SQL
     // starts, or before the former separate Space read after real chat SQL.
     // Every query still executes against PostgreSQL; no rows are substituted.
-    const execute = spyOn(db, "execute").mockImplementation((async (...args: Parameters<typeof db.execute>) => {
-      const statement = typeof args[0] === "string" ? args[0] : dialect.sqlToQuery(args[0].getSQL()).sql
-      if (statement.includes("'space'::text as kind")) {
-        starting.resolve()
-        await release.promise
+    const execute = spyOn(db, "execute").mockImplementation(<TRow extends Record<string, unknown>>(
+      query: Parameters<typeof db.execute>[0],
+    ) => {
+      const pending = executeQuery<TRow>(query)
+      if (pending.getQuery().sql.includes("'space'::text as kind")) {
+        const run = pending.execute.bind(pending)
+        const delayed = spyOn(pending, "execute").mockImplementation(async () => {
+          starting.resolve()
+          await release.promise
+          return run()
+        })
+        restoreDelayedQueries.push(() => delayed.mockRestore())
       }
-      return executeQuery(...args)
-    }) as typeof db.execute)
+      return pending
+    })
     const select = spyOn(db, "select").mockImplementation(((...args: Parameters<typeof db.select>) => {
       const builder = selectQuery(...args)
       const fields = args[0]
@@ -655,7 +662,7 @@ test("a mixed chat and Space batch reaches retained WebSockets from one final au
           starting.resolve()
           return release.promise.then(() => thenQuery(...callbacks))
         }) as typeof query.then)
-        restoreSpaceQueries.push(() => delayed.mockRestore())
+        restoreDelayedQueries.push(() => delayed.mockRestore())
         return query
       }) as typeof builder.from
       return builder
@@ -685,7 +692,7 @@ test("a mixed chat and Space batch reaches retained WebSockets from one final au
     } finally {
       release.resolve()
       await Promise.allSettled(deliveries)
-      for (const restore of restoreSpaceQueries) restore()
+      for (const restore of restoreDelayedQueries) restore()
       select.mockRestore()
       execute.mockRestore()
     }
