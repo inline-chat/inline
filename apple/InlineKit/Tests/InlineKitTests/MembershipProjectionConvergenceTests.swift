@@ -222,6 +222,98 @@ struct MembershipProjectionConvergenceTests {
     }
   }
 
+  @Test("a sequenced removal after Space deletion commits the User cursor")
+  func sequencedRemovalAfterSpaceDeletionAdvancesCursor() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { db in
+      try seedSpaceAndUser(db)
+      try makeMember(id: 100, role: .member).save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user, state: .init(date: 10, seq: 10), in: db
+      )
+      try InlineKit.Member.deleteOne(db, id: 100)
+      try InlineKit.Space.deleteOne(db, id: spaceID)
+      #expect(try InlineKit.Member.fetchOne(db, id: 100) == nil)
+    }
+
+    var removal = InlineProtocol.UpdateSpaceMemberDelete()
+    removal.spaceID = spaceID
+    removal.userID = userID
+    removal.memberID = 100
+    let result = await engine.applyBatch(
+      updates: [makeUpdate(sequence: 11, payload: .spaceMemberDelete(removal))],
+      source: .syncCatchup,
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 11, seq: 11),
+        expectedStartState: .init(date: 10, seq: 10)
+      )
+    )
+
+    #expect(result.succeeded)
+    let replay = await engine.applyBatch(
+      updates: [makeUpdate(sequence: 11, payload: .spaceMemberDelete(removal))],
+      source: .syncCatchup,
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 11, seq: 11),
+        expectedStartState: .init(date: 10, seq: 10)
+      )
+    )
+    #expect(!replay.succeeded)
+    guard case .cursorChanged? = replay.failure else {
+      Issue.record("Duplicate replay must retain its committed User cursor")
+      return
+    }
+    try await queue.read { db in
+      #expect(try InlineKit.Space.fetchOne(db, id: spaceID) == nil)
+      #expect(try InlineKit.Member.fetchOne(db, id: 100) == nil)
+      #expect(try memberEventSequence(db, userID: userID) == nil)
+      #expect(try SpaceMemberRosterState.fetchOne(db, key: spaceID) == nil)
+      let userCursor = try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+        .fetchOne(db)
+      #expect(userCursor?.seq == 11)
+      #expect(try SyncRemovalRevision.read(db) == 0)
+    }
+  }
+
+  @Test("sequenced self-removal without Space still advances removal admission and User cursor")
+  func sequencedSelfRemovalAfterSpaceDeletion() throws {
+    let (queue, _) = try makeEngine()
+    try queue.write { db in
+      try seedSpaceAndUser(db)
+      try makeMember(id: 100, role: .member).save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user, state: .init(date: 10, seq: 10), in: db
+      )
+      try InlineKit.Member.deleteOne(db, id: 100)
+      try InlineKit.Space.deleteOne(db, id: spaceID)
+
+      var removal = InlineProtocol.UpdateSpaceMemberDelete()
+      removal.spaceID = spaceID
+      removal.userID = userID
+      removal.memberID = 100
+      try removal.apply(db, updateSequence: 11, currentUserID: userID)
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user, state: .init(date: 11, seq: 11), in: db
+      )
+    }
+    try queue.read { db in
+      #expect(try InlineKit.Space.fetchOne(db, id: spaceID) == nil)
+      #expect(try InlineKit.Member.fetchOne(db, id: 100) == nil)
+      #expect(try memberEventSequence(db, userID: userID) == nil)
+      #expect(try SpaceMemberRosterState.fetchOne(db, key: spaceID) == nil)
+      #expect(try SyncRemovalRevision.read(db) > 0)
+      let cursor = try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+        .fetchOne(db)
+      #expect(cursor?.seq == 11)
+    }
+  }
+
   @Test("a sequenced roster snapshot owns covered membership updates")
   func snapshotWatermarkPreventsReplayRegression() async throws {
     let (queue, engine) = try makeEngine()
