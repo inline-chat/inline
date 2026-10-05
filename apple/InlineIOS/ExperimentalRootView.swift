@@ -467,6 +467,7 @@ private struct ExperimentalAuthedRootView: View {
 
     return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
       rootPage(nav: bindableNav)
+        .voicePlaybackRootPill(router: router)
         .background(Color(.systemBackground))
         .experimentalRootTitleDisplayMode()
         .navigationTitle("")
@@ -482,6 +483,7 @@ private struct ExperimentalAuthedRootView: View {
             onSelectSpace: selectSpaceInHome,
             onMigrateLegacySpaceDestination: migrateLegacySpaceDestination
           )
+          .voicePlaybackRootPill(router: router, destination: destination)
         }
     }
   }

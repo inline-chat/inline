@@ -1,7 +1,9 @@
 import Combine
 import GRDB
 import InlineKit
+import InlineIOSUI
 import Logger
+import SwiftUI
 import UIKit
 
 final class PinnedMessageHeaderView: UIView {
@@ -20,8 +22,12 @@ final class PinnedMessageHeaderView: UIView {
     + Constants.backgroundTopInset
     + Constants.backgroundBottomInset
 
-  var onHeightChange: ((CGFloat) -> Void)?
+  var onHeightChange: ((CGFloat) -> Void)? {
+    didSet { onHeightChange?(currentPreferredHeight) }
+  }
   var onOpenMessage: ((Int64) -> Void)?
+  var onOpenVoiceMessage: ((AudioPlaybackOpenTarget) -> Void)?
+  var onPlaybackError: ((String) -> Void)?
 
   private let peerId: Peer
   private let chatId: Int64
@@ -31,6 +37,18 @@ final class PinnedMessageHeaderView: UIView {
   private var messageObservation: AnyCancellable?
   private var currentMessageId: Int64?
   private var isVisible = false
+  private var isVoiceVisible = false
+  private var audioObservations: Set<AnyCancellable> = []
+
+  private lazy var voiceHostingController: UIHostingController<VoicePlaybackPill> = {
+    let controller = UIHostingController(rootView: VoicePlaybackPill { [weak self] target in
+      self?.onOpenVoiceMessage?(target)
+    })
+    controller.safeAreaRegions = []
+    controller.view.backgroundColor = .clear
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    return controller
+  }()
 
   private let backgroundView: UIView = {
     let view = UIView()
@@ -69,8 +87,8 @@ final class PinnedMessageHeaderView: UIView {
 
   private var didStartObservation = false
   private var backgroundViewTopConstraint: NSLayoutConstraint?
-  private var backgroundViewBottomConstraint: NSLayoutConstraint?
   private var closeButtonHeightConstraint: NSLayoutConstraint?
+  private var voiceHeightConstraint: NSLayoutConstraint?
 
   private lazy var embedView: EmbedMessageView = {
     let view = EmbedMessageView()
@@ -96,13 +114,18 @@ final class PinnedMessageHeaderView: UIView {
     return button
   }()
 
-  init(peerId: Peer, chatId: Int64) {
+  init(peerId: Peer, chatId: Int64, showsVoicePlayback: Bool = true) {
     self.peerId = peerId
     self.chatId = chatId
     super.init(frame: .zero)
     setupViews()
     setupConstraints()
     applyHiddenState()
+    if showsVoicePlayback { observeAudioPlayback() }
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: PinnedMessageHeaderView, _: UITraitCollection) in
+      view.voiceHeightConstraint?.constant = VoicePlaybackPill.preferredHeight(compatibleWith: view.traitCollection)
+      view.updateHeaderPresentation()
+    }
   }
 
   @available(*, unavailable)
@@ -118,6 +141,7 @@ final class PinnedMessageHeaderView: UIView {
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
+    addSubview(voiceHostingController.view)
 
     if #unavailable(iOS 26.0) {
       backgroundView.addSubview(fallbackMaterialView)
@@ -143,17 +167,21 @@ final class PinnedMessageHeaderView: UIView {
       equalTo: topAnchor,
       constant: Constants.backgroundTopInset
     )
-    backgroundViewBottomConstraint = backgroundView.bottomAnchor.constraint(
-      equalTo: bottomAnchor,
-      constant: -Constants.backgroundBottomInset
-    )
     closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
+    voiceHeightConstraint = voiceHostingController.view.heightAnchor.constraint(
+      equalToConstant: VoicePlaybackPill.preferredHeight(compatibleWith: traitCollection)
+    )
 
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
       backgroundViewTopConstraint!,
-      backgroundViewBottomConstraint!,
+      backgroundView.heightAnchor.constraint(equalToConstant: VoicePlaybackPill.height),
+
+      voiceHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
+      voiceHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
+      voiceHostingController.view.topAnchor.constraint(equalTo: topAnchor, constant: Constants.backgroundTopInset),
+      voiceHeightConstraint!,
 
       primaryButton.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
       primaryButton.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
@@ -182,6 +210,9 @@ final class PinnedMessageHeaderView: UIView {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     startObservingIfNeeded()
+    if window != nil, let error = SharedAudioPlayer.shared.playbackError {
+      onPlaybackError?(error)
+    }
   }
 
   private func updatePrimaryPressAppearance(isHighlighted: Bool) {
@@ -228,6 +259,53 @@ final class PinnedMessageHeaderView: UIView {
     observePinnedMessages()
   }
 
+  private func observeAudioPlayback() {
+    let player = SharedAudioPlayer.shared
+    player.$state.map { $0.item?.kind == .voice }
+      .combineLatest(player.$loadingVoice.map { $0 != nil })
+      .map { $0 || $1 }
+      .removeDuplicates()
+      .sink { [weak self] visible in
+        guard let self else { return }
+        isVoiceVisible = visible
+        updateHeaderPresentation()
+      }
+      .store(in: &audioObservations)
+
+    player.$playbackError.compactMap { $0 }
+      .sink { [weak self] error in self?.onPlaybackError?(error) }
+      .store(in: &audioObservations)
+
+    NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+      .sink { [weak self] _ in
+        guard let error = SharedAudioPlayer.shared.playbackError else { return }
+        self?.onPlaybackError?(error)
+      }
+      .store(in: &audioObservations)
+  }
+
+  private func updateHeaderPresentation() {
+    let hasPin = currentMessageId != nil
+    backgroundView.isHidden = !hasPin
+    voiceHostingController.view.isHidden = !isVoiceVisible
+    backgroundViewTopConstraint?.constant = Constants.backgroundTopInset
+      + (isVoiceVisible ? voiceSlotHeight : 0)
+    let height = currentPreferredHeight
+    onHeightChange?(height)
+    setVisible(height > 0)
+  }
+
+  private var currentPreferredHeight: CGFloat {
+    (isVoiceVisible ? voiceSlotHeight : 0) + (currentMessageId != nil ? Self.preferredHeight : 0)
+  }
+
+  var displayedHeight: CGFloat { currentPreferredHeight }
+
+  private var voiceSlotHeight: CGFloat {
+    VoicePlaybackPill.preferredHeight(compatibleWith: traitCollection)
+      + Constants.backgroundTopInset + Constants.backgroundBottomInset
+  }
+
   private func observePinnedMessages() {
     AppDatabase.shared.warnIfInMemoryDatabaseForObservation("PinnedMessageHeaderView.pinnedMessage")
     pinnedMessageObservation = ValueObservation
@@ -257,7 +335,6 @@ final class PinnedMessageHeaderView: UIView {
     messageObservation = nil
 
     if let messageId {
-      setVisible(true)
       if let message = loadPinnedMessage(messageId: messageId) {
         embedView.configure(
           fullMessage: message,
@@ -279,9 +356,8 @@ final class PinnedMessageHeaderView: UIView {
         }
       }
       observePinnedMessageContent(messageId: messageId)
-    } else {
-      setVisible(false)
     }
+    updateHeaderPresentation()
   }
 
   private func loadPinnedMessage(messageId: Int64) -> FullMessage? {
@@ -347,10 +423,7 @@ final class PinnedMessageHeaderView: UIView {
     if visible {
       isHidden = false
       alpha = canAnimate ? 0 : 1
-      backgroundViewTopConstraint?.constant = Constants.backgroundTopInset
-      backgroundViewBottomConstraint?.constant = -Constants.backgroundBottomInset
       closeButtonHeightConstraint?.constant = Constants.closeButtonSize
-      onHeightChange?(Self.preferredHeight)
       superview?.layoutIfNeeded()
 
       guard canAnimate else { return }
@@ -384,8 +457,6 @@ final class PinnedMessageHeaderView: UIView {
   private func applyHiddenState() {
     isHidden = true
     alpha = 0
-    backgroundViewTopConstraint?.constant = 0
-    backgroundViewBottomConstraint?.constant = 0
     closeButtonHeightConstraint?.constant = 0
     onHeightChange?(0)
   }

@@ -5,6 +5,8 @@ import UIKit
 
 public class ChatContainerView: UIView {
   var onRenameThread: (() -> Bool)?
+  var onOpenVoiceMessage: ((AudioPlaybackOpenTarget, @escaping (Int64) -> Void) -> Void)?
+  var canPresentVoicePlaybackError: (() -> Bool)?
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
@@ -12,7 +14,7 @@ public class ChatContainerView: UIView {
   private let isPreview: Bool
   private(set) var theme: IOSThemeSnapshot
   private var lastAppliedDraftSignature: DraftSignature?
-  private var lastRequestedFocus: (messageID: Int64, revision: Int)?
+  private var lastRequestedFocus: (messageID: Int64, revision: Int, requiresExactMessage: Bool)?
 
   private struct DraftSignature: Equatable {
     let text: String
@@ -74,7 +76,7 @@ public class ChatContainerView: UIView {
   }()
 
   private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
-    let view = PinnedMessageHeaderView(peerId: peerId, chatId: chatId ?? 0)
+    let view = PinnedMessageHeaderView(peerId: peerId, chatId: chatId ?? 0, showsVoicePlayback: !isPreview)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.onHeightChange = { [weak self] height in
       self?.pinnedHeaderHeightConstraint?.constant = height
@@ -83,8 +85,34 @@ public class ChatContainerView: UIView {
     view.onOpenMessage = { [weak self] messageID in
       self?.messagesCollectionView.scrollToMessageWhenAvailable(messageID)
     }
+    view.onOpenVoiceMessage = { [weak self] target in
+      guard let self else { return }
+      onOpenVoiceMessage?(target) { [weak self] messageID in
+        self?.messagesCollectionView.scrollToMessageWhenAvailable(messageID, requiresExactMessage: true)
+      }
+    }
+    view.onPlaybackError = { [weak self] error in self?.presentVoicePlaybackError(error) }
     return view
   }()
+
+  private func presentVoicePlaybackError(_ error: String) {
+    guard window?.windowScene?.activationState == .foregroundActive,
+          !isPreview, canPresentVoicePlaybackError?() == true
+    else { return }
+    var responder: UIResponder? = self
+    while let current = responder {
+      if let controller = current as? UIViewController {
+        guard controller.presentedViewController == nil else { return }
+        let alert = UIAlertController(title: "Voice playback failed", message: error, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+          SharedAudioPlayer.shared.clearPlaybackError()
+        })
+        controller.present(alert, animated: true)
+        return
+      }
+      responder = current.next
+    }
+  }
 
   lazy var composeView: ComposeView = {
     let view = ComposeView()
@@ -223,15 +251,18 @@ public class ChatContainerView: UIView {
     composeView.loadDraft(from: draftMessage)
   }
 
-  func focusMessage(_ messageID: Int64?, requestRevision: Int) {
+  func focusMessage(_ messageID: Int64?, requestRevision: Int, requiresExactMessage: Bool) {
     guard let messageID else {
+      // An unchanged ordinary chat route does not own the pill's pending jump.
+      guard lastRequestedFocus != nil else { return }
       lastRequestedFocus = nil
       messagesCollectionView.cancelPendingMessageFocus()
       return
     }
-    guard lastRequestedFocus?.messageID != messageID || lastRequestedFocus?.revision != requestRevision else { return }
-    lastRequestedFocus = (messageID, requestRevision)
-    messagesCollectionView.scrollToMessageWhenAvailable(messageID)
+    guard lastRequestedFocus?.messageID != messageID || lastRequestedFocus?.revision != requestRevision
+      || lastRequestedFocus?.requiresExactMessage != requiresExactMessage else { return }
+    lastRequestedFocus = (messageID, requestRevision, requiresExactMessage)
+    messagesCollectionView.scrollToMessageWhenAvailable(messageID, requiresExactMessage: requiresExactMessage)
   }
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
@@ -261,7 +292,7 @@ public class ChatContainerView: UIView {
     sendAnimationCoordinator?.setSourceLayoutView(messagesCollectionView)
     addSubview(pinnedHeaderView)
 
-    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
+    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderView.displayedHeight)
     let commonConstraints = [
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
@@ -925,11 +956,13 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
 }
 
 struct ChatViewUIKit: UIViewRepresentable {
+  @Environment(Router.self) private var router
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
   let draftMessage: DraftMessage?
   let focusMessageID: Int64?
+  let focusMessageExactly: Bool
   let focusRequestRevision: Int
   let collapsedMaxId: Int64?
   let isPreview: Bool
@@ -946,9 +979,12 @@ struct ChatViewUIKit: UIViewRepresentable {
       theme: theme
     )
     view.onRenameThread = isPreview ? nil : onRenameThread
+    configureVoicePlaybackNavigation(view)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
-      view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
+      view.focusMessage(
+        focusMessageID, requestRevision: focusRequestRevision, requiresExactMessage: focusMessageExactly
+      )
     }
 
     return view
@@ -956,11 +992,26 @@ struct ChatViewUIKit: UIViewRepresentable {
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.onRenameThread = isPreview ? nil : onRenameThread
+    configureVoicePlaybackNavigation(view)
     view.applyTheme(theme)
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
-      view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
+      view.focusMessage(
+        focusMessageID, requestRevision: focusRequestRevision, requiresExactMessage: focusMessageExactly
+      )
+    }
+  }
+
+  private func configureVoicePlaybackNavigation(_ view: ChatContainerView) {
+    view.canPresentVoicePlaybackError = {
+      router.presentedSheet == nil && router.selectedTabPath.last?.chatPeer == peerId
+    }
+    view.onOpenVoiceMessage = { target, scrollToMessage in
+      VoicePlaybackNavigation.open(
+        target, router: router, currentPeer: peerId, currentChatID: chatId,
+        scrollToMessage: scrollToMessage
+      )
     }
   }
 }

@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 public final class AVAudioPlayerPlaybackEngine: NSObject, AudioPlaybackEngine, AVAudioPlayerDelegate {
   public var onFinish: ((TimeInterval) -> Void)?
+  public var onFailure: (() -> Void)?
 
   public var currentTime: TimeInterval {
     get { player?.currentTime ?? 0 }
@@ -32,7 +33,7 @@ public final class AVAudioPlayerPlaybackEngine: NSObject, AudioPlaybackEngine, A
     }
   }
 
-  private var player: AVAudioPlayer?
+  private(set) var player: AVAudioPlayer?
 
   override public init() {
     super.init()
@@ -47,8 +48,8 @@ public final class AVAudioPlayerPlaybackEngine: NSObject, AudioPlaybackEngine, A
     player = nextPlayer
   }
 
-  public func prepare() {
-    player?.prepareToPlay()
+  public func prepare() throws {
+    guard player?.prepareToPlay() == true else { throw AudioPlaybackError.preparationFailed }
   }
 
   public func play() -> Bool {
@@ -64,10 +65,19 @@ public final class AVAudioPlayerPlaybackEngine: NSObject, AudioPlaybackEngine, A
     player = nil
   }
 
-  nonisolated public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
-    let duration = player.duration
+  nonisolated public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    let identity = ObjectIdentifier(player)
     Task { @MainActor [weak self] in
-      self?.onFinish?(duration)
+      guard let self, let current = self.player, ObjectIdentifier(current) == identity, !current.isPlaying else { return }
+      if flag { onFinish?(current.duration) } else { onFailure?() }
+    }
+  }
+
+  nonisolated public func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error _: Error?) {
+    let identity = ObjectIdentifier(player)
+    Task { @MainActor [weak self] in
+      guard let self, let current = self.player, ObjectIdentifier(current) == identity else { return }
+      onFailure?()
     }
   }
 }

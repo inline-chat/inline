@@ -13,9 +13,10 @@ public protocol AudioPlaybackEngine: AnyObject {
   var playbackRate: Float { get set }
   var volume: Float { get set }
   var onFinish: ((TimeInterval) -> Void)? { get set }
+  var onFailure: (() -> Void)? { get set }
 
   func load(contentsOf fileURL: URL) throws
-  func prepare()
+  func prepare() throws
   func play() -> Bool
   func pause()
   func stop()

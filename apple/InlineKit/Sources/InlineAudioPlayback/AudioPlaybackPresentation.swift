@@ -24,11 +24,13 @@ public struct AudioPlaybackDisplay: Codable, Equatable, Hashable, Sendable {
   public var title: String
   public var parentTitle: String?
   public var subtitle: String?
+  public var senderName: String?
 
-  public init(title: String, parentTitle: String? = nil, subtitle: String? = nil) {
+  public init(title: String, parentTitle: String? = nil, subtitle: String? = nil, senderName: String? = nil) {
     self.title = title
     self.parentTitle = parentTitle
     self.subtitle = subtitle
+    self.senderName = senderName
   }
 }
 

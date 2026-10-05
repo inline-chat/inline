@@ -1,56 +1,80 @@
 import AVFoundation
 import Foundation
-
-struct ComposeVoiceRecording: Sendable {
-  let fileURL: URL
-  let data: Data
-  let duration: TimeInterval
-  let waveform: Data
-  let mimeType: String
-  let fileExtension: String
-}
+import InlineKit
+import Logger
 
 @MainActor
-final class ComposeVoiceRecorder: NSObject {
+final class ComposeVoiceRecorder: NSObject, AVAudioRecorderDelegate {
+  private let log = Log.scoped("ComposeVoiceRecorder")
   private var recorder: AVAudioRecorder?
   private var fileURL: URL?
   private var samples: [UInt8] = []
   private var meterTimer: Timer?
-  private var startedAt: Date?
-  private var sessionActive = false
+  private var startedAt: TimeInterval?
+  private var capturedDuration: TimeInterval = 0
+  private var lastProgressAt: TimeInterval = 0
+  private var lastMeteredAt: TimeInterval = 0
+  private var sessionToken: InlineAudioSession.Token?
 
   var onUpdate: ((TimeInterval, [UInt8]) -> Void)?
+  var onUnexpectedStop: ((ComposeVoiceRecorderError) -> Void)?
 
   var isRecording: Bool {
     recorder?.isRecording == true
   }
 
-  func start() throws {
+  deinit {
+    meterTimer?.invalidate()
+    recorder?.stop()
+    let sessionToken = sessionToken
+    Task { @MainActor in
+      if let sessionToken {
+        InlineAudioSession.shared.release(sessionToken)
+      }
+    }
+  }
+
+  func start(isCurrent: @escaping @MainActor () -> Bool = { true }) async throws {
     cancel()
     stopMetering()
-    try configureSession()
 
     let id = UUID().uuidString
     let finalURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-ios-voice-\(id).m4a")
 
+    var attemptToken: InlineAudioSession.Token?
     do {
+      let token = try await configureSession(isCurrent: isCurrent)
+      attemptToken = token
+      guard sessionToken == token, InlineAudioSession.shared.owns(token), isCurrent(), !Task.isCancelled
+      else { throw CancellationError() }
       let recorder = try AVAudioRecorder(url: finalURL, settings: Self.recordingSettings)
+      recorder.delegate = self
       recorder.isMeteringEnabled = true
-      recorder.prepareToRecord()
+      guard recorder.prepareToRecord() else {
+        recorder.stop()
+        throw ComposeVoiceRecorderError.preparationFailed
+      }
 
       guard recorder.record() else {
+        recorder.stop()
         throw ComposeVoiceRecorderError.startFailed
       }
 
       self.recorder = recorder
       fileURL = finalURL
       samples = []
-      startedAt = Date()
+      capturedDuration = 0
+      let now = ProcessInfo.processInfo.systemUptime
+      startedAt = now
+      lastProgressAt = now
+      lastMeteredAt = now
+      logDiagnostics(event: "started", recorder: recorder)
       startMetering()
     } catch {
+      logDiagnostics(event: "startFailed", recorder: nil)
       try? FileManager.default.removeItem(at: finalURL)
-      cleanupSession()
+      if let attemptToken { cleanupSession(attemptToken) }
       throw error
     }
   }
@@ -60,50 +84,76 @@ final class ComposeVoiceRecorder: NSObject {
       throw ComposeVoiceRecorderError.notRecording
     }
 
-    let duration = elapsedDuration
+    updateCapturedDuration(recorder.currentTime)
+    let captureDuration = capturedDuration
+    let wallDuration = self.wallDuration
     let samples = samples
+    logDiagnostics(event: "finishing", recorder: recorder)
+    recorder.delegate = nil
     recorder.stop()
     stopMetering()
     self.recorder = nil
     self.fileURL = nil
     self.samples = []
     startedAt = nil
+    capturedDuration = 0
     cleanupSession()
 
-    return try await Self.makeRecording(
-      fileURL: fileURL,
-      duration: duration,
-      samples: samples
-    )
+    do {
+      let recording = try await Self.makeRecording(fileURL: fileURL, samples: samples)
+      log.info("Validated voice capture encodedSeconds=\(recording.duration) recorderSeconds=\(captureDuration) wallSeconds=\(wallDuration) bytes=\(recording.data.count)")
+      return recording
+    } catch {
+      log.warning("Rejected voice capture recorderSeconds=\(captureDuration) wallSeconds=\(wallDuration)")
+      throw error
+    }
   }
 
   func cancel() {
     let fileURL = fileURL
+    recorder?.delegate = nil
     recorder?.stop()
     stopMetering()
     recorder = nil
     self.fileURL = nil
     samples = []
     startedAt = nil
+    capturedDuration = 0
     if let fileURL {
       try? FileManager.default.removeItem(at: fileURL)
     }
     cleanupSession()
   }
 
-  private func configureSession() throws {
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
-    try? session.setPreferredSampleRate(Self.sampleRate)
-    try session.setActive(true)
-    _ = try? VoiceInputController.shared.applyPreferredInput(to: session)
-    sessionActive = true
+  private func configureSession(isCurrent: @MainActor () -> Bool) async throws -> InlineAudioSession.Token {
+    // Fence pending voice downloads as well as a currently playing message.
+    SharedAudioPlayer.shared.stop()
+    let sessionOwner = InlineAudioSession.shared
+    let token = try sessionOwner.acquire(.recording)
+    sessionToken = token
+    do {
+      try await sessionOwner.activate(
+        token,
+        category: .playAndRecord,
+        mode: .default,
+        options: [.allowBluetoothHFP, .defaultToSpeaker]
+      )
+      guard sessionToken == token, sessionOwner.owns(token), isCurrent(), !Task.isCancelled
+      else { throw CancellationError() }
+      let session = AVAudioSession.sharedInstance()
+      // The recorder owns the encoded sample rate; leave hardware timing to the route.
+      _ = try VoiceInputController.shared.applyPreferredInput(to: session)
+      return token
+    } catch {
+      cleanupSession(token)
+      throw error
+    }
   }
 
-  private func cleanupSession() {
-    guard sessionActive else { return }
-    sessionActive = false
-    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+  private func cleanupSession(_ token: InlineAudioSession.Token? = nil) {
+    guard let token = token ?? sessionToken else { return }
+    if sessionToken == token { sessionToken = nil }
+    InlineAudioSession.shared.release(token)
   }
 
   private func startMetering() {
@@ -122,15 +172,85 @@ final class ComposeVoiceRecorder: NSObject {
   private func publishMeter() {
     guard let recorder else { return }
 
+    guard recorder.isRecording else {
+      reportUnexpectedStop(.captureStopped, recorder: recorder)
+      return
+    }
+
+    let now = ProcessInfo.processInfo.systemUptime
+    // A busy main actor is not evidence that audio stopped. Start observing again
+    // after a timer gap instead of counting the unobserved interval as a stall.
+    if now - lastMeteredAt > Self.maximumMeterGap {
+      lastProgressAt = now
+    }
+    lastMeteredAt = now
+    if updateCapturedDuration(recorder.currentTime) {
+      lastProgressAt = now
+    }
+    if now - lastProgressAt >= Self.captureStallTimeout {
+      reportUnexpectedStop(.captureStopped, recorder: recorder)
+      return
+    }
+
     recorder.updateMeters()
     samples.append(Self.meterSample(fromAveragePower: recorder.averagePower(forChannel: 0)))
 
-    onUpdate?(elapsedDuration, Self.liveSamples(from: samples))
+    onUpdate?(capturedDuration, Self.liveSamples(from: samples))
   }
 
-  private var elapsedDuration: TimeInterval {
+  @discardableResult
+  private func updateCapturedDuration(_ currentTime: TimeInterval) -> Bool {
+    guard currentTime.isFinite, currentTime > capturedDuration else { return false }
+    capturedDuration = currentTime
+    return true
+  }
+
+  private var wallDuration: TimeInterval {
     guard let startedAt else { return 0 }
-    return max(0, Date().timeIntervalSince(startedAt))
+    return max(0, ProcessInfo.processInfo.systemUptime - startedAt)
+  }
+
+  func logRouteChange(reason: AVAudioSession.RouteChangeReason?) {
+    guard let recorder else { return }
+    logDiagnostics(event: "routeChanged:\(reason?.rawValue ?? 0)", recorder: recorder)
+  }
+
+  private func logDiagnostics(event: String, recorder: AVAudioRecorder?) {
+    let session = AVAudioSession.sharedInstance()
+    let inputs = session.currentRoute.inputs.prefix(4).map(\.portType.rawValue).joined(separator: ",")
+    let outputs = session.currentRoute.outputs.prefix(4).map(\.portType.rawValue).joined(separator: ",")
+    let ownsSession = sessionToken.map { InlineAudioSession.shared.owns($0) } ?? false
+    let preferredInput = session.preferredInput?.portType.rawValue ?? "automatic"
+    let diagnostic = "Voice capture event=\(event) recorderSeconds=\(capturedDuration) wallSeconds=\(wallDuration) recording=\(recorder?.isRecording ?? false) ownsSession=\(ownsSession) inputAvailable=\(session.isInputAvailable) inputMuted=\(AVAudioApplication.shared.isInputMuted) sampleRate=\(session.sampleRate) category=\(session.category.rawValue) mode=\(session.mode.rawValue) inputs=\(inputs) outputs=\(outputs) preferredInput=\(preferredInput) meterMaximum=\(samples.max() ?? 0)"
+    log.info(diagnostic)
+    #if DEBUG
+    // Device launch consoles forward stdout, while unified logs require a separate stream.
+    print(diagnostic)
+    #endif
+  }
+
+  private func reportUnexpectedStop(_ error: ComposeVoiceRecorderError, recorder: AVAudioRecorder) {
+    guard self.recorder === recorder, meterTimer != nil else { return }
+    updateCapturedDuration(recorder.currentTime)
+    logDiagnostics(event: "unexpectedStop", recorder: recorder)
+    stopMetering()
+    onUnexpectedStop?(error)
+  }
+
+  nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+    let identity = ObjectIdentifier(recorder)
+    Task { @MainActor [weak self] in
+      guard let self, let current = self.recorder, ObjectIdentifier(current) == identity else { return }
+      self.reportUnexpectedStop(flag ? .captureStopped : .encodingFailed, recorder: current)
+    }
+  }
+
+  nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+    let identity = ObjectIdentifier(recorder)
+    Task { @MainActor [weak self] in
+      guard let self, let current = self.recorder, ObjectIdentifier(current) == identity else { return }
+      self.reportUnexpectedStop(.encodingFailed, recorder: current)
+    }
   }
 
   nonisolated fileprivate static func normalizedPower(_ power: Float) -> Float {
@@ -144,30 +264,11 @@ final class ComposeVoiceRecorder: NSObject {
 
   private nonisolated static func makeRecording(
     fileURL: URL,
-    duration: TimeInterval,
     samples: [UInt8]
   ) async throws -> ComposeVoiceRecording {
     try await Task.detached(priority: .userInitiated) {
       do {
-        let data = try Data(contentsOf: fileURL)
-        if data.isEmpty {
-          try? FileManager.default.removeItem(at: fileURL)
-          throw ComposeVoiceRecorderError.emptyRecording
-        }
-
-        if data.count > Self.maxVoiceBytes {
-          try? FileManager.default.removeItem(at: fileURL)
-          throw ComposeVoiceRecorderError.fileTooLarge
-        }
-
-        return ComposeVoiceRecording(
-          fileURL: fileURL,
-          data: data,
-          duration: duration,
-          waveform: Self.waveformData(from: samples),
-          mimeType: "audio/mp4",
-          fileExtension: "m4a"
-        )
+        return try ComposeVoiceRecordingValidation.load(fileURL: fileURL, waveform: Self.waveformData(from: samples))
       } catch {
         try? FileManager.default.removeItem(at: fileURL)
         throw error
@@ -222,32 +323,13 @@ final class ComposeVoiceRecorder: NSObject {
   private nonisolated static let sampleRate: Double = 44_100
   private nonisolated static let meterInterval: TimeInterval = 1.0 / 25.0
   private nonisolated static let liveSampleCount = 120
-  private nonisolated static let maxVoiceBytes = 20 * 1_024 * 1_024
-  private nonisolated static let recordingSettings: [String: Any] = [
-      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-      AVSampleRateKey: sampleRate,
-      AVNumberOfChannelsKey: 1,
-      AVEncoderBitRateKey: 40_000,
-      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+  private nonisolated static let maximumMeterGap: TimeInterval = 1
+  private nonisolated static let captureStallTimeout: TimeInterval = 4
+  private static let recordingSettings: [String: Any] = [
+    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+    AVSampleRateKey: sampleRate,
+    AVNumberOfChannelsKey: 1,
+    AVEncoderBitRateKey: 40_000,
+    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
   ]
-}
-
-enum ComposeVoiceRecorderError: LocalizedError {
-  case startFailed
-  case notRecording
-  case emptyRecording
-  case fileTooLarge
-
-  var errorDescription: String? {
-    switch self {
-    case .startFailed:
-      "Could not start voice recording."
-    case .notRecording:
-      "No active voice recording."
-    case .emptyRecording:
-      "Voice recording is empty."
-    case .fileTooLarge:
-      "Voice recording is too large to send."
-    }
-  }
 }

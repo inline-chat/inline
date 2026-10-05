@@ -82,6 +82,8 @@ private enum LocalDataResetPerformer {
   private static let log = Log.scoped("LocalDataReset")
 
   static func perform(realtimeV2: RealtimeV2) async throws {
+    SharedAudioPlayer.shared.beginLocalDataMaintenance()
+    defer { SharedAudioPlayer.shared.endLocalDataMaintenance() }
     await ReservedChatIDPool.shared.pauseAndDrain()
     await realtimeV2.loggedOut()
     await Realtime.shared.loggedOut()

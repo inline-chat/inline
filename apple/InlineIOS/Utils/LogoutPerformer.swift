@@ -27,6 +27,8 @@ enum LogoutPerformer {
       return
     }
 
+    // Fence playback and pending download intent before the first suspension.
+    SharedAudioPlayer.shared.stop()
     (UIApplication.shared.delegate as? AppDelegate)?.cancelPendingSpaceJoin()
     ProviderSignInCoordinator.shared.cancelPendingAttempt()
 

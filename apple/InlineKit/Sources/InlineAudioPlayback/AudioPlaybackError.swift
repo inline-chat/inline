@@ -6,6 +6,8 @@ public enum AudioPlaybackError: LocalizedError, Sendable {
   case missingLocalFile
   case unsupportedAudioFile
   case playbackUnavailable
+  case preparationFailed
+  case audioInUse(String)
 
   public var errorDescription: String? {
     switch self {
@@ -16,7 +18,11 @@ public enum AudioPlaybackError: LocalizedError, Sendable {
     case .unsupportedAudioFile:
       "The selected file isn't a supported audio format."
     case .playbackUnavailable:
-      "There isn't an audio item ready to resume."
+      "Couldn't play this voice message. Try again."
+    case .preparationFailed:
+      "Couldn't play this voice message. Try again."
+    case let .audioInUse(message):
+      message
     }
   }
 }

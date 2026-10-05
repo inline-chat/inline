@@ -176,6 +176,8 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   #if DEBUG
+  var pendingMessageFocusIDForTesting: Int64? { pendingScrollMessageID }
+
   /// Exercises the production picker with in-memory fixtures in device tests.
   func reactionPickerForTesting(for message: FullMessage) -> UIView {
     coordinator.createReactionPickerView(for: message)
@@ -342,16 +344,23 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
-  func scrollToMessageWhenAvailable(_ messageID: Int64) {
+  func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage: Bool = false) {
     cancelContextMenuKeyboardRestoration()
     messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
 
+    guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID) else {
+      pendingScrollMessageID = nil
+      ToastManager.shared.showToast("Message unavailable", type: .error, systemImage: "exclamationmark.triangle.fill")
+      return
+    }
+
     guard !resolvePendingMessageScroll() else { return }
 
     let peer = peerId
+    let unavailableMessage = requiresExactMessage ? "Message unavailable" : "Could not load that message"
     let limit = MessagesProgressiveViewModel.defaultInitialLimit()
     pendingScrollLoadTask = Task { @MainActor [weak self] in
       guard !Task.isCancelled else { return }
@@ -363,18 +372,20 @@ final class MessagesCollectionView: UICollectionView {
           limit: limit
         )
         guard let self, !Task.isCancelled, pendingScrollMessageID == messageID else { return }
-        guard outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID) else {
+        guard (!requiresExactMessage || !isHiddenByCollapsedHistory(messageID)),
+              outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID) else {
           pendingScrollMessageID = nil
           pendingScrollLoadTask = nil
           ToastManager.shared.showToast(
-            "Could not load that message",
+            unavailableMessage,
             type: .error,
             systemImage: "exclamationmark.triangle.fill"
           )
           return
         }
         pendingScrollLoadTask = nil
-        guard let displayedMessageID = coordinator.nearestDisplayedMessageID(to: messageID),
+        let displayedMessageID = requiresExactMessage ? messageID : coordinator.nearestDisplayedMessageID(to: messageID)
+        guard let displayedMessageID,
               resolvePendingMessageScroll(
                 displayedMessageID: displayedMessageID,
                 shouldHighlight: displayedMessageID == messageID
@@ -382,7 +393,7 @@ final class MessagesCollectionView: UICollectionView {
         else {
           pendingScrollMessageID = nil
           ToastManager.shared.showToast(
-            "Could not load that message",
+            unavailableMessage,
             type: .error,
             systemImage: "exclamationmark.triangle.fill"
           )
@@ -396,13 +407,18 @@ final class MessagesCollectionView: UICollectionView {
         pendingScrollLoadTask = nil
         Log.shared.error("Failed to load focused message", error: error)
         ToastManager.shared.showToast(
-          "Could not load that message",
+          unavailableMessage,
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )
         return
       }
     }
+  }
+
+  private func isHiddenByCollapsedHistory(_ messageID: Int64) -> Bool {
+    guard let boundary = coordinator.viewModel.collapsedMaxId else { return false }
+    return messageID > 0 && messageID <= boundary
   }
 
   func cancelPendingMessageFocus() {
@@ -535,8 +551,16 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func updatePinnedHeaderHeight(_ height: CGFloat) {
+    guard abs(pinnedHeaderHeight - height) > 0.5 else { return }
+    let previousOffset = contentOffset
+    let wasAtBottom = visualBottomDistance <= 1
     pinnedHeaderHeight = height
-    updateContentInsets()
+    UIView.performWithoutAnimation {
+      updateContentInsets()
+      guard window != nil else { return }
+      let target = wasAtBottom ? CGPoint(x: previousOffset.x, y: -contentInset.top) : previousOffset
+      setContentOffset(clampedSendAnimationContentOffset(target), animated: false)
+    }
   }
 
   func updateComposeInset(

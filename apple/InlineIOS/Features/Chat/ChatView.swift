@@ -47,6 +47,7 @@ struct ChatView: View {
   let onOpenSpace: (Int64) -> Void
   private let preview: Bool
   private let focusMessageID: Int64?
+  private let focusMessageExactly: Bool
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
   @AppStorage(ChatToolbarBackgroundMode.key)
@@ -112,6 +113,7 @@ struct ChatView: View {
     onOpenSpace: @escaping (Int64) -> Void,
     preview: Bool = false,
     focusMessageID: Int64? = nil,
+    focusMessageExactly: Bool = false,
     autoCleanupUntitledEmptyThreadOnBack: Bool = false
   ) {
     peerId = peer
@@ -119,6 +121,7 @@ struct ChatView: View {
     self.onOpenSpace = onOpenSpace
     self.preview = preview
     self.focusMessageID = focusMessageID
+    self.focusMessageExactly = focusMessageExactly
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
     _translationPlacement = State(
@@ -141,6 +144,7 @@ struct ChatView: View {
       }
       renderOverlay
     }
+    .voicePlaybackChatPlaceholder(router: router, peer: peerId, isPlaceholder: !preview && fullChatViewModel.chat == nil)
     .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
@@ -605,6 +609,7 @@ struct ChatView: View {
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
         focusMessageID: focusMessageID,
+        focusMessageExactly: focusMessageExactly,
         focusRequestRevision: router.presentationResetRevision,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
         isPreview: preview,
@@ -732,7 +737,7 @@ struct ChatView: View {
     AppTab.allCases.contains { tab in
       router[tab].contains { destination in
         switch destination {
-        case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _):
+        case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _), let .voiceMessage(peer, _):
           peer == peerId
         default:
           false

@@ -14,7 +14,7 @@ enum ComposeVoiceRecordingPhase: Equatable, Hashable {
 }
 
 @MainActor
-final class ComposeVoiceRecordingViewModel: ObservableObject {
+final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
   @Published private(set) var phase: ComposeVoiceRecordingPhase = .idle
   @Published private(set) var duration: TimeInterval = 0
   @Published private(set) var samples: [UInt8] = []
@@ -30,7 +30,8 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var recording: ComposeVoiceRecording?
   private var player: AVAudioPlayer?
   private var playbackTimer: Timer?
-  private var playbackSessionActive = false
+  private var playbackSessionToken: InlineAudioSession.Token?
+  private var isPreparingPlayback = false
   private var stopRecordingAction: (@Sendable () -> Void)?
   private var operationId = UUID()
   private var isPreparingStart = false
@@ -48,12 +49,13 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     duration > Self.discardConfirmationDuration
   }
 
-  convenience init() {
+  override convenience init() {
     self.init(inputController: .shared)
   }
 
   init(inputController: VoiceInputController) {
     self.inputController = inputController
+    super.init()
     observeSystemEvents()
   }
 
@@ -64,10 +66,10 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
     let recorder = recorder
     let recordingURL = recording?.fileURL
-    let shouldDeactivatePlaybackSession = playbackSessionActive
+    let playbackSessionToken = playbackSessionToken
     Task { @MainActor in
-      if shouldDeactivatePlaybackSession {
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+      if let playbackSessionToken {
+        InlineAudioSession.shared.release(playbackSessionToken)
       }
       recorder?.cancel()
       if let recordingURL {
@@ -108,7 +110,19 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       recorder.onUpdate = { [weak self] duration, samples in
         self?.applyRecorderUpdate(duration: duration, samples: samples)
       }
-      try recorder.start()
+      recorder.onUnexpectedStop = { [weak self] error in
+        Task { @MainActor in
+          guard let self, self.operationId == operationId, self.phase == .recording else { return }
+          await self.finishRecording(showTooShortToast: true, unexpectedStop: error)
+        }
+      }
+      // Cancellation must reach a recorder whose native activation is still pending.
+      self.recorder = recorder
+      try await recorder.start { [weak self] in
+        guard let self else { return false }
+        return self.operationId == operationId && self.phase == .starting
+          && UIApplication.shared.applicationState == .active
+      }
 
       guard self.operationId == operationId else {
         recorder.cancel()
@@ -125,6 +139,10 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       phase = .recording
       stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
     } catch {
+      guard self.operationId == operationId else { return }
+      self.recorder?.cancel()
+      self.recorder = nil
+      if error is CancellationError { reset(); return }
       log.error("Failed to start voice recording", error: error)
       showError(error.localizedDescription)
       if self.operationId == operationId {
@@ -141,7 +159,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func selectInputDevice(_ deviceId: VoiceInputDevice.ID) {
-    log.debug("Voice input picker selected device id=\(deviceId) phase=\(String(describing: phase))")
+    log.debug("Voice input picker selected explicit input phase=\(String(describing: phase))")
     guard phase == .recording else { return }
 
     do {
@@ -188,33 +206,57 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   func togglePlayback() {
     guard phase == .review, let recording else { return }
 
-    if player?.isPlaying == true {
+    if player?.isPlaying == true || isPreparingPlayback {
       pausePlayback()
       return
     }
 
     do {
-      try configurePlaybackSession()
       let player = try player ?? makePlaybackPlayer(for: recording)
       if playbackProgress >= 1 {
         player.currentTime = 0
         playbackProgress = 0
       }
       self.player = player
-      guard player.play() else {
-        throw ComposeVoicePlaybackError.playFailed
+      let operationId = UUID()
+      self.operationId = operationId
+      let session = InlineAudioSession.shared
+      let token = try session.acquire(.draftPreview)
+      playbackSessionToken = token
+      isPreparingPlayback = true
+      Task { @MainActor [weak self] in
+        do {
+          try await session.activate(token, category: .playback, mode: .spokenAudio)
+          guard let self, self.operationId == operationId, phase == .review, self.player === player,
+                playbackSessionToken == token, session.owns(token), !Task.isCancelled
+          else { session.release(token); return }
+          guard player.prepareToPlay() else { throw ComposeVoicePlaybackError.preparationFailed }
+          guard player.play() else { throw ComposeVoicePlaybackError.playFailed }
+          isPreparingPlayback = false
+          isPlaying = true
+          startPlaybackTimer()
+        } catch {
+          session.release(token)
+          guard let self, self.operationId == operationId, phase == .review, self.player === player,
+                playbackSessionToken == token else { return }
+          playbackSessionToken = nil
+          if !(error is CancellationError) {
+            logPlaybackError("Failed to play voice recording", error: error, recording: recording)
+            showError((error as? AudioPlaybackError)?.localizedDescription ?? "Failed to play voice message")
+          }
+          stopPlayback(resetProgress: true)
+        }
       }
-      isPlaying = true
-      startPlaybackTimer()
     } catch {
       logPlaybackError("Failed to play voice recording", error: error, recording: recording)
-      showError("Failed to play voice message")
+      showError((error as? AudioPlaybackError)?.localizedDescription ?? "Failed to play voice message")
       stopPlayback(resetProgress: true)
     }
   }
 
   func seekPlayback(to progress: Double) {
     guard phase == .review, let recording else { return }
+    if isPreparingPlayback { pausePlayback() }
 
     do {
       let player = try player ?? makePlaybackPlayer(for: recording)
@@ -261,7 +303,10 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return .voice(voice)
   }
 
-  private func finishRecording(showTooShortToast: Bool) async {
+  private func finishRecording(
+    showTooShortToast: Bool,
+    unexpectedStop: ComposeVoiceRecorderError? = nil
+  ) async {
     guard phase == .recording, let recorder else { return }
 
     let operationId = self.operationId
@@ -278,15 +323,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
         return
       }
 
-      guard recording.duration >= Self.minimumDuration else {
-        discard(recording)
-        if showTooShortToast {
-          showError("Voice message is too short.")
-        }
-        resetFinishedAttempt()
-        return
-      }
-
       self.recording = recording
       duration = recording.duration
       samples = Array(recording.waveform)
@@ -294,6 +330,9 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       isPlaying = false
       isSending = false
       phase = .review
+      if let unexpectedStop {
+        showError(unexpectedStop.localizedDescription)
+      }
     } catch {
       guard self.operationId == operationId else { return }
       log.error("Failed to finish voice recording", error: error)
@@ -345,7 +384,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
         let reason = Self.routeChangeReason(notification)
         Task { @MainActor in
           guard let self else { return }
-          self.inputController.logRouteChange(reason: reason)
+          self.recorder?.logRouteChange(reason: reason)
 
           if let reason, Self.shouldApplyPreferredInput(for: reason) {
             self.applyPreferredInput()
@@ -523,6 +562,9 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard isPreparingStart else { return }
     operationId = UUID()
     isPreparingStart = false
+    recorder?.cancel()
+    recorder = nil
+    if phase == .starting { reset() }
   }
 
   private func requestMicrophoneAccess() async -> Bool {
@@ -538,23 +580,43 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     UIApplication.shared.open(url)
   }
 
-  private func configurePlaybackSession() throws {
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playback, mode: .spokenAudio, options: [])
-    try session.setActive(true)
-    playbackSessionActive = true
-  }
-
   private func deactivatePlaybackSession() {
-    guard playbackSessionActive else { return }
-    playbackSessionActive = false
-    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    guard let playbackSessionToken else { return }
+    self.playbackSessionToken = nil
+    InlineAudioSession.shared.release(playbackSessionToken)
   }
 
   private func makePlaybackPlayer(for recording: ComposeVoiceRecording) throws -> AVAudioPlayer {
     let player = try AVAudioPlayer(data: recording.data)
-    player.prepareToPlay()
+    player.delegate = self
     return player
+  }
+
+  nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    let identity = ObjectIdentifier(player)
+    Task { @MainActor [weak self] in
+      guard let self, let current = self.player, ObjectIdentifier(current) == identity, !current.isPlaying else { return }
+      if !flag {
+        self.showError("Failed to play voice message")
+      }
+      self.stopPlayback(resetProgress: true)
+    }
+  }
+
+  nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+    let identity = ObjectIdentifier(player)
+    Task { @MainActor [weak self] in
+      guard let self, let current = self.player, ObjectIdentifier(current) == identity else { return }
+      if let recording = self.recording {
+        self.logPlaybackError(
+          "Failed to decode voice recording",
+          error: error ?? ComposeVoicePlaybackError.decodeFailed,
+          recording: recording
+        )
+      }
+      self.showError("Failed to play voice message")
+      self.stopPlayback(resetProgress: true)
+    }
   }
 
   private func logPlaybackError(_ message: String, error: Error, recording: ComposeVoiceRecording) {
@@ -603,6 +665,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func pausePlayback() {
+    cancelPendingPlayback()
     player?.pause()
     playbackTimer?.invalidate()
     playbackTimer = nil
@@ -611,6 +674,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func stopPlayback(resetProgress: Bool) {
+    cancelPendingPlayback()
     playbackTimer?.invalidate()
     playbackTimer = nil
     player?.stop()
@@ -632,20 +696,22 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     phase = .idle
   }
 
+  private func cancelPendingPlayback() {
+    if isPreparingPlayback {
+      operationId = UUID()
+      isPreparingPlayback = false
+    }
+  }
+
   private func resetFinishedAttempt() {
     recording = nil
     reset()
-  }
-
-  private func discard(_ recording: ComposeVoiceRecording) {
-    try? FileManager.default.removeItem(at: recording.fileURL)
   }
 
   private func showError(_ message: String) {
     ToastManager.shared.showToast(message, type: .error, systemImage: "exclamationmark.triangle.fill")
   }
 
-  private static let minimumDuration: TimeInterval = 0.5
   private static let discardConfirmationDuration: TimeInterval = 10
   private static let microphonePermissionSettleDelay: UInt64 = 120_000_000
   private static let applicationActivationPollInterval: UInt64 = 50_000_000
@@ -658,12 +724,18 @@ private enum MicrophoneAccessGrant: Equatable {
 }
 
 private enum ComposeVoicePlaybackError: LocalizedError {
+  case preparationFailed
   case playFailed
+  case decodeFailed
 
   var errorDescription: String? {
     switch self {
+    case .preparationFailed:
+      "Could not prepare voice recording."
     case .playFailed:
       "Could not play voice recording."
+    case .decodeFailed:
+      "Could not decode voice recording."
     }
   }
 }

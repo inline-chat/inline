@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import InlineKit
 import Logger
 import Nuke
 import NukeUI
@@ -30,20 +31,21 @@ final class ImageViewerController: UIViewController {
 
   private let isVideo: Bool
   private var didNotifyDismiss = false
-  private var audioSessionSnapshot: AudioSessionSnapshot?
+  private var videoHasAudio: Bool?
+  private var videoSessionToken: InlineAudioSession.Token?
+  private var videoSessionIsStarting = false
+  private var videoPauseForActivation = false
+  private var videoTimeControlObservation: NSKeyValueObservation?
+  private var videoMuteObservation: NSKeyValueObservation?
+  private var videoPlayerStatusObservation: NSKeyValueObservation?
+  private var videoItemStatusObservation: NSKeyValueObservation?
+  private var videoPlaybackEndObserver: NSObjectProtocol?
   private var playerViewController: AVPlayerViewController?
-  private var didRestoreAudioSession = false
   private var didBeginPresentation = false
   private weak var suppressedSourceView: UIView?
   private var suppressedSourceAlpha: CGFloat?
   private var suppressedSourceItemID: Int64?
 
-  private struct AudioSessionSnapshot {
-    let category: AVAudioSession.Category
-    let mode: AVAudioSession.Mode
-    let options: AVAudioSession.CategoryOptions
-  }
-    
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
     scrollView.delegate = self
@@ -610,8 +612,33 @@ final class ImageViewerController: UIViewController {
     self.playerViewController = playerController
     self.player = player
 
-    configureAudioSessionForVideo()
-    player.play()
+    observeVideoPlayback(player)
+    let generation = imageLoadGeneration
+    Task { @MainActor [weak self] in
+      do {
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let self, self.player === player, !self.didNotifyDismiss,
+              self.imageLoadGeneration == generation
+        else { return }
+        self.videoHasAudio = !audioTracks.isEmpty
+        // Our own play request can acquire before AVPlayer starts rendering audio.
+        if self.acquireVideoSession(for: player) {
+          player.play()
+        }
+      } catch {
+        guard let self, self.player === player, !self.didNotifyDismiss,
+              self.imageLoadGeneration == generation
+        else { return }
+        Log.shared.warning("Failed to inspect video audio tracks: \(error.localizedDescription)")
+        // Unknown metadata must reserve audio before allowing playback.
+        self.videoHasAudio = true
+        if self.acquireVideoSession(for: player) {
+          player.play()
+        } else {
+          player.pause()
+        }
+      }
+    }
     imageView.alpha = 0
     imageView.isHidden = true
   }
@@ -969,6 +996,9 @@ final class ImageViewerController: UIViewController {
     
   isolated deinit {
     restoreSuppressedSource(animated: false)
+    stopObservingVideoPlayback()
+    player?.pause()
+    releaseVideoSession()
   }
 
   // MARK: - Helpers
@@ -1098,6 +1128,7 @@ final class ImageViewerController: UIViewController {
 
   private func stopVideoPlaybackIfNeeded() {
     guard isVideo else { return }
+    stopObservingVideoPlayback()
     player?.pause()
     player?.replaceCurrentItem(with: nil)
     if let playerViewController {
@@ -1108,46 +1139,169 @@ final class ImageViewerController: UIViewController {
     }
     player = nil
     playerViewController = nil
-    restoreAudioSessionAfterVideo()
+    videoHasAudio = nil
+    releaseVideoSession()
   }
 
-  private func configureAudioSessionForVideo() {
-    let session = AVAudioSession.sharedInstance()
-    if audioSessionSnapshot == nil {
-      audioSessionSnapshot = AudioSessionSnapshot(
-        category: session.category,
-        mode: session.mode,
-        options: session.categoryOptions
-      )
-    }
-
-    do {
-      try session.setCategory(.playback, mode: .moviePlayback, options: [])
-      try session.setActive(true)
-    } catch {
-      Log.shared.warning("Failed to configure audio session for video: \(error.localizedDescription)")
-    }
-  }
-
-  private func restoreAudioSessionAfterVideo() {
-    guard !didRestoreAudioSession else { return }
-    didRestoreAudioSession = true
-    let session = AVAudioSession.sharedInstance()
-    do {
-      try session.setActive(false, options: [.notifyOthersOnDeactivation])
-    } catch {
-      Log.shared.warning("Failed to deactivate audio session after video: \(error.localizedDescription)")
-    }
-
-    if let snapshot = audioSessionSnapshot {
-      do {
-        try session.setCategory(snapshot.category, mode: snapshot.mode, options: snapshot.options)
-      } catch {
-        Log.shared.warning("Failed to restore audio session category after video: \(error.localizedDescription)")
+  private func observeVideoPlayback(_ player: AVPlayer) {
+    stopObservingVideoPlayback()
+    videoTimeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, change in
+      let status = change.newValue
+      Task { @MainActor [weak self] in
+        guard let self, self.player === player else { return }
+        self.updateVideoSession(for: player, observedStatus: status)
       }
     }
+    videoMuteObservation = player.observe(\.isMuted, options: [.new]) { [weak self] player, _ in
+      Task { @MainActor [weak self] in
+        guard let self, self.player === player else { return }
+        self.updateVideoSession(for: player)
+      }
+    }
+    videoPlayerStatusObservation = player.observe(\.status, options: [.new]) { [weak self] player, change in
+      guard change.newValue == .failed else { return }
+      Task { @MainActor [weak self] in
+        guard let self, self.player === player else { return }
+        self.updateVideoSession(for: player)
+      }
+    }
+    videoItemStatusObservation = player.currentItem?.observe(\.status, options: [.new]) { [weak self] item, change in
+      guard change.newValue == .failed else { return }
+      Task { @MainActor [weak self] in
+        guard let self, self.player === player, player.currentItem === item else { return }
+        self.updateVideoSession(for: player)
+      }
+    }
+    videoPlaybackEndObserver = NotificationCenter.default.addObserver(
+      forName: AVPlayerItem.didPlayToEndTimeNotification,
+      object: player.currentItem,
+      queue: .main
+    ) { [weak self] notification in
+      guard let item = notification.object as? AVPlayerItem else { return }
+      MainActor.assumeIsolated {
+        guard let self, self.player === player, player.currentItem === item else { return }
+        player.pause()
+        self.releaseVideoSession()
+      }
+    }
+  }
 
-    audioSessionSnapshot = nil
+  private func stopObservingVideoPlayback() {
+    videoTimeControlObservation?.invalidate()
+    videoTimeControlObservation = nil
+    videoMuteObservation?.invalidate()
+    videoMuteObservation = nil
+    videoPlayerStatusObservation?.invalidate()
+    videoPlayerStatusObservation = nil
+    videoItemStatusObservation?.invalidate()
+    videoItemStatusObservation = nil
+    if let videoPlaybackEndObserver {
+      NotificationCenter.default.removeObserver(videoPlaybackEndObserver)
+      self.videoPlaybackEndObserver = nil
+    }
+  }
+
+  private func updateVideoSession(for player: AVPlayer, observedStatus: AVPlayer.TimeControlStatus? = nil) {
+    // A failed item can remain waiting with a desired nonzero rate.
+    guard player.status != .failed, player.currentItem?.status != .failed else {
+      if player.timeControlStatus != .paused { player.pause() }
+      releaseVideoSession()
+      return
+    }
+    // Native controls can request playback while track inspection is pending.
+    guard let videoHasAudio else {
+      if player.timeControlStatus != .paused { player.pause() }
+      releaseVideoSession()
+      return
+    }
+    guard videoHasAudio, !player.isMuted else {
+      releaseVideoSession()
+      return
+    }
+    if videoSessionIsStarting {
+      if observedStatus == .paused {
+        if videoPauseForActivation { videoPauseForActivation = false }
+        else { releaseVideoSession() }
+      } else { pauseVideoUntilActivation(player) }
+      return
+    }
+    // Buffering is still an active playback request; retain ownership until paused.
+    guard player.timeControlStatus != .paused else { releaseVideoSession(); return }
+    if !acquireVideoSession(for: player) {
+      pauseVideoUntilActivation(player)
+    }
+  }
+
+  private func acquireVideoSession(for player: AVPlayer) -> Bool {
+    guard player.status != .failed, player.currentItem?.status != .failed else {
+      if player.timeControlStatus != .paused { player.pause() }
+      releaseVideoSession()
+      return false
+    }
+    guard let videoHasAudio else { return false }
+    guard videoHasAudio, !player.isMuted else {
+      releaseVideoSession()
+      return true
+    }
+    let session = InlineAudioSession.shared
+    if let videoSessionToken, session.owns(videoSessionToken) { return !videoSessionIsStarting }
+
+    do {
+      let token = try session.acquire(.video)
+      videoSessionToken = token
+      videoSessionIsStarting = true
+      let generation = imageLoadGeneration
+      pauseVideoUntilActivation(player)
+      Task { @MainActor [weak self] in
+        do {
+          try await session.activate(token, category: .playback, mode: .moviePlayback)
+          guard let self, self.player === player, imageLoadGeneration == generation, !didNotifyDismiss,
+                videoSessionToken == token, videoSessionIsStarting, session.owns(token), !Task.isCancelled,
+                videoHasAudio == true, !player.isMuted, player.status != .failed,
+                player.currentItem?.status != .failed
+          else {
+            session.release(token)
+            if let self, videoSessionToken == token { releaseVideoSession() }
+            return
+          }
+          videoSessionIsStarting = false
+          videoPauseForActivation = false
+          player.play()
+        } catch {
+          session.release(token)
+          guard let self, self.player === player, imageLoadGeneration == generation,
+                videoSessionToken == token else { return }
+          releaseVideoSession()
+          player.pause()
+          if !(error is CancellationError) { reportVideoSessionError(error) }
+        }
+      }
+      return false
+    } catch {
+      releaseVideoSession()
+      reportVideoSessionError(error)
+      return false
+    }
+  }
+
+  private func pauseVideoUntilActivation(_ player: AVPlayer) {
+    guard player.timeControlStatus != .paused else { return }
+    if videoSessionIsStarting { videoPauseForActivation = true }
+    player.pause()
+  }
+
+  private func reportVideoSessionError(_ error: Error) {
+    Log.shared.warning("Failed to acquire audio session for video: \(error.localizedDescription)")
+    ToastManager.shared.showToast(error.localizedDescription, type: .error,
+                                 systemImage: "exclamationmark.triangle.fill")
+  }
+
+  private func releaseVideoSession() {
+    videoSessionIsStarting = false
+    videoPauseForActivation = false
+    guard let videoSessionToken else { return }
+    self.videoSessionToken = nil
+    InlineAudioSession.shared.release(videoSessionToken)
   }
 }
 

@@ -267,6 +267,7 @@ enum Destination: DestinationType, Codable {
   case chat(peer: Peer)
   case externalChat(peer: Peer, contextSpaceID: Int64?, messageID: Int64? = nil)
   case chatMessage(peer: Peer, messageID: Int64)
+  case voiceMessage(peer: Peer, messageID: Int64)
   case chatInfo(chatItem: SpaceChatItem)
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
@@ -416,12 +417,16 @@ extension Destination {
 
   var chatPeer: Peer? {
     switch self {
-    case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _):
+    case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _), let .voiceMessage(peer, _):
       peer
     case .chats, .archived, .spaces, .space, .chatInfo, .spaceSettings,
          .spaceIntegrations, .integrationOptions, .createSpaceChat, .createThread, .createSpace:
       nil
     }
+  }
+
+  var requiresExactMessageFocus: Bool {
+    if case .voiceMessage = self { true } else { false }
   }
 
   /// The conversation represented by the visible route, including child pages

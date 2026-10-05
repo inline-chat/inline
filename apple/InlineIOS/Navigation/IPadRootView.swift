@@ -127,6 +127,7 @@ private struct IPadDetailPage: View {
         ContentUnavailableView("Select a Chat", systemImage: "bubble.left.and.bubble.right")
       }
     }
+    .voicePlaybackRootPill(router: router, destination: destination)
     .navigationBarBackButtonHidden(isNested)
     .toolbar {
       ToolbarItemGroup(placement: .topBarLeading) {

@@ -104,8 +104,10 @@ private struct AuthedAppRoot: View {
       ForEach(legacyRootTabs) { tab in
         NavigationStack(path: $bindableRouter[tab]) {
           tabContentView(for: tab)
+            .voicePlaybackRootPill(router: router, tab: tab)
             .navigationDestination(for: Destination.self) { destination in
               destinationView(for: destination)
+                .voicePlaybackRootPill(router: router, destination: destination, tab: tab)
             }
         }
         .tabItem {
@@ -165,11 +167,12 @@ private struct AuthedAppRoot: View {
         focusMessageID: messageID
       )
       .id(peer)
-    case let .chatMessage(peer, messageID):
+    case let .chatMessage(peer, messageID), let .voiceMessage(peer, messageID):
       ChatView(
         peer: peer,
         onOpenSpace: showLegacySpacesRoot,
-        focusMessageID: messageID
+        focusMessageID: messageID,
+        focusMessageExactly: destination.requiresExactMessageFocus
       )
       .id(peer)
     case let .chatInfo(chatItem):

@@ -23,6 +23,7 @@ public struct VoiceMessageBubble: View {
   @State private var downloadedLocalURL: URL?
   @State private var progressCancellable: AnyCancellable?
   @State private var autoDownloadRequestedVoiceID: Int64?
+  @State private var downloadRevision = UUID()
 
   public init(
     message: InlineKit.Message,
@@ -232,6 +233,7 @@ public struct VoiceMessageBubble: View {
     }
     .onChange(of: message.voiceRemoteId) { oldID, _ in
       if oldID != message.voiceRemoteId {
+        downloadRevision = UUID()
         downloadedLocalURL = nil
         downloadProgress = nil
         autoDownloadRequestedVoiceID = nil
@@ -285,7 +287,11 @@ public struct VoiceMessageBubble: View {
       do {
         try player.prepareVoice(for: message, fileURLOverride: localURL)
       } catch {
+        #if os(iOS)
+        player.reportPlaybackError(error)
+        #else
         downloadProgress = .failed(id: downloadID, error: error)
+        #endif
         return
       }
     }
@@ -312,6 +318,14 @@ public struct VoiceMessageBubble: View {
   }
 
   private func handlePrimaryAction() {
+    #if os(iOS)
+    if localURL == nil, let voiceID, isDownloading {
+      player.cancelVoiceSelection(mediaID: voiceID)
+      downloadProgress = nil
+      return
+    }
+    player.requestVoicePlayback(for: message, fileURLOverride: localURL)
+    #else
     if let localURL {
       do {
         try player.toggleVoicePlayback(for: message, fileURLOverride: localURL)
@@ -329,6 +343,7 @@ public struct VoiceMessageBubble: View {
     }
 
     startDownload(autoplay: true, showErrors: true)
+    #endif
   }
 
   private func requestAutoDownloadIfNeeded() {
@@ -347,7 +362,9 @@ public struct VoiceMessageBubble: View {
     guard let voiceID else { return }
 
     bindDownloadProgressIfNeeded()
+    let revision = downloadRevision
     FileDownloader.shared.downloadVoice(message: message) { result in
+      guard self.downloadRevision == revision else { return }
       switch result {
       case let .success(fileURL):
         self.downloadedLocalURL = fileURL

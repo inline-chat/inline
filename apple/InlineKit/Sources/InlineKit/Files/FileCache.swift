@@ -1014,19 +1014,19 @@ private final class ExportSessionBox: @unchecked Sendable {
 
 extension FileCache {
   public func clearCache() async throws {
+    // Keep selection closed across every suspension, including nested local resets.
+    await MainActor.run { SharedAudioPlayer.shared.beginLocalDataMaintenance() }
     log.debug("Clearing cache")
-
-    // Clear photos
-    try await clearPhotoCache()
-
-    // Clear documents
-    try await clearDocumentCache()
-
-    // Clear videos
-    try await clearVideoCache()
-
-    // Clear voices
-    try await clearVoiceCache()
+    do {
+      try await clearPhotoCache()
+      try await clearDocumentCache()
+      try await clearVideoCache()
+      try await clearVoiceCache()
+    } catch {
+      await MainActor.run { SharedAudioPlayer.shared.endLocalDataMaintenance() }
+      throw error
+    }
+    await MainActor.run { SharedAudioPlayer.shared.endLocalDataMaintenance() }
   }
 
   private func clearPhotoCache() async throws {

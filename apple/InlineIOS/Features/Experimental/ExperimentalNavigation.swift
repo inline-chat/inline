@@ -206,12 +206,13 @@ struct ExperimentalDestinationView: View {
         }
         ExperimentalHomeNavigationPerformance.completeChatOpen(peer: peer)
       }
-    case let .chatMessage(peer, messageID):
+    case let .chatMessage(peer, messageID), let .voiceMessage(peer, messageID):
       ChatView(
         peer: peer,
         contextSpaceId: nav.activeSpaceId,
         onOpenSpace: onSelectSpace,
         focusMessageID: messageID,
+        focusMessageExactly: destination.requiresExactMessageFocus,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
       .id(peer)
