@@ -143,6 +143,25 @@ enables and configures the plugin. Do not reset the Hermes home or replace a
 conflicting bot credential to recover a partial setup. If setup reports a
 conflict, confirm the intended bot before using `--replace`.
 
+## Install from the Hermes Catalog
+
+You can also install Inline from the [Hermes plugin catalog](https://hermes-agent.nousresearch.com/docs/plugins/inline-platform):
+
+```bash
+hermes plugins install inline-platform
+```
+
+In the same Hermes home and profile, enable the plugin and configure the gateway:
+
+```bash
+hermes plugins enable inline-platform
+hermes gateway setup
+```
+
+Select **Inline** and configure its bot credential. Restart through your existing
+process manager, then check `hermes inline status --json --probe` and verify a
+reply in Inline.
+
 ## Verify
 
 The guided setup uses `npm exec`; it does not require a global `inline-hermes`
@@ -180,7 +199,14 @@ complete the checks above before declaring it ready.
 
 ## Update
 
-Run in the same user, home, profile, and persistent npm prefix used at install:
+For a catalog installation:
+
+```bash
+hermes plugins update inline-platform
+hermes gateway restart
+```
+
+For an npm installation, run in the same user, home, profile, and persistent npm prefix used at install:
 
 ```bash
 inline update

@@ -14,6 +14,12 @@ https://inline.chat/docs/add-inline.md
 
 ## ChatGPT/Codex Plugin
 
+### ChatGPT
+
+[Install Inline from the ChatGPT plugin store](https://chatgpt.com/plugins/plugin_asdk_app_6a660963e7b481918e10c08dd1e0430f?q=inline).
+
+### Codex
+
 Add the Inline marketplace:
 
 ```bash
@@ -26,7 +32,7 @@ Install the plugin:
 codex plugin add inline@inline
 ```
 
-Restart Codex. In ChatGPT desktop, open **Plugins** and install **Inline** from the Inline marketplace.
+Restart Codex.
 
 The plugin includes the Inline skill and MCP integration.
 
