@@ -21,6 +21,8 @@ final class UserAvatarView: UIView {
     let phoneNumber: String?
     let email: String?
     let avatarIdentity: String?
+    let remoteSource: String?
+    let localSource: String?
     let size: CGFloat
   }
 
@@ -129,6 +131,8 @@ final class UserAvatarView: UIView {
       phoneNumber: user.phoneNumber,
       email: user.email,
       avatarIdentity: userInfo.stableAvatarIdentity,
+      remoteSource: user.profileCdnUrl,
+      localSource: user.profileLocalPath,
       size: size
     )
   }

@@ -129,7 +129,7 @@ struct UserAvatarEqualityTests {
   }
   #endif
 
-  @Test("same photo identity with refreshed signed URL remains equal")
+  @Test("same photo identity with refreshed signed URL updates presentation but reuses bytes")
   @MainActor
   func samePhotoIdentityWithRefreshedURL() {
     var userA = User(id: 42, email: "avatar@example.com", firstName: "Avatar")
@@ -143,7 +143,8 @@ struct UserAvatarEqualityTests {
     let lhs = UserAvatar(userInfo: UserInfo(user: userA), size: 32)
     let rhs = UserAvatar(userInfo: UserInfo(user: userB), size: 32)
 
-    #expect(lhs == rhs)
+    #expect(lhs != rhs)
+    #expect(lhs.avatarCacheKey == rhs.avatarCacheKey)
   }
 
   @Test("different photo identity is not equal")

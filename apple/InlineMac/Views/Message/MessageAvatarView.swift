@@ -22,6 +22,8 @@ class UserAvatarView: NSView {
     let phoneNumber: String?
     let email: String?
     let avatarIdentity: String?
+    let remoteSource: String?
+    let localSource: String?
   }
 
   init(userInfo: UserInfo, size: CGFloat = Theme.messageAvatarSize) {
@@ -117,7 +119,9 @@ class UserAvatarView: NSView {
       username: user.username,
       phoneNumber: user.phoneNumber,
       email: user.email,
-      avatarIdentity: userInfo.stableAvatarIdentity
+      avatarIdentity: userInfo.stableAvatarIdentity,
+      remoteSource: user.profileCdnUrl,
+      localSource: user.profileLocalPath
     )
   }
 

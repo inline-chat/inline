@@ -16,6 +16,7 @@ public struct UserAvatar: View, Equatable {
       && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
       && lhs.hasConfiguredPhoto == rhs.hasConfiguredPhoto
       && lhs.localUrl == rhs.localUrl
+      && lhs.remoteUrl == rhs.remoteUrl
       && lhs.prefersExplicitLocalSource == rhs.prefersExplicitLocalSource
       && Self.avatarIdentity(
         stableAvatarIdentity: lhs.stableAvatarIdentity,
@@ -50,7 +51,6 @@ public struct UserAvatar: View, Equatable {
   let showsPersonSymbol: Bool
 
   @Environment(\.displayScale) private var displayScale
-  @State private var startedRemoteCacheUrl: URL?
 
   public nonisolated static func getNameForInitials(user: User) -> String {
     avatarPresentation(
@@ -77,8 +77,8 @@ public struct UserAvatar: View, Equatable {
     username = user.username
     self.size = size
     remoteUrl = user.getRemoteURL()
-    localUrl = Self.existingFileUrl(localAvatarURL) ?? Self.existingFileUrl(user.getLocalURL())
-    prefersExplicitLocalSource = Self.existingFileUrl(localAvatarURL) != nil
+    localUrl = localAvatarURL ?? user.getLocalURL()
+    prefersExplicitLocalSource = localAvatarURL != nil
     stableAvatarIdentity = user.stableAvatarIdentity
     hasConfiguredPhoto = stableAvatarIdentity != nil || remoteUrl != nil || localUrl != nil
     self.ignoresSafeArea = ignoresSafeArea
@@ -105,7 +105,7 @@ public struct UserAvatar: View, Equatable {
     let user = userInfo.user
     userId = user.id
     remoteUrl = user.getRemoteURL() // ?? userInfo.profilePhoto?.first?.getRemoteURL()
-    localUrl = Self.existingFileUrl(user.getLocalURL()) // ?? userInfo.profilePhoto?.first?.getLocalURL()
+    localUrl = user.getLocalURL() // ?? userInfo.profilePhoto?.first?.getLocalURL()
     stableAvatarIdentity = userInfo.stableAvatarIdentity
     hasConfiguredPhoto = stableAvatarIdentity != nil || remoteUrl != nil || localUrl != nil
     firstName = user.firstName
@@ -128,7 +128,7 @@ public struct UserAvatar: View, Equatable {
   }
 
   /// Creates an avatar from values that were prepared off the main actor.
-  /// Callers are responsible for validating `localURL` before constructing the view.
+  /// Local file availability is checked by the image loader, outside view construction.
   public init(
     userID: Int64,
     firstName: String?,
@@ -272,11 +272,6 @@ public struct UserAvatar: View, Equatable {
       ?? "user:\(userId)"
   }
 
-  private var targetSize: CGSize {
-    let side = max(size, 1)
-    return CGSize(width: side, height: side)
-  }
-
   private var renderScale: CGFloat {
     max(displayScale, 1)
   }
@@ -284,21 +279,10 @@ public struct UserAvatar: View, Equatable {
   @ViewBuilder
   public var avatar: some View {
     if let imageSource {
-      KFImage.url(imageSource.url, cacheKey: imageSource.cacheKey)
-        .setProcessor(DownsamplingImageProcessor(size: targetSize))
-        .scaleFactor(renderScale)
-        .cacheOriginalImage()
-        .loadDiskFileSynchronously()
-        .cancelOnDisappear(true)
-        .placeholder {
-          placeholder
-        }
-        .onSuccess { _ in
-          cacheRemoteAvatarIfNeeded(source: imageSource)
-        }
-        .resizable()
-        // For non-square profile photos.
-        .aspectRatio(contentMode: .fill)
+      UserAvatarPhoto(source: imageSource, size: size, scale: renderScale,
+                      userID: userId, photoIdentity: stableAvatarIdentity,
+                      cacheRemoteAvatar: cacheRemoteAvatar)
+        .id(UserAvatarPhotoIdentity(source: imageSource, size: size, scale: renderScale))
         .frame(width: size, height: size)
         .background(backgroundGradient)
         .clipShape(Circle())
@@ -320,38 +304,74 @@ public struct UserAvatar: View, Equatable {
     }
   }
 
-  private func cacheRemoteAvatarIfNeeded(source: UserAvatarImageSource) {
-    guard cacheRemoteAvatar else { return }
-    let sourceUrl = source.url
-    guard sourceUrl.isFileURL == false else { return }
-    guard localUrl?.lastPathComponent.hasPrefix(User.remoteProfilePhotoCacheFilePrefix) != true else { return }
-    guard startedRemoteCacheUrl != sourceUrl else { return }
+}
 
-    startedRemoteCacheUrl = sourceUrl
+/// A new processing configuration needs a new loader, even when the original bytes are unchanged.
+struct UserAvatarPhotoIdentity: Hashable {
+  let source: UserAvatarImageSource
+  let size: CGFloat
+  let scale: CGFloat
+}
 
-    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+/// Source-scoped lifetime prevents delayed retries and cache writes from a recycled avatar.
+struct UserAvatarPhoto: View {
+  let source: UserAvatarImageSource
+  let size: CGFloat
+  let scale: CGFloat
+  let userID: Int64
+  let photoIdentity: String?
+  let cacheRemoteAvatar: Bool
+  @State private var loader: AvatarImageLoader
+  @State private var startedCache = false
 
-    Task { [userId, stableAvatarIdentity] in
-      do {
-        let data = try await source.originalImageData()
-        try Auth.shared.handle.validateAccountMutation(account)
-        try await User.cacheImageData(
-          userId: userId,
-          data: data,
-          expectedSourceURL: sourceUrl,
-          expectedAvatarIdentity: stableAvatarIdentity,
-          accountToken: account
-        )
-      } catch {
-        Log.shared.error("Failed to cache image", error: error)
-      }
-    }
+  init(source: UserAvatarImageSource, size: CGFloat, scale: CGFloat, userID: Int64,
+       photoIdentity: String?, cacheRemoteAvatar: Bool, loader: AvatarImageLoader = AvatarImageLoader()) {
+    self.source = source
+    self.size = size
+    self.scale = scale
+    self.userID = userID
+    self.photoIdentity = photoIdentity
+    self.cacheRemoteAvatar = cacheRemoteAvatar
+    _loader = State(initialValue: loader)
   }
 
-  private static func existingFileUrl(_ url: URL?) -> URL? {
-    guard let url else { return nil }
-    guard url.isFileURL else { return url }
-    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  var body: some View {
+    Group {
+      if let image = loader.image {
+        #if os(macOS)
+        Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+        #else
+        Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+        #endif
+      } else {
+        Circle().fill(Color.gray.opacity(0.5)).frame(width: size, height: size)
+      }
+    }
+    .onAppear {
+      loader.start(source: source, size: size, scale: scale) { loadedURL in cacheOriginalIfNeeded(loadedURL: loadedURL) }
+    }
+    .onDisappear { loader.cancel() }
+  }
+
+  private func cacheOriginalIfNeeded(loadedURL: URL) {
+    guard cacheRemoteAvatar, !loadedURL.isFileURL, !startedCache,
+          let account = loader.currentAccount else { return }
+    startedCache = true
+    Task { [source, userID, photoIdentity] in
+      do {
+        let data = try await source.originalImageData()
+        guard loader.isCurrent else { return }
+        try Auth.shared.handle.validateAccountMutation(account)
+        try await User.cacheImageData(
+          userId: userID, data: data, expectedSourceURL: loadedURL,
+          expectedAvatarIdentity: photoIdentity, accountToken: account
+        )
+      } catch {
+        // Stale-source/account fencing is expected when a photo is replaced during retrieval.
+        guard loader.isCurrent else { return }
+        Log.shared.error("Failed to cache avatar original", error: AvatarImageFailure.cache)
+      }
+    }
   }
 }
 
