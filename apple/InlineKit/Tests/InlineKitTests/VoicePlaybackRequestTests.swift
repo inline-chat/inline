@@ -789,7 +789,7 @@ private final class ControlledVoiceDownloads {
   private var progressSubjects: [Int64: CurrentValueSubject<DownloadProgress, Never>] = [:]
   private var terminalProgress: [Int64: DownloadProgress] = [:]
 
-  func download(_ message: Message, completion: @escaping (Result<URL, Error>) -> Void) {
+  func download(_ message: InlineKit.Message, completion: @escaping (Result<URL, Error>) -> Void) {
     completions.append(completion)
     guard let voiceID = message.voiceContent?.voiceID else { return }
     terminalProgress[voiceID] = nil
@@ -928,7 +928,7 @@ private final class RequestPlaybackEngine: AudioPlaybackEngine {
   }
 }
 
-private func voiceMessage(_ id: Int64) -> Message {
+private func voiceMessage(_ id: Int64) -> InlineKit.Message {
   var voice = Client_MessageVoiceContent()
   voice.voiceID = id + 100
   voice.duration = 12
@@ -936,8 +936,8 @@ private func voiceMessage(_ id: Int64) -> Message {
   voice.mimeType = "audio/mp4"
   var payload = Client_MessageContentPayload()
   payload.voice = voice
-  return Message(messageId: id, fromId: 7, date: Date(timeIntervalSince1970: 1), text: nil,
-                 peerUserId: nil, peerThreadId: 44, chatId: 44, contentPayload: payload)
+  return InlineKit.Message(messageId: id, fromId: 7, date: Date(timeIntervalSince1970: 1), text: nil,
+                           peerUserId: nil, peerThreadId: 44, chatId: 44, contentPayload: payload)
 }
 
 private func requestURL(_ name: String) -> URL { URL(fileURLWithPath: "/voice-request-test/\(name).wav") }
