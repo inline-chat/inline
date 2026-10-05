@@ -40,6 +40,7 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhoto } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
@@ -984,93 +985,30 @@ const pushUpdates = async ({
     },
   }
 
-  let selfUpdates: Update[] = []
-  const sends: Promise<void>[] = []
-
-  if (resolvedUpdateGroup.type === "dmUsers") {
-    resolvedUpdateGroup.userIds.forEach((userId) => {
-      let newMessageUpdate: Update = {
-        update: {
-          oneofKind: "newMessage",
-          newMessage: {
-            message: encodeMessageForUser({
-              messageInfo,
-              updateGroup: resolvedUpdateGroup,
-              inputPeer,
-              currentUserId,
-              targetUserId: userId,
-            }),
-          },
-        },
-        seq: update.seq,
-        date: encodeDateStrict(update.date),
-      }
-
-      if (userId === currentUserId) {
-        // current user gets the message id update and new message update
-        sends.push(RealtimeUpdates.pushToUser(
-          userId,
-          [
-            // order matters here
-            messageIdUpdate,
-            newMessageUpdate,
-          ],
-          { skipSessionId },
-        ))
-
-        selfUpdates = [
-          // order matters here
-          messageIdUpdate,
-          newMessageUpdate,
-        ]
-      } else {
-        // other users get the message only
-        sends.push(RealtimeUpdates.pushToUser(userId, [newMessageUpdate]))
-      }
-    })
-  } else if (resolvedUpdateGroup.type === "threadUsers") {
-    resolvedUpdateGroup.userIds.forEach((userId) => {
-      // New updates
-      let newMessageUpdate: Update = {
-        update: {
-          oneofKind: "newMessage",
-          newMessage: {
-            message: encodeMessageForUser({
-              messageInfo,
-              updateGroup: resolvedUpdateGroup,
-              inputPeer,
-              currentUserId,
-              targetUserId: userId,
-            }),
-          },
-        },
-        seq: update.seq,
-        date: encodeDateStrict(update.date),
-      }
-
-      if (userId === currentUserId) {
-        // current user gets the message id update and new message update
-        sends.push(RealtimeUpdates.pushToUser(
-          userId,
-          [
-            // order matters here
-            messageIdUpdate,
-            newMessageUpdate,
-          ],
-          { skipSessionId },
-        ))
-
-        selfUpdates = [
-          // order matters here
-          messageIdUpdate,
-          newMessageUpdate,
-        ]
-      } else {
-        // other users get the message only
-        sends.push(RealtimeUpdates.pushToUser(userId, [newMessageUpdate]))
-      }
-    })
-  }
+  const messageUpdateForUser = (targetUserId: number): Update => ({
+    update: {
+      oneofKind: "newMessage",
+      newMessage: {
+        message: encodeMessageForUser({
+          messageInfo,
+          updateGroup: resolvedUpdateGroup,
+          inputPeer,
+          currentUserId,
+          targetUserId,
+        }),
+      },
+    },
+    seq: update.seq,
+    date: encodeDateStrict(update.date),
+  })
+  // The successful mutation's receipt is independent of a later recipient
+  // projection, which may already exclude a concurrently removed sender.
+  const selfUpdates = [messageIdUpdate, messageUpdateForUser(currentUserId)]
+  const sends = resolvedUpdateGroup.userIds.map((userId) => RealtimeUpdates.pushToUser(
+    userId,
+    userId === currentUserId ? selfUpdates : [messageUpdateForUser(userId)],
+    userId === currentUserId ? { skipSessionId } : undefined,
+  ))
 
   await Promise.all(sends)
   return { selfUpdates, updateGroup: resolvedUpdateGroup }
@@ -1304,41 +1242,30 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
   const dialogNotificationSettingsByUserId = await getInheritedDialogNotificationSettings(chat.id, recipientUserIds)
 
-  // TODO: send to users who have it set to All immediately
-  // Handle DMs and threads
-  await Promise.all(
-    updateGroup.userIds
-      .filter((userId) => userId !== currentUserId)
-      .map(async (userId) => {
-        try {
-          await sendNotificationToUser({
-            userId,
-            messageInfo,
-            messageText,
-            messageEntities,
-            mentionedUserIds,
-            replyMentionUserIds,
-            chat,
-            isNudge,
-            isUrgentNudge,
-            updateGroup,
-            inputPeer,
-            currentUserId,
-            senderNameInfo,
-            senderProfilePhotoUrl: senderPhoto?.cdnUrl,
-            senderHasProfilePhoto: senderPhoto?.hasPhoto,
-            dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
-          })
-        } catch (error) {
-          log.error("Failed to send message notification to user", {
-            error,
-            userId,
-            chatId: chat.id,
-            messageId: messageInfo.message.messageId,
-          })
-        }
-      }),
-  )
+  // Resolve policy/provider preparation first, then take one current authority
+  // snapshot immediately before submitting the eligible notification audience.
+  const prepared = await Promise.all(recipientUserIds.map(async (userId) => {
+    try {
+      const send = await prepareNotificationForUser({
+        userId, messageInfo, messageText, messageEntities, mentionedUserIds, replyMentionUserIds,
+        chat, isNudge, isUrgentNudge, updateGroup, inputPeer, currentUserId, senderNameInfo,
+        senderProfilePhotoUrl: senderPhoto?.cdnUrl,
+        senderHasProfilePhoto: senderPhoto?.hasPhoto,
+        dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
+      })
+      return send ? { userId, send } : undefined
+    } catch (error) {
+      log.error("Failed to prepare message notification", { error, userId, chatId: chat.id })
+      return undefined
+    }
+  }))
+  const notifications = prepared.filter((value) => value !== undefined)
+  const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: notifications.map((value) => value.userId) })
+  await Promise.all(notifications.filter((value) => access.get(chat.id)?.has(value.userId)).map(async (value) => {
+    try { await value.send() } catch (error) {
+      log.error("Failed to send message notification", { error, userId: value.userId, chatId: chat.id })
+    }
+  }))
 }
 
 /**
@@ -1369,7 +1296,7 @@ export async function sendProjectedMessageNotification(input: {
 }
 
 /** Send push notifications for this message */
-async function sendNotificationToUser({
+async function prepareNotificationForUser({
   userId,
   messageInfo,
   messageText,
@@ -1482,8 +1409,8 @@ async function sendNotificationToUser({
     isUrgentNudge,
   })
 
-  if (!suppressionDecision.suppress) {
-    await Notifications.sendToUser({
+  const pushSubmission = !suppressionDecision.suppress
+    ? await Notifications.prepareSendToUser({
       userId,
       payload: {
         kind: "send_message",
@@ -1502,31 +1429,37 @@ async function sendNotificationToUser({
         photoUrl: messageInfo.message.isSticker ? undefined : notificationPhotoUrl(messageInfo.photo),
       },
     })
-  } else {
-    log.debug("Suppressing iOS send_message push due to active desktop chat", {
-      userId,
-      chatId: messageInfo.message.chatId,
-      reason: suppressionDecision.reason,
-    })
-  }
+    : undefined
 
-  if (needsExplicitMacNotification) {
-    RealtimeUpdates.pushToUser(userId, [
-      {
-        update: {
-          oneofKind: "newMessageNotification",
-          newMessageNotification: {
-            message: encodeMessageForUser({
-              messageInfo,
-              updateGroup,
-              inputPeer,
-              currentUserId,
-              targetUserId: userId,
-            }),
-            reason: reason,
+  return async () => {
+    await pushSubmission?.()
+
+    if (suppressionDecision.suppress) {
+      log.debug("Suppressing iOS send_message push due to active desktop chat", {
+        userId,
+        chatId: messageInfo.message.chatId,
+        reason: suppressionDecision.reason,
+      })
+    }
+
+    if (needsExplicitMacNotification) {
+      RealtimeUpdates.pushToUser(userId, [
+        {
+          update: {
+            oneofKind: "newMessageNotification",
+            newMessageNotification: {
+              message: encodeMessageForUser({
+                messageInfo,
+                updateGroup,
+                inputPeer,
+                currentUserId,
+                targetUserId: userId,
+              }),
+              reason: reason,
+            },
           },
         },
-      },
-    ])
+      ])
+    }
   }
 }

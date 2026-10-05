@@ -1,6 +1,6 @@
 import type { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 
 type ChatAccessRow = {
   chatId: number
@@ -55,9 +55,8 @@ export async function getSpaceRootChatIdsForAccessEvents(
 
 /**
  * Computes the effective users who can discover each chat from the caller's
- * database snapshot. This mirrors AccessGuards:
- * an explicit grant on the target wins only within current owning-Space
- * authority; otherwise a child inherits from its root chat. Retained participant
+ * database snapshot. An explicit grant on the target wins only within current
+ * owning-Space authority; otherwise a child inherits from its root chat. Retained participant
  * rows never preserve access after Space departure or soft deletion.
  */
 export async function getEffectiveChatAccessUserIds(
@@ -72,11 +71,25 @@ export async function getEffectiveChatAccessUserIds(
   const constrainedUserIds = options?.userIds === undefined ? undefined : uniquePositiveIds(options.userIds)
   if (constrainedUserIds?.length === 0) return result
 
+  const rows = await tx.execute<ChatAccessRow>(effectiveChatAccessSql(ids, constrainedUserIds))
+  for (const row of rows) {
+    result.get(row.chatId)?.add(row.userId)
+  }
+  return result
+}
+
+/** Reuses the canonical projection within a larger, single-snapshot admission query. */
+export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: readonly number[]): SQL {
+  const ids = uniquePositiveIds(chatIds)
+  const constrainedUserIds = userIds === undefined ? undefined : uniquePositiveIds(userIds)
+  if (ids.length === 0 || constrainedUserIds?.length === 0) {
+    return sql`select null::integer as "chatId", null::integer as "userId" where false`
+  }
   const chatIdList = sql.join(ids, sql`, `)
   const userFilter = constrainedUserIds === undefined
     ? sql``
     : sql`and access."userId" in (${sql.join(constrainedUserIds, sql`, `)})`
-  const rows = await tx.execute<ChatAccessRow>(sql`
+  return sql`
     with recursive ancestors as (
       select
         c.id as "chatId",
@@ -192,12 +205,7 @@ export async function getEffectiveChatAccessUserIds(
       )
       ${userFilter}
     order by access."chatId", access."userId"
-  `)
-
-  for (const row of rows) {
-    result.get(row.chatId)?.add(row.userId)
-  }
-  return result
+  `
 }
 
 export function addedAccessUserIds(chatId: number, before: ChatAccessMap, after: ChatAccessMap): number[] {
@@ -210,6 +218,6 @@ export function removedAccessUserIds(chatId: number, before: ChatAccessMap, afte
   return Array.from(before.get(chatId) ?? []).filter((userId) => !newIds.has(userId))
 }
 
-function uniquePositiveIds(ids: number[]): number[] {
+function uniquePositiveIds(ids: readonly number[]): number[] {
   return Array.from(new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0)))
 }

@@ -25,7 +25,9 @@ import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggrega
 import { db } from "@in/server/db"
 import { members, spaces, users } from "@in/server/db/schema"
 import { and, eq, inArray, isNull, or } from "drizzle-orm"
-import { liveRealtimeDelivery, observeLocalDelivery } from "@in/server/modules/internalMessaging/liveDelivery"
+import { authorizeLiveDeliveries, localContentUpdates } from "@in/server/modules/internalMessaging/liveAuthorization"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
+import { liveRealtimeDelivery, MAX_LIVE_RECIPIENTS, observeLocalDelivery } from "@in/server/modules/internalMessaging/liveDelivery"
 
 const log = new Log("realtime")
 const MAX_SPACE_AUTHORIZATION_RECIPIENTS_PER_QUERY = 512
@@ -403,6 +405,70 @@ export const sendMessageToRealtimeUserWithDelivery = async (
   return accepted
 }
 
+type PendingLocalContent = {
+  userId: number
+  updates: UpdatesPayload["updates"]
+  payload: ServerMessage["payload"]
+  epoch: number
+  options?: { skipSessionId?: number }
+  resolve: () => void
+}
+let pendingLocalContent: PendingLocalContent[] = []
+const localContentByUser = new Map<number, Promise<void>>()
+
+/** First deliveries across users share a bounded same-turn authority query.
+ * A user's later content checks authority after its preceding handoff; other
+ * users never wait on that predecessor. */
+function admitLocalContent(input: Omit<PendingLocalContent, "resolve">): Promise<void> {
+  return new Promise((resolve) => {
+    pendingLocalContent.push({ ...input, resolve })
+    if (pendingLocalContent.length === 1) queueMicrotask(flushLocalContent)
+    if (pendingLocalContent.length === MAX_LIVE_RECIPIENTS) flushLocalContent()
+  })
+}
+
+function flushLocalContent(): void {
+  if (pendingLocalContent.length === 0) return
+  const batch = pendingLocalContent
+  pendingLocalContent = []
+  const work = (async () => {
+    try {
+      const peerChatIds = new Map<number, Map<number, number>>()
+      const admitted = await authorizeLiveDeliveries(batch, peerChatIds)
+      // The primitive submits synchronously. Start every handoff before awaiting
+      // any result so other recipients add no yield after the final decision.
+      await Promise.all(admitted.map(async (delivery) => {
+        if (connectionManager.getUserConnectionEpoch(delivery.userId) !== delivery.epoch) return
+        try {
+          const accepted = await sendMessageToRealtimeUserWithDelivery(delivery.userId, delivery.payload, delivery.options)
+          observeLocalDelivery(delivery.userId, delivery.updates, delivery.epoch, accepted,
+            delivery.options?.skipSessionId, peerChatIds.get(delivery.userId))
+        } catch (error) {
+          log.warn("Local realtime content transport failed", { error })
+        }
+      }))
+    } catch (error) {
+      // A committed mutation retains its RPC receipt. Failed admission sends no
+      // content and records no repair coverage; durable catch-up remains available.
+      log.warn("Local realtime content admission failed", { error, recipientCount: batch.length })
+    } finally {
+      for (const delivery of batch) delivery.resolve()
+    }
+  })()
+  applicationBackgroundWork.track(work)
+}
+
+function queueLocalContent(input: Omit<PendingLocalContent, "resolve">): Promise<void> {
+  const previous = localContentByUser.get(input.userId)
+  const work = previous ? previous.then(() => admitLocalContent(input)) : admitLocalContent(input)
+  localContentByUser.set(input.userId, work)
+  void work.then(() => {
+    if (localContentByUser.get(input.userId) === work) localContentByUser.delete(input.userId)
+  })
+  applicationBackgroundWork.track(work)
+  return work
+}
+
 /** Preserves the established fire-and-forget realtime API for ordinary fanout. */
 export const sendMessageToRealtimeUser = async (
   userId: number,
@@ -410,6 +476,23 @@ export const sendMessageToRealtimeUser = async (
   options?: { skipSessionId?: number },
 ): Promise<void> => {
   const epoch = connectionManager.getUserConnectionEpoch(userId)
+  if (payload.oneofKind === "update") {
+    const content = localContentUpdates(payload.update.updates, userId)
+    if (content.length > 0) {
+      // Remote consumers authorize their own current recipients. Publication
+      // must also reach users whose sockets live only on another host.
+      liveRealtimeDelivery.toUser(userId, payload.update.updates, options?.skipSessionId)
+      if (connectionManager.getUserConnections(userId).length === 0) return
+      // Content used to reach the transport before this call yielded. Own a
+      // projection snapshot so later caller mutations cannot change admission.
+      const update = UpdatesPayload.clone(payload.update)
+      await queueLocalContent({
+        userId, updates: localContentUpdates(update.updates, userId),
+        payload: { oneofKind: "update", update }, epoch, options,
+      })
+      return
+    }
+  }
   const accepted = await sendMessageToRealtimeUserWithDelivery(userId, payload, options)
   if (payload.oneofKind === "update") {
     observeLocalDelivery(userId, payload.update.updates, epoch, accepted, options?.skipSessionId)

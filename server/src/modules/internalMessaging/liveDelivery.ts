@@ -195,14 +195,16 @@ async function receiveLiveDelivery(payload: RealtimeDelivery): Promise<void> {
     const peerChatIds = new Map<number, Map<number, number>>()
     const recipients = await authorizeLiveRecipients(payload.updates, batch, peerChatIds)
     if (payload.expiresAtMs <= BigInt(Date.now())) return
-    for (const userId of recipients) {
+    // Raw transport submission is synchronous. Start the entire bounded batch
+    // before awaiting results, preserving the final authority handoff boundary.
+    await Promise.all(recipients.map(async (userId) => {
       // New admissions use their own normal bootstrap/recovery. Never let an
       // authorization begun before an admission mark its sockets as current.
-      if (connectionManager.getUserConnectionEpoch(userId) !== epochs.get(userId)) continue
+      if (connectionManager.getUserConnectionEpoch(userId) !== epochs.get(userId)) return
       const skipSessionId = payload.skipSessionId === undefined ? undefined : Number(payload.skipSessionId)
       const accepted = await RealtimeUpdates.pushToUserWithDelivery(userId, payload.updates, { skipSessionId })
       observeLocalDelivery(userId, payload.updates, epochs.get(userId)!, accepted, skipSessionId, peerChatIds.get(userId))
-    }
+    }))
   }
 }
 
