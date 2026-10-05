@@ -38,6 +38,7 @@ import {
   getEffectiveChatAccessUserIds,
   removedAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 const log = new Log("functions.updateChatVisibility")
 
@@ -135,6 +136,10 @@ export async function updateChatVisibility(
         tx,
         existingGroupGrants.map((grant) => grant.groupId),
       )
+
+      // This RPC replaces grants even when visibility remains private. Fence
+      // admitted speech before changing who can read its destination.
+      await invalidateGridTranscriptionForHistory(tx, { chatIds: [chat.id], reason: "access_revoked" })
 
       if (isPublic) {
         if (input.participants && input.participants.length > 0) {

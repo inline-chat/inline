@@ -1,3 +1,4 @@
+import { openGridThread, setGridTranscription, listGridTranscripts } from "./gridTranscription"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { deleteMessageAttachment } from "@in/server/functions/messages.deleteMessageAttachment"
 import { clearChatHistory } from "@in/server/functions/messages.clearChatHistory"
@@ -193,6 +194,9 @@ export const Functions = {
     getUpdates: getUpdates,
   },
   grid: {
+    openThread: openGridThread,
+    setTranscription: setGridTranscription,
+    listTranscripts: listGridTranscripts,
     get: getGrid,
     getHome: getGridHome,
     createRoom: createGridRoom,

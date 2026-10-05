@@ -31,7 +31,18 @@ import { SessionId, SpaceId, UserId } from "@in/server/core/schema/identifiers"
 import { db } from "@in/server/db"
 import { SpaceSettingsModel } from "@in/server/db/models/spaceSettings"
 import { UsersModel } from "@in/server/db/models/users"
-import { gridPresence, gridRooms, members, sessions, spaces, users, type DbGridRoom } from "@in/server/db/schema"
+import {
+  chats,
+  gridPresence,
+  gridRooms,
+  gridTranscriptionRuns,
+  gridTranscriptionSpaceRevisions,
+  members,
+  sessions,
+  spaces,
+  users,
+  type DbGridRoom,
+} from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -46,6 +57,14 @@ import {
 } from "@in/server/modules/grid/livekit"
 import { setGridAvatarMicrophoneState } from "@in/server/modules/grid/avatarState"
 import { notifyGridChanged } from "@in/server/modules/grid/realtime"
+import { enrollGridRoomHistory } from "./gridTranscription"
+import {
+  encodeGridTranscription,
+  stopGridTranscription,
+  transcriptionAvailable,
+  retireUnclaimedGridTranscriptions,
+  supportedGridTranscriptionSession,
+} from "@in/server/modules/grid/transcription/state"
 import { enqueueGridParticipantRevocation } from "@in/server/modules/grid/providerEffects"
 import {
   activeGridConnection,
@@ -664,6 +683,14 @@ async function movePresence(
 
   const ownerChanged = existing !== undefined && existing.presence.ownerSessionId !== context.currentSessionId
   const rotateForAccessRevocation = ownerChanged && liveKitRequiresGenerationRotation()
+  if (existing && ownerChanged) {
+    await stopGridTranscription(
+      tx,
+      existing.room.id,
+      rotateForAccessRevocation ? "generation_changed" : "authority_lost",
+      true,
+    )
+  }
   if (existing && (existing.room.id !== targetRoom.id || ownerChanged)) {
     const connection = activeGridConnection(existing.room)
     if (connection) {
@@ -678,6 +705,19 @@ async function movePresence(
   }
 
   await claimPresence(tx, context, targetRoom.id, microphoneEnabled)
+  await enrollGridRoomHistory(tx, targetRoom.id, [context.currentUserId])
+  const roster = await tx
+    .select({ userId: gridPresence.userId })
+    .from(gridPresence)
+    .where(and(eq(gridPresence.roomId, targetRoom.id), gt(gridPresence.leaseExpiresAt, new Date())))
+  if (roster.length > 8) await stopGridTranscription(tx, targetRoom.id, "speaker_capacity", true)
+  const [ownerSession] = await tx
+    .select({ clientType: sessions.clientType, clientVersion: sessions.clientVersion })
+    .from(sessions)
+    .where(eq(sessions.id, context.currentSessionId))
+    .limit(1)
+  if (!ownerSession || !supportedGridTranscriptionSession(ownerSession))
+    await stopGridTranscription(tx, targetRoom.id, "unsupported_client", true)
 
   if (existing && existing.room.id !== targetRoom.id) {
     const endedConnection = await reconcileGridRoom(tx, existing.room.id, { rotateForAccessRevocation })
@@ -809,9 +849,18 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
   // response, but it can never label old content with a newer revision.
   const snapshot = await db.transaction(async (tx) => {
     await lockGridMutations(tx)
+    await retireUnclaimedGridTranscriptions(tx)
     const settings = await SpaceSettingsModel.getStored(spaceId, tx)
     const [space] = await tx
-      .select({ revision: spaces.gridRevision })
+      .select({
+        revision: spaces.gridRevision,
+        // Hold the isolated counter stable while reading run projections. No
+        // capture/history writer can commit newer state with an older label.
+        transcriptionRevision:
+          sql<bigint>`coalesce((select "revision" from ${gridTranscriptionSpaceRevisions} where "space_id" = ${spaces.id} for share), 0)`.mapWith(
+            BigInt,
+          ),
+      })
       .from(spaces)
       .where(and(eq(spaces.id, spaceId), isNull(spaces.deleted)))
       .limit(1)
@@ -828,7 +877,109 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
           .where(eq(gridRooms.spaceId, spaceId))
           .orderBy(asc(gridRooms.createdAt), asc(gridRooms.id), asc(gridPresence.joinedAt))
       : []
-    return { settings, revision: space.revision, roomRows }
+    const available = await transcriptionAvailable(tx)
+    const projected = new Map<
+      number,
+      {
+        roomThreadId?: bigint
+        transcription?: ReturnType<typeof encodeGridTranscription>
+        transcriptionAvailable: boolean
+      }
+    >()
+    const boundRoomIds = roomRows.filter((row) => available || row.room.roomThreadId !== null).map((row) => row.room.id)
+    const latestRuns = boundRoomIds.length
+      ? await tx
+          .selectDistinctOn([gridTranscriptionRuns.sourceRoomId])
+          .from(gridTranscriptionRuns)
+          .where(inArray(gridTranscriptionRuns.sourceRoomId, [...new Set(boundRoomIds)]))
+          .orderBy(gridTranscriptionRuns.sourceRoomId, desc(gridTranscriptionRuns.createdAt))
+      : []
+    const runByRoom = new Map(latestRuns.map((run) => [run.sourceRoomId, run]))
+    const projectionChatIds = [
+      ...new Set([
+        ...roomRows.flatMap((row) => (row.room.roomThreadId === null ? [] : [row.room.roomThreadId])),
+        ...latestRuns.map((run) => run.transcriptChatId),
+      ]),
+    ]
+    const projectionChats = projectionChatIds.length
+      ? await tx.select().from(chats).where(inArray(chats.id, projectionChatIds))
+      : []
+    const chatById = new Map(projectionChats.map((chat) => [chat.id, chat]))
+    const ownerSessionIds = available
+      ? [...new Set(roomRows.flatMap((row) => (row.presence ? [row.presence.ownerSessionId] : [])))]
+      : []
+    const ownerSessions = ownerSessionIds.length
+      ? await tx
+          .select({
+            id: sessions.id,
+            clientType: sessions.clientType,
+            clientVersion: sessions.clientVersion,
+            revoked: sessions.revoked,
+          })
+          .from(sessions)
+          .where(inArray(sessions.id, ownerSessionIds))
+      : []
+    const qualifiedOwners = new Set(
+      ownerSessions
+        .filter((session) => session.revoked === null && supportedGridTranscriptionSession(session))
+        .map((session) => session.id),
+    )
+    for (const room of new Map(roomRows.map((row) => [row.room.id, row.room])).values()) {
+      if (!available && room.roomThreadId === null) {
+        projected.set(room.id, { transcriptionAvailable: false })
+        continue
+      }
+      let roomThreadId: bigint | undefined
+      if (room.roomThreadId) {
+        const chat = chatById.get(room.roomThreadId)
+        if (
+          chat &&
+          chat.type === "thread" &&
+          chat.spaceId === room.spaceId &&
+          chat.publicThread === false &&
+          chat.parentChatId === null
+        ) {
+          try {
+            await AccessGuards.ensureChatAccess(chat, context.currentUserId, tx)
+            roomThreadId = BigInt(chat.id)
+          } catch (error) {
+            if (!RealtimeRpcError.is(error)) throw error
+          }
+        }
+      }
+      const run = runByRoom.get(room.id)
+      let canRead = false
+      if (run) {
+        const chat = chatById.get(run.transcriptChatId)
+        if (chat) {
+          try {
+            await AccessGuards.ensureChatAccess(chat, context.currentUserId, tx)
+            canRead = true
+          } catch (error) {
+            if (!RealtimeRpcError.is(error)) throw error
+          }
+        }
+      }
+      const roster = roomRows.filter((row) => row.room.id === room.id && row.presence).map((row) => row.presence!)
+      const roomAvailable =
+        available &&
+        room.connectionStartedAt !== null &&
+        roster.length >= 2 &&
+        roster.length <= 8 &&
+        roster.every((presence) => qualifiedOwners.has(presence.ownerSessionId))
+      projected.set(room.id, {
+        roomThreadId,
+        transcription: run ? encodeGridTranscription(run, canRead) : undefined,
+        transcriptionAvailable: roomAvailable,
+      })
+    }
+    return {
+      settings,
+      revision: BigInt(space.revision) + (space.transcriptionRevision ?? 0n),
+      roomRows,
+      projected,
+      available,
+    }
   })
 
   if (!snapshot.settings.gridEnabled) {
@@ -854,6 +1005,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
     let room = rooms.get(row.room.id)
     if (!room) {
       room = encodeRoom(row.room)
+      Object.assign(room, snapshot.projected.get(row.room.id))
       rooms.set(row.room.id, room)
     }
     if (row.presence) {
@@ -892,6 +1044,7 @@ function encodeRoom(room: DbGridRoom): GridRoom {
     createdAt: encodeDateStrict(room.createdAt),
     updatedAt: encodeDateStrict(room.updatedAt),
     avatars: [],
+    transcriptionAvailable: false,
     connection: room.connectionStartedAt
       ? {
           roomId: BigInt(room.id),

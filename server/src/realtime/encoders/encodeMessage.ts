@@ -65,6 +65,14 @@ function encodeServiceMessage(systemMessage: SystemMessage | null | undefined): 
         },
       }
 
+    case "gridTranscript":
+      return {
+        event: {
+          oneofKind: "gridTranscript",
+          gridTranscript: event.gridTranscript,
+        },
+      }
+
     case undefined:
       return undefined
   }
@@ -225,17 +233,20 @@ export const encodeMessage = ({
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
     rev: BigInt(message.rev ?? 0),
-    mentioned: entities ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
+    mentioned: message.systemMessage?.event.oneofKind === "gridTranscript"
+      ? false
+      : entities ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker || undefined,
     hasLink: hasLink,
     entities: entities,
-    sendMode: sendMode ?? undefined,
+    sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : sendMode ?? undefined,
+    countsAsUnread: message.countsAsUnread === false ? false : undefined,
     fwdFrom: fwdFrom,
     replies,
     subthread,
-    actions,
+    actions: message.systemMessage?.event.oneofKind === "gridTranscript" ? undefined : actions,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: message.blockContent ?? undefined,
     agentSession: message.agentSession,
@@ -368,7 +379,9 @@ export const encodeFullMessage = ({
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
     rev: BigInt(message.rev ?? 0),
-    mentioned: message.entities ? isUserMentioned(message.entities, encodingForUserId) : false,
+    mentioned: message.systemMessage?.event.oneofKind === "gridTranscript"
+      ? false
+      : message.entities ? isUserMentioned(message.entities, encodingForUserId) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
@@ -382,10 +395,12 @@ export const encodeFullMessage = ({
         }
       : undefined,
     entities: message.entities ?? undefined,
+    sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : undefined,
+    countsAsUnread: message.countsAsUnread === false ? false : undefined,
     fwdFrom: fwdFrom,
     replies,
     subthread,
-    actions: message.actions ?? undefined,
+    actions: message.systemMessage?.event.oneofKind === "gridTranscript" ? undefined : message.actions ?? undefined,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: blockContent ?? undefined,
     agentSession: message.agentSession,

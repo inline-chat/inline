@@ -14,6 +14,7 @@ test("preserves ordinary diagnostic paths and excludes public Bot documentation 
   }
   expect(requiresPrivateResponse("/health")).toBeFalse()
   expect(requiresPrivateResponse("/bot-api-reference/json")).toBeFalse()
+  expect(requiresPrivateResponse("/_internal/grid-transcription/claim")).toBeTrue()
 })
 
 test("legacy HTTP setup adds no-store without changing GET dispatch", async () => {

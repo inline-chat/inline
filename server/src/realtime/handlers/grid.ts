@@ -1,4 +1,10 @@
 import type {
+  OpenGridThreadInput,
+  OpenGridThreadResult,
+  SetGridTranscriptionInput,
+  SetGridTranscriptionResult,
+  ListGridTranscriptsInput,
+  ListGridTranscriptsResult,
   CreateGridRoomInput,
   CreateGridRoomResult,
   DeleteGridRoomInput,
@@ -76,3 +82,12 @@ export const setGridAvatarMicrophoneEnabledHandler = (
   context: HandlerContext,
 ): Promise<SetGridAvatarMicrophoneEnabledResult> =>
   Functions.grid.setAvatarMicrophoneEnabled(input, functionContext(context))
+
+export const openGridThreadHandler = (input: OpenGridThreadInput, context: HandlerContext): Promise<OpenGridThreadResult> =>
+  Functions.grid.openThread(input, functionContext(context))
+
+export const setGridTranscriptionHandler = (input: SetGridTranscriptionInput, context: HandlerContext): Promise<SetGridTranscriptionResult> =>
+  Functions.grid.setTranscription(input, functionContext(context))
+
+export const listGridTranscriptsHandler = (input: ListGridTranscriptsInput, context: HandlerContext): Promise<ListGridTranscriptsResult> =>
+  Functions.grid.listTranscripts(input, functionContext(context))

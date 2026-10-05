@@ -28,6 +28,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { ensureCanManageChatParticipants } from "@in/server/modules/authorization/spaceThreadGuards"
 import { ensureGroupCanParticipateInChat, loadActiveGroupMemberIds } from "@in/server/modules/userGroups"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 import {
   getRootChatIdsForAccessEvents,
   getEffectiveChatAccessUserIds,
@@ -90,6 +91,8 @@ export async function removeChatParticipant(
 
       const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [input.chatId])
       const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+
+      await invalidateGridTranscriptionForHistory(tx, { chatIds: [chat.id], reason: "access_revoked" })
 
       await tx
         .delete(chatParticipants)
@@ -204,6 +207,8 @@ async function removeChatParticipantGroup(
       const affectedUserIds = await loadActiveGroupMemberIds(input.groupId, tx)
       const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [input.chatId])
       const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+
+      await invalidateGridTranscriptionForHistory(tx, { chatIds: [chat.id], reason: "access_revoked" })
 
       await tx
         .delete(chatParticipantGroups)

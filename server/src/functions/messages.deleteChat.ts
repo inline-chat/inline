@@ -23,6 +23,7 @@ import {
   getEffectiveChatAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
 import { deleteSubthreadParentPlacement } from "@in/server/functions/messages.deleteMessage"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -172,6 +173,8 @@ async function deleteChatWithOptions(
             return false
           }
         }
+
+        await invalidateGridTranscriptionForHistory(tx, { chatIds: [lockedChat.id], reason: "chat_deleted" })
 
         peerId = Encoders.peerFromChat(lockedChat, { currentUserId })
         const recipientAccess = await getEffectiveChatAccessUserIds(tx, [lockedChat.id])

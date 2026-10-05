@@ -26,6 +26,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { hasImportedAgentMessages } from "@in/server/modules/agentSessions/service"
+import { decryptSystemMessagePayload } from "@in/server/modules/systemMessages/payload"
 
 type Input = {
   messageIds: bigint[]
@@ -99,9 +100,22 @@ async function deleteMessageWithOptions(
         messageIds: input.messageIds,
       })
 
+  const selectedRows = numericMessageIds.length === 0 ? [] : await db.select({
+    messageId: messages.messageId,
+    countsAsUnread: messages.countsAsUnread,
+    systemMessageEncrypted: messages.systemMessageEncrypted,
+    systemMessageIv: messages.systemMessageIv,
+    systemMessageTag: messages.systemMessageTag,
+  }).from(messages).where(and(eq(messages.chatId, chat.id), inArray(messages.messageId, numericMessageIds)))
+  const quietGeneratedIds = new Set(selectedRows
+    .filter((row) => row.countsAsUnread === false && row.systemMessageEncrypted !== null && row.systemMessageIv !== null && row.systemMessageTag !== null && decryptSystemMessagePayload({ encrypted: row.systemMessageEncrypted, iv: row.systemMessageIv, authTag: row.systemMessageTag }).event?.oneofKind === "gridTranscript")
+    .map((row) => row.messageId))
+  const ordinaryMessageIds = input.messageIds.filter((id) => !quietGeneratedIds.has(Number(id)))
+  const onlyQuietGenerated = selectedRows.length > 0 && ordinaryMessageIds.length === 0
+
   let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
-  if (!options.trustedPlacementCleanup) {
-    BotUpdateProjector.messageRoutesDeleted({ chatId: chat.id, messageIds: input.messageIds })
+  if (!options.trustedPlacementCleanup && ordinaryMessageIds.length > 0) {
+    BotUpdateProjector.messageRoutesDeleted({ chatId: chat.id, messageIds: ordinaryMessageIds })
   }
   const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
     currentUserId: context.currentUserId,
@@ -119,12 +133,12 @@ async function deleteMessageWithOptions(
     chatUpdates: metadataChatUpdates,
   })
 
-  if (isReplyThread(chat)) {
+  if (isReplyThread(chat) && !onlyQuietGenerated) {
     await emitMessageSubthreadUpdateIfNeeded({
       chatId: chat.id,
       currentUserId: context.currentUserId,
     })
-  } else if (isLinkedSubthread(chat)) {
+  } else if (isLinkedSubthread(chat) && !onlyQuietGenerated) {
     queueSubthreadParentUpdate({
       chatId: chat.id,
       currentUserId: context.currentUserId,
@@ -132,7 +146,7 @@ async function deleteMessageWithOptions(
     })
   }
 
-  if (!options.trustedPlacementCleanup) {
+  if (!options.trustedPlacementCleanup && ordinaryMessageIds.length > 0) {
     await Promise.all(
       updateGroup.userIds.map(async (userId) => {
         await Notifications.sendToUser({
@@ -140,7 +154,7 @@ async function deleteMessageWithOptions(
           payload: {
             kind: "message_deleted",
             threadId: `chat_${chat.id}`,
-            messageIds: input.messageIds.map((id) => id.toString()),
+            messageIds: ordinaryMessageIds.map((id) => id.toString()),
           },
         })
       }),

@@ -105,6 +105,9 @@ import {
 import { setSpacePhotoHandler } from "@in/server/realtime/handlers/space.profile"
 import { getSpaceSettingsHandler, toggleSpaceGridHandler } from "@in/server/realtime/handlers/space.settings"
 import {
+  openGridThreadHandler,
+  setGridTranscriptionHandler,
+  listGridTranscriptsHandler,
   createGridRoomHandler,
   deleteGridRoomHandler,
   getGridHandler,
@@ -465,6 +468,24 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await toggleSpaceGridHandler(call.input.toggleSpaceGrid, handlerContext)
       return { oneofKind: "toggleSpaceGrid", toggleSpaceGrid: result }
+    }
+
+    case Method.OPEN_GRID_THREAD: {
+      if (call.input.oneofKind !== "openGridThread") throw RealtimeRpcError.BadRequest()
+      const result = await openGridThreadHandler(call.input.openGridThread, handlerContext)
+      return { oneofKind: "openGridThread", openGridThread: result }
+    }
+
+    case Method.SET_GRID_TRANSCRIPTION: {
+      if (call.input.oneofKind !== "setGridTranscription") throw RealtimeRpcError.BadRequest()
+      const result = await setGridTranscriptionHandler(call.input.setGridTranscription, handlerContext)
+      return { oneofKind: "setGridTranscription", setGridTranscription: result }
+    }
+
+    case Method.LIST_GRID_TRANSCRIPTS: {
+      if (call.input.oneofKind !== "listGridTranscripts") throw RealtimeRpcError.BadRequest()
+      const result = await listGridTranscriptsHandler(call.input.listGridTranscripts, handlerContext)
+      return { oneofKind: "listGridTranscripts", listGridTranscripts: result }
     }
 
     case Method.GET_GRID: {

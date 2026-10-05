@@ -64,6 +64,8 @@ import {
   validateBlockContent,
 } from "@in/server/modules/message/blockContent"
 import { decryptAgentRef } from "@in/server/modules/agentSessions/crypto"
+import { messageActivityPredicate } from "@in/server/modules/message/activity"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -867,6 +869,19 @@ async function deleteMessages(
 
     const messageIdsNum = messageIds.map((id) => Number(id))
 
+    // Orphaning anchored children also mutates their chat rows. Own these
+    // before the run fence, matching final writers' chat -> run order.
+    await tx.select({ id: chats.id }).from(chats)
+      .where(and(eq(chats.parentChatId, chatId), inArray(chats.parentMessageId, messageIdsNum)))
+      .orderBy(chats.id).for("update")
+
+    // Deleting a visible anchor/link retires capture and future enrollment.
+    // A finalized turn deletion leaves its admitted/final dedup tombstone.
+    await invalidateGridTranscriptionForHistory(tx, {
+      messageRefs: messageIdsNum.map((messageId) => ({ chatId, messageId })),
+      reason: "message_deleted",
+    })
+
     // Clear first to allow for deleting
     await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
 
@@ -896,7 +911,7 @@ async function deleteMessages(
     let [message] = await tx
       .select({ messageId: messages.messageId })
       .from(messages)
-      .where(eq(messages.chatId, chatId))
+      .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
       .orderBy(desc(messages.messageId))
       .limit(1)
 
@@ -998,7 +1013,12 @@ async function editMessage(input: EditMessageInput): Promise<{
     }
 
     const [currentMessage] = await tx
-      .select({ blockContentId: messages.blockContentId, rev: messages.rev, voiceId: messages.voiceId })
+      .select({
+        blockContentId: messages.blockContentId, rev: messages.rev, voiceId: messages.voiceId,
+        systemMessageEncrypted: messages.systemMessageEncrypted,
+        systemMessageIv: messages.systemMessageIv,
+        systemMessageTag: messages.systemMessageTag,
+      })
       .from(messages)
       .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
       .for("update")
@@ -1008,6 +1028,14 @@ async function editMessage(input: EditMessageInput): Promise<{
       if (input.expectedRevision !== undefined || input.expectedVoiceId !== undefined) {
         throw new MessageRevisionConflict()
       }
+      throw ModelError.MessageInvalid
+    }
+    if (currentMessage.systemMessageEncrypted && currentMessage.systemMessageIv && currentMessage.systemMessageTag &&
+      decryptSystemMessagePayload({
+        encrypted: currentMessage.systemMessageEncrypted,
+        iv: currentMessage.systemMessageIv,
+        authTag: currentMessage.systemMessageTag,
+      }).event.oneofKind === "gridTranscript") {
       throw ModelError.MessageInvalid
     }
     if ((input.expectedRevision !== undefined && (currentMessage.rev ?? 0) !== input.expectedRevision)

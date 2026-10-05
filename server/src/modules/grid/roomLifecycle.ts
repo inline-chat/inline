@@ -13,6 +13,7 @@ import {
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"
 import { and, count, eq, gt, inArray, sql } from "drizzle-orm"
+import { stopGridTranscription, invalidateGridTranscriptionForSpeaker } from "./transcription/state"
 
 const log = new Log("grid.roomLifecycle")
 
@@ -61,6 +62,15 @@ export async function reconcileGridRoom(
     ? room.connectionGeneration + 1
     : room.connectionGeneration
   const endedConnection = activeGridConnection(room)
+
+  if (occupantCount < 2 || options.rotateForAccessRevocation) {
+    await stopGridTranscription(
+      tx,
+      roomId,
+      options.rotateForAccessRevocation ? "generation_changed" : "media_ended",
+      true,
+    )
+  }
 
   if (occupantCount === 0 && room.title === null) {
     await tx.delete(gridRooms).where(eq(gridRooms.id, roomId))
@@ -227,9 +237,6 @@ async function removeGridPresenceInTransaction(
 ): Promise<GridPresenceRemovalState> {
   const conditions = [eq(gridPresence.userId, input.userId)]
   if (input.spaceId !== undefined) conditions.push(eq(gridRooms.spaceId, input.spaceId))
-  if (input.ownerSessionId !== undefined) {
-    conditions.push(eq(gridPresence.ownerSessionId, input.ownerSessionId))
-  }
   const [row] = await tx
     .select({ room: gridRooms, presence: gridPresence })
     .from(gridPresence)
@@ -237,7 +244,10 @@ async function removeGridPresenceInTransaction(
     .where(and(...conditions))
     .limit(1)
 
-  if (!row) {
+  if (!row || (input.ownerSessionId !== undefined && row.presence.ownerSessionId !== input.ownerSessionId)) {
+    // Revoking an older session must not discard the replacement owner's speech.
+    // With no current presence, revocation still retires the speaker's pending turns.
+    if (!row) await invalidateGridTranscriptionForSpeaker(tx, input.userId, input.spaceId)
     return {
       affectedSpaceIds: new Set<number>(),
       changedRoomId: undefined,
@@ -246,6 +256,13 @@ async function removeGridPresenceInTransaction(
       activeConnection: undefined,
     }
   }
+
+  await invalidateGridTranscriptionForSpeaker(
+    tx,
+    input.userId,
+    input.spaceId,
+    input.ownerSessionId === undefined ? undefined : row.presence.mediaMembershipId,
+  )
 
   const deleteConditions = [
     eq(gridPresence.userId, input.userId),

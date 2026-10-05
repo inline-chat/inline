@@ -2,7 +2,19 @@ import { sessions } from "@in/server/db/schema/sessions"
 import { spaces } from "@in/server/db/schema/spaces"
 import { lower, users } from "@in/server/db/schema/users"
 import { sql } from "drizzle-orm"
-import { boolean, check, index, integer, pgTable, serial, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core"
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  serial,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core"
 
 export const gridRooms = pgTable(
   "grid_rooms",
@@ -16,6 +28,9 @@ export const gridRooms = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     title: varchar("title", { length: 80 }),
     locked: boolean("locked").default(false).notNull(),
+    // Validated against the room Space/private ancestry at use time. No FK:
+    // ordinary chat deletion must not invert Grid room -> chat lock order.
+    roomThreadId: integer("room_thread_id"),
     connectionGeneration: integer("connection_generation").default(0).notNull(),
     connectionStartedAt: timestamp("connection_started_at", { mode: "date", precision: 3 }),
     createdAt: timestamp("created_at", { mode: "date", precision: 3 })
@@ -31,11 +46,11 @@ export const gridRooms = pgTable(
     namedRoomUnique: uniqueIndex("grid_rooms_space_title_unique")
       .on(table.spaceId, lower(table.title))
       .where(sql`${table.title} is not null`),
-    connectionGenerationCheck: check(
-      "grid_rooms_connection_generation_check",
-      sql`${table.connectionGeneration} >= 0`,
+    connectionGenerationCheck: check("grid_rooms_connection_generation_check", sql`${table.connectionGeneration} >= 0`),
+    titleNotEmptyCheck: check(
+      "grid_rooms_title_not_empty_check",
+      sql`${table.title} is null or length(${table.title}) > 0`,
     ),
-    titleNotEmptyCheck: check("grid_rooms_title_not_empty_check", sql`${table.title} is null or length(${table.title}) > 0`),
   }),
 )
 
@@ -57,16 +72,14 @@ export const gridPresence = pgTable(
     microphoneEnabled: boolean("microphone_enabled").default(false).notNull(),
     microphoneRevision: integer("microphone_revision").default(0).notNull(),
     mediaMembershipId: uuid("media_membership_id").defaultRandom().notNull(),
+    callId: uuid("call_id").defaultRandom().notNull(),
     leaseExpiresAt: timestamp("lease_expires_at", { mode: "date", precision: 3 }).notNull(),
   },
   (table) => ({
     roomIndex: index("grid_presence_room_id_idx").on(table.roomId),
     ownerSessionIndex: index("grid_presence_owner_session_id_idx").on(table.ownerSessionId),
     leaseExpiryIndex: index("grid_presence_lease_expires_at_idx").on(table.leaseExpiresAt),
-    microphoneRevisionCheck: check(
-      "grid_presence_microphone_revision_check",
-      sql`${table.microphoneRevision} >= 0`,
-    ),
+    microphoneRevisionCheck: check("grid_presence_microphone_revision_check", sql`${table.microphoneRevision} >= 0`),
   }),
 )
 
@@ -126,3 +139,94 @@ export type DbGridPresence = typeof gridPresence.$inferSelect
 export type DbNewGridPresence = typeof gridPresence.$inferInsert
 export type DbGridProviderEffect = typeof gridProviderEffects.$inferSelect
 export type DbNewGridProviderEffect = typeof gridProviderEffects.$inferInsert
+
+// Source room/chat/message IDs deliberately have no foreign keys: provenance
+// and final dedup tombstones survive ordinary room/history deletion.
+export const gridTranscriptionRuns = pgTable(
+  "grid_transcription_runs",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    sourceRoomId: integer("source_room_id").notNull(),
+    spaceId: integer("space_id").notNull(),
+    roomChatId: integer("room_chat_id").notNull(),
+    transcriptChatId: integer("transcript_chat_id").notNull(),
+    destinationParentChatId: integer("destination_parent_chat_id").notNull(),
+    originalAnchorId: integer("original_anchor_id").notNull(),
+    roomLinkMessageId: integer("room_link_message_id"),
+    actorUserId: integer("actor_user_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    model: varchar({ length: 32 }).notNull(),
+    state: varchar({ length: 16 }).notNull(),
+    generation: integer().notNull(),
+    providerTarget: varchar("provider_target", { length: 255 }).notNull(),
+    revision: integer().default(1).notNull(),
+    claimEpoch: integer("claim_epoch").default(0).notNull(),
+    workerId: varchar("worker_id", { length: 80 }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date", precision: 3 }),
+    expiresAt: timestamp("expires_at", { mode: "date", precision: 3 }).notNull(),
+    stopRequestedAt: timestamp("stop_requested_at", { mode: "date", precision: 3 }),
+    interruptionReason: varchar("interruption_reason", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
+  },
+  (table) => ({
+    requestUnique: uniqueIndex("grid_transcription_request_unique").on(table.actorUserId, table.requestId),
+    activeRoomUnique: uniqueIndex("grid_transcription_active_room_unique")
+      .on(table.sourceRoomId)
+      .where(sql`${table.state} in ('starting','active','stopping')`),
+    activeDestinationUnique: uniqueIndex("grid_transcription_active_destination_unique")
+      .on(table.transcriptChatId)
+      .where(sql`${table.state} in ('starting','active','stopping')`),
+    recentIndex: index("grid_transcription_space_recent_idx").on(table.spaceId, table.createdAt),
+    roomIndex: index("grid_transcription_source_room_idx").on(table.sourceRoomId),
+    stateCheck: check(
+      "grid_transcription_state_check",
+      sql`${table.state} in ('starting','active','stopping','stopped','interrupted')`,
+    ),
+  }),
+)
+
+export const gridTranscriptionSegments = pgTable(
+  "grid_transcription_segments",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => gridTranscriptionRuns.id),
+    claimEpoch: integer("claim_epoch").notNull(),
+    speakerUserId: integer("speaker_user_id").notNull(),
+    membershipId: uuid("membership_id").notNull(),
+    trackSid: varchar("track_sid", { length: 128 }).notNull(),
+    sourceTurnKey: varchar("source_turn_key", { length: 128 }).notNull(),
+    state: varchar({ length: 16 }).default("admitted").notNull(),
+    messageId: integer("message_id"),
+    admittedAt: timestamp("admitted_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
+  },
+  (table) => ({
+    sourceUnique: uniqueIndex("grid_transcription_segment_source_unique").on(
+      table.runId,
+      table.trackSid,
+      table.sourceTurnKey,
+    ),
+    stateCheck: check(
+      "grid_transcription_segment_state_check",
+      sql`${table.state} in ('admitted','finalized','discarded')`,
+    ),
+  }),
+)
+
+export const gridTranscriptionWorker = pgTable("grid_transcription_worker", {
+  id: integer().primaryKey(),
+  workerId: varchar("worker_id", { length: 80 }).notNull(),
+  model: varchar({ length: 32 }).notNull(),
+  heartbeatAt: timestamp("heartbeat_at", { mode: "date", precision: 3 }).notNull(),
+})
+
+export type DbGridTranscriptionRun = typeof gridTranscriptionRuns.$inferSelect
+
+/** Separate revision owner avoids Space -> chat / chat -> Space trigger deadlocks. */
+export const gridTranscriptionSpaceRevisions = pgTable("grid_transcription_space_revisions", {
+  spaceId: integer("space_id").primaryKey(),
+  revision: bigint({ mode: "bigint" })
+    .notNull()
+    .default(sql`0`),
+})

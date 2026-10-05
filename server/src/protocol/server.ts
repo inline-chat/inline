@@ -13,6 +13,7 @@ import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "@inline-chat/protocol/core";
 import { Chat } from "@inline-chat/protocol/core";
+import { MessageServiceGridTranscript } from "@inline-chat/protocol/core";
 import { BlockContent } from "@inline-chat/protocol/core";
 import { MessageEntities } from "@inline-chat/protocol/core";
 import { Dialog } from "@inline-chat/protocol/core";
@@ -1122,6 +1123,12 @@ export interface SystemMessage {
          * @generated from protobuf field: server.PinnedMessageSystemMessage pinned_message = 2;
          */
         pinnedMessage: PinnedMessageSystemMessage;
+    } | {
+        oneofKind: "gridTranscript";
+        /**
+         * @generated from protobuf field: MessageServiceGridTranscript grid_transcript = 3;
+         */
+        gridTranscript: MessageServiceGridTranscript;
     } | {
         oneofKind: undefined;
     };
@@ -4284,7 +4291,8 @@ class SystemMessage$Type extends MessageType<SystemMessage> {
     constructor() {
         super("server.SystemMessage", [
             { no: 1, name: "thread_backlink", kind: "message", oneof: "event", T: () => ThreadBacklinkSystemMessage },
-            { no: 2, name: "pinned_message", kind: "message", oneof: "event", T: () => PinnedMessageSystemMessage }
+            { no: 2, name: "pinned_message", kind: "message", oneof: "event", T: () => PinnedMessageSystemMessage },
+            { no: 3, name: "grid_transcript", kind: "message", oneof: "event", T: () => MessageServiceGridTranscript }
         ]);
     }
     create(value?: PartialMessage<SystemMessage>): SystemMessage {
@@ -4311,6 +4319,12 @@ class SystemMessage$Type extends MessageType<SystemMessage> {
                         pinnedMessage: PinnedMessageSystemMessage.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).pinnedMessage)
                     };
                     break;
+                case /* MessageServiceGridTranscript grid_transcript */ 3:
+                    message.event = {
+                        oneofKind: "gridTranscript",
+                        gridTranscript: MessageServiceGridTranscript.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).gridTranscript)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4329,6 +4343,9 @@ class SystemMessage$Type extends MessageType<SystemMessage> {
         /* server.PinnedMessageSystemMessage pinned_message = 2; */
         if (message.event.oneofKind === "pinnedMessage")
             PinnedMessageSystemMessage.internalBinaryWrite(message.event.pinnedMessage, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* MessageServiceGridTranscript grid_transcript = 3; */
+        if (message.event.oneofKind === "gridTranscript")
+            MessageServiceGridTranscript.internalBinaryWrite(message.event.gridTranscript, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

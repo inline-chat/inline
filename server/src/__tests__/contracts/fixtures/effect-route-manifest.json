@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 313,
+  "count": 319,
   "methodCounts": {
     "DELETE": 1,
     "GET": 153,
-    "POST": 157,
+    "POST": 163,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "907ff942ca7f0e8b9a3c87276faff8ef708516360e8cf2b4c2d7afc725e98777",
+  "sha256": "9cc716886cf0f2bb569141bc7fe1fcc6558c5953dbb4d13dcd891d891f720a66",
   "routes": [
     {
       "method": "DELETE",
@@ -625,6 +625,30 @@
     {
       "method": "GET",
       "path": "/waitlist/super_secret_sub_count"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/admit"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/final"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/_internal/grid-transcription/stopped"
     },
     {
       "method": "POST",

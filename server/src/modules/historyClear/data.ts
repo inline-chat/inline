@@ -4,6 +4,8 @@ import type { Transaction } from "@in/server/db/types"
 import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { deleteUnreferencedBlockContents } from "@in/server/modules/message/blockContentStorage"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { messageActivityPredicate } from "@in/server/modules/message/activity"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 export type ClearHistoryOptions = {
   beforeDate?: Date
@@ -144,6 +146,9 @@ export async function clearChatHistoryData(
   input: ClearChatHistoryInput,
   hooks?: ClearHistoryHooks,
 ): Promise<ClearChatHistoryResult> {
+  // Even a dated clear conservatively ends affected capture. Never flush
+  // already admitted speech back into the history the user just removed.
+  await invalidateGridTranscriptionForHistory(tx, { chatIds: [input.chatId], reason: "history_cleared" })
   let deletedChatIds: number[] = []
   let deletedChats: ClearHistoryDeletedChat[] = []
   let orphanedChatIds: number[] = []
@@ -178,6 +183,8 @@ export async function clearSpaceHistoryData(
   input: ClearSpaceHistoryInput,
   hooks?: ClearHistoryHooks,
 ): Promise<ClearSpaceHistoryResult> {
+  const spaceChatRows = await tx.select({ id: chats.id }).from(chats).where(eq(chats.spaceId, input.spaceId))
+  await invalidateGridTranscriptionForHistory(tx, { chatIds: spaceChatRows.map((chat) => chat.id), reason: "history_cleared" })
   const detachedExternalChats = await detachExternalReplyThreadsForClearedSpaceMessages(
     tx,
     input.spaceId,
@@ -228,7 +235,7 @@ async function refreshChatLastMsgId(tx: Transaction, chatId: number): Promise<nu
   const [latestMessage] = await tx
     .select({ messageId: messages.messageId })
     .from(messages)
-    .where(eq(messages.chatId, chatId))
+    .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
     .orderBy(desc(messages.messageId))
     .limit(1)
 
@@ -775,6 +782,7 @@ async function refreshSpaceChatLastMsgIds(tx: Transaction, spaceId: number): Pro
       select m.message_id
       from messages m
       where m.chat_id = c.id
+        and (m.counts_as_unread is true or m.system_message_encrypted is null)
       order by m.message_id desc
       limit 1
     )
