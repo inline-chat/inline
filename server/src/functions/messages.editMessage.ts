@@ -178,7 +178,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   ).get(message.messageId)
 
   let { selfUpdates } = await pushUpdates({
-    inputPeer: input.peer,
+    inputPeer: Encoders.peerFromChat(chat, { currentUserId }),
     messageInfo,
     currentUserId,
     update,

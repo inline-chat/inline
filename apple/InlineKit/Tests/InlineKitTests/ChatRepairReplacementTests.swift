@@ -9,6 +9,36 @@ import Testing
 
 @Suite("Chat bucket repair")
 struct ChatRepairReplacementTests {
+  @Test("sync identity uses a DM counterpart and does not trust a provisional thread row")
+  func canonicalChatPeerLookup() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    try await queue.write { (db: Database) throws in
+      try User(id: 1_900, email: nil, firstName: "Peer").insert(db)
+      try Chat(
+        id: 4, date: Date(timeIntervalSince1970: 10), type: .privateChat,
+        title: nil, spaceId: nil, peerUserId: 1_900
+      ).insert(db)
+      try Chat(
+        id: 5, date: Date(timeIntervalSince1970: 10), type: .thread,
+        title: nil, spaceId: nil
+      ).insert(db)
+      try Chat(
+        id: 6, date: Date(timeIntervalSince1970: 10), type: .thread,
+        title: "Thread", spaceId: nil
+      ).insert(db)
+      var dialogProto = InlineProtocol.Dialog()
+      dialogProto.peer = chatPeer(6)
+      dialogProto.chatID = 6
+      let dialog = Dialog(from: dialogProto)
+      try dialog.save(db)
+    }
+    let storage = GRDBSyncStorage(db: appDatabase)
+    #expect(try await storage.canonicalPeer(forChatID: 4) == userPeer(1_900))
+    #expect(try await storage.canonicalPeer(forChatID: 5) == nil)
+    #expect(try await storage.canonicalPeer(forChatID: 6) == chatPeer(6))
+  }
+
   @Test("overlays authoritative chat state without deleting cached history")
   func replacesStaleChatBucket() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
@@ -525,6 +555,10 @@ struct ChatRepairReplacementTests {
 
   private func chatPeer(_ chatID: Int64) -> InlineProtocol.Peer {
     .with { $0.chat.chatID = chatID }
+  }
+
+  private func userPeer(_ userID: Int64) -> InlineProtocol.Peer {
+    .with { $0.user.userID = userID }
   }
 
   private func repairedChatResult() -> InlineProtocol.GetChatResult {

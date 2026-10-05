@@ -155,11 +155,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // input data
   const date = input.sendDate ? new Date(input.sendDate * 1000) : new Date()
   const fromId = context.currentUserId
-  const inputPeer = input.peerId
   const currentUserId = context.currentUserId
   let chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
+  const inputPeer = Encoders.peerFromChat(chat, { currentUserId })
   const chatId = chat.id
   if (input.sourceChatId !== undefined) {
     const sourceChatId = Number(input.sourceChatId)

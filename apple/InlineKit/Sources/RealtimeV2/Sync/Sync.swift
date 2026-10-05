@@ -462,10 +462,11 @@ actor Sync {
     var bucketedUpdates: [BucketKey: [InlineProtocol.Update]] = [:]
 
     for update in updates {
+      guard isCurrent(expectedGeneration) else { return }
       switch update.update {
         case let .chatHasNewUpdates(payload):
           // Trigger fetch for this chat
-          chatHasNewUpdates(payload)
+          await chatHasNewUpdates(payload, generation: expectedGeneration)
           continue
 
         case let .spaceHasNewUpdates(payload):
@@ -486,7 +487,24 @@ actor Sync {
               fetchUserBucket(upToSeq: Int64(update.seq))
               continue
             }
-            if let key = getBucketKey(for: update) {
+            if let rawKey = getBucketKey(for: update) {
+              let admittedKey = await canonicalBucketKey(
+                rawKey, generation: expectedGeneration, allowRemoteLookup: false
+              )
+              guard isCurrent(expectedGeneration) else { return }
+              guard let key = admittedKey else {
+                registerDiscoveryTarget(key: rawKey, seq: Int64(update.seq))
+                scheduleBucketLoadRetry(key: rawKey, immediate: true)
+                continue
+              }
+              if key != rawKey {
+                // A raw chat-ID event for a DM may still be in flight from an
+                // older server. Replay it under the canonical cursor instead
+                // of applying its mismatched peer directly.
+                registerDiscoveryTarget(key: key, seq: Int64(update.seq))
+                scheduleBucketLoadRetry(key: key, immediate: true)
+                continue
+              }
             // Route sequenced updates through BucketActor so we can enforce strict per-bucket ordering
             // and fetch missing history when we detect gaps.
               bucketedUpdates[key, default: []].append(update)
@@ -503,6 +521,7 @@ actor Sync {
     }
 
     // Apply the direct updates
+    guard isCurrent(expectedGeneration) else { return }
     if !applyingUpdates.isEmpty {
       let result = await applyUpdates.apply(
         updates: applyingUpdates,
@@ -528,6 +547,7 @@ actor Sync {
     }
 
     // Apply bucketed updates (sequenced) via BucketActor ordering/buffering.
+    guard isCurrent(expectedGeneration) else { return }
     if !bucketedUpdates.isEmpty {
       for (key, updates) in bucketedUpdates {
         if let target = updates.map({ Int64($0.seq) }).max() {
@@ -1550,10 +1570,26 @@ actor Sync {
 
   // MARK: - Private Helpers
 
-  private func chatHasNewUpdates(_ payload: InlineProtocol.UpdateChatHasNewUpdates) {
+  private func chatHasNewUpdates(
+    _ payload: InlineProtocol.UpdateChatHasNewUpdates,
+    generation expectedGeneration: UInt64
+  ) async {
     log.trace("chat has new updates: \(payload)")
-    let key = BucketKey.chat(peer: payload.peerID)
+    let rawKey = BucketKey.chat(peer: payload.peerID)
+    let admittedKey = await canonicalBucketKey(
+      rawKey, generation: expectedGeneration, allowRemoteLookup: false
+    )
+    guard isCurrent(expectedGeneration) else { return }
+    guard let key = admittedKey else {
+      registerDiscoveryTarget(key: rawKey, seq: Int64(payload.updateSeq))
+      scheduleBucketLoadRetry(key: rawKey, immediate: true)
+      return
+    }
     registerDiscoveryTarget(key: key, seq: Int64(payload.updateSeq))
+    if key != rawKey {
+      scheduleBucketLoadRetry(key: key, immediate: true)
+      return
+    }
     launchRootTask { sync, generation in
       guard let bucketActor = await sync.getBucketActor(
         key: key,
@@ -1639,6 +1675,94 @@ actor Sync {
     }
   }
 
+  /// Resolve a chat-ID address before it can own a cursor or discovery target.
+  /// The local Chat row handles known DMs; getChat covers a cold or provisional
+  /// row and verifies that the reply actually describes the requested chat.
+  private func canonicalBucketKey(
+    _ key: BucketKey,
+    generation expectedGeneration: UInt64,
+    allowRemoteLookup: Bool = true
+  ) async -> BucketKey? {
+    guard isCurrent(expectedGeneration) else { return nil }
+    guard case let .chat(peer) = key,
+          case let .chat(rawChat) = peer.type,
+          rawChat.chatID > 0
+    else { return key }
+
+    let chatID = rawChat.chatID
+    let canonicalPeer: InlineProtocol.Peer
+    do {
+      let localPeer = try await syncStorage.canonicalPeer(forChatID: chatID)
+      guard isCurrent(expectedGeneration) else { return nil }
+      if let localPeer {
+        canonicalPeer = localPeer
+      } else {
+        guard allowRemoteLookup else { return nil }
+        guard let client,
+              case let .getChat(snapshot)? = try await client.callRpc(
+                method: .getChat,
+                input: .getChat(.with { $0.peerID = peer.toInputPeer() }),
+                timeout: Self.chatRepairTimeout
+              ),
+              snapshot.hasChat,
+              snapshot.chat.id == chatID,
+              snapshot.hasDialog,
+              snapshot.dialog.hasChatID,
+              snapshot.dialog.chatID == chatID,
+              snapshot.dialog.hasPeer,
+              snapshot.dialog.peer == snapshot.chat.peerID
+        else {
+          log.warning("getChat did not establish the requested chat bucket identity")
+          return nil
+        }
+        canonicalPeer = snapshot.chat.peerID
+      }
+    } catch {
+      guard isCurrent(expectedGeneration) else { return nil }
+      if allowRemoteLookup,
+         case let ProtocolSessionError.rpcError(code, _, _) = error,
+         code == .peerIDInvalid || code == .chatIDInvalid || code == .spaceIDInvalid {
+        await resolveInaccessibleBucket(key: key)
+        return nil
+      }
+      log.warning("could not resolve chat bucket identity; retaining demand")
+      return nil
+    }
+    guard isCurrent(expectedGeneration) else { return nil }
+    switch canonicalPeer.type {
+      case let .user(user) where user.userID > 0:
+        break
+      case let .chat(chat) where chat.chatID == chatID:
+        break
+      default:
+        log.warning("chat bucket identity did not match the requested chat")
+        return nil
+    }
+    let admittedKey = BucketKey.chat(peer: canonicalPeer)
+    if admittedKey != key {
+      moveDiscoveryTargets(from: key, to: admittedKey)
+    }
+    return admittedKey
+  }
+
+  private func moveDiscoveryTargets(from oldKey: BucketKey, to newKey: BucketKey) {
+    if let target = queuedDiscoveryTargets.removeValue(forKey: oldKey) {
+      mergeDiscoveryTarget(target, for: newKey, into: &queuedDiscoveryTargets)
+    }
+    if var round = activeDiscoveryRound,
+       let target = round.pendingTargets.removeValue(forKey: oldKey) {
+      mergeDiscoveryTarget(target, for: newKey, into: &round.pendingTargets)
+      activeDiscoveryRound = round
+    }
+    for generation in pendingDiscoveryRounds.keys.sorted() {
+      guard var round = pendingDiscoveryRounds[generation],
+            let target = round.pendingTargets.removeValue(forKey: oldKey)
+      else { continue }
+      mergeDiscoveryTarget(target, for: newKey, into: &round.pendingTargets)
+      pendingDiscoveryRounds[generation] = round
+    }
+  }
+
   private func getBucketActor(
     key: BucketKey,
     generation expectedGeneration: UInt64,
@@ -1721,51 +1845,83 @@ actor Sync {
     generation expectedGeneration: UInt64,
     immediate: Bool
   ) async {
+    var didRemap = false
     defer {
-      if bucketLoadRetries[key]?.id == id {
-        bucketLoadRetries.removeValue(forKey: key)
-      }
-      requestSyncActivityRefresh()
+      releaseBucketLoadRetry(key: key, id: id, didRemap: didRemap, generation: expectedGeneration)
     }
     var attempt = 0
+    var pendingKey = key
     while isCurrent(expectedGeneration), !Task.isCancelled {
+      guard hasDiscoveryDemand(for: pendingKey) else { return }
       if !immediate || attempt > 0 {
         do { try await Task.sleep(for: SyncRetryPolicy.delay(attempt: attempt)) }
         catch { return }
       }
       guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
       attempt += 1
+      guard let admittedKey = await canonicalBucketKey(pendingKey, generation: expectedGeneration),
+            isCurrent(expectedGeneration)
+      else {
+        continue
+      }
+      if admittedKey != key { didRemap = true }
+      pendingKey = admittedKey
       guard let actor = await getBucketActor(
-        key: key,
+        key: admittedKey,
         generation: expectedGeneration,
         retriesLoadFailure: false
       ) else { continue }
       var exactTargets: [BucketKey: DiscoveryTarget] = [:]
-      if let target = queuedDiscoveryTargets[key] {
-        mergeDiscoveryTarget(target, for: key, into: &exactTargets)
+      if let target = queuedDiscoveryTargets[admittedKey] {
+        mergeDiscoveryTarget(target, for: admittedKey, into: &exactTargets)
       }
-      if let target = activeDiscoveryRound?.pendingTargets[key] {
-        mergeDiscoveryTarget(target, for: key, into: &exactTargets)
+      if let target = activeDiscoveryRound?.pendingTargets[admittedKey] {
+        mergeDiscoveryTarget(target, for: admittedKey, into: &exactTargets)
       }
       for round in pendingDiscoveryRounds.values {
-        if let target = round.pendingTargets[key] {
-          mergeDiscoveryTarget(target, for: key, into: &exactTargets)
+        if let target = round.pendingTargets[admittedKey] {
+          mergeDiscoveryTarget(target, for: admittedKey, into: &exactTargets)
         }
       }
-      guard let target = exactTargets[key] else { return }
+      guard let target = exactTargets[admittedKey] else { return }
       let sequence: Int64
       switch target {
         case let .through(value): sequence = value
         case .latest: sequence = 0
       }
+      // The actor now owns the exact demand. Release this load handle before
+      // awaiting its fetch so a concurrent hint can schedule its own admission.
+      releaseBucketLoadRetry(key: key, id: id, didRemap: didRemap, generation: expectedGeneration)
       if await actor.noteHasNewUpdates(upToSeq: sequence) {
         await actor.fetchNewUpdates()
       } else {
         let state = await actor.snapshot()
-        await bucketDidAdvance(key: key, state: BucketState(date: state.date, seq: state.seq))
+        await bucketDidAdvance(key: admittedKey, state: BucketState(date: state.date, seq: state.seq))
       }
       return
     }
+  }
+
+  private func releaseBucketLoadRetry(
+    key: BucketKey,
+    id: UUID,
+    didRemap: Bool,
+    generation expectedGeneration: UInt64
+  ) {
+    guard bucketLoadRetries[key]?.id == id else { return }
+    bucketLoadRetries.removeValue(forKey: key)
+    // A second raw hint may have arrived while the first was resolving.
+    if didRemap, isCurrent(expectedGeneration), !Task.isCancelled,
+       hasDiscoveryDemand(for: key) {
+      scheduleBucketLoadRetry(key: key, immediate: true)
+    }
+    requestSyncActivityRefresh()
+  }
+
+  private func hasDiscoveryDemand(for key: BucketKey) -> Bool {
+    queuedDiscoveryTargets[key] != nil ||
+      activeDiscoveryRound?.pendingTargets[key] != nil ||
+      pendingDiscoveryRounds.values.contains { $0.pendingTargets[key] != nil }
   }
 
   private func invalidateAllBuckets() async {

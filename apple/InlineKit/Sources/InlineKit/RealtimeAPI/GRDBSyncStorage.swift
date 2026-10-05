@@ -62,6 +62,25 @@ public struct GRDBSyncStorage: SyncStorage {
     try await db.reader.read { try SyncRemovalRevision.read($0) }
   }
 
+  public func canonicalPeer(forChatID chatID: Int64) async throws -> InlineProtocol.Peer? {
+    try await db.reader.read { db in
+      guard let chat = try Chat.fetchOne(db, id: chatID) else { return nil }
+      if let peerUserID = chat.peerUserId, peerUserID > 0 {
+        return .with { $0.user.userID = peerUserID }
+      }
+      // A message can create a provisional thread-shaped Chat row before its
+      // authoritative chat arrives. A matching thread dialog distinguishes a
+      // real thread from a DM stub with no counterpart mapping yet.
+      if chat.type == .thread,
+         try Dialog
+           .filter(Dialog.Columns.peerThreadId == chatID && Dialog.Columns.chatId == chatID)
+           .fetchOne(db) != nil {
+        return .with { $0.chat.chatID = chatID }
+      }
+      return nil
+    }
+  }
+
   public func getState() async throws -> SyncState {
     try await db.reader.read { db in
       if let state = try DbGlobalSyncState.fetchOne(db) {

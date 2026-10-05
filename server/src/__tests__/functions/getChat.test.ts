@@ -1,12 +1,16 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { getChat } from "@in/server/functions/messages.getChat"
+import { getMessages } from "@in/server/functions/messages.getMessages"
+import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { editMessage } from "@in/server/functions/messages.editMessage"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import type { InputPeer } from "@inline-chat/protocol/core"
+import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 
 const makeHandlerContext = (userId: number): any => ({
   currentUserId: userId,
@@ -22,8 +26,64 @@ const makeInputPeerUser = (userId: number): InputPeer => ({
   type: { oneofKind: "user", user: { userId: BigInt(userId) } },
 })
 
+const makePeerUser = (userId: number): Peer => ({
+  type: { oneofKind: "user", user: { userId: BigInt(userId) } },
+})
+
 describe("getChat", () => {
   setupTestLifecycle()
+
+  test("a DM addressed by chat ID emits counterpart user peers in live and repair messages", async () => {
+    const sender = (await testUtils.createUser("canonical-dm-sender@example.com"))!
+    const recipient = (await testUtils.createUser("canonical-dm-recipient@example.com"))!
+    const chat = (await testUtils.createPrivateChat(sender, recipient))!
+    const rawPeer = makeInputPeerChat(chat.id)
+    const pushes = spyOn(RealtimeUpdates, "pushToUser")
+    try {
+      const sent = await sendMessage(
+        { peerId: rawPeer, message: "canonical peer" },
+        testUtils.functionContext({ userId: sender.id, sessionId: 1 }),
+      )
+      const sentUpdate = sent.updates.find((update) => update.update.oneofKind === "newMessage")
+      if (sentUpdate?.update.oneofKind !== "newMessage") throw new Error("Missing sender message update")
+      const sentMessage = sentUpdate.update.newMessage.message
+      if (!sentMessage) throw new Error("Missing sender message")
+      const messageId = sentMessage.id
+      expect(sentMessage.peerId).toEqual(makePeerUser(recipient.id))
+
+      const recipientMessages = pushes.mock.calls
+        .filter(([userId]) => userId === recipient.id)
+        .flatMap(([, updates]) => updates)
+        .filter((update) => update.update.oneofKind === "newMessage")
+      expect(recipientMessages).toHaveLength(1)
+      const recipientUpdate = recipientMessages[0]
+      if (recipientUpdate?.update.oneofKind !== "newMessage") throw new Error("Missing recipient message update")
+      expect(recipientUpdate.update.newMessage.message?.peerId).toEqual(makePeerUser(sender.id))
+
+      const edited = await editMessage(
+        { peer: rawPeer, messageId, text: "edited" },
+        testUtils.functionContext({ userId: sender.id, sessionId: 1 }),
+      )
+      const editUpdate = edited.updates.find((update) => update.update.oneofKind === "editMessage")
+      if (editUpdate?.update.oneofKind !== "editMessage") throw new Error("Missing edited message update")
+      expect(editUpdate.update.editMessage.message?.peerId).toEqual(makePeerUser(recipient.id))
+
+      const snapshot = await getChat(
+        { peerId: rawPeer, includeRecentMessages: true },
+        makeHandlerContext(sender.id),
+      )
+      expect(snapshot.chat.peerId).toEqual(makePeerUser(recipient.id))
+      expect(snapshot.dialog?.peer).toEqual(makePeerUser(recipient.id))
+      expect(snapshot.messages[0]?.peerId).toEqual(makePeerUser(recipient.id))
+      const selected = await getMessages(
+        { peerId: rawPeer, messageIds: [messageId] },
+        makeHandlerContext(sender.id),
+      )
+      expect(selected.messages[0]?.peerId).toEqual(makePeerUser(recipient.id))
+    } finally {
+      pushes.mockRestore()
+    }
+  })
 
   test("returns home thread for participant and creates dialog", async () => {
     const creator = await testUtils.createUser("home-chat-owner@example.com")
