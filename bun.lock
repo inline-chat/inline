@@ -405,6 +405,30 @@
         "typescript": "catalog:",
       },
     },
+    "web": {
+      "name": "@inline-chat/web",
+      "dependencies": {
+        "@inline-chat/protocol": "workspace:*",
+        "@inline/auth": "workspace:*",
+        "@inline/client": "workspace:*",
+        "@inline/config": "workspace:*",
+        "@inline/ids": "workspace:*",
+        "@tanstack/react-router": "^1.132.27",
+        "react": "^19.1.1",
+        "react-dom": "^19.1.1",
+      },
+      "devDependencies": {
+        "@playwright/test": "1.63.0",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "@vitejs/plugin-react": "^5.0.4",
+        "fake-indexeddb": "^6.2.5",
+        "typescript": "catalog:",
+        "vite": "^7.1.7",
+        "vitest": "catalog:",
+      },
+    },
   },
   "overrides": {
     "@aws-sdk/core@3.749.0": {
@@ -770,6 +794,8 @@
     "@inline-chat/server": ["@inline-chat/server@workspace:server"],
 
     "@inline-chat/url-preview": ["@inline-chat/url-preview@workspace:server/packages/url-preview"],
+
+    "@inline-chat/web": ["@inline-chat/web@workspace:web"],
 
     "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:plugins/openclaw"],
 

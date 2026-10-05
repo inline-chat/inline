@@ -6,6 +6,8 @@
 !bunfig.toml
 !cli/
 !cli/package.json
+!web/
+!web/package.json
 !server/
 !server/**
 !landing/

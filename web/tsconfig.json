@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@inline/client": ["../landing/packages/client/src/index.ts"],
+      "@inline/client/*": ["../landing/packages/client/src/*"],
+      "@inline/auth": ["../landing/packages/auth/src/index.ts"],
+      "@inline/auth/*": ["../landing/packages/auth/src/*"],
+      "@inline/ids": ["../landing/packages/ids/src/index.ts"],
+      "@inline/config": ["../landing/packages/config/src/index.ts"],
+      "@inline/log": ["../landing/packages/log/src/index.ts"],
+      "@inline-chat/protocol": ["../packages/protocol/src/index.ts"],
+      "@inline-chat/protocol/*": ["../packages/protocol/src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts"]
+}

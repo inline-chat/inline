@@ -1,0 +1,35 @@
+{
+  "name": "@inline-chat/web",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite --mode experimental",
+    "build": "tsc --noEmit && vite build",
+    "build:experimental": "tsc --noEmit && vite build --mode experimental",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@inline/client": "workspace:*",
+    "@inline/auth": "workspace:*",
+    "@inline/ids": "workspace:*",
+    "@inline/config": "workspace:*",
+    "@inline-chat/protocol": "workspace:*",
+    "@tanstack/react-router": "^1.132.27",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@playwright/test": "1.63.0",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "catalog:",
+    "vite": "^7.1.7",
+    "vitest": "catalog:"
+  }
+}
