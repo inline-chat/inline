@@ -119,6 +119,21 @@ private actor CatchupScenarioDriver: ApplyUpdates {
   func respond(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult
     .OneOf_Result?
   {
+    if method == .getChat, case let .getChat(request)? = input,
+       case let .chat(peer)? = request.peerID.type {
+      let id = peer.chatID
+      let peerID = InlineProtocol.Peer.with { $0.chat.chatID = id }
+      // Establish the missing root's identity without installing it locally;
+      // the catch-up page below must still supply the Chat and Dialog.
+      return .getChat(.with {
+        $0.chat = .with { $0.id = id
+          $0.peerID = peerID
+        }
+        $0.dialog = .with { $0.peer = peerID
+          $0.chatID = id
+        }
+      })
+    }
     guard method == .getUpdates, case let .getUpdates(request)? = input,
           case let .chat(bucket)? = request.bucket.type,
           case let .chat(peer)? = bucket.peerID.type
