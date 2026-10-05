@@ -12,6 +12,7 @@ import {
   users,
   type DbChat,
 } from "@in/server/db/schema"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { and, eq, isNull } from "drizzle-orm"
 import type { Transaction } from "@in/server/db/types"
@@ -51,55 +52,9 @@ export async function getGroupParticipantUserIds(chatId: number): Promise<number
   return uniqueIds(rows.map((row) => row.userId))
 }
 
-export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> {
-  if (chat.type === "private") {
-    if (chat.minUserId == null || chat.maxUserId == null) {
-      return []
-    }
-
-    if (chat.minUserId === chat.maxUserId) {
-      return UsersModel.getActiveUserIds([chat.minUserId])
-    }
-
-    return UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId])
-  }
-
-  if (chat.spaceId == null) {
-    return getGrantedUserIds(chat.id)
-  }
-
-  if (chat.publicThread) {
-    const publicMembers = await db
-      .select({ userId: members.userId })
-      .from(members)
-      .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
-
-    return UsersModel.getActiveUserIds(publicMembers.map((member) => member.userId))
-  }
-
-  return getGrantedUserIds(chat.id)
-}
-
-export async function getInheritedAccessUserIds(chat: DbChat): Promise<number[]> {
-  if (chat.parentChatId == null) {
-    return getTopLevelAccessUserIds(chat)
-  }
-
-  const parentChat = await getChatById(chat.parentChatId)
-  if (!parentChat) {
-    return []
-  }
-
-  return getInheritedAccessUserIds(parentChat)
-}
-
 export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]> {
-  const [grantedUserIds, inheritedUserIds] = await Promise.all([
-    getGrantedUserIds(chat.id),
-    getInheritedAccessUserIds(chat),
-  ])
-
-  return uniqueIds([...grantedUserIds, ...inheritedUserIds])
+  const access = await getEffectiveChatAccessUserIds(db, [chat.id])
+  return Array.from(access.get(chat.id) ?? [])
 }
 
 export async function hasDirectParticipantGrant(
@@ -161,24 +116,6 @@ export async function hasThreadAccessGrant(
   }
 
   return hasGroupParticipantGrant(chatId, userId, query)
-}
-
-async function getGrantedUserIds(chatId: number): Promise<number[]> {
-  const [directUserIds, groupUserIds] = await Promise.all([
-    getDirectParticipantUserIds(chatId),
-    getGroupParticipantUserIds(chatId),
-  ])
-
-  return uniqueIds([...directUserIds, ...groupUserIds])
-}
-
-async function getChatById(chatId: number): Promise<DbChat | undefined> {
-  return db
-    .select()
-    .from(chats)
-    .where(eq(chats.id, chatId))
-    .limit(1)
-    .then((rows) => rows[0])
 }
 
 function uniqueIds(ids: number[]): number[] {

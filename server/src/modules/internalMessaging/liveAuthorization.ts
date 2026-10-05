@@ -1,8 +1,8 @@
 import { db } from "@in/server/db"
-import { chats, members, spaces, users } from "@in/server/db/schema"
-import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { chats } from "@in/server/db/schema"
+import { effectiveChatAccessSql } from "@in/server/modules/authorization/chatAccessProjection"
 import type { Peer, Update } from "@inline-chat/protocol/core"
-import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, eq, or, sql } from "drizzle-orm"
 
 export function positiveId(value: bigint | undefined): number {
   const id = Number(value)
@@ -102,51 +102,98 @@ export function liveRequirements(updates: readonly Update[], recipient: number):
   return result
 }
 
-/** Batched authority checks happen only for locally connected, explicit recipients. */
-export async function authorizeLiveRecipients(updates: readonly Update[], userIds: number[], peerChatIds?: Map<number, Map<number, number>>): Promise<number[]> {
-  if (userIds.length === 0) return []
-  const requirements = new Map(userIds.map((id) => [id, liveRequirements(updates, id)]))
-  const pairs = userIds.flatMap((id) => requirements.get(id)!.peers.map((peer) => ({
-    userId: id, peer, min: Math.min(id, peer.id), max: Math.max(id, peer.id),
+export type LiveDelivery = { userId: number; updates: readonly Update[] }
+
+/** Each projection keeps its own requirements, including recipient-specific DM aliases. */
+export async function authorizeLiveDeliveries<T extends LiveDelivery>(
+  deliveries: readonly T[],
+  peerChatIds?: Map<number, Map<number, number>>,
+): Promise<T[]> {
+  if (deliveries.length === 0) return []
+  const userIds = [...new Set(deliveries.map((delivery) => delivery.userId))]
+  const requirements = new Map(deliveries.map((delivery) => [delivery, liveRequirements(delivery.updates, delivery.userId)]))
+  const pairs = deliveries.flatMap((delivery) => requirements.get(delivery)!.peers.map((peer) => ({
+    delivery, peer, min: Math.min(delivery.userId, peer.id), max: Math.max(delivery.userId, peer.id),
   })))
   if (pairs.length > 0) {
+    const identitiesToResolve = new Map(pairs.map((pair) => [`${pair.min}:${pair.max}`, pair]))
     const rows = await db.select({ id: chats.id, min: chats.minUserId, max: chats.maxUserId }).from(chats)
-      .where(and(eq(chats.type, "private"), or(...pairs.map((p) => and(eq(chats.minUserId, p.min), eq(chats.maxUserId, p.max))))))
+      .where(and(eq(chats.type, "private"), or(...[...identitiesToResolve.values()].map((p) =>
+        and(eq(chats.minUserId, p.min), eq(chats.maxUserId, p.max))))))
     const identities = new Map(rows.map((row) => [`${row.min}:${row.max}`, row.id]))
     for (const pair of pairs) {
       const resolved = identities.get(`${pair.min}:${pair.max}`)
       if (resolved === undefined || (pair.peer.chatId !== undefined && pair.peer.chatId !== resolved)) {
-        requirements.delete(pair.userId)
+        requirements.delete(pair.delivery)
       } else {
-        requirements.get(pair.userId)?.chats.add(resolved)
-        let mapping = peerChatIds?.get(pair.userId)
-        if (peerChatIds && !mapping) { mapping = new Map(); peerChatIds.set(pair.userId, mapping) }
+        requirements.get(pair.delivery)?.chats.add(resolved)
+        let mapping = peerChatIds?.get(pair.delivery.userId)
+        if (peerChatIds && !mapping) { mapping = new Map(); peerChatIds.set(pair.delivery.userId, mapping) }
         mapping?.set(pair.peer.id, resolved)
       }
     }
   }
   const chatIds = [...new Set([...requirements.values()].flatMap((r) => [...r.chats]))]
   const spaceIds = [...new Set([...requirements.values()].flatMap((r) => [...r.spaces]))]
-  const access = await getEffectiveChatAccessUserIds(db, chatIds, { userIds })
+  const personal = [...new Set([...requirements].filter(([, r]) => r.chats.size === 0 && r.spaces.size === 0)
+    .map(([delivery]) => delivery.userId))]
+  // Resolve identities first, then admit every resource in one statement. No
+  // later resource query can leave an earlier decision stale before transport
+  // submission. This is an admission snapshot, not a lock against later writes.
+  const noAuthority = sql`select null::text as kind, null::integer as "resourceId", null::integer as "userId" where false`
+  const spaceAuthority = spaceIds.length === 0 ? noAuthority : sql`
+    select 'space'::text as kind, m.space_id as "resourceId", m.user_id as "userId"
+    from members m
+    join spaces s on s.id = m.space_id
+    join users u on u.id = m.user_id
+    where m.space_id in (${sql.join(spaceIds, sql`, `)})
+      and m.user_id in (${sql.join(userIds, sql`, `)})
+      and s.deleted is null and u.deleted is distinct from true
+  `
+  const personalAuthority = personal.length === 0 ? noAuthority : sql`
+    select 'user'::text as kind, 0::integer as "resourceId", u.id as "userId"
+    from users u
+    where u.id in (${sql.join(personal, sql`, `)}) and u.deleted is distinct from true
+  `
+  const rows = await db.execute<{ kind: string; resourceId: number; userId: number }>(sql`
+    with chat_access as (${effectiveChatAccessSql(chatIds, userIds)})
+    select 'chat'::text as kind, "chatId" as "resourceId", "userId" from chat_access
+    union all ${spaceAuthority}
+    union all ${personalAuthority}
+  `)
+  const access = new Set<string>()
   const membership = new Set<string>()
-  if (spaceIds.length > 0) {
-    const rows = await db.select({ spaceId: members.spaceId, userId: members.userId }).from(members)
-      .innerJoin(spaces, eq(spaces.id, members.spaceId))
-      .innerJoin(users, eq(users.id, members.userId))
-      .where(and(inArray(members.spaceId, spaceIds), inArray(members.userId, userIds), isNull(spaces.deleted),
-        or(isNull(users.deleted), eq(users.deleted, false))))
-    for (const row of rows) membership.add(`${row.spaceId}:${row.userId}`)
+  const activePersonal = new Set<number>()
+  for (const row of rows) {
+    if (row.kind === "chat") access.add(`${row.resourceId}:${row.userId}`)
+    else if (row.kind === "space") membership.add(`${row.resourceId}:${row.userId}`)
+    else if (row.kind === "user") activePersonal.add(row.userId)
   }
-  // Resource authority already excludes deleted users. Only personal/control
-  // payloads need a separate account query.
-  const personal = [...requirements].filter(([, r]) => r.chats.size === 0 && r.spaces.size === 0).map(([id]) => id)
-  const activePersonal = new Set(personal.length === 0 ? [] : (await db.select({ id: users.id }).from(users).where(and(
-    inArray(users.id, personal), or(isNull(users.deleted), eq(users.deleted, false)),
-  ))).map((row) => row.id))
-  return userIds.filter((id) => {
-    const r = requirements.get(id)
-    return r !== undefined && (r.chats.size > 0 || r.spaces.size > 0 || activePersonal.has(id)) &&
-      [...r.chats].every((chatId) => access.get(chatId)?.has(id)) &&
-      [...r.spaces].every((spaceId) => membership.has(`${spaceId}:${id}`))
+  return deliveries.filter((delivery) => {
+    const r = requirements.get(delivery)
+    return r !== undefined && (r.chats.size > 0 || r.spaces.size > 0 || activePersonal.has(delivery.userId)) &&
+      [...r.chats].every((chatId) => access.has(`${chatId}:${delivery.userId}`)) &&
+      [...r.spaces].every((spaceId) => membership.has(`${spaceId}:${delivery.userId}`))
   })
+}
+
+/** Batched authority checks happen only for locally connected, explicit recipients. */
+export async function authorizeLiveRecipients(updates: readonly Update[], userIds: number[], peerChatIds?: Map<number, Map<number, number>>): Promise<number[]> {
+  return (await authorizeLiveDeliveries(userIds.map((userId) => ({ userId, updates })), peerChatIds))
+    .map((delivery) => delivery.userId)
+}
+
+/** Local personal/removal controls retain their synchronous transport boundary.
+ * Transient events and repair hints already have dedicated publication owners. */
+export function localContentUpdates(updates: readonly Update[], userId: number): Update[] {
+  const selected = updates.filter(({ update }) => {
+    switch (update.oneofKind) {
+      case "updateComposeAction": case "updateUserStatus": case "botPresence":
+      case "chatSkipPts": case "chatHasNewUpdates": case "spaceHasNewUpdates": case "userHasNewUpdates":
+      case undefined: return false
+      default: return true
+    }
+  })
+  const requirements = liveRequirements(selected, userId)
+  return requirements.chats.size > 0 || requirements.spaces.size > 0 || requirements.peers.length > 0 ? selected : []
 }

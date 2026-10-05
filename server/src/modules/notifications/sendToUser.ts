@@ -10,6 +10,7 @@ import {
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
+import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic } from "./utils"
 import { maxNotificationNameBytes, notificationBodyText, notificationText } from "./messagePreview"
 import {
@@ -349,7 +350,12 @@ export const buildApnNotification = ({
   return finalize()
 }
 
-export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
+export type PreparedPushSubmission = () => Promise<void>
+
+/** Resolve devices and build payloads before the caller's final content-access check. */
+export const preparePushNotificationToUser = async (
+  { userId, payload }: SendPushToUserInput,
+): Promise<PreparedPushSubmission | undefined> => {
   try {
     // Get all sessions for the user
     const userSessions = await SessionsModel.getValidPushSessionsByUserId(userId)
@@ -370,9 +376,10 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       }
     }
 
+    const submissions: PreparedPushSubmission[] = []
     for (const session of userSessions) {
       if (session.pushNotificationProvider === "expo_android") {
-        await sendExpoPush({ session, payload, silent, userId })
+        submissions.push(...prepareExpoPush({ session, payload, silent, userId }))
         continue
       }
 
@@ -448,8 +455,18 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         }
       }
 
-      void sendPush()
+      submissions.push(() => {
+        // APNs completion stays detached from the caller as before. Register
+        // it so shutdown and test teardown still join the provider result.
+        applicationBackgroundWork.track(sendPush())
+        return Promise.resolve()
+      })
     }
+
+    if (submissions.length === 0) return undefined
+    // Calling the closure starts every prepared provider submission before
+    // awaiting any result. No asynchronous preparation follows admission.
+    return () => Promise.all(submissions.map((submit) => submit())).then(() => undefined)
   } catch (error) {
     log.error("Error sending push notification", {
       error,
@@ -459,11 +476,16 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
   }
 }
 
+export const sendPushNotificationToUser = async (input: SendPushToUserInput): Promise<void> => {
+  const submit = await preparePushNotificationToUser(input)
+  await submit?.()
+}
+
 export function shouldClearApplePushTokenForFailures(failures: readonly unknown[]): boolean {
   return failures.length > 0 && failures.every((failure) => isSuppressedApnFailure(summarizeApnFailure(failure)))
 }
 
-async function sendExpoPush({
+function prepareExpoPush({
   session,
   payload,
   silent,
@@ -473,14 +495,14 @@ async function sendExpoPush({
   payload: PushToUserPayload
   silent: boolean
   userId: number
-}) {
+}): PreparedPushSubmission[] {
   if (!session.applePushToken || !isExpoPushToken(session.applePushToken)) {
     log.warn("Invalid Expo push token", {
       userId,
       sessionId: session.id,
       threadId: payload.threadId,
     })
-    return
+    return []
   }
 
   const message = buildExpoPushMessage({
@@ -488,12 +510,12 @@ async function sendExpoPush({
     payload,
     silent,
   })
-  if (!message) return
+  if (!message) return []
 
   const expo = getExpoPushClient()
   const chunks = expo.chunkPushNotifications([message])
 
-  for (const chunk of chunks) {
+  return chunks.map((chunk) => async () => {
     try {
       const tickets = await expo.sendPushNotificationsAsync(chunk)
       await handleExpoTickets({ tickets, session, payload, userId })
@@ -505,7 +527,7 @@ async function sendExpoPush({
         threadId: payload.threadId,
       })
     }
-  }
+  })
 }
 
 export function buildExpoPushMessage({

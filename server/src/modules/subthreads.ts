@@ -36,8 +36,6 @@ import { dialogOpenDefaultsForChat, setDialogOpenForUsers } from "@in/server/mod
 import {
   getDirectParticipantUserIds as resolveDirectParticipantUserIds,
   getEffectiveAccessUserIds as resolveEffectiveAccessUserIds,
-  getInheritedAccessUserIds as resolveInheritedAccessUserIds,
-  getTopLevelAccessUserIds as resolveTopLevelAccessUserIds,
 } from "@in/server/modules/authorization/threadAccess"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 
@@ -584,14 +582,6 @@ async function getThreadActivityByChatId(input: {
 
 export async function getDirectParticipantUserIds(chatId: number): Promise<number[]> {
   return resolveDirectParticipantUserIds(chatId)
-}
-
-export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> {
-  return resolveTopLevelAccessUserIds(chat)
-}
-
-export async function getInheritedAccessUserIds(chat: DbChat): Promise<number[]> {
-  return resolveInheritedAccessUserIds(chat)
 }
 
 export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]> {
