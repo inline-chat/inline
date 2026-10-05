@@ -376,6 +376,7 @@ message SystemMessage {
   oneof event {
     ThreadBacklinkSystemMessage thread_backlink = 1;
     PinnedMessageSystemMessage pinned_message = 2;
+    MessageServiceGridTranscript grid_transcript = 3;
   }
 }
 

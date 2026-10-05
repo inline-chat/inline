@@ -439,6 +439,7 @@ message MessageService {
   oneof event {
     MessageServiceThreadBacklink thread_backlink = 1;
     MessageServicePinnedMessage pinned_message = 2;
+    MessageServiceGridTranscript grid_transcript = 3;
   }
 }
 
@@ -450,6 +451,21 @@ message MessageServiceThreadBacklink {
 message MessageServicePinnedMessage {
   // Per-chat message id of the pinned message, when known.
   optional int64 message_id = 1;
+}
+
+enum GridTranscriptMessageKind {
+  GRID_TRANSCRIPT_TURN = 0;
+  GRID_TRANSCRIPT_STARTED = 1;
+  GRID_TRANSCRIPT_STOPPED = 2;
+  GRID_TRANSCRIPT_INTERRUPTED = 3;
+  GRID_TRANSCRIPT_LINK = 4;
+}
+
+message MessageServiceGridTranscript {
+  string run_id = 1;
+  string segment_id = 2;
+  optional int64 speaker_user_id = 3;
+  GridTranscriptMessageKind kind = 4;
 }
 
 // Structural rich content projected alongside Message.message and
@@ -677,6 +693,9 @@ message Message {
 
   // Canonical card projection for anchored replies and materialized subthreads.
   optional MessageSubthread subthread = 25;
+
+  // Explicit false suppresses unread for generated/historical rows.
+  optional bool counts_as_unread = 26;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -1602,6 +1621,9 @@ enum Method {
   REQUEST_BOT_FILESYSTEM = 143;
   ANSWER_BOT_FILESYSTEM = 144;
   SET_SPACE_PHOTO = 145;
+  OPEN_GRID_THREAD = 147;
+  SET_GRID_TRANSCRIPTION = 148;
+  LIST_GRID_TRANSCRIPTS = 149;
 }
 
 message RpcCall {
@@ -1752,6 +1774,9 @@ message RpcCall {
     RequestBotFilesystemInput requestBotFilesystem = 144;
     AnswerBotFilesystemInput answerBotFilesystem = 145;
     SetSpacePhotoInput setSpacePhoto = 146;
+    OpenGridThreadInput openGridThread = 148;
+    SetGridTranscriptionInput setGridTranscription = 149;
+    ListGridTranscriptsInput listGridTranscripts = 150;
   }
 }
 
@@ -1904,6 +1929,9 @@ message RpcResult {
     RequestBotFilesystemResult requestBotFilesystem = 144;
     AnswerBotFilesystemResult answerBotFilesystem = 145;
     SetSpacePhotoResult setSpacePhoto = 146;
+    OpenGridThreadResult openGridThread = 148;
+    SetGridTranscriptionResult setGridTranscription = 149;
+    ListGridTranscriptsResult listGridTranscripts = 150;
   }
 }
 
@@ -2078,7 +2106,57 @@ message GridRoom {
   int64 updated_at = 7;
   repeated GridAvatar avatars = 8;
   optional GridConnection connection = 9;
+  optional int64 room_thread_id = 10;
+  bool transcription_available = 11;
+  optional GridTranscription transcription = 12;
 }
+
+enum GridTranscriptionState {
+  GRID_TRANSCRIPTION_UNSPECIFIED = 0;
+  GRID_TRANSCRIPTION_STARTING = 1;
+  GRID_TRANSCRIPTION_ACTIVE = 2;
+  GRID_TRANSCRIPTION_STOPPING = 3;
+  GRID_TRANSCRIPTION_STOPPED = 4;
+  GRID_TRANSCRIPTION_INTERRUPTED = 5;
+}
+
+message GridTranscription {
+  string run_id = 1;
+  GridTranscriptionState state = 2;
+  optional int64 transcript_chat_id = 3;
+  int32 revision = 4;
+}
+
+enum GridTranscriptDestination {
+  GRID_TRANSCRIPT_LAST = 0;
+  GRID_TRANSCRIPT_NEW = 1;
+  GRID_TRANSCRIPT_EXISTING = 2;
+}
+
+message OpenGridThreadInput {
+  int64 room_id = 1;
+  string expected_membership_id = 2;
+}
+message OpenGridThreadResult { int64 chat_id = 1; repeated Update updates = 2; }
+message SetGridTranscriptionInput {
+  int64 room_id = 1;
+  string expected_membership_id = 2;
+  int32 expected_generation = 3;
+  optional string expected_run_id = 4;
+  int32 expected_revision = 5;
+  bool enabled = 6;
+  GridTranscriptDestination destination = 7;
+  optional int64 transcript_chat_id = 8;
+  string request_id = 9;
+}
+message SetGridTranscriptionResult { Grid grid = 1; repeated Update updates = 2; }
+message ListGridTranscriptsInput { int64 room_id = 1; }
+message GridTranscriptDestinationInfo {
+  int64 transcript_chat_id = 1;
+  string title = 2;
+  bool busy = 3;
+}
+message ListGridTranscriptsResult { repeated GridTranscriptDestinationInfo transcripts = 1; }
 
 // Replaceable current state for one Space's implicit Grid.
 message Grid {

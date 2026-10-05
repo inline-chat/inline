@@ -10,6 +10,7 @@ message MessageContentPayload {
   MessageReplies replies = 3;
   MessageService service_message = 4;
   MessageSubthread subthread = 5;
+  optional bool counts_as_unread = 6;
 }
 
 message MessageVoiceContent {
