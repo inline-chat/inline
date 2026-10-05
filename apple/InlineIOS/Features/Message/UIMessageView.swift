@@ -683,6 +683,8 @@ class UIMessageView: UIView {
 
   private func serviceTextColor(for tone: MessageServiceDisplaySegment.Tone) -> UIColor {
     switch tone {
+      case .primary:
+        return .label
       case .secondary:
         return theme.incomingSecondaryText.uiColor
       case .tertiary:

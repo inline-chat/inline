@@ -1462,6 +1462,21 @@ struct SidebarView: View {
   @ViewBuilder
   private func bottomBar(scrollProxy: ScrollViewProxy) -> some View {
     VStack(spacing: 3) {
+      if let room = gridStore.activeTranscriptionRoom {
+        GridTranscriptionSidebarIndicator(
+          room: room,
+          isBusy: gridStore.pendingTranscriptionRequestIDs[room.id] != nil,
+          onOpenGrid: { openGrid(spaceID: room.spaceID) },
+          onOpenTranscript: {
+            guard let chatID = room.transcriptChatID else { return }
+            dependencies?.requestOpenChat(peer: .thread(id: chatID))
+          },
+          onStop: { try await gridStore.setTranscription(room: room, enabled: false) }
+        )
+        .id(room.id)
+        .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
+      }
+
       // Temporarily hide the sidebar connection indicator.
       // if let state = sidebarConnectionState {
       //   SidebarConnectionStatePill(state: state)

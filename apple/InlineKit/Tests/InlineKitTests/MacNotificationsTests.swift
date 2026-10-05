@@ -10,6 +10,21 @@ import Testing
 
 @Suite("Mac notifications")
 struct MacNotificationsTests {
+  @Test("quiet generated transcripts cannot notify even when personally addressed")
+  func transcriptsNeverNotify() {
+    var message = makeMessage(mentioned: true)
+    message.countsAsUnread = false
+    message.serviceMessage.gridTranscript = .init()
+    #expect(!shouldSchedule(message, mode: .all, isPersonallyAddressed: true))
+    message.clearCountsAsUnread()
+    #expect(!shouldSchedule(message, mode: .all, isPersonallyAddressed: true))
+    message.clearServiceMessage()
+    message.countsAsUnread = false
+    #expect(!shouldSchedule(message, mode: .all, isPersonallyAddressed: true))
+    message.clearCountsAsUnread()
+    #expect(shouldSchedule(message, mode: .all, isPersonallyAddressed: true))
+  }
+
   private let now = Date(timeIntervalSince1970: 1_000)
 
   private func makeMessage(

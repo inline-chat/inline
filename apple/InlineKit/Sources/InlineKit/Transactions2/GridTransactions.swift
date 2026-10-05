@@ -265,3 +265,101 @@ public extension Transaction2 where Self == SetGridAvatarMicTransaction {
     .init(roomID: roomID, enabled: enabled)
   }
 }
+
+public struct OpenGridThreadTransaction: Transaction2 {
+  public var method: InlineProtocol.Method = .openGridThread
+  public var context: Context
+  public var type: TransactionKindType = .mutation(.init(transient: true))
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? {
+    .neverReplay
+  }
+
+  public struct Context: Sendable, Codable {
+    let roomID: Int64
+    let membershipID: String
+  }
+
+  enum CodingKeys: String, CodingKey { case context }
+  public init(roomID: Int64, membershipID: String) {
+    context = Context(roomID: roomID, membershipID: membershipID)
+  }
+
+  public func input(from context: Context) -> RpcCall.OneOf_Input? {
+    .openGridThread(.with {
+      $0.roomID = context.roomID
+      $0.expectedMembershipID = context.membershipID
+    })
+  }
+
+  public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    guard case let .openGridThread(response) = result else { throw .invalid }
+    await Api.realtime.applyUpdatesAndWait(response.updates)
+  }
+}
+
+public struct SetGridTranscriptionTransaction: Transaction2 {
+  public var method: InlineProtocol.Method = .setGridTranscription
+  public var context: GridTranscriptionRequest
+  public var type: TransactionKindType = .mutation(.init(transient: true))
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? {
+    .neverReplay
+  }
+
+  enum CodingKeys: String, CodingKey { case context }
+  public init(request: GridTranscriptionRequest) {
+    context = request
+  }
+
+  public func input(from context: GridTranscriptionRequest) -> RpcCall.OneOf_Input? {
+    .setGridTranscription(context.input)
+  }
+
+  public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    guard case let .setGridTranscription(response) = result else { throw .invalid }
+    await Api.realtime.applyUpdatesAndWait(response.updates)
+  }
+}
+
+public struct ListGridTranscriptsTransaction: Transaction2 {
+  public var method: InlineProtocol.Method = .listGridTranscripts
+  public var context: Context
+  public var type: TransactionKindType = .ephemeral()
+  public var ephemeralCoalescingKey: String? {
+    "room:\(context.roomID)"
+  }
+
+  public struct Context: Sendable, Codable { let roomID: Int64 }
+  enum CodingKeys: String, CodingKey { case context }
+  public init(roomID: Int64) {
+    context = Context(roomID: roomID)
+  }
+
+  public func input(from context: Context) -> RpcCall.OneOf_Input? {
+    .listGridTranscripts(.with { $0.roomID = context.roomID })
+  }
+
+  public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    guard case .listGridTranscripts = result else { throw .invalid }
+  }
+}
+
+public extension Transaction2 where Self == OpenGridThreadTransaction {
+  static func openGridThread(roomID: Int64, membershipID: String) -> Self {
+    .init(
+      roomID: roomID,
+      membershipID: membershipID
+    )
+  }
+}
+
+public extension Transaction2 where Self == SetGridTranscriptionTransaction {
+  static func setGridTranscription(request: GridTranscriptionRequest) -> Self {
+    .init(request: request)
+  }
+}
+
+public extension Transaction2 where Self == ListGridTranscriptsTransaction {
+  static func listGridTranscripts(roomID: Int64) -> Self {
+    .init(roomID: roomID)
+  }
+}

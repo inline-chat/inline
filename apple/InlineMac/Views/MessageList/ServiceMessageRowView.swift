@@ -39,7 +39,7 @@ enum ServiceMessageRowLayout {
 
   static func plan(for message: FullMessage, rowSize: NSSize) -> Plan {
     let textSize = textSize(for: message, rowWidth: rowSize.width)
-    return plan(textSize: textSize, rowSize: rowSize)
+    return plan(textSize: textSize, rowSize: rowSize, leading: message.message.isGridTranscript)
   }
 
   static func calculateSize(
@@ -48,7 +48,7 @@ enum ServiceMessageRowLayout {
   ) -> (size: NSSize, textSize: NSSize, layout: MessageSizeCalculator.LayoutPlans) {
     let textSize = textSize(for: message, rowWidth: width)
     let rowSize = NSSize(width: width, height: rowHeight(textHeight: textSize.height))
-    let plan = plan(textSize: textSize, rowSize: rowSize)
+    let plan = plan(textSize: textSize, rowSize: rowSize, leading: message.message.isGridTranscript)
     let wrapperPlan = MessageSizeCalculator.LayoutPlan(size: plan.rowSize, spacing: .zero)
     let zeroPlan = MessageSizeCalculator.LayoutPlan(size: .zero, spacing: .zero)
     let layout = MessageSizeCalculator.LayoutPlans(
@@ -83,13 +83,14 @@ enum ServiceMessageRowLayout {
     return (plan.rowSize, plan.textSize, layout)
   }
 
-  private static func plan(textSize: NSSize, rowSize: NSSize) -> Plan {
+  private static func plan(textSize: NSSize, rowSize: NSSize, leading: Bool) -> Plan {
     let textWidth = min(maxTextWidth(rowWidth: rowSize.width), max(1, textSize.width))
     let textHeight = max(1, textSize.height)
     let containerWidth = textWidth + horizontalInset * 2
     let containerHeight = textHeight + verticalInset * 2
     let containerFrame = NSRect(
-      x: floor((rowSize.width - containerWidth) / 2),
+      x: leading ? floor((rowSize.width - maxContainerWidth(rowWidth: rowSize.width)) / 2) :
+        floor((rowSize.width - containerWidth) / 2),
       y: floor((rowSize.height - containerHeight) / 2),
       width: ceil(containerWidth),
       height: ceil(containerHeight)
@@ -138,6 +139,7 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
   private lazy var textView = ServiceMessageTextView { [weak self] link in
     self?.open(link)
   }
+
   private var fullMessage: FullMessage
   private var dependencies: AppDependencies?
 
@@ -166,11 +168,12 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    let textPoint = convert(point, to: textView)
+    let localPoint = convert(point, from: superview)
+    let textPoint = containerView.convert(localPoint, from: self)
     if let hit = textView.hitTest(textPoint) {
       return hit
     }
-    if containerView.frame.contains(point) {
+    if containerView.frame.contains(localPoint) {
       return self
     }
     return nil
@@ -214,7 +217,10 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
   }
 
   private func updateText() {
-    textView.setSegments(ServiceMessageRowLayout.segments(for: fullMessage))
+    textView.setSegments(
+      ServiceMessageRowLayout.segments(for: fullMessage),
+      leading: fullMessage.message.isGridTranscript
+    )
     needsLayout = true
     needsDisplay = true
   }
@@ -233,20 +239,30 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
 
   private func open(_ link: MessageServiceDisplaySegment.Link) {
     switch link {
-    case let .user(userId):
-      dependencies?.requestOpenChat(peer: .user(id: userId))
-    case let .thread(chatId):
-      dependencies?.requestOpenChat(peer: .thread(id: chatId))
+      case let .user(userId):
+        dependencies?.requestOpenChat(peer: .user(id: userId))
+      case let .thread(chatId):
+        dependencies?.requestOpenChat(peer: .thread(id: chatId))
     }
   }
 
   private func makeContextMenu() -> NSMenu {
     let menu = NSMenu()
+    if fullMessage.message.isGridTranscript {
+      let copyItem = NSMenuItem(title: "Copy", action: #selector(copyTranscript), keyEquivalent: "")
+      copyItem.target = self
+      menu.addItem(copyItem)
+    }
     let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "delete")
     deleteItem.target = self
     deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
     menu.addItem(deleteItem)
     return menu
+  }
+
+  @objc private func copyTranscript() {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(fullMessage.message.text ?? "", forType: .string)
   }
 
   @objc private func deleteMessage() {
@@ -262,10 +278,12 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
 
   fileprivate static func textColor(for tone: MessageServiceDisplaySegment.Tone) -> NSColor {
     switch tone {
-    case .secondary:
-      return .secondaryLabelColor
-    case .tertiary:
-      return .tertiaryLabelColor
+      case .primary:
+        .labelColor
+      case .secondary:
+        .secondaryLabelColor
+      case .tertiary:
+        .tertiaryLabelColor
     }
   }
 
@@ -284,7 +302,9 @@ private final class ServiceMessageTextView: NSView {
   private let onOpen: (MessageServiceDisplaySegment.Link) -> Void
   private var linkRuns: [LinkRun] = []
 
-  override var isFlipped: Bool { true }
+  override var isFlipped: Bool {
+    true
+  }
 
   init(onOpen: @escaping (MessageServiceDisplaySegment.Link) -> Void) {
     self.onOpen = onOpen
@@ -304,13 +324,16 @@ private final class ServiceMessageTextView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func setSegments(_ segments: [MessageServiceDisplaySegment]) {
+  func setSegments(_ segments: [MessageServiceDisplaySegment], leading: Bool) {
     let text = NSMutableAttributedString()
     var runs: [LinkRun] = []
 
     for segment in segments where segment.text.isEmpty == false {
       let start = text.length
-      text.append(NSAttributedString(string: segment.text, attributes: Self.attributes(for: segment.tone)))
+      text.append(NSAttributedString(
+        string: segment.text,
+        attributes: Self.attributes(for: segment.tone, leading: leading)
+      ))
 
       if let link = segment.link {
         let range = NSRange(location: start, length: text.length - start)
@@ -332,7 +355,8 @@ private final class ServiceMessageTextView: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard bounds.contains(point), link(at: point) != nil else { return nil }
+    let localPoint = convert(point, from: superview)
+    guard bounds.contains(localPoint), link(at: localPoint) != nil else { return nil }
     return self
   }
 
@@ -392,9 +416,12 @@ private final class ServiceMessageTextView: NSView {
     return linkRuns.first { NSLocationInRange(charIndex, $0.range) }?.link
   }
 
-  private static func attributes(for tone: MessageServiceDisplaySegment.Tone) -> [NSAttributedString.Key: Any] {
+  private static func attributes(
+    for tone: MessageServiceDisplaySegment.Tone,
+    leading: Bool
+  ) -> [NSAttributedString.Key: Any] {
     let paragraphStyle = NSMutableParagraphStyle()
-    paragraphStyle.alignment = .center
+    paragraphStyle.alignment = leading ? .left : .center
     paragraphStyle.lineBreakMode = .byCharWrapping
 
     return [

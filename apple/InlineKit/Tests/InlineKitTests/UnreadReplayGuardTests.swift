@@ -8,6 +8,63 @@ import Testing
 
 @Suite("Unread Replay Guard")
 struct UnreadReplayGuardTests {
+  @Test("quiet transcript rows persist and advance history without changing unread")
+  func quietTranscriptDoesNotIncrementUnread() throws {
+    let dbQueue = try makeInMemoryDB()
+    try dbQueue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 2)
+      var update = makeNewMessageUpdate(messageId: 21)
+      update.message.countsAsUnread = false
+      update.message.serviceMessage.gridTranscript = .with {
+        $0.runID = "run-1"
+        $0.segmentID = "segment-1"
+      }
+      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 2)
+      let fetched = try Message.fetchOne(db, key: ["messageId": 21, "chatId": chatId])
+      let saved = try #require(fetched)
+      #expect(saved.isGridTranscript)
+      #expect(!saved.countsAsUnread)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == nil)
+      // A replay must preserve durable quietness as well as deduplication.
+      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 2)
+    }
+  }
+
+  @Test("transcripts stay out of sidebar activity during history and chat-tail deletion")
+  func transcriptActivityHistoryAndDeletion() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
+      let earlier = makeNewMessageUpdate(messageId: 1)
+      try earlier.apply(db, publishChanges: false, suppressNotifications: true)
+      var transcript = makeNewMessageUpdate(messageId: 2)
+      transcript.message.date = 5
+      transcript.message.serviceMessage.gridTranscript = .init()
+      transcript.message.countsAsUnread = false
+      try transcript.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 1)
+      var later = makeNewMessageUpdate(messageId: 3)
+      later.message.date = 4
+      try later.apply(db, publishChanges: false, suppressNotifications: true)
+      try Chat.updateLastMsgIds(db, messages: [Message(from: earlier.message), Message(from: transcript.message)])
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 3)
+
+      let deletion = InlineProtocol.UpdateDeleteMessages.with {
+        $0.peerID.chat.chatID = chatId
+        $0.messageIds = [3]
+      }
+      try deletion.apply(db, publishChanges: false)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 1)
+      #expect(try Message.filter(Message.Columns.chatId == chatId && Message.Columns.messageId == 1)
+        .fetchOne(db)?.date == Date(timeIntervalSince1970: 2))
+      try Message.deleteMessages(db, messageIds: [1], chatId: chatId)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == nil)
+      #expect(try Message.fetchCount(db) == 1)
+    }
+  }
+
   private let chatId: Int64 = 1_000
   private let senderId: Int64 = 99
 

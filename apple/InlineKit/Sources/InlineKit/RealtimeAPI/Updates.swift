@@ -2387,7 +2387,9 @@ extension InlineProtocol.UpdateNewMessage {
       materializeMissingReferences: materializeMissingReferences
     )
 
-    try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
+    if !msg.isGridTranscript {
+      try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
+    }
 
     // Increase unread count only when this message is newly inserted, not ours,
     // and newer than the dialog's read cursor. Catch-up applies dialog sidecars
@@ -2399,7 +2401,9 @@ extension InlineProtocol.UpdateNewMessage {
       var didIncrement = false
       var reason = "not_newer_than_read_max"
 
-      if !incrementUnreadCount {
+      if !msg.countsAsUnread {
+        reason = "quiet_message"
+      } else if !incrementUnreadCount {
         reason = "increment_disabled"
       } else if hadMessage {
         reason = "duplicate_message"
@@ -2429,6 +2433,7 @@ extension InlineProtocol.UpdateNewMessage {
     if !suppressNotifications,
        !hadMessage,
        msg.out == false,
+       msg.countsAsUnread,
        MacNotifications.isFreshMessage(message, now: Date()),
        let currentUserID = Auth.shared.getCurrentUserId() {
       db.afterNextTransaction { committedDB in
@@ -2502,7 +2507,9 @@ extension InlineProtocol.UpdateMessageId {
           publishChanges: true
         )
 
-      try Chat.updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
+      if !message.isGridTranscript {
+        try Chat.updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
+      }
     }
   }
 }
@@ -2585,11 +2592,7 @@ extension InlineProtocol.UpdateDeleteMessages {
     for messageId in messageIds {
       // Update last message first
       if prevChatLastMsgId == messageId {
-        let previousMessage = try Message
-          .filter(Column("chatId") == chat.id)
-          .order(Column("date").desc, Column("messageId").desc)
-          .limit(1, offset: 1)
-          .fetchOne(db)
+        let previousMessage = try Message.latestActivityMessage(db, chatId: chat.id, excluding: messageIds)
 
         var updatedChat = chat
         updatedChat.lastMsgId = previousMessage?.messageId

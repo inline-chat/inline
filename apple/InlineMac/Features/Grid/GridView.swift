@@ -66,23 +66,44 @@ struct GridView: View {
       }
     }
     .safeAreaInset(edge: .bottom) {
-      if currentRoom != nil {
-        GridControlPill(
-          media: store.media,
-          onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
-          onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
-          onSelectInput: store.setInputSelection,
-          onRefreshInputDevices: store.refreshInputDevices,
-          onSelectOutput: store.setOutputSelection,
-          onRefreshOutputDevices: store.refreshOutputDevices,
-          onToggleScreenShare: store.toggleScreenShare,
-          onSelectScreenCaptureSource: store.startScreenSharing,
-          onSelectScreenShareQualityProfile: store.setScreenShareQualityProfile,
-          onRefreshScreenCaptureSources: store.refreshScreenCaptureSources,
-          onStopScreenShare: store.stopScreenSharing,
-          onSetOutputVolume: store.setOutputVolume,
-          onRetryAudio: store.retryAudio
-        )
+      if let currentRoom {
+        VStack(spacing: 8) {
+          if currentRoom.transcriptionAvailable || currentRoom.hasTranscription || currentRoom.hasRoomThreadID {
+            GridTranscriptionControls(
+              room: currentRoom,
+              isBusy: store.pendingTranscriptionRequestIDs[currentRoom.id] != nil,
+              onSetTranscription: { enabled, destination in
+                try await store.setTranscription(room: currentRoom, enabled: enabled, destination: destination)
+              },
+              onOpenRoomThread: {
+                let chatID = try await store.openRoomThread(roomID: currentRoom.id)
+                dependencies?.requestOpenChat(peer: .thread(id: chatID))
+              },
+              onOpenTranscript: {
+                guard let chatID = currentRoom.transcriptChatID else { return }
+                dependencies?.requestOpenChat(peer: .thread(id: chatID))
+              },
+              onListTranscripts: { try await store.listTranscripts(roomID: currentRoom.id) }
+            )
+            .id(currentRoom.id)
+          }
+          GridControlPill(
+            media: store.media,
+            onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
+            onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
+            onSelectInput: store.setInputSelection,
+            onRefreshInputDevices: store.refreshInputDevices,
+            onSelectOutput: store.setOutputSelection,
+            onRefreshOutputDevices: store.refreshOutputDevices,
+            onToggleScreenShare: store.toggleScreenShare,
+            onSelectScreenCaptureSource: store.startScreenSharing,
+            onSelectScreenShareQualityProfile: store.setScreenShareQualityProfile,
+            onRefreshScreenCaptureSources: store.refreshScreenCaptureSources,
+            onStopScreenShare: store.stopScreenSharing,
+            onSetOutputVolume: store.setOutputVolume,
+            onRetryAudio: store.retryAudio
+          )
+        }
         .padding(.bottom, 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }

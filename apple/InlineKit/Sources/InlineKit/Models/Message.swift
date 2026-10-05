@@ -621,7 +621,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   private static func hasContentPayload(_ payload: Client_MessageContentPayload) -> Bool {
-    payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage || payload.hasSubthread
+    payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage || payload.hasSubthread || payload.hasCountsAsUnread
   }
 
   private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
@@ -652,6 +652,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     if message.hasSubthread {
       payload.subthread = message.subthread
     }
+    if message.hasCountsAsUnread { payload.countsAsUnread = message.countsAsUnread }
 
     return hasContentPayload(payload) ? payload : nil
   }
@@ -759,6 +760,12 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         }
       }
 
+      if incoming.hasCountsAsUnread {
+        merged.countsAsUnread = incoming.countsAsUnread
+      } else if existing.hasCountsAsUnread {
+        merged.countsAsUnread = existing.countsAsUnread
+      }
+
       return hasContentPayload(merged) ? merged : nil
 
     case let (incoming?, nil):
@@ -816,6 +823,7 @@ public struct MessageServiceDisplaySegment: Equatable, Sendable {
   }
 
   public enum Tone: Equatable, Sendable {
+    case primary
     case secondary
     case tertiary
   }
@@ -841,8 +849,26 @@ public extension Message {
     serviceMessage?.event != nil
   }
 
+  var isGridTranscript: Bool {
+    if case .gridTranscript = serviceMessage?.event {
+      return true
+    }
+    return false
+  }
+
+  /// Missing fields preserve ordinary-message behavior. Typed transcripts are
+  /// also quiet if a transitional server omitted the explicit flag.
+  var countsAsUnread: Bool {
+    if isGridTranscript {
+      return false
+    }
+    guard let contentPayload, contentPayload.hasCountsAsUnread else { return true }
+    return contentPayload.countsAsUnread
+  }
+
   var serviceFallbackText: String? {
     guard let serviceMessage else { return nil }
+    if isGridTranscript { return text }
     return serviceMessage.fallbackText
   }
 
@@ -888,9 +914,46 @@ public extension Message {
           actorSegment,
           MessageServiceDisplaySegment(text: " pinned a message"),
         ]
+      case let .gridTranscript(transcript):
+        let body = text ?? ""
+        if transcript.kind == .gridTranscriptTurn {
+          let prefix = "Transcript · "
+          let speech = body.hasPrefix(prefix) ? String(body.dropFirst(prefix.count)) : body
+          return [
+            MessageServiceDisplaySegment(text: prefix, tone: .tertiary),
+            MessageServiceDisplaySegment(text: speech, tone: .primary),
+          ]
+        }
+        // Status and continuation links retain the server's self-contained
+        // text. The sender is an attribution owner, not the speaker.
+        return transcriptStatusSegments(text: body)
       case nil:
         return nil
     }
+  }
+
+  private func transcriptStatusSegments(text: String) -> [MessageServiceDisplaySegment] {
+    let source = text as NSString
+    let threadEntities = (entities?.entities ?? []).filter {
+      $0.type == .thread && $0.thread.chatID > 0 && $0.offset >= 0 && $0.length > 0
+    }.sorted { $0.offset < $1.offset }
+    var cursor = 0
+    var segments: [MessageServiceDisplaySegment] = []
+    for entity in threadEntities {
+      guard entity.offset <= Int64(source.length),
+            entity.length <= Int64(source.length) - entity.offset else { continue }
+      let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+      guard range.location >= cursor else { continue }
+      if range.location > cursor {
+        segments.append(.init(text: source.substring(with: NSRange(location: cursor, length: range.location - cursor))))
+      }
+      segments.append(.init(text: source.substring(with: range), link: .thread(entity.thread.chatID)))
+      cursor = NSMaxRange(range)
+    }
+    if cursor < source.length {
+      segments.append(.init(text: source.substring(from: cursor)))
+    }
+    return segments.isEmpty ? [.init(text: text)] : segments
   }
 
   /// Returns a string representation of the message, including emojis for different media types.
@@ -1017,6 +1080,9 @@ public extension MessageService {
         return "Linked from another thread"
       case .pinnedMessage:
         return "Pinned a message"
+      case .gridTranscript:
+        // Its meaningful fallback is the encrypted Message.message text.
+        return nil
       case nil:
         return nil
     }
@@ -1720,11 +1786,7 @@ public extension Message {
       // If the message we are about to delete is the last message of the chat,
       // we need to promote the previous message (if any) to be the new last one.
       if prevChatLastMsgId == messageId {
-        let previousMessage = try Message
-          .filter(Column("chatId") == chat?.id)
-          .order(Column("date").desc)
-          .limit(1, offset: 1)
-          .fetchOne(db)
+        let previousMessage = try latestActivityMessage(db, chatId: chatId, excluding: messageIds)
 
         var updatedChat = chat
         updatedChat?.lastMsgId = previousMessage?.messageId
@@ -1733,7 +1795,7 @@ public extension Message {
         // Preserve the information that we have already handled the current
         // `lastMsgId` so subsequent deletions in the same batch don't repeat
         // the update work unnecessarily.
-        prevChatLastMsgId = messageId
+        prevChatLastMsgId = previousMessage?.messageId
       }
 
       // Remove the message itself.
@@ -1742,5 +1804,20 @@ public extension Message {
         .filter(Column("chatId") == chatId)
         .deleteAll(db)
     }
+  }
+
+  /// Generated transcript rows are history, never sidebar activity. The
+  /// existing protobuf payload requires decoding; a cursor avoids loading a
+  /// whole transcript into memory when an ordinary chat-tail message is deleted.
+  static func latestActivityMessage(_ db: Database, chatId: Int64, excluding messageIds: [Int64]) throws -> Message? {
+    let cursor = try Message
+      .filter(Column("chatId") == chatId)
+      .filter(!messageIds.contains(Column("messageId")))
+      .order(Column("date").desc, Column("messageId").desc)
+      .fetchCursor(db)
+    while let message = try cursor.next() {
+      if !message.isGridTranscript { return message }
+    }
+    return nil
   }
 }

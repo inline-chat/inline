@@ -51,6 +51,30 @@ final class GridRoomAPI {
     return response.spaces
   }
 
+  func openRoomThread(roomID: Int64, membershipID: String) async throws -> Int64 {
+    let result = try await realtime.send(.openGridThread(roomID: roomID, membershipID: membershipID))
+    guard case let .openGridThread(response)? = result, response.chatID > 0 else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    return response.chatID
+  }
+
+  func setTranscription(request: GridTranscriptionRequest) async throws -> InlineProtocol.Grid {
+    let result = try await realtime.send(.setGridTranscription(request: request))
+    guard case let .setGridTranscription(response)? = result, response.hasGrid else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    return response.grid
+  }
+
+  func listTranscripts(roomID: Int64) async throws -> [GridTranscriptDestinationInfo] {
+    let result = try await realtime.send(.listGridTranscripts(roomID: roomID))
+    guard case let .listGridTranscripts(response)? = result else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    return Array(response.transcripts.prefix(20))
+  }
+
   func createRoom(
     spaceID: Int64,
     microphoneEnabled: Bool

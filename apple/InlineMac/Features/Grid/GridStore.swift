@@ -20,6 +20,7 @@ final class GridRoomService {
   private(set) var lastError: String?
   private(set) var networkRefreshRevision = 0
   private(set) var networkAvailable = true
+  private(set) var pendingTranscriptionRequestIDs: [Int64: String] = [:]
   var connectionRecoveryAttempt: Int { media.recoveryAttempt }
   let media: GridMediaPresentation
 
@@ -176,6 +177,7 @@ final class GridRoomService {
     homeLoadRevision &+= 1
     roomMutationRevisions.removeAll()
     pendingRoomMutations.removeAll()
+    pendingTranscriptionRequestIDs.removeAll()
     membershipMutationRevision &+= 1
     pendingMembershipMutations.removeAll()
     membershipRollbackBaseline.clear()
@@ -187,6 +189,17 @@ final class GridRoomService {
 
   func grid(spaceID: Int64) -> InlineProtocol.Grid? {
     grids[spaceID]
+  }
+
+  var activeTranscriptionRoom: GridRoom? {
+    grids.values.lazy.compactMap { grid in
+      guard grid.hasCurrentRoomID,
+            let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
+            room.transcriptionIsRunning,
+            room.avatars.contains(where: { $0.ownedByCurrentSession && !$0.membershipID.isEmpty })
+      else { return nil }
+      return room
+    }.first
   }
 
   func recentAvatars(spaceID: Int64, limit: Int = 4) -> [GridAvatar] {
@@ -466,6 +479,75 @@ final class GridRoomService {
     )
     avatarStateSync.submitMicrophoneState(roomID: roomID, enabled: enabled)
     reconcileMediaDemand()
+  }
+
+  func openRoomThread(roomID: Int64) async throws -> Int64 {
+    let room = try transcriptionRoom(roomID: roomID)
+    guard let avatar = room.avatars.first(where: \.ownedByCurrentSession), !avatar.membershipID.isEmpty else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    let chatID = try await api.openRoomThread(roomID: roomID, membershipID: avatar.membershipID)
+    let latestRoom = try transcriptionRoom(roomID: roomID)
+    guard latestRoom.avatars.contains(where: { $0.ownedByCurrentSession && $0.membershipID == avatar.membershipID })
+    else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    // Thread sidecars are applied by the transaction before navigation.
+    return chatID
+  }
+
+  func setTranscription(
+    room: GridRoom,
+    enabled: Bool,
+    destination: GridTranscriptionRequest.Destination = .last
+  ) async throws {
+    let roomID = room.id
+    guard pendingTranscriptionRequestIDs[roomID] == nil else { throw GridRoomAPIError.invalidResponse }
+    let latestRoom = try transcriptionRoom(roomID: roomID)
+    guard let request = GridTranscriptionRequest(room: room, enabled: enabled, destination: destination) else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    guard latestRoom.avatars.contains(where: { $0.ownedByCurrentSession && $0.membershipID == request.membershipID }),
+          latestRoom.hasConnection, latestRoom.connection.generation == request.generation
+    else { throw GridRoomAPIError.invalidResponse }
+    let accessRevision = spaceAccessRevisions[room.spaceID, default: 0]
+    pendingTranscriptionRequestIDs[roomID] = request.requestID
+    defer {
+      if pendingTranscriptionRequestIDs[roomID] == request.requestID {
+        pendingTranscriptionRequestIDs.removeValue(forKey: roomID)
+      }
+    }
+    do {
+      let grid = try await api.setTranscription(request: request)
+      guard accessRevision == spaceAccessRevisions[room.spaceID, default: 0] else { return }
+      applySnapshot([grid])
+    } catch {
+      // A rejected fence or uncertain response must repair from the authority,
+      // never synthesize an active/stopped state in the client.
+      if accessRevision == spaceAccessRevisions[room.spaceID, default: 0] {
+        try? await reloadGrid(spaceID: room.spaceID)
+      }
+      throw error
+    }
+  }
+
+  func listTranscripts(roomID: Int64) async throws -> [GridTranscriptDestinationInfo] {
+    let room = try transcriptionRoom(roomID: roomID)
+    let membershipID = room.avatars.first(where: \.ownedByCurrentSession)?.membershipID
+    let transcripts = try await api.listTranscripts(roomID: roomID)
+    let latestRoom = try transcriptionRoom(roomID: roomID)
+    guard latestRoom.avatars.contains(where: { $0.ownedByCurrentSession && $0.membershipID == membershipID }) else {
+      throw GridRoomAPIError.invalidResponse
+    }
+    return transcripts
+  }
+
+  private func transcriptionRoom(roomID: Int64) throws -> GridRoom {
+    guard let grid = grids.values.first(where: { $0.hasCurrentRoomID && $0.currentRoomID == roomID }),
+          let room = grid.rooms.first(where: { $0.id == roomID }),
+          room.avatars.contains(where: { $0.ownedByCurrentSession && !$0.membershipID.isEmpty })
+    else { throw GridRoomAPIError.invalidResponse }
+    return room
   }
 
   func toggleCurrentMicrophone() {
