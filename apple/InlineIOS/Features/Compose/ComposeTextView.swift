@@ -40,9 +40,35 @@ class ComposeTextView: UITextView {
   }
 
   override var keyCommands: [UIKeyCommand]? {
-    let commands = super.keyCommands ?? []
-    guard pastedLinkSessionStorage?.canRevert == true else { return commands }
-    return commands + [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(revertPastedLink(_:)))]
+    var commands = super.keyCommands ?? []
+    if canHandleHardwareReturn {
+      let send = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(sendWithHardwareReturn(_:)))
+      let newline = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertHardwareNewline(_:)))
+      // UITextView otherwise handles Return as text input before custom key commands.
+      send.wantsPriorityOverSystemBehavior = true
+      newline.wantsPriorityOverSystemBehavior = true
+      commands += [send, newline]
+    }
+    if pastedLinkSessionStorage?.canRevert == true {
+      commands.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(revertPastedLink(_:))))
+    }
+    return commands
+  }
+
+  private var canHandleHardwareReturn: Bool {
+    traitCollection.userInterfaceIdiom == .pad &&
+      INUserSettings.current.compose.sendWithReturnOnIPad && isEditable && markedTextRange == nil
+  }
+
+  @objc private func sendWithHardwareReturn(_ sender: UIKeyCommand) {
+    guard canHandleHardwareReturn else { return }
+    if composeView?.autocompleteManager?.handleKeyPress("Enter") == true { return }
+    composeView?.sendTapped()
+  }
+
+  @objc private func insertHardwareNewline(_ sender: UIKeyCommand) {
+    guard canHandleHardwareReturn else { return }
+    insertText("\n")
   }
 
   @objc private func revertPastedLink(_ sender: Any?) {
@@ -177,6 +203,9 @@ class ComposeTextView: UITextView {
   }
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(sendWithHardwareReturn(_:)) || action == #selector(insertHardwareNewline(_:)) {
+      return canHandleHardwareReturn
+    }
     if action == #selector(paste(_:)), isEditable,
        ExperimentalFeatureFlags.richMessageCopyEditingEnabled, MessageTextPasteboard.containsFormattedText() {
       return true

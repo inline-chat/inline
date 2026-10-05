@@ -6,6 +6,36 @@ import Testing
 @Suite("User settings refresh", .serialized)
 @MainActor
 struct INUserSettingsRefreshTests {
+  @Test("iPad hardware Return defaults on and preserves local choices", arguments: [nil, false, true] as [Bool?])
+  func hardwareReturnIsLocal(savedChoice: Bool?) async throws {
+    let harness = try makeHarness()
+    defer { harness.removeUserDefaults() }
+    #expect(harness.settings.compose.sendWithReturnOnIPad)
+    if let savedChoice {
+      harness.settings.compose.sendWithReturnOnIPad = savedChoice
+    }
+    let expected = savedChoice ?? true
+    #expect(ComposeSettingsManager(localDefaults: harness.userDefaults).sendWithReturnOnIPad == expected)
+    harness.settings.updateFromServer(.with {
+      $0.composeSettings.replacePastedLinksWithTitles = true
+    })
+    #expect(harness.settings.compose.sendWithReturnOnIPad == expected)
+    // Let the actual shared-settings debounce complete; a local toggle must never reach it.
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(await harness.saver.callCount == 0)
+    let relaunched = INUserSettings(
+      userDefaults: harness.userDefaults,
+      currentUserID: { 1 },
+      fetchNotificationSettings: { nil },
+      saveNotificationSettings: { _ in Issue.record("Local Return preference unexpectedly synced") }
+    )
+    #expect(relaunched.compose.sendWithReturnOnIPad == expected)
+    let encoded = try JSONEncoder().encode(relaunched.compose)
+    let values = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    #expect(values["sendWithReturnOnIPad"] == nil)
+    #expect(relaunched.compose.toProtocol().replacePastedLinksWithTitles)
+  }
+
   @Test("gesture edits sync while local overrides never publish")
   func gestureSyncAndLocalOverride() async throws {
     let harness = try makeHarness(controlledSaves: true)

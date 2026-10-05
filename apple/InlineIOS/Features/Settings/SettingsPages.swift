@@ -3,6 +3,7 @@ import InlineUI
 import SwiftUI
 import TextProcessing
 import Translation
+import UIKit
 
 struct SettingsNavigationRow<Destination: View>: View {
   let title: LocalizedStringResource
@@ -43,6 +44,17 @@ struct GeneralSettingsView: View {
         }
       } footer: {
         Text("Turn supported pasted links into compact text links. Use Undo or Backspace to restore the URL.")
+      }
+
+      if UIDevice.current.userInterfaceIdiom == .pad {
+        Section {
+          SettingsItem(icon: "keyboard", iconColor: .blue, title: String(localized: "Send with Return")) {
+            Toggle("Send with Return", isOn: $composeSettings.sendWithReturnOnIPad)
+              .labelsHidden()
+          }
+        } footer: {
+          Text("When enabled, Return sends and Shift-Return adds a new line on an external keyboard. Applies only to this iPad.")
+        }
       }
 
       Section {

@@ -216,6 +216,7 @@ public class INUserSettings {
     saveNotificationSettings: @escaping SaveNotificationSettings
   ) {
     self.userDefaults = userDefaults
+    compose = ComposeSettingsManager(localDefaults: userDefaults)
     messageGestures = MessageGestureSettingsManager(
       defaults: userDefaults,
       legacyDefaults: legacyGestureDefaults ?? userDefaults
@@ -306,7 +307,9 @@ public class INUserSettings {
       }
       .store(in: &cancellables)
 
-    compose.objectWillChange
+    // Hardware keyboard behavior stays on this device; only the shared link setting syncs.
+    compose.$replacePastedLinksWithTitles
+      .dropFirst()
       .sink { [weak self] _ in
         self?.notificationSettingsWillChange()
       }
