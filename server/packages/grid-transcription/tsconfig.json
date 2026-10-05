@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "noUncheckedIndexedAccess": true, "skipLibCheck": true,
+    "rootDir": "src", "outDir": "dist", "declaration": true,
+    "types": ["node"], "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts"], "exclude": ["src/**/*.test.ts"]
+}

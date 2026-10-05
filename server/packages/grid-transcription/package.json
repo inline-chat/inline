@@ -1,0 +1,35 @@
+{
+  "name": "@inline-chat/grid-transcription",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node dist/copy-model.js",
+    "qualify": "node dist/qualify.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun --no-env-file test src",
+    "lint": "oxlint --config ../../../.oxlintrc.json --ignore-path ../../../.oxlintignore src",
+    "start": "node dist/daemon.js"
+  },
+  "dependencies": {
+    "ws": "8.21.3",
+    "@livekit/rtc-node": "1.1.0",
+    "onnxruntime-node": "1.24.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/ws": "8.18.1",
+    "typescript": "catalog:",
+    "oxlint": "catalog:"
+  },
+  "license": "AGPL-3.0-only"
+}
