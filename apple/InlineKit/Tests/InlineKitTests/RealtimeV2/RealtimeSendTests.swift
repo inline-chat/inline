@@ -3808,6 +3808,10 @@ private actor SendTestSyncStorage: SyncStorage {
   private var bucketStates: [BucketKey: BucketState] = [:]
   private var clearCount = 0
 
+  func canonicalPeer(forChatID chatID: Int64) -> InlineProtocol.Peer? {
+    .with { $0.chat.chatID = chatID }
+  }
+
   func getState() async -> SyncState {
     state
   }

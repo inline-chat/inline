@@ -313,12 +313,13 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         userId: currentUserId,
         tx,
       })
+      const canonicalPeer = Encoders.peerFromChat(snapshotChat, { currentUserId })
       const encodedMessages = recentMessages.map((message) => {
         const threadProjection = recentThreadProjections.get(message.messageId)
         return Encoders.fullMessage({
           message,
           encodingForUserId: currentUserId,
-          encodingForPeer: { inputPeer },
+          encodingForPeer: { inputPeer: canonicalPeer },
           replies: threadProjection?.replies,
           subthread: threadProjection?.subthread,
         })

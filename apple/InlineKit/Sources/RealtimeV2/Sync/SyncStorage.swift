@@ -71,6 +71,9 @@ public enum BucketKey: Sendable, Hashable {
 
 public protocol SyncStorage: Sendable {
   func getRemovalRevision() async throws -> Int64
+  /// A local chat row can identify a DM by its counterpart user. An unknown
+  /// chat ID returns nil so admission can resolve it through getChat.
+  func canonicalPeer(forChatID chatID: Int64) async throws -> InlineProtocol.Peer?
   func getState() async throws -> SyncState
   @discardableResult
   func setState(_ state: SyncState) async -> Bool

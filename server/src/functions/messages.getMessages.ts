@@ -39,6 +39,7 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
     parentMessageIds: orderedMessages.map((message) => message.messageId),
     userId: context.currentUserId,
   })
+  const canonicalPeer = Encoders.peerFromChat(chat, { currentUserId: context.currentUserId })
 
   return {
     messages: orderedMessages.map((message) => {
@@ -46,7 +47,7 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
       return Encoders.fullMessage({
         message,
         encodingForUserId: context.currentUserId,
-        encodingForPeer: { inputPeer: input.peerId },
+        encodingForPeer: { inputPeer: canonicalPeer },
         replies: threadProjection?.replies,
         subthread: threadProjection?.subthread,
       })

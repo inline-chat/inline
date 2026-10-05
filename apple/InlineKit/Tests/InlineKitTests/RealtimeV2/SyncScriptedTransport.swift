@@ -12,6 +12,13 @@ actor SyncScriptedTransport: Transport {
 
   nonisolated let events = AsyncChannel<TransportEvent>()
   private(set) var requests: [Request] = []
+  private(set) var chatLookups = 0
+  private let chatResult: InlineProtocol.GetChatResult?
+
+  init(chatResult: InlineProtocol.GetChatResult? = nil) {
+    self.chatResult = chatResult
+  }
+
   func start() async {}
   func stop() async {}
   func finish() {
@@ -25,7 +32,24 @@ actor SyncScriptedTransport: Transport {
   }
 
   func send(_ message: ClientMessage) async throws {
-    guard case let .rpcCall(call) = message.body, case let .getUpdates(input)? = call.input else {
+    guard case let .rpcCall(call) = message.body else {
+      Issue.record("Unexpected protocol operation")
+      return
+    }
+    if case .getChat? = call.input {
+      guard let chatResult else {
+        Issue.record("Unexpected chat lookup")
+        return
+      }
+      chatLookups += 1
+      await events.send(.message(.with {
+        $0.body = .rpcResult(.with { $0.reqMsgID = message.id
+          $0.result = .getChat(chatResult)
+        })
+      }))
+      return
+    }
+    guard case let .getUpdates(input)? = call.input else {
       Issue.record("Unexpected protocol operation")
       return
     }

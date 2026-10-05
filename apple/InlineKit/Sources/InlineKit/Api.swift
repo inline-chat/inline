@@ -4,6 +4,10 @@ import RealtimeV2
 
 // TODO: Replace with proper SyncStorage implementation using GRDB
 struct StubSyncStorage: SyncStorage {
+  func canonicalPeer(forChatID chatID: Int64) async -> InlineProtocol.Peer? {
+    .with { $0.chat.chatID = chatID }
+  }
+
   func getState() async -> SyncState {
     SyncState(lastSyncDate: 0)
   }

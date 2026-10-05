@@ -1113,6 +1113,377 @@ final class SyncTests {
     #expect(applied.isEmpty)
   }
 
+  @Test("raw DM message and canonical hint share the existing user bucket")
+  func rawDMUpdateUsesCanonicalCursor() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(userPeer, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0))
+    let apply = RecordingApplyUpdates()
+    var canonicalMessage = makeNewMessageUpdate(seq: 6, date: 120, chatId: 4)
+    if case var .newMessage(payload) = canonicalMessage.update {
+      payload.message.peerID = userPeer
+      canonicalMessage.update = .newMessage(payload)
+    }
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 6, date: 120, updates: [canonicalMessage], final: true, resultType: .slice
+    )])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    var hint = InlineProtocol.UpdateChatHasNewUpdates()
+    hint.peerID = userPeer
+    hint.updateSeq = 6
+    let canonicalHint = InlineProtocol.Update.with { $0.update = .chatHasNewUpdates(hint) }
+    async let rawArrival: Void = sync.process(updates: [makeNewMessageUpdate(seq: 6, date: 120, chatId: 4)])
+    async let canonicalArrival: Void = sync.process(updates: [canonicalHint])
+    _ = await (rawArrival, canonicalArrival)
+
+    #expect(await waitForCondition { await storage.getBucketState(for: canonical).seq == 6 })
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+    if case let .newMessage(payload) = applied.first?.update {
+      #expect(payload.message.peerID == userPeer)
+    } else {
+      Issue.record("Expected canonical message replay")
+    }
+    let stats = await sync.getStats()
+    #expect(stats.buckets.map(\.key) == [canonical])
+    #expect(await waitForCondition { await sync.getStats().activeBucketFetches == 0 })
+    await sync.prepareForTermination()
+  }
+
+  @Test("a received raw DM hint commits through the canonical GRDB bucket", arguments: [false, true])
+  func receivedRawDMHintUsesCanonicalBucket(coldLookup: Bool) async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    if !coldLookup {
+      try await queue.write { db in
+        try Chat(
+          id: 4, date: Date(timeIntervalSince1970: 10), type: .privateChat,
+          title: nil, spaceId: nil, peerUserId: 1_900
+        ).insert(db)
+      }
+    }
+    let storage = GRDBSyncStorage(db: database)
+    #expect(await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5)))
+    #expect(await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0)))
+    let snapshot = InlineProtocol.GetChatResult.with {
+      $0.chat = .with { $0.id = 4; $0.peerID = userPeer; $0.seq = 6 }
+      $0.dialog = .with { $0.chatID = 4; $0.peer = userPeer }
+    }
+    let transport = SyncScriptedTransport(chatResult: coldLookup ? snapshot : nil)
+    let session = ProtocolSession(transport: transport, auth: Auth.mocked(authenticated: true).handle)
+    let sync = Sync(
+      applyUpdates: InlineApplyUpdates(engine: UpdatesEngine(database: database)),
+      syncStorage: storage, client: session, config: .default
+    )
+    // The real ProtocolSession waits for this receipt before consuming the
+    // getUpdates reply, so admission must release the receive loop.
+    let consumer = Task {
+      for await envelope in session.events {
+        if case let .updates(payload) = envelope.event {
+          await sync.process(updates: payload.updates)
+        }
+        await envelope.markProcessed()
+      }
+    }
+    await session.start()
+    let delivery = Task {
+      await transport.push([makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 6)])
+    }
+    let converged = await waitForCondition(timeout: .seconds(5)) {
+      (try? await storage.getBucketState(for: canonical).seq) == 6
+    }
+    await session.reset()
+    await sync.prepareForTermination()
+    await transport.finish()
+    consumer.cancel()
+    await delivery.value
+
+    #expect(converged)
+    #expect(try await storage.getBucketState(for: canonical).seq == 6)
+    #expect(try await storage.getBucketState(for: raw).seq == 0)
+    #expect(await transport.chatLookups == (coldLookup ? 1 : 0))
+    #expect(await transport.requests == [SyncScriptedTransport.Request(from: 5, through: 6)])
+  }
+
+  @Test("a second raw DM hint during canonical fetch retains its later target")
+  func rawDMHintArrivingDuringFetchReplaysLaterTarget() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(userPeer, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0))
+    let client = FakeProtocolClient(
+      responses: [
+        makeGetUpdatesResult(
+          seq: 6, date: 120, updates: [], final: true, resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 6)
+        ),
+        makeGetUpdatesResult(
+          seq: 7, date: 121, updates: [], final: true, resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 6, through: 7)
+        ),
+      ],
+      gateFirstCall: true
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 6)])
+    await client.waitForFirstCallStarted()
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 7)])
+    await client.releaseFirstCall()
+
+    #expect(await waitForCondition { await storage.getBucketState(for: canonical).seq == 7 })
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    #expect(await client.getUpdatesStartSequences() == [5, 6])
+    #expect(await sync.getStats().buckets.map(\.key) == [canonical])
+    #expect(await waitForCondition { await sync.getStats().discoveryTargetsPending == 0 })
+    await sync.prepareForTermination()
+  }
+
+  @Test("cold raw latest demand remains latest when a finite hint arrives")
+  func coldRawLatestRetainsAuthoritativeTarget() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0))
+    let snapshot = makeGetChatResult(chatId: 4, seq: 6, peer: userPeer)
+    let client = FakeProtocolClient(
+      responses: [], gateFirstCall: true,
+      methodResponses: [
+        .getChat: [snapshot, snapshot],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 6, date: 120, updates: [], final: true, resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 6)
+        )],
+      ]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 0)])
+    await client.waitForFirstCallStarted()
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 6)])
+    await client.releaseFirstCall()
+
+    #expect(await waitForCondition { await storage.getBucketState(for: canonical).seq == 6 })
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    #expect(await client.getChatRecentMessageRequests() == [false, false])
+    #expect(await client.getUpdatesStartSequences() == [5])
+    #expect(await sync.getStats().buckets.map(\.key) == [canonical])
+    #expect(await waitForCondition {
+      let stats = await sync.getStats()
+      return stats.discoveryTargetsPending == 0 && stats.queuedDiscoveryTargets == 0
+    })
+    await sync.prepareForTermination()
+  }
+
+  @Test("cold raw DM demand resolves outside the receive loop and repairs one canonical bucket")
+  func coldRawDMTooLongUsesCanonicalRepair() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0))
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var recent = makeProtocolMessage(id: 99, chatId: 4)
+    recent.peerID = userPeer
+    let dmSnapshot = makeGetChatResult(
+      chatId: 4, seq: 10, lastMessageId: 99, peer: userPeer, messages: [recent]
+    )
+    let client = FakeProtocolClient(
+      responses: [], gateFirstCall: true,
+      methodResponses: [
+        .getChat: [dmSnapshot, dmSnapshot],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 10, date: 200, updates: [], final: false, resultType: .tooLong
+        )],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply, syncStorage: storage, client: client,
+      config: .default, auth: Auth.mocked(authenticated: true).handle
+    )
+    await sync.activateGeneration()
+    let finished = SyncActivityRecorder()
+    let process = Task {
+      await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 10)])
+      await finished.record(true)
+    }
+    await client.waitForFirstCallStarted()
+    let receiveReturnedBeforeLookup = await waitForCondition(timeout: .seconds(1)) {
+      await finished.sequence == [true]
+    }
+    await client.releaseFirstCall()
+    await process.value
+    #expect(receiveReturnedBeforeLookup)
+    #expect(await waitForCondition { await storage.getBucketState(for: canonical).seq == 10 })
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    let repair = try #require(await apply.repairedChats.first)
+    #expect(repair.peer == userPeer)
+    #expect(repair.chat.messages.map(\.peerID) == [userPeer])
+    #expect(await client.getChatRecentMessageRequests() == [false, true])
+    #expect(await sync.getStats().buckets.map(\.key) == [canonical])
+    #expect(await waitForCondition {
+      let stats = await sync.getStats()
+      return stats.activeBucketFetches == 0 && stats.discoveryTargetsPending == 0 && stats.queuedDiscoveryTargets == 0
+    })
+    await sync.prepareForTermination()
+  }
+
+  @Test("cold chat lookup rejects a different chat without creating a bucket")
+  func coldLookupRejectsUnrelatedChat() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [.getChat: [makeGetChatResult(
+        chatId: 5, seq: 10, peer: makeUserPeer(userId: 1_900)
+      )]]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 10)])
+    #expect(await waitForCondition { await client.getCallCount() >= 1 })
+    #expect(await client.getCalledMethods() == [.getChat])
+    #expect(await sync.getStats().buckets.isEmpty)
+    #expect(await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 4))).seq == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("permanent cold DM lookup denial retires its unresolved demand")
+  func coldRawDMDenialRetiresDemand() async throws {
+    let storage = InMemorySyncStorage()
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    let denied = ProtocolSessionError.rpcError(
+      errorCode: .peerIDInvalid, message: "no access", code: 400
+    )
+    let client = FakeProtocolClient(responses: [], methodErrors: [.getChat: [denied]])
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 10)])
+
+    #expect(await waitForCondition {
+      let stats = await sync.getStats()
+      return await client.getCallCount() == 1 && stats.queuedDiscoveryTargets == 0 &&
+        stats.discoveryTargetsPending == 0
+    })
+    #expect(await client.getCalledMethods() == [.getChat])
+    #expect(await sync.getStats().buckets.isEmpty)
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("transient cold DM lookup retains demand until canonical catch-up commits")
+  func coldRawDMTransientLookupRetries() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    let transient = ProtocolSessionError.rpcError(
+      errorCode: .internalError, message: "temporary", code: 500
+    )
+    let client = FakeProtocolClient(
+      responses: [], gateFirstCall: true,
+      methodResponses: [
+        .getChat: [makeGetChatResult(chatId: 4, seq: 6, peer: userPeer)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 6, date: 120, updates: [], final: true, resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 6)
+        )],
+      ],
+      methodErrors: [.getChat: [transient]]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 6)])
+    await client.waitForFirstCallStarted()
+    #expect(await sync.getStats().buckets.isEmpty)
+    #expect(await sync.getStats().queuedDiscoveryTargets == 1)
+    await client.releaseFirstCall()
+
+    #expect(await waitForCondition(timeout: .seconds(6)) {
+      await storage.getBucketState(for: canonical).seq == 6
+    })
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    #expect(await client.getCalledMethods() == [.getChat, .getChat, .getUpdates])
+    #expect(await client.getUpdatesStartSequences() == [5])
+    #expect(await sync.getStats().buckets.map(\.key) == [canonical])
+    #expect(await waitForCondition { await sync.getStats().discoveryTargetsPending == 0 })
+    await sync.prepareForTermination()
+  }
+
+  @Test("cold DM target satisfied durably during lookup retry needs no replay")
+  func coldRawDMRetryObservesDurableTarget() async throws {
+    let storage = InMemorySyncStorage()
+    let userPeer = makeUserPeer(userId: 1_900)
+    let canonical = BucketKey.chat(peer: userPeer)
+    let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5))
+    let transient = ProtocolSessionError.rpcError(
+      errorCode: .internalError, message: "temporary", code: 500
+    )
+    let client = FakeProtocolClient(
+      responses: [], gateFirstCall: true,
+      methodResponses: [.getChat: [makeGetChatResult(chatId: 4, seq: 10, peer: userPeer)]],
+      methodErrors: [.getChat: [transient]]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 10)])
+    await client.waitForFirstCallStarted()
+    await storage.setBucketState(for: canonical, state: .init(date: 200, seq: 10))
+    await client.releaseFirstCall()
+
+    #expect(await waitForCondition(timeout: .seconds(6)) {
+      let stats = await sync.getStats()
+      return await client.getCallCount() == 2 && stats.queuedDiscoveryTargets == 0 &&
+        stats.discoveryTargetsPending == 0
+    })
+    #expect(await storage.getBucketState(for: canonical).seq == 10)
+    #expect(await storage.getBucketState(for: raw).seq == 0)
+    #expect(await client.getCalledMethods() == [.getChat, .getChat])
+    #expect(await sync.getStats().buckets.map(\.key) == [canonical])
+    await sync.prepareForTermination()
+  }
+
+  @Test("account reset during cold local lookup cannot issue a stale getChat")
+  func staleColdLookupCannotStartRemoteRepair() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setCanonicalPeer(nil, forChatID: 4)
+    await storage.gateCanonicalLookup(number: 2)
+    let client = FakeProtocolClient(responses: [])
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 10)])
+    await storage.waitForCanonicalLookupStarted()
+    let shutdown = Task { await sync.prepareForTermination() }
+    #expect(await waitForCondition { await sync.getStats().queuedDiscoveryTargets == 0 })
+    await storage.releaseCanonicalLookup()
+    await shutdown.value
+
+    #expect(await client.getCallCount() == 0)
+    #expect(await sync.getStats().buckets.isEmpty)
+    #expect(await sync.getStats().discoveryTargetsPending == 0)
+  }
+
   @Test("cold chat TOO_LONG repairs chat snapshot and advances")
   func testColdChatTooLongRepairsAndAdvances() async throws {
     let storage = InMemorySyncStorage()
@@ -5680,6 +6051,10 @@ private actor TransientBucketReadFailureStorage: SyncStorage {
     self.failingKey = failingKey
   }
 
+  func canonicalPeer(forChatID chatID: Int64) async -> InlineProtocol.Peer? {
+    await base.canonicalPeer(forChatID: chatID)
+  }
+
   func getState() async throws -> SyncState { await base.getState() }
   func setState(_ state: SyncState) async -> Bool { await base.setState(state) }
   func getBucketState(for key: BucketKey) async throws -> BucketState {
@@ -5722,11 +6097,48 @@ actor InMemorySyncStorage: SyncStorage {
   }
   private var state = SyncState(lastSyncDate: 0)
   private var bucketStates: [BucketKey: BucketState] = [:]
+  private var canonicalChatPeers: [Int64: InlineProtocol.Peer?] = [:]
+  private var canonicalLookupCount = 0
+  private var gatedCanonicalLookupNumber: Int?
+  private var canonicalLookupStarted = false
+  private var canonicalLookupStartWaiters: [CheckedContinuation<Void, Never>] = []
+  private var canonicalLookupGate: CheckedContinuation<Void, Never>?
   private var stateWriteFailuresRemaining = 0
   private var failBucketStateWrites = false
   private var bucketStateWriteFailuresRemaining = 0
   private var clearCount = 0
   private var bucketReadKeys: [BucketKey] = []
+
+  func setCanonicalPeer(_ peer: InlineProtocol.Peer?, forChatID chatID: Int64) {
+    canonicalChatPeers.updateValue(peer, forKey: chatID)
+  }
+
+  func gateCanonicalLookup(number: Int) {
+    gatedCanonicalLookupNumber = number
+  }
+
+  func waitForCanonicalLookupStarted() async {
+    if canonicalLookupStarted { return }
+    await withCheckedContinuation { canonicalLookupStartWaiters.append($0) }
+  }
+
+  func releaseCanonicalLookup() {
+    canonicalLookupGate?.resume()
+    canonicalLookupGate = nil
+  }
+
+  func canonicalPeer(forChatID chatID: Int64) async -> InlineProtocol.Peer? {
+    canonicalLookupCount += 1
+    if let gatedCanonicalLookupNumber, canonicalLookupCount == gatedCanonicalLookupNumber {
+      self.gatedCanonicalLookupNumber = nil
+      canonicalLookupStarted = true
+      for waiter in canonicalLookupStartWaiters { waiter.resume() }
+      canonicalLookupStartWaiters.removeAll()
+      await withCheckedContinuation { canonicalLookupGate = $0 }
+    }
+    if let peer = canonicalChatPeers[chatID] { return peer }
+    return .with { $0.chat.chatID = chatID }
+  }
 
   func readBucketKeys() -> [BucketKey] { bucketReadKeys }
 
@@ -5832,6 +6244,10 @@ private actor FailNextUserReadSyncStorage: SyncStorage {
     self.base = base
   }
 
+  func canonicalPeer(forChatID chatID: Int64) async -> InlineProtocol.Peer? {
+    await base.canonicalPeer(forChatID: chatID)
+  }
+
   func failNextUserRead() {
     shouldFailNextUserRead = true
   }
@@ -5876,6 +6292,10 @@ private actor FailNextUserReadSyncStorage: SyncStorage {
 private actor ReadFailingSyncStorage: SyncStorage {
   private struct ReadFailure: Error {}
 
+  func canonicalPeer(forChatID _: Int64) async throws -> InlineProtocol.Peer? {
+    throw ReadFailure()
+  }
+
   func getState() async throws -> SyncState {
     throw ReadFailure()
   }
@@ -5917,6 +6337,10 @@ private func makeChatPeer(chatId: Int64) -> InlineProtocol.Peer {
   return peer
 }
 
+private func makeUserPeer(userId: Int64) -> InlineProtocol.Peer {
+  .with { $0.user.userID = userId }
+}
+
 private func makeChatHasNewUpdatesSignal(chatId: Int64, updateSeq: Int32) -> InlineProtocol.Update {
   var payload = InlineProtocol.UpdateChatHasNewUpdates()
   payload.peerID = makeChatPeer(chatId: chatId)
@@ -5950,9 +6374,11 @@ private func makeGetChatResult(
   chatId: Int64 = 1,
   seq: Int32,
   lastMessageId: Int64? = nil,
-  pinnedMessageIds: [Int64] = []
+  pinnedMessageIds: [Int64] = [],
+  peer: InlineProtocol.Peer? = nil,
+  messages: [InlineProtocol.Message] = []
 ) -> InlineProtocol.RpcResult.OneOf_Result {
-  let peer = makeChatPeer(chatId: chatId)
+  let peer = peer ?? makeChatPeer(chatId: chatId)
 
   var chat = InlineProtocol.Chat()
   chat.id = chatId
@@ -5972,6 +6398,7 @@ private func makeGetChatResult(
   result.chat = chat
   result.dialog = dialog
   result.pinnedMessageIds = pinnedMessageIds
+  result.messages = messages
   return .getChat(result)
 }
 
@@ -6073,8 +6500,8 @@ private func makeGetUpdatesStateResult(
   return .getUpdatesState(result)
 }
 
-private func makeNewMessageUpdate(seq: Int64, date: Int64) -> InlineProtocol.Update {
-  let message = makeProtocolMessage(id: 1, chatId: 1)
+private func makeNewMessageUpdate(seq: Int64, date: Int64, chatId: Int64 = 1) -> InlineProtocol.Update {
+  let message = makeProtocolMessage(id: 1, chatId: chatId)
 
   var payload = InlineProtocol.UpdateNewMessage()
   payload.message = message
