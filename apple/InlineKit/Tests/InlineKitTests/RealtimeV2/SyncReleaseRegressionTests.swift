@@ -17,6 +17,14 @@ struct SyncReleaseRegressionTests {
     let storage = GRDBSyncStorage(db: database)
     let peer = InlineProtocol.Peer.with { $0.chat.chatID = 7 }
     let key = BucketKey.chat(peer: peer)
+    try await queue.write { db in
+      try Chat(from: .with { $0.id = 7
+        $0.peerID = peer
+      }).insert(db)
+      try Dialog(from: .with { $0.peer = peer
+        $0.chatID = 7
+      }).insert(db)
+    }
     _ = await storage.setBucketState(for: key, state: .init(date: 100, seq: 1))
     let transport = SyncScriptedTransport()
     let session = ProtocolSession(transport: transport, auth: Auth.mocked(authenticated: true).handle)
@@ -50,6 +58,7 @@ struct SyncReleaseRegressionTests {
       let stats = await sync.getStats()
       return state?.seq == 4_099 && stats.activeBucketFetches == 0
     }
+    let bufferRecoveries = await sync.getStats().realtimeBufferRecoveries
     // Cleanup before assertions also releases the deliberately wedged old path.
     await session.reset()
     await sync.prepareForTermination()
@@ -61,6 +70,7 @@ struct SyncReleaseRegressionTests {
       from: $0.0,
       through: $0.1
     ) })
+    #expect(bufferRecoveries > 0)
     #expect(try await storage.getBucketState(for: key).seq == 4_099)
   }
 
@@ -80,6 +90,9 @@ struct SyncReleaseRegressionTests {
           $0.title = "Before"
         })
         try chat.save(db)
+        try Dialog(from: .with { $0.peer = peer
+          $0.chatID = peer.chat.chatID
+        }).insert(db)
       }
     }
     for key in [failedKey, healthyKey] {

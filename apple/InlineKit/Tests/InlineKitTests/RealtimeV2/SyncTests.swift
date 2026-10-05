@@ -1164,6 +1164,7 @@ final class SyncTests {
     let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
     if !coldLookup {
       try await queue.write { db in
+        try User(id: 1_900, email: nil, firstName: "Counterpart").insert(db)
         try Chat(
           id: 4, date: Date(timeIntervalSince1970: 10), type: .privateChat,
           title: nil, spaceId: nil, peerUserId: 1_900
