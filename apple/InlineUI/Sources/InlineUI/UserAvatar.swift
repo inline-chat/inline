@@ -15,6 +15,7 @@ public struct UserAvatar: View, Equatable {
       && lhs.backgroundOpacity == rhs.backgroundOpacity
       && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
       && lhs.hasConfiguredPhoto == rhs.hasConfiguredPhoto
+      && lhs.remoteUrl == rhs.remoteUrl
       && lhs.localUrl == rhs.localUrl
       && lhs.prefersExplicitLocalSource == rhs.prefersExplicitLocalSource
       && Self.avatarIdentity(
@@ -289,7 +290,9 @@ public struct UserAvatar: View, Equatable {
         .scaleFactor(renderScale)
         .cacheOriginalImage()
         .loadDiskFileSynchronously()
-        .cancelOnDisappear(true)
+        .retry(maxCount: 1, interval: .seconds(1))
+        // Finish avatar requests through row reuse so they can populate the shared cache.
+        .reducePriorityOnDisappear(true)
         .placeholder {
           placeholder
         }
