@@ -71,7 +71,7 @@ function Download() {
           </div>
 
           <p {...stylex.props(styles.hint)}>
-            Supports macOS 15+ and iOS 18+
+            Supports macOS 15.2+ and iOS 18+
             <br />
             Beta
           </p>
