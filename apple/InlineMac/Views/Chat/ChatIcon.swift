@@ -26,6 +26,7 @@ struct ChatIcon: View {
         return lhsUserInfo.user.id == rhsUserInfo.user.id
           && userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
           && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
+          && lhsUserInfo.user.profileCdnUrl == rhsUserInfo.user.profileCdnUrl
           && lhsUserInfo.user.profileLocalPath == rhsUserInfo.user.profileLocalPath
 
       default:

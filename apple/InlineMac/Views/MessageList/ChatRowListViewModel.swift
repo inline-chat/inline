@@ -80,6 +80,11 @@ final class ChatRowListViewModel {
     // Raw progressive indexes do not map through a collapse boundary. Keep the established
     // incremental path unchanged for normal chats and rebuild only the collapsed projection.
     if collapsedMaxId != nil {
+      if case let .updated(updated, _, _) = update {
+        // Updates are resolved by message ID; hidden collapsed rows need no view invalidation.
+        let visibleIDs = Set(visibleMessages.map(\.id))
+        return applyUpdated(updated.filter { visibleIDs.contains($0.id) || $0.id == threadAnchor?.id })
+      }
       messages = visibleMessages
       rebuildRows()
       return .reloadAll

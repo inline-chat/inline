@@ -3,9 +3,10 @@ import InlineKit
 import Kingfisher
 
 /// One photo source for circular avatars and full-size previews.
-public struct UserAvatarImageSource: Sendable {
+public struct UserAvatarImageSource: Sendable, Hashable {
   public let url: URL
   public let cacheKey: String
+  let fallbackURL: URL?
 
   public init?(user: User, scale: CGFloat = 1) {
     self.init(
@@ -27,13 +28,11 @@ public struct UserAvatarImageSource: Sendable {
   ) {
     // Legacy local files may contain a previous photo or a processed thumbnail.
     // The server's photo reference is authoritative; Kingfisher retains its original for offline use.
-    let localURL = localURL.flatMap { url in
-      FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
     let hasVerifiedLocalOriginal = localURL?.lastPathComponent.hasPrefix(User.remoteProfilePhotoCacheFilePrefix) == true
     let preferredLocal = prefersExplicitLocalSource || hasVerifiedLocalOriginal ? localURL : nil
     guard let url = preferredLocal ?? remoteURL ?? localURL else { return nil }
     self.url = url
+    fallbackURL = url.isFileURL && !prefersExplicitLocalSource ? remoteURL : nil
     let photoIdentity: String
     if let identity, !identity.hasPrefix("local:") {
       photoIdentity = identity
@@ -43,6 +42,10 @@ public struct UserAvatarImageSource: Sendable {
     let sourceKey = remoteURL == nil || prefersExplicitLocalSource ? url.absoluteString : "remote"
     let scaleKey = Int((max(scale, 1) * 100).rounded())
     cacheKey = "user-avatar:v3:\(userID):scale\(scaleKey):\(photoIdentity):\(sourceKey)"
+  }
+
+  var alternativeSources: [Source]? {
+    fallbackURL.map { [KF.ImageResource(downloadURL: $0, cacheKey: cacheKey).convertToSource()] }
   }
 
   @MainActor
@@ -56,7 +59,7 @@ public struct UserAvatarImageSource: Sendable {
       // No downsampling processor: a .none result from a processed request can still be thumbnail data.
       manager.retrieveImage(
         with: KF.ImageResource(downloadURL: url, cacheKey: cacheKey),
-        options: onlyFromCache ? [.onlyFromCache] : [],
+        options: (onlyFromCache ? [.onlyFromCache] : []) + (alternativeSources.map { [.alternativeSources($0)] } ?? []),
         completionHandler: { result in
           switch result {
           case let .success(image):

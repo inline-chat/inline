@@ -242,6 +242,7 @@ public class MessagesProgressiveViewModel {
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
   private var loadedWindowMetadataGeneration: UInt64 = 0
   private var reloadGeneration: UInt64 = 0
+  private var avatarGeneration: UInt64 = 0
   private var reloadTask: Task<Void, Never>?
 
   // Note:
@@ -276,7 +277,7 @@ public class MessagesProgressiveViewModel {
     publisher.publisher
       .sink { [weak self] update in
         guard let self else { return }
-        Log.shared.trace("Received update \(update)")
+        Log.shared.trace("Received update \(update.traceLabel)")
         if let changeset = applyChanges(update: update) {
           callback?(changeset)
         }
@@ -395,6 +396,7 @@ public class MessagesProgressiveViewModel {
   public func loadLocalWindowAroundMessageAsync(messageId: Int64, limit: Int? = nil) async throws -> Bool {
     invalidatePendingReload()
     let generation = reloadGeneration
+    let sourceGeneration = avatarGeneration
     let peer = peer
     let count = max(60, min(limit ?? initialLimit, maximumWindowCount ?? 400))
     let snapshot = try await db.reader.read { db -> (messages: [FullMessage], metadata: LoadedWindowMetadata)? in
@@ -405,10 +407,13 @@ public class MessagesProgressiveViewModel {
     }
     try Task.checkCancellation()
     guard generation == reloadGeneration, let snapshot else { return false }
+    let refreshed = try await refreshingAvatarSources(in: snapshot.messages, since: sourceGeneration)
+    try Task.checkCancellation()
+    guard generation == reloadGeneration else { return false }
     metadataTask?.cancel()
     loadedWindowMetadataGeneration &+= 1
     // Parent publications can arrive during the read; retain the current parent.
-    applyInitialState(.init(messages: snapshot.messages, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
+    applyInitialState(.init(messages: refreshed, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
     messages = reapplyingPendingAcknowledgements(to: messages)
     atBottom = false
     historyAnchorID = messageId
@@ -419,15 +424,19 @@ public class MessagesProgressiveViewModel {
   public func loadLatestWindowAsync() async throws -> Bool {
     invalidatePendingReload()
     let generation = reloadGeneration
+    let sourceGeneration = avatarGeneration
     let snapshot = try await Self.publisherReloadSnapshot(
       database: db, peer: peer, currentUserId: currentUserId, reversed: reversed,
       existingMessages: messages, mode: .replaceLatest(limit: min(initialLimit, maximumWindowCount ?? initialLimit))
     )
     try Task.checkCancellation()
     guard generation == reloadGeneration else { return false }
+    let refreshed = try await refreshingAvatarSources(in: snapshot.messages, since: sourceGeneration)
+    try Task.checkCancellation()
+    guard generation == reloadGeneration else { return false }
     metadataTask?.cancel()
     loadedWindowMetadataGeneration &+= 1
-    applyInitialState(.init(messages: snapshot.messages, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
+    applyInitialState(.init(messages: refreshed, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
     messages = reapplyingPendingAcknowledgements(to: messages)
     historyAnchorID = nil
     return true
@@ -575,6 +584,26 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
+      case let .userAvatar(userInfo, accountUserID):
+        guard currentUserId == accountUserID else { return nil }
+        avatarGeneration &+= 1
+        var nextMessages = messages
+        var changed: [FullMessage] = []
+        var indices: [Int] = []
+        for index in nextMessages.indices {
+          if nextMessages[index].applyUserAvatar(userInfo) {
+            changed.append(nextMessages[index])
+            indices.append(index)
+          }
+        }
+        if !indices.isEmpty { messages = nextMessages }
+        if var anchor = threadAnchor, anchor.applyUserAvatar(userInfo) {
+          threadAnchor = anchor
+          changed.append(anchor)
+        }
+        guard !changed.isEmpty else { return nil }
+        return .updated(changed, indexSet: indices, animated: false)
+
       case let .acknowledgements(change):
         guard change.peer == peer else { return nil }
         invalidatePendingReload()
@@ -645,6 +674,7 @@ public class MessagesProgressiveViewModel {
 
     reloadGeneration &+= 1
     let generation = reloadGeneration
+    let sourceGeneration = avatarGeneration
     reloadTask?.cancel()
     let database = db
     let peer = peer
@@ -664,7 +694,9 @@ public class MessagesProgressiveViewModel {
         )
         guard !Task.isCancelled, let self, self.reloadGeneration == generation else { return }
 
-        self.messages = self.reapplyingPendingAcknowledgements(to: snapshot.messages)
+        let refreshed = try await self.refreshingAvatarSources(in: snapshot.messages, since: sourceGeneration)
+        guard !Task.isCancelled, self.reloadGeneration == generation else { return }
+        self.messages = self.reapplyingPendingAcknowledgements(to: refreshed)
         self.updateRange()
         let metadataRequest = self.beginLoadedWindowMetadataRequest()
         _ = self.applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest)
@@ -678,6 +710,26 @@ public class MessagesProgressiveViewModel {
         Log.shared.error("Failed to reload messages", error: error)
       }
     }
+  }
+
+  /// Only a source event racing an async history read needs this extra user query.
+  /// No image bytes or user snapshots are retained as a second cache.
+  func refreshingAvatarSources(in snapshot: [FullMessage], since generation: UInt64) async throws -> [FullMessage] {
+    var checkedGeneration = generation
+    var result = snapshot
+    while checkedGeneration != avatarGeneration {
+      try Task.checkCancellation()
+      checkedGeneration = avatarGeneration
+      let userIDs = Set(result.flatMap(\.avatarUserIDs))
+      guard !userIDs.isEmpty else { return result }
+      let users = try await db.reader.read { db in
+        try User.userInfoQuery().filter(userIDs.contains(Column("id"))).fetchAll(db)
+      }
+      for index in result.indices {
+        for user in users { _ = result[index].applyUserAvatar(user) }
+      }
+    }
+    return result
   }
 
   private func invalidatePendingReload() {
@@ -1500,6 +1552,7 @@ public class MessagesProgressiveViewModel {
   private func loadAdditionalMessagesAsync(request: AdditionalLoadRequest, publish: Bool) async -> Bool {
     let peer = peer
     let generation = reloadGeneration
+    let sourceGeneration = avatarGeneration
 
     if maximumWindowCount != nil {
       let existing = messages
@@ -1515,9 +1568,11 @@ public class MessagesProgressiveViewModel {
           return (messages: merged, inserted: !batch.isEmpty, metadata: try Self.loadedWindowMetadata(db, peer: peer, messages: merged))
         }
         guard !Task.isCancelled, generation == reloadGeneration else { return false }
+        let refreshed = try await refreshingAvatarSources(in: snapshot.messages, since: sourceGeneration)
+        guard !Task.isCancelled, generation == reloadGeneration else { return false }
         invalidatePendingReload()
         metadataTask?.cancel()
-        messages = reapplyingPendingAcknowledgements(to: snapshot.messages)
+        messages = reapplyingPendingAcknowledgements(to: refreshed)
         updateRange()
         _ = applyLoadedWindowMetadata(snapshot.metadata, for: beginLoadedWindowMetadataRequest())
         // No suspension after mutation: the caller can commit the matching rows
@@ -1541,6 +1596,8 @@ public class MessagesProgressiveViewModel {
         db: db, peer: peer, request: request, currentUserId: currentUserId
       )
       let rawCount = messagesBatch.count
+      guard !Task.isCancelled else { return false }
+      messagesBatch = try await refreshingAvatarSources(in: messagesBatch, since: sourceGeneration)
       guard !Task.isCancelled else { return false }
 
       log.trace("loaded additional messages async: \(rawCount)")
@@ -1653,6 +1710,7 @@ public final class MessagesPublisher {
     case add(MessageAdd)
     case update(MessageUpdate)
     case acknowledgements(AcknowledgementChange)
+    case userAvatar(UserInfo, accountUserID: Int64)
     case delete(MessageDelete)
     case reload(peer: Peer, animated: Bool?)
   }
@@ -1665,8 +1723,81 @@ public final class MessagesPublisher {
   private var nextAcknowledgementProjectionToken: Int64 = 1
   private var pendingAcknowledgements: [OptimisticAcknowledgementKey: PendingAcknowledgement] = [:]
 
-  init(database: AppDatabase) {
+  private let validateAvatarAccount: @Sendable (AuthAccountMutationToken) throws -> Void
+  private var pendingAvatarChanges: [Int64: AuthAccountMutationToken] = [:]
+  private var refreshingAvatars = false
+  private var avatarGeneration: UInt64 = 0
+
+  init(
+    database: AppDatabase,
+    validateAvatarAccount: @escaping @Sendable (AuthAccountMutationToken) throws -> Void = {
+      try Auth.shared.handle.validateAccountMutation($0)
+    }
+  ) {
     db = database
+    self.validateAvatarAccount = validateAvatarAccount
+  }
+
+  /// A rollback must never replace a visible sender with uncommitted avatar metadata.
+  nonisolated static func publishUserAvatarChangeAfterCommit(
+    _ db: Database,
+    userID: Int64,
+    accountToken: AuthAccountMutationToken? = nil,
+    publish: @escaping @MainActor @Sendable (Int64, AuthAccountMutationToken) async -> Void = {
+      await MessagesPublisher.shared.userAvatarChanged(userID: $0, accountToken: $1)
+    }
+  ) {
+    guard let token = accountToken ?? (try? Auth.shared.handle.beginAccountMutation()) else { return }
+    db.afterNextTransaction { _ in
+      Task { @MainActor in await publish(userID, token) }
+    }
+  }
+
+  /// Coalesce source changes, then read their latest committed values serially. Never hydrate messages.
+  func userAvatarChanged(userID: Int64, accountToken: AuthAccountMutationToken) async {
+    guard acceptsUpdates, (try? validateAvatarAccount(accountToken)) != nil else { return }
+    pendingAvatarChanges[userID] = accountToken
+    guard !refreshingAvatars else { return }
+    refreshingAvatars = true
+    activeDatabaseReads += 1
+    defer {
+      refreshingAvatars = false
+      finishDatabaseRead()
+    }
+    while acceptsUpdates, !pendingAvatarChanges.isEmpty {
+      let batch = pendingAvatarChanges
+      pendingAvatarChanges.removeAll()
+      do {
+        let users = try await db.reader.read { db in
+          try User.userInfoQuery().filter(Array(batch.keys).contains(Column("id"))).fetchAll(db)
+        }
+        guard acceptsUpdates else { return }
+        for userInfo in users {
+          guard pendingAvatarChanges[userInfo.id] == nil,
+                let token = batch[userInfo.id],
+                (try? validateAvatarAccount(token)) != nil else { continue }
+          avatarGeneration &+= 1
+          publisher.send(.userAvatar(userInfo, accountUserID: token.userID))
+        }
+      } catch {
+        Log.shared.error("Failed to refresh avatar projection")
+      }
+    }
+  }
+
+  private func refreshingAvatarSources(in snapshot: FullMessage, since generation: UInt64) async throws -> FullMessage {
+    var checkedGeneration = generation
+    var result = snapshot
+    while checkedGeneration != avatarGeneration {
+      checkedGeneration = avatarGeneration
+      let ids = Set(result.avatarUserIDs)
+      guard !ids.isEmpty else { return result }
+      let users = try await db.reader.read { db in
+        try User.userInfoQuery().filter(ids.contains(Column("id"))).fetchAll(db)
+      }
+      for user in users { _ = result.applyUserAvatar(user) }
+    }
+    return result
   }
 
   /// Process teardown closes admission synchronously before the shared SQLCipher owner drains.
@@ -1743,6 +1874,7 @@ public final class MessagesPublisher {
 //    Log.shared.debug("Message added: \(message)")
     guard beginDatabaseRead(peer: peer) else { return }
     defer { finishDatabaseRead() }
+    let sourceGeneration = avatarGeneration
 
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -1776,8 +1908,9 @@ public final class MessagesPublisher {
         return
       }
 
+      let refreshed = try await refreshingAvatarSources(in: fullMessage, since: sourceGeneration)
       guard acceptsUpdates else { return }
-      publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
+      publisher.send(.add(MessageAdd(messages: [refreshed], peer: peer)))
     } catch {
       Log.shared.error("Failed to get full message", error: error)
     }
@@ -1802,6 +1935,7 @@ public final class MessagesPublisher {
     //    Log.shared.debug("Message updated: \(message.messageId)")
     guard beginDatabaseRead(peer: peer) else { return }
     defer { finishDatabaseRead() }
+    let sourceGeneration = avatarGeneration
 
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -1842,8 +1976,9 @@ public final class MessagesPublisher {
       Log.shared.error("Failed to get full message")
       return
     }
-    guard acceptsUpdates else { return }
-    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
+    guard let refreshed = try? await refreshingAvatarSources(in: fullMessage, since: sourceGeneration),
+          acceptsUpdates else { return }
+    publisher.send(.update(MessageUpdate(message: refreshed, animated: animated, peer: peer)))
   }
 
   /// Cursor publication only updates already-loaded rows. No message query or anchor routing.
@@ -2092,12 +2227,52 @@ private extension MessagesPublisher.UpdateType {
     switch self {
       case .add:
         "add"
-      case .update, .acknowledgements:
+      case .update, .acknowledgements, .userAvatar:
         "update"
       case .delete:
         "delete"
       case .reload:
         "reload"
     }
+  }
+}
+
+
+private extension FullMessage {
+  var avatarUserIDs: [Int64] {
+    [senderInfo?.id, forwardFromUserInfo?.id, forwardFromPeerUserInfo?.id, repliedToMessage?.senderInfo?.id]
+      .compactMap { $0 }
+      + reactions.compactMap { $0.userInfo?.id }
+      + (acknowledgements ?? []).compactMap { $0.userInfo?.id }
+  }
+
+  /// Preserve all message content, geometry inputs, names, and transient projections.
+  mutating func applyUserAvatar(_ source: UserInfo) -> Bool {
+    var changed = false
+    func update(_ info: inout UserInfo?) {
+      guard var current = info, current.id == source.id else { return }
+      guard current.user.avatarSource != source.user.avatarSource
+        || (current.profilePhoto ?? []) != (source.profilePhoto ?? []) else { return }
+      current.user.profileFileUniqueId = source.user.profileFileUniqueId
+      current.user.profileFileId = source.user.profileFileId
+      current.user.profileCdnUrl = source.user.profileCdnUrl
+      current.user.profileLocalPath = source.user.profileLocalPath
+      current.profilePhoto = source.profilePhoto
+      info = current
+      changed = true
+    }
+    update(&senderInfo)
+    update(&forwardFromUserInfo)
+    update(&forwardFromPeerUserInfo)
+    if var reply = repliedToMessage {
+      update(&reply.senderInfo)
+      repliedToMessage = reply
+    }
+    for index in reactions.indices { update(&reactions[index].userInfo) }
+    if var cursors = acknowledgements {
+      for index in cursors.indices { update(&cursors[index].userInfo) }
+      acknowledgements = cursors
+    }
+    return changed
   }
 }

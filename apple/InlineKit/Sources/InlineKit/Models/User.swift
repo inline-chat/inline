@@ -374,6 +374,7 @@ public extension ApiUser {
       try user.save(db)
     }
 
+    User.publishAvatarChange(db, previous: existing, current: user)
     return user
   }
 }
@@ -468,6 +469,7 @@ public extension User {
       try user.save(db)
     }
 
+    User.publishAvatarChange(db, previous: existing, current: user)
     return user
   }
 }
@@ -487,7 +489,7 @@ public extension User {
       return nil
     }
     return
-      User.getProfileCacheDirectory()
+      FileHelpers.getLocalCacheDirectory(for: .photos, createIfNeeded: false)
         .appending(path: profileLocalPath)
   }
 
@@ -562,7 +564,21 @@ public extension User {
     try User.filter(id: userId).updateAll(db, [
       Column("profileLocalPath").set(to: localPath),
     ])
+    var updated = user
+    updated.profileLocalPath = localPath
+    publishAvatarChange(db, previous: user, current: updated)
     return user.profileLocalPath
+  }
+
+  /// Emit after commit, through the existing loaded-message projection owner.
+  internal static func publishAvatarChange(_ db: Database, previous: User?, current: User) {
+    let previousSource = previous?.avatarSource ?? [nil, nil, nil, nil]
+    guard previousSource != current.avatarSource else { return }
+    MessagesPublisher.publishUserAvatarChangeAfterCommit(db, userID: current.id)
+  }
+
+  internal var avatarSource: [String?] {
+    [profileFileUniqueId, profileFileId, profileCdnUrl, profileLocalPath]
   }
 
   private static func imageFormat(for data: Data) -> ImageFormat {
