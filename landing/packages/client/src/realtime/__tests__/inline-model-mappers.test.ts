@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Dialog, Space, User } from "@inline-chat/protocol/core"
-import { chatId, dialogId, spaceId, userId } from "@inline/ids"
+import { chatId, dialogId, messageId, spaceId, userId } from "@inline/ids"
 import { Db, DbObjectKind } from "../../index"
 import {
   getDialogId,
@@ -10,6 +10,41 @@ import {
 } from "../transactions/mappers"
 
 describe("Inline model mappers", () => {
+  it.each([5n, undefined])(
+    "keeps newer read state when a delayed snapshot has boundary %s",
+    (readMaxId) => {
+      const db = new Db({ autoHydrate: false, persistence: false })
+      const peer: Dialog["peer"] = {
+        type: { oneofKind: "chat", chat: { chatId: 801n } },
+      }
+      upsertDialog(db, {
+        chatId: 801n,
+        peer,
+        readMaxId: 20n,
+        unreadCount: 0,
+        unreadMark: false,
+      })
+
+      upsertDialog(db, {
+        chatId: 801n,
+        peer,
+        readMaxId,
+        unreadCount: 4,
+        unreadMark: true,
+        pinned: true,
+      })
+
+      expect(db.get(db.ref(DbObjectKind.Dialog, dialogId(-801)))).toMatchObject(
+        {
+          readMaxId: messageId(20),
+          unreadCount: 0,
+          unreadMark: false,
+          pinned: true,
+        },
+      )
+    },
+  )
+
   it("retains the protocol avatar tiny thumbnail in the resident cache", () => {
     const db = new Db({ autoHydrate: false })
     const strippedThumb = new Uint8Array([1, 30, 40])

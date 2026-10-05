@@ -182,6 +182,10 @@ export class RealtimeClient {
   >()
   private restoredTransactions = false
   private lastPendingTransactionCreatedAt = 0
+  private accountUserId: UserID | undefined
+  private connectionSession:
+    | { token: string; userId: UserID | null }
+    | undefined
 
   constructor(options: RealtimeClientOptions) {
     const baseLogger = options.logger ?? new Log("RealtimeV2", options.logLevel)
@@ -211,7 +215,7 @@ export class RealtimeClient {
 
     this.client = new ProtocolClient({
       transport: this.transport,
-      getConnectionInit: () => this.getConnectionInit(),
+      getConnectionInit: () => this.getConnectionInit(true),
       logLevel: options.logLevel,
       logger: baseLogger.withScope("ProtocolClient"),
     })
@@ -233,6 +237,7 @@ export class RealtimeClient {
           new SyncEngine({
             db: this.db,
             client: this.client,
+            getCurrentUserId: () => this.accountUserId,
             logger: baseLogger.withScope("Sync"),
           })
     this.transactions = new Transactions(baseLogger.withScope("Transactions"))
@@ -246,6 +251,15 @@ export class RealtimeClient {
   }
 
   async start(): Promise<void> {
+    const currentUserId = this.auth.getState().currentUserId
+    if (
+      this.accountUserId != null &&
+      currentUserId != null &&
+      this.accountUserId !== currentUserId
+    ) {
+      throw new Error("Inline realtime belongs to another account")
+    }
+    this.accountUserId ??= currentUserId ?? undefined
     if (this.stopTask) {
       await this.stopTask
       return await this.start()
@@ -293,6 +307,17 @@ export class RealtimeClient {
     try {
       await this.drainTrackedTasks(this.activeOwnerTasks)
       if (!this.isCurrentLifecycle(generation, "starting")) return
+      await this.db.ready
+      if (!this.isCurrentLifecycle(generation, "starting")) return
+      const currentUserId = this.auth.getState().currentUserId
+      if (
+        this.accountUserId != null &&
+        currentUserId != null &&
+        this.accountUserId !== currentUserId
+      ) {
+        throw new Error("Inline realtime belongs to another account")
+      }
+      this.accountUserId ??= currentUserId ?? undefined
       if (!this.getConnectionInit()) {
         throw new Error("not-authorized")
       }
@@ -387,6 +412,14 @@ export class RealtimeClient {
   }
 
   async startSession(session: AuthSession) {
+    const sessionUserId = parseInlineId<"user">(session.userId, {
+      positive: true,
+    })
+    if (this.accountUserId != null && this.accountUserId !== sessionUserId) {
+      throw new Error("Inline realtime belongs to another account")
+    }
+    if (session.token && sessionUserId != null)
+      this.accountUserId ??= sessionUserId
     await this.auth.login(session)
     await this.start()
   }
@@ -397,9 +430,19 @@ export class RealtimeClient {
     await this.auth.logout()
   }
 
-  private getConnectionInit(): ConnectionInit | null {
+  private getConnectionInit(captureSession = false): ConnectionInit | null {
+    if (
+      this.accountUserId != null &&
+      this.auth.getState().currentUserId !== this.accountUserId
+    )
+      return null
     const token = this.auth.getToken()
     if (!token) return null
+    if (captureSession)
+      this.connectionSession = {
+        token,
+        userId: this.auth.getState().currentUserId,
+      }
 
     return {
       token,
@@ -571,9 +614,14 @@ export class RealtimeClient {
       this.lastPendingTransactionCreatedAt + 1,
     )
     this.lastPendingTransactionCreatedAt = transactionCreatedAt
+    let accountRejected = false
     try {
       if (transaction.persistence || transaction.optimistic) {
         await this.db.commit(() => {
+          if (!this.isCurrentAccount()) {
+            accountRejected = true
+            throw new TransactionFailure(TransactionErrors.stopped())
+          }
           transaction.prepare?.(this.db, this.auth)
           if (transaction.persistence) {
             this.db.insert({
@@ -591,6 +639,7 @@ export class RealtimeClient {
         })
       }
     } catch (error) {
+      if (accountRejected) throw error
       await transaction.failed?.(
         TransactionErrors.invalid(),
         this.db,
@@ -645,7 +694,7 @@ export class RealtimeClient {
     ) {
       throw new TypeError("Invalid Inline failed-message identity")
     }
-    if (!this.isRealtimeActive()) {
+    if (!this.acceptsTransactions()) {
       throw new Error("Inline realtime must be started before resending")
     }
     const resend = failedMessageResend(
@@ -658,6 +707,8 @@ export class RealtimeClient {
     }
 
     await this.db.commit(() => {
+      if (!this.isCurrentAccount())
+        throw new TransactionFailure(TransactionErrors.stopped())
       stageFailedMessageResend(this.db, resend)
     })
     this.prepareAcceptedMessageWindow(resend.transaction)
@@ -713,6 +764,8 @@ export class RealtimeClient {
       const wrapper = queued[0]!
       try {
         await this.db.commit(() => {
+          if (!this.isCurrentAccount())
+            throw new TransactionFailure(TransactionErrors.stopped())
           this.removePendingTransaction(wrapper.id, wrapper.transaction)
           this.removeLocalMessageAndRepairChat(exactChatId, exactMessageId)
         })
@@ -740,6 +793,8 @@ export class RealtimeClient {
       return false
     }
     await this.db.commit(() => {
+      if (!this.isCurrentAccount())
+        throw new TransactionFailure(TransactionErrors.stopped())
       this.db.delete(
         this.db.ref(DbObjectKind.PendingTransaction, failed.outbox.id),
       )
@@ -880,7 +935,9 @@ export class RealtimeClient {
               event.updates.updates,
             ),
           )
-          applyUpdates(this.db, event.updates.updates)
+          applyUpdates(this.db, event.updates.updates, "realtime", {
+            currentUserId: this.accountUserId,
+          })
         }
         break
 
@@ -889,7 +946,10 @@ export class RealtimeClient {
           reason: event.reason,
         })
         // Only the explicit revocation signal may discard durable credentials.
-        const stop = event.reason === ConnectionError_Reason.SESSION_REVOKED ? this.stopSession() : this.stop()
+        const stop =
+          event.reason === ConnectionError_Reason.SESSION_REVOKED
+            ? this.stopRevokedSession()
+            : this.stop()
         void stop.catch((error: unknown) => {
           this.log.error("realtime.auth.stop_failed", { error })
         })
@@ -1338,8 +1398,28 @@ export class RealtimeClient {
 
   private acceptsTransactions() {
     return (
-      this.lifecycleState === "starting" ||
-      this.lifecycleState === "running"
+      (this.lifecycleState === "starting" ||
+        this.lifecycleState === "running") &&
+      this.isCurrentAccount()
+    )
+  }
+
+  private async stopRevokedSession() {
+    const revoked = this.connectionSession
+    const matches = () =>
+      revoked != null &&
+      this.auth.getToken() === revoked.token &&
+      this.auth.getState().currentUserId === revoked.userId
+    const wasCurrent = matches()
+    await this.stop()
+    await this.connection.setAuthAvailable(false)
+    if (wasCurrent && matches()) await this.auth.logout()
+  }
+
+  private isCurrentAccount() {
+    return (
+      this.accountUserId != null &&
+      this.auth.getState().currentUserId === this.accountUserId
     )
   }
 

@@ -477,7 +477,7 @@ export class Db {
           }),
         )
 
-        this.batch(() => {
+        await this.commit(() => {
           for (const { kind, objects } of results) {
             for (const object of objects) {
               this.notify(this.ref(kind, object.id))
@@ -503,7 +503,7 @@ export class Db {
         return { kind, objects }
       }),
     )
-    this.notifyHydrated(results)
+    await this.commit(() => this.notifyHydrated(results))
   }
 
   async hydrateMessageWindow(
@@ -537,89 +537,96 @@ export class Db {
     const collection = this.collection<DbObjectKind.Message, DbModels[DbObjectKind.Message]>(
       DbObjectKind.Message,
     )
-    const { objects, inserted } =
+    const initialWindowKeys = new Set(this.fullChatWindows.keys(chatId))
+    let deferred: DbModels[DbObjectKind.DeferredUpdate][] = []
+    const { objects: storedObjects, inserted } =
       await collection.hydrateMessageWindowByChatId(
         chatId,
         options.limit,
         options.before,
         options.after,
+        async (objects) => {
+          deferred = await this.loadDeferredUpdatesForMessageKeys(
+            objects.map((message) => message.id),
+          )
+        },
       )
-    const deferred = await this.loadDeferredUpdatesForMessageKeys(
-      objects.map((message) => message.id),
-    )
-    if (
-      intentVersion != null &&
-      this.isCurrentResidentMessageWindowIntent(
-        chatId,
-        intentVersion,
-      )
-    ) {
-      const messageKeys = objects.map((message) => message.id)
-      if (options.before == null && options.after == null) {
-        this.replaceResidentMessageWindow(
-          chatId,
-          this.messageKeysRetainingLocalSends(
-            chatId,
-            messageKeys,
-          ),
-          true,
-          intentVersion,
-        )
-      } else {
-        this.extendResidentMessageWindow(
-          chatId,
-          messageKeys,
-          intentVersion,
-        )
-      }
+    let result: { count: number; messageKeys: MessageKey[] } = {
+      count: 0,
+      messageKeys: [],
     }
-    this.notifyHydrated([
-      { kind: DbObjectKind.DeferredUpdate, objects: deferred },
-      { kind: DbObjectKind.Message, objects: inserted },
-    ])
-    const newest = objects
-      .slice()
-      .sort((left, right) =>
-        compareMessagesByWindow(right, left),
-      )
-      .at(0)
-    const chatRef = this.ref(DbObjectKind.Chat, chatId)
-    const chat = this.get(chatRef)
-    if (
-      newest &&
-      chat &&
-      (chat.lastMsgId == null ||
-        compareMessagesByWindow(newest, {
-          messageId: chat.lastMsgId,
-          date: chat.date,
-        }) > 0)
-    ) {
-      this.update({
-        ...chat,
-        lastMsgId: newest.messageId,
-        date: newest.date ?? chat.date,
+    await this.commit(() => {
+      const objects = storedObjects.flatMap((object) => {
+        const current = collection.get(object.id)
+        return current ? [current] : []
       })
-    }
-    const currentLastMessageId = this.get(chatRef)?.lastMsgId
-    if (
-      this.fullChatWindows.isActive(chatId) &&
-      intentVersion != null &&
-      this.isCurrentResidentMessageWindowIntent(
-        chatId,
-        intentVersion,
-      ) &&
-      options.after != null &&
-      currentLastMessageId != null &&
-      objects.some(
-        (message) => message.messageId === currentLastMessageId,
-      )
-    ) {
-      this.fullChatWindows.setAtLatest(chatId, true)
-    }
-    return {
-      count: objects.length,
-      messageKeys: objects.map((message) => message.id),
-    }
+      if (
+        intentVersion != null &&
+        this.isCurrentResidentMessageWindowIntent(chatId, intentVersion)
+      ) {
+        const messageKeys = objects.map((message) => message.id)
+        if (options.before == null && options.after == null) {
+          const liveKeys = this.fullChatWindows
+            .keys(chatId)
+            .filter(
+              (key) =>
+                !initialWindowKeys.has(key) && collection.get(key) != null,
+            )
+          this.replaceResidentMessageWindow(
+            chatId,
+            this.messageKeysRetainingLocalSends(chatId, [
+              ...messageKeys,
+              ...liveKeys,
+            ]),
+            true,
+            intentVersion,
+          )
+        } else {
+          this.extendResidentMessageWindow(chatId, messageKeys, intentVersion)
+        }
+      }
+      this.notifyHydrated([
+        { kind: DbObjectKind.DeferredUpdate, objects: deferred },
+        { kind: DbObjectKind.Message, objects: inserted },
+      ])
+      const newest = objects
+        .slice()
+        .sort((left, right) => compareMessagesByWindow(right, left))
+        .at(0)
+      const chatRef = this.ref(DbObjectKind.Chat, chatId)
+      const chat = this.get(chatRef)
+      if (
+        newest &&
+        chat &&
+        (chat.lastMsgId == null ||
+          compareMessagesByWindow(newest, {
+            messageId: chat.lastMsgId,
+            date: chat.date,
+          }) > 0)
+      ) {
+        this.update({
+          ...chat,
+          lastMsgId: newest.messageId,
+          date: newest.date ?? chat.date,
+        })
+      }
+      const currentLastMessageId = this.get(chatRef)?.lastMsgId
+      if (
+        this.fullChatWindows.isActive(chatId) &&
+        intentVersion != null &&
+        this.isCurrentResidentMessageWindowIntent(chatId, intentVersion) &&
+        options.after != null &&
+        currentLastMessageId != null &&
+        objects.some((message) => message.messageId === currentLastMessageId)
+      ) {
+        this.fullChatWindows.setAtLatest(chatId, true)
+      }
+      result = {
+        count: objects.length,
+        messageKeys: objects.map((message) => message.id),
+      }
+    })
+    return result
   }
 
   /**
@@ -669,73 +676,76 @@ export class Db {
       DbObjectKind.Message,
       DbModels[DbObjectKind.Message]
     >(DbObjectKind.Message)
-    const objects = await collection.loadLocalWindowAroundMessage(
+    let deferred: DbModels[DbObjectKind.DeferredUpdate][] = []
+    const storedObjects = await collection.loadLocalWindowAroundMessage(
       chatId,
       options.messageId,
       options.beforeLimit,
       options.afterLimit,
+      async (objects) => {
+        deferred = await this.loadDeferredUpdatesForMessageKeys(
+          objects.map((message) => message.id),
+        )
+      },
     )
-    if (objects.length === 0) {
-      return { found: false, messageKeys: [] }
+    let result: { found: boolean; messageKeys: MessageKey[] } = {
+      found: false,
+      messageKeys: [],
     }
+    await this.commit(() => {
+      const objects = storedObjects.flatMap((object) => {
+        const current = collection.get(object.id)
+        return current ? [current] : []
+      })
+      if (objects.length === 0) return
 
-    if (
-      expectedIntentVersion != null &&
-      !this.isCurrentResidentMessageWindowIntent(
-        chatId,
-        expectedIntentVersion,
-      )
-    ) {
-      return { found: false, messageKeys: [] }
-    }
+      if (
+        expectedIntentVersion != null &&
+        !this.isCurrentResidentMessageWindowIntent(
+          chatId,
+          expectedIntentVersion,
+        )
+      ) {
+        return
+      }
 
-    const deferred = await this.loadDeferredUpdatesForMessageKeys(
-      objects.map((message) => message.id),
-    )
-
-    if (this.fullChatWindows.isActive(chatId)) {
-      this.replaceResidentMessageWindow(
-        chatId,
-        objects.map((message) => message.id),
-        false,
-        expectedIntentVersion,
-      )
-    }
-
-    this.batch(() => {
-      for (const object of deferred) {
-        this.notify(
-          this.ref(DbObjectKind.DeferredUpdate, object.id),
+      if (this.fullChatWindows.isActive(chatId)) {
+        this.replaceResidentMessageWindow(
+          chatId,
+          objects.map((message) => message.id),
+          false,
+          expectedIntentVersion,
         )
       }
-      if (
-        this.fullChatWindows.isActive(chatId) ||
-        !replaceResidentWindow
-      ) {
-        for (const object of objects) {
-          if (!collection.get(object.id)) {
-            collection.insertResident(object)
+
+      this.batch(() => {
+        for (const object of deferred) {
+          this.notify(this.ref(DbObjectKind.DeferredUpdate, object.id))
+        }
+        if (this.fullChatWindows.isActive(chatId) || !replaceResidentWindow) {
+          for (const object of objects) {
+            this.notify(this.ref(DbObjectKind.Message, object.id))
           }
-          this.notify(this.ref(DbObjectKind.Message, object.id))
+          if (this.fullChatWindows.isActive(chatId)) {
+            this.reconcileResidentMessageWindow(chatId)
+          }
+        } else {
+          for (const id of collection.replaceResidentMessagesForChat(
+            chatId,
+            objects,
+          )) {
+            this.notify(this.ref(DbObjectKind.Message, id))
+          }
         }
-        if (this.fullChatWindows.isActive(chatId)) {
-          this.reconcileResidentMessageWindow(chatId)
-        }
-      } else {
-        for (const id of collection.replaceResidentMessagesForChat(
-          chatId,
-          objects,
-        )) {
-          this.notify(this.ref(DbObjectKind.Message, id))
-        }
+      })
+      result = {
+        found: objects.some(
+          (message) => message.messageId === options.messageId,
+        ),
+        messageKeys: objects.map((message) => message.id),
       }
     })
-    return {
-      found: objects.some(
-        (message) => message.messageId === options.messageId,
-      ),
-      messageKeys: objects.map((message) => message.id),
-    }
+    return result
   }
 
   /**
@@ -1100,19 +1110,28 @@ export class Db {
     })
   }
 
-  async hydrateObjects<K extends DbObjectKind>(kind: K, ids: DbObjectId<K>[]): Promise<number> {
+  async hydrateObjects<K extends DbObjectKind>(
+    kind: K,
+    ids: DbObjectId<K>[],
+  ): Promise<number> {
     const uniqueIds = Array.from(new Set(ids))
-    const objects = await this.collection<K, DbModels[K]>(kind).hydrateIds(uniqueIds)
-    const deferred =
-      kind === DbObjectKind.Message
-        ? await this.loadDeferredUpdatesForMessageKeys(
+    let deferred: DbModels[DbObjectKind.DeferredUpdate][] = []
+    const objects = await this.collection<K, DbModels[K]>(kind).hydrateIds(
+      uniqueIds,
+      async (objects) => {
+        if (kind === DbObjectKind.Message) {
+          deferred = await this.loadDeferredUpdatesForMessageKeys(
             objects.map((object) => String(object.id)),
           )
-        : []
-    this.notifyHydrated([
-      { kind: DbObjectKind.DeferredUpdate, objects: deferred },
-      { kind, objects },
-    ])
+        }
+      },
+    )
+    await this.commit(() =>
+      this.notifyHydrated([
+        { kind: DbObjectKind.DeferredUpdate, objects: deferred },
+        { kind, objects },
+      ]),
+    )
     return objects.length
   }
 
@@ -1127,9 +1146,9 @@ export class Db {
     const objects = await this.loadDeferredUpdatesForMessageKeys(
       targetKeys,
     )
-    this.notifyHydrated([
-      { kind: DbObjectKind.DeferredUpdate, objects },
-    ])
+    await this.commit(() =>
+      this.notifyHydrated([{ kind: DbObjectKind.DeferredUpdate, objects }]),
+    )
     return objects.length
   }
 
@@ -1283,6 +1302,8 @@ export class Db {
           ),
         (collection, id, previous) =>
           this.recordUndo(collection, id, previous),
+        () => this.awaitCommittedWrites(),
+        (apply) => this.commit(apply),
         this.logger.withScope(`Collection.${kind}`),
       )
     }
@@ -1297,6 +1318,16 @@ export class Db {
     void tracked.then(() => {
       this.pendingPersistence.delete(tracked)
     })
+  }
+
+  /** Storage snapshots must not mutate a writer's pending commit projection. */
+  private async awaitCommittedWrites() {
+    while (true) {
+      const queue = this.commitQueue
+      await queue
+      await this.flushPersistence()
+      if (queue === this.commitQueue) return
+    }
   }
 
   private schedulePersistence(
@@ -1441,6 +1472,10 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   hasHydrated = false
   private hydrationPromise: Promise<O[]> | null = null
   private storage: CollectionStorage<O> | null
+  private readonly storageReads = new Set<{
+    changedIds: Set<O["id"]>
+    clearedChats: Set<ChatID>
+  }>()
 
   constructor(
     kind: K,
@@ -1459,6 +1494,8 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
       id: DbModel["id"],
       previous: DbModel | undefined,
     ) => void,
+    private readonly awaitCommittedWrites: () => Promise<void>,
+    private readonly commitHydration: (apply: () => void) => Promise<void>,
     private readonly logger: Log,
   ) {
     this.kind = kind
@@ -1502,6 +1539,7 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   }
 
   clearMessagesForChat(chatId: ChatID): O["id"][] {
+    for (const read of this.storageReads) read.clearedChats.add(chatId)
     const removedIds: O["id"][] = []
     for (const id of this.ids) {
       const object = this.objectsById.get(id)
@@ -1599,19 +1637,13 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     if (this.hydrationPromise) return this.hydrationPromise
 
     this.hydrationPromise = (async () => {
-      try {
-        await this.storage!.init()
-        const objects = await this.storage!.getAll()
-        const inserted: O[] = []
-        for (const object of objects) {
-          if (this.objectsById.has(object.id)) continue
-          this.insertLocal(object)
-          inserted.push(object)
-        }
-        return inserted
-      } finally {
-        this.hasHydrated = true
-      }
+      const { inserted } = await this.readStorage(
+        () => this.storage!.getAll(),
+        undefined,
+        true,
+      )
+      this.hasHydrated = true
+      return inserted
     })()
 
     return this.hydrationPromise
@@ -1622,31 +1654,21 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     limit: number,
     before?: MessageWindowCursor,
     after?: MessageWindowCursor,
+    prepare?: (objects: O[]) => Promise<void>,
   ): Promise<{ objects: O[]; inserted: O[] }> {
     if (!this.storage?.getMessageWindowByChatId) {
       return { objects: [], inserted: [] }
     }
 
-    await this.storage.init()
-    const objects =
-      await this.storage.getMessageWindowByChatId(
-        chatId,
-        limit,
-        before,
-        after,
-      )
-    const inserted: O[] = []
-    for (const object of objects) {
-      if (this.objectsById.has(object.id)) continue
-      this.insertLocal(object)
-      inserted.push(object)
-    }
-    return { objects, inserted }
+    return await this.readStorage(
+      () =>
+        this.storage!.getMessageWindowByChatId!(chatId, limit, before, after),
+      prepare,
+      true,
+    )
   }
 
-  async hydrateDeferredTargetKeys(
-    targetKeys: string[],
-  ): Promise<O[]> {
+  async hydrateDeferredTargetKeys(targetKeys: string[]): Promise<O[]> {
     if (
       !this.storage?.getDeferredUpdatesByTargetKeys ||
       targetKeys.length === 0
@@ -1654,17 +1676,11 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
       return []
     }
 
-    await this.storage.init()
-    const objects =
-      await this.storage.getDeferredUpdatesByTargetKeys(
-        targetKeys,
-      )
-    const inserted: O[] = []
-    for (const object of objects) {
-      if (this.objectsById.has(object.id)) continue
-      this.insertLocal(object)
-      inserted.push(object)
-    }
+    const { inserted } = await this.readStorage(
+      () => this.storage!.getDeferredUpdatesByTargetKeys!(targetKeys),
+      undefined,
+      true,
+    )
     return inserted
   }
 
@@ -1673,16 +1689,22 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     messageId: MessageID,
     beforeLimit: number,
     afterLimit: number,
+    prepare?: (objects: O[]) => Promise<void>,
   ): Promise<O[]> {
     if (!this.storage?.getMessageWindowAroundMessageId) return []
 
-    await this.storage.init()
-    return await this.storage.getMessageWindowAroundMessageId(
-      chatId,
-      messageId,
-      beforeLimit,
-      afterLimit,
+    const { objects } = await this.readStorage(
+      () =>
+        this.storage!.getMessageWindowAroundMessageId!(
+          chatId,
+          messageId,
+          beforeLimit,
+          afterLimit,
+        ),
+      prepare,
+      true,
     )
+    return objects
   }
 
   replaceResidentMessagesForChat(
@@ -1738,54 +1760,52 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     return removedIds
   }
 
-  async hydrateIds(ids: O["id"][]): Promise<O[]> {
+  async hydrateIds(
+    ids: O["id"][],
+    prepare?: (objects: O[]) => Promise<void>,
+  ): Promise<O[]> {
     if (!this.storage || ids.length === 0) return []
 
-    await this.storage.init()
-    let objects: O[]
-    if (this.storage.getMany) {
-      objects = await this.storage.getMany(ids)
-    } else {
-      objects = []
-      for (const id of ids) {
-        const object = await this.storage.get(id)
-        if (object) objects.push(object)
-      }
-    }
-    const inserted: O[] = []
-    for (const object of objects) {
-      if (this.objectsById.has(object.id)) continue
-      this.insertLocal(object)
-      inserted.push(object)
-    }
+    const { inserted } = await this.readStorage(
+      async () => {
+        if (this.storage!.getMany) return await this.storage!.getMany(ids)
+        const objects: O[] = []
+        for (const id of ids) {
+          const object = await this.storage!.get(id)
+          if (object) objects.push(object)
+        }
+        return objects
+      },
+      prepare,
+      true,
+    )
     return inserted
   }
 
   async readStoredIds(ids: O["id"][]): Promise<O[]> {
     if (ids.length === 0) return []
-
-    const found = new Map<O["id"], O>()
-    const missing: O["id"][] = []
-    for (const id of ids) {
-      const resident = this.objectsById.get(id)
-      if (resident) found.set(id, resident)
-      else missing.push(id)
+    if (!this.storage) {
+      return ids.flatMap((id) => {
+        const object = this.objectsById.get(id)
+        return object ? [object] : []
+      })
     }
-
-    if (this.storage && missing.length > 0) {
-      await this.storage.init()
-      if (this.storage.getMany) {
-        for (const object of await this.storage.getMany(missing)) {
-          found.set(object.id, object)
-        }
-      } else {
-        for (const id of missing) {
-          const object = await this.storage.get(id)
-          if (object) found.set(id, object)
-        }
+    const { objects } = await this.readStorage(async () => {
+      const found = ids.flatMap((id) => {
+        const object = this.objectsById.get(id)
+        return object ? [object] : []
+      })
+      const residentIds = new Set(found.map((object) => object.id))
+      const missing = ids.filter((id) => !residentIds.has(id))
+      if (this.storage!.getMany)
+        return [...found, ...(await this.storage!.getMany(missing))]
+      for (const id of missing) {
+        const object = await this.storage!.get(id)
+        if (object) found.push(object)
       }
-    }
-
+      return found
+    })
+    const found = new Map(objects.map((object) => [object.id, object]))
     return ids.flatMap((id) => {
       const object = found.get(id)
       return object ? [object] : []
@@ -1793,7 +1813,56 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   }
 
   persistNonResident(object: O) {
+    this.invalidateStorageReads(object.id)
     this.persistPut(object)
+  }
+
+  /** Changes are retained only for the lifetime of an outstanding disk read. */
+  private async readStorage(
+    readObjects: () => Promise<O[]>,
+    prepare?: (objects: O[]) => Promise<void>,
+    materialize = false,
+  ): Promise<{ objects: O[]; inserted: O[] }> {
+    const admission = {
+      changedIds: new Set<O["id"]>(),
+      clearedChats: new Set<ChatID>(),
+    }
+    this.storageReads.add(admission)
+    try {
+      await this.awaitCommittedWrites()
+      await this.storage!.init()
+      const objects = await readObjects()
+      await prepare?.(objects)
+      const accepted: O[] = []
+      const inserted: O[] = []
+      await this.commitHydration(() => {
+        for (const object of objects) {
+          const current = this.objectsById.get(object.id)
+          if (current) {
+            accepted.push(current)
+            continue
+          }
+          if (
+            admission.changedIds.has(object.id) ||
+            ("chatId" in object &&
+              admission.clearedChats.has(object.chatId as ChatID))
+          )
+            continue
+          accepted.push(object)
+          if (materialize) {
+            this.insertLocal(object)
+            inserted.push(object)
+          }
+        }
+      })
+      return { objects: accepted, inserted }
+    } finally {
+      this.storageReads.delete(admission)
+    }
+  }
+
+  private invalidateStorageReads(id: O["id"]) {
+    for (const read of this.storageReads) read.changedIds.add(id)
   }
 
   private persistPut(object: O) {
@@ -1825,10 +1894,8 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     this.objectsById.set(exactId, previous as O)
   }
 
-  private recordBeforeChange(
-    id: O["id"],
-    previous: O | undefined,
-  ) {
+  private recordBeforeChange(id: O["id"], previous: O | undefined) {
+    this.invalidateStorageReads(id)
     this.recordUndo(
       this as unknown as Collection<
         DbObjectKind,

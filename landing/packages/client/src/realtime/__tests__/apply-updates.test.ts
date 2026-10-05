@@ -21,6 +21,38 @@ const threadChatId = chatId(801)
 const threadDialogId = dialogId(-801)
 
 describe("realtime update application", () => {
+  it("does not undo a newer read when an older read RPC response arrives", () => {
+    const db = new Db({ autoHydrate: false, persistence: false })
+    db.insert({
+      kind: DbObjectKind.Dialog,
+      id: threadDialogId,
+      chatId: threadChatId,
+      peerThreadId: threadChatId,
+      readMaxId: messageId(20),
+      unreadCount: 0,
+      unreadMark: true,
+    })
+    applyUpdates(db, [
+      Update.create({
+        update: {
+          oneofKind: "updateReadMaxId",
+          updateReadMaxId: {
+            peerId: chatPeer(801n),
+            readMaxId: 5n,
+            unreadCount: 4,
+          },
+        },
+      }),
+    ])
+    expect(
+      db.get(db.ref(DbObjectKind.Dialog, threadDialogId)),
+    ).toMatchObject({
+      readMaxId: messageId(20),
+      unreadCount: 0,
+      unreadMark: true,
+    })
+  })
+
   it("uses the native thread dialog identity for inbox updates", () => {
     const db = new Db({ autoHydrate: false })
     db.insert({

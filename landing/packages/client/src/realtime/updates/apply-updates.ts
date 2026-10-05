@@ -11,6 +11,7 @@ import {
   spaceId as makeSpaceId,
   userId as makeUserId,
   type MessageID,
+  type UserID,
 } from "@inline/ids"
 import type { Db } from "../../database"
 import { DbObjectKind, messageKey, MessageSendingStatus } from "../../database/models"
@@ -84,6 +85,13 @@ const updateDialogForPeer = (
   const ref = db.ref(DbObjectKind.Dialog, dialogId)
   const existing = db.get(ref)
   if (!existing) return false
+  if (
+    changes.readMaxId != null &&
+    existing.readMaxId != null &&
+    compareInlineIds(changes.readMaxId, existing.readMaxId) < 0
+  ) {
+    return true
+  }
 
   db.update({
     ...existing,
@@ -95,7 +103,80 @@ const updateDialogForPeer = (
   return true
 }
 
+const removeChats = (
+  db: Db,
+  ids: Set<ReturnType<typeof makeChatId>>,
+  invalidateDescendants = false,
+) => {
+  if (invalidateDescendants) {
+    const children = new Map<
+      ReturnType<typeof makeChatId>,
+      ReturnType<typeof makeChatId>[]
+    >()
+    const chats = db.queryCollection(DbQueryPlanType.Objects, DbObjectKind.Chat)
+    for (const chat of chats) {
+      if (chat.parentChatId == null) continue
+      const siblings = children.get(chat.parentChatId) ?? []
+      siblings.push(chat.id)
+      children.set(chat.parentChatId, siblings)
+    }
+    const pending = Array.from(ids)
+    for (let index = 0; index < pending.length; index += 1) {
+      for (const child of children.get(pending[index]!) ?? []) {
+        if (ids.has(child)) continue
+        ids.add(child)
+        pending.push(child)
+      }
+    }
+  }
+  for (const id of ids) {
+    db.clearMessagesForChat(id)
+    db.delete(db.ref(DbObjectKind.Chat, id))
+  }
+  const dialogs = db.queryCollection(
+    DbQueryPlanType.Objects,
+    DbObjectKind.Dialog,
+    (dialog) => ids.has(dialog.chatId),
+  )
+  for (const dialog of dialogs) {
+    db.delete(db.ref(DbObjectKind.Dialog, dialog.id))
+  }
+}
+
+const removeChat = (
+  db: Db,
+  chatId: ReturnType<typeof makeChatId>,
+  invalidateDescendants = false,
+) => removeChats(db, new Set([chatId]), invalidateDescendants)
+
 export type UpdateApplySource = "realtime" | "syncCatchup"
+
+export type UpdateApplyContext = {
+  currentUserId?: UserID
+  bucketKind?: "user" | "chat" | "space"
+}
+
+const removeSpace = (db: Db, spaceId: ReturnType<typeof makeSpaceId>) => {
+  const chats = db.queryCollection(
+    DbQueryPlanType.Objects,
+    DbObjectKind.Chat,
+    (chat) => chat.spaceId === spaceId,
+  )
+  const dialogs = db.queryCollection(
+    DbQueryPlanType.Objects,
+    DbObjectKind.Dialog,
+    (dialog) => dialog.spaceId === spaceId,
+  )
+  removeChats(
+    db,
+    new Set([
+      ...chats.map((chat) => chat.id),
+      ...dialogs.map((dialog) => dialog.chatId),
+    ]),
+    true,
+  )
+  db.delete(db.ref(DbObjectKind.Space, spaceId))
+}
 
 export type UpdateDisposition =
   | "applied"
@@ -243,6 +324,7 @@ const applyUpdate = (
   db: Db,
   update: Update,
   source: UpdateApplySource,
+  context: UpdateApplyContext,
 ): UpdateDisposition => {
   switch (update.update.oneofKind) {
     case "newMessage": {
@@ -406,18 +488,23 @@ const applyUpdate = (
         deferUpdate(db, update)
         return "deferred"
       }
-      db.clearMessagesForChat(chatId)
-      db.delete(db.ref(DbObjectKind.Chat, chatId))
-      const dialogs = db.queryCollection(
-        DbQueryPlanType.Objects,
-        DbObjectKind.Dialog,
-        (dialog) => dialog.chatId === chatId,
-      )
-      for (const dialog of dialogs) {
-        db.delete(db.ref(DbObjectKind.Dialog, dialog.id))
-      }
+      removeChat(db, chatId)
       return "applied"
     }
+
+    case "userRemovedFromChat":
+      // This event denotes effective access loss, including group/inherited
+      // grants. It is not merely a participant-list change.
+      // Root access events can cover inherited descendants. Invalidate their
+      // cached projection too; surviving direct grants require a fresh,
+      // authorized getChat snapshot. Local drafts remain intact.
+      removeChat(db, makeChatId(update.update.userRemovedFromChat.chatId), true)
+      return "applied"
+
+    case "userAddedToChat":
+      // The payload has no Chat/Dialog snapshot. Sync replays its user bucket
+      // to obtain currently authorized sidecars before advertising the chat.
+      return "syncHint"
 
     case "chatOpen": {
       const { user, chat, dialog } = update.update.chatOpen
@@ -461,6 +548,22 @@ const applyUpdate = (
       }
       deferUpdate(db, update)
       return "deferred"
+
+    case "spaceMemberDelete": {
+      const removal = update.update.spaceMemberDelete
+      if (
+        context.currentUserId == null ||
+        makeUserId(removal.userId) !== context.currentUserId
+      ) {
+        deferUpdate(db, update)
+        return "deferred"
+      }
+      // Space/live updates can describe an older membership generation.
+      // Only ordered user replay can evict the account-owned projection.
+      if (context.bucketKind !== "user") return "syncHint"
+      removeSpace(db, makeSpaceId(removal.spaceId))
+      return "applied"
+    }
 
     case "chatVisibility": {
       const chatId = makeChatId(update.update.chatVisibility.chatId)
@@ -736,15 +839,12 @@ const applyUpdate = (
     }
     case "participantAdd":
     case "participantDelete":
-    case "spaceMemberDelete":
     case "spaceMemberUpdate":
     case "updateUserSettings":
     case "dialogNotificationSettings":
     case "acknowledgement":
     case "dialogTranslation":
     case "dialogFolder":
-    case "userAddedToChat":
-    case "userRemovedFromChat":
     case "participantGroupAdd":
     case "participantGroupDelete":
     case "spaceSettings":
@@ -778,13 +878,14 @@ export const applyUpdates = (
   db: Db,
   updates: Update[],
   source: UpdateApplySource = "realtime",
+  context: UpdateApplyContext = {},
 ): UpdateApplyReport => {
   const report = emptyReport()
   db.batch(() => {
     for (const [index, update] of updates.entries()) {
       const updateType = update.update.oneofKind ?? "undefined"
       try {
-        const disposition = applyUpdate(db, update, source)
+        const disposition = applyUpdate(db, update, source, context)
         report[disposition] += 1
       } catch (cause) {
         report.failed += 1

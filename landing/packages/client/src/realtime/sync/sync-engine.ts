@@ -4,18 +4,31 @@ import {
   Method,
   SyncSkippedSequence_Reason,
   type GetUpdatesResult,
+  type Dialog,
   type RpcCall,
   type RpcResult,
   type Update,
 } from "@inline-chat/protocol/core"
 import { Log } from "@inline/log"
-import { chatId, messageId, spaceId } from "@inline/ids"
+import {
+  chatId,
+  messageId,
+  spaceId,
+  userId,
+  type ChatID,
+  type DialogID,
+  type SpaceID,
+  type UserID,
+} from "@inline/ids"
 import type { Db } from "../../database"
 import { DbObjectKind } from "../../database/models"
+import { DbQueryPlanType } from "../../database/types"
 import {
   upsertChat,
   upsertDialog,
   upsertMessage,
+  getDialogId,
+  upsertSpace,
 } from "../transactions/mappers"
 import { applyUpdates, applyUpdateSidecars } from "../updates/apply-updates"
 import {
@@ -52,16 +65,30 @@ export type SyncEngineOptions = {
   now?: () => number
   maxConcurrentFetches?: number
   retryDelaysMs?: number[]
+  getCurrentUserId?: () => UserID | undefined
 }
 
 type BucketWork = {
   key: SyncBucketKey
   targetSeq?: number
   fetchLatest: boolean
+  latestRequestGeneration: number
   buffered: Map<number, Update>
   task?: Promise<void>
   retryTimer?: ReturnType<typeof setTimeout>
   retryAttempt: number
+}
+
+type SnapshotAdmission = {
+  assertCurrent: (
+    snapshotChatIds?: readonly ChatID[],
+    snapshotSpaceIds?: readonly SpaceID[],
+  ) => void
+  sidecars: (
+    sidecars: GetUpdatesResult["sidecars"],
+  ) => GetUpdatesResult["sidecars"]
+  acceptsDialog: (id: DialogID) => boolean
+  close: () => void
 }
 
 const initialLookbackSeconds = 5 * 24 * 60 * 60
@@ -75,6 +102,7 @@ const rpcTimeoutMs = 15_000
 
 class InvalidSyncEnvelope extends Error {}
 class SnapshotRepairRequired extends Error {}
+class StaleSyncSnapshot extends Error {}
 
 const maxUpdateDate = (updates: Update[]) =>
   updates.reduce(
@@ -82,6 +110,17 @@ const maxUpdateDate = (updates: Update[]) =>
       Math.max(maximum, Number(update.date ?? 0n)),
     0,
   )
+
+const getDialogIdForProtocol = (dialog: Dialog): DialogID | undefined => {
+  if (dialog.peer?.type.oneofKind === "user") {
+    return getDialogId({ peerUserId: userId(dialog.peer.type.user.userId) })
+  }
+  const id =
+    dialog.peer?.type.oneofKind === "chat"
+      ? dialog.peer.type.chat.chatId
+      : dialog.chatId
+  return id == null ? undefined : getDialogId({ peerThreadId: chatId(id) })
+}
 
 const hintedChatKey = (
   update: Extract<
@@ -95,6 +134,21 @@ const hintedChatKey = (
   return { kind: "chat", peer: update.peerId }
 }
 
+const selfSpaceEvent = (update: Update, currentUserId: UserID | undefined) => {
+  if (currentUserId == null) return undefined
+  if (update.update.oneofKind === "spaceMemberDelete") {
+    const removal = update.update.spaceMemberDelete
+    if (userId(removal.userId) === currentUserId)
+      return { spaceId: spaceId(removal.spaceId), joined: false }
+  }
+  if (update.update.oneofKind === "joinSpace") {
+    const { member, space } = update.update.joinSpace
+    if (member && userId(member.userId) === currentUserId)
+      return { spaceId: spaceId(member.spaceId), joined: true, seq: space?.seq }
+  }
+  return undefined
+}
+
 export class SyncEngine {
   private readonly db: Db
   private readonly client: SyncRpcClient
@@ -104,6 +158,10 @@ export class SyncEngine {
   private readonly limiter: FetchLimiter
   private readonly retryDelaysMs: number[]
   private readonly workById = new Map<string, BucketWork>()
+  private readonly activeTasks = new Set<Promise<void>>()
+  private accessChangesInCommit: Set<ChatID> | undefined
+  private spaceAccessChangesInCommit: Set<SpaceID> | undefined
+  private readonly getCurrentUserId: () => UserID | undefined
 
   private connected = false
   private stopped = false
@@ -120,6 +178,7 @@ export class SyncEngine {
     this.limiter = new FetchLimiter(options.maxConcurrentFetches ?? 4)
     this.retryDelaysMs =
       options.retryDelaysMs ?? [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
+    this.getCurrentUserId = options.getCurrentUserId ?? (() => undefined)
   }
 
   async connectionOpened() {
@@ -127,13 +186,22 @@ export class SyncEngine {
     this.stopped = false
     const generation = ++this.connectionGeneration
     await this.storage.initialize()
+    await this.db.ready
+    await this.db.hydrateKinds(
+      [DbObjectKind.Space, DbObjectKind.Chat, DbObjectKind.Dialog].filter(
+        (kind) => !this.db.collections[kind]?.hasHydrated,
+      ),
+    )
     if (!this.isCurrentConnection(generation)) return
 
     this.requestBucket({ kind: "user" }, undefined, true)
     for (const work of this.workById.values()) this.startWork(work)
-    this.discoveryTask = this.discoverBuckets(generation)
-    void this.discoveryTask.finally(() => {
-      if (this.connectionGeneration === generation) this.discoveryTask = null
+    const discovery = this.discoverBuckets(generation)
+    this.discoveryTask = discovery
+    this.activeTasks.add(discovery)
+    void discovery.finally(() => {
+      this.activeTasks.delete(discovery)
+      if (this.discoveryTask === discovery) this.discoveryTask = null
     })
   }
 
@@ -152,10 +220,24 @@ export class SyncEngine {
   }
 
   async processPush(updates: Update[]) {
+    const generation = this.connectionGeneration
+    const currentUserId = this.getCurrentUserId()
     const direct: Update[] = []
     const ambiguousBuckets = new Map<string, SyncBucketKey>()
 
     for (const update of updates) {
+      if (selfSpaceEvent(update, currentUserId)?.joined === false) {
+        // A self removal cannot use an inaccessible Space cursor. Replay its
+        // ordered user bucket, including a possible newer join.
+        this.requestBucket({ kind: "user" }, undefined, true)
+        continue
+      }
+      if (update.update.oneofKind === "userAddedToChat") {
+        // A grant contains no chat snapshot. Fetch its authorized user-bucket
+        // sidecars instead of consuming a contiguous payload-only push.
+        this.requestBucket({ kind: "user" }, update.seq, true)
+        continue
+      }
       if (update.update.oneofKind === "userHasNewUpdates") {
         const targetSeq = update.update.userHasNewUpdates.updateSeq
         if (Number.isSafeInteger(targetSeq) && targetSeq > 0) {
@@ -215,7 +297,8 @@ export class SyncEngine {
         deferredMessageKeysFromUpdates(direct),
       )
       await this.db.commit(() => {
-        applyUpdates(this.db, direct, "realtime")
+        if (generation !== this.connectionGeneration || this.stopped) return
+        applyUpdates(this.db, direct, "realtime", { currentUserId })
       })
       await this.updateLastSyncDate(maxUpdateDate(direct))
     } finally {
@@ -233,12 +316,7 @@ export class SyncEngine {
    */
   async idle() {
     while (true) {
-      const tasks = [
-        ...Array.from(this.workById.values())
-          .map((work) => work.task)
-          .filter((task): task is Promise<void> => task != null),
-        ...(this.discoveryTask ? [this.discoveryTask] : []),
-      ]
+      const tasks = Array.from(this.activeTasks)
       if (tasks.length === 0) return
       await Promise.allSettled(tasks)
     }
@@ -253,7 +331,10 @@ export class SyncEngine {
     if (targetSeq != null && targetSeq > 0) {
       work.targetSeq = Math.max(work.targetSeq ?? 0, targetSeq)
     }
-    work.fetchLatest ||= fetchLatest
+    if (fetchLatest) {
+      work.fetchLatest = true
+      work.latestRequestGeneration += 1
+    }
     this.startWork(work)
   }
 
@@ -264,6 +345,7 @@ export class SyncEngine {
       work = {
         key,
         fetchLatest: false,
+        latestRequestGeneration: 0,
         buffered: new Map(),
         retryAttempt: 0,
       }
@@ -274,6 +356,7 @@ export class SyncEngine {
 
   private startWork(work: BucketWork) {
     if (
+      this.workById.get(syncBucketId(work.key)) !== work ||
       !this.connected ||
       this.stopped ||
       work.task ||
@@ -282,47 +365,54 @@ export class SyncEngine {
       return
     }
 
-    const task = this.runWork(work)
+    const generation = this.connectionGeneration
+    const task = this.runWork(work, generation)
     work.task = task
+    this.activeTasks.add(task)
     void task.then(
-      () => {
-        work.retryAttempt = 0
-      },
-      (error: unknown) => {
-        if (!this.connected || this.stopped) return
-        this.log.warn("sync.bucket.paused", {
-          bucketKind: work.key.kind,
-          error,
-        })
-        this.scheduleRetry(work)
-      },
-    ).finally(() => {
-      if (work.task === task) work.task = undefined
-      if (
-        !work.retryTimer &&
-        (work.fetchLatest || work.targetSeq != null)
-      ) {
-        this.startWork(work)
-      }
-    })
+        () => {
+          work.retryAttempt = 0
+        },
+        (error: unknown) => {
+          if (!this.isCurrentWork(work, generation)) return
+          this.log.warn("sync.bucket.paused", {
+            bucketKind: work.key.kind,
+            error,
+          })
+          this.scheduleRetry(work)
+        },
+      )
+      .finally(() => {
+        this.activeTasks.delete(task)
+        if (work.task === task) work.task = undefined
+        if (!work.retryTimer && (work.fetchLatest || work.targetSeq != null)) {
+          this.startWork(work)
+        }
+      })
   }
 
-  private async runWork(work: BucketWork) {
+  private async runWork(work: BucketWork, generation: number) {
     let state = await this.storage.getBucketState(work.key)
 
-    while (this.connected && !this.stopped) {
+    while (this.isCurrentWork(work, generation)) {
       this.discardBufferedThrough(work, state.seq)
       const contiguous = this.takeContiguousUpdates(work, state.seq)
       if (contiguous.length > 0) {
-        state = await this.commitBucketPage(
-          work.key,
-          state,
-          contiguous,
-          undefined,
-          contiguous.at(-1)!.seq!,
-          maxUpdateDate(contiguous),
-          "realtime",
-        )
+        const admission = this.snapshotAdmission(work, generation)
+        try {
+          state = await this.commitBucketPage(
+            work.key,
+            state,
+            contiguous,
+            undefined,
+            contiguous.at(-1)!.seq!,
+            maxUpdateDate(contiguous),
+            "realtime",
+            admission,
+          )
+        } finally {
+          admission.close()
+        }
         continue
       }
 
@@ -331,10 +421,11 @@ export class SyncEngine {
       }
       if (!work.fetchLatest && work.targetSeq == null) return
 
-      const requestedLatest = work.fetchLatest
+      const requestedLatest = work.latestRequestGeneration
       const targetSeq = work.targetSeq
-      state = await this.fetchBucket(work.key, state, targetSeq)
-      if (requestedLatest) work.fetchLatest = false
+      state = await this.fetchBucket(work, state, targetSeq, generation)
+      if (requestedLatest === work.latestRequestGeneration)
+        work.fetchLatest = false
       if (work.targetSeq != null && work.targetSeq <= state.seq) {
         work.targetSeq = undefined
       }
@@ -342,93 +433,106 @@ export class SyncEngine {
   }
 
   private async fetchBucket(
-    key: SyncBucketKey,
+    work: BucketWork,
     initialState: SyncBucketCursor,
-    targetSeq?: number,
+    targetSeq: number | undefined,
+    generation: number,
   ) {
+    const key = work.key
     let state = initialState
     let sliceEnd = targetSeq
-
-    while (this.connected && !this.stopped) {
-      const input: RpcCall["input"] = {
-        oneofKind: "getUpdates",
-        getUpdates: {
-          bucket: protocolUpdateBucket(key),
-          startSeq: BigInt(state.seq),
-          totalLimit:
-            state.seq === 0 && sliceEnd == null
-              ? coldStartTotalLimit
-              : maxTotalUpdates,
-          seqEnd: BigInt(sliceEnd ?? 0),
-          limit: updatesPageLimit,
-        },
-      }
-      const result = await this.limiter.run(() =>
-        this.client.callRpc(Method.GET_UPDATES, input, {
-          timeoutMs: rpcTimeoutMs,
-        }),
-      )
-      if (!result || result.oneofKind !== "getUpdates") {
-        throw new InvalidSyncEnvelope("getUpdates returned the wrong result")
-      }
-
-      const payload = result.getUpdates
-      if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const serverSeq = Number(payload.seq)
-        if (serverSeq <= state.seq) {
-          throw new InvalidSyncEnvelope(
-            `TOO_LONG did not advance beyond ${state.seq}`,
-          )
+    while (this.isCurrentWork(work, generation)) {
+      const admission = this.snapshotAdmission(work, generation)
+      try {
+        const input: RpcCall["input"] = {
+          oneofKind: "getUpdates",
+          getUpdates: {
+            bucket: protocolUpdateBucket(key),
+            startSeq: BigInt(state.seq),
+            totalLimit:
+              state.seq === 0 && sliceEnd == null
+                ? coldStartTotalLimit
+                : maxTotalUpdates,
+            seqEnd: BigInt(sliceEnd ?? 0),
+            limit: updatesPageLimit,
+          },
         }
-        if (state.seq === 0 && key.kind === "chat") {
+        const result = await this.limiter.run(() =>
+          this.client.callRpc(Method.GET_UPDATES, input, {
+            timeoutMs: rpcTimeoutMs,
+          }),
+        )
+        admission.assertCurrent()
+        if (!result || result.oneofKind !== "getUpdates") {
+          throw new InvalidSyncEnvelope("getUpdates returned the wrong result")
+        }
+
+        const payload = result.getUpdates
+        if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
+          const serverSeq = Number(payload.seq)
+          if (serverSeq <= state.seq) {
+            throw new InvalidSyncEnvelope(
+              `TOO_LONG did not advance beyond ${state.seq}`,
+            )
+          }
+          if (state.seq === 0 && key.kind === "chat") {
+            return await this.repairChatBucket(
+              key,
+              serverSeq,
+              Number(payload.date),
+              admission,
+            )
+          }
+          const nextSliceEnd = Math.min(
+            targetSeq ?? serverSeq,
+            serverSeq,
+            state.seq + maxTotalUpdates,
+          )
+          if (sliceEnd != null && nextSliceEnd === sliceEnd) {
+            throw new InvalidSyncEnvelope(
+              `TOO_LONG repeated slice boundary ${sliceEnd}`,
+            )
+          }
+          sliceEnd = nextSliceEnd
+          continue
+        }
+
+        const requiresRepair = this.validateEnvelope(payload, state.seq)
+        if (requiresRepair) {
+          if (key.kind !== "chat") throw new SnapshotRepairRequired()
           return await this.repairChatBucket(
             key,
-            serverSeq,
+            Number(payload.seq),
             Number(payload.date),
+            admission,
           )
         }
-        const nextSliceEnd = Math.min(
-          targetSeq ?? serverSeq,
-          serverSeq,
-          state.seq + maxTotalUpdates,
-        )
-        if (sliceEnd != null && nextSliceEnd === sliceEnd) {
+
+        const endSeq = Number(payload.seq)
+        if (endSeq === state.seq && payload.final === false) {
           throw new InvalidSyncEnvelope(
-            `TOO_LONG repeated slice boundary ${sliceEnd}`,
+            "non-final getUpdates page made no progress",
           )
         }
-        sliceEnd = nextSliceEnd
-        continue
-      }
-
-      const requiresRepair = this.validateEnvelope(payload, state.seq)
-      if (requiresRepair) {
-        if (key.kind !== "chat") throw new SnapshotRepairRequired()
-        return await this.repairChatBucket(
+        state = await this.commitBucketPage(
           key,
-          Number(payload.seq),
+          state,
+          payload.updates
+            .slice()
+            .sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0)),
+          payload.sidecars,
+          endSeq,
           Number(payload.date),
+          "syncCatchup",
+          admission,
         )
-      }
 
-      const endSeq = Number(payload.seq)
-      if (endSeq === state.seq && payload.final === false) {
-        throw new InvalidSyncEnvelope("non-final getUpdates page made no progress")
+        if (targetSeq != null && state.seq >= targetSeq) return state
+        if (payload.final !== false) return state
+      } finally {
+        admission.close()
       }
-      state = await this.commitBucketPage(
-        key,
-        state,
-        payload.updates.slice().sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0)),
-        payload.sidecars,
-        endSeq,
-        Number(payload.date),
-        "syncCatchup",
-      )
-
-      if (targetSeq != null && state.seq >= targetSeq) return state
-      if (payload.final !== false) return state
     }
-
     throw new Error("Bucket fetch interrupted")
   }
 
@@ -437,9 +541,7 @@ export class SyncEngine {
       payload.resultType !== GetUpdatesResult_ResultType.SLICE &&
       payload.resultType !== GetUpdatesResult_ResultType.EMPTY
     ) {
-      throw new InvalidSyncEnvelope(
-        `invalid result type ${payload.resultType}`,
-      )
+      throw new InvalidSyncEnvelope(`invalid result type ${payload.resultType}`)
     }
 
     const endSeq = Number(payload.seq)
@@ -509,31 +611,117 @@ export class SyncEngine {
     seq: number,
     date: number,
     source: "realtime" | "syncCatchup",
+    admission: SnapshotAdmission,
   ): Promise<SyncBucketCursor> {
     const next = {
       seq,
       date: Math.max(previous.date, date, maxUpdateDate(updates)),
     }
+    const currentUserId = this.getCurrentUserId()
     await this.db.hydrateDeferredUpdatesForMessageKeys(
       deferredMessageKeysFromUpdates(updates),
     )
+    const accessChanges = new Set<ChatID>()
+    const spaceAccessChanges = new Set<SpaceID>()
+    const spaceGrants = new Map<SpaceID, number | undefined>()
+    for (const update of updates) {
+      if (update.update.oneofKind === "userRemovedFromChat") {
+        accessChanges.add(chatId(update.update.userRemovedFromChat.chatId))
+      } else if (update.update.oneofKind === "userAddedToChat") {
+        accessChanges.add(chatId(update.update.userAddedToChat.chatId))
+      }
+      const event =
+        key.kind === "user" ? selfSpaceEvent(update, currentUserId) : undefined
+      if (event) {
+        spaceAccessChanges.add(event.spaceId)
+        if (event.joined) spaceGrants.set(event.spaceId, event.seq)
+        else spaceGrants.delete(event.spaceId)
+      }
+    }
     const apply = () => {
+      admission.assertCurrent(
+        [
+          ...(sidecars?.chats.map((chat) => chatId(chat.id)) ?? []),
+          ...(sidecars?.dialogs.flatMap((dialog) =>
+            dialog.chatId == null ? [] : [chatId(dialog.chatId)],
+          ) ?? []),
+        ],
+        [
+          ...spaceAccessChanges,
+          ...(sidecars?.spaces.map((space) => spaceId(space.id)) ?? []),
+          ...(sidecars?.chats.flatMap((chat) =>
+            chat.spaceId == null ? [] : [spaceId(chat.spaceId)],
+          ) ?? []),
+        ],
+      )
+      this.accessChangesInCommit = accessChanges
+      this.spaceAccessChangesInCommit = spaceAccessChanges
       this.db.batch(() => {
-        applyUpdateSidecars(this.db, sidecars)
-        applyUpdates(this.db, updates, source)
+        applyUpdateSidecars(this.db, admission.sidecars(sidecars))
+        applyUpdates(this.db, updates, source, {
+          currentUserId,
+          bucketKind: key.kind,
+        })
+        // A page can contain revoke followed by rejoin. Restore only the final
+        // effective grants from the server's currently authorized snapshots.
+        const grants = new Set<ChatID>()
+        for (const update of updates) {
+          if (update.update.oneofKind === "userRemovedFromChat") {
+            grants.delete(chatId(update.update.userRemovedFromChat.chatId))
+          } else if (update.update.oneofKind === "userAddedToChat") {
+            grants.add(chatId(update.update.userAddedToChat.chatId))
+          }
+        }
+        for (const chat of sidecars?.chats ?? []) {
+          if (
+            grants.has(chatId(chat.id)) ||
+            (chat.spaceId != null && spaceGrants.has(spaceId(chat.spaceId)))
+          )
+            upsertChat(this.db, chat)
+        }
+        for (const space of sidecars?.spaces ?? []) {
+          if (spaceGrants.has(spaceId(space.id))) upsertSpace(this.db, space)
+        }
+        for (const dialog of admission.sidecars(sidecars)?.dialogs ?? []) {
+          if (
+            (dialog.chatId != null && grants.has(chatId(dialog.chatId))) ||
+            (dialog.spaceId != null && spaceGrants.has(spaceId(dialog.spaceId)))
+          ) {
+            upsertDialog(this.db, dialog)
+          }
+        }
       })
     }
-    const committed = this.storage.commitBucketState
-      ? await this.storage.commitBucketState(key, next, apply)
-      : await (async () => {
-          apply()
-          await this.db.flushPersistence()
-          return await this.storage.setBucketState(key, next)
-        })()
+    let committed: boolean
+    try {
+      committed = this.storage.commitBucketState
+        ? await this.storage.commitBucketState(key, next, apply)
+        : await (async () => {
+            apply()
+            await this.db.flushPersistence()
+            return await this.storage.setBucketState(key, next)
+          })()
+    } finally {
+      if (this.accessChangesInCommit === accessChanges)
+        this.accessChangesInCommit = undefined
+      if (this.spaceAccessChangesInCommit === spaceAccessChanges)
+        this.spaceAccessChangesInCommit = undefined
+    }
     if (!committed) {
       throw new Error("Could not persist sync cursor")
     }
     await this.updateLastSyncDate(next.date)
+    for (const [id, spaceSeq] of spaceGrants) {
+      this.requestBucket({ kind: "space", spaceId: id }, spaceSeq, true)
+    }
+    if (
+      key.kind !== "user" &&
+      updates.some(
+        (update) => selfSpaceEvent(update, currentUserId)?.joined === false,
+      )
+    ) {
+      this.requestBucket({ kind: "user" }, undefined, true)
+    }
     this.log.debug("sync.bucket.committed", {
       bucketKind: key.kind,
       source,
@@ -548,6 +736,7 @@ export class SyncEngine {
     key: Extract<SyncBucketKey, { kind: "chat" }>,
     targetSeq: number,
     targetDate: number,
+    admission: SnapshotAdmission,
   ): Promise<SyncBucketCursor> {
     const peerId = protocolInputPeer(key.peer)
     if (!peerId) throw new SnapshotRepairRequired("invalid chat peer")
@@ -561,6 +750,15 @@ export class SyncEngine {
         },
         { timeoutMs: rpcTimeoutMs },
       ),
+    )
+    admission.assertCurrent(
+      chatResult?.oneofKind === "getChat" && chatResult.getChat.chat
+        ? [chatId(chatResult.getChat.chat.id)]
+        : undefined,
+      chatResult?.oneofKind === "getChat" &&
+        chatResult.getChat.chat?.spaceId != null
+        ? [spaceId(chatResult.getChat.chat.spaceId)]
+        : undefined,
     )
     if (!chatResult || chatResult.oneofKind !== "getChat") {
       throw new SnapshotRepairRequired("getChat repair failed")
@@ -580,6 +778,7 @@ export class SyncEngine {
         { timeoutMs: rpcTimeoutMs },
       ),
     )
+    admission.assertCurrent()
     if (!historyResult || historyResult.oneofKind !== "getChatHistory") {
       throw new SnapshotRepairRequired("getChatHistory repair failed")
     }
@@ -597,9 +796,18 @@ export class SyncEngine {
       ),
     ])
     const applyRepair = () => {
+      admission.assertCurrent(
+        [chatId(chatResult.getChat.chat!.id)],
+        chatResult.getChat.chat!.spaceId == null
+          ? []
+          : [spaceId(chatResult.getChat.chat!.spaceId)],
+      )
       this.db.batch(() => {
         upsertChat(this.db, chatResult.getChat.chat!)
-        upsertDialog(this.db, chatResult.getChat.dialog!)
+        const dialog = chatResult.getChat.dialog!
+        const id = getDialogIdForProtocol(dialog)
+        if (id == null || admission.acceptsDialog(id))
+          upsertDialog(this.db, dialog)
         if (chatResult.getChat.anchorMessage) {
           upsertMessage(this.db, chatResult.getChat.anchorMessage)
         }
@@ -665,6 +873,148 @@ export class SyncEngine {
     }
   }
 
+  /** Request-local admission survives deletion and rejoin of the same ID. */
+  private snapshotAdmission(
+    work: BucketWork,
+    generation: number,
+  ): SnapshotAdmission {
+    const removed = new Set<ChatID>()
+    const accessChanged = new Set<ChatID>()
+    const removedSpaces = new Set<SpaceID>()
+    const changedSpaces = new Set<SpaceID>()
+    const changedDialogs = new Set<DialogID>()
+    const targetChatId = this.chatIdForWork(work)
+    const targetSpaces = new Set<SpaceID>()
+    const ancestors = new Set<ChatID>()
+    let ancestor = targetChatId
+    while (ancestor != null && !ancestors.has(ancestor)) {
+      ancestors.add(ancestor)
+      const chat = this.db.get(this.db.ref(DbObjectKind.Chat, ancestor))
+      if (chat?.spaceId != null) targetSpaces.add(chat.spaceId)
+      ancestor = chat?.parentChatId
+    }
+    const close = this.db.subscribeToResidentChanges((batch) => {
+      const userCursorCommitted = batch.changes.some(
+        (change) =>
+          change.kind === DbObjectKind.SyncBucketState && change.id === "user",
+      )
+      for (const change of batch.changes) {
+        if (change.kind === DbObjectKind.Space) {
+          const id = change.id as SpaceID
+          if (change.object == null) removedSpaces.add(id)
+          if (userCursorCommitted && this.spaceAccessChangesInCommit?.has(id))
+            changedSpaces.add(id)
+          if (
+            work.key.kind === "space" &&
+            work.key.spaceId === id &&
+            change.object == null
+          )
+            this.retireWork(work)
+        }
+        if (change.kind === DbObjectKind.Dialog) {
+          changedDialogs.add(change.id as DialogID)
+        }
+        if (change.kind !== DbObjectKind.Chat) continue
+        const id = change.id as ChatID
+        if (change.object == null) removed.add(id)
+        if (userCursorCommitted && this.accessChangesInCommit?.has(id))
+          accessChanged.add(id)
+        if (
+          work.key.kind === "chat" &&
+          id === targetChatId &&
+          change.object == null
+        ) {
+          this.retireWork(work)
+        }
+      }
+    })
+    return {
+      close,
+      acceptsDialog: (id) => !changedDialogs.has(id),
+      sidecars: (sidecars) =>
+        sidecars && {
+          ...sidecars,
+          dialogs: sidecars.dialogs.filter((dialog) => {
+            const id = getDialogIdForProtocol(dialog)
+            return id == null || !changedDialogs.has(id)
+          }),
+        },
+      assertCurrent: (ids = [], spaceIds = []) => {
+        if (!this.isCurrentWork(work, generation)) {
+          throw new StaleSyncSnapshot("Sync work was interrupted or retired")
+        }
+        const spaces = [...spaceIds, ...targetSpaces]
+        if (work.key.kind === "space") spaces.push(work.key.spaceId)
+        if (spaces.some((id) => removedSpaces.has(id))) {
+          if (work.key.kind !== "user") this.retireWork(work)
+          throw new StaleSyncSnapshot(
+            "Space membership changed while its snapshot was in flight",
+          )
+        }
+        if (spaces.some((id) => changedSpaces.has(id))) {
+          throw new StaleSyncSnapshot(
+            "A newer Space membership committed while its snapshot was in flight",
+          )
+        }
+        if (
+          work.key.kind === "chat" &&
+          spaces.length === 0 &&
+          (removedSpaces.size > 0 || changedSpaces.size > 0)
+        ) {
+          // Older inherited-chat snapshots may omit their owning Space ID.
+          // Refetch after membership churn rather than infer their authority.
+          throw new StaleSyncSnapshot(
+            "Space membership changed during an unscoped chat snapshot",
+          )
+        }
+        if (ids.some((id) => removed.has(id))) {
+          if (work.key.kind === "chat") this.retireWork(work)
+          throw new StaleSyncSnapshot(
+            "Chat access changed while its snapshot was in flight",
+          )
+        }
+        if (ids.some((id) => accessChanged.has(id))) {
+          // Refetch after an effective grant changed, retaining the desired
+          // catch-up frontier. Ordinary read sidecars do not invalidate it.
+          throw new StaleSyncSnapshot(
+            "A newer user snapshot committed while this snapshot was in flight",
+          )
+        }
+      },
+    }
+  }
+
+  private chatIdForWork(work: BucketWork): ChatID | undefined {
+    if (work.key.kind !== "chat") return undefined
+    const peer = work.key.peer
+    if (peer.type.oneofKind === "chat") return chatId(peer.type.chat.chatId)
+    if (peer.type.oneofKind !== "user") return undefined
+    const peerUserId = userId(peer.type.user.userId)
+    return this.db.queryCollection(
+      DbQueryPlanType.Objects,
+      DbObjectKind.Dialog,
+      (dialog) => dialog.peerUserId === peerUserId,
+    )[0]?.chatId
+  }
+
+  private retireWork(work: BucketWork) {
+    if (this.workById.get(syncBucketId(work.key)) === work) {
+      this.workById.delete(syncBucketId(work.key))
+    }
+    if (work.retryTimer) clearTimeout(work.retryTimer)
+    work.retryTimer = undefined
+    work.fetchLatest = false
+    work.targetSeq = undefined
+    work.buffered.clear()
+  }
+
+  private isCurrentWork(work: BucketWork, generation: number) {
+    return (
+      this.isCurrentConnection(generation) &&
+      this.workById.get(syncBucketId(work.key)) === work
+    )
+  }
+
   private async discoverBuckets(generation: number) {
     const state = await this.preparedGlobalState()
     const delays = [0, 1_000, 2_000, 5_000]
@@ -690,6 +1040,7 @@ export class SyncEngine {
           },
           { timeoutMs: rpcTimeoutMs },
         )
+        if (!this.isCurrentConnection(generation)) return
         if (!result || result.oneofKind !== "getUpdatesState") {
           throw new Error("getUpdatesState returned the wrong result")
         }

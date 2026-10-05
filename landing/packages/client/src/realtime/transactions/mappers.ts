@@ -144,6 +144,13 @@ export const upsertDialog = (db: Db, dialog: Dialog) => {
       ? getDialogId({ peerUserId })
       : getDialogId({ peerThreadId: peerThreadId ?? exactChatId })
   const existing = db.get(db.ref(DbObjectKind.Dialog, id))
+  const incomingReadMaxId = toId(dialog.readMaxId, messageId)
+  // Read boundaries only advance on the server. A delayed snapshot from a
+  // different sync bucket must not undo a committed read and its unread state.
+  const staleReadState =
+    existing?.readMaxId != null &&
+    (incomingReadMaxId == null ||
+      compareInlineIds(incomingReadMaxId, existing.readMaxId) < 0)
   const open = dialog.open !== undefined ? dialog.open : existing?.open
   const chatListHidden =
     dialog.chatListHidden !== undefined
@@ -161,9 +168,9 @@ export const upsertDialog = (db: Db, dialog: Dialog) => {
     spaceId: toId(dialog.spaceId, spaceId),
     archived: dialog.archived ?? undefined,
     pinned: dialog.pinned ?? undefined,
-    readMaxId: toId(dialog.readMaxId, messageId),
-    unreadCount: dialog.unreadCount ?? undefined,
-    unreadMark: dialog.unreadMark ?? undefined,
+    readMaxId: staleReadState ? existing.readMaxId : incomingReadMaxId,
+    unreadCount: staleReadState ? existing.unreadCount : dialog.unreadCount,
+    unreadMark: staleReadState ? existing.unreadMark : dialog.unreadMark,
     open,
     order:
       dialog.open === false
