@@ -2003,7 +2003,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
     titleField.font = .systemFont(ofSize: 13)
     closeButton.title = ""
-    closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+    closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close from Sidebar")
     closeButton.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
     closeButton.imagePosition = .imageOnly
     closeButton.controlSize = .small
@@ -2011,8 +2011,8 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     closeButton.contentTintColor = .secondaryLabelColor
     closeButton.target = self
     closeButton.action = #selector(closeButtonPressed)
-    closeButton.toolTip = "Close"
-    closeButton.setAccessibilityLabel("Close")
+    closeButton.toolTip = "Close from Sidebar. Find this chat again in All Chats."
+    closeButton.setAccessibilityLabel("Close from Sidebar")
     closeButton.isHidden = true
     titleActivityView.visibilityChanged = { [weak self] in
       self?.needsLayout = true

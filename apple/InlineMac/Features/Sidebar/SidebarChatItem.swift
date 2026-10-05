@@ -502,7 +502,8 @@ struct SidebarChatItemView: Equatable, View {
       SidebarChatCloseIcon()
     }
     .buttonStyle(SidebarCloseButtonStyle(isHovered: isCloseHovered))
-    .help("Close")
+    .help("Close from Sidebar. Find this chat again in All Chats.")
+    .accessibilityLabel("Close from Sidebar")
     .onHover { isCloseHovered = $0 }
   }
 

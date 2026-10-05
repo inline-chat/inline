@@ -740,6 +740,10 @@ final class AppMenu: NSObject {
         commandItem.target = self
         commandItem.tag = command.rawValue
         commandItem.identifier = command.identifier
+        if command == .copyLink {
+          commandItem.keyEquivalent = "c"
+          commandItem.keyEquivalentModifierMask = [.command, .option]
+        }
         menu.addItem(commandItem)
         chatMenuItems[command] = commandItem
       }

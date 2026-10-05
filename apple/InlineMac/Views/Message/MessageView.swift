@@ -4953,21 +4953,6 @@ extension MessageViewAppKit: NSMenuDelegate {
     let menu = NSMenu()
 
     let regularMessage = message.status != .sending && message.status != .failed
-    if regularMessage, let action = currentAcknowledgementAction() {
-      let ack = NSMenuItem(
-        title: action.clear ? "Remove Ack" : "Ack",
-        action: #selector(acknowledgeMessage),
-        keyEquivalent: ""
-      )
-      ack.target = self
-      ack.image = NSImage(
-        systemSymbolName: action.clear ? "xmark" : "checkmark",
-        accessibilityDescription: nil
-      )
-      menu.addItem(ack)
-    }
-
-
     // Reply
     if regularMessage, !isAnchorMessage {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")

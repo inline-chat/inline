@@ -4717,31 +4717,6 @@ private extension MessagesCollectionView {
         actions.append(forwardAction)
       }
 
-      if let acknowledgementAction = fullMessage.acknowledgementAction(
-        currentUserId: Auth.shared.getCurrentUserId()
-      ) {
-        actions.append(UIAction(
-          title: acknowledgementAction.clear ? "Remove Ack" : "Ack",
-          image: UIImage(systemName: acknowledgementAction.clear ? "xmark" : "checkmark")
-        ) { _ in
-          Task {
-            do {
-              try await Api.realtime.send(.acknowledgeMessages(
-                message: fullMessage,
-                action: acknowledgementAction
-              ))
-            } catch {
-              Log.scoped("Acknowledgement").error("Failed to update Ack", error: error)
-              ToastManager.shared.showToast(
-                "Could not update Ack",
-                type: .error,
-                systemImage: "exclamationmark.triangle.fill"
-              )
-            }
-          }
-        })
-      }
-
       let pinned = isMessagePinned(message)
       let pinAction = UIAction(
         title: pinned ? "Unpin" : "Pin",
