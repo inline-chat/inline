@@ -72,10 +72,10 @@ async fn serve_response(
         if line == "\r\n" {
             break;
         }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse::<usize>().unwrap();
-            }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            length = value.trim().parse::<usize>().unwrap();
         }
     }
     // Codex can discover optional provider metadata before its first response.
