@@ -133,6 +133,9 @@ struct SpaceMemberRosterState: Codable, FetchableRecord, PersistableRecord {
     guard let sequence else { return }
     let existing = try fetchOne(db, key: spaceID)
     guard sequence > (existing?.observedSeq ?? -1) else { return }
+    // A removal can arrive after the Space and its cascade-owned state were
+    // deleted. There is no parent for a sequence row to protect in that case.
+    guard try Space.fetchOne(db, id: spaceID) != nil else { return }
     try SpaceMemberRosterState(
       spaceId: spaceID,
       observedSeq: sequence,
@@ -185,6 +188,7 @@ struct SpaceMemberEventState: Codable, FetchableRecord, PersistableRecord {
     let existing = try filter(Columns.spaceId == spaceID && Columns.userId == userID)
       .fetchOne(db)
     guard sequence > (existing?.seq ?? -1) else { return }
+    guard try Space.fetchOne(db, id: spaceID) != nil else { return }
     try SpaceMemberEventState(spaceId: spaceID, userId: userID, seq: sequence).save(db)
   }
 }
