@@ -6,7 +6,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from .message_actions import build_inline_agent_action_id
 
@@ -105,16 +105,11 @@ _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
 _PRESENCE_KINDS = ["idle", "happy", "waving", "jumping", "failed", "waiting", "running", "review"]
 
 
-def configure_sidecar(*, bind: str, port: int, token: str, send: Optional[Callable] = None) -> None:
+def configure_sidecar(*, bind: str, port: int, token: str) -> None:
     """Store live adapter sidecar details for model tools in this process."""
     if not token:
         return
-    _sidecar.update({"bind": bind, "port": int(port), "token": token, "send": send})
-
-
-def clear_sidecar_send(send: Callable) -> None:
-    if _sidecar.get("send") is send:
-        _sidecar.pop("send", None)
+    _sidecar.update({"bind": bind, "port": int(port), "token": token})
 
 
 def check_inline_tool_requirements() -> bool:
@@ -296,8 +291,7 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
 
     try:
         path, body = _request_for_action(action, args)
-        sender = _sidecar.get("send") if action == "send_message" else None
-        response = sender(body) if sender is not None else _sidecar_call(path, body)
+        response = _sidecar_call(path, body)
         result = _compact_result(action, response.get("result") or {})
         return tool_result({"success": True, "action": action, "result": result})
     except InlineToolError as exc:

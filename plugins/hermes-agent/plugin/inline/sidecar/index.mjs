@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
 var require_json_typings = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.isJsonObject = exports.typeofJsonValue = undefined;
@@ -55,7 +55,7 @@ var require_json_typings = __commonJS(function(exports) {
   exports.isJsonObject = isJsonObject;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
 var require_base64 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.base64encode = exports.base64decode = undefined;
@@ -147,7 +147,7 @@ var require_base64 = __commonJS(function(exports) {
   exports.base64encode = base64encode;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
 var require_protobufjs_utf8 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.utf8read = undefined;
@@ -184,7 +184,7 @@ var require_protobufjs_utf8 = __commonJS(function(exports) {
   exports.utf8read = utf8read;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
 var require_binary_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
@@ -224,7 +224,7 @@ var require_binary_format_contract = __commonJS(function(exports) {
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
 var require_goog_varint = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.varint32read = exports.varint32write = exports.int64toString = exports.int64fromString = exports.varint64write = exports.varint64read = undefined;
@@ -391,7 +391,7 @@ var require_goog_varint = __commonJS(function(exports) {
   exports.varint32read = varint32read;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
 var require_pb_long = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.PbLong = exports.PbULong = exports.detectBi = undefined;
@@ -575,7 +575,7 @@ var require_pb_long = __commonJS(function(exports) {
   PbLong.ZERO = new PbLong(0, 0);
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
 var require_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryReader = exports.binaryReadOptions = undefined;
@@ -697,7 +697,7 @@ var require_binary_reader = __commonJS(function(exports) {
   exports.BinaryReader = BinaryReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
 var require_assert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assertFloat32 = exports.assertUInt32 = exports.assertInt32 = exports.assertNever = exports.assert = undefined;
@@ -741,7 +741,7 @@ var require_assert = __commonJS(function(exports) {
   exports.assertFloat32 = assertFloat32;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
 var require_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryWriter = exports.binaryWriteOptions = undefined;
@@ -896,7 +896,7 @@ var require_binary_writer = __commonJS(function(exports) {
   exports.BinaryWriter = BinaryWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
 var require_json_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.mergeJsonOptions = exports.jsonWriteOptions = exports.jsonReadOptions = undefined;
@@ -926,14 +926,14 @@ var require_json_format_contract = __commonJS(function(exports) {
   exports.mergeJsonOptions = mergeJsonOptions;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
 var require_message_type_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MESSAGE_TYPE = undefined;
   exports.MESSAGE_TYPE = Symbol.for("protobuf-ts/message-type");
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
 var require_lower_camel_case = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.lowerCamelCase = undefined;
@@ -961,7 +961,7 @@ var require_lower_camel_case = __commonJS(function(exports) {
   exports.lowerCamelCase = lowerCamelCase;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
 var require_reflection_info = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
@@ -1035,7 +1035,7 @@ var require_reflection_info = __commonJS(function(exports) {
   exports.readMessageOption = readMessageOption;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
 var require_oneof = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSelectedOneofValue = exports.clearOneofValue = exports.setUnknownOneofValue = exports.setOneofValue = exports.getOneofValue = exports.isOneofGroup = undefined;
@@ -1095,7 +1095,7 @@ var require_oneof = __commonJS(function(exports) {
   exports.getSelectedOneofValue = getSelectedOneofValue;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
 var require_reflection_type_check = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionTypeCheck = undefined;
@@ -1296,7 +1296,7 @@ var require_reflection_type_check = __commonJS(function(exports) {
   exports.ReflectionTypeCheck = ReflectionTypeCheck;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
 var require_reflection_long_convert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionLongConvert = undefined;
@@ -1314,7 +1314,7 @@ var require_reflection_long_convert = __commonJS(function(exports) {
   exports.reflectionLongConvert = reflectionLongConvert;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
 var require_reflection_json_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonReader = undefined;
@@ -1588,7 +1588,7 @@ var require_reflection_json_reader = __commonJS(function(exports) {
   exports.ReflectionJsonReader = ReflectionJsonReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
 var require_reflection_json_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonWriter = undefined;
@@ -1791,7 +1791,7 @@ var require_reflection_json_writer = __commonJS(function(exports) {
   exports.ReflectionJsonWriter = ReflectionJsonWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
 var require_reflection_scalar_default = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionScalarDefault = undefined;
@@ -1823,7 +1823,7 @@ var require_reflection_scalar_default = __commonJS(function(exports) {
   exports.reflectionScalarDefault = reflectionScalarDefault;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
 var require_reflection_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryReader = undefined;
@@ -1983,7 +1983,7 @@ var require_reflection_binary_reader = __commonJS(function(exports) {
   exports.ReflectionBinaryReader = ReflectionBinaryReader;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
 var require_reflection_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryWriter = undefined;
@@ -2181,7 +2181,7 @@ var require_reflection_binary_writer = __commonJS(function(exports) {
   exports.ReflectionBinaryWriter = ReflectionBinaryWriter;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
 var require_reflection_create = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionCreate = undefined;
@@ -2215,7 +2215,7 @@ var require_reflection_create = __commonJS(function(exports) {
   exports.reflectionCreate = reflectionCreate;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
 var require_reflection_merge_partial = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionMergePartial = undefined;
@@ -2282,7 +2282,7 @@ var require_reflection_merge_partial = __commonJS(function(exports) {
   exports.reflectionMergePartial = reflectionMergePartial;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
 var require_reflection_equals = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionEquals = undefined;
@@ -2350,7 +2350,7 @@ var require_reflection_equals = __commonJS(function(exports) {
   }
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
 var require_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MessageType = undefined;
@@ -2456,7 +2456,7 @@ var require_message_type = __commonJS(function(exports) {
   exports.MessageType = MessageType;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
 var require_reflection_contains_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.containsMessageType = undefined;
@@ -2467,7 +2467,7 @@ var require_reflection_contains_message_type = __commonJS(function(exports) {
   exports.containsMessageType = containsMessageType;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
 var require_enum_object = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.listEnumNumbers = exports.listEnumNames = exports.listEnumValues = exports.isEnumObject = undefined;
@@ -2519,7 +2519,7 @@ var require_enum_object = __commonJS(function(exports) {
   exports.listEnumNumbers = listEnumNumbers;
 });
 
-// node_modules/@protobuf-ts/runtime/build/commonjs/index.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@protobuf-ts/runtime/build/commonjs/index.js
 var require_commonjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var json_typings_1 = require_json_typings();
@@ -2702,7 +2702,7 @@ var require_commonjs = __commonJS(function(exports) {
   } });
 });
 
-// node_modules/ws/lib/constants.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2722,7 +2722,7 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
@@ -2800,7 +2800,7 @@ var require_buffer_util = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS(function(exports, module) {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2832,7 +2832,7 @@ var require_limiter = __commonJS(function(exports, module) {
   module.exports = Limiter;
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS(function(exports, module) {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -3096,7 +3096,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/validation.js
 var require_validation = __commonJS(function(exports, module) {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3283,7 +3283,7 @@ var require_validation = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS(function(exports, module) {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3677,7 +3677,7 @@ var require_receiver = __commonJS(function(exports, module) {
   module.exports = Receiver;
 });
 
-// node_modules/ws/lib/sender.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/sender.js
 var require_sender = __commonJS(function(exports, module) {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -4036,7 +4036,7 @@ var require_sender = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS(function(exports, module) {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4187,7 +4187,7 @@ var require_event_target = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/extension.js
 var require_extension = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4352,7 +4352,7 @@ var require_extension = __commonJS(function(exports, module) {
   module.exports = { format, parse };
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -5137,7 +5137,7 @@ var require_websocket = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/stream.js
 var require_stream = __commonJS(function(exports, module) {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5240,7 +5240,7 @@ var require_stream = __commonJS(function(exports, module) {
   module.exports = createWebSocketStream;
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5285,7 +5285,7 @@ var require_subprotocol = __commonJS(function(exports, module) {
   module.exports = { parse };
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -6041,7 +6041,7 @@ import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
 import path from "node:path";
 
-// node_modules/@inline-chat/protocol/dist/core.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/core.js
 var import_runtime = __toESM(require_commonjs(), 1);
 var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
@@ -38764,7 +38764,7 @@ class ChatAcknowledgements$Type extends import_runtime4.MessageType {
 }
 var ChatAcknowledgements = new ChatAcknowledgements$Type;
 
-// node_modules/@noble/hashes/esm/utils.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/hashes/esm/utils.js
 /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -38824,7 +38824,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/_md.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE);
@@ -38945,7 +38945,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// node_modules/@noble/hashes/esm/sha2.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -39085,11 +39085,11 @@ class SHA256 extends HashMD {
 }
 var sha256 = /* @__PURE__ */ createHasher(() => new SHA256);
 
-// node_modules/@inline-chat/protocol/dist/transfers.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/transfers.js
 var INLINE_TRANSFER_PART_SIZE = 512 * 1024;
 var INLINE_UPLOAD_MAX_PARTS = 1000;
 
-// node_modules/@inline-chat/protocol/dist/uploads.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/uploads.js
 var HASH_READ_SIZE = 1024 * 1024;
 var DEFAULT_GLOBAL_CONCURRENCY = 3;
 var DEFAULT_UPLOAD_CONCURRENCY = 2;
@@ -39522,7 +39522,7 @@ class NativeUploadError extends Error {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/ids.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
     super(message);
@@ -39541,7 +39541,7 @@ var asInlineId = (value, fieldName = "id") => {
   return BigInt(value);
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
 class ChannelConsumerError extends Error {
   constructor(message) {
     super(message);
@@ -39843,7 +39843,7 @@ class AcknowledgedAsyncChannel {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
 class PingPongService {
   log;
   crypto;
@@ -39972,7 +39972,7 @@ class PingPongService {
 }
 var isCrypto = (value) => typeof value === "object" && value !== null && ("getRandomValues" in value) && typeof value.getRandomValues === "function";
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
 class TransportError extends Error {
   code;
   constructor(message, code = "generic") {
@@ -39994,7 +39994,7 @@ class TransportError extends Error {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/errors.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/errors.js
 class InlineSdkAuthenticationError extends Error {
   code;
   reason;
@@ -40019,7 +40019,7 @@ function authenticationErrorFromConnectionReason(reason) {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
 var emptyRpcInput = { oneofKind: undefined };
 var defaultRpcTimeoutMs = 30000;
 var defaultMaxPendingRpcRequests = 64;
@@ -40534,7 +40534,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// node_modules/ws/wrapper.mjs
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -40544,7 +40544,7 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
 class WebSocketTransport {
   events = new AsyncChannel;
   url;
@@ -40783,10 +40783,10 @@ function redactUrlForDiagnostics(raw) {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 import { randomBytes } from "node:crypto";
 
-// node_modules/@inline-chat/protocol/dist/secure/bytes.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/bytes.js
 var MAX_PACKET_BYTES = 16 * 1024 * 1024;
 var concatBytes = (...parts) => {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
@@ -40838,7 +40838,7 @@ var hexToBytes = (hex) => {
     throw new RangeError("Invalid hexadecimal bytes");
   return Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
 };
-// node_modules/@noble/ciphers/esm/utils.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/ciphers/esm/utils.js
 /*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) */
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -40930,7 +40930,7 @@ function copyBytes(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// node_modules/@noble/ciphers/esm/aes.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/ciphers/esm/aes.js
 var BLOCK_SIZE = 16;
 var POLY = 283;
 function mul2(n) {
@@ -41163,7 +41163,7 @@ var ecb = /* @__PURE__ */ wrapCipher({ blockSize: 16 }, function aesecb(key, opt
   };
 });
 
-// node_modules/@noble/hashes/esm/legacy.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@noble/hashes/esm/legacy.js
 var SHA1_IV = /* @__PURE__ */ Uint32Array.from([
   1732584193,
   4023233417,
@@ -41238,7 +41238,7 @@ class SHA1 extends HashMD {
 }
 var sha1 = /* @__PURE__ */ createHasher(() => new SHA1);
 
-// node_modules/@inline-chat/protocol/dist/secure/crypto.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/crypto.js
 var BLOCK_BYTES = 16;
 var assertLength = (name, bytes, length) => {
   if (bytes.length !== length)
@@ -41342,7 +41342,7 @@ class AesCtrStream {
   }
 }
 
-// node_modules/@inline-chat/protocol/dist/secure/tl.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/tl.js
 var TL_VECTOR_CONSTRUCTOR = 481674261;
 var encodeTlBytes = (value) => {
   if (value.length > 16777215 || value.length > MAX_PACKET_BYTES)
@@ -41428,7 +41428,7 @@ class TlReader {
   }
 }
 
-// node_modules/@inline-chat/protocol/dist/secure/binding.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/binding.js
 var BindingConstructor = {
   bindAuthKeyInner: 1973679973,
   bindTempAuthKey: 3453233669
@@ -41468,7 +41468,7 @@ var createTemporaryKeyBindingProof = (input) => {
   const { key, iv } = deriveV1Aes(input.permanentAuthKey, messageKey);
   return concatBytes(authKeyId(input.permanentAuthKey), messageKey, aesIgeEncrypt(concatBytes(plaintextWithoutPadding, input.randomPadding), key, iv));
 };
-// node_modules/@inline-chat/protocol/dist/secure/application.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/application.js
 var INLINE_RESULT_CONSTRUCTOR = 2889735252;
 var INLINE_UPDATE_CONSTRUCTOR = 3695258776;
 var INLINE_INVOKE_CONSTRUCTOR = 3950856870;
@@ -41493,7 +41493,7 @@ var decodeInlineApplicationObject = (bytes) => {
     return { kind: "update", payload };
   throw new RangeError("Unknown Inline application constructor");
 };
-// node_modules/@inline-chat/protocol/dist/secure/carrier.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/carrier.js
 var FORBIDDEN_PREFIXES = new Set([1145128264, 1414745936, 542393671, 1230262351, 4008636142, 3722304989, 33620758]);
 var encodeAbridgedPacket = (payload, quickAckRequested = false) => {
   if (payload.length === 0 || payload.length > MAX_PACKET_BYTES || payload.length % 4 !== 0)
@@ -41548,7 +41548,7 @@ var createObfuscatedClientHeader = (randomHeader, dc = 1) => {
   const encryptedHeader = outbound.process(plaintext);
   return { wireHeader: concatBytes(plaintext.slice(0, 56), encryptedHeader.slice(56)), outbound, inbound };
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshake.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/handshake.js
 var TELEGRAM_DH_PRIME = hexToBytes("c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" + "48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372" + "0fd51f69458705ac68cd4fe6b6b13abdc9746512969328454f18faf8c595f642" + "477fe96bb2a941d5bcd1d4ac8cc49880708fa9b378e3c4f3a9060bee67cf9a4a" + "4a695811051907e162753b56b0f6b410dba74d8a84b2a14b3144e0ef1284754f" + "d17ed950d5965b4b9dd46582db1178d169c6bc465b0d6ff9ca3928fef5b9ae4e" + "418fc15e83ebea0f87fa9ff5eed70050ded2849f47bf959d956850ce929851f0d" + "8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b");
 
 class RsaPadRetry extends Error {
@@ -41767,7 +41767,7 @@ var factorPq = (pqBytes, randomBytes, maximumAttempts = 32) => {
   }
   throw new RangeError("Unable to factor pq challenge");
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshakeSchema.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/handshakeSchema.js
 var HandshakeConstructor = {
   resPq: 85337187,
   pQInnerDataDc: 2851430293,
@@ -41871,7 +41871,7 @@ var constructorReaderPrefix = (body, expected) => {
     throw new RangeError("Unexpected TL constructor");
   return new TlReader(body.slice(4));
 };
-// node_modules/@inline-chat/protocol/dist/secure/handshakeState.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/handshakeState.js
 var PQ = hexToBytes("17ed48941a08f981");
 var P = hexToBytes("494c553b");
 var Q = hexToBytes("53911073");
@@ -42041,7 +42041,7 @@ var makeRsaPublicKey = (modulus, exponent) => ({
   exponent,
   fingerprint: rsaPublicKeyFingerprint(modulus, exponent)
 });
-// node_modules/@inline-chat/protocol/dist/secure/record.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/record.js
 class InvalidEncryptedRecord extends Error {
   constructor() {
     super("Invalid Inline Protocol encrypted record");
@@ -42115,7 +42115,7 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
   }
 };
 var decryptRecord = (record, authKey, validation) => decryptRecordWithMetadata(record, authKey, validation).fields;
-// node_modules/@inline-chat/protocol/dist/secure/session.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/session.js
 class MessageIdGenerator {
   #last = 0n;
   next(estimatedServerUnixMillis, randomLowBits, modulo) {
@@ -42175,7 +42175,7 @@ class AuthenticatedServerClock {
     return this.#serverUnixMilliseconds + elapsed;
   }
 }
-// node_modules/@inline-chat/protocol/dist/secure/service.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/service.js
 var MAX_SERVICE_MESSAGE_IDS = 8192;
 var ServiceConstructor = {
   rpcResult: 4082920705,
@@ -42276,7 +42276,7 @@ var readerFor = (body, expected) => {
     throw new RangeError("Unexpected service constructor");
   return new TlReader(body.slice(4));
 };
-// node_modules/@inline-chat/protocol/dist/secure/serverSession.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/secure/serverSession.js
 var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.msgContainer,
   ServiceConstructor.msgsAck,
@@ -42291,7 +42291,7 @@ var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.pong,
   ServiceConstructor.httpWait
 ]);
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 var BOOL_TRUE = 2574415285;
 var CONNECT_TIMEOUT_MS = 30000;
 var REQUEST_TIMEOUT_MS = 60000;
@@ -43064,7 +43064,7 @@ class InlineProtocolV3Connection {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-transport.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-transport.js
 var pendingUpdateCapacity = 256;
 var pendingUpdateByteCapacity = 8 * 1024 * 1024;
 var transportEventByteCapacity = 8 * 1024 * 1024;
@@ -43516,7 +43516,7 @@ class InlineProtocolV3Transport {
   }
 }
 
-// node_modules/@inline-chat/realtime-sdk/dist/realtime/production-trust-roots.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/realtime/production-trust-roots.js
 var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   {
     modulus: "y4mCEOAFrQU02g6WBGLvsy6hBh9jOfV6Hg6lvKvnRKj2vybdLTISXilcYbN2ItUfXhFf7Tk660OLhD7lBv2Pme9YVmWswHJ9j7PyyIa6klTiBLSADPPCuknvID1X7bX-Ut5IwmJDciSITHy0Qxf5yGnhRWPWOgxWDt4EdwHiOd9uHwCxLn9k8LfIXN2DOT8aPH306IB0IWMsTlnXBZ7om8nZniJG0NWG1u-BJDEk4Hz8eko1cF4wc-naVY4qcDh9zD9iXrbMJ5b8aw2JG11dvJGEBmWqjPcPJy1VqFNAZOxGUf-LXWRTnNuwECRpgvqm5oO_CFfwXUvM5W1Tw7lIVQ",
@@ -43530,7 +43530,7 @@ var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   }
 ];
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
 var rpcInputKindByMethod = {
   0: undefined,
   1: "getMe",
@@ -43670,10 +43670,10 @@ var rpcResultKindByMethod = {
   132: "deleteBotAgent"
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
 var noopLogger = {};
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
 import { readFileSync } from "node:fs";
 var cached = null;
 var getSdkVersion = () => {
@@ -43697,7 +43697,7 @@ var getSdkVersion = () => {
   return cached;
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
 var nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 var sdkLayer = 1;
 var defaultApiBaseUrl = "https://api.inline.chat";
@@ -46443,7 +46443,7 @@ var resolveRealtimeV3Url = (baseUrl) => {
   return url.toString();
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
 async function registerBotCapabilitiesWithRetry(params) {
   const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
   const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -46462,10 +46462,10 @@ async function registerBotCapabilitiesWithRetry(params) {
     }
   }
 }
-// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
-// node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
   const json = {
     version: 1,
@@ -46524,7 +46524,7 @@ var isStateJsonV1 = (value) => {
   return true;
 };
 
-// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 class JsonFileStateStore {
   path;
   constructor(path) {
@@ -46545,7 +46545,7 @@ class JsonFileStateStore {
     await rename(tempPath, this.path);
   }
 }
-// node_modules/@inline-chat/protocol/dist/vectors.js
+// ../../../inline-hermes-release-scLm0o/plugins/hermes-agent/node_modules/@inline-chat/protocol/dist/vectors.js
 var portableCoreV1Vector = {
   authKeyHex: Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0")).join(""),
   direction: "client-to-server",
@@ -47246,17 +47246,7 @@ async function endpointTyping(res, body) {
     writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } });
     return;
   }
-  if (record2.experimentalAgentActivity === true) {
-    await client.invoke(Method.SEND_COMPOSE_ACTION, {
-      oneofKind: "sendComposeAction",
-      sendComposeAction: {
-        peerId: InputPeer.create({ type: { oneofKind: "chat", chat: { chatId: target.chatId } } }),
-        ...typing ? { action: 6 } : {}
-      }
-    });
-  } else {
-    await client.sendTyping({ chatId: target.chatId, typing });
-  }
+  await client.sendTyping({ chatId: target.chatId, typing });
   writeJson(res, 200, { ok: true, result: {} });
 }
 async function endpointPresence(res, body) {
