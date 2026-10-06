@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import functools
 import json
 import logging
 import math
@@ -25,8 +24,6 @@ import subprocess
 import sys
 import time
 from collections import OrderedDict
-from contextlib import AsyncExitStack, asynccontextmanager
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
@@ -59,10 +56,8 @@ from .message_actions import (
     resolve_inline_message_action_ownership,
 )
 from .telemetry import capture_plugin_error
-from .activity import ActivityTimeline, tool_event
 
 logger = logging.getLogger(__name__)
-_activity_owner: ContextVar = ContextVar("inline_activity_owner", default=None)
 
 _DEFAULT_SIDECAR_PORT = 8794
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
@@ -236,8 +231,6 @@ def _install_inline_display_defaults() -> None:
         if not isinstance(defaults, dict):
             return
         inline_defaults = dict(_INLINE_DISPLAY_DEFAULTS)
-        if _truthy(os.getenv("INLINE_EXPERIMENTAL_AGENT_ACTIVITY")):
-            inline_defaults.update(tool_progress="all", cleanup_progress=False, interim_assistant_messages=True)
         current = defaults.get("inline")
         if isinstance(current, dict):
             defaults["inline"] = {**inline_defaults, **current}
@@ -245,110 +238,6 @@ def _install_inline_display_defaults() -> None:
             defaults["inline"] = inline_defaults
     except Exception:
         logger.debug("[inline] failed to install display defaults", exc_info=True)
-
-
-def _inline_activity_key(source: Any, message_id: Any) -> tuple[str, str, str]:
-    return (str(source.chat_id), str(getattr(source, "thread_id", None) or ""), str(message_id or ""))
-
-
-def _install_inline_progress_bridge() -> None:
-    """Compatibility for Hermes' legacy gateway, gated to Inline and both seams.
-
-    Processing outcomes use the public adapter hook. Current Hermes does not
-    route this gateway path through BasePlatformAdapter.format_tool_event yet.
-    Keep host-specific access here so that hook can replace this bridge later.
-    """
-    try:
-        from gateway.run import TurnRunner
-        original_send = TurnRunner.send_progress_messages
-        original_progress = TurnRunner.progress_callback
-    except (ImportError, AttributeError):
-        logger.warning("[inline] structured progress unavailable on this Hermes host; using host defaults")
-        return
-    if getattr(original_send, "_inline_activity_bridge", False):
-        return
-
-    def adapter_for(runner):
-        ctx = runner._ctx
-        if str(getattr(ctx.source.platform, "value", ctx.source.platform)) != "inline":
-            return None
-        if not callable(getattr(ctx, "_run_still_current", None)) or not hasattr(ctx, "progress_queue"):
-            return None
-        adapter = runner._runner._adapter_for_source(ctx.source)
-        return adapter if isinstance(adapter, InlineAdapter) and adapter._agent_activity_enabled else None
-
-    @functools.wraps(original_progress)
-    def progress(runner, event_type, tool_name=None, preview=None, args=None, **kwargs):
-        adapter = adapter_for(runner)
-        ctx = runner._ctx
-        if adapter is None or event_type not in {"tool.started", "tool.completed"}:
-            return original_progress(runner, event_type, tool_name, preview, args, **kwargs)
-        # Respect explicit display policy, current-generation ownership and stop.
-        if not getattr(ctx, "tool_progress_enabled", False) or ctx.progress_queue is None:
-            return original_progress(runner, event_type, tool_name, preview, args, **kwargs)
-        holder = getattr(ctx, "agent_holder", None)
-        if not ctx._run_still_current() or (holder and getattr(holder[0], "is_interrupted", False)):
-            return
-        if event_type == "tool.started" and getattr(ctx, "progress_mode", "all") == "new":
-            if ctx.last_tool[0] == tool_name:
-                return
-            ctx.last_tool[0] = tool_name
-        try:
-            from agent.display import get_tool_preview_max_len
-            preview_limit = get_tool_preview_max_len()
-        except (ImportError, AttributeError):
-            preview_limit = 40
-        event = tool_event(event_type, tool_name or "tool", preview, args, preview_limit=preview_limit, **kwargs)
-        if event is not None:
-            ctx.progress_queue.put(event)
-
-    @functools.wraps(original_send)
-    async def send_progress(runner):
-        adapter = adapter_for(runner)
-        if adapter is None:
-            return await original_send(runner)
-        ctx = runner._ctx
-        if ctx.progress_queue is None:
-            return
-        metadata = ctx._progress_metadata
-        owner = _activity_owner.get()
-        group = adapter._activity_timelines.get(owner[1]) if owner and owner[0] is adapter else None
-        timeline = ActivityTimeline(adapter._send_sidecar, adapter._target_for(ctx.source.chat_id, metadata),
-                                    ctx=ctx, handles_replies=True)
-        internal_key = None
-        if group is not None:
-            # Queued followups recurse inside the original processing task.
-            # Its public hook owns the entire chain, not each reply anchor.
-            previous = group[-1] if group else None
-            group.append(timeline)
-            if previous is not None:
-                try:
-                    await previous.finish()
-                except Exception:
-                    logger.debug("[inline] preceding activity close failed", exc_info=True)
-        else:
-            # Cron/internal senders have no public completion owner. Register
-            # only for their sender lifetime, never under a synthetic reply ID.
-            internal_key = _inline_activity_key(ctx.source, f"internal:{id(timeline)}")
-            adapter._activity_timelines[internal_key] = [timeline]
-        try:
-            await timeline.consume(ctx)
-        except Exception:
-            # Presentation failure must never skip the agent's final reply.
-            logger.warning("[inline] activity delivery failed", exc_info=True)
-            try:
-                # Transport failure is not a model failure. Retry the frozen
-                # processing outcome; the public hook can still correct it.
-                await timeline.finish()
-            except Exception:
-                pass
-        finally:
-            if internal_key is not None:
-                adapter._activity_timelines.pop(internal_key, None)
-
-    send_progress._inline_activity_bridge = True
-    TurnRunner.progress_callback = progress
-    TurnRunner.send_progress_messages = send_progress
 
 
 def _reply_thread_mode(value: Any, default: str = "auto") -> str:
@@ -844,10 +733,10 @@ def is_connected(cfg: PlatformConfig) -> bool:
     return validate_config(cfg)
 
 
-def _configure_tool_sidecar(*, bind: str, port: int, token: str, send: Optional[Callable] = None) -> None:
+def _configure_tool_sidecar(*, bind: str, port: int, token: str) -> None:
     try:
         from . import tools as _inline_tools
-        _inline_tools.configure_sidecar(bind=bind, port=port, token=token, send=send)
+        _inline_tools.configure_sidecar(bind=bind, port=port, token=token)
     except Exception:
         logger.debug("[inline] failed to configure Inline tool sidecar", exc_info=True)
 
@@ -924,7 +813,8 @@ class InlineAdapter(BasePlatformAdapter):
         super().__init__(config, Platform("inline"))
         extra = config.extra or {}
 
-        self._agent_activity_enabled = _truthy(os.getenv("INLINE_EXPERIMENTAL_AGENT_ACTIVITY"))
+        if _truthy(os.getenv("INLINE_EXPERIMENTAL_AGENT_ACTIVITY")):
+            logger.warning("[inline] experimental tool timelines are unavailable; ignoring INLINE_EXPERIMENTAL_AGENT_ACTIVITY and using ordinary typing")
         self._token = _config_token(config)
         self._base_url = os.getenv("INLINE_BASE_URL") or extra.get("base_url") or "https://api.inline.chat"
         self._sidecar_bind = _normalize_sidecar_bind(extra.get("sidecar_bind") or os.getenv("INLINE_SIDECAR_BIND"))
@@ -940,7 +830,6 @@ class InlineAdapter(BasePlatformAdapter):
             "INLINE_CONNECT_TIMEOUT_MS",
         )
         self._sidecar_token = os.getenv("INLINE_SIDECAR_TOKEN") or secrets.token_hex(16)
-        self._tool_send: Optional[Callable] = None
         _configure_tool_sidecar(bind=self._sidecar_bind, port=self._sidecar_port, token=self._sidecar_token)
         self._node_bin = _find_node_bin() or "node"
         self._autostart_sidecar = _truthy(os.getenv("INLINE_SIDECAR_AUTOSTART"), True)
@@ -1112,7 +1001,6 @@ class InlineAdapter(BasePlatformAdapter):
         self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._status_message_ids: "OrderedDict[tuple[str, str, str], str]" = OrderedDict()
-        self._activity_timelines: dict[tuple[str, str, str], list[ActivityTimeline]] = {}
         self._processing_reaction_messages: "OrderedDict[tuple[str, str, str], Dict[str, str]]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -2031,8 +1919,6 @@ class InlineAdapter(BasePlatformAdapter):
         return True
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
-        if self._agent_activity_enabled:
-            _install_inline_progress_bridge()
         if not HTTPX_AVAILABLE:
             self._set_fatal_error("MISSING_DEP", "httpx not installed", retryable=False)
             return False
@@ -2055,8 +1941,6 @@ class InlineAdapter(BasePlatformAdapter):
                 self._http_client = None
                 return False
         self._inbound_running = True
-        if self._agent_activity_enabled:
-            self._configure_tool_sender()
         self._inbound_task = asyncio.get_event_loop().create_task(self._inbound_loop())
         self._mark_connected()
         logger.info("[inline] connected via sidecar on %s:%d", self._sidecar_bind, self._sidecar_port)
@@ -2064,10 +1948,6 @@ class InlineAdapter(BasePlatformAdapter):
         return True
 
     async def disconnect(self) -> None:
-        if self._tool_send is not None:
-            from .tools import clear_sidecar_send
-            clear_sidecar_send(self._tool_send)
-            self._tool_send = None
         self._inbound_running = False
         if self._command_sync_task is not None:
             self._command_sync_task.cancel()
@@ -2093,14 +1973,6 @@ class InlineAdapter(BasePlatformAdapter):
         if deliveries:
             await asyncio.gather(*deliveries, return_exceptions=True)
         self._inbound_deliveries.clear()
-        groups = list(self._activity_timelines.values())
-        self._activity_timelines.clear()
-        for group in groups:
-            for index, timeline in enumerate(group):
-                try:
-                    await timeline.finish("cancelled" if index == len(group) - 1 else None)
-                except Exception:
-                    logger.debug("[inline] activity shutdown update failed", exc_info=True)
         for task in list(self._bot_settings_tasks):
             task.cancel()
         if self._bot_settings_tasks:
@@ -4737,80 +4609,7 @@ class InlineAdapter(BasePlatformAdapter):
         except Exception:
             logger.debug("[inline] answer action failed", exc_info=True)
 
-    def _configure_tool_sender(self) -> None:
-        """Route synchronous model sends through this live adapter's boundary."""
-        from .tools import InlineToolError
-        loop = asyncio.get_running_loop()
-
-        def send(body):
-            try:
-                current_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                current_loop = None
-            if current_loop is loop:
-                raise InlineToolError("Inline synchronous send cannot run on the gateway event loop", "unknown")
-            if not loop.is_running():
-                raise InlineToolError("Inline adapter is not connected", "transient")
-            future = asyncio.run_coroutine_threadsafe(self._send_tool_message(body), loop)
-            try:
-                return future.result(timeout=45)
-            except TimeoutError as exc:
-                future.cancel()
-                # Delivery may already have committed. Never fall back to a
-                # second HTTP send after a timeout or transport exception.
-                raise InlineToolError("Inline send timed out; delivery may have completed", "unknown") from exc
-            except Exception as exc:
-                raise InlineToolError(str(exc), getattr(exc, "error_kind", "unknown")) from exc
-
-        self._tool_send = send
-        _configure_tool_sidecar(bind=self._sidecar_bind, port=self._sidecar_port,
-                                token=self._sidecar_token, send=send)
-
-    async def _send_tool_message(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        async with self._activity_reply_boundary(body["target"]):
-            return await self._sidecar_call("/send", body)
-
-    @asynccontextmanager
-    async def _activity_reply_boundary(self, target: Dict[str, Any]):
-        if not self._agent_activity_enabled:
-            yield
-            return
-        owner = _activity_owner.get()
-        group = self._activity_timelines.get(owner[1]) if owner and owner[0] is self else None
-        if group is not None:
-            for previous in group[:-1]:
-                try:
-                    await previous.finish()
-                except Exception:
-                    logger.debug("[inline] preceding activity close failed", exc_info=True)
-            candidates = [timeline for timeline in group[-1:]
-                          if not timeline.closed and timeline.target == target]
-        else:
-            # Unowned internal sends carry no reliable turn ID. Every active
-            # row in this target must precede the visible reply, including when
-            # a cron task overlaps another sender. Registry order is stable so
-            # concurrent sends acquire these locks in the same order.
-            candidates = [timeline for timelines in self._activity_timelines.values() for timeline in timelines
-                          if not timeline.closed and timeline.target == target]
-        async with AsyncExitStack() as boundaries:
-            for timeline in candidates:
-                await boundaries.enter_async_context(timeline.reply_boundary())
-            yield
-
     async def send(
-        self,
-        chat_id: str,
-        content: str,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        actions: Optional[Dict[str, Any]] = None,
-    ) -> SendResult:
-        if not self._agent_activity_enabled:
-            return await self._send_content(chat_id, content, reply_to, metadata, actions)
-        async with self._activity_reply_boundary(self._target_for(chat_id, metadata)):
-            return await self._send_content(chat_id, content, reply_to, metadata, actions)
-
-    async def _send_content(
         self,
         chat_id: str,
         content: str,
@@ -5033,8 +4832,7 @@ class InlineAdapter(BasePlatformAdapter):
     async def send_typing(self, chat_id: str, metadata=None) -> None:
         try:
             target = self._typing_target_for(chat_id, metadata)
-            await self._sidecar_call("/typing", {"target": target, "state": "start",
-                                                  "experimentalAgentActivity": self._agent_activity_enabled})
+            await self._sidecar_call("/typing", {"target": target, "state": "start"})
             self._active_typing_targets[self._typing_target_key(chat_id, metadata)] = target
         except Exception as exc:
             logger.debug("[inline] typing failed: %s", exc)
@@ -5098,13 +4896,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def on_processing_start(self, event: MessageEvent) -> None:
         """Mark an inbound message while Hermes is actively processing it."""
-        if self._agent_activity_enabled:
-            activity_key = _inline_activity_key(event.source, getattr(event, "message_id", None))
-            self._activity_timelines.setdefault(activity_key, [])
-            # The host awaits this hook in its processing task. Context follows its
-            # child tasks and recursive queued turns, while concurrent chats stay
-            # isolated. Internal/cron senders own their temporary entries instead.
-            _activity_owner.set((self, activity_key))
         reaction_target = self._processing_reaction_target(event)
         if not reaction_target:
             return
@@ -5122,19 +4913,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         """Replace the processing marker without affecting response delivery."""
-        if self._agent_activity_enabled:
-            key = _inline_activity_key(event.source, getattr(event, "message_id", None))
-            outcome_name = str(getattr(outcome, "value", outcome) or "").strip().lower()
-            group = self._activity_timelines.pop(key, [])
-            if _activity_owner.get() == (self, key):
-                _activity_owner.set(None)
-            for index, timeline in enumerate(group):
-                try:
-                    # Earlier queued turns already have their own result. The
-                    # outer hook reports final delivery for the last child only.
-                    await timeline.finish(outcome_name if index == len(group) - 1 else None)
-                except Exception:
-                    logger.warning("[inline] activity outcome update failed", exc_info=True)
         reaction_target = self._processing_reaction_target(event)
         if not reaction_target:
             return
