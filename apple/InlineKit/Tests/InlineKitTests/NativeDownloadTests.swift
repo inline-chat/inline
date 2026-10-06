@@ -1,3 +1,4 @@
+@_spi(LogoutCoordinator) import Auth
 import Combine
 import CryptoKit
 import Foundation
@@ -85,6 +86,116 @@ private actor DownloadPartMock: NativeFilePartFetching {
 
 @Suite("Native download session ownership", .serialized)
 @MainActor private struct NativeDownloadSessionTests {
+  @Test func savedNativeOptInWithoutV3StillStartsCDNDownload() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let owner = FileDownloader(auth: auth.handle)
+    #expect(auth.getIsLoggedIn())
+    #expect(auth.getInlineProtocolCredentials() == nil)
+    let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
+    let previousPreference = UserDefaults.standard.object(forKey: key)
+    UserDefaults.standard.set(true, forKey: key)
+    defer { UserDefaults.standard.set(previousPreference, forKey: key) }
+
+    let document = DocumentInfo(document: Document(
+      documentId: 99004, date: Date(), fileName: "download-policy.txt", size: 1,
+      cdnUrl: "unsupported-download-policy://document"
+    ))
+    let message = Message(
+      messageId: 1, fromId: 1, date: Date(), text: nil,
+      peerUserId: 1, peerThreadId: nil, chatId: 1, documentId: document.document.documentId
+    )
+    var completions = 0
+    owner.downloadDocument(document: document, for: message) { result in
+      completions += 1
+      if case let .failure(error) = result {
+        #expect(error is URLError)
+      } else {
+        Issue.record("The unsupported test URL unexpectedly downloaded")
+      }
+    }
+
+    // The real URLSession route publishes progress before resuming its task.
+    // The old native admission instead failed synchronously before this point.
+    #expect(owner.isDocumentDownloadActive(documentId: document.id))
+    #expect(owner.currentDocumentProgress(documentId: document.id) != nil)
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
+    #expect(UserDefaults.standard.bool(forKey: key))
+    await owner.resetSession()
+    #expect(completions == 1)
+    try await completeMockLogout(auth)
+  }
+
+  @Test func publishedLogoutCannotAdmitCDNWhenV3Disappears() async throws {
+    let auth = Auth.mocked(authenticated: false)
+    let owner = FileDownloader(auth: auth.handle)
+    let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
+    let previousPreference = UserDefaults.standard.object(forKey: key)
+    defer { UserDefaults.standard.set(previousPreference, forKey: key) }
+    let bytes = [UInt8](repeating: 0x31, count: 256)
+    let authorization = try InlineProtocolAuthorization(
+      key: bytes, keyID: InlineSecureTransport.authKeyID(bytes), serverSalt: 7,
+      temporary: false, expiresAt: nil
+    )
+    try await auth.saveInlineProtocolCredentials(InlineProtocolSessionCredentials(
+      userId: 1, accountSessionId: 84, permanent: authorization
+    ))
+    UserDefaults.standard.set(false, forKey: key)
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
+    UserDefaults.standard.set(true, forKey: key)
+    #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
+    #expect(try NativeDocumentDownload(auth: auth.handle).accountToken.userID == 1)
+
+    let fence = try auth.beginLogoutSynchronously()
+    await auth.publishLogoutInProgress()
+    #expect(auth.getInlineProtocolCredentials() == nil)
+    let document = DocumentInfo(document: Document(
+      documentId: 99005, date: Date(), cdnUrl: "unsupported-download-policy://document"
+    ))
+    let message = Message(
+      messageId: 1, fromId: 1, date: Date(), text: nil,
+      peerUserId: 1, peerThreadId: nil, chatId: 1, documentId: document.document.documentId
+    )
+    var completions = 0
+    owner.downloadDocument(document: document, for: message) { result in
+      completions += 1
+      if case let .failure(error) = result {
+        #expect(FileDownloader.isCancellation(error))
+      } else {
+        Issue.record("Logout admitted a new download")
+      }
+    }
+    #expect(completions == 1)
+    #expect(!owner.isDocumentDownloadActive(documentId: document.id))
+    #expect(owner.currentDocumentProgress(documentId: document.id) == nil)
+    await owner.resetSession()
+    try await completeMockLogout(auth, fence: fence)
+
+    // A stale view can still deliver an action after the logout fence clears.
+    owner.downloadDocument(document: document, for: message) { result in
+      completions += 1
+      if case let .failure(error) = result {
+        #expect(FileDownloader.isCancellation(error))
+      } else {
+        Issue.record("Completed logout admitted a new download")
+      }
+    }
+    #expect(completions == 2)
+    #expect(!owner.isDocumentDownloadActive(documentId: document.id))
+    #expect(owner.currentDocumentProgress(documentId: document.id) == nil)
+    await owner.resetSession()
+  }
+
+  private func completeMockLogout(_ auth: Auth, fence: AuthLogoutFence? = nil) async throws {
+    let fence = try fence ?? auth.beginLogoutSynchronously()
+    let proof = await auth.destroyCredentialsForPendingLogout(fence: fence)
+    guard let proof else { throw AuthStorageError.keychainDeleteFailed }
+    let completed = await auth.completePendingLogout(
+      fence: fence, databaseProof: AuthDatabaseCleanupProof(fence: fence), credentialProof: proof,
+      completionPermit: AuthLogoutCompletionPermit(fence: fence)
+    )
+    #expect(completed)
+  }
+
   @Test func cachePublicationWinsOverLateCancellation() async throws {
     let owner = FileDownloader.shared
     await owner.resetSession()

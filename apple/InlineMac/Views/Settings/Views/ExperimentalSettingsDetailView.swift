@@ -114,17 +114,30 @@ struct ExperimentalSettingsDetailView: View {
         Button("Open Files") { FilesWindowController.show(dependencies: dependencies) }
           .disabled(auth.currentUserId == nil)
       }
-      Toggle(isOn: $nativeFileDownloadsEnabled) {
+      Toggle(isOn: Binding(
+        get: { nativeFileDownloadsEnabled && nativeFileDownloadsAvailable },
+        set: { nativeFileDownloadsEnabled = $0 }
+      )) {
         SettingsRowLabel(
           "Native File Downloads",
           description: "Download message documents over encrypted realtime. Other media still use CDN."
         )
       }
+      .disabled(!nativeFileDownloadsAvailable)
     } header: {
       SettingsSectionHeader("Files")
     } footer: {
-      Text("Requires a V3 session and server support. Turn off to retry failed downloads using CDN.")
+      if nativeFileDownloadsAvailable {
+        Text("Requires server support. Turn off to use standard file downloads.")
+      } else {
+        Text("Native File Downloads isn’t available for this session. Files use standard downloads.")
+      }
     }
+  }
+
+  private var nativeFileDownloadsAvailable: Bool {
+    // Observe the existing auth owner so the control updates after a session change.
+    auth.getInlineProtocolCredentials() != nil
   }
 
   private var developerToolsSection: some View {

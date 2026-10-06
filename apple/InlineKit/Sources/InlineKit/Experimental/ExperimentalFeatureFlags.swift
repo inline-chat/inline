@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import InlineConfig
 
@@ -53,7 +54,16 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
   }
 
+  /// A saved opt-in cannot enable the V3-only transport for a bearer session.
+  public static var nativeFileDownloadsAvailable: Bool {
+    Auth.shared.getInlineProtocolCredentials() != nil
+  }
+
   public static var nativeFileDownloadsEnabled: Bool {
-    UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
+    nativeFileDownloadsEnabled(auth: Auth.shared.handle)
+  }
+
+  static func nativeFileDownloadsEnabled(auth: AuthHandle) -> Bool {
+    UserDefaults.standard.bool(forKey: nativeFileDownloadsKey) && auth.inlineProtocolCredentials() != nil
   }
 }
