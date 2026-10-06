@@ -599,7 +599,6 @@ async function hasPluginFiles(dir: string): Promise<boolean> {
     "plugin.yaml",
     "__init__.py",
     "adapter.py",
-    "activity.py",
     "message_actions.py",
     path.join("sidecar", "index.mjs"),
   ]

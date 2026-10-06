@@ -220,26 +220,21 @@ describe("sidecar runtime", () => {
         target: { chatId: "123" },
         messageId: "9001",
       }, auth))
-      // Unset/false uses the established typing API. Only an explicit boolean opts in.
-      for (const experimentalAgentActivity of [undefined, false]) {
-        await expectOk(post(port, "/typing", {
-          target: { chatId: "123" }, state: "start", experimentalAgentActivity,
-        }, auth))
+      // Stale experimental flags also use ordinary typing after timeline removal.
+      for (const experimentalAgentActivity of [undefined, false, true]) {
+        for (const state of ["start", "stop"]) {
+          await expectOk(post(port, "/typing", {
+            target: { chatId: "123" }, state, experimentalAgentActivity,
+          }, auth))
+        }
       }
-      for (const state of ["start", "stop"]) {
-        await expectOk(post(port, "/typing", {
-          target: { chatId: "123" }, state, experimentalAgentActivity: true,
-        }, auth))
-      }
-      const activityHealth = await post(port, "/healthz", {}, auth)
-      const allCalls = (resultOf(activityHealth.body).diagnostics as {
-        calls: Array<{ method: string; params?: { sendComposeAction?: { action?: number } } }>
+      const typingHealth = await post(port, "/healthz", {}, auth)
+      const typingCalls = (resultOf(typingHealth.body).diagnostics as {
+        calls: Array<{ method: string; params?: { typing?: boolean } }>
       }).calls
-      expect(allCalls.filter((call) => call.method === "sendTyping")).toHaveLength(2)
-      const activityCalls = allCalls.filter((call) => call.method === "invoke:SEND_COMPOSE_ACTION")
-      expect(activityCalls).toHaveLength(2)
-      expect(activityCalls[0]?.params?.sendComposeAction?.action).toBe(6)
-      expect(activityCalls[1]?.params?.sendComposeAction).not.toHaveProperty("action")
+      expect(typingCalls.filter((call) => call.method === "sendTyping").map((call) => call.params?.typing))
+        .toEqual([true, false, true, false, true, false])
+      expect(typingCalls.filter((call) => call.method === "invoke:SEND_COMPOSE_ACTION")).toHaveLength(0)
       await expectOk(post(port, "/presence", {
         target: { userId: "42" },
         kind: "running",

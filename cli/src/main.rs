@@ -8362,7 +8362,6 @@ mod cli_parsing_tests {
                     ..Default::default()
                 },
             ],
-            ..Default::default()
         };
 
         filter_users_payload(&mut payload, Some("mo"));

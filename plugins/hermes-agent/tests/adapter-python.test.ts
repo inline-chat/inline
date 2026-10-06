@@ -318,29 +318,30 @@ from inline.message_actions import (
     resolve_inline_message_action_ownership,
 )
 
-# An unset flag keeps the old defaults and creates no activity ownership.
+# A legacy timeline opt-in no longer changes quiet defaults or typing.
+for legacy_activity_flag in (None, "false", "true"):
+    if legacy_activity_flag is None:
+        os.environ.pop("INLINE_EXPERIMENTAL_AGENT_ACTIVITY", None)
+    else:
+        os.environ["INLINE_EXPERIMENTAL_AGENT_ACTIVITY"] = legacy_activity_flag
+    display_config._PLATFORM_DEFAULTS.pop("inline", None)
+    _install_inline_display_defaults()
+    assert display_config._PLATFORM_DEFAULTS["inline"]["tool_progress"] == "off"
+    assert display_config._PLATFORM_DEFAULTS["inline"]["cleanup_progress"] is True
+    assert display_config._PLATFORM_DEFAULTS["inline"]["interim_assistant_messages"] is False
+    default_adapter = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
+    async def assert_ordinary_processing():
+        calls=[]
+        async def sidecar(route, body): calls.append((route, body))
+        default_adapter._sidecar_call=sidecar
+        default_adapter._typing_target_for=lambda chat_id, metadata: {"chatId": chat_id}
+        default_adapter._processing_reaction_target=lambda event: None
+        event=types.SimpleNamespace(source=types.SimpleNamespace(chat_id="7", thread_id=None), message_id="1")
+        await default_adapter.on_processing_start(event)
+        await default_adapter.send_typing("7")
+        assert calls == [("/typing", {"target": {"chatId": "7"}, "state": "start"})]
+    asyncio.run(assert_ordinary_processing())
 os.environ.pop("INLINE_EXPERIMENTAL_AGENT_ACTIVITY", None)
-default_adapter = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
-assert default_adapter._agent_activity_enabled is False
-_install_inline_display_defaults()
-assert display_config._PLATFORM_DEFAULTS["inline"]["tool_progress"] == "off"
-assert display_config._PLATFORM_DEFAULTS["inline"]["cleanup_progress"] is True
-assert display_config._PLATFORM_DEFAULTS["inline"]["interim_assistant_messages"] is False
-async def assert_default_activity_disabled():
-    calls=[]
-    async def sidecar(route, body): calls.append((route, body))
-    default_adapter._sidecar_call=sidecar
-    default_adapter._typing_target_for=lambda chat_id, metadata: {"chatId": chat_id}
-    default_adapter._processing_reaction_target=lambda event: None
-    event=types.SimpleNamespace(source=types.SimpleNamespace(chat_id="7", thread_id=None), message_id="1")
-    await default_adapter.on_processing_start(event)
-    assert default_adapter._activity_timelines == {}
-    await default_adapter.send_typing("7")
-    assert calls[-1][1]["experimentalAgentActivity"] is False
-asyncio.run(assert_default_activity_disabled())
-# Existing structured-activity scenarios explicitly opt in.
-os.environ["INLINE_EXPERIMENTAL_AGENT_ACTIVITY"] = "true"
-display_config._PLATFORM_DEFAULTS.pop("inline", None)
 
 base_extra = {"token": "fake", "context_history_limit": 0}
 # Behavioral fixtures explicitly trust their actors; authorization cases use base_extra.
@@ -545,10 +546,10 @@ class RegistryContext:
 ctx = RegistryContext()
 register(ctx)
 inline_display = display_config._PLATFORM_DEFAULTS["inline"]
-assert inline_display["tool_progress"] == "all"
-assert inline_display["cleanup_progress"] is False
+assert inline_display["tool_progress"] == "off"
+assert inline_display["cleanup_progress"] is True
 assert inline_display["streaming"] is False
-assert inline_display["interim_assistant_messages"] is True
+assert inline_display["interim_assistant_messages"] is False
 assert ctx.platform["name"] == "inline"
 assert ctx.platform["emoji"] == chr(0x1F4AC)
 assert ctx.platform["label"] == "Inline"
@@ -2167,7 +2168,7 @@ async def assert_forced_reply_thread_creation():
     assert events[0].auto_skill == ["thread-skill"]
 
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "start", "experimentalAgentActivity": True})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "start"})
 
     trigger_reply = await adapter.send("10", "agent reply", reply_to="7", metadata={"thread_id": "99"})
     assert trigger_reply.success is True
@@ -2178,14 +2179,14 @@ async def assert_forced_reply_thread_creation():
     assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "stop"})
 
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start", "experimentalAgentActivity": True})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
     await adapter.stop_typing("10", metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
     reused_thread = await adapter._create_reply_thread("10", "7", "please investigate the incident", "6")
     assert reused_thread == "99"
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start", "experimentalAgentActivity": True})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
     await adapter.stop_typing("10", metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
@@ -3979,7 +3980,7 @@ async def assert_transport_helpers():
     assert calls[-1] == ("/delete", {"target": {"chatId": "99"}, "messageId": "777"})
 
     await adapter.send_typing("chat:10", metadata=metadata)
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start", "experimentalAgentActivity": True})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
 
     await adapter.stop_typing("chat:10", metadata=metadata)
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
@@ -5601,330 +5602,6 @@ async def assert_bot_settings_fail_closed_and_serialized():
     assert adapter._bot_settings_lock_users == {}
 
 asyncio.run(assert_bot_settings_fail_closed_and_serialized())
-
-async def assert_quiet_timeline():
-    import queue
-    from inline.adapter import _install_inline_progress_bridge, _send_result
-    from inline.activity import ActivityEvent
-    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
-    calls = []
-    serial = [90]
-    async def send_sidecar(route, body):
-        calls.append((route, body))
-        if route == "/send": serial[0] += 1
-        return _send_result(success=True, message_id=str(serial[0]), raw_response={})
-    adapter._send_sidecar = send_sidecar
-    adapter._mark_reply_thread_visible = lambda target: None
-    adapter._target_for = lambda chat_id, metadata: {"chatId": chat_id}
-    adapter._reply_to_for_target = lambda reply_to, target: None
-    adapter._processing_reaction_target = lambda event: None
-    class ProgressRunner:
-        def progress_callback(self, *args, **kwargs):
-            calls.append(("host_callback", args))
-        async def send_progress_messages(self):
-            calls.append(("host_sender", None))
-    fake_run = types.ModuleType("gateway.run")
-    fake_run.TurnRunner = ProgressRunner
-    previous_run = sys.modules.get("gateway.run")
-    sys.modules["gateway.run"] = fake_run
-    try:
-        _install_inline_progress_bridge()
-        installed = ProgressRunner.send_progress_messages
-        _install_inline_progress_bridge()
-        assert ProgressRunner.send_progress_messages is installed
-        source = types.SimpleNamespace(platform="inline", chat_id="7", thread_id=None)
-        event = types.SimpleNamespace(source=source, message_id="1", raw_message=None)
-        await adapter.on_processing_start(event)
-        runner = ProgressRunner()
-        runner._ctx = types.SimpleNamespace(source=source, event_message_id="1", _progress_metadata={},
-            progress_queue=queue.Queue(), tool_progress_enabled=True, progress_mode="all",
-            _run_still_current=lambda: True, agent_holder=[None])
-        runner._runner = types.SimpleNamespace(_adapter_for_source=lambda source: adapter)
-        runner.progress_callback("tool.started", "terminal", "python3 bad.py", {"description":"Checking the EPUB", "command":"python3 bad.py"})
-        queued_event = runner._ctx.progress_queue.queue[0]
-        assert isinstance(queued_event, ActivityEvent) and queued_event.title == "Checking the EPUB"
-        task = asyncio.create_task(runner.send_progress_messages())
-        await asyncio.sleep(0.02)
-        assert '>Checking the EPUB</summary>' in calls[0][1]["text"]
-        await adapter.send("7", "Here is the comparison.")
-        assert calls[-1][1]["text"] == "Here is the comparison."
-        assert '>Worked for ' in calls[-2][1]["text"]
-        task.cancel()
-        await task
-        # Public completion hook is authoritative, even with reactions disabled.
-        await adapter.on_processing_complete(event, "failure")
-        assert '>Failed after ' in calls[-1][1]["text"]
-        assert adapter._activity_timelines == {}
-        adapter._agent_activity_enabled = False
-        runner.progress_callback("tool.started", "terminal", "ls", {})
-        await runner.send_progress_messages()
-        assert calls[-2][0] == "host_callback" and calls[-1][0] == "host_sender"
-        adapter._agent_activity_enabled = True
-        source.platform = "telegram"
-        runner.progress_callback("tool.started", "terminal", "ls", {})
-        await runner.send_progress_messages()
-        assert calls[-2][0] == "host_callback" and calls[-1][0] == "host_sender"
-
-        # The real host recurses into queued turns before cancelling the first
-        # sender, then completes only the ORIGINAL inbound event. Every child
-        # must share that owner, while only the final child gets delivery errors.
-        source.platform = "inline"
-        async def queued_chain(final_outcome, *, first_interrupted=False, last_failed=False):
-            calls.clear()
-            outer = types.SimpleNamespace(source=source, message_id="101", raw_message=None)
-            await adapter.on_processing_start(outer)
-            runners = []
-            tasks = []
-            for message_id in ("101", "102"):
-                child = ProgressRunner()
-                child._ctx = types.SimpleNamespace(source=source,event_message_id=message_id,_progress_metadata={},
-                    progress_queue=queue.Queue(),tool_progress_enabled=True,progress_mode="all",
-                    _run_still_current=lambda:True,agent_holder=[types.SimpleNamespace(is_interrupted=False)],
-                    result_holder=[None])
-                child._runner = types.SimpleNamespace(_adapter_for_source=lambda source:adapter)
-                child.progress_callback("tool.started", "terminal", message_id, {"description":"Work " + message_id})
-                tasks.append(asyncio.create_task(child.send_progress_messages()))
-                runners.append(child)
-                await asyncio.sleep(.01)
-                if message_id == "101":
-                    child._ctx.result_holder[0] = {"interrupted":first_interrupted}
-                    if not first_interrupted:
-                        # Queued-first-response sends are unmarked in the host.
-                        await adapter.send("7", "First response")
-            assert list(adapter._activity_timelines)==[("7", "", "101")]
-            group=adapter._activity_timelines[("7", "", "101")]
-            assert len(group)==2 and group[0].closed and not group[1].closed
-            runners[-1]._ctx.result_holder[0] = {"failed":last_failed}
-            if final_outcome=="cancelled":
-                runners[-1]._ctx.agent_holder[0].is_interrupted=True
-            for child_task in reversed(tasks):
-                child_task.cancel(); await child_task
-            first_id=group[0].last_closed["messageId"]
-            second_id=group[1].last_closed["messageId"]
-            first_elapsed=group[0].last_closed["elapsed"]
-            await adapter.on_processing_complete(outer, final_outcome)
-            assert adapter._activity_timelines=={}
-            edits={body["messageId"]:body["text"] for route,body in calls if route=="/edit"}
-            assert ('>Stopped after ' if first_interrupted else '>Worked for ') in edits[first_id]
-            expected='>Stopped after ' if final_outcome=="cancelled" else '>Failed after ' if final_outcome=="failure" or last_failed else '>Worked for '
-            assert expected in edits[second_id]
-            assert group[0].last_closed["elapsed"]==first_elapsed
-
-        await queued_chain("failure")
-        await queued_chain("cancelled")
-        await queued_chain("success", first_interrupted=True)
-        await queued_chain("success", last_failed=True)
-
-        # Context ownership is per processing task, including two independent
-        # sessions targeting the same chat; one reply must not close the other.
-        ready=asyncio.Event(); started=[0]
-        async def independent_processing(message_id):
-            event=types.SimpleNamespace(source=source,message_id=message_id,raw_message=None)
-            await adapter.on_processing_start(event)
-            child=ProgressRunner()
-            child._ctx=types.SimpleNamespace(source=source,event_message_id=message_id,_progress_metadata={},
-                progress_queue=queue.Queue(),agent_holder=[None],_run_still_current=lambda:True)
-            child._ctx.progress_queue.put(ActivityEvent('Concurrent '+message_id,'detail',time.monotonic()))
-            child._runner=types.SimpleNamespace(_adapter_for_source=lambda source:adapter)
-            task=asyncio.create_task(child.send_progress_messages()); await asyncio.sleep(.01)
-            started[0]+=1
-            if started[0]==2: ready.set()
-            await ready.wait()
-            await adapter.send("7", "Reply "+message_id)
-            assert calls[-1][1]['text']=='Reply '+message_id
-            assert ('Concurrent '+message_id) in calls[-2][1]['text']
-            assert '>Worked for ' in calls[-2][1]['text']
-            task.cancel(); await task
-            await adapter.on_processing_complete(event,"success")
-        await asyncio.gather(independent_processing("201"),independent_processing("202"))
-        assert adapter._activity_timelines=={}
-
-        # Both consume.finally and the bridge retry can fail to deliver the
-        # terminal edit. Public completion must retry again without changing
-        # a real failed/stopped outcome or inventing failure from transport.
-        for result_outcome,prefix in (("success","Worked for"),("failure","Failed after"),("cancelled","Stopped after")):
-            terminal_attempts=[]; now=[105.0]
-            async def retry_sidecar(route,body):
-                if route=="/edit":
-                    terminal_attempts.append(body['text'])
-                    if len(terminal_attempts)<=2:
-                        return _send_result(success=False,error="temporary terminal edit failure")
-                return await send_sidecar(route,body)
-            adapter._send_sidecar=retry_sidecar
-            outer=types.SimpleNamespace(source=source,message_id="retry-301",raw_message=None)
-            await adapter.on_processing_start(outer)
-            child=ProgressRunner()
-            child._ctx=types.SimpleNamespace(source=source,event_message_id="retry-301",_progress_metadata={},
-                progress_queue=queue.Queue(),agent_holder=[types.SimpleNamespace(is_interrupted=False)],
-                result_holder=[None],_run_still_current=lambda:True)
-            child._runner=types.SimpleNamespace(_adapter_for_source=lambda source:adapter)
-            child._ctx.progress_queue.put(ActivityEvent("Checking","detail",100))
-            task=asyncio.create_task(child.send_progress_messages());await asyncio.sleep(.01)
-            timeline=adapter._activity_timelines[("7","","retry-301")][0]
-            timeline.clock=lambda:now[0]
-            child._ctx.result_holder[0]={"failed":result_outcome=="failure","interrupted":result_outcome=="cancelled"}
-            child._ctx.agent_holder[0].is_interrupted=result_outcome=="cancelled"
-            task.cancel();await task
-            assert len(terminal_attempts)==2 and timeline.closed
-            assert timeline.pending_outcome==result_outcome
-            now[0]=205.0
-            await adapter.on_processing_complete(outer,"success")
-            assert len(terminal_attempts)==3 and len(set(terminal_attempts))==1
-            assert f'>{prefix} 5s</summary>' in terminal_attempts[-1]
-            assert adapter._activity_timelines=={} and timeline.pending_outcome is None
-        adapter._send_sidecar=send_sidecar
-
-        # Internal/cron replies have neither a public owner nor notify/interim
-        # metadata. Their temporary sender registrations still flush queued
-        # tools BEFORE an unmarked reply, with no synthetic-anchor leak.
-        def internal_runner(anchor):
-            child=ProgressRunner()
-            child._ctx=types.SimpleNamespace(source=source,event_message_id=anchor,_progress_metadata={},
-                progress_queue=queue.Queue(),agent_holder=[None],_run_still_current=lambda:True)
-            child._runner=types.SimpleNamespace(_adapter_for_source=lambda source:adapter)
-            return child
-
-        for anchor in (None,"cron-anchor"):
-            calls.clear()
-            internal=internal_runner(anchor)
-            pending=internal._ctx.progress_queue
-            pending.put(ActivityEvent("Cron first","before reply A",time.monotonic()))
-            internal_task=asyncio.create_task(internal.send_progress_messages());await asyncio.sleep(.01)
-            keys=list(adapter._activity_timelines)
-            assert len(keys)==1 and keys[0][2].startswith("internal:") and keys[0][2]!=anchor
-            pending.put(ActivityEvent("Cron second","before reply B",time.monotonic()))
-            await adapter.send("7","Cron summary")
-            assert calls[-1][1]['text']=="Cron summary"
-            assert 'before reply B' in calls[-2][1]['text'] and '>Worked for ' in calls[-2][1]['text']
-            # Match the actual host's after-send reset, then later tool work.
-            pending.put(('__reset__',))
-            pending.put(ActivityEvent("Cron third","after reply C",time.monotonic()))
-            await asyncio.sleep(.55)
-            internal_task.cancel();await internal_task
-            sent=[body['text'] for route,body in calls if route=="/send"]
-            assert len(sent)==3 and sent[1]=="Cron summary"
-            assert 'after reply C' in sent[2] and 'before reply B' not in sent[2]
-            assert adapter._activity_timelines=={}
-
-        # Without an owner, an overlapping internal reply closes ALL earlier
-        # activity rows for its target. Each sender removes only its own entry.
-        calls.clear();internal_tasks=[]
-        for anchor in ("cron-a","cron-b"):
-            internal=internal_runner(anchor)
-            internal._ctx.progress_queue.put(ActivityEvent(anchor,'queued before shared reply',time.monotonic()))
-            internal_tasks.append(asyncio.create_task(internal.send_progress_messages()))
-        await asyncio.sleep(.01)
-        assert len(adapter._activity_timelines)==2
-        await adapter.send("7","Shared internal reply")
-        assert calls[-1][1]['text']=="Shared internal reply"
-        assert all('>Worked for ' in body['text'] for route,body in calls[-3:-1])
-        internal_tasks[0].cancel();await internal_tasks[0]
-        assert len(adapter._activity_timelines)==1
-        internal_tasks[1].cancel();await internal_tasks[1]
-        assert adapter._activity_timelines=={}
-
-        # Failed progress delivery must also release the sender-owned entry.
-        async def fail_sidecar(route,body):
-            return _send_result(success=False,error="synthetic transport failure")
-        adapter._send_sidecar=fail_sidecar
-        internal=internal_runner("failed-cron")
-        internal._ctx.progress_queue.put(ActivityEvent("Failing cron","detail",time.monotonic()))
-        await internal.send_progress_messages()
-        assert adapter._activity_timelines=={}
-    finally:
-        if previous_run is None: sys.modules.pop("gateway.run", None)
-        else: sys.modules["gateway.run"] = previous_run
-
-asyncio.run(assert_quiet_timeline())
-
-async def assert_inline_tool_reply_boundary():
-    import queue
-    from inline.adapter import _activity_owner, _send_result, InlineSidecarError
-    from inline.activity import ActivityEvent, ActivityTimeline
-    from inline.message_actions import build_inline_agent_action_id
-    old_sidecar=inline_tools._sidecar.copy()
-    direct_call=inline_tools._sidecar_call
-    def forbidden_fallback(*args):
-        raise AssertionError('A configured tool send must never bypass the adapter or retry directly')
-    inline_tools._sidecar_call=forbidden_fallback
-    try:
-        for owned in (True,False):
-            adapter=InlineAdapter(PlatformConfig(extra=trusted_extra))
-            calls=[]; serial=[0]; entered=asyncio.Event(); release=asyncio.Event()
-            async def publish(route,body):
-                serial[0]+=1; calls.append((route,body.copy()))
-                return _send_result(success=True,message_id=str(serial[0]))
-            async def raw_send(route,body):
-                if body['target']=={'chatId':'7'}:
-                    entered.set(); await release.wait()
-                calls.append(('tool-delivered',body.copy()))
-                return {'ok':True,'result':{'messageId':'123'}}
-            adapter._sidecar_call=raw_send
-            adapter._configure_tool_sender()
-            ctx=types.SimpleNamespace(progress_queue=queue.Queue(),agent_holder=[None],_run_still_current=lambda:True)
-            timeline=ActivityTimeline(publish,{'chatId':'7'},ctx=ctx)
-            adapter._activity_timelines[('7','','owner')]=[timeline]
-            token=_activity_owner.set((adapter,('7','','owner')) if owned else None)
-            try:
-                await timeline.add(ActivityEvent('Before','first tool',time.monotonic()))
-                unrelated=await asyncio.to_thread(inline_tools._handle_inline_tool,{'action':'send_message','chat_id':'8','text':'Other destination'})
-                assert json.loads(unrelated)['success'] and timeline.started_at is not None
-                ctx.progress_queue.put(ActivityEvent('Queued before','second tool',time.monotonic()))
-                args={'action':'send_message','chat_id':'7','text':'FIRST_STEP_VISIBLE','parse_markdown':False,
-                      'buttons':[[{'text':'Copy','copy_text':'exact text'}]]}
-                task=asyncio.create_task(asyncio.to_thread(inline_tools._handle_inline_tool,args))
-                await asyncio.wait_for(entered.wait(),1)
-                assert '>Worked for ' in calls[-1][1]['text'] and 'second tool' in calls[-1][1]['text']
-                later=asyncio.create_task(timeline.add(ActivityEvent('After','third tool',time.monotonic())))
-                await asyncio.sleep(.01)
-                assert not later.done(), 'Later progress overtook the actual tool reply transport'
-                release.set()
-                result=json.loads(await task); await later
-                assert result=={'success':True,'action':'send_message','result':{'messageId':'123'}}
-                assert calls[-2][0]=='tool-delivered' and calls[-2][1]=={
-                    'target':{'chatId':'7'},'text':'FIRST_STEP_VISIBLE','parseMarkdown':False,
-                    'actions':{'rows':[{'actions':[{'id':build_inline_agent_action_id(0,0),'text':'Copy','copyText':'exact text'}]}]}}
-                assert calls[-1][0]=='/send' and 'third tool' in calls[-1][1]['text']
-                assert 'second tool' not in calls[-1][1]['text']
-
-                # The synchronous tool may never block its own event loop.
-                same_loop=json.loads(inline_tools._handle_inline_tool(args))
-                assert 'event loop' in same_loop['error']
-                async def failed_send(route,body):
-                    raise InlineSidecarError(route,503,'temporary transport failure','transient',{})
-                adapter._sidecar_call=failed_send
-                error=json.loads(await asyncio.to_thread(inline_tools._handle_inline_tool,args))
-                assert error['error_kind']=='transient' and 'temporary transport failure' in error['error']
-                schedule=asyncio.run_coroutine_threadsafe
-                cancelled=[]
-                class TimedOutSend:
-                    def result(self,timeout):
-                        assert timeout==45
-                        raise TimeoutError('synthetic timeout')
-                    def cancel(self): cancelled.append(True)
-                def time_out_send(coroutine,loop):
-                    coroutine.close()
-                    return TimedOutSend()
-                try:
-                    asyncio.run_coroutine_threadsafe=time_out_send
-                    error=json.loads(await asyncio.to_thread(inline_tools._handle_inline_tool,args))
-                    assert 'delivery may have completed' in error['error'] and cancelled==[True]
-                finally:
-                    asyncio.run_coroutine_threadsafe=schedule
-                sender=adapter._tool_send
-                # Clearing another adapter's obsolete hook cannot unregister
-                # this live gateway; teardown clears only its own callback.
-                inline_tools.clear_sidecar_send(lambda body:None)
-                assert inline_tools._sidecar['send'] is sender
-                await adapter.disconnect()
-                assert inline_tools._sidecar.get('send') is None
-            finally:
-                _activity_owner.reset(token)
-    finally:
-        inline_tools._sidecar.clear(); inline_tools._sidecar.update(old_sidecar)
-        inline_tools._sidecar_call=direct_call
-
-asyncio.run(assert_inline_tool_reply_boundary())
 
 print("adapter python smoke ok")
 `

@@ -431,4 +431,92 @@ async def exercise_receipt_recovery():
 
 
 asyncio.run(exercise_receipt_recovery())
+
+
+async def exercise_ordinary_presentation():
+    from gateway.display_config import resolve_display_setting, resolve_tool_progress
+
+    # Exercise the host's actual resolver; explicit operator config always wins.
+    assert resolve_display_setting({}, "inline", "tool_progress") == "off"
+    assert resolve_display_setting({}, "inline", "cleanup_progress") is True
+    assert resolve_display_setting({}, "inline", "interim_assistant_messages") is False
+    assert resolve_display_setting({}, "inline", "long_running_notifications") is True
+    assert resolve_display_setting({"display": {"tool_progress": "all"}}, "inline", "tool_progress") == "all"
+    explicit = {"display": {"tool_progress": "off", "platforms": {"inline": {
+        "tool_progress": "all", "cleanup_progress": False, "interim_assistant_messages": True,
+    }}}}
+    assert resolve_display_setting(explicit, "inline", "tool_progress") == "all"
+    assert resolve_display_setting(explicit, "inline", "cleanup_progress") is False
+    assert resolve_display_setting(explicit, "inline", "interim_assistant_messages") is True
+    assert resolve_display_setting({"display": {"tool_progress_overrides": {"inline": "new"}}},
+                                   "inline", "tool_progress") == "new"
+
+    assert resolve_tool_progress({}, "inline", "all") == ("all", True)
+    assert resolve_tool_progress({"display": {"platforms": {"inline": {"tool_progress": "off"}}}},
+                                 "inline", "all") == ("off", True)
+
+    for flag in ("", "true"):
+        for failed_send in (False, True):
+            with patch.dict(os.environ, {"INLINE_EXPERIMENTAL_AGENT_ACTIVITY": flag}):
+                ordinary = platform_registry.create_adapter("inline", PlatformConfig(
+                    enabled=True, token="offline-test-token", extra={
+                        "dm_policy": "open", "require_mention": False, "reply_threads": "off",
+                        "context_backfill": "off", "reactions": True, "sync_commands": False,
+                        "text_debounce_seconds": 0,
+                    },
+                ))
+            calls, outcomes, completed, typing_started = [], [], asyncio.Event(), asyncio.Event()
+            def transport(request):
+                body = json.loads(request.content)
+                calls.append((request.url.path, body))
+                if request.url.path == "/chat":
+                    return httpx.Response(200, json={"ok": True, "result": {"id": "6101", "title": "Offline fixture"}})
+                if request.url.path == "/typing" and body["state"] == "start":
+                    typing_started.set()
+                if request.url.path == "/send" and failed_send:
+                    return httpx.Response(400, json={"ok": False, "error": "rejected fixture reply", "errorKind": "bad_format"})
+                return httpx.Response(200, json={"ok": True, "result": {"messageId": "6202"}})
+            async def reply(event):
+                await asyncio.wait_for(typing_started.wait(), timeout=10)
+                return "Ordinary native reply"
+            complete = ordinary.on_processing_complete
+            async def observe_completion(event, outcome):
+                await complete(event, outcome)
+                outcomes.append(str(getattr(outcome, "value", outcome)))
+                completed.set()
+            ordinary.on_processing_complete = observe_completion
+            ordinary.set_message_handler(reply)
+            ordinary.set_authorization_check(lambda *_args, **_kwargs: True)
+            ordinary._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+            event = {"kind": "message.new", "seq": 6201, "chatId": "6101", "meId": "999",
+                "sender": {"id": "42", "bot": False}, "message": {
+                "id": "6201", "chatId": "6101", "fromId": "42", "message": "hello",
+                "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "6101"}}},
+            }}
+            try:
+                await ordinary._on_inbound(json.dumps(event))
+                await asyncio.wait_for(completed.wait(), timeout=10)
+                async def wait_idle():
+                    while ordinary._active_sessions:
+                        await asyncio.sleep(0.001)
+                await asyncio.wait_for(wait_idle(), timeout=10)
+                assert outcomes == ["failure" if failed_send else "success"], outcomes
+                typing = [body for route, body in calls if route == "/typing"]
+                assert typing and any(body["state"] == "start" for body in typing)
+                assert typing[-1]["state"] == "stop"
+                assert all("experimentalAgentActivity" not in body for body in typing)
+                reactions = [body for route, body in calls if route == "/reaction"]
+                assert [(body["emoji"], body.get("remove", False)) for body in reactions] == [
+                    ("👀", False), ("👀", True), ("❌" if failed_send else "✅", False),
+                ], reactions
+                sends = [body for route, body in calls if route == "/send"]
+                assert sends and sends[0]["text"] == "Ordinary native reply"
+                assert not any("<details" in body["text"] for body in sends)
+                assert not ordinary._processing_reaction_messages
+            finally:
+                await ordinary.disconnect()
+    print("Real Hermes quiet display precedence, stale flag handling, typing, reply and success/failure reactions passed.")
+
+
+asyncio.run(exercise_ordinary_presentation())
 print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")
