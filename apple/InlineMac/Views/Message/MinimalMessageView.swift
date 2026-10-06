@@ -4430,12 +4430,39 @@ class MinimalMessageViewAppKit: NSView {
   @objc private func cancelMessage() {
     Log.shared.debug("Canceling message")
     if let transactionId = message.transactionId, !transactionId.isEmpty {
+      guard message.status == .sending, message.messageId < 0,
+            let account = try? Auth.shared.handle.beginAccountMutation(), account.userID == message.fromId
+      else { return }
       Transactions.shared.cancel(transactionId: transactionId)
+      let pendingMessage = message
+      Task {
+        do {
+          let deleted = try await AppDatabase.shared.dbWriter.write { db in
+            try Auth.shared.handle.validateAccountMutation(account)
+            guard let stored = try Message.fetchOne(db, key: [
+              "messageId": pendingMessage.messageId, "chatId": pendingMessage.chatId,
+            ]), stored.status == .sending, stored.transactionId == transactionId,
+                stored.fromId == account.userID else { return false }
+            try Message.deleteMessages(db, messageIds: [pendingMessage.messageId], chatId: pendingMessage.chatId)
+            return true
+          }
+          if deleted {
+            try await MainActor.run {
+              try Auth.shared.handle.validateAccountMutation(account)
+              MessagesPublisher.shared.messagesDeleted(
+                messageIds: [pendingMessage.messageId], peer: pendingMessage.peerId
+              )
+            }
+          }
+        } catch {
+          Log.shared.error("Failed to cancel pending message", error: error)
+        }
+      }
     } else {
       // try v2
       let randomId = message.randomId
       Task {
-        Api.realtime.cancelTransaction(where: {
+        await Api.realtime.cancelTransaction(where: {
           guard $0.transaction.method == .sendMessage else { return false }
           guard case let .sendMessage(input) = $0.transaction.input else { return false }
           return input.randomID == randomId

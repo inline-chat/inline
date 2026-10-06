@@ -22,11 +22,34 @@ enum SendMessageUploadCoordinator {
   static func beginOrJoinUpload<T>(
     _ startUpload: () async throws -> T
   ) async throws -> T? {
+    try Task.checkCancellation()
     do {
       return try await startUpload()
     } catch FileUploadError.uploadAlreadyInProgress {
       return nil
     }
+  }
+
+  static func waitForUpload(_ task: Task<UploadResult, any Error>) async throws -> UploadResult {
+    try Task.checkCancellation()
+    let (results, continuation) = AsyncStream<Result<UploadResult, any Error>>.makeStream(
+      bufferingPolicy: .bufferingNewest(1)
+    )
+    let waiter = Task {
+      continuation.yield(await task.result)
+      continuation.finish()
+    }
+    defer {
+      waiter.cancel()
+      continuation.finish()
+    }
+
+    // Uploads can be shared by multiple sends. Cancel this wait without stopping
+    // another message's transfer; AsyncStream wakes a cancelled iterator.
+    var iterator = results.makeAsyncIterator()
+    guard let result = await iterator.next() else { throw CancellationError() }
+    try Task.checkCancellation()
+    return try result.get()
   }
 }
 
@@ -236,6 +259,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func execute() async throws -> [InlineProtocol.Update] {
+    try Task.checkCancellation()
     // clear typing...
     Task {
       await ComposeActions.shared.stoppedTyping(for: peerId)
@@ -352,6 +376,8 @@ public struct TransactionSendMessage: Transaction {
           }
       }
     }
+
+    try Task.checkCancellation()
 
     // input for send message
     let input: SendMessageInput = .with {

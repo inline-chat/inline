@@ -1295,9 +1295,10 @@ public actor FileUploader {
   private func waitForUpload(uploadId: String) async throws -> UploadResult? {
     if let taskInfo = uploadTasks[uploadId] {
       // still in progress
-      return try await taskInfo.task.value
+      return try await SendMessageUploadCoordinator.waitForUpload(taskInfo.task)
     } else if let result = finishedUploads[uploadId] {
       // finished
+      try Task.checkCancellation()
       return result
     } else {
       // not found
