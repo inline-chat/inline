@@ -1,4 +1,5 @@
 import AVFoundation
+import Auth
 import InlineKit
 import Photos
 import Logger
@@ -462,64 +463,82 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func addVideo(
     _ url: URL,
     removeSourceAfterProcessing: Bool = false,
-    dismissAttachmentPickerOnSuccess: Bool = true,
-    sendImmediately: Bool = false
+    dismissAttachmentPickerOnSuccess: Bool = true
   ) {
-    let pendingId = sendImmediately ? nil : addPendingVideoAttachment()
-    Task {
+    guard canAttachFileToCurrentMessage() else { return }
+    guard let destinationPeer = peerId, let destinationChat = chatId,
+          let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+    stageVideoAttachment(
+      url,
+      removeSourceAfterProcessing: removeSourceAfterProcessing,
+      dismissAttachmentPickerOnSuccess: dismissAttachmentPickerOnSuccess
+    ) { [weak self] in
+      self?.peerId == destinationPeer && self?.chatId == destinationChat &&
+        (try? Auth.shared.handle.validateAccountMutation(account)) != nil
+    }
+  }
+
+  @discardableResult
+  func stageVideoAttachment(
+    _ url: URL,
+    removeSourceAfterProcessing: Bool = false,
+    dismissAttachmentPickerOnSuccess: Bool = true,
+    loadVideo: @escaping @MainActor (URL, UIImage?) async throws -> VideoInfo = {
+      try await FileCache.saveVideo(url: $0, thumbnail: $1)
+    },
+    isCurrentDestination: @escaping @MainActor () -> Bool
+  ) -> Task<Void, Never> {
+    guard canAttachFileToCurrentMessage() else { return Task {} }
+    let pendingId = addPendingVideoAttachment()
+    let hasAccess = url.startAccessingSecurityScopedResource()
+    return Task { @MainActor [weak self] in
       defer {
+        if hasAccess { url.stopAccessingSecurityScopedResource() }
         if removeSourceAfterProcessing {
           try? FileManager.default.removeItem(at: url)
         }
       }
 
+      guard let self else { return }
       do {
         let immediateThumbnail = immediateVideoThumbnail(from: url)
-        if let immediateThumbnail {
-          await MainActor.run { [weak self] in
-            if let pendingId {
-              self?.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
-            }
-          }
+        if let immediateThumbnail, isCurrentDestination() {
+          updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
         }
 
-        let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: immediateThumbnail)
+        let videoInfo = try await loadVideo(url, immediateThumbnail)
         let mediaItem = FileMediaItem.video(videoInfo)
 
-        await MainActor.run { [weak self] in
-          guard let self else { return }
+        guard !isPendingVideoAttachmentCanceled(pendingId) else {
+          finishPendingVideoAttachmentProcessing(pendingId)
+          return
+        }
+        guard isCurrentDestination() else {
+          cancelQueuedPendingVideoSend()
+          completePendingVideoAttachments([pendingId])
+          return
+        }
+        guard canAttachFileToCurrentMessage() else {
+          cancelQueuedPendingVideoSend()
+          completePendingVideoAttachments([pendingId])
+          return
+        }
+        addAttachmentItem(mediaItem)
+        completePendingVideoAttachments([pendingId])
 
-          if let pendingId {
-            let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
-            guard !isCanceled else {
-              finishPendingVideoAttachmentProcessing(pendingId)
-              return
-            }
-          }
-
-          if sendImmediately {
-            sendMediaItemImmediately(mediaItem)
-          } else {
-            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
-          }
-
-          if let pendingId {
-            completePendingVideoAttachments([pendingId])
-          }
-
-          if dismissAttachmentPickerOnSuccess {
-            dismissAttachmentPickerIfPresented(animated: true)
-          }
+        if dismissAttachmentPickerOnSuccess {
+          dismissAttachmentPickerIfPresented(animated: true)
         }
       } catch {
         Log.shared.error("Failed to save video", error: error)
-        await MainActor.run { [weak self] in
-          self?.cancelQueuedPendingVideoSend()
-          if let pendingId {
-            self?.completePendingVideoAttachments([pendingId])
-          }
-          self?.showVideoError(error)
+        guard !isPendingVideoAttachmentCanceled(pendingId) else {
+          finishPendingVideoAttachmentProcessing(pendingId)
+          return
         }
+        cancelQueuedPendingVideoSend()
+        completePendingVideoAttachments([pendingId])
+        guard isCurrentDestination() else { return }
+        showVideoError(error)
       }
     }
   }
