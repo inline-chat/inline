@@ -86,8 +86,18 @@ describe("internal messaging contracts", () => {
     const envelope = {
       version: 1 as const, eventId: randomUUID(), originBootId: randomUUID(),
       target: { kind: "session" as const, bootId: randomUUID(), userId: UserId.make(1), sessionId: SessionId.make(2) },
-      event: { kind: "SessionRealtime" as const, payload: { kind: "gridCredentials" as const,
-        roomId: 3, spaceId: SpaceId.make(4), generation: 5, mediaMembershipId: randomUUID(), encodedPayload: "e30=" } },
+      event: {
+        kind: "SessionRealtime" as const,
+        payload: {
+          kind: "gridCredentials" as const,
+          roomId: 3,
+          spaceId: SpaceId.make(4),
+          generation: 5,
+          mediaMembershipId: randomUUID(),
+          callId: randomUUID(),
+          encodedPayload: "e30=",
+        },
+      },
     }
     expect(decodeEnvelope(encodeEnvelope(envelope))).toEqual(envelope)
     expect(() => decodeEnvelope(JSON.stringify({ ...envelope, target: { kind: "session", userId: 1, sessionId: 2 } }))).toThrow()

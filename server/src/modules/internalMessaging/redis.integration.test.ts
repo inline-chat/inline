@@ -62,8 +62,18 @@ describe("two-service disposable broker transport", () => {
       const unsubscribeSession = b.on("SessionRealtime", ({ target }) => receivedSession.resolve(target.bootId))
       const directed = await a.publish({
         target: { kind: "session", bootId: b.bootId, userId: UserId.make(9001), sessionId: SessionId.make(9002) },
-        event: { kind: "SessionRealtime", payload: { kind: "gridCredentials", roomId: 1,
-          spaceId: SpaceId.make(2), generation: 3, mediaMembershipId: randomUUID(), encodedPayload: "e30=" } },
+        event: {
+          kind: "SessionRealtime",
+          payload: {
+            kind: "gridCredentials",
+            roomId: 1,
+            spaceId: SpaceId.make(2),
+            generation: 3,
+            mediaMembershipId: randomUUID(),
+            callId: randomUUID(),
+            encodedPayload: "e30=",
+          },
+        },
       })
       expect(directed).toEqual({ status: "published", subscribers: 1 })
       expect(await waitFor(receivedSession.promise)).toBe(b.bootId)

@@ -38,6 +38,7 @@ describe("grid", () => {
       enabled: false,
       rooms: [],
       revision: 0n,
+      callTransferEnabled: false,
     })
 
     await expect(createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)).rejects.toThrow()

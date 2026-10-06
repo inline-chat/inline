@@ -49,6 +49,7 @@ import {
 import { insertGridTranscriptMessage } from "@in/server/modules/grid/transcription/messages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, eq, gt, inArray, isNull, desc, or, notInArray } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 function id(value: bigint) {
@@ -223,6 +224,7 @@ export async function listGridTranscripts(
           .orderBy(gridTranscriptionRuns.transcriptChatId, desc(gridTranscriptionRuns.createdAt))
       : []
     const acceptedByChat = new Map(acceptedRows.map((run) => [run.transcriptChatId, run]))
+    const parent = alias(chats, "grid_transcript_parent")
     const seen = new Set<number>()
     const transcripts: ListGridTranscriptsResult["transcripts"] = []
     for (const run of rows) {
@@ -240,7 +242,13 @@ export async function listGridTranscripts(
       )
         continue
       seen.add(run.transcriptChatId)
-      const [chat] = await tx.select().from(chats).where(eq(chats.id, run.transcriptChatId)).limit(1)
+      const [destination] = await tx
+        .select({ title: chats.title, number: chats.threadNumber, parentTitle: parent.title })
+        .from(chats)
+        .innerJoin(parent, eq(parent.id, chats.parentChatId))
+        .where(eq(chats.id, run.transcriptChatId))
+        .limit(1)
+      if (!destination) continue
       const [active] = await tx
         .select({ id: gridTranscriptionRuns.id })
         .from(gridTranscriptionRuns)
@@ -253,7 +261,7 @@ export async function listGridTranscripts(
         .limit(1)
       transcripts.push({
         transcriptChatId: BigInt(run.transcriptChatId),
-        title: chat?.title ?? "Transcript",
+        title: `${destination.parentTitle?.trim() || "Grid room"} · ${destination.title?.trim() || "Transcript"}${destination.number === null ? "" : ` #${destination.number}`}`,
         busy: !!active,
       })
       if (transcripts.length === 20) break

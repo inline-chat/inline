@@ -10,11 +10,14 @@ import type {
   GridHomeSpace,
   Grid,
   GridConnection,
+  GridCurrentCall,
   GridRoom,
   JoinGridRoomInput,
   JoinGridRoomResult,
   LeaveGridRoomInput,
   LeaveGridRoomResult,
+  MoveGridCallHereInput,
+  MoveGridCallHereResult,
   PrepareGridConnectionInput,
   PrepareGridConnectionResult,
   SetGridAvatarMicrophoneEnabledInput,
@@ -41,8 +44,10 @@ import {
   sessions,
   spaces,
   users,
+  type DbGridPresence,
   type DbGridRoom,
 } from "@in/server/db/schema"
+import { isGridCallTransferEnabled } from "@in/server/env"
 import type { Transaction } from "@in/server/db/types"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -85,12 +90,28 @@ const MAX_NAMED_ROOMS_PER_SPACE = 50
 const MAX_ROOM_TITLE_LENGTH = 80
 const log = new Log("grid")
 
+type GridClaim = {
+  roomId: number
+  callId: string
+  mediaMembershipId: string
+  currentCall: GridCurrentCall
+}
+
+type GridClaimMutationState = GridMutationState & { claim?: GridClaim }
+
+type GridCredentialIssuer = typeof createGridConnectionCredentials
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function getGrid(input: GetGridInput, context: FunctionContext): Promise<GetGridResult> {
   const spaceId = positiveId(input.spaceId, RealtimeRpcError.SpaceIdInvalid)
   await AccessGuards.ensureSpaceMember(spaceId, context.currentUserId)
 
-  await refreshPresenceLeases({ spaceId, context })
-  return { grid: await buildGrid(spaceId, context) }
+  const expectedMembershipId =
+    input.expectedMembershipId === undefined ? undefined : membershipFence(input.expectedMembershipId)
+  await refreshPresenceLeases({ spaceId, context, expectedMembershipId })
+  const [grid, currentCall] = await Promise.all([buildGrid(spaceId, context), buildCurrentCall(context)])
+  return { grid, currentCall }
 }
 
 export async function getGridHome(
@@ -157,12 +178,16 @@ export async function getGridHome(
   }
 
   summaries.sort((a, b) => {
-    if ((a.activeAvatarCount > 0) !== (b.activeAvatarCount > 0)) {
+    if (a.activeAvatarCount > 0 !== b.activeAvatarCount > 0) {
       return a.activeAvatarCount > 0 ? -1 : 1
     }
     return Number(b.latestActivityAt - a.latestActivityAt)
   })
-  return { spaces: summaries }
+  return {
+    spaces: summaries,
+    currentCall: await buildCurrentCall(context),
+    callTransferEnabled: isGridCallTransferEnabled(),
+  }
 }
 
 export async function createGridRoom(
@@ -185,11 +210,12 @@ export async function createGridRoom(
     // The preflight can race a Space leave or deletion before this lock.
     await ensureGridAvailable(spaceId, context.currentUserId, tx)
 
-    const state: GridMutationState = {
+    const state: GridClaimMutationState = {
       affectedSpaceIds: new Set([spaceId]),
       endedConnections: [],
     }
     const existing = await getActivePresenceWithRoom(tx, context.currentUserId, state)
+    assertPresenceFence(existing, context, input.expectedMembershipId, { allowLegacyTakeover: true })
     if (existing && existing.room.spaceId === spaceId && existing.room.title === null) {
       const [occupancy] = await tx
         .select({ value: count() })
@@ -217,9 +243,7 @@ export async function createGridRoom(
   await notifyGridChanged(state)
   const [grids, connection] = await Promise.all([
     buildGrids(state.affectedSpaceIds, context),
-    state.changedRoomId
-      ? credentialsForParticipant(state.changedRoomId, context.currentUserId, context.currentSessionId)
-      : undefined,
+    state.claim ? credentialsForParticipant(state.claim, context) : undefined,
     state.changedRoomId ? notifyConnectionReady(state.changedRoomId) : undefined,
   ])
   log.debug("GRID_TRACE phase=create_rpc_done", {
@@ -231,6 +255,7 @@ export async function createGridRoom(
   return {
     grids,
     connection,
+    currentCall: state.claim?.currentCall,
   }
 }
 
@@ -255,12 +280,13 @@ export async function joinGridRoom(
     if (!room) throw RealtimeRpcError.BadRequest()
     await ensureGridAvailable(room.spaceId, context.currentUserId, tx)
 
-    const state: GridMutationState = {
+    const state: GridClaimMutationState = {
       affectedSpaceIds: new Set([room.spaceId]),
       changedRoomId: room.id,
       endedConnections: [],
     }
     const existing = await getActivePresenceWithRoom(tx, context.currentUserId, state)
+    assertPresenceFence(existing, context, input.expectedMembershipId, { allowLegacyTakeover: true })
     if (existing?.room.id === room.id) {
       await movePresence(tx, context, room, existing, state, input.microphoneEnabled)
       return state
@@ -286,7 +312,7 @@ export async function joinGridRoom(
   await notifyGridChanged(state)
   const [grids, connection] = await Promise.all([
     buildGrids(state.affectedSpaceIds, context),
-    credentialsForParticipant(roomId, context.currentUserId, context.currentSessionId),
+    state.claim ? credentialsForParticipant(state.claim, context) : undefined,
     notifyConnectionReady(roomId),
   ])
   log.debug("GRID_TRACE phase=join_rpc_done", {
@@ -298,6 +324,7 @@ export async function joinGridRoom(
   return {
     grids,
     connection,
+    currentCall: state.claim?.currentCall,
   }
 }
 
@@ -306,12 +333,19 @@ export async function leaveGridRoom(
   context: FunctionContext,
 ): Promise<LeaveGridRoomResult> {
   const expectedRoomId = positiveId(input.expectedRoomId, RealtimeRpcError.BadRequest)
+  const expectedMembershipId = commandMembershipFence(input.expectedMembershipId)
 
   const state = await db.transaction(async (tx) => {
     await lockGridMutations(tx)
+    await ensureCurrentSession(tx, context)
     await lockUser(tx, context.currentUserId)
     const existing = await getPresenceWithRoom(tx, context.currentUserId)
-    if (!existing || existing.room.id !== expectedRoomId || existing.presence.ownerSessionId !== context.currentSessionId) {
+    if (
+      !existing ||
+      existing.room.id !== expectedRoomId ||
+      existing.presence.ownerSessionId !== context.currentSessionId ||
+      (expectedMembershipId !== undefined && existing.presence.mediaMembershipId !== expectedMembershipId)
+    ) {
       return { affectedSpaceIds: new Set<number>(), endedConnections: [] }
     }
 
@@ -336,7 +370,51 @@ export async function leaveGridRoom(
   })
 
   await notifyGridChanged(state)
-  return { grids: await buildGrids(state.affectedSpaceIds, context) }
+  const [grids, currentCall] = await Promise.all([
+    buildGrids(state.affectedSpaceIds, context),
+    buildCurrentCall(context),
+  ])
+  return { grids, currentCall }
+}
+
+/** Atomic control transfer. Media cleanup remains asynchronous and provider-specific. */
+export async function moveGridCallHere(
+  input: MoveGridCallHereInput,
+  context: FunctionContext,
+  issueCredentials: GridCredentialIssuer = createGridConnectionCredentials,
+): Promise<MoveGridCallHereResult> {
+  if (!isGridCallTransferEnabled()) throw gridClientUpgradeRequired()
+  const callId = membershipFence(input.callId)
+  const expectedMembershipId = membershipFence(input.expectedMembershipId)
+  const state = await db.transaction(async (tx) => {
+    await lockGridMutations(tx)
+    await ensureCurrentSession(tx, context)
+    await lockUser(tx, context.currentUserId)
+    const state: GridClaimMutationState = { affectedSpaceIds: new Set(), endedConnections: [] }
+    const existing = await getActivePresenceWithRoom(tx, context.currentUserId, state)
+    if (
+      !existing ||
+      existing.presence.callId !== callId ||
+      existing.presence.mediaMembershipId !== expectedMembershipId
+    ) {
+      return state
+    }
+    await ensureGridAvailable(existing.room.spaceId, context.currentUserId, tx)
+    state.changedRoomId = existing.room.id
+    await movePresence(tx, context, existing.room, existing, state, false, {
+      preserveCallId: callId,
+      replaceMembership: true,
+    })
+    return state
+  })
+  await notifyGridChanged(state)
+  const [grids, connection, currentCall] = await Promise.all([
+    buildGrids(state.affectedSpaceIds, context),
+    state.claim ? credentialsForParticipant(state.claim, context, issueCredentials) : undefined,
+    state.claim?.currentCall ?? buildCurrentCall(context),
+    state.changedRoomId ? notifyConnectionReady(state.changedRoomId) : undefined,
+  ])
+  return { grids, connection, currentCall, moved: state.claim !== undefined }
 }
 
 export async function setGridRoomTitle(
@@ -461,6 +539,7 @@ export async function prepareGridConnection(
 ): Promise<PrepareGridConnectionResult> {
   const startedAt = Date.now()
   const roomId = positiveId(input.roomId, RealtimeRpcError.BadRequest)
+  const expectedMembershipId = commandMembershipFence(input.expectedMembershipId)
   log.debug("GRID_TRACE phase=prepare_rpc_start", {
     roomId,
     generation: input.generation,
@@ -484,6 +563,7 @@ export async function prepareGridConnection(
           eq(gridRooms.id, roomId),
           eq(gridRooms.connectionGeneration, input.generation),
           eq(gridPresence.ownerSessionId, context.currentSessionId),
+          expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
           gt(gridPresence.leaseExpiresAt, new Date()),
         ),
       )
@@ -501,6 +581,7 @@ export async function prepareGridConnection(
       displayName: displayName(row.user),
       participantIdentity: gridParticipantIdentity(row.user.id, row.presence.mediaMembershipId),
       mediaMembershipId: row.presence.mediaMembershipId,
+      callId: row.presence.callId,
       spaceId: row.room.spaceId,
     }
   })
@@ -520,6 +601,8 @@ export async function prepareGridConnection(
       userId: preparation.userId,
       displayName: preparation.displayName,
       participantIdentity: preparation.participantIdentity,
+      callId: preparation.callId,
+      mediaMembershipId: preparation.mediaMembershipId,
     })
   } catch (error) {
     Log.shared.warn("Failed to mint prepared Grid connection credentials", {
@@ -538,6 +621,7 @@ export async function prepareGridConnection(
       userId: context.currentUserId,
       sessionId: context.currentSessionId,
       mediaMembershipId: preparation.mediaMembershipId,
+      callId: preparation.callId,
     })
     if (!stillActive) {
       log.debug("GRID_TRACE phase=prepare_rpc_stale_after_mint", {
@@ -566,6 +650,7 @@ async function gridCredentialAuthorityIsActive(input: {
   userId: number
   sessionId: number
   mediaMembershipId: string
+  callId: string
 }): Promise<boolean> {
   return db.transaction(async (tx) => {
     await lockGridMutations(tx)
@@ -580,6 +665,7 @@ async function gridCredentialAuthorityIsActive(input: {
           eq(gridPresence.userId, input.userId),
           eq(gridPresence.ownerSessionId, input.sessionId),
           eq(gridPresence.mediaMembershipId, input.mediaMembershipId),
+          eq(gridPresence.callId, input.callId),
           gt(gridPresence.leaseExpiresAt, new Date()),
         ),
       )
@@ -617,8 +703,10 @@ export async function setGridAvatarMicrophoneEnabled(
   context: FunctionContext,
 ): Promise<SetGridAvatarMicrophoneEnabledResult> {
   const roomId = positiveId(input.expectedRoomId, RealtimeRpcError.BadRequest)
+  const expectedMembershipId = commandMembershipFence(input.expectedMembershipId)
   const stateUpdate = await db.transaction(async (tx) => {
     await lockGridMutations(tx)
+    await ensureCurrentSession(tx, context)
     const [row] = await tx
       .select({ spaceId: gridRooms.spaceId })
       .from(gridPresence)
@@ -628,6 +716,7 @@ export async function setGridAvatarMicrophoneEnabled(
           eq(gridPresence.userId, context.currentUserId),
           eq(gridPresence.ownerSessionId, context.currentSessionId),
           eq(gridPresence.roomId, roomId),
+          expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
           gt(gridPresence.leaseExpiresAt, new Date()),
         ),
       )
@@ -639,6 +728,7 @@ export async function setGridAvatarMicrophoneEnabled(
       ownerSessionId: context.currentSessionId,
       roomId,
       enabled: input.enabled,
+      expectedMembershipId,
     })
     if (!updated) throw RealtimeRpcError.BadRequest()
     return { spaceId: row.spaceId, ...updated }
@@ -674,16 +764,19 @@ async function movePresence(
   context: FunctionContext,
   targetRoom: DbGridRoom,
   existing: Awaited<ReturnType<typeof getPresenceWithRoom>>,
-  state: GridMutationState,
+  state: GridClaimMutationState,
   microphoneEnabled?: boolean,
+  options: { preserveCallId?: string; replaceMembership?: boolean } = {},
 ) {
   if (existing) {
     state.affectedSpaceIds.add(existing.room.spaceId)
   }
 
-  const ownerChanged = existing !== undefined && existing.presence.ownerSessionId !== context.currentSessionId
-  const rotateForAccessRevocation = ownerChanged && liveKitRequiresGenerationRotation()
-  if (existing && ownerChanged) {
+  const ownershipReplaced =
+    existing !== undefined &&
+    (existing.presence.ownerSessionId !== context.currentSessionId || options.replaceMembership === true)
+  const rotateForAccessRevocation = ownershipReplaced && liveKitRequiresGenerationRotation()
+  if (existing && ownershipReplaced) {
     await stopGridTranscription(
       tx,
       existing.room.id,
@@ -691,7 +784,7 @@ async function movePresence(
       true,
     )
   }
-  if (existing && (existing.room.id !== targetRoom.id || ownerChanged)) {
+  if (existing && (existing.room.id !== targetRoom.id || ownershipReplaced)) {
     const connection = activeGridConnection(existing.room)
     if (connection) {
       await recordGridParticipantRevocation(
@@ -704,7 +797,7 @@ async function movePresence(
     }
   }
 
-  await claimPresence(tx, context, targetRoom.id, microphoneEnabled)
+  const presence = await claimPresence(tx, context, targetRoom.id, microphoneEnabled, options)
   await enrollGridRoomHistory(tx, targetRoom.id, [context.currentUserId])
   const roster = await tx
     .select({ userId: gridPresence.userId })
@@ -718,6 +811,12 @@ async function movePresence(
     .limit(1)
   if (!ownerSession || !supportedGridTranscriptionSession(ownerSession))
     await stopGridTranscription(tx, targetRoom.id, "unsupported_client", true)
+  state.claim = {
+    roomId: presence.roomId,
+    callId: presence.callId,
+    mediaMembershipId: presence.mediaMembershipId,
+    currentCall: encodeCurrentCall(presence, targetRoom, context, ownerSession?.clientType),
+  }
 
   if (existing && existing.room.id !== targetRoom.id) {
     const endedConnection = await reconcileGridRoom(tx, existing.room.id, { rotateForAccessRevocation })
@@ -734,14 +833,16 @@ async function claimPresence(
   context: FunctionContext,
   roomId: number,
   microphoneEnabled?: boolean,
+  options: { preserveCallId?: string; replaceMembership?: boolean } = {},
 ) {
   const now = new Date()
-  await tx
+  const [presence] = await tx
     .insert(gridPresence)
     .values({
       userId: context.currentUserId,
       roomId,
       ownerSessionId: context.currentSessionId,
+      callId: options.preserveCallId,
       microphoneEnabled: microphoneEnabled ?? false,
       joinedAt: now,
       leaseExpiresAt: new Date(now.getTime() + PRESENCE_LEASE_MS),
@@ -751,22 +852,38 @@ async function claimPresence(
       set: {
         roomId,
         ownerSessionId: context.currentSessionId,
-        joinedAt: sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.joinedAt} else now() end`,
-        mediaMembershipId: sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.mediaMembershipId} else gen_random_uuid() end`,
+        joinedAt:
+          options.preserveCallId !== undefined
+            ? gridPresence.joinedAt
+            : sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.joinedAt} else now() end`,
+        callId:
+          options.preserveCallId ??
+          sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.callId} else gen_random_uuid() end`,
+        mediaMembershipId: options.replaceMembership
+          ? sql`gen_random_uuid()`
+          : sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.mediaMembershipId} else gen_random_uuid() end`,
         microphoneEnabled:
           microphoneEnabled === undefined
             ? sql`case when ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneEnabled} else false end`
             : microphoneEnabled,
-        microphoneRevision:
-          microphoneEnabled === undefined
-            ? sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`
-            : sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} and ${gridPresence.microphoneEnabled} != ${microphoneEnabled} then ${gridPresence.microphoneRevision} + 1 when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`,
+        microphoneRevision: options.replaceMembership
+          ? 0
+          : microphoneEnabled === undefined
+          ? sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`
+          : sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} and ${gridPresence.microphoneEnabled} != ${microphoneEnabled} then ${gridPresence.microphoneRevision} + 1 when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`,
         leaseExpiresAt: new Date(now.getTime() + PRESENCE_LEASE_MS),
       },
     })
+    .returning()
+  if (!presence) throw RealtimeRpcError.InternalError()
+  return presence
 }
 
-async function refreshPresenceLeases(input?: { spaceId: number; context: FunctionContext }) {
+async function refreshPresenceLeases(input?: {
+  spaceId: number
+  context: FunctionContext
+  expectedMembershipId?: string
+}) {
   const affected = await db.transaction(async (tx) => {
     await lockGridMutations(tx)
 
@@ -790,7 +907,9 @@ async function refreshPresenceLeases(input?: { spaceId: number; context: Functio
       const endedConnection = await reconcileGridRoom(tx, roomId)
       if (endedConnection) endedConnections.push(endedConnection)
     }
-    if (input) await renewOwnedPresence(tx, input.spaceId, input.context, cutoff)
+    if (input && (input.expectedMembershipId !== undefined || !isGridCallTransferEnabled())) {
+      await renewOwnedPresence(tx, input.spaceId, input.context, cutoff, input.expectedMembershipId)
+    }
     const state: GridMutationState = {
       affectedSpaceIds: new Set(expired.map(({ room }) => room.spaceId)),
       endedConnections,
@@ -811,6 +930,7 @@ async function renewOwnedPresence(
   spaceId: number,
   context: FunctionContext,
   cutoff: Date,
+  expectedMembershipId?: string,
 ) {
   const [presence] = await tx
     .select({ roomId: gridPresence.roomId })
@@ -820,6 +940,7 @@ async function renewOwnedPresence(
       and(
         eq(gridPresence.userId, context.currentUserId),
         eq(gridPresence.ownerSessionId, context.currentSessionId),
+        expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
         gt(gridPresence.leaseExpiresAt, cutoff),
       ),
     )
@@ -834,6 +955,7 @@ async function renewOwnedPresence(
         eq(gridPresence.userId, context.currentUserId),
         eq(gridPresence.ownerSessionId, context.currentSessionId),
         eq(gridPresence.roomId, presence.roomId),
+        expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
         gt(gridPresence.leaseExpiresAt, cutoff),
       ),
     )
@@ -841,6 +963,94 @@ async function renewOwnedPresence(
 
 async function buildGrids(spaceIds: Set<number>, context: FunctionContext): Promise<Grid[]> {
   return Promise.all([...spaceIds].sort((a, b) => a - b).map((spaceId) => buildGrid(spaceId, context)))
+}
+
+async function buildCurrentCall(context: FunctionContext): Promise<GridCurrentCall | undefined> {
+  return db.transaction(async (tx) => {
+    await lockGridMutations(tx)
+    const [row] = await tx
+      .select({ presence: gridPresence, room: gridRooms, ownerClientType: sessions.clientType })
+      .from(gridPresence)
+      .innerJoin(gridRooms, eq(gridRooms.id, gridPresence.roomId))
+      .innerJoin(spaces, and(eq(spaces.id, gridRooms.spaceId), isNull(spaces.deleted)))
+      .innerJoin(members, and(eq(members.spaceId, gridRooms.spaceId), eq(members.userId, gridPresence.userId)))
+      .innerJoin(
+        sessions,
+        and(
+          eq(sessions.id, gridPresence.ownerSessionId),
+          eq(sessions.userId, gridPresence.userId),
+          isNull(sessions.revoked),
+        ),
+      )
+      .where(and(eq(gridPresence.userId, context.currentUserId), gt(gridPresence.leaseExpiresAt, new Date())))
+      .limit(1)
+    if (!row || !(await SpaceSettingsModel.getStored(row.room.spaceId, tx)).gridEnabled) return undefined
+    return encodeCurrentCall(row.presence, row.room, context, row.ownerClientType)
+  })
+}
+
+function encodeCurrentCall(
+  presence: DbGridPresence,
+  room: DbGridRoom,
+  context: FunctionContext,
+  ownerClientType?: string | null,
+): GridCurrentCall {
+  return {
+    callId: presence.callId,
+    spaceId: BigInt(room.spaceId),
+    roomId: BigInt(room.id),
+    membershipId: presence.mediaMembershipId,
+    ownedByCurrentSession: presence.ownerSessionId === context.currentSessionId,
+    ownerClientType: ownerClientType ?? "",
+  }
+}
+
+function membershipFence(value: string, allowEmpty = false): string {
+  if (allowEmpty && value === "") return value
+  if (!uuidPattern.test(value)) throw RealtimeRpcError.BadRequest()
+  return value.toLowerCase()
+}
+
+function gridClientUpgradeRequired(): RealtimeRpcError {
+  return new RealtimeRpcError(
+    RealtimeRpcError.Code.BAD_REQUEST,
+    "Grid call ownership requires an updated client and enabled server.",
+    400,
+  )
+}
+
+function commandMembershipFence(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    if (isGridCallTransferEnabled()) throw gridClientUpgradeRequired()
+    return undefined
+  }
+  return membershipFence(value)
+}
+
+function assertPresenceFence(
+  existing: Awaited<ReturnType<typeof getPresenceWithRoom>>,
+  context: FunctionContext,
+  value: string | undefined,
+  options: { allowLegacyTakeover?: boolean } = {},
+): void {
+  if (value === undefined) {
+    if (isGridCallTransferEnabled()) throw gridClientUpgradeRequired()
+    return
+  }
+  const expected = membershipFence(value, true)
+  if (!existing && expected === "") return
+  if (
+    existing &&
+    expected === existing.presence.mediaMembershipId &&
+    (existing.presence.ownerSessionId === context.currentSessionId ||
+      (options.allowLegacyTakeover === true && !isGridCallTransferEnabled()))
+  )
+    return
+  throw new RealtimeRpcError(
+    RealtimeRpcError.Code.BAD_REQUEST,
+    "The Grid call changed. Refresh before trying again.",
+    400,
+  )
 }
 
 async function buildGrid(spaceId: number, context: FunctionContext): Promise<Grid> {
@@ -988,6 +1198,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
       enabled: false,
       rooms: [],
       revision: BigInt(snapshot.revision),
+      callTransferEnabled: isGridCallTransferEnabled(),
     }
   }
 
@@ -1031,6 +1242,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
     rooms: [...rooms.values()],
     currentRoomId,
     revision: BigInt(snapshot.revision),
+    callTransferEnabled: isGridCallTransferEnabled(),
   }
 }
 
@@ -1158,7 +1370,14 @@ async function ensureCreatorOrAdmin(tx: Transaction, room: DbGridRoom, userId: n
   if (!(await isSpaceAdmin(tx, room.spaceId, userId))) throw RealtimeRpcError.BadRequest()
 }
 
-async function credentialsForParticipant(roomId: number, userId: number, sessionId: number) {
+async function credentialsForParticipant(
+  claim: GridClaim,
+  context: FunctionContext,
+  issueCredentials: GridCredentialIssuer = createGridConnectionCredentials,
+) {
+  const roomId = claim.roomId
+  const userId = context.currentUserId
+  const sessionId = context.currentSessionId
   const startedAt = Date.now()
   const [row] = await db
     .select({ room: gridRooms, presence: gridPresence, user: users })
@@ -1169,6 +1388,8 @@ async function credentialsForParticipant(roomId: number, userId: number, session
         eq(gridPresence.roomId, gridRooms.id),
         eq(gridPresence.userId, userId),
         eq(gridPresence.ownerSessionId, sessionId),
+        eq(gridPresence.callId, claim.callId),
+        eq(gridPresence.mediaMembershipId, claim.mediaMembershipId),
         gt(gridPresence.leaseExpiresAt, new Date()),
       ),
     )
@@ -1187,11 +1408,13 @@ async function credentialsForParticipant(roomId: number, userId: number, session
   }
   let credentials
   try {
-    credentials = await createGridConnectionCredentials({
+    credentials = await issueCredentials({
       connection,
       userId,
       displayName: displayName(row.user),
       participantIdentity: gridParticipantIdentity(userId, row.presence.mediaMembershipId),
+      callId: claim.callId,
+      mediaMembershipId: claim.mediaMembershipId,
     })
   } catch (error) {
     Log.shared.warn("Failed to mint committed Grid participant credentials", {
@@ -1212,6 +1435,7 @@ async function credentialsForParticipant(roomId: number, userId: number, session
       userId,
       sessionId,
       mediaMembershipId: row.presence.mediaMembershipId,
+      callId: claim.callId,
     }))
   ) {
     log.debug("GRID_TRACE phase=participant_credentials_stale_after_mint", {
@@ -1272,6 +1496,8 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
         userId: row.user.id,
         displayName: displayName(row.user),
         participantIdentity: gridParticipantIdentity(row.user.id, row.presence.mediaMembershipId),
+        callId: row.presence.callId,
+        mediaMembershipId: row.presence.mediaMembershipId,
       })
       if (!credentials) return
       const stillActive = await gridCredentialAuthorityIsActive({
@@ -1281,6 +1507,7 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
         userId: row.user.id,
         sessionId: row.presence.ownerSessionId,
         mediaMembershipId: row.presence.mediaMembershipId,
+        callId: row.presence.callId,
       })
       if (!stillActive) {
         log.debug("GRID_TRACE phase=ready_push_stale_after_mint", {
@@ -1313,6 +1540,7 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
             spaceId: SpaceId.make(row.room.spaceId),
             generation: connection.generation,
             mediaMembershipId: row.presence.mediaMembershipId,
+            callId: row.presence.callId,
             encodedPayload: Buffer.from(ServerMessage.toBinary({ payload })).toString("base64"),
           } as const }
         await Promise.all([...owningBoots].map((bootId) => internalMessaging.publish({
@@ -1335,8 +1563,19 @@ async function notifyConnectionReadyUnchecked(roomId: number) {
 export function subscribeGridCredentialHints(): () => void {
   return internalMessaging.on("SessionRealtime", async ({ target, event }) => {
     if (event.payload.kind !== "gridCredentials") return
-    const { roomId, spaceId, generation, mediaMembershipId, encodedPayload } = event.payload
-    if (!(await gridCredentialAuthorityIsActive({ roomId, spaceId, generation, mediaMembershipId, userId: target.userId, sessionId: target.sessionId }))) return
+    const { roomId, spaceId, generation, mediaMembershipId, callId, encodedPayload } = event.payload
+    if (
+      !(await gridCredentialAuthorityIsActive({
+        roomId,
+        spaceId,
+        generation,
+        mediaMembershipId,
+        callId,
+        userId: target.userId,
+        sessionId: target.sessionId,
+      }))
+    )
+      return
     let payload: ServerMessage["payload"]
     try {
       payload = ServerMessage.fromBinary(Buffer.from(encodedPayload, "base64")).payload

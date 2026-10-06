@@ -92,7 +92,15 @@ const PrivateReply = Schema.Struct({
 const SessionRealtime = Schema.Struct({
   kind: Schema.Literal("SessionRealtime"),
   payload: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("gridCredentials"), roomId: WirePositiveInteger, spaceId: SpaceId, generation: WireNonNegativeInteger, mediaMembershipId: Uuid, encodedPayload: Schema.String.check(Schema.isMaxLength(32768)) }),
+    Schema.Struct({
+      kind: Schema.Literal("gridCredentials"),
+      roomId: WirePositiveInteger,
+      spaceId: SpaceId,
+      generation: WireNonNegativeInteger,
+      mediaMembershipId: Uuid,
+      callId: Uuid,
+      encodedPayload: Schema.String.check(Schema.isMaxLength(32768)),
+    }),
   ]),
 })
 

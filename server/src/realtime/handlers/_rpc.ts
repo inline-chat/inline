@@ -114,6 +114,7 @@ import {
   getGridHomeHandler,
   joinGridRoomHandler,
   leaveGridRoomHandler,
+  moveGridCallHereHandler,
   prepareGridConnectionHandler,
   setGridAvatarMicrophoneEnabledHandler,
   setGridRoomLockedHandler,
@@ -516,6 +517,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "leaveGridRoom") throw RealtimeRpcError.BadRequest()
       const result = await leaveGridRoomHandler(call.input.leaveGridRoom, handlerContext)
       return { oneofKind: "leaveGridRoom", leaveGridRoom: result }
+    }
+
+    case Method.MOVE_GRID_CALL_HERE: {
+      if (call.input.oneofKind !== "moveGridCallHere") throw RealtimeRpcError.BadRequest()
+      const result = await moveGridCallHereHandler(call.input.moveGridCallHere, handlerContext)
+      return { oneofKind: "moveGridCallHere", moveGridCallHere: result }
     }
 
     case Method.SET_GRID_ROOM_TITLE: {

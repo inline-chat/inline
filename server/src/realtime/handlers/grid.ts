@@ -17,6 +17,8 @@ import type {
   JoinGridRoomResult,
   LeaveGridRoomInput,
   LeaveGridRoomResult,
+  MoveGridCallHereInput,
+  MoveGridCallHereResult,
   PrepareGridConnectionInput,
   PrepareGridConnectionResult,
   SetGridAvatarMicrophoneEnabledInput,
@@ -56,6 +58,11 @@ export const leaveGridRoomHandler = (
   input: LeaveGridRoomInput,
   context: HandlerContext,
 ): Promise<LeaveGridRoomResult> => Functions.grid.leaveRoom(input, functionContext(context))
+
+export const moveGridCallHereHandler = (
+  input: MoveGridCallHereInput,
+  context: HandlerContext,
+): Promise<MoveGridCallHereResult> => Functions.grid.moveCallHere(input, functionContext(context))
 
 export const setGridRoomTitleHandler = (
   input: SetGridRoomTitleInput,

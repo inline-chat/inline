@@ -117,14 +117,15 @@ async function fixture(label: string) {
     transcriptChatId?: bigint,
     actor = 0,
     requestId = randomUUID(),
+    controlledRoomId = roomId,
   ) => {
     const room = (await getGrid({ spaceId: BigInt(space.id) }, contexts[actor]!)).grid!.rooms.find(
-      (room) => room.id === roomId,
+      (room) => room.id === controlledRoomId,
     )!
     const avatar = room.avatars.find((avatar) => avatar.user?.id === BigInt(users[actor]!.id))!
     return setGridTranscription(
       {
-        roomId,
+        roomId: controlledRoomId,
         enabled,
         requestId,
         expectedMembershipId: avatar.membershipId,
@@ -438,6 +439,34 @@ describe("Grid transcription control and worker authorization", () => {
       [origin.transcriptChatId, repeated.transcriptChatId].sort(),
     )
     expect(listed.transcripts.every((entry) => !entry.busy)).toBe(true)
+  })
+
+  test("picker identifies source parents and distinct transcripts without changing or sharing history", async () => {
+    const f = await fixture("picker-labels")
+    await db.update(gridRooms).set({ title: "Product planning" }).where(eq(gridRooms.id, Number(f.roomId)))
+    await f.control(true)
+    await f.control(false)
+    await f.control(true, GridTranscriptDestination.GRID_TRANSCRIPT_NEW)
+    await f.control(false)
+    const created = await createGridRoom({ spaceId: BigInt(f.space.id), microphoneEnabled: true }, f.contexts[0]!)
+    const otherRoomId = created.grids[0]!.rooms.find((room) => room.avatars.some((avatar) => avatar.ownedByCurrentSession))!.id
+    await db.update(gridRooms).set({ title: "Design review" }).where(eq(gridRooms.id, Number(otherRoomId)))
+    await joinGridRoom({ roomId: otherRoomId, microphoneEnabled: true }, f.contexts[1]!)
+    await f.control(true, GridTranscriptDestination.GRID_TRANSCRIPT_NEW, undefined, 0, randomUUID(), otherRoomId)
+    await f.control(false, GridTranscriptDestination.GRID_TRANSCRIPT_LAST, undefined, 0, randomUUID(), otherRoomId)
+    const runs = await db.select().from(gridTranscriptionRuns)
+    expect(runs).toHaveLength(3)
+    const before = await db.select().from(chatParticipants)
+    const listed = await listGridTranscripts({ roomId: otherRoomId }, f.contexts[0]!)
+    const labels = new Map(listed.transcripts.map((entry) => [Number(entry.transcriptChatId), entry.title]))
+    for (const run of runs) {
+      const [child] = await db.select().from(chats).where(eq(chats.id, run.transcriptChatId))
+      expect(child!.title).toBe("Transcript")
+      const source = run.sourceRoomId === Number(f.roomId) ? "Product planning" : "Design review"
+      expect(labels.get(run.transcriptChatId)).toBe(`${source} · Transcript #${child!.threadNumber}`)
+    }
+    expect(new Set(labels.values()).size).toBe(3)
+    expect(await db.select().from(chatParticipants)).toEqual(before)
   })
 
   test("lease-only renewals keep Grid revision and hints quiet while authority loss publishes once", async () => {
