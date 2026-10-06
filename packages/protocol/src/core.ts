@@ -4607,6 +4607,12 @@ export interface RpcCall {
          */
         setSpacePhoto: SetSpacePhotoInput;
     } | {
+        oneofKind: "moveGridCallHere";
+        /**
+         * @generated from protobuf field: MoveGridCallHereInput moveGridCallHere = 147;
+         */
+        moveGridCallHere: MoveGridCallHereInput;
+    } | {
         oneofKind: "openGridThread";
         /**
          * @generated from protobuf field: OpenGridThreadInput openGridThread = 148;
@@ -5504,6 +5510,12 @@ export interface RpcResult {
          */
         setSpacePhoto: SetSpacePhotoResult;
     } | {
+        oneofKind: "moveGridCallHere";
+        /**
+         * @generated from protobuf field: MoveGridCallHereResult moveGridCallHere = 147;
+         */
+        moveGridCallHere: MoveGridCallHereResult;
+    } | {
         oneofKind: "openGridThread";
         /**
          * @generated from protobuf field: OpenGridThreadResult openGridThread = 148;
@@ -6132,6 +6144,48 @@ export interface Grid {
      * @generated from protobuf field: int64 revision = 5;
      */
     revision: bigint;
+    /**
+     * Effective server capability, including ownership fence enforcement.
+     * New clients must not admit media through an older/disabled server.
+     *
+     * @generated from protobuf field: bool call_transfer_enabled = 6;
+     */
+    callTransferEnabled: boolean;
+}
+/**
+ * Personalized control ownership, disclosed only to the authenticated user.
+ * call_id stays stable across an explicit device transfer; membership_id is
+ * replaced on each transfer/resume and fences commands and media credentials.
+ *
+ * @generated from protobuf message GridCurrentCall
+ */
+export interface GridCurrentCall {
+    /**
+     * @generated from protobuf field: string call_id = 1;
+     */
+    callId: string;
+    /**
+     * @generated from protobuf field: int64 space_id = 2;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 room_id = 3;
+     */
+    roomId: bigint;
+    /**
+     * @generated from protobuf field: string membership_id = 4;
+     */
+    membershipId: string;
+    /**
+     * @generated from protobuf field: bool owned_by_current_session = 5;
+     */
+    ownedByCurrentSession: boolean;
+    /**
+     * Coarse existing session client kind (ios, macos, etc.), not a device ID.
+     *
+     * @generated from protobuf field: string owner_client_type = 6;
+     */
+    ownerClientType: string;
 }
 /**
  * Short-lived, session-targeted LiveKit credentials. Never persist or include
@@ -6160,6 +6214,14 @@ export interface GridConnectionCredentials {
      * @generated from protobuf field: int64 expires_at = 5;
      */
     expiresAt: bigint;
+    /**
+     * @generated from protobuf field: string call_id = 6;
+     */
+    callId: string;
+    /**
+     * @generated from protobuf field: string membership_id = 7;
+     */
+    membershipId: string;
 }
 /**
  * @generated from protobuf message GetGridInput
@@ -6169,6 +6231,13 @@ export interface GetGridInput {
      * @generated from protobuf field: int64 space_id = 1;
      */
     spaceId: bigint;
+    /**
+     * Explicit renewal by the admitted owner. Omit for read-only browsing when
+     * call-transfer enforcement is active. A stale fence never renews presence.
+     *
+     * @generated from protobuf field: optional string expected_membership_id = 2;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message GetGridResult
@@ -6178,6 +6247,10 @@ export interface GetGridResult {
      * @generated from protobuf field: Grid grid = 1;
      */
     grid?: Grid;
+    /**
+     * @generated from protobuf field: optional GridCurrentCall current_call = 2;
+     */
+    currentCall?: GridCurrentCall;
 }
 /**
  * Home-level discovery for every Grid-enabled Space the current user can see.
@@ -6216,6 +6289,14 @@ export interface GetGridHomeResult {
      * @generated from protobuf field: repeated GridHomeSpace spaces = 1;
      */
     spaces: GridHomeSpace[];
+    /**
+     * @generated from protobuf field: optional GridCurrentCall current_call = 2;
+     */
+    currentCall?: GridCurrentCall;
+    /**
+     * @generated from protobuf field: bool call_transfer_enabled = 3;
+     */
+    callTransferEnabled: boolean;
 }
 /**
  * @generated from protobuf message CreateGridRoomInput
@@ -6229,6 +6310,13 @@ export interface CreateGridRoomInput {
      * @generated from protobuf field: optional bool microphone_enabled = 2;
      */
     microphoneEnabled?: boolean;
+    /**
+     * Required when call_transfer_enabled: empty expects no active presence;
+     * nonempty must match the current session's live membership exactly.
+     *
+     * @generated from protobuf field: optional string expected_membership_id = 3;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message CreateGridRoomResult
@@ -6242,6 +6330,13 @@ export interface CreateGridRoomResult {
      * @generated from protobuf field: optional GridConnectionCredentials connection = 2;
      */
     connection?: GridConnectionCredentials;
+    /**
+     * Successful claims report the projection captured at commit. A newer
+     * accepted Grid/self state wins; this field alone cannot admit media.
+     *
+     * @generated from protobuf field: optional GridCurrentCall current_call = 3;
+     */
+    currentCall?: GridCurrentCall;
 }
 /**
  * @generated from protobuf message JoinGridRoomInput
@@ -6255,6 +6350,10 @@ export interface JoinGridRoomInput {
      * @generated from protobuf field: optional bool microphone_enabled = 2;
      */
     microphoneEnabled?: boolean;
+    /**
+     * @generated from protobuf field: optional string expected_membership_id = 3;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message JoinGridRoomResult
@@ -6268,6 +6367,10 @@ export interface JoinGridRoomResult {
      * @generated from protobuf field: optional GridConnectionCredentials connection = 2;
      */
     connection?: GridConnectionCredentials;
+    /**
+     * @generated from protobuf field: optional GridCurrentCall current_call = 3;
+     */
+    currentCall?: GridCurrentCall;
 }
 /**
  * @generated from protobuf message LeaveGridRoomInput
@@ -6277,6 +6380,10 @@ export interface LeaveGridRoomInput {
      * @generated from protobuf field: int64 expected_room_id = 1;
      */
     expectedRoomId: bigint;
+    /**
+     * @generated from protobuf field: optional string expected_membership_id = 2;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message LeaveGridRoomResult
@@ -6286,6 +6393,53 @@ export interface LeaveGridRoomResult {
      * @generated from protobuf field: repeated Grid grids = 1;
      */
     grids: Grid[];
+    /**
+     * Display/repair only; leaving never grants a replacement admission.
+     *
+     * @generated from protobuf field: optional GridCurrentCall current_call = 2;
+     */
+    currentCall?: GridCurrentCall;
+}
+/**
+ * Explicitly move this user's existing room participation to the authenticated
+ * calling session (also used for a same-login cold-process Resume).
+ *
+ * @generated from protobuf message MoveGridCallHereInput
+ */
+export interface MoveGridCallHereInput {
+    /**
+     * @generated from protobuf field: string call_id = 1;
+     */
+    callId: string;
+    /**
+     * @generated from protobuf field: string expected_membership_id = 2;
+     */
+    expectedMembershipId: string;
+}
+/**
+ * @generated from protobuf message MoveGridCallHereResult
+ */
+export interface MoveGridCallHereResult {
+    /**
+     * @generated from protobuf field: repeated Grid grids = 1;
+     */
+    grids: Grid[];
+    /**
+     * @generated from protobuf field: optional GridConnectionCredentials connection = 2;
+     */
+    connection?: GridConnectionCredentials;
+    /**
+     * Captured at the claim's commit when moved=true; display/repair otherwise.
+     *
+     * @generated from protobuf field: optional GridCurrentCall current_call = 3;
+     */
+    currentCall?: GridCurrentCall;
+    /**
+     * False means the expected call/membership changed; no claim was performed.
+     *
+     * @generated from protobuf field: bool moved = 4;
+     */
+    moved: boolean;
 }
 /**
  * @generated from protobuf message SetGridRoomTitleInput
@@ -6363,6 +6517,10 @@ export interface PrepareGridConnectionInput {
      * @generated from protobuf field: int32 generation = 2;
      */
     generation: number;
+    /**
+     * @generated from protobuf field: optional string expected_membership_id = 3;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message PrepareGridConnectionResult
@@ -6389,6 +6547,10 @@ export interface SetGridAvatarMicrophoneEnabledInput {
      * @generated from protobuf field: bool enabled = 2;
      */
     enabled: boolean;
+    /**
+     * @generated from protobuf field: optional string expected_membership_id = 3;
+     */
+    expectedMembershipId?: string;
 }
 /**
  * @generated from protobuf message SetGridAvatarMicrophoneEnabledResult
@@ -14566,6 +14728,10 @@ export enum Method {
      * @generated from protobuf enum value: SET_SPACE_PHOTO = 145;
      */
     SET_SPACE_PHOTO = 145,
+    /**
+     * @generated from protobuf enum value: MOVE_GRID_CALL_HERE = 146;
+     */
+    MOVE_GRID_CALL_HERE = 146,
     /**
      * @generated from protobuf enum value: OPEN_GRID_THREAD = 147;
      */
@@ -23743,6 +23909,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "input", T: () => RequestBotFilesystemInput },
             { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "input", T: () => AnswerBotFilesystemInput },
             { no: 146, name: "setSpacePhoto", kind: "message", oneof: "input", T: () => SetSpacePhotoInput },
+            { no: 147, name: "moveGridCallHere", kind: "message", oneof: "input", T: () => MoveGridCallHereInput },
             { no: 148, name: "openGridThread", kind: "message", oneof: "input", T: () => OpenGridThreadInput },
             { no: 149, name: "setGridTranscription", kind: "message", oneof: "input", T: () => SetGridTranscriptionInput },
             { no: 150, name: "listGridTranscripts", kind: "message", oneof: "input", T: () => ListGridTranscriptsInput }
@@ -24628,6 +24795,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setSpacePhoto: SetSpacePhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setSpacePhoto)
                     };
                     break;
+                case /* MoveGridCallHereInput moveGridCallHere */ 147:
+                    message.input = {
+                        oneofKind: "moveGridCallHere",
+                        moveGridCallHere: MoveGridCallHereInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).moveGridCallHere)
+                    };
+                    break;
                 case /* OpenGridThreadInput openGridThread */ 148:
                     message.input = {
                         oneofKind: "openGridThread",
@@ -25093,6 +25266,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetSpacePhotoInput setSpacePhoto = 146; */
         if (message.input.oneofKind === "setSpacePhoto")
             SetSpacePhotoInput.internalBinaryWrite(message.input.setSpacePhoto, writer.tag(146, WireType.LengthDelimited).fork(), options).join();
+        /* MoveGridCallHereInput moveGridCallHere = 147; */
+        if (message.input.oneofKind === "moveGridCallHere")
+            MoveGridCallHereInput.internalBinaryWrite(message.input.moveGridCallHere, writer.tag(147, WireType.LengthDelimited).fork(), options).join();
         /* OpenGridThreadInput openGridThread = 148; */
         if (message.input.oneofKind === "openGridThread")
             OpenGridThreadInput.internalBinaryWrite(message.input.openGridThread, writer.tag(148, WireType.LengthDelimited).fork(), options).join();
@@ -25261,6 +25437,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 144, name: "requestBotFilesystem", kind: "message", oneof: "result", T: () => RequestBotFilesystemResult },
             { no: 145, name: "answerBotFilesystem", kind: "message", oneof: "result", T: () => AnswerBotFilesystemResult },
             { no: 146, name: "setSpacePhoto", kind: "message", oneof: "result", T: () => SetSpacePhotoResult },
+            { no: 147, name: "moveGridCallHere", kind: "message", oneof: "result", T: () => MoveGridCallHereResult },
             { no: 148, name: "openGridThread", kind: "message", oneof: "result", T: () => OpenGridThreadResult },
             { no: 149, name: "setGridTranscription", kind: "message", oneof: "result", T: () => SetGridTranscriptionResult },
             { no: 150, name: "listGridTranscripts", kind: "message", oneof: "result", T: () => ListGridTranscriptsResult }
@@ -26146,6 +26323,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setSpacePhoto: SetSpacePhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setSpacePhoto)
                     };
                     break;
+                case /* MoveGridCallHereResult moveGridCallHere */ 147:
+                    message.result = {
+                        oneofKind: "moveGridCallHere",
+                        moveGridCallHere: MoveGridCallHereResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).moveGridCallHere)
+                    };
+                    break;
                 case /* OpenGridThreadResult openGridThread */ 148:
                     message.result = {
                         oneofKind: "openGridThread",
@@ -26611,6 +26794,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetSpacePhotoResult setSpacePhoto = 146; */
         if (message.result.oneofKind === "setSpacePhoto")
             SetSpacePhotoResult.internalBinaryWrite(message.result.setSpacePhoto, writer.tag(146, WireType.LengthDelimited).fork(), options).join();
+        /* MoveGridCallHereResult moveGridCallHere = 147; */
+        if (message.result.oneofKind === "moveGridCallHere")
+            MoveGridCallHereResult.internalBinaryWrite(message.result.moveGridCallHere, writer.tag(147, WireType.LengthDelimited).fork(), options).join();
         /* OpenGridThreadResult openGridThread = 148; */
         if (message.result.oneofKind === "openGridThread")
             OpenGridThreadResult.internalBinaryWrite(message.result.openGridThread, writer.tag(148, WireType.LengthDelimited).fork(), options).join();
@@ -28387,7 +28573,8 @@ class Grid$Type extends MessageType<Grid> {
             { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "rooms", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridRoom },
             { no: 4, name: "current_room_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "call_transfer_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Grid>): Grid {
@@ -28396,6 +28583,7 @@ class Grid$Type extends MessageType<Grid> {
         message.enabled = false;
         message.rooms = [];
         message.revision = 0n;
+        message.callTransferEnabled = false;
         if (value !== undefined)
             reflectionMergePartial<Grid>(this, message, value);
         return message;
@@ -28419,6 +28607,9 @@ class Grid$Type extends MessageType<Grid> {
                     break;
                 case /* int64 revision */ 5:
                     message.revision = reader.int64().toBigInt();
+                    break;
+                case /* bool call_transfer_enabled */ 6:
+                    message.callTransferEnabled = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -28447,6 +28638,9 @@ class Grid$Type extends MessageType<Grid> {
         /* int64 revision = 5; */
         if (message.revision !== 0n)
             writer.tag(5, WireType.Varint).int64(message.revision);
+        /* bool call_transfer_enabled = 6; */
+        if (message.callTransferEnabled !== false)
+            writer.tag(6, WireType.Varint).bool(message.callTransferEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28458,6 +28652,93 @@ class Grid$Type extends MessageType<Grid> {
  */
 export const Grid = new Grid$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class GridCurrentCall$Type extends MessageType<GridCurrentCall> {
+    constructor() {
+        super("GridCurrentCall", [
+            { no: 1, name: "call_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "membership_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "owned_by_current_session", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "owner_client_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridCurrentCall>): GridCurrentCall {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.callId = "";
+        message.spaceId = 0n;
+        message.roomId = 0n;
+        message.membershipId = "";
+        message.ownedByCurrentSession = false;
+        message.ownerClientType = "";
+        if (value !== undefined)
+            reflectionMergePartial<GridCurrentCall>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridCurrentCall): GridCurrentCall {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string call_id */ 1:
+                    message.callId = reader.string();
+                    break;
+                case /* int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 room_id */ 3:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* string membership_id */ 4:
+                    message.membershipId = reader.string();
+                    break;
+                case /* bool owned_by_current_session */ 5:
+                    message.ownedByCurrentSession = reader.bool();
+                    break;
+                case /* string owner_client_type */ 6:
+                    message.ownerClientType = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridCurrentCall, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string call_id = 1; */
+        if (message.callId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.callId);
+        /* int64 space_id = 2; */
+        if (message.spaceId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        /* int64 room_id = 3; */
+        if (message.roomId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.roomId);
+        /* string membership_id = 4; */
+        if (message.membershipId !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.membershipId);
+        /* bool owned_by_current_session = 5; */
+        if (message.ownedByCurrentSession !== false)
+            writer.tag(5, WireType.Varint).bool(message.ownedByCurrentSession);
+        /* string owner_client_type = 6; */
+        if (message.ownerClientType !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.ownerClientType);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridCurrentCall
+ */
+export const GridCurrentCall = new GridCurrentCall$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentials> {
     constructor() {
         super("GridConnectionCredentials", [
@@ -28465,7 +28746,9 @@ class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentia
             { no: 2, name: "server_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "participant_identity", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 5, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "call_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "membership_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<GridConnectionCredentials>): GridConnectionCredentials {
@@ -28474,6 +28757,8 @@ class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentia
         message.participantIdentity = "";
         message.token = "";
         message.expiresAt = 0n;
+        message.callId = "";
+        message.membershipId = "";
         if (value !== undefined)
             reflectionMergePartial<GridConnectionCredentials>(this, message, value);
         return message;
@@ -28497,6 +28782,12 @@ class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentia
                     break;
                 case /* int64 expires_at */ 5:
                     message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* string call_id */ 6:
+                    message.callId = reader.string();
+                    break;
+                case /* string membership_id */ 7:
+                    message.membershipId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -28525,6 +28816,12 @@ class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentia
         /* int64 expires_at = 5; */
         if (message.expiresAt !== 0n)
             writer.tag(5, WireType.Varint).int64(message.expiresAt);
+        /* string call_id = 6; */
+        if (message.callId !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.callId);
+        /* string membership_id = 7; */
+        if (message.membershipId !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.membershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28539,7 +28836,8 @@ export const GridConnectionCredentials = new GridConnectionCredentials$Type();
 class GetGridInput$Type extends MessageType<GetGridInput> {
     constructor() {
         super("GetGridInput", [
-            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<GetGridInput>): GetGridInput {
@@ -28557,6 +28855,9 @@ class GetGridInput$Type extends MessageType<GetGridInput> {
                 case /* int64 space_id */ 1:
                     message.spaceId = reader.int64().toBigInt();
                     break;
+                case /* optional string expected_membership_id */ 2:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28572,6 +28873,9 @@ class GetGridInput$Type extends MessageType<GetGridInput> {
         /* int64 space_id = 1; */
         if (message.spaceId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* optional string expected_membership_id = 2; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28586,7 +28890,8 @@ export const GetGridInput = new GetGridInput$Type();
 class GetGridResult$Type extends MessageType<GetGridResult> {
     constructor() {
         super("GetGridResult", [
-            { no: 1, name: "grid", kind: "message", T: () => Grid }
+            { no: 1, name: "grid", kind: "message", T: () => Grid },
+            { no: 2, name: "current_call", kind: "message", T: () => GridCurrentCall }
         ]);
     }
     create(value?: PartialMessage<GetGridResult>): GetGridResult {
@@ -28603,6 +28908,9 @@ class GetGridResult$Type extends MessageType<GetGridResult> {
                 case /* Grid grid */ 1:
                     message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
                     break;
+                case /* optional GridCurrentCall current_call */ 2:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28618,6 +28926,9 @@ class GetGridResult$Type extends MessageType<GetGridResult> {
         /* Grid grid = 1; */
         if (message.grid)
             Grid.internalBinaryWrite(message.grid, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 2; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28728,12 +29039,15 @@ export const GetGridHomeInput = new GetGridHomeInput$Type();
 class GetGridHomeResult$Type extends MessageType<GetGridHomeResult> {
     constructor() {
         super("GetGridHomeResult", [
-            { no: 1, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridHomeSpace }
+            { no: 1, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridHomeSpace },
+            { no: 2, name: "current_call", kind: "message", T: () => GridCurrentCall },
+            { no: 3, name: "call_transfer_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetGridHomeResult>): GetGridHomeResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaces = [];
+        message.callTransferEnabled = false;
         if (value !== undefined)
             reflectionMergePartial<GetGridHomeResult>(this, message, value);
         return message;
@@ -28745,6 +29059,12 @@ class GetGridHomeResult$Type extends MessageType<GetGridHomeResult> {
             switch (fieldNo) {
                 case /* repeated GridHomeSpace spaces */ 1:
                     message.spaces.push(GridHomeSpace.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional GridCurrentCall current_call */ 2:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
+                case /* bool call_transfer_enabled */ 3:
+                    message.callTransferEnabled = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -28761,6 +29081,12 @@ class GetGridHomeResult$Type extends MessageType<GetGridHomeResult> {
         /* repeated GridHomeSpace spaces = 1; */
         for (let i = 0; i < message.spaces.length; i++)
             GridHomeSpace.internalBinaryWrite(message.spaces[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 2; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool call_transfer_enabled = 3; */
+        if (message.callTransferEnabled !== false)
+            writer.tag(3, WireType.Varint).bool(message.callTransferEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28776,7 +29102,8 @@ class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
     constructor() {
         super("CreateGridRoomInput", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateGridRoomInput>): CreateGridRoomInput {
@@ -28797,6 +29124,9 @@ class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
                 case /* optional bool microphone_enabled */ 2:
                     message.microphoneEnabled = reader.bool();
                     break;
+                case /* optional string expected_membership_id */ 3:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28815,6 +29145,9 @@ class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
         /* optional bool microphone_enabled = 2; */
         if (message.microphoneEnabled !== undefined)
             writer.tag(2, WireType.Varint).bool(message.microphoneEnabled);
+        /* optional string expected_membership_id = 3; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28830,7 +29163,8 @@ class CreateGridRoomResult$Type extends MessageType<CreateGridRoomResult> {
     constructor() {
         super("CreateGridRoomResult", [
             { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
-            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials },
+            { no: 3, name: "current_call", kind: "message", T: () => GridCurrentCall }
         ]);
     }
     create(value?: PartialMessage<CreateGridRoomResult>): CreateGridRoomResult {
@@ -28851,6 +29185,9 @@ class CreateGridRoomResult$Type extends MessageType<CreateGridRoomResult> {
                 case /* optional GridConnectionCredentials connection */ 2:
                     message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
                     break;
+                case /* optional GridCurrentCall current_call */ 3:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28869,6 +29206,9 @@ class CreateGridRoomResult$Type extends MessageType<CreateGridRoomResult> {
         /* optional GridConnectionCredentials connection = 2; */
         if (message.connection)
             GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 3; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28884,7 +29224,8 @@ class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
     constructor() {
         super("JoinGridRoomInput", [
             { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<JoinGridRoomInput>): JoinGridRoomInput {
@@ -28905,6 +29246,9 @@ class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
                 case /* optional bool microphone_enabled */ 2:
                     message.microphoneEnabled = reader.bool();
                     break;
+                case /* optional string expected_membership_id */ 3:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28923,6 +29267,9 @@ class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
         /* optional bool microphone_enabled = 2; */
         if (message.microphoneEnabled !== undefined)
             writer.tag(2, WireType.Varint).bool(message.microphoneEnabled);
+        /* optional string expected_membership_id = 3; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28938,7 +29285,8 @@ class JoinGridRoomResult$Type extends MessageType<JoinGridRoomResult> {
     constructor() {
         super("JoinGridRoomResult", [
             { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
-            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials },
+            { no: 3, name: "current_call", kind: "message", T: () => GridCurrentCall }
         ]);
     }
     create(value?: PartialMessage<JoinGridRoomResult>): JoinGridRoomResult {
@@ -28959,6 +29307,9 @@ class JoinGridRoomResult$Type extends MessageType<JoinGridRoomResult> {
                 case /* optional GridConnectionCredentials connection */ 2:
                     message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
                     break;
+                case /* optional GridCurrentCall current_call */ 3:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28977,6 +29328,9 @@ class JoinGridRoomResult$Type extends MessageType<JoinGridRoomResult> {
         /* optional GridConnectionCredentials connection = 2; */
         if (message.connection)
             GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 3; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28991,7 +29345,8 @@ export const JoinGridRoomResult = new JoinGridRoomResult$Type();
 class LeaveGridRoomInput$Type extends MessageType<LeaveGridRoomInput> {
     constructor() {
         super("LeaveGridRoomInput", [
-            { no: 1, name: "expected_room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "expected_room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<LeaveGridRoomInput>): LeaveGridRoomInput {
@@ -29009,6 +29364,9 @@ class LeaveGridRoomInput$Type extends MessageType<LeaveGridRoomInput> {
                 case /* int64 expected_room_id */ 1:
                     message.expectedRoomId = reader.int64().toBigInt();
                     break;
+                case /* optional string expected_membership_id */ 2:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -29024,6 +29382,9 @@ class LeaveGridRoomInput$Type extends MessageType<LeaveGridRoomInput> {
         /* int64 expected_room_id = 1; */
         if (message.expectedRoomId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.expectedRoomId);
+        /* optional string expected_membership_id = 2; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29038,7 +29399,8 @@ export const LeaveGridRoomInput = new LeaveGridRoomInput$Type();
 class LeaveGridRoomResult$Type extends MessageType<LeaveGridRoomResult> {
     constructor() {
         super("LeaveGridRoomResult", [
-            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid }
+            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
+            { no: 2, name: "current_call", kind: "message", T: () => GridCurrentCall }
         ]);
     }
     create(value?: PartialMessage<LeaveGridRoomResult>): LeaveGridRoomResult {
@@ -29056,6 +29418,9 @@ class LeaveGridRoomResult$Type extends MessageType<LeaveGridRoomResult> {
                 case /* repeated Grid grids */ 1:
                     message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional GridCurrentCall current_call */ 2:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -29071,6 +29436,9 @@ class LeaveGridRoomResult$Type extends MessageType<LeaveGridRoomResult> {
         /* repeated Grid grids = 1; */
         for (let i = 0; i < message.grids.length; i++)
             Grid.internalBinaryWrite(message.grids[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 2; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29081,6 +29449,130 @@ class LeaveGridRoomResult$Type extends MessageType<LeaveGridRoomResult> {
  * @generated MessageType for protobuf message LeaveGridRoomResult
  */
 export const LeaveGridRoomResult = new LeaveGridRoomResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MoveGridCallHereInput$Type extends MessageType<MoveGridCallHereInput> {
+    constructor() {
+        super("MoveGridCallHereInput", [
+            { no: 1, name: "call_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "expected_membership_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MoveGridCallHereInput>): MoveGridCallHereInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.callId = "";
+        message.expectedMembershipId = "";
+        if (value !== undefined)
+            reflectionMergePartial<MoveGridCallHereInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveGridCallHereInput): MoveGridCallHereInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string call_id */ 1:
+                    message.callId = reader.string();
+                    break;
+                case /* string expected_membership_id */ 2:
+                    message.expectedMembershipId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveGridCallHereInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string call_id = 1; */
+        if (message.callId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.callId);
+        /* string expected_membership_id = 2; */
+        if (message.expectedMembershipId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.expectedMembershipId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveGridCallHereInput
+ */
+export const MoveGridCallHereInput = new MoveGridCallHereInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MoveGridCallHereResult$Type extends MessageType<MoveGridCallHereResult> {
+    constructor() {
+        super("MoveGridCallHereResult", [
+            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
+            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials },
+            { no: 3, name: "current_call", kind: "message", T: () => GridCurrentCall },
+            { no: 4, name: "moved", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MoveGridCallHereResult>): MoveGridCallHereResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.grids = [];
+        message.moved = false;
+        if (value !== undefined)
+            reflectionMergePartial<MoveGridCallHereResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveGridCallHereResult): MoveGridCallHereResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Grid grids */ 1:
+                    message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional GridConnectionCredentials connection */ 2:
+                    message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                case /* optional GridCurrentCall current_call */ 3:
+                    message.currentCall = GridCurrentCall.internalBinaryRead(reader, reader.uint32(), options, message.currentCall);
+                    break;
+                case /* bool moved */ 4:
+                    message.moved = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveGridCallHereResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Grid grids = 1; */
+        for (let i = 0; i < message.grids.length; i++)
+            Grid.internalBinaryWrite(message.grids[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridConnectionCredentials connection = 2; */
+        if (message.connection)
+            GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridCurrentCall current_call = 3; */
+        if (message.currentCall)
+            GridCurrentCall.internalBinaryWrite(message.currentCall, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* bool moved = 4; */
+        if (message.moved !== false)
+            writer.tag(4, WireType.Varint).bool(message.moved);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveGridCallHereResult
+ */
+export const MoveGridCallHereResult = new MoveGridCallHereResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SetGridRoomTitleInput$Type extends MessageType<SetGridRoomTitleInput> {
     constructor() {
@@ -29381,7 +29873,8 @@ class PrepareGridConnectionInput$Type extends MessageType<PrepareGridConnectionI
     constructor() {
         super("PrepareGridConnectionInput", [
             { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "generation", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "generation", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<PrepareGridConnectionInput>): PrepareGridConnectionInput {
@@ -29403,6 +29896,9 @@ class PrepareGridConnectionInput$Type extends MessageType<PrepareGridConnectionI
                 case /* int32 generation */ 2:
                     message.generation = reader.int32();
                     break;
+                case /* optional string expected_membership_id */ 3:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -29421,6 +29917,9 @@ class PrepareGridConnectionInput$Type extends MessageType<PrepareGridConnectionI
         /* int32 generation = 2; */
         if (message.generation !== 0)
             writer.tag(2, WireType.Varint).int32(message.generation);
+        /* optional string expected_membership_id = 3; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29490,7 +29989,8 @@ class SetGridAvatarMicrophoneEnabledInput$Type extends MessageType<SetGridAvatar
     constructor() {
         super("SetGridAvatarMicrophoneEnabledInput", [
             { no: 1, name: "expected_room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "expected_membership_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<SetGridAvatarMicrophoneEnabledInput>): SetGridAvatarMicrophoneEnabledInput {
@@ -29512,6 +30012,9 @@ class SetGridAvatarMicrophoneEnabledInput$Type extends MessageType<SetGridAvatar
                 case /* bool enabled */ 2:
                     message.enabled = reader.bool();
                     break;
+                case /* optional string expected_membership_id */ 3:
+                    message.expectedMembershipId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -29530,6 +30033,9 @@ class SetGridAvatarMicrophoneEnabledInput$Type extends MessageType<SetGridAvatar
         /* bool enabled = 2; */
         if (message.enabled !== false)
             writer.tag(2, WireType.Varint).bool(message.enabled);
+        /* optional string expected_membership_id = 3; */
+        if (message.expectedMembershipId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.expectedMembershipId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

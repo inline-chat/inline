@@ -1621,6 +1621,7 @@ enum Method {
   REQUEST_BOT_FILESYSTEM = 143;
   ANSWER_BOT_FILESYSTEM = 144;
   SET_SPACE_PHOTO = 145;
+  MOVE_GRID_CALL_HERE = 146;
   OPEN_GRID_THREAD = 147;
   SET_GRID_TRANSCRIPTION = 148;
   LIST_GRID_TRANSCRIPTS = 149;
@@ -1774,6 +1775,7 @@ message RpcCall {
     RequestBotFilesystemInput requestBotFilesystem = 144;
     AnswerBotFilesystemInput answerBotFilesystem = 145;
     SetSpacePhotoInput setSpacePhoto = 146;
+    MoveGridCallHereInput moveGridCallHere = 147;
     OpenGridThreadInput openGridThread = 148;
     SetGridTranscriptionInput setGridTranscription = 149;
     ListGridTranscriptsInput listGridTranscripts = 150;
@@ -1929,6 +1931,7 @@ message RpcResult {
     RequestBotFilesystemResult requestBotFilesystem = 144;
     AnswerBotFilesystemResult answerBotFilesystem = 145;
     SetSpacePhotoResult setSpacePhoto = 146;
+    MoveGridCallHereResult moveGridCallHere = 147;
     OpenGridThreadResult openGridThread = 148;
     SetGridTranscriptionResult setGridTranscription = 149;
     ListGridTranscriptsResult listGridTranscripts = 150;
@@ -2167,6 +2170,22 @@ message Grid {
   // Server-owned monotonic revision for this Space's complete Grid snapshot.
   // Clients must not replace a newer snapshot with a lower revision.
   int64 revision = 5;
+  // Effective server capability, including ownership fence enforcement.
+  // New clients must not admit media through an older/disabled server.
+  bool call_transfer_enabled = 6;
+}
+
+// Personalized control ownership, disclosed only to the authenticated user.
+// call_id stays stable across an explicit device transfer; membership_id is
+// replaced on each transfer/resume and fences commands and media credentials.
+message GridCurrentCall {
+  string call_id = 1;
+  int64 space_id = 2;
+  int64 room_id = 3;
+  string membership_id = 4;
+  bool owned_by_current_session = 5;
+  // Coarse existing session client kind (ios, macos, etc.), not a device ID.
+  string owner_client_type = 6;
 }
 
 // Short-lived, session-targeted LiveKit credentials. Never persist or include
@@ -2177,11 +2196,21 @@ message GridConnectionCredentials {
   string participant_identity = 3;
   string token = 4;
   int64 expires_at = 5;
+  string call_id = 6;
+  string membership_id = 7;
 }
 
-message GetGridInput { int64 space_id = 1; }
+message GetGridInput {
+  int64 space_id = 1;
+  // Explicit renewal by the admitted owner. Omit for read-only browsing when
+  // call-transfer enforcement is active. A stale fence never renews presence.
+  optional string expected_membership_id = 2;
+}
 
-message GetGridResult { Grid grid = 1; }
+message GetGridResult {
+  Grid grid = 1;
+  optional GridCurrentCall current_call = 2;
+}
 
 // Home-level discovery for every Grid-enabled Space the current user can see.
 // This is a bounded summary: full rooms remain available only through GetGrid.
@@ -2194,31 +2223,66 @@ message GridHomeSpace {
 
 message GetGridHomeInput {}
 
-message GetGridHomeResult { repeated GridHomeSpace spaces = 1; }
+message GetGridHomeResult {
+  repeated GridHomeSpace spaces = 1;
+  optional GridCurrentCall current_call = 2;
+  bool call_transfer_enabled = 3;
+}
 
 message CreateGridRoomInput {
   int64 space_id = 1;
   optional bool microphone_enabled = 2;
+  // Required when call_transfer_enabled: empty expects no active presence;
+  // nonempty must match the current session's live membership exactly.
+  optional string expected_membership_id = 3;
 }
 
 message CreateGridRoomResult {
   repeated Grid grids = 1;
   optional GridConnectionCredentials connection = 2;
+  // Successful claims report the projection captured at commit. A newer
+  // accepted Grid/self state wins; this field alone cannot admit media.
+  optional GridCurrentCall current_call = 3;
 }
 
 message JoinGridRoomInput {
   int64 room_id = 1;
   optional bool microphone_enabled = 2;
+  optional string expected_membership_id = 3;
 }
 
 message JoinGridRoomResult {
   repeated Grid grids = 1;
   optional GridConnectionCredentials connection = 2;
+  optional GridCurrentCall current_call = 3;
 }
 
-message LeaveGridRoomInput { int64 expected_room_id = 1; }
+message LeaveGridRoomInput {
+  int64 expected_room_id = 1;
+  optional string expected_membership_id = 2;
+}
 
-message LeaveGridRoomResult { repeated Grid grids = 1; }
+message LeaveGridRoomResult {
+  repeated Grid grids = 1;
+  // Display/repair only; leaving never grants a replacement admission.
+  optional GridCurrentCall current_call = 2;
+}
+
+// Explicitly move this user's existing room participation to the authenticated
+// calling session (also used for a same-login cold-process Resume).
+message MoveGridCallHereInput {
+  string call_id = 1;
+  string expected_membership_id = 2;
+}
+
+message MoveGridCallHereResult {
+  repeated Grid grids = 1;
+  optional GridConnectionCredentials connection = 2;
+  // Captured at the claim's commit when moved=true; display/repair otherwise.
+  optional GridCurrentCall current_call = 3;
+  // False means the expected call/membership changed; no claim was performed.
+  bool moved = 4;
+}
 
 message SetGridRoomTitleInput {
   int64 room_id = 1;
@@ -2242,6 +2306,7 @@ message DeleteGridRoomResult { Grid grid = 1; }
 message PrepareGridConnectionInput {
   int64 room_id = 1;
   int32 generation = 2;
+  optional string expected_membership_id = 3;
 }
 
 enum GridConnectionUnavailableReason {
@@ -2258,6 +2323,7 @@ message PrepareGridConnectionResult {
 message SetGridAvatarMicrophoneEnabledInput {
   int64 expected_room_id = 1;
   bool enabled = 2;
+  optional string expected_membership_id = 3;
 }
 
 message SetGridAvatarMicrophoneEnabledResult { bool enabled = 1; }

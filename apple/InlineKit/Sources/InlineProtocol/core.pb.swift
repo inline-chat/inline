@@ -571,6 +571,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case requestBotFilesystem // = 143
   case answerBotFilesystem // = 144
   case setSpacePhoto // = 145
+  case moveGridCallHere // = 146
   case openGridThread // = 147
   case setGridTranscription // = 148
   case listGridTranscripts // = 149
@@ -727,6 +728,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 143: self = .requestBotFilesystem
     case 144: self = .answerBotFilesystem
     case 145: self = .setSpacePhoto
+    case 146: self = .moveGridCallHere
     case 147: self = .openGridThread
     case 148: self = .setGridTranscription
     case 149: self = .listGridTranscripts
@@ -881,6 +883,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .requestBotFilesystem: return 143
     case .answerBotFilesystem: return 144
     case .setSpacePhoto: return 145
+    case .moveGridCallHere: return 146
     case .openGridThread: return 147
     case .setGridTranscription: return 148
     case .listGridTranscripts: return 149
@@ -1035,6 +1038,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .requestBotFilesystem,
     .answerBotFilesystem,
     .setSpacePhoto,
+    .moveGridCallHere,
     .openGridThread,
     .setGridTranscription,
     .listGridTranscripts,
@@ -8424,6 +8428,14 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .setSpacePhoto(newValue)}
   }
 
+  public var moveGridCallHere: MoveGridCallHereInput {
+    get {
+      if case .moveGridCallHere(let v)? = input {return v}
+      return MoveGridCallHereInput()
+    }
+    set {input = .moveGridCallHere(newValue)}
+  }
+
   public var openGridThread: OpenGridThreadInput {
     get {
       if case .openGridThread(let v)? = input {return v}
@@ -8595,6 +8607,7 @@ public nonisolated struct RpcCall: Sendable {
     case requestBotFilesystem(RequestBotFilesystemInput)
     case answerBotFilesystem(AnswerBotFilesystemInput)
     case setSpacePhoto(SetSpacePhotoInput)
+    case moveGridCallHere(MoveGridCallHereInput)
     case openGridThread(OpenGridThreadInput)
     case setGridTranscription(SetGridTranscriptionInput)
     case listGridTranscripts(ListGridTranscriptsInput)
@@ -9771,6 +9784,14 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .setSpacePhoto(newValue)}
   }
 
+  public var moveGridCallHere: MoveGridCallHereResult {
+    get {
+      if case .moveGridCallHere(let v)? = _storage._result {return v}
+      return MoveGridCallHereResult()
+    }
+    set {_uniqueStorage()._result = .moveGridCallHere(newValue)}
+  }
+
   public var openGridThread: OpenGridThreadResult {
     get {
       if case .openGridThread(let v)? = _storage._result {return v}
@@ -9942,6 +9963,7 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case requestBotFilesystem(RequestBotFilesystemResult)
     case answerBotFilesystem(AnswerBotFilesystemResult)
     case setSpacePhoto(SetSpacePhotoResult)
+    case moveGridCallHere(MoveGridCallHereResult)
     case openGridThread(OpenGridThreadResult)
     case setGridTranscription(SetGridTranscriptionResult)
     case listGridTranscripts(ListGridTranscriptsResult)
@@ -10720,11 +10742,41 @@ public nonisolated struct Grid: Sendable {
   /// Clients must not replace a newer snapshot with a lower revision.
   public var revision: Int64 = 0
 
+  /// Effective server capability, including ownership fence enforcement.
+  /// New clients must not admit media through an older/disabled server.
+  public var callTransferEnabled: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _currentRoomID: Int64? = nil
+}
+
+/// Personalized control ownership, disclosed only to the authenticated user.
+/// call_id stays stable across an explicit device transfer; membership_id is
+/// replaced on each transfer/resume and fences commands and media credentials.
+public nonisolated struct GridCurrentCall: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var callID: String = String()
+
+  public var spaceID: Int64 = 0
+
+  public var roomID: Int64 = 0
+
+  public var membershipID: String = String()
+
+  public var ownedByCurrentSession: Bool = false
+
+  /// Coarse existing session client kind (ios, macos, etc.), not a device ID.
+  public var ownerClientType: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// Short-lived, session-targeted LiveKit credentials. Never persist or include
@@ -10751,6 +10803,10 @@ public nonisolated struct GridConnectionCredentials: Sendable {
 
   public var expiresAt: Int64 = 0
 
+  public var callID: String = String()
+
+  public var membershipID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -10765,9 +10821,22 @@ public nonisolated struct GetGridInput: Sendable {
 
   public var spaceID: Int64 = 0
 
+  /// Explicit renewal by the admitted owner. Omit for read-only browsing when
+  /// call-transfer enforcement is active. A stale fence never renews presence.
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct GetGridResult: Sendable {
@@ -10784,11 +10853,21 @@ public nonisolated struct GetGridResult: Sendable {
   /// Clears the value of `grid`. Subsequent reads from it will return its default value.
   public mutating func clearGrid() {self._grid = nil}
 
+  public var currentCall: GridCurrentCall {
+    get {_currentCall ?? GridCurrentCall()}
+    set {_currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {self._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {self._currentCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _grid: Grid? = nil
+  fileprivate var _currentCall: GridCurrentCall? = nil
 }
 
 /// Home-level discovery for every Grid-enabled Space the current user can see.
@@ -10828,9 +10907,22 @@ public nonisolated struct GetGridHomeResult: Sendable {
 
   public var spaces: [GridHomeSpace] = []
 
+  public var currentCall: GridCurrentCall {
+    get {_currentCall ?? GridCurrentCall()}
+    set {_currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {self._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {self._currentCall = nil}
+
+  public var callTransferEnabled: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _currentCall: GridCurrentCall? = nil
 }
 
 public nonisolated struct CreateGridRoomInput: Sendable {
@@ -10849,11 +10941,23 @@ public nonisolated struct CreateGridRoomInput: Sendable {
   /// Clears the value of `microphoneEnabled`. Subsequent reads from it will return its default value.
   public mutating func clearMicrophoneEnabled() {self._microphoneEnabled = nil}
 
+  /// Required when call_transfer_enabled: empty expects no active presence;
+  /// nonempty must match the current session's live membership exactly.
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _microphoneEnabled: Bool? = nil
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct CreateGridRoomResult: Sendable {
@@ -10872,11 +10976,23 @@ public nonisolated struct CreateGridRoomResult: Sendable {
   /// Clears the value of `connection`. Subsequent reads from it will return its default value.
   public mutating func clearConnection() {self._connection = nil}
 
+  /// Successful claims report the projection captured at commit. A newer
+  /// accepted Grid/self state wins; this field alone cannot admit media.
+  public var currentCall: GridCurrentCall {
+    get {_currentCall ?? GridCurrentCall()}
+    set {_currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {self._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {self._currentCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _connection: GridConnectionCredentials? = nil
+  fileprivate var _currentCall: GridCurrentCall? = nil
 }
 
 public nonisolated struct JoinGridRoomInput: Sendable {
@@ -10895,11 +11011,21 @@ public nonisolated struct JoinGridRoomInput: Sendable {
   /// Clears the value of `microphoneEnabled`. Subsequent reads from it will return its default value.
   public mutating func clearMicrophoneEnabled() {self._microphoneEnabled = nil}
 
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _microphoneEnabled: Bool? = nil
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct JoinGridRoomResult: Sendable {
@@ -10918,11 +11044,21 @@ public nonisolated struct JoinGridRoomResult: Sendable {
   /// Clears the value of `connection`. Subsequent reads from it will return its default value.
   public mutating func clearConnection() {self._connection = nil}
 
+  public var currentCall: GridCurrentCall {
+    get {_currentCall ?? GridCurrentCall()}
+    set {_currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {self._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {self._currentCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _connection: GridConnectionCredentials? = nil
+  fileprivate var _currentCall: GridCurrentCall? = nil
 }
 
 public nonisolated struct LeaveGridRoomInput: Sendable {
@@ -10932,9 +11068,20 @@ public nonisolated struct LeaveGridRoomInput: Sendable {
 
   public var expectedRoomID: Int64 = 0
 
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct LeaveGridRoomResult: Sendable {
@@ -10944,9 +11091,79 @@ public nonisolated struct LeaveGridRoomResult: Sendable {
 
   public var grids: [Grid] = []
 
+  /// Display/repair only; leaving never grants a replacement admission.
+  public var currentCall: GridCurrentCall {
+    get {_currentCall ?? GridCurrentCall()}
+    set {_currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {self._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {self._currentCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _currentCall: GridCurrentCall? = nil
+}
+
+/// Explicitly move this user's existing room participation to the authenticated
+/// calling session (also used for a same-login cold-process Resume).
+public nonisolated struct MoveGridCallHereInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var callID: String = String()
+
+  public var expectedMembershipID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct MoveGridCallHereResult: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var grids: [Grid] {
+    get {_storage._grids}
+    set {_uniqueStorage()._grids = newValue}
+  }
+
+  public var connection: GridConnectionCredentials {
+    get {_storage._connection ?? GridConnectionCredentials()}
+    set {_uniqueStorage()._connection = newValue}
+  }
+  /// Returns true if `connection` has been explicitly set.
+  public var hasConnection: Bool {_storage._connection != nil}
+  /// Clears the value of `connection`. Subsequent reads from it will return its default value.
+  public mutating func clearConnection() {_uniqueStorage()._connection = nil}
+
+  /// Captured at the claim's commit when moved=true; display/repair otherwise.
+  public var currentCall: GridCurrentCall {
+    get {_storage._currentCall ?? GridCurrentCall()}
+    set {_uniqueStorage()._currentCall = newValue}
+  }
+  /// Returns true if `currentCall` has been explicitly set.
+  public var hasCurrentCall: Bool {_storage._currentCall != nil}
+  /// Clears the value of `currentCall`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentCall() {_uniqueStorage()._currentCall = nil}
+
+  /// False means the expected call/membership changed; no claim was performed.
+  public var moved: Bool {
+    get {_storage._moved}
+    set {_uniqueStorage()._moved = newValue}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct SetGridRoomTitleInput: Sendable {
@@ -11062,9 +11279,20 @@ public nonisolated struct PrepareGridConnectionInput: Sendable {
 
   public var generation: Int32 = 0
 
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct PrepareGridConnectionResult: Sendable {
@@ -11099,9 +11327,20 @@ public nonisolated struct SetGridAvatarMicrophoneEnabledInput: Sendable {
 
   public var enabled: Bool = false
 
+  public var expectedMembershipID: String {
+    get {_expectedMembershipID ?? String()}
+    set {_expectedMembershipID = newValue}
+  }
+  /// Returns true if `expectedMembershipID` has been explicitly set.
+  public var hasExpectedMembershipID: Bool {self._expectedMembershipID != nil}
+  /// Clears the value of `expectedMembershipID`. Subsequent reads from it will return its default value.
+  public mutating func clearExpectedMembershipID() {self._expectedMembershipID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _expectedMembershipID: String? = nil
 }
 
 public nonisolated struct SetGridAvatarMicrophoneEnabledResult: Sendable {
@@ -22586,7 +22825,7 @@ nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProv
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{2}\u{2}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0")
 }
 
 nonisolated extension GridTranscriptionState: SwiftProtobuf._ProtoNameProviding {
@@ -29885,7 +30124,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{2}\u{2}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -31766,6 +32005,19 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .setSpacePhoto(v)
         }
       }()
+      case 147: try {
+        var v: MoveGridCallHereInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .moveGridCallHere(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .moveGridCallHere(v)
+        }
+      }()
       case 148: try {
         var v: OpenGridThreadInput?
         var hadOneofValue = false
@@ -32395,6 +32647,10 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .setSpacePhoto(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 146)
     }()
+    case .moveGridCallHere?: try {
+      guard case .moveGridCallHere(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 147)
+    }()
     case .openGridThread?: try {
       guard case .openGridThread(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 148)
@@ -32422,7 +32678,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{2}\u{2}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -34330,6 +34586,19 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .setSpacePhoto(v)
           }
         }()
+        case 147: try {
+          var v: MoveGridCallHereResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .moveGridCallHere(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .moveGridCallHere(v)
+          }
+        }()
         case 148: try {
           var v: OpenGridThreadResult?
           var hadOneofValue = false
@@ -34960,6 +35229,10 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .setSpacePhoto?: try {
         guard case .setSpacePhoto(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 146)
+      }()
+      case .moveGridCallHere?: try {
+        guard case .moveGridCallHere(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 147)
       }()
       case .openGridThread?: try {
         guard case .openGridThread(let v)? = _storage._result else { preconditionFailure() }
@@ -36270,7 +36543,7 @@ nonisolated extension ListGridTranscriptsResult: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Grid: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Grid"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}enabled\0\u{1}rooms\0\u{3}current_room_id\0\u{1}revision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}enabled\0\u{1}rooms\0\u{3}current_room_id\0\u{1}revision\0\u{3}call_transfer_enabled\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36283,6 +36556,7 @@ nonisolated extension Grid: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 3: try { try decoder.decodeRepeatedMessageField(value: &self.rooms) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._currentRoomID) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.revision) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.callTransferEnabled) }()
       default: break
       }
     }
@@ -36308,6 +36582,9 @@ nonisolated extension Grid: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if self.revision != 0 {
       try visitor.visitSingularInt64Field(value: self.revision, fieldNumber: 5)
     }
+    if self.callTransferEnabled != false {
+      try visitor.visitSingularBoolField(value: self.callTransferEnabled, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -36317,6 +36594,62 @@ nonisolated extension Grid: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs.rooms != rhs.rooms {return false}
     if lhs._currentRoomID != rhs._currentRoomID {return false}
     if lhs.revision != rhs.revision {return false}
+    if lhs.callTransferEnabled != rhs.callTransferEnabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GridCurrentCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GridCurrentCall"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}call_id\0\u{3}space_id\0\u{3}room_id\0\u{3}membership_id\0\u{3}owned_by_current_session\0\u{3}owner_client_type\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.callID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.roomID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.membershipID) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.ownedByCurrentSession) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.ownerClientType) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.callID.isEmpty {
+      try visitor.visitSingularStringField(value: self.callID, fieldNumber: 1)
+    }
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 2)
+    }
+    if self.roomID != 0 {
+      try visitor.visitSingularInt64Field(value: self.roomID, fieldNumber: 3)
+    }
+    if !self.membershipID.isEmpty {
+      try visitor.visitSingularStringField(value: self.membershipID, fieldNumber: 4)
+    }
+    if self.ownedByCurrentSession != false {
+      try visitor.visitSingularBoolField(value: self.ownedByCurrentSession, fieldNumber: 5)
+    }
+    if !self.ownerClientType.isEmpty {
+      try visitor.visitSingularStringField(value: self.ownerClientType, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GridCurrentCall, rhs: GridCurrentCall) -> Bool {
+    if lhs.callID != rhs.callID {return false}
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.roomID != rhs.roomID {return false}
+    if lhs.membershipID != rhs.membershipID {return false}
+    if lhs.ownedByCurrentSession != rhs.ownedByCurrentSession {return false}
+    if lhs.ownerClientType != rhs.ownerClientType {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36324,7 +36657,7 @@ nonisolated extension Grid: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
 
 nonisolated extension GridConnectionCredentials: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GridConnectionCredentials"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}connection\0\u{3}server_url\0\u{3}participant_identity\0\u{1}token\0\u{3}expires_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}connection\0\u{3}server_url\0\u{3}participant_identity\0\u{1}token\0\u{3}expires_at\0\u{3}call_id\0\u{3}membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36337,6 +36670,8 @@ nonisolated extension GridConnectionCredentials: SwiftProtobuf.Message, SwiftPro
       case 3: try { try decoder.decodeSingularStringField(value: &self.participantIdentity) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.token) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.callID) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.membershipID) }()
       default: break
       }
     }
@@ -36362,6 +36697,12 @@ nonisolated extension GridConnectionCredentials: SwiftProtobuf.Message, SwiftPro
     if self.expiresAt != 0 {
       try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 5)
     }
+    if !self.callID.isEmpty {
+      try visitor.visitSingularStringField(value: self.callID, fieldNumber: 6)
+    }
+    if !self.membershipID.isEmpty {
+      try visitor.visitSingularStringField(value: self.membershipID, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -36371,6 +36712,8 @@ nonisolated extension GridConnectionCredentials: SwiftProtobuf.Message, SwiftPro
     if lhs.participantIdentity != rhs.participantIdentity {return false}
     if lhs.token != rhs.token {return false}
     if lhs.expiresAt != rhs.expiresAt {return false}
+    if lhs.callID != rhs.callID {return false}
+    if lhs.membershipID != rhs.membershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36378,7 +36721,7 @@ nonisolated extension GridConnectionCredentials: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension GetGridInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetGridInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36387,20 +36730,29 @@ nonisolated extension GetGridInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.spaceID != 0 {
       try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
     }
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetGridInput, rhs: GetGridInput) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36408,7 +36760,7 @@ nonisolated extension GetGridInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension GetGridResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetGridResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grid\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grid\0\u{3}current_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36417,6 +36769,7 @@ nonisolated extension GetGridResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._grid) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._currentCall) }()
       default: break
       }
     }
@@ -36430,11 +36783,15 @@ nonisolated extension GetGridResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._grid {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._currentCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetGridResult, rhs: GetGridResult) -> Bool {
     if lhs._grid != rhs._grid {return false}
+    if lhs._currentCall != rhs._currentCall {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36506,7 +36863,7 @@ nonisolated extension GetGridHomeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension GetGridHomeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetGridHomeResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}spaces\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}spaces\0\u{3}current_call\0\u{3}call_transfer_enabled\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36515,20 +36872,34 @@ nonisolated extension GetGridHomeResult: SwiftProtobuf.Message, SwiftProtobuf._M
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._currentCall) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.callTransferEnabled) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.spaces.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.spaces, fieldNumber: 1)
+    }
+    try { if let v = self._currentCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.callTransferEnabled != false {
+      try visitor.visitSingularBoolField(value: self.callTransferEnabled, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetGridHomeResult, rhs: GetGridHomeResult) -> Bool {
     if lhs.spaces != rhs.spaces {return false}
+    if lhs._currentCall != rhs._currentCall {return false}
+    if lhs.callTransferEnabled != rhs.callTransferEnabled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36536,7 +36907,7 @@ nonisolated extension GetGridHomeResult: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateGridRoomInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}microphone_enabled\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}microphone_enabled\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36546,6 +36917,7 @@ nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf.
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._microphoneEnabled) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
@@ -36562,12 +36934,16 @@ nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf.
     try { if let v = self._microphoneEnabled {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateGridRoomInput, rhs: CreateGridRoomInput) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs._microphoneEnabled != rhs._microphoneEnabled {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36575,7 +36951,7 @@ nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension CreateGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateGridRoomResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{1}connection\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{1}connection\0\u{3}current_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36585,6 +36961,7 @@ nonisolated extension CreateGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.grids) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._connection) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._currentCall) }()
       default: break
       }
     }
@@ -36601,12 +36978,16 @@ nonisolated extension CreateGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._connection {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._currentCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateGridRoomResult, rhs: CreateGridRoomResult) -> Bool {
     if lhs.grids != rhs.grids {return false}
     if lhs._connection != rhs._connection {return false}
+    if lhs._currentCall != rhs._currentCall {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36614,7 +36995,7 @@ nonisolated extension CreateGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "JoinGridRoomInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0\u{3}microphone_enabled\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0\u{3}microphone_enabled\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36624,6 +37005,7 @@ nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._M
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.roomID) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._microphoneEnabled) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
@@ -36640,12 +37022,16 @@ nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._M
     try { if let v = self._microphoneEnabled {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: JoinGridRoomInput, rhs: JoinGridRoomInput) -> Bool {
     if lhs.roomID != rhs.roomID {return false}
     if lhs._microphoneEnabled != rhs._microphoneEnabled {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36653,7 +37039,7 @@ nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension JoinGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "JoinGridRoomResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{1}connection\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{1}connection\0\u{3}current_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36663,6 +37049,7 @@ nonisolated extension JoinGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.grids) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._connection) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._currentCall) }()
       default: break
       }
     }
@@ -36679,12 +37066,16 @@ nonisolated extension JoinGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._
     try { if let v = self._connection {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._currentCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: JoinGridRoomResult, rhs: JoinGridRoomResult) -> Bool {
     if lhs.grids != rhs.grids {return false}
     if lhs._connection != rhs._connection {return false}
+    if lhs._currentCall != rhs._currentCall {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36692,7 +37083,7 @@ nonisolated extension JoinGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension LeaveGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "LeaveGridRoomInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}expected_room_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}expected_room_id\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36701,20 +37092,29 @@ nonisolated extension LeaveGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.expectedRoomID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.expectedRoomID != 0 {
       try visitor.visitSingularInt64Field(value: self.expectedRoomID, fieldNumber: 1)
     }
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: LeaveGridRoomInput, rhs: LeaveGridRoomInput) -> Bool {
     if lhs.expectedRoomID != rhs.expectedRoomID {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36722,7 +37122,7 @@ nonisolated extension LeaveGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension LeaveGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "LeaveGridRoomResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{3}current_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36731,20 +37131,155 @@ nonisolated extension LeaveGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf.
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.grids) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._currentCall) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.grids.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.grids, fieldNumber: 1)
     }
+    try { if let v = self._currentCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: LeaveGridRoomResult, rhs: LeaveGridRoomResult) -> Bool {
     if lhs.grids != rhs.grids {return false}
+    if lhs._currentCall != rhs._currentCall {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MoveGridCallHereInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MoveGridCallHereInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}call_id\0\u{3}expected_membership_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.callID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.expectedMembershipID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.callID.isEmpty {
+      try visitor.visitSingularStringField(value: self.callID, fieldNumber: 1)
+    }
+    if !self.expectedMembershipID.isEmpty {
+      try visitor.visitSingularStringField(value: self.expectedMembershipID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MoveGridCallHereInput, rhs: MoveGridCallHereInput) -> Bool {
+    if lhs.callID != rhs.callID {return false}
+    if lhs.expectedMembershipID != rhs.expectedMembershipID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MoveGridCallHereResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MoveGridCallHereResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grids\0\u{1}connection\0\u{3}current_call\0\u{1}moved\0")
+
+  fileprivate class _StorageClass {
+    var _grids: [Grid] = []
+    var _connection: GridConnectionCredentials? = nil
+    var _currentCall: GridCurrentCall? = nil
+    var _moved: Bool = false
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _grids = source._grids
+      _connection = source._connection
+      _currentCall = source._currentCall
+      _moved = source._moved
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeRepeatedMessageField(value: &_storage._grids) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._connection) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._currentCall) }()
+        case 4: try { try decoder.decodeSingularBoolField(value: &_storage._moved) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._grids.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._grids, fieldNumber: 1)
+      }
+      try { if let v = _storage._connection {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._currentCall {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+      if _storage._moved != false {
+        try visitor.visitSingularBoolField(value: _storage._moved, fieldNumber: 4)
+      }
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MoveGridCallHereResult, rhs: MoveGridCallHereResult) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._grids != rhs_storage._grids {return false}
+        if _storage._connection != rhs_storage._connection {return false}
+        if _storage._currentCall != rhs_storage._currentCall {return false}
+        if _storage._moved != rhs_storage._moved {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36954,7 +37489,7 @@ nonisolated extension DeleteGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension PrepareGridConnectionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PrepareGridConnectionInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0\u{1}generation\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0\u{1}generation\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36964,24 +37499,33 @@ nonisolated extension PrepareGridConnectionInput: SwiftProtobuf.Message, SwiftPr
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.roomID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.generation) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.roomID != 0 {
       try visitor.visitSingularInt64Field(value: self.roomID, fieldNumber: 1)
     }
     if self.generation != 0 {
       try visitor.visitSingularInt32Field(value: self.generation, fieldNumber: 2)
     }
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: PrepareGridConnectionInput, rhs: PrepareGridConnectionInput) -> Bool {
     if lhs.roomID != rhs.roomID {return false}
     if lhs.generation != rhs.generation {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -37028,7 +37572,7 @@ nonisolated extension PrepareGridConnectionResult: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension SetGridAvatarMicrophoneEnabledInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetGridAvatarMicrophoneEnabledInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}expected_room_id\0\u{1}enabled\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}expected_room_id\0\u{1}enabled\0\u{3}expected_membership_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -37038,24 +37582,33 @@ nonisolated extension SetGridAvatarMicrophoneEnabledInput: SwiftProtobuf.Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.expectedRoomID) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.enabled) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._expectedMembershipID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.expectedRoomID != 0 {
       try visitor.visitSingularInt64Field(value: self.expectedRoomID, fieldNumber: 1)
     }
     if self.enabled != false {
       try visitor.visitSingularBoolField(value: self.enabled, fieldNumber: 2)
     }
+    try { if let v = self._expectedMembershipID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SetGridAvatarMicrophoneEnabledInput, rhs: SetGridAvatarMicrophoneEnabledInput) -> Bool {
     if lhs.expectedRoomID != rhs.expectedRoomID {return false}
     if lhs.enabled != rhs.enabled {return false}
+    if lhs._expectedMembershipID != rhs._expectedMembershipID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
