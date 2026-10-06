@@ -152,6 +152,7 @@ public actor RealtimeV2 {
   private var transactionOwnerTransitionID: UUID?
   private var acceptsTransactions: Bool
   private var isPreparingForTermination = false
+  private var mediaRetentionRevision: UInt64 = 0
   private var transactionRetryTask: Task<Void, Never>?
   private var transactionOperationsInProgress = 0
   private var transactionDrainWaiters: [CheckedContinuation<Void, Never>] = []
@@ -301,6 +302,8 @@ public actor RealtimeV2 {
   /// Stop transport. But do not kill the listeners and tasks. This is state is recoverable via a transport start.
   public func loggedOut() async {
     log.info("Stopping realtime account generation")
+    mediaRetentionRevision &+= 1
+    await connectionManager.setMediaRetention(eligible: false, revision: mediaRetentionRevision)
     acceptsTransactions = false
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
@@ -1598,6 +1601,18 @@ public actor RealtimeV2 {
     } catch {
       throw RealtimeDirectRpcError.unknown(error)
     }
+  }
+
+  /// Keeps the existing transport eligible while an admitted media owner actually plays/captures.
+  /// This neither changes UIKit lifecycle state nor grants background execution.
+  public func setGridMediaRetention(
+    eligible: Bool,
+    accountToken: AuthAccountMutationToken
+  ) async {
+    guard !isPreparingForTermination,
+          (try? auth.validateAccountMutation(accountToken)) != nil else { return }
+    mediaRetentionRevision &+= 1
+    await connectionManager.setMediaRetention(eligible: eligible, revision: mediaRetentionRevision)
   }
 
   /// Bounded user-requested work (for example system automation) on the existing account owner.

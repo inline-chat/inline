@@ -6,6 +6,9 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.agentActivityKey)
   private var agentActivityEnabled = false
 
+  @AppStorage(ExperimentalFeatureFlags.gridIOSKey)
+  private var gridIOSEnabled = false
+
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
@@ -17,6 +20,17 @@ struct ExperimentalView: View {
 
   var body: some View {
     List {
+      Section {
+        SettingsItem(icon: "waveform", iconColor: .green, title: "Grid") {
+          Toggle("Grid", isOn: $gridIOSEnabled)
+            .labelsHidden()
+        }
+      } header: {
+        Text("Audio")
+      } footer: {
+        Text("Join voice rooms and view shared screens in spaces with Grid enabled.")
+      }
+
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
       Section {
         Toggle("Agent Activity", isOn: $agentActivityEnabled)

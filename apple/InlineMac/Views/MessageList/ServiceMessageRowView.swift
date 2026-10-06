@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import RealtimeV2
 
 enum ServiceMessageRowLayout {
   struct Plan: Equatable {
@@ -134,7 +135,7 @@ enum ServiceMessageRowLayout {
   }
 }
 
-final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
+final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView, NSMenuItemValidation {
   private let containerView = NSView()
   private lazy var textView = ServiceMessageTextView { [weak self] link in
     self?.open(link)
@@ -265,14 +266,37 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
     NSPasteboard.general.setString(fullMessage.message.text ?? "", forType: .string)
   }
 
+  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    guard menuItem.action == #selector(deleteMessage) else { return true }
+    // This row has no Space role projection. Keep server authority for signed-in
+    // readers rather than fetching membership while constructing a menu.
+    return dependencies?.auth.getCurrentUserId() != nil
+  }
+
   @objc private func deleteMessage() {
     let message = fullMessage.message
     Task(priority: .userInitiated) { @MainActor in
-      try await Api.realtime.send(.deleteMessages(
-        messageIds: [message.messageId],
-        peerId: message.peerId,
-        chatId: message.chatId
-      ))
+      do {
+        try await Api.realtime.send(DeleteMessageTransaction(
+          messageIds: [message.messageId],
+          peerId: message.peerId,
+          chatId: message.chatId,
+          deferLocalDeletion: message.isGridTranscript
+        ))
+      } catch {
+        let notice: String
+        if let failure = error as? TransactionError,
+           case let .rpcError(rpc) = failure,
+           rpc.errorCode == .spaceAdminRequired
+        {
+          notice = message.isGridTranscript
+            ? "Only the person who started transcription or a space admin can delete this message."
+            : "Only the author or a space admin can delete this message."
+        } else {
+          notice = "Could not delete message. Please try again."
+        }
+        ToastCenter.shared.showError(notice)
+      }
     }
   }
 

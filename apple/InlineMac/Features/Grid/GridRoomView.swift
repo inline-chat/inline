@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineProtocol
 import InlineRTC
@@ -68,6 +69,8 @@ struct GridContent: View {
   let grid: InlineProtocol.Grid?
   let isLoading: Bool
   let didFailLoading: Bool
+  let hasLocalAdmission: Bool
+  let isJoiningDisabled: Bool
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
@@ -89,7 +92,8 @@ struct GridContent: View {
           ForEach(grid.rooms, id: \.id) { room in
             GridRoomCard(
               room: room,
-              isCurrent: grid.hasCurrentRoomID && grid.currentRoomID == room.id,
+              isCurrent: hasLocalAdmission && grid.hasCurrentRoomID && grid.currentRoomID == room.id,
+              isJoiningDisabled: isJoiningDisabled,
               audioLevel: audioLevel,
               isScreenSharing: isScreenSharing,
               connectionState: connectionState,
@@ -104,6 +108,7 @@ struct GridContent: View {
             )
           }
           GridCreateRoomCard(action: onCreate)
+            .disabled(isJoiningDisabled)
         }
         .animation(.smoothSnappy, value: grid.rooms.map(\.id))
       } else if isLoading {
@@ -164,6 +169,7 @@ private struct GridCreateRoomCard: View {
 private struct GridRoomCard: View {
   let room: GridRoom
   let isCurrent: Bool
+  let isJoiningDisabled: Bool
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
@@ -209,7 +215,7 @@ private struct GridRoomCard: View {
           )
         }
         .buttonStyle(.plain)
-        .disabled(room.locked)
+        .disabled(room.locked || isJoiningDisabled)
       }
 
       GridRoomOptionsMenu(
@@ -287,6 +293,7 @@ private struct GridRoomSurface: View {
       .overlay {
         GridRoomAvatars(
           avatars: room.avatars,
+          allowsLocalControls: isCurrent,
           audioLevel: audioLevel,
           isScreenSharing: isScreenSharing,
           showsLocalConnectingIndicator: isCurrent && connectionState == .connecting,
@@ -362,6 +369,7 @@ private struct GridRoomAvatars: View {
   static let maximumVisibleAvatarCount = 5
 
   let avatars: [GridAvatar]
+  let allowsLocalControls: Bool
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
   let showsLocalConnectingIndicator: Bool
@@ -375,6 +383,7 @@ private struct GridRoomAvatars: View {
       ForEach(visibleAvatars, id: \.user.id) { avatar in
         GridSpeakingAvatar(
           avatar: avatar,
+          allowsLocalControls: allowsLocalControls,
           audioLevel: audioLevel(avatar.user.id),
           isScreenSharing: isScreenSharing(avatar),
           showsConnectingIndicator: showsLocalConnectingIndicator && avatar.ownedByCurrentSession,
@@ -445,6 +454,7 @@ private struct GridRoomAvatars: View {
 
 private struct GridSpeakingAvatar: View {
   let avatar: GridAvatar
+  let allowsLocalControls: Bool
   let audioLevel: Float
   let isScreenSharing: Bool
   let showsConnectingIndicator: Bool
@@ -457,7 +467,7 @@ private struct GridSpeakingAvatar: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
-      if avatar.ownedByCurrentSession {
+      if avatar.ownedByCurrentSession && allowsLocalControls {
         Button(action: onToggleMicrophone) {
           GridAvatarImage(
             user: avatar.user,
@@ -473,7 +483,7 @@ private struct GridSpeakingAvatar: View {
         GridAvatarImage(
           user: avatar.user,
           audioLevel: audioLevel,
-          microphoneEnabled: avatar.microphoneEnabled,
+          microphoneEnabled: avatar.ownedByCurrentSession && !allowsLocalControls ? false : avatar.microphoneEnabled,
           showsConnectingIndicator: false,
           size: 45
         )
@@ -482,7 +492,7 @@ private struct GridSpeakingAvatar: View {
 
       if isScreenSharing {
         GridAvatarScreenShareControl(
-          isLocal: avatar.ownedByCurrentSession,
+          isLocal: avatar.ownedByCurrentSession && allowsLocalControls,
           displayName: InlineKit.User(from: avatar.user).displayName,
           onOpen: onOpenScreenShare,
           onStop: onStopScreenShare
@@ -490,7 +500,7 @@ private struct GridSpeakingAvatar: View {
         .offset(x: 23, y: 23)
       }
 
-      if avatar.ownedByCurrentSession, isHovered {
+      if avatar.ownedByCurrentSession && allowsLocalControls, isHovered {
         GridAvatarLeaveButton(action: onLeave)
           .offset(x: -3, y: -3)
           .transition(.scale(scale: 0.72).combined(with: .opacity))
@@ -501,7 +511,7 @@ private struct GridSpeakingAvatar: View {
   }
 
   private var helpText: String {
-    if avatar.ownedByCurrentSession {
+    if avatar.ownedByCurrentSession && allowsLocalControls {
       return isScreenSharing ? "You’re sharing · mute or unmute" : "Mute or unmute"
     }
     if isScreenSharing { return "Open screen" }

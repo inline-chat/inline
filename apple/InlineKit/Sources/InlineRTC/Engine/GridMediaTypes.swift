@@ -48,6 +48,9 @@ public struct InlineRTCDemand: Equatable, Sendable {
   public var target: InlineRTCSessionID?
   public var credentials: InlineRTCCredentials?
   public var microphoneEnabled: Bool
+  /// Explicit capture preparation for this locally admitted call. iOS keeps
+  /// this false until the user unmutes; a prior OS permission is not intent.
+  public var microphoneCapturePrepared: Bool
   public var screenCaptureSource: InlineRTCScreenCaptureSource?
   public var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
   public var input: AudioInputSelection
@@ -58,6 +61,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     target: InlineRTCSessionID? = nil,
     credentials: InlineRTCCredentials? = nil,
     microphoneEnabled: Bool = false,
+    microphoneCapturePrepared: Bool = false,
     screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
     screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     input: AudioInputSelection = .automatic,
@@ -67,6 +71,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     self.target = target
     self.credentials = credentials
     self.microphoneEnabled = microphoneEnabled
+    self.microphoneCapturePrepared = microphoneCapturePrepared
     self.screenCaptureSource = screenCaptureSource
     self.screenShareQualityProfile = screenShareQualityProfile
     self.input = input
@@ -77,6 +82,8 @@ public struct InlineRTCDemand: Equatable, Sendable {
 
 enum GridAudioDriverEvent: Equatable, Sendable {
   case devicesChanged
+  case safetyPaused
+  case listeningResumed
   case engineStarting(playout: Bool, recording: Bool)
   case engineStopped(playout: Bool, recording: Bool)
   case engineDisabled(playout: Bool, recording: Bool)
@@ -401,6 +408,47 @@ public struct GridMediaShutdownReceipt: Equatable, Sendable {
     screenSharePublicationCount = rtc.screenSharePublicationCount
     failures = rtc.failures + audio.failures
   }
+
+  static let unproven = GridMediaShutdownReceipt(
+    audio: GridAudioShutdownReceipt(
+      recordingStopped: false, playoutStopped: false, mutationReleased: false,
+      failures: ["InlineRTCSession ended before shutdown completed."]
+    ),
+    rtc: GridRTCShutdownReceipt(locallyActiveRoomCount: 1, failures: [])
+  )
+}
+
+/// One shutdown command owns its acknowledgement from synchronous submission to completion.
+/// Completion may precede its waiter; no actor-owned request registry or enqueue hop is needed.
+final class GridShutdownCompletion: @unchecked Sendable, Equatable {
+  private let lock = NSLock()
+  private var receipt: GridMediaShutdownReceipt?
+  private var waiter: CheckedContinuation<GridMediaShutdownReceipt, Never>?
+
+  static func == (lhs: GridShutdownCompletion, rhs: GridShutdownCompletion) -> Bool { lhs === rhs }
+
+  func value() async -> GridMediaShutdownReceipt {
+    await withCheckedContinuation { continuation in
+      let completed = lock.withLock { () -> GridMediaShutdownReceipt? in
+        if let receipt { return receipt }
+        precondition(waiter == nil)
+        waiter = continuation
+        return nil as GridMediaShutdownReceipt?
+      }
+      if let completed { continuation.resume(returning: completed) }
+    }
+  }
+
+  func complete(_ receipt: GridMediaShutdownReceipt) {
+    let continuation = lock.withLock {
+      guard self.receipt == nil else { return nil as CheckedContinuation<GridMediaShutdownReceipt, Never>? }
+      self.receipt = receipt
+      let continuation = waiter
+      waiter = nil
+      return continuation
+    }
+    continuation?.resume(returning: receipt)
+  }
 }
 
 enum GridAudioPlayoutFailureDisposition: Equatable, Sendable {
@@ -431,6 +479,8 @@ public struct InlineRTCAudioSnapshot: Equatable, Sendable {
   public let outputVolume: Float
   public let lastTransitionMilliseconds: Int?
   public let microphonePermission: InlineRTCMicrophonePermission
+  public let safetyPauseRevision: UInt64
+  public let isSafetyPaused: Bool
 
   public init(
     state: InlineRTCAudioState,
@@ -449,7 +499,9 @@ public struct InlineRTCAudioSnapshot: Equatable, Sendable {
     currentMutationMilliseconds: Int? = nil,
     outputVolume: Float,
     lastTransitionMilliseconds: Int?,
-    microphonePermission: InlineRTCMicrophonePermission
+    microphonePermission: InlineRTCMicrophonePermission,
+    safetyPauseRevision: UInt64 = 0,
+    isSafetyPaused: Bool = false
   ) {
     self.state = state
     self.isConfigured = isConfigured
@@ -468,6 +520,8 @@ public struct InlineRTCAudioSnapshot: Equatable, Sendable {
     self.outputVolume = outputVolume
     self.lastTransitionMilliseconds = lastTransitionMilliseconds
     self.microphonePermission = microphonePermission
+    self.safetyPauseRevision = safetyPauseRevision
+    self.isSafetyPaused = isSafetyPaused
   }
 }
 
@@ -648,7 +702,11 @@ enum GridEngineCommand: Equatable, Sendable {
   case retryAudio
   case networkBecameAvailable
   case applicationDidWake
-  case shutdown(requestID: UUID)
+  case shutdown(requestID: UUID, completion: GridShutdownCompletion? = nil)
+
+  func failUnfinishedShutdown() {
+    if case let .shutdown(_, completion) = self { completion?.complete(.unproven) }
+  }
 }
 
 /// A complete immutable projection of the process-wide InlineRTC runtime.

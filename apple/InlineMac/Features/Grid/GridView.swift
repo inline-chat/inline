@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineProtocol
 import SwiftUI
@@ -16,12 +17,21 @@ struct GridView: View {
       grid: store.grid(spaceID: spaceID),
       isLoading: store.loadingSpaceIDs.contains(spaceID),
       didFailLoading: store.failedLoadSpaceIDs.contains(spaceID),
+      hasLocalAdmission: hasLocalAdmissionInSpace,
+      isJoiningDisabled: store.membershipMutationInFlight
+        || (store.callTransferEnabled && store.currentCall?.ownedByCurrentSession == false),
       audioLevel: store.audioLevel,
       isScreenSharing: { store.isScreenSharing(avatar: $0) },
       connectionState: store.connectionRecoveryAttempt > 0 ? .connecting : store.media.connectionState,
       onCreate: { store.createAndJoin(spaceID: spaceID) },
       onRetry: { Task { await store.load(spaceID: spaceID) } },
-      onJoin: { roomID in store.join(roomID: roomID) },
+      onJoin: { roomID in
+        if store.callTransferEnabled, store.currentCall?.roomID == roomID {
+          store.moveCallHere()
+        } else {
+          store.join(roomID: roomID)
+        }
+      },
       onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
       onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
       onOpenScreenShare: { store.openScreenShare(for: $0) },
@@ -66,7 +76,7 @@ struct GridView: View {
       }
     }
     .safeAreaInset(edge: .bottom) {
-      if let currentRoom {
+      if let currentRoom, hasLocalAdmissionInSpace {
         VStack(spacing: 8) {
           if currentRoom.transcriptionAvailable || currentRoom.hasTranscription || currentRoom.hasRoomThreadID {
             GridTranscriptionControls(
@@ -106,6 +116,29 @@ struct GridView: View {
         }
         .padding(.bottom, 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+      } else if store.callTransferEnabled, let call = store.currentCall, call.spaceID == spaceID {
+        HStack(spacing: 12) {
+          Button(call.ownedByCurrentSession ? "Resume here" : "Move here", systemImage: "arrow.down.to.line") {
+            store.moveCallHere()
+          }
+          .disabled(store.membershipMutationInFlight)
+          if store.membershipMutationInFlight {
+            Button("Cancel") { store.withdrawLocalAdmission() }
+          }
+        }
+        .padding(.bottom, 18)
+      } else if let room = currentRoom {
+        HStack(spacing: 12) {
+          Button("Resume here", systemImage: "arrow.down.to.line") { store.join(roomID: room.id) }
+            .disabled(store.membershipMutationInFlight)
+          if store.membershipMutationInFlight {
+            Button("Cancel") { store.withdrawLocalAdmission() }
+          }
+        }
+        .padding(.bottom, 18)
+      } else if store.membershipMutationInFlight {
+        Button("Cancel") { store.withdrawLocalAdmission() }
+          .padding(.bottom, 18)
       }
     }
     .animation(.smoothSnappy, value: currentRoom?.id)
@@ -115,8 +148,19 @@ struct GridView: View {
   }
 
   private var currentRoom: GridRoom? {
-    guard let grid = store.grid(spaceID: spaceID), grid.hasCurrentRoomID else { return nil }
+    guard let grid = store.grid(spaceID: spaceID) else { return nil }
+    if store.callTransferEnabled {
+      guard let call = store.currentCall, call.spaceID == spaceID else { return nil }
+      return grid.rooms.first { $0.id == call.roomID }
+    }
+    guard grid.hasCurrentRoomID else { return nil }
     return grid.rooms.first { $0.id == grid.currentRoomID }
+  }
+
+  private var hasLocalAdmissionInSpace: Bool {
+    guard store.hasLocalAdmission else { return false }
+    guard store.callTransferEnabled else { return true }
+    return store.currentCall?.ownedByCurrentSession == true && store.currentCall?.spaceID == spaceID
   }
 
   private var pageTitle: String {

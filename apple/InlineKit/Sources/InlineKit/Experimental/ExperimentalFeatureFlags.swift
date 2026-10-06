@@ -5,6 +5,13 @@ public enum ExperimentalFeatureFlags {
   public static let agentActivityKey = AgentActivityFeature.preferenceKey
   public static var agentActivityEnabled: Bool { AgentActivityFeature.isEnabled }
 
+  public static let gridIOSKey = "experimental.gridIOS"
+
+  /// Off until physical audio, background and device-transfer qualification is complete.
+  public static var gridIOSEnabled: Bool {
+    UserDefaults.standard.bool(forKey: gridIOSKey)
+  }
+
   public static let newThreadAgentPickerKey = "experimental.newThreadAgentPicker"
 
   /// macOS-only, opt-in persistent agent selection for the new-thread composer.

@@ -10,6 +10,45 @@ public extension Notification.Name {
   )
 }
 
+extension Notification.Name {
+  /// Posted on MainActor after staging closes mutation admission, before replacement writes.
+  /// The object identifies the exact Auth cache and the payload carries its retirement request.
+  static let authAccountAuthorityWillChange = Notification.Name("inline.auth.accountAuthorityWillChange")
+}
+
+/// A single staged authority transition. Process owners withdraw synchronously, then attach
+/// their local retirement acknowledgement; Auth awaits it before replacing credentials.
+@MainActor
+public final class AuthAccountAuthorityRetirement {
+  public let previousAccount: AuthAccountMutationToken
+  private let stagingIsCurrent: @Sendable () -> Bool
+  private var retirement: Task<Bool, Never>?
+
+  init(previousAccount: AuthAccountMutationToken, isCurrent: @escaping @Sendable () -> Bool) {
+    self.previousAccount = previousAccount
+    stagingIsCurrent = isCurrent
+  }
+
+  public var isCurrent: Bool { stagingIsCurrent() }
+
+  public func requireRetirement(_ task: Task<Bool, Never>) {
+    if let previous = retirement {
+      retirement = Task {
+        let previousStopped = await previous.value
+        let stopped = await task.value
+        return previousStopped && stopped
+      }
+    } else {
+      retirement = task
+    }
+  }
+
+  func waitForRetirement() async -> Bool {
+    guard let retirement else { return true }
+    return await retirement.value
+  }
+}
+
 public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
   public var userId: Int64
   public var accountSessionId: Int64
@@ -341,6 +380,24 @@ public struct AuthHandle: Sendable {
 
   public func validateAccountMutation(_ token: AuthAccountMutationToken) throws {
     try cache.validateAccountMutationToken(token)
+  }
+
+  /// Stops process-owned work before a login or credential write replaces server authority.
+  /// Delivery is synchronous on MainActor and scoped to this handle's Auth store. The handler
+  /// must attach any required retirement task before returning.
+  @MainActor
+  public func observeAccountAuthorityWillChange(
+    _ handler: @escaping @MainActor @Sendable (AuthAccountAuthorityRetirement) -> Void
+  ) -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(
+      forName: .authAccountAuthorityWillChange, object: cache, queue: .main
+    ) { notification in
+      guard let retirement = notification.userInfo?["retirement"] as? AuthAccountAuthorityRetirement else { return }
+      MainActor.assumeIsolated {
+        guard retirement.isCurrent else { return }
+        handler(retirement)
+      }
+    }
   }
 
   @discardableResult

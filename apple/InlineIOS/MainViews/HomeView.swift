@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineSearch
 import InlineUI
@@ -23,6 +24,7 @@ struct HomeView: View {
 
   @State private var text = ""
   @State private var searchModel: InlineSearchViewModel?
+  @State private var isGridPresented = false
 
   private var chatItems: [HomeChatItem] {
     let visibleChats = home.chats.filter { $0.dialog.archived != true }
@@ -40,9 +42,15 @@ struct HomeView: View {
         HomeToolbarContent(
           router: router,
           realtimeState: realtimeState,
-          notificationSettings: notificationSettings
+          notificationSettings: notificationSettings,
+          onOpenGrid: { isGridPresented = true }
         )
       }
+      .gridHomeEntry(
+        isPresented: $isGridPresented,
+        spaces: home.spaces.map(\.space),
+        isVisible: text.isEmpty
+      )
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()
       .onAppear {

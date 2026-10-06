@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import InlineAudioPlayback
 import Logger
 import SwiftUI
 
@@ -130,6 +131,7 @@ final class VoiceInputController: ObservableObject {
 
   @discardableResult
   func applyPreferredInput(to session: AVAudioSession = .sharedInstance()) throws -> VoiceInputState {
+    guard !InlineAudioSession.shared.isGridActive else { throw InlineAudioSessionError.gridOwnsAudio }
     guard let preferredDeviceId = activePreferredDeviceId else {
       log.debug("apply preferred=nil before \(routeSnapshot(for: session))")
       try session.setPreferredInput(nil)
@@ -155,6 +157,7 @@ final class VoiceInputController: ObservableObject {
     persistence: VoiceInputPreferencePersistence = .persistent,
     in session: AVAudioSession = .sharedInstance()
   ) throws -> VoiceInputState {
+    guard !InlineAudioSession.shared.isGridActive else { throw InlineAudioSessionError.gridOwnsAudio }
     let unchanged: Bool
     switch persistence {
     case .persistent:
@@ -205,6 +208,7 @@ final class VoiceInputController: ObservableObject {
     persistence: VoiceInputPreferencePersistence = .persistent,
     in session: AVAudioSession = .sharedInstance()
   ) throws -> VoiceInputState {
+    guard !InlineAudioSession.shared.isGridActive else { throw InlineAudioSessionError.gridOwnsAudio }
     let currentState = inputState(for: session)
 
     if deviceId == pendingDeviceId, currentState.selectedDeviceId != deviceId {

@@ -1,4 +1,5 @@
 import Auth
+import InlineGrid
 import InlineKit
 import InlineUI
 import Logger
@@ -132,6 +133,8 @@ private struct ExperimentalAuthedRootView: View {
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
+  @State private var isGridPresented = false
+  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridIOSEnabled = false
   @State private var isCleaningOpenChats = false
   @State private var iPadCommandRequest: IPadCommandRequest?
   @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
@@ -456,6 +459,11 @@ private struct ExperimentalAuthedRootView: View {
     .toolbar {
       experimentalToolbarContent()
     }
+    .gridHomeEntry(
+      isPresented: $isGridPresented,
+      spaceID: nav.activeSpaceId,
+      spaces: compactSpaceList.spaces
+    )
     .safeAreaInset(edge: .bottom, spacing: 0) {
       IPadSidebarSwitcher(selection: iPadSidebarScopeBinding)
     }
@@ -476,6 +484,12 @@ private struct ExperimentalAuthedRootView: View {
         .toolbar {
           experimentalToolbarContent()
         }
+        .gridHomeEntry(
+          isPresented: $isGridPresented,
+          spaceID: nav.activeSpaceId,
+          spaces: compactSpaceList.spaces,
+          isVisible: !isSearchActivePresentation
+        )
         .navigationDestination(for: Destination.self) { destination in
           ExperimentalDestinationView(
             nav: bindableNav,
@@ -1191,7 +1205,11 @@ private struct ExperimentalAuthedRootView: View {
       },
       onManage: activeSpace.map { space in
         { openHomeDestination(.spaceSettings(spaceId: space.id)) }
-      }
+      },
+      onGrid: gridIOSEnabled
+        && GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry
+        ? { isGridPresented = true }
+        : nil
     )
     // Fill the iPad toolbar target without changing the phone toolbar layout.
     .frame(width: usesIPadSplitView ? 44 : 28, height: usesIPadSplitView ? 44 : 28)
@@ -1404,6 +1422,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let onInvite: () -> Void
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
+  let onGrid: (() -> Void)?
 
   func makeUIView(context: Context) -> UIButton {
     let button = UIButton(type: .system)
@@ -1422,6 +1441,11 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   }
 
   private func makeMenu() -> UIMenu {
+    let grid = onGrid.map { onGrid in
+      UIAction(title: String(localized: "Grid"), image: UIImage(systemName: "square.grid.2x2")) { _ in
+        onGrid()
+      }
+    }
     let archivedChats = UIAction(
       title: "Archived Chats",
       image: UIImage(systemName: "archivebox")
@@ -1537,7 +1561,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     }
 
     return UIMenu(
-      children: [viewSection] + (cleanupSection.map { [$0] } ?? []) + [spaceSection]
+      children: (grid.map { [$0] } ?? []) + [viewSection] + (cleanupSection.map { [$0] } ?? []) + [spaceSection]
     )
   }
 }

@@ -25,7 +25,10 @@ final class GridEngineCommandMailbox: @unchecked Sendable {
 
   func enqueue(_ command: GridEngineCommand) {
     let shouldSignal = lock.withLock {
-      guard !finished else { return false }
+      guard !finished else {
+        command.failUnfinishedShutdown()
+        return false
+      }
       if case .setDemand = command,
          let last = queue.indices.last,
          case .setDemand = queue[last] {
@@ -53,6 +56,7 @@ final class GridEngineCommandMailbox: @unchecked Sendable {
     let shouldFinish = lock.withLock {
       guard !finished else { return false }
       finished = true
+      queue.forEach { $0.failUnfinishedShutdown() }
       queue.removeAll()
       return true
     }

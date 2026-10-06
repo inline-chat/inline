@@ -22,9 +22,8 @@ public actor InlineRTCSession {
   private var eventTasks: [Task<Void, Never>] = []
   private var commandTask: Task<Void, Never>?
   private var permissionRequestTask: Task<Void, Never>?
-  private var shutdownWaiters: [UUID: CheckedContinuation<GridMediaShutdownReceipt, Never>] = [:]
 
-  public init(captureCooldown: Duration = .seconds(2)) {
+  public init(captureCooldown: Duration = InlineRTCSession.defaultCaptureCooldown) {
     self.init(
       configuration: .voice,
       audioDriver: LiveKitGridAUHALAudioDriver(),
@@ -32,6 +31,15 @@ public actor InlineRTCSession {
       rtcDriver: LiveKitGridRTCDriver(),
       captureCooldown: captureCooldown
     )
+  }
+
+  public static var defaultCaptureCooldown: Duration {
+    #if os(iOS)
+    // End capture immediately when the authorized multiparty demand ends.
+    .zero
+    #else
+    .seconds(2)
+    #endif
   }
 
   init(
@@ -57,19 +65,6 @@ public actor InlineRTCSession {
     commandTask?.cancel()
     permissionRequestTask?.cancel()
     eventTasks.forEach { $0.cancel() }
-    let receipt = GridMediaShutdownReceipt(
-      audio: GridAudioShutdownReceipt(
-        recordingStopped: false,
-        playoutStopped: false,
-        mutationReleased: false,
-        failures: ["InlineRTCSession deinitialized before shutdown completed."]
-      ),
-      rtc: GridRTCShutdownReceipt(
-        locallyActiveRoomCount: 1,
-        failures: []
-      )
-    )
-    shutdownWaiters.values.forEach { $0.resume(returning: receipt) }
     subscribers.values.forEach { $0.finish() }
     commandMailbox.finish()
   }
@@ -118,6 +113,21 @@ public actor InlineRTCSession {
     enqueue(.shutdown(requestID: UUID()))
   }
 
+  /// Enqueues the exact retirement boundary before returning to its caller. Awaiting the
+  /// receipt later cannot submit an old shutdown behind a newer account's media demand.
+  public nonisolated func requestShutdownReceipt() -> Task<GridMediaShutdownReceipt, Never> {
+    let completion = GridShutdownCompletion()
+    enqueue(.shutdown(requestID: UUID(), completion: completion))
+    return Task { [weak self] in
+      if let self {
+        await self.start()
+      } else {
+        completion.complete(.unproven)
+      }
+      return await completion.value()
+    }
+  }
+
   /// Creates an independent watch-style subscription to the process-wide
   /// media runtime. Every call owns a distinct AsyncStream; Swift consumers
   /// never compete for elements from a shared iterator.
@@ -161,8 +171,11 @@ public actor InlineRTCSession {
       for await _ in commandMailbox.signals {
         guard !Task.isCancelled else { return }
         while let command = commandMailbox.dequeue() {
-          guard !Task.isCancelled else { return }
-          await self?.handle(command)
+          guard !Task.isCancelled, let self else {
+            command.failUnfinishedShutdown()
+            return
+          }
+          await self.handle(command)
         }
       }
     }
@@ -174,13 +187,8 @@ public actor InlineRTCSession {
   /// followed by an explicit empty demand before media is disconnected. The
   /// mailbox remains alive so the same authenticated-process runtime can be
   /// reused if application dependencies survive a logout/login transition.
-  public func shutdown() async -> GridMediaShutdownReceipt {
-    await start()
-    let requestID = UUID()
-    return await withCheckedContinuation { continuation in
-      shutdownWaiters[requestID] = continuation
-      enqueue(.shutdown(requestID: requestID))
-    }
+  public nonisolated func shutdown() async -> GridMediaShutdownReceipt {
+    await requestShutdownReceipt().value
   }
 
   private func handle(_ command: GridEngineCommand) async {
@@ -205,7 +213,7 @@ public actor InlineRTCSession {
     case .applicationDidWake:
       await audio.checkRuntimeHealthAfterInterruption()
       await rtc.applicationDidWake()
-    case let .shutdown(requestID):
+    case let .shutdown(_, completion):
       let rtcReceipt = await rtc.shutdown()
       let audioReceipt = await audio.shutdown()
       let receipt = GridMediaShutdownReceipt(audio: audioReceipt, rtc: rtcReceipt)
@@ -216,7 +224,7 @@ public actor InlineRTCSession {
           "GRID_ENGINE phase=engine_shutdown_incomplete locally_quiescent=false active_rooms=\(receipt.locallyActiveRoomCount) rtc_media_mutations=\(receipt.rtcLocalMediaMutationCount) microphone_publications=\(receipt.microphonePublicationCount) screen_publications=\(receipt.screenSharePublicationCount) audio_mutation_released=\(receipt.audioMutationReleased) failures=\(receipt.failures.joined(separator: ","))"
         )
       }
-      shutdownWaiters.removeValue(forKey: requestID)?.resume(returning: receipt)
+      completion?.complete(receipt)
     }
   }
 

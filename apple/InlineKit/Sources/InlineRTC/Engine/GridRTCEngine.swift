@@ -43,6 +43,7 @@ actor GridRTCEngine {
 
   private var demand = InlineRTCDemand()
   private var demandRevision = 0
+  private var mediaDemandEpoch: UInt64 = 0
   private var demandAudioLease: GridAudioLease?
   private var lifecycleAudioLeases: [GridRTCRoomHandle: GridAudioLease] = [:]
   private var reconnectsAwaitingMicrophonePublication = Set<GridRTCRoomHandle>()
@@ -81,6 +82,9 @@ actor GridRTCEngine {
   private var lastError: String?
   private var reconcileTask: Task<Void, Never>?
   private var reconcileTaskID: UUID?
+  /// Cancellation can detach the task handle while an SDK call still owns
+  /// native work. Keep every actual task until its completion returns.
+  private var runningReconcileTaskIDs = Set<UUID>()
   private var reconcileRequested = false
   private var backoffTask: Task<Void, Never>?
   private var microphoneRetryTask: Task<Void, Never>?
@@ -134,9 +138,12 @@ actor GridRTCEngine {
     if nextDemand.credentials?.target != nextDemand.target {
       nextDemand.credentials = nil
     }
+    if !nextDemand.microphoneCapturePrepared { nextDemand.microphoneEnabled = false }
     guard nextDemand != demand else { return }
     let previousTarget = demand.target
+    if previousTarget != nextDemand.target { mediaDemandEpoch &+= 1 }
     demandRevision &+= 1
+    let admissionRevision = demandRevision
     demand = nextDemand
     backoffTask?.cancel()
     backoffTask = nil
@@ -152,10 +159,38 @@ actor GridRTCEngine {
       startAudioPreparationWait(for: nextDemand.target)
     }
 
+    do {
+      if let target = nextDemand.target {
+        // A retained process reservation is not proof that the previous room
+        // released its local tracks. Do not reopen the native audio engine or
+        // prepare the replacement microphone until that receipt is complete.
+        try await waitForRetirementsBeforeConnect(target: target)
+        guard demandRevision == admissionRevision else { return }
+      }
+      try await audio.setMediaDemandActive(nextDemand.target != nil, epoch: mediaDemandEpoch)
+    } catch {
+      guard !Task.isCancelled else { return }
+      guard demandRevision == admissionRevision else { return }
+      lastError = error.localizedDescription
+      state = .failed(nextDemand.target, error.localizedDescription)
+      emitSnapshot()
+      // Native ownership conflicts require the user or owner to resolve them.
+      // Keep desired admission and a stable failure; Retry/audio availability
+      // or a network wake can re-run the admission check without a new claim.
+      return
+    }
+    // Joining a previous native teardown may suspend admission long enough for
+    // another demand to replace this one. Only its current revision may apply.
+    guard demandRevision == admissionRevision else { return }
+
     await audio.setInput(nextDemand.input)
+    guard demandRevision == admissionRevision, !Task.isCancelled else { return }
     await audio.setOutput(nextDemand.output)
+    guard demandRevision == admissionRevision, !Task.isCancelled else { return }
     await audio.setOutputVolume(nextDemand.outputVolume)
+    guard demandRevision == admissionRevision, !Task.isCancelled else { return }
     await replaceDemandAudioLease(for: nextDemand.target)
+    guard demandRevision == admissionRevision, !Task.isCancelled else { return }
 
     log.debug(
       "GRID_ENGINE phase=rtc_demand_replaced revision=\(demandRevision) room=\(nextDemand.target.map(\.rawValue) ?? "none") microphone=\(nextDemand.microphoneEnabled) screen_share=\(nextDemand.screenCaptureSource != nil)"
@@ -197,7 +232,9 @@ actor GridRTCEngine {
 
   func shutdown() async -> GridRTCShutdownReceipt {
     demandRevision &+= 1
+    mediaDemandEpoch &+= 1
     demand = InlineRTCDemand()
+    try? await audio.setMediaDemandActive(false, epoch: mediaDemandEpoch)
     backoffTask?.cancel()
     backoffTask = nil
     microphoneRetryTask?.cancel()
@@ -212,13 +249,14 @@ actor GridRTCEngine {
     let deadline = Date().addingTimeInterval(configuration.connection.providerTeardownTimeout)
     while Date() < deadline {
       if retirementTasks.isEmpty {
-        guard !failedLocalQuiescence.isEmpty else { break }
+        guard !failedLocalQuiescence.isEmpty || !runningReconcileTaskIDs.isEmpty else { break }
         retryFailedLocalQuiescence()
       }
       try? await Task.sleep(for: .milliseconds(10))
     }
     let activeRooms = Set(retirementTasks.keys).union(failedLocalQuiescence.keys)
     let activeCount = activeRooms.count
+    let providerMutationCount = runningReconcileTaskIDs.count
     let localMediaMutationCount = failedLocalQuiescence.values
       .reduce(0) { $0 + $1.localMediaMutationCount }
     let microphonePublicationCount = failedLocalQuiescence.values
@@ -232,12 +270,19 @@ actor GridRTCEngine {
       + (retirementTasks.isEmpty
         ? []
         : ["Timed out waiting for \(retirementTasks.count) room(s) to release local media."])
-    state = activeCount == 0
+      + (providerMutationCount == 0
+        ? []
+        : ["Timed out waiting for \(providerMutationCount) provider operation(s) to return."])
+    state = activeCount == 0 && providerMutationCount == 0
       ? .idle
       : .failed(nil, failures.first ?? "Local room quiescence could not be proven.")
     emitSnapshot()
+    await reportMediaQuiescenceIfReady()
     return GridRTCShutdownReceipt(
       locallyActiveRoomCount: activeCount,
+      // A retained publication is also owned by its suspended reconcile task;
+      // count the concrete mutation once. Pending provider work remains an
+      // explicit failure, so an idle room receipt cannot imply quiescence.
       localMediaMutationCount: localMediaMutationCount,
       microphonePublicationCount: microphonePublicationCount,
       screenSharePublicationCount: screenSharePublicationCount,
@@ -246,15 +291,36 @@ actor GridRTCEngine {
   }
 
   private func replaceDemandAudioLease(for target: InlineRTCSessionID?) async {
-    let nextLease = target.map(GridAudioLease.connectionDemand)
+    guard target == demand.target else { return }
+    let revision = demandRevision
+    let nextLease = demand.microphoneCapturePrepared
+      ? target.map(GridAudioLease.connectionDemand)
+      : nil
     guard nextLease != demandAudioLease else { return }
     if let nextLease {
       await audio.acquireCaptureLease(nextLease)
     }
+    guard demandRevision == revision else {
+      await releaseSupersededDemandAudioLease(nextLease)
+      return
+    }
     if let demandAudioLease {
       await audio.releaseCaptureLease(demandAudioLease)
     }
+    guard demandRevision == revision else {
+      await releaseSupersededDemandAudioLease(nextLease)
+      return
+    }
     demandAudioLease = nextLease
+  }
+
+  private func releaseSupersededDemandAudioLease(_ lease: GridAudioLease?) async {
+    let currentIntent = demand.microphoneCapturePrepared
+      ? demand.target.map(GridAudioLease.connectionDemand)
+      : nil
+    if let lease, lease != currentIntent {
+      await audio.releaseCaptureLease(lease)
+    }
   }
 
   private func scheduleReconcile() {
@@ -274,6 +340,7 @@ actor GridRTCEngine {
       return
     }
     let taskID = UUID()
+    runningReconcileTaskIDs.insert(taskID)
     reconcileTaskID = taskID
     reconcileTask = Task { [weak self] in
       await self?.runReconcileLoop()
@@ -322,6 +389,31 @@ actor GridRTCEngine {
         return
       }
 
+      let admissionRevision = demandRevision
+      do {
+        try await waitForRetirementsBeforeConnect(target: target)
+        guard !Task.isCancelled else { return }
+        guard demandRevision == admissionRevision else { continue }
+        try await audio.setMediaDemandActive(true, epoch: mediaDemandEpoch)
+      } catch {
+        guard !Task.isCancelled else { return }
+        guard demandRevision == admissionRevision else { continue }
+        lastError = error.localizedDescription
+        state = .failed(target, error.localizedDescription)
+        emitSnapshot()
+        return
+      }
+      guard !Task.isCancelled else { return }
+      guard demandRevision == admissionRevision else { continue }
+      await audio.setInput(demand.input)
+      guard demandRevision == admissionRevision, !Task.isCancelled else { continue }
+      await audio.setOutput(demand.output)
+      guard demandRevision == admissionRevision, !Task.isCancelled else { continue }
+      await audio.setOutputVolume(demand.outputVolume)
+      guard demandRevision == admissionRevision, !Task.isCancelled else { continue }
+      await replaceDemandAudioLease(for: target)
+      guard demandRevision == admissionRevision, !Task.isCancelled else { continue }
+
       if room == nil, pendingAudioTransportGeneration == nil {
         pendingAudioTransportGeneration = await audio.rtcTransportWillInitialize()
       }
@@ -352,6 +444,11 @@ actor GridRTCEngine {
           continue
         }
         if !microphonePublished {
+          guard demand.microphoneCapturePrepared else {
+            microphonePublicationState = .notRequested
+            emitSnapshot()
+            return
+          }
           guard microphoneRetryTask == nil else {
             emitSnapshot()
             return
@@ -446,6 +543,7 @@ actor GridRTCEngine {
       }
       let audioWaitsForRTCTransport = await audio.isWaitingForRTCTransport()
       if !audioWaitsForRTCTransport,
+         demand.microphoneCapturePrepared,
          !audioSnapshot.isPrepared,
          audioSnapshot.microphonePermission.permitsCapture {
         if shouldWaitForAudioPreparation(target: target) {
@@ -485,7 +583,11 @@ actor GridRTCEngine {
 
     let attemptID = UUID()
     let lifecycleLease = GridAudioLease.rtcLifecycle(attemptID)
-    await audio.acquireCaptureLease(lifecycleLease)
+    #if !os(iOS)
+    if demand.microphoneCapturePrepared {
+      await audio.acquireCaptureLease(lifecycleLease)
+    }
+    #endif
     let room: GridRTCRoomHandle
     do {
       room = try await driver.makeRoom(configuration: configuration)
@@ -607,6 +709,7 @@ actor GridRTCEngine {
   /// audio churn. Wait for the fast path, but preserve bounded forward progress
   /// when a provider call is genuinely stuck.
   private func waitForRetirementsBeforeConnect(target: InlineRTCSessionID) async throws {
+    try Task.checkCancellation()
     let timeout = configuration.connection.retirementBarrierTimeout
     guard !retirementTasks.isEmpty || !failedLocalQuiescence.isEmpty else { return }
     guard timeout > 0 else {
@@ -623,6 +726,7 @@ actor GridRTCEngine {
     }
 
     let elapsed = elapsedMilliseconds(since: startedAt)
+    try Task.checkCancellation()
     if retirementTasks.isEmpty, failedLocalQuiescence.isEmpty {
       log.debug(
         "GRID_ENGINE phase=rtc_retirement_barrier_finished session=\(target.rawValue) elapsed_ms=\(elapsed)"
@@ -1092,6 +1196,7 @@ actor GridRTCEngine {
       "GRID_ENGINE phase=rtc_retired session=\(target.rawValue) elapsed_ms=\(lastDisconnectMilliseconds ?? 0) locally_quiescent=\(receipt.isQuiescent)"
     )
     emitSnapshot()
+    await reportMediaQuiescenceIfReady()
   }
 
   private func detach(_ detachedRoom: GridRTCRoomHandle) {
@@ -1138,6 +1243,9 @@ actor GridRTCEngine {
     guard retirementsRequiringAudioTransportFence.remove(retiredRoom) != nil,
           room == nil
     else { return }
+    // Only the custom ADM has a transport-generation fence to close. The iOS
+    // SDK path would merely reopen native playout while old tracks still exist.
+    guard await audio.rtcTransportRequiresPreparation() else { return }
     let generation = await audio.rtcTransportWillInitialize()
     if demand.target != nil, pendingAudioTransportGeneration == nil {
       pendingAudioTransportGeneration = generation
@@ -1812,16 +1920,33 @@ actor GridRTCEngine {
     reconcileRequested = false
   }
 
-  private func reconcileFinished(taskID: UUID) {
+  private func reconcileFinished(taskID: UUID) async {
+    runningReconcileTaskIDs.remove(taskID)
     if providerCircuitBreaker.contains(id: taskID) {
       retiredProviderOperationReturned(id: taskID)
     }
-    guard reconcileTaskID == taskID else { return }
+    guard reconcileTaskID == taskID else {
+      await reportMediaQuiescenceIfReady()
+      return
+    }
     reconcileTask = nil
     reconcileTaskID = nil
-    guard reconcileRequested else { return }
+    guard reconcileRequested else {
+      await reportMediaQuiescenceIfReady()
+      return
+    }
     reconcileRequested = false
     scheduleReconcile()
+  }
+
+  private func reportMediaQuiescenceIfReady() async {
+    guard demand.target == nil,
+          room == nil,
+          retirementTasks.isEmpty,
+          failedLocalQuiescence.isEmpty,
+          runningReconcileTaskIDs.isEmpty,
+          providerCircuitBreaker.abandonedOperationCount == 0 else { return }
+    await audio.mediaDidQuiesce(epoch: mediaDemandEpoch)
   }
 
   private func startDriverEventsIfNeeded() {

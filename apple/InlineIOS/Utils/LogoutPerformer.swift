@@ -1,4 +1,5 @@
 import Auth
+import InlineGrid
 import InlineKit
 import Logger
 import UIKit
@@ -29,6 +30,17 @@ enum LogoutPerformer {
 
     // Fence playback and pending download intent before the first suspension.
     SharedAudioPlayer.shared.stop()
+    // Close media admission before logout's first suspension. Account fencing
+    // alone does not stop a sender already running in the RTC engine.
+    if let grid = GridRuntime.existing {
+      grid.rooms.withdrawLocalAdmission()
+      let mediaShutdown = await grid.prepareForLogout()
+      guard mediaShutdown.isLocallyQuiescent else {
+        Log.shared.error("iOS logout stopped: Grid local media shutdown could not be proven")
+        return
+      }
+    }
+
     (UIApplication.shared.delegate as? AppDelegate)?.cancelPendingSpaceJoin()
     ProviderSignInCoordinator.shared.cancelPendingAttempt()
 
