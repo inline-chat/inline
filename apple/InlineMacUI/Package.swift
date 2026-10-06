@@ -39,6 +39,11 @@ let package = Package(
   ],
 
   targets: [
+    .testTarget(
+      name: "MacDevtoolsTests",
+      dependencies: ["MacDevtools"],
+      swiftSettings: swiftSettings
+    ),
     .target(
       name: "InlineCLIInstaller",
       dependencies: [],

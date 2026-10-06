@@ -164,6 +164,7 @@ public final class MacDevtoolsLogStore {
   }
 
   private func refresh(resetExisting: Bool = false) async {
+    captureEnabled = MacDevtoolsLogCapture.shared.isEnabled
     guard let url = MacDevtools.logFileURL else { return }
 
     do {
