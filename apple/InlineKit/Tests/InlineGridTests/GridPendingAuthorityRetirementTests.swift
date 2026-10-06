@@ -19,6 +19,7 @@ struct GridPendingAuthorityRetirementTests {
       }
     }
 
+    @MainActor
     func submit(to service: GridRoomService) {
       switch self {
         case .create: service.createAndJoin(spaceID: 42)

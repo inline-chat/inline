@@ -412,6 +412,10 @@ private struct GridAuthorityNoUpdates: ApplyUpdates {
 }
 
 private struct GridAuthoritySyncStorage: SyncStorage {
+  func canonicalPeer(forChatID _: Int64) async throws -> Peer? {
+    nil
+  }
+
   func getState() async throws -> SyncState {
     .init(lastSyncDate: 0)
   }

@@ -151,7 +151,7 @@ struct GridAuthAuthorityRetirementTests {
           let key = Array((UInt8.min...UInt8.max).reversed())
           credentials.temporary = try InlineProtocolAuthorization(
             key: key, keyID: InlineSecureTransport.authKeyID(key), serverSalt: 8,
-            temporary: true, expiresAt: Int64(Date().addingTimeInterval(3600).timeIntervalSince1970)
+            temporary: true, expiresAt: Int32(Date().addingTimeInterval(3600).timeIntervalSince1970)
           )
           try await fixture.auth.saveInlineProtocolCredentials(credentials)
         }
