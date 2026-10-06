@@ -333,7 +333,9 @@ final class SidebarViewModel {
     #endif
 
     chatsCancellable = ValueObservation
-      .tracking { db in
+      // This source always reads the same SQL region. Pool fetches can run
+      // off the writer and coalesce changes while a fetch is in flight.
+      .trackingConstantRegion { db in
         let chats = try ChatListDatabaseQuery.fetchSnapshots(
           db,
           spaceID: source.spaceId,
