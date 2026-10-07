@@ -260,6 +260,21 @@ describe("messages.createSubthread", () => {
     expect(canonicalSubthread?.hasUnread).toBe(legacyReplies?.hasUnread)
     expect(canonicalSubthread?.recentAuthorUserIds).toEqual(legacyReplies?.recentReplierUserIds)
 
+    // An empty child can be manually unread for one recipient. Keep both wire
+    // projections personalized even when the unread-message aggregate is zero.
+    await db.update(schema.dialogs).set({ unreadMark: true })
+      .where(and(eq(schema.dialogs.chatId, childChatId), eq(schema.dialogs.userId, creator.id)))
+    for (const viewer of [creator, anchorAuthor]) {
+      const personalized = await getMessages({
+        peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(parentChat.id) } } },
+        messageIds: [1n],
+      }, testUtils.functionContext({ userId: viewer.id }))
+      expect(personalized.messages[0]?.replies?.hasUnread).toBe(viewer.id === creator.id)
+      expect(personalized.messages[0]?.subthread?.hasUnread).toBe(viewer.id === creator.id)
+    }
+    await db.update(schema.dialogs).set({ unreadMark: false })
+      .where(and(eq(schema.dialogs.chatId, childChatId), eq(schema.dialogs.userId, creator.id)))
+
     const edited = await editMessage(
       {
         peer: {

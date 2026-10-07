@@ -9,15 +9,22 @@ export type ScenarioSpec = {
 // These are reviewed upper bounds for complete operations, including tracked
 // detached work and transaction control. They describe current costs, not targets.
 // Fixture or semantic changes require a version bump before comparing timings.
-export const scenarioVersion = 1
+export const scenarioVersion = 2
+
+// Coherent reads submit BEGIN, SET TRANSACTION and COMMIT. Catalog discovery
+// additionally prepares missing dialogs and checks candidate access; history
+// rereads its chat inside the snapshot. These fixed costs do not scale with rows.
+const snapshotCommands = 3
+const catalogAdmissionCommands = 2
+const historySnapshotChatCommands = 1
 export const scenarios: readonly ScenarioSpec[] = [
   { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 26 },
   { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 },
   { id: "send.dm.retry", kind: "sendDm", size: 1, variant: "retry", maxCommands: 7 },
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 + size })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.reply.${size}`, kind: "sendThread", size, variant: "reply", maxCommands: 66 + 7 * size })),
-  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 })),
-  { id: "history.50", kind: "history", size: 50, maxCommands: 7 },
+  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 + snapshotCommands + catalogAdmissionCommands })),
+  { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands + historySnapshotChatCommands },
   { id: "updates.replay.empty", kind: "replay", size: 0, variant: "empty", maxCommands: 7 },
   { id: "updates.replay.message", kind: "replay", size: 1, maxCommands: 23 },
   { id: "updates.checkpoint", kind: "checkpoint", size: 1, maxCommands: 6 },
