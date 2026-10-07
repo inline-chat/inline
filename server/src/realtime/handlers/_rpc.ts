@@ -105,12 +105,16 @@ import {
 import { setSpacePhotoHandler } from "@in/server/realtime/handlers/space.profile"
 import { getSpaceSettingsHandler, toggleSpaceGridHandler } from "@in/server/realtime/handlers/space.settings"
 import {
+  openGridThreadHandler,
+  setGridTranscriptionHandler,
+  listGridTranscriptsHandler,
   createGridRoomHandler,
   deleteGridRoomHandler,
   getGridHandler,
   getGridHomeHandler,
   joinGridRoomHandler,
   leaveGridRoomHandler,
+  moveGridCallHereHandler,
   prepareGridConnectionHandler,
   setGridAvatarMicrophoneEnabledHandler,
   setGridRoomLockedHandler,
@@ -467,6 +471,24 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "toggleSpaceGrid", toggleSpaceGrid: result }
     }
 
+    case Method.OPEN_GRID_THREAD: {
+      if (call.input.oneofKind !== "openGridThread") throw RealtimeRpcError.BadRequest()
+      const result = await openGridThreadHandler(call.input.openGridThread, handlerContext)
+      return { oneofKind: "openGridThread", openGridThread: result }
+    }
+
+    case Method.SET_GRID_TRANSCRIPTION: {
+      if (call.input.oneofKind !== "setGridTranscription") throw RealtimeRpcError.BadRequest()
+      const result = await setGridTranscriptionHandler(call.input.setGridTranscription, handlerContext)
+      return { oneofKind: "setGridTranscription", setGridTranscription: result }
+    }
+
+    case Method.LIST_GRID_TRANSCRIPTS: {
+      if (call.input.oneofKind !== "listGridTranscripts") throw RealtimeRpcError.BadRequest()
+      const result = await listGridTranscriptsHandler(call.input.listGridTranscripts, handlerContext)
+      return { oneofKind: "listGridTranscripts", listGridTranscripts: result }
+    }
+
     case Method.GET_GRID: {
       if (call.input.oneofKind !== "getGrid") throw RealtimeRpcError.BadRequest()
       const result = await getGridHandler(call.input.getGrid, handlerContext)
@@ -495,6 +517,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "leaveGridRoom") throw RealtimeRpcError.BadRequest()
       const result = await leaveGridRoomHandler(call.input.leaveGridRoom, handlerContext)
       return { oneofKind: "leaveGridRoom", leaveGridRoom: result }
+    }
+
+    case Method.MOVE_GRID_CALL_HERE: {
+      if (call.input.oneofKind !== "moveGridCallHere") throw RealtimeRpcError.BadRequest()
+      const result = await moveGridCallHereHandler(call.input.moveGridCallHere, handlerContext)
+      return { oneofKind: "moveGridCallHere", moveGridCallHere: result }
     }
 
     case Method.SET_GRID_ROOM_TITLE: {

@@ -115,6 +115,35 @@ struct GetChatsHistoryFenceTests {
     }
   }
 
+  @Test("cold cursor rejection rolls back its model preview and acknowledgements")
+  func coldCatalogCursorFailureIsAtomic() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      let context = try GetChatsTransaction.Context(expectedRemovalRevision: SyncRemovalRevision.read(db))
+      try db.execute(sql: """
+        CREATE TRIGGER reject_cold_cursor BEFORE INSERT ON sync_bucket_state
+        WHEN NEW.bucketType = 1 AND NEW.entityId = -10
+        BEGIN SELECT RAISE(ABORT, 'reject cold cursor'); END;
+        """)
+      var result = page()
+      result.chats[0].acknowledgements.cursors = [.with {
+        $0.chatID = 10
+        $0.userID = 1
+        $0.maxID = 50
+        $0.revision = 1
+      }]
+      let imported = try GetChatsTransaction.applyCatalog(
+        result, context: context, allowedChatIDs: [10], in: db
+      )
+      #expect(imported.failures == [.init(phase: .chatCursors, count: 1)])
+      #expect(imported.seededStates.isEmpty)
+      #expect(try Chat.fetchOne(db, id: 10) == nil)
+      #expect(try Message.fetchCount(db) == 0)
+      #expect(try Acknowledgement.fetchCount(db) == 0)
+      #expect(try DbBucketState.fetchCount(db) == 0)
+    }
+  }
+
   @Test("cold bootstrap requires both its dispatch removal fence and history permission", arguments: [false, true])
   func coldCatalogAdmissionFence(removalChanged: Bool) throws {
     let queue = try makeDatabase()

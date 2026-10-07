@@ -1,13 +1,110 @@
 import Foundation
 import GRDB
+@testable import InlineKit
 import InlineProtocol
 import RealtimeV2
 import Testing
 
-@testable import InlineKit
-
 @Suite("Unread Replay Guard")
 struct UnreadReplayGuardTests {
+  @Test("quiet transcript rows persist and advance history without changing unread")
+  func quietTranscriptDoesNotIncrementUnread() throws {
+    let dbQueue = try makeInMemoryDB()
+    try dbQueue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 2)
+      var update = makeNewMessageUpdate(messageId: 21)
+      update.message.countsAsUnread = false
+      update.message.serviceMessage.gridTranscript = .with {
+        $0.runID = "run-1"
+        $0.segmentID = "segment-1"
+      }
+      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 2)
+      let fetched = try Message.fetchOne(db, key: ["messageId": 21, "chatId": chatId])
+      let saved = try #require(fetched)
+      #expect(saved.isGridTranscript)
+      #expect(!saved.countsAsUnread)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == nil)
+      // A replay must preserve durable quietness as well as deduplication.
+      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 2)
+    }
+  }
+
+  @Test("transcripts stay out of sidebar activity during history and chat-tail deletion")
+  func transcriptActivityHistoryAndDeletion() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
+      let earlier = makeNewMessageUpdate(messageId: 1)
+      try earlier.apply(db, publishChanges: false, suppressNotifications: true)
+      var transcript = makeNewMessageUpdate(messageId: 2)
+      transcript.message.date = 5
+      transcript.message.serviceMessage.gridTranscript = .init()
+      transcript.message.countsAsUnread = false
+      try transcript.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 1)
+      var later = makeNewMessageUpdate(messageId: 3)
+      later.message.date = 4
+      try later.apply(db, publishChanges: false, suppressNotifications: true)
+      try Chat.updateLastMsgIds(db, messages: [Message(from: earlier.message), Message(from: transcript.message)])
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 3)
+
+      let deletion = InlineProtocol.UpdateDeleteMessages.with {
+        $0.peerID.chat.chatID = chatId
+        $0.messageIds = [3]
+      }
+      try deletion.apply(db, publishChanges: false)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 1)
+      #expect(try Message.filter(Message.Columns.chatId == chatId && Message.Columns.messageId == 1)
+        .fetchOne(db)?.date == Date(timeIntervalSince1970: 2))
+      try Message.deleteMessages(db, messageIds: [1], chatId: chatId)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == nil)
+      #expect(try Message.fetchCount(db) == 1)
+    }
+  }
+
+  @Test("batched tail deletion keeps quiet confirmed and optimistic rows out of activity and fences history")
+  func quietBatchTailPromotion() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { db in
+      try seedDialog(db, readInboxMaxId: 1_000, unreadCount: 0)
+      for (id, date) in [(10, 300), (20, 100), (30, 400), (40, 700)] {
+        var update = makeNewMessageUpdate(messageId: Int64(id))
+        update.message.date = Int64(date)
+        if id == 30 {
+          update.message.serviceMessage.gridTranscript = .init()
+          update.message.countsAsUnread = false
+        }
+        try update.apply(db, publishChanges: false, suppressNotifications: true)
+      }
+      var pending = Message(from: makeNewMessageUpdate(messageId: -1).message)
+      pending.date = Date(timeIntervalSince1970: 500)
+      pending.status = .sending
+      try pending.saveMessage(db)
+      var quietPending = makeNewMessageUpdate(messageId: -2).message
+      quietPending.date = 600
+      quietPending.serviceMessage.gridTranscript = .init()
+      quietPending.countsAsUnread = false
+      var quietRow = Message(from: quietPending)
+      quietRow.status = .sending
+      try quietRow.saveMessage(db)
+      try Chat.filter(Chat.Columns.id == chatId).updateAll(db, Chat.Columns.lastMsgId.set(to: 40))
+      let token = try HistoryPageAdmissionToken.capture(db, chatId: chatId)
+      // Cross the delete chunk boundary, including uncached coordinates.
+      try Message.deleteMessages(db, messageIds: [40] + Array(100 ... 600), chatId: chatId)
+      #expect(try Chat.fetchCount(db) == 1)
+      #expect(try Chat.fetchOne(db, id: chatId)?.lastMsgId == -1)
+      #expect(try HistoryPageAdmissionToken.capture(db, chatId: chatId).revision == token.revision + 1)
+      try Message.deleteMessages(db, messageIds: [-1], chatId: chatId)
+      // Confirmed message IDs still win over backdated timestamps.
+      #expect(try Chat.fetchOne(db, id: chatId)?.lastMsgId == 20)
+      #expect(try Message.filter(Message.Columns.chatId == chatId && Message.Columns.messageId == 30).fetchOne(db)?
+        .isGridTranscript == true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
+    }
+  }
+
   private let chatId: Int64 = 1_000
   private let senderId: Int64 = 99
 
@@ -121,7 +218,7 @@ struct UnreadReplayGuardTests {
   @Test("sync catch-up message does not increment sidecar unread total")
   func catchupMessageDoesNotIncrementSidecarUnreadTotal() async throws {
     let dbQueue = try makeInMemoryDB()
-    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
+    let engine = try UpdatesEngine(database: AppDatabase(dbQueue))
 
     try await dbQueue.write { (db: Database) throws in
       try seedDialog(db, readInboxMaxId: nil, unreadCount: 1)
@@ -192,7 +289,7 @@ struct UnreadReplayGuardTests {
   @Test("updates engine live message materializes missing chat references")
   func updatesEngineLiveMessageMaterializesMissingChatReferences() async throws {
     let dbQueue = try makeInMemoryDB()
-    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
+    let engine = try UpdatesEngine(database: AppDatabase(dbQueue))
 
     var update = InlineProtocol.Update()
     update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
@@ -276,7 +373,7 @@ struct UnreadReplayGuardTests {
   @Test("chatSkipPts applies as a catch-up no-op")
   func chatSkipPtsAppliesAsCatchupNoop() async throws {
     let dbQueue = try makeInMemoryDB()
-    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
+    let engine = try UpdatesEngine(database: AppDatabase(dbQueue))
 
     var payload = InlineProtocol.UpdateChatSkipPts()
     payload.chatID = chatId
@@ -288,7 +385,7 @@ struct UnreadReplayGuardTests {
 
     #expect(applied.succeeded)
     #expect(applied.appliedCount == 1)
-    try await dbQueue.read { (db: Database) throws -> Void in
+    try await dbQueue.read { (db: Database) throws in
       #expect(try Message.fetchCount(db) == 0)
     }
   }

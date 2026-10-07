@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineSearch
 import InlineUI
@@ -40,8 +41,12 @@ struct HomeView: View {
         HomeToolbarContent(
           router: router,
           realtimeState: realtimeState,
-          notificationSettings: notificationSettings
+          notificationSettings: notificationSettings,
+          onOpenGrid: { router.push(.grid(initialSpaceID: nil)) }
         )
+      }
+      .gridHomeEntry(isVisible: text.isEmpty) {
+        router.push(.grid(initialSpaceID: nil))
       }
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()

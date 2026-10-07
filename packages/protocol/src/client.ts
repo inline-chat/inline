@@ -39,6 +39,10 @@ export interface MessageContentPayload {
      * @generated from protobuf field: MessageSubthread subthread = 5;
      */
     subthread?: MessageSubthread;
+    /**
+     * @generated from protobuf field: optional bool counts_as_unread = 6;
+     */
+    countsAsUnread?: boolean;
 }
 /**
  * @generated from protobuf message client.MessageVoiceContent
@@ -102,7 +106,8 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
             { no: 2, name: "actions", kind: "message", T: () => MessageActions },
             { no: 3, name: "replies", kind: "message", T: () => MessageReplies },
             { no: 4, name: "service_message", kind: "message", T: () => MessageService },
-            { no: 5, name: "subthread", kind: "message", T: () => MessageSubthread }
+            { no: 5, name: "subthread", kind: "message", T: () => MessageSubthread },
+            { no: 6, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
@@ -131,6 +136,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
                 case /* MessageSubthread subthread */ 5:
                     message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
                     break;
+                case /* optional bool counts_as_unread */ 6:
+                    message.countsAsUnread = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -158,6 +166,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         /* MessageSubthread subthread = 5; */
         if (message.subthread)
             MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool counts_as_unread = 6; */
+        if (message.countsAsUnread !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.countsAsUnread);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

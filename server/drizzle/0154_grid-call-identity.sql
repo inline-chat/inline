@@ -1,0 +1,1 @@
+ALTER TABLE "grid_presence" ADD COLUMN "call_id" uuid DEFAULT gen_random_uuid() NOT NULL;

@@ -270,7 +270,7 @@ public enum InlineRTCScreenShareWindowSizePolicy {
 }
 
 public final class InlineRTCVideoTrack: @unchecked Sendable, Equatable {
-  fileprivate let liveKitTrack: VideoTrack
+  let liveKitTrack: VideoTrack
 
   init(_ liveKitTrack: VideoTrack) {
     self.liveKitTrack = liveKitTrack

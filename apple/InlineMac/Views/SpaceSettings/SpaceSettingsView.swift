@@ -1,3 +1,4 @@
+import InlineGrid
 import Foundation
 import InlineKit
 import InlineUI

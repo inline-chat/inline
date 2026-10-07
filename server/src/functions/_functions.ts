@@ -1,3 +1,4 @@
+import { openGridThread, setGridTranscription, listGridTranscripts } from "./gridTranscription"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { deleteMessageAttachment } from "@in/server/functions/messages.deleteMessageAttachment"
 import { clearChatHistory } from "@in/server/functions/messages.clearChatHistory"
@@ -86,6 +87,7 @@ import {
   getGrid,
   getGridHome,
   joinGridRoom,
+  moveGridCallHere,
   leaveGridRoom,
   prepareGridConnection,
   setGridAvatarMicrophoneEnabled,
@@ -193,10 +195,14 @@ export const Functions = {
     getUpdates: getUpdates,
   },
   grid: {
+    openThread: openGridThread,
+    setTranscription: setGridTranscription,
+    listTranscripts: listGridTranscripts,
     get: getGrid,
     getHome: getGridHome,
     createRoom: createGridRoom,
     joinRoom: joinGridRoom,
+    moveCallHere: moveGridCallHere,
     leaveRoom: leaveGridRoom,
     setRoomTitle: setGridRoomTitle,
     setRoomLocked: setGridRoomLocked,

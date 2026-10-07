@@ -17,6 +17,7 @@ export async function setGridAvatarMicrophoneState(
     ownerSessionId: number
     roomId: number
     enabled: boolean
+    expectedMembershipId?: string
   },
 ): Promise<{ membershipId: string; revision: number } | undefined> {
   const updated = await tx
@@ -30,6 +31,9 @@ export async function setGridAvatarMicrophoneState(
         eq(gridPresence.userId, input.userId),
         eq(gridPresence.ownerSessionId, input.ownerSessionId),
         eq(gridPresence.roomId, input.roomId),
+        input.expectedMembershipId === undefined
+          ? undefined
+          : eq(gridPresence.mediaMembershipId, input.expectedMembershipId),
         gt(gridPresence.leaseExpiresAt, new Date()),
       ),
     )

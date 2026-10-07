@@ -8,6 +8,7 @@ import {
   BlockDisclosure_Kind,
   MessageEntities,
   MessageEntity_Type,
+  MessageSendMode,
   Photo_Format,
   type Peer,
 } from "@inline-chat/protocol/core"
@@ -466,6 +467,31 @@ describe("mentioned", () => {
 })
 
 describe("service messages", () => {
+  it("keeps generated transcription quiet in direct and history projections", () => {
+    const service = {
+      event: {
+        oneofKind: "gridTranscript" as const,
+        gridTranscript: { runId: "run", segmentId: "segment", speakerUserId: 200n, kind: 0 },
+      },
+    }
+    const direct = encodeMessage({
+      message: { ...buildMessage({ text: "Transcript · Ben: Hello", countsAsUnread: false }), systemMessage: service },
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+    const history = encodeFullMessage({
+      message: buildFullMessage({ text: "Transcript · Ben: Hello", countsAsUnread: false, systemMessage: service }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+    for (const result of [direct, history]) {
+      expect(result.countsAsUnread).toBe(false)
+      expect(result.sendMode).toBe(MessageSendMode.MODE_SILENT)
+      expect(result.mentioned).toBe(false)
+      expect(result.serviceMessage?.event).toEqual(service.event)
+    }
+  })
+
   it("encodes thread backlink service metadata on full messages", () => {
     const result = encodeFullMessage({
       message: buildFullMessage({

@@ -221,6 +221,8 @@ struct ExperimentalDestinationView: View {
       }
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
+    case let .grid(initialSpaceID):
+      GridDestinationView(initialSpaceID: initialSpaceID)
     case let .spaceSettings(spaceId):
       SpaceSettingsView(spaceId: spaceId, usesRouterNavigation: usesRouterNavigation)
     case let .spaceIntegrations(spaceId):

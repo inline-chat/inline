@@ -57,6 +57,10 @@ let package = Package(
       targets: ["InlineAudioPlayback"]
     ),
     .library(
+      name: "InlineGrid",
+      targets: ["InlineGrid"]
+    ),
+    .library(
       name: "InlineRTC",
       targets: ["InlineRTC"]
     ),
@@ -134,11 +138,18 @@ let package = Package(
     ),
 
     .target(
+      name: "InlineGrid",
+      dependencies: ["InlineKit", "InlineRTC", "InlineAudioPlayback", "InlineProtocol", "RealtimeV2", "Auth", "Logger"],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
       name: "InlineRTC",
       dependencies: [
         .product(name: "Atomics", package: "swift-atomics"),
         .product(name: "LiveKit", package: "client-sdk-swift"),
         "Logger",
+        "InlineAudioPlayback",
       ],
       // Retain failed and superseded audio backends as source-only archives.
       // The compiled macOS path is the directional AUHAL RTCAudioDevice.
@@ -260,6 +271,12 @@ let package = Package(
     .testTarget(
       name: "LoggerTests",
       dependencies: ["Logger"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineGridTests",
+      dependencies: ["InlineGrid", "InlineProtocol", "InlineRTC", "Auth", "RealtimeV2"],
       swiftSettings: swiftSettings
     ),
 

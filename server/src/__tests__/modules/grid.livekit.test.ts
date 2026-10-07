@@ -176,6 +176,31 @@ describe("Grid LiveKit credentials", () => {
     expect(oldClaims.video?.room).not.toBe(currentClaims.video?.room)
   })
 
+  test("binds private credentials to ownership without disclosing the stable call in room metadata", async () => {
+    const config = {
+      serverUrl: "wss://grid.example.test",
+      apiKey: "test-key",
+      apiSecret: "test-secret-that-is-long-enough-for-hmac",
+    }
+    const callId = "00000000-0000-4000-8000-000000000001"
+    const mediaMembershipId = "00000000-0000-4000-8000-000000000002"
+    const credentials = await createGridConnectionCredentials({
+      connection: { roomId: 42n, generation: 3, startedAt: 100n },
+      userId: 7,
+      callId,
+      mediaMembershipId,
+      participantIdentity: `inline-grid-user-7-${mediaMembershipId}`,
+    }, config)
+    expect(credentials?.callId).toBe(callId)
+    expect(credentials?.membershipId).toBe(mediaMembershipId)
+    const claims = await new TokenVerifier(config.apiKey, config.apiSecret).verify(credentials!.token)
+    const metadata = JSON.parse(claims.metadata!)
+    expect(metadata).not.toHaveProperty("callId")
+    expect(metadata).not.toHaveProperty("membershipId")
+    expect(metadata).toEqual({ inlineUserId: 7, gridRoomId: "42", generation: 3 })
+    expect(claims.sub).toBe(`inline-grid-user-7-${mediaMembershipId}`)
+  })
+
   test("returns unavailable when the provider is not configured", async () => {
     await expect(
       createGridConnectionCredentials(

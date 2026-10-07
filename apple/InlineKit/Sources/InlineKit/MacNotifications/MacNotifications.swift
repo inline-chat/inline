@@ -239,6 +239,8 @@ public actor MacNotifications {
   ) -> Bool {
     guard source == .newMessage else { return false }
     guard deliveryState.isNewlyInserted, deliveryState.isUnread else { return false }
+    guard !message.hasCountsAsUnread || message.countsAsUnread else { return false }
+    if case .gridTranscript = message.serviceMessage.event { return false }
     guard message.sendMode != .modeSilent else { return false }
     guard isFreshMessage(message, now: now) else { return false }
 

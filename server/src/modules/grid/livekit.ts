@@ -63,6 +63,8 @@ export async function createGridConnectionCredentials(
     userId: number
     displayName?: string
     participantIdentity?: string
+    callId?: string
+    mediaMembershipId?: string
   },
   config: LiveKitGridConfig | null | undefined = getLiveKitGridConfig(),
 ): Promise<GridConnectionCredentials | undefined> {
@@ -71,6 +73,8 @@ export async function createGridConnectionCredentials(
     log.debug("GRID_TRACE phase=credentials_config_unavailable", {
       roomId: input.connection.roomId.toString(),
       generation: input.connection.generation,
+      callId: input.callId,
+      membershipId: input.mediaMembershipId,
       userId: input.userId,
     })
     return undefined
@@ -111,6 +115,8 @@ export async function createGridConnectionCredentials(
     participantIdentity,
     token: jwt,
     expiresAt: BigInt(Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS),
+    callId: input.callId ?? "",
+    membershipId: input.mediaMembershipId ?? "",
   }
 }
 

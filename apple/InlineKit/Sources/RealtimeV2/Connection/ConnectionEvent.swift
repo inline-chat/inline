@@ -4,6 +4,7 @@ public enum ConnectionEvent: Sendable {
   case connectNow
   case userInitiatedOperationStarted
   case userInitiatedOperationFinished
+  case mediaRetentionChanged(eligible: Bool, revision: UInt64)
 
   case authAvailable
   case authLost
@@ -44,6 +45,7 @@ extension ConnectionEvent {
     case .connectNow: "connectNow"
     case .userInitiatedOperationStarted: "userInitiatedOperationStarted"
     case .userInitiatedOperationFinished: "userInitiatedOperationFinished"
+    case .mediaRetentionChanged: "mediaRetentionChanged"
     case .authAvailable: "authAvailable"
     case .authLost: "authLost"
     case .networkAvailable: "networkAvailable"

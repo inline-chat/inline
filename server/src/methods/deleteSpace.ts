@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { eq, inArray } from "drizzle-orm"
-import { members, spaces, users } from "@in/server/db/schema"
+import { chats, members, spaces, users } from "@in/server/db/schema"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { normalizeId, TInputId } from "@in/server/types/methods"
@@ -14,6 +14,7 @@ import type { Update } from "@inline-chat/protocol/core"
 import { InlineError } from "@in/server/types/errors"
 import { deactivateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
 import { Log } from "@in/server/utils/log"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 const log = new Log("space.deleteSpace")
 
@@ -94,6 +95,10 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
         if (!sameIds(expectedMemberUserIds, lockedMemberUserIds)) {
           throw new SpaceMemberSetChanged(lockedMemberUserIds)
         }
+
+        const spaceChats = await tx.select({ id: chats.id }).from(chats)
+          .where(eq(chats.spaceId, spaceId)).orderBy(chats.id).for("update")
+        await invalidateGridTranscriptionForHistory(tx, { chatIds: spaceChats.map((chat) => chat.id), reason: "space_deleted" })
 
         await UserBucketUpdates.enqueueMany(
           lockedMemberUserIds.map((userId) => ({

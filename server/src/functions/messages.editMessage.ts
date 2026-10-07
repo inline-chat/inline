@@ -64,6 +64,9 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   if (fullMessage && await isSubthreadParentMessage(fullMessage.globalId)) {
     throw RealtimeRpcError.BadRequest()
   }
+  if (fullMessage?.systemMessage?.event.oneofKind === "gridTranscript") {
+    throw RealtimeRpcError.BadRequest()
+  }
   if (await isImportedAgentMessage(chatId, Number(input.messageId))) {
     throw RealtimeRpcError.AgentSessionMessageImmutable()
   }

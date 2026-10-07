@@ -1,3 +1,4 @@
+import InlineGrid
 import Auth
 import Foundation
 import GRDB
@@ -40,7 +41,11 @@ public struct AppDependencies {
   let session = tracedLaunchDependency("DependencySessionRefresher") { MainWindowSessionRefresher() }
   let unreadCounts = tracedLaunchDependency("DependencyUnreadCounts") { UnreadCountsModel.shared }
   let userSettings = tracedLaunchDependency("DependencyUserSettings") { INUserSettings.current }
-  let gridRuntime = tracedLaunchDependency("DependencyGridRuntime") { GridRuntime.shared }
+  let gridRuntime = tracedLaunchDependency("DependencyGridRuntime") {
+    let runtime = GridRuntime.shared
+    runtime.configurePlatformEffects(.macOS)
+    return runtime
+  }
   let commandBarCatalog = tracedLaunchDependency("DependencyCommandCatalog") {
     CommandBarCatalogService(database: AppDatabase.shared)
   }

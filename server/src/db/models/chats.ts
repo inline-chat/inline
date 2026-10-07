@@ -25,6 +25,7 @@ import {
   dialogOpenDefaultsForChat,
   dialogOrderForPlacement,
 } from "@in/server/modules/dialogOpen"
+import { messageActivityPredicate } from "@in/server/modules/message/activity"
 
 const log = new Log("chats")
 
@@ -291,7 +292,7 @@ async function refreshLastMessageId(chatId: number) {
     let [message] = await tx
       .select()
       .from(messages)
-      .where(eq(messages.chatId, chatId))
+      .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
       .orderBy(desc(messages.messageId))
       .limit(1)
 
@@ -319,7 +320,7 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
     let [message] = await tx
       .select()
       .from(messages)
-      .where(eq(messages.chatId, chatId))
+      .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
       .orderBy(desc(messages.messageId))
       .limit(1)
 

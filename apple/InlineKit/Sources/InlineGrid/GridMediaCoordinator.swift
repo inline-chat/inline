@@ -1,0 +1,597 @@
+import Foundation
+import InlineKit
+import InlineRTC
+
+enum GridMediaCoordinatorEvent: Sendable {
+  case credentialsNeeded(GridMediaTarget)
+  case connected(GridMediaTarget, rtcConnectMilliseconds: Int?)
+  case screenShareContextChanged
+  case microphoneSafetyPaused
+  case audioEligibilityChanged(Bool)
+}
+
+struct GridAutomaticMicrophoneChange: Equatable, Sendable {
+  let revision: Int
+  let previousEnabled: Bool
+  let appliedEnabled: Bool
+}
+
+/// Main-actor bridge between room product state and the process-wide media
+/// engine. This owns media intent, preference persistence, credentials, and
+/// snapshot projection; `GridRoomService` never reaches into audio or RTC.
+@MainActor
+final class GridMediaCoordinator {
+  let presentation: GridMediaPresentation
+
+  private var platformEffects = GridPlatformEffects()
+  private let engine: InlineRTCSession
+  private let presentationController: GridMediaPresentationController
+  private let inputPreferences: AudioInputPreferenceStore
+  private let outputPreferences: AudioOutputPreferenceStore
+  private let defaults: UserDefaults
+  private var microphoneEnabled: Bool
+  private var microphoneCapturePrepared = false
+  private var lastSafetyPauseRevision: UInt64 = 0
+  private var lastAudioEligibility = false
+  private var microphoneIntentRevision = 0
+  private var activeAutomaticMicrophoneChange: GridAutomaticMicrophoneChange?
+  private var autoUnmuteOnJoin: Bool
+  private var autoMuteWhenAlone: Bool
+  private var inputSelection: AudioInputSelection
+  private var outputSelection: AudioOutputSelection
+  private var outputVolume: Float = 1
+  private var screenCaptureSource: InlineRTCScreenCaptureSource?
+  private var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
+  private var screenCaptureSourceRefresh: GridScreenCaptureSourceRefresh?
+  private var target: GridMediaTarget?
+  private var connectedTarget: GridMediaTarget?
+  private var credentials: InlineRTCCredentials?
+  private var lastDemand: InlineRTCDemand?
+  private var playedConnectionSoundKeys = Set<String>()
+  private var engineTask: Task<Void, Never>?
+  private var subscribers: [UUID: AsyncStream<GridMediaCoordinatorEvent>.Continuation] = [:]
+
+  private static let microphoneEnabledKey = "grid.microphoneEnabled"
+  private static let autoUnmuteOnJoinKey = "grid.autoUnmuteOnJoin"
+  private static let autoMuteWhenAloneKey = "grid.autoMuteWhenAlone"
+  private static let screenShareQualityProfileKey = "grid.screenShareQualityProfile"
+
+  init(
+    engine: InlineRTCSession,
+    defaults: UserDefaults,
+    inputPreferences: AudioInputPreferenceStore,
+    outputPreferences: AudioOutputPreferenceStore
+  ) {
+    self.engine = engine
+    self.defaults = defaults
+    self.inputPreferences = inputPreferences
+    self.outputPreferences = outputPreferences
+    #if os(iOS)
+    inputSelection = .automatic
+    outputSelection = .automatic
+    microphoneEnabled = false
+    autoUnmuteOnJoin = false
+    autoMuteWhenAlone = false
+    #else
+    inputSelection = inputPreferences.selection
+    outputSelection = outputPreferences.selection
+    microphoneEnabled = defaults.bool(forKey: Self.microphoneEnabledKey)
+    autoUnmuteOnJoin = defaults.bool(forKey: Self.autoUnmuteOnJoinKey)
+    autoMuteWhenAlone = defaults.bool(forKey: Self.autoMuteWhenAloneKey)
+    #endif
+    screenShareQualityProfile = defaults.string(forKey: Self.screenShareQualityProfileKey)
+      .flatMap(InlineRTCScreenShareQualityProfile.init(rawValue:))
+      ?? .automatic
+    let controller = GridMediaPresentationController(
+      microphoneEnabled: microphoneEnabled,
+      autoUnmuteOnJoin: autoUnmuteOnJoin,
+      autoMuteWhenAlone: autoMuteWhenAlone,
+      inputSelection: inputSelection,
+      screenShareQualityProfile: screenShareQualityProfile,
+      outputSelection: outputSelection
+    )
+    presentationController = controller
+    presentation = controller.presentation
+
+    engineTask = Task { [weak self, engine] in
+      await engine.start()
+      guard !Task.isCancelled else { return }
+      engine.refreshDevices()
+      self?.submitDemand()
+      let snapshots = await engine.subscribe()
+      for await snapshot in snapshots {
+        guard !Task.isCancelled else { return }
+        self?.apply(snapshot)
+      }
+    }
+  }
+
+  deinit {
+    engineTask?.cancel()
+    subscribers.values.forEach { $0.finish() }
+    engine.requestShutdown()
+  }
+
+  func subscribe() -> AsyncStream<GridMediaCoordinatorEvent> {
+    let id = UUID()
+    let stream = AsyncStream.makeStream(
+      of: GridMediaCoordinatorEvent.self,
+      // These are edge notifications backed by complete engine snapshots and
+      // target-scoped credential retry. A stalled observer must stay bounded.
+      bufferingPolicy: .bufferingNewest(16)
+    )
+    stream.continuation.onTermination = { [weak self] _ in
+      Task { @MainActor in self?.subscribers.removeValue(forKey: id) }
+    }
+    subscribers[id] = stream.continuation
+    return stream.stream
+  }
+
+  func configurePlatformEffects(_ effects: GridPlatformEffects) {
+    platformEffects = effects
+  }
+
+  func setTarget(_ target: GridMediaTarget?) {
+    #if os(iOS)
+    if target == nil || self.target?.callID != target?.callID
+      || self.target?.membershipID != target?.membershipID
+    {
+      microphoneCapturePrepared = false
+      setMicrophoneEnabled(false)
+    }
+    #endif
+    guard self.target != target else {
+      submitDemand()
+      return
+    }
+    screenCaptureSource = nil
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    platformEffects.updateScreenShareOutline?(nil)
+    platformEffects.closeScreenShares?()
+    self.target = target
+    if credentials?.target != target?.rtcSessionID {
+      credentials = nil
+    }
+    submitDemand()
+  }
+
+  func accept(_ credentials: InlineRTCCredentials) -> Bool {
+    guard credentials.target == target?.rtcSessionID else { return false }
+    self.credentials = credentials
+    submitDemand()
+    return true
+  }
+
+  func hasUsableCredentials(for target: GridMediaTarget) -> Bool {
+    credentials?.target == target.rtcSessionID
+      && (credentials?.expiresAt.timeIntervalSinceNow ?? 0) > 5
+  }
+
+  func isConnected(to target: GridMediaTarget) -> Bool {
+    connectedTarget == target
+  }
+
+  func invalidateCredentials(for target: GridMediaTarget) {
+    guard credentials?.target == target.rtcSessionID else { return }
+    credentials = nil
+    submitDemand()
+  }
+
+  func clearCredentials() {
+    guard credentials != nil else { return }
+    credentials = nil
+    submitDemand()
+  }
+
+  @discardableResult
+  func withdrawLocalMedia() -> Task<GridMediaShutdownReceipt, Never> {
+    microphoneCapturePrepared = false
+    #if os(iOS)
+    setMicrophoneEnabled(false)
+    #endif
+    clearCredentials()
+    setTarget(nil)
+    lastDemand = nil
+    return engine.requestShutdownReceipt()
+  }
+
+  func toggleMicrophone() -> Bool {
+    setMicrophoneEnabled(!microphoneEnabled)
+  }
+
+  @discardableResult
+  func setMicrophoneEnabled(_ enabled: Bool) -> Bool {
+    #if os(iOS)
+    if enabled, target == nil {
+      return false
+    }
+    if enabled {
+      microphoneCapturePrepared = true
+    }
+    #endif
+    guard microphoneEnabled != enabled else {
+      submitDemand()
+      return enabled
+    }
+    if enabled, presentation.microphonePermission != .authorized {
+      engine.requestMicrophonePermission()
+    }
+    activeAutomaticMicrophoneChange = nil
+    microphoneIntentRevision &+= 1
+    microphoneEnabled = enabled
+    presentationController.setMicrophoneEnabled(enabled)
+    defaults.set(enabled, forKey: Self.microphoneEnabledKey)
+    submitDemand()
+    return enabled
+  }
+
+  func applyAutoUnmuteOnJoin() -> GridAutomaticMicrophoneChange? {
+    guard autoUnmuteOnJoin else { return nil }
+    if microphoneEnabled {
+      return activeAutomaticMicrophoneChange
+    }
+    let previousEnabled = microphoneEnabled
+    setMicrophoneEnabled(true)
+    let change = GridAutomaticMicrophoneChange(
+      revision: microphoneIntentRevision,
+      previousEnabled: previousEnabled,
+      appliedEnabled: true
+    )
+    activeAutomaticMicrophoneChange = change
+    return change
+  }
+
+  @discardableResult
+  func restoreAutomaticMicrophoneChangeIfCurrent(
+    _ change: GridAutomaticMicrophoneChange?
+  ) -> Bool {
+    guard let change,
+          activeAutomaticMicrophoneChange == change,
+          microphoneIntentRevision == change.revision,
+          microphoneEnabled == change.appliedEnabled
+    else { return false }
+    setMicrophoneEnabled(change.previousEnabled)
+    return true
+  }
+
+  func commitAutomaticMicrophoneChange(_ change: GridAutomaticMicrophoneChange?) {
+    guard activeAutomaticMicrophoneChange == change else { return }
+    activeAutomaticMicrophoneChange = nil
+  }
+
+  func setAutoUnmuteOnJoin(_ enabled: Bool) {
+    guard autoUnmuteOnJoin != enabled else { return }
+    autoUnmuteOnJoin = enabled
+    defaults.set(enabled, forKey: Self.autoUnmuteOnJoinKey)
+    presentationController.setAutoUnmuteOnJoin(enabled)
+  }
+
+  func setAutoMuteWhenAlone(_ enabled: Bool) {
+    guard autoMuteWhenAlone != enabled else { return }
+    autoMuteWhenAlone = enabled
+    defaults.set(enabled, forKey: Self.autoMuteWhenAloneKey)
+    presentationController.setAutoMuteWhenAlone(enabled)
+  }
+
+  func requestMicrophonePermission() {
+    engine.requestMicrophonePermission()
+  }
+
+  func setInput(_ selection: AudioInputSelection) {
+    if inputSelection == selection {
+      if presentation.isFallingBackToAutomaticInput || presentation.audioState.isFailed {
+        engine.retryInput(selection)
+      }
+      return
+    }
+    inputSelection = selection
+    inputPreferences.setSelection(selection)
+    presentationController.setDesiredInputSelection(selection)
+    submitDemand()
+  }
+
+  func setOutput(_ selection: AudioOutputSelection) {
+    if outputSelection == selection {
+      if presentation.isFallingBackToAutomaticOutput || presentation.audioState.isFailed {
+        engine.retryOutput(selection)
+      }
+      return
+    }
+    outputSelection = selection
+    outputPreferences.setSelection(selection)
+    presentationController.setDesiredOutputSelection(selection)
+    submitDemand()
+  }
+
+  func setOutputVolume(_ volume: Float) {
+    outputVolume = min(max(volume, 0), 1)
+    presentationController.setDesiredOutputVolume(outputVolume)
+    submitDemand()
+  }
+
+  func refreshInputDevices() {
+    engine.refreshDevices()
+  }
+
+  func refreshOutputDevices() {
+    engine.refreshDevices()
+  }
+
+  @discardableResult
+  func refreshScreenCaptureSources() async -> [InlineRTCScreenCaptureSource] {
+    if let refresh = screenCaptureSourceRefresh {
+      return await finishScreenCaptureSourceRefresh(
+        refresh.task.value,
+        id: refresh.id
+      )
+    }
+
+    let refresh = GridScreenCaptureSourceRefresh(
+      id: UUID(),
+      task: Task { [engine] in
+        do {
+          let sources = try await engine.screenCaptureSources()
+          guard !sources.isEmpty else {
+            return .failure("No displays are available")
+          }
+          return .success(sources)
+        } catch {
+          return .failure(error.localizedDescription)
+        }
+      }
+    )
+    screenCaptureSourceRefresh = refresh
+    presentationController.setRefreshingScreenCaptureSources(true)
+    return await finishScreenCaptureSourceRefresh(
+      refresh.task.value,
+      id: refresh.id
+    )
+  }
+
+  func startScreenSharing(displayID: UInt32?) async {
+    guard let expectedTarget = target else { return }
+    let sources = await refreshScreenCaptureSources()
+    guard target == expectedTarget else { return }
+    let source = displayID.flatMap { displayID in
+      sources.first { $0.displayID == displayID }
+    } ?? sources.first
+    guard let source else { return }
+    startScreenSharing(source)
+  }
+
+  func startScreenSharing(_ source: InlineRTCScreenCaptureSource) {
+    guard target != nil else { return }
+    screenCaptureSource = source
+    presentationController.setSelectedScreenCaptureSource(source)
+    presentationController.clearScreenCaptureError()
+    submitDemand()
+  }
+
+  func stopScreenSharing() {
+    screenCaptureSource = nil
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    platformEffects.updateScreenShareOutline?(nil)
+    submitDemand()
+  }
+
+  func setScreenShareQualityProfile(_ profile: InlineRTCScreenShareQualityProfile) {
+    guard screenShareQualityProfile != profile else { return }
+    screenShareQualityProfile = profile
+    defaults.set(profile.rawValue, forKey: Self.screenShareQualityProfileKey)
+    presentationController.setScreenShareQualityProfile(profile)
+    submitDemand()
+  }
+
+  func retryAudio() {
+    engine.retryAudio()
+  }
+
+  func networkBecameAvailable() {
+    engine.networkBecameAvailable()
+  }
+
+  func applicationDidWake() {
+    engine.applicationDidWake()
+  }
+
+  @discardableResult
+  func shutdown() async -> GridMediaShutdownReceipt {
+    target = nil
+    connectedTarget = nil
+    credentials = nil
+    screenCaptureSource = nil
+    screenCaptureSourceRefresh?.task.cancel()
+    screenCaptureSourceRefresh = nil
+    presentationController.setRefreshingScreenCaptureSources(false)
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    platformEffects.updateScreenShareOutline?(nil)
+    platformEffects.closeScreenShares?()
+    lastDemand = nil
+    engine.setDemand(InlineRTCDemand())
+    return await engine.requestShutdownReceipt().value
+  }
+
+  var isMicrophoneEnabled: Bool {
+    microphoneEnabled
+  }
+
+  var shouldAutoMuteWhenAlone: Bool {
+    autoMuteWhenAlone
+  }
+
+  private var microphoneCapturePreparedForDemand: Bool {
+    #if os(iOS)
+    microphoneCapturePrepared && target != nil
+    #else
+    target != nil
+    #endif
+  }
+
+  private func submitDemand() {
+    let rtcTarget = target?.rtcSessionID
+    if credentials?.target != rtcTarget {
+      credentials = nil
+    }
+    let demand = InlineRTCDemand(
+      target: rtcTarget,
+      credentials: credentials,
+      microphoneEnabled: microphoneEnabled,
+      microphoneCapturePrepared: microphoneCapturePreparedForDemand,
+      screenCaptureSource: screenCaptureSource,
+      screenShareQualityProfile: screenShareQualityProfile,
+      input: inputSelection,
+      output: outputSelection,
+      outputVolume: outputVolume
+    )
+    guard demand != lastDemand else { return }
+    lastDemand = demand
+    engine.setDemand(demand)
+  }
+
+  private func finishScreenCaptureSourceRefresh(
+    _ result: GridScreenCaptureSourceRefreshResult,
+    id: UUID
+  ) -> [InlineRTCScreenCaptureSource] {
+    let sources = result.sources
+    guard screenCaptureSourceRefresh?.id == id else { return sources }
+    screenCaptureSourceRefresh = nil
+    presentationController.setRefreshingScreenCaptureSources(false)
+    switch result {
+      case let .success(sources):
+        presentationController.applyScreenCaptureSources(.success(sources))
+      case let .failure(message):
+        presentationController.applyScreenCaptureSources(
+          .failure(GridScreenCaptureSourceRefreshError(message: message))
+        )
+    }
+    reconcileScreenShareOutline()
+    return sources
+  }
+
+  private func apply(_ snapshot: InlineRTCState) {
+    #if os(iOS)
+    if snapshot.audio.safetyPauseRevision != lastSafetyPauseRevision {
+      lastSafetyPauseRevision = snapshot.audio.safetyPauseRevision
+      microphoneCapturePrepared = false
+      setMicrophoneEnabled(false)
+      broadcast(.microphoneSafetyPaused)
+    }
+    if snapshot.audio.microphonePermission == .denied || snapshot.audio.microphonePermission == .restricted,
+       microphoneEnabled
+    {
+      microphoneCapturePrepared = false
+      setMicrophoneEnabled(false)
+      broadcast(.microphoneSafetyPaused)
+    }
+    #endif
+    presentationController.apply(audio: snapshot.audio)
+    if let devices = snapshot.devices {
+      presentationController.apply(devices: devices)
+    }
+    if let outputDevices = snapshot.outputDevices {
+      presentationController.apply(outputDevices: outputDevices)
+    }
+
+    let wasConnected = presentation.connectionState == .connected
+    presentationController.apply(rtc: snapshot.rtc)
+    reconcileScreenShareOutline()
+    broadcast(.screenShareContextChanged)
+    if case .failed = snapshot.rtc.screenShareState, screenCaptureSource != nil {
+      screenCaptureSource = nil
+      presentationController.setSelectedScreenCaptureSource(nil)
+      submitDemand()
+    }
+    if case let .connected(sessionID) = snapshot.rtc.state,
+       let target,
+       target.rtcSessionID == sessionID
+    {
+      connectedTarget = target
+    } else {
+      connectedTarget = nil
+    }
+    let audioEligible = target != nil && connectedTarget != nil
+      && (snapshot.audio.isCaptureHealthy || snapshot.audio.isPlayoutHealthy)
+    if audioEligible != lastAudioEligibility {
+      lastAudioEligibility = audioEligible
+      broadcast(.audioEligibilityChanged(audioEligible))
+    }
+    if !wasConnected,
+       presentation.connectionState == .connected,
+       let sessionID = snapshot.rtc.target,
+       let target,
+       target.rtcSessionID == sessionID
+    {
+      let soundKey = sessionID.rawValue
+      if playedConnectionSoundKeys.count >= 128 {
+        playedConnectionSoundKeys.removeAll(keepingCapacity: true)
+      }
+      if playedConnectionSoundKeys.insert(soundKey).inserted {
+        platformEffects.playSound?(.connected)
+      }
+      broadcast(.connected(target, rtcConnectMilliseconds: snapshot.rtc.lastConnectMilliseconds))
+    }
+    if case let .waitingForCredentials(sessionID) = snapshot.rtc.state,
+       let target,
+       target.rtcSessionID == sessionID
+    {
+      broadcast(.credentialsNeeded(target))
+    }
+  }
+
+  private func broadcast(_ event: GridMediaCoordinatorEvent) {
+    subscribers.values.forEach { $0.yield(event) }
+  }
+
+  private func reconcileScreenShareOutline() {
+    guard let localShare = presentation.screenShares.first(where: \.isLocal),
+          let sourceID = localShare.captureSourceID
+    else {
+      platformEffects.updateScreenShareOutline?(nil)
+      return
+    }
+    let sources = presentation.screenCaptureSources
+      + [presentation.selectedScreenCaptureSource].compactMap(\.self)
+    guard let source = sources.first(where: { $0.id == sourceID }) else {
+      platformEffects.updateScreenShareOutline?(nil)
+      return
+    }
+    platformEffects.updateScreenShareOutline?(source)
+  }
+}
+
+private struct GridScreenCaptureSourceRefresh {
+  let id: UUID
+  let task: Task<GridScreenCaptureSourceRefreshResult, Never>
+}
+
+private enum GridScreenCaptureSourceRefreshResult: Sendable {
+  case success([InlineRTCScreenCaptureSource])
+  case failure(String)
+
+  var sources: [InlineRTCScreenCaptureSource] {
+    switch self {
+      case let .success(sources): sources
+      case .failure: []
+    }
+  }
+}
+
+private struct GridScreenCaptureSourceRefreshError: LocalizedError, Sendable {
+  let message: String
+
+  var errorDescription: String? {
+    message
+  }
+}
+
+private extension InlineRTCAudioState {
+  var isFailed: Bool {
+    if case .failed = self {
+      return true
+    }
+    return false
+  }
+}

@@ -20,10 +20,19 @@ struct AnchoredMessageWindowTests {
     let fixture = try await Fixture()
     let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: nil)
     defer { model.dispose() }
-    model.setHistoryAnchor(15) // ignored without the experimental window limit
     fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
     #expect(model.messages.last?.message.messageId == 100)
     #expect(model.messages.count == 12)
+  }
+
+  @Test @MainActor
+  func unboundedHistoricalWindowDoesNotAppendTheLiveTail() async throws {
+    let fixture = try await Fixture()
+    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: nil)
+    defer { model.dispose() }
+    model.setHistoryAnchor(15)
+    fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
+    #expect(model.messages.map(\.message.messageId) == Array(Int64(10) ... 20))
   }
 
   @Test @MainActor

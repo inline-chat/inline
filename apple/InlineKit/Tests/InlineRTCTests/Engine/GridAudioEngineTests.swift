@@ -5,6 +5,50 @@ import Testing
 
 @Suite("Grid audio engine", .serialized)
 struct GridAudioEngineTests {
+  @Test("retry after a safety pause restores listening without restoring a microphone lease")
+  func safetyRetryRestoresListeningOnly() async throws {
+    let driver = FakeGridAudioDriver()
+    let engine = GridAudioEngine(driver: driver, permissionDriver: TestGridMicrophonePermissionDriver())
+    let lease = GridAudioLease.connectionDemand(.init("grid-test:1:76:1"))
+    await engine.setInput(.automatic)
+    await engine.acquireCaptureLease(lease)
+    try await eventually { await engine.currentSnapshot().isPrepared }
+    let prepareCount = await driver.operations().filter { $0 == "prepared:true" }.count
+
+    await driver.emit(.safetyPaused)
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return snapshot.isSafetyPaused && snapshot.captureLeaseCount == 0
+    }
+    await engine.retry()
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return !snapshot.isSafetyPaused && snapshot.isPlaying && !snapshot.isRecording
+    }
+    #expect(await engine.currentSnapshot().captureLeaseCount == 0)
+    #expect(await driver.operations().filter { $0 == "prepared:true" }.count == prepareCount)
+    _ = await engine.shutdown()
+  }
+
+  @Test("a denied microphone does not prevent listening-only safety recovery")
+  func safetyRetryWithoutMicrophonePermission() async throws {
+    let driver = FakeGridAudioDriver()
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied, requested: .denied)
+    )
+    await engine.start()
+    await driver.emit(.safetyPaused)
+    try await eventually { await engine.currentSnapshot().isSafetyPaused }
+    await engine.retry()
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return !snapshot.isSafetyPaused && snapshot.isPlaying && !snapshot.isRecording
+    }
+    #expect(!(await driver.operations().contains("prepared:true")))
+    _ = await engine.shutdown()
+  }
+
   @Test("permission gates the physical input transaction")
   func permissionGatesInputRoute() async throws {
     let driver = FakeGridAudioDriver()
@@ -1835,6 +1879,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
   nonisolated let recordingStartsWithMicrophoneSender: Bool
   private nonisolated let eventContinuation: AsyncStream<GridAudioDriverEvent>.Continuation
   private var log: [String] = []
+  private var safetyPaused = false
   private var availableDeviceIDs: Set<String>
   private var availableOutputDeviceIDs: Set<String>
   private let blockConfigure: Bool
@@ -1947,6 +1992,12 @@ private actor FakeGridAudioDriver: GridAudioDriver {
 
   func resumeAfterTerminalShutdown() async {
     log.append("resume-terminal-gate")
+  }
+
+  func resumeListeningAfterSafetyPause() async throws {
+    guard safetyPaused else { return }
+    log.append("resume-listening")
+    emit(.listeningResumed)
   }
 
   func setPrepared(_ prepared: Bool) async throws {
@@ -2203,6 +2254,16 @@ private actor FakeGridAudioDriver: GridAudioDriver {
       engineRunning = false
       recordingActive = false
       playingActive = false
+    case .safetyPaused:
+      safetyPaused = true
+      engineRunning = false
+      recordingActive = false
+      playingActive = false
+    case .listeningResumed:
+      safetyPaused = false
+      engineRunning = true
+      recordingActive = false
+      playingActive = true
     case .devicesChanged:
       break
     }

@@ -439,6 +439,7 @@ message MessageService {
   oneof event {
     MessageServiceThreadBacklink thread_backlink = 1;
     MessageServicePinnedMessage pinned_message = 2;
+    MessageServiceGridTranscript grid_transcript = 3;
   }
 }
 
@@ -450,6 +451,21 @@ message MessageServiceThreadBacklink {
 message MessageServicePinnedMessage {
   // Per-chat message id of the pinned message, when known.
   optional int64 message_id = 1;
+}
+
+enum GridTranscriptMessageKind {
+  GRID_TRANSCRIPT_TURN = 0;
+  GRID_TRANSCRIPT_STARTED = 1;
+  GRID_TRANSCRIPT_STOPPED = 2;
+  GRID_TRANSCRIPT_INTERRUPTED = 3;
+  GRID_TRANSCRIPT_LINK = 4;
+}
+
+message MessageServiceGridTranscript {
+  string run_id = 1;
+  string segment_id = 2;
+  optional int64 speaker_user_id = 3;
+  GridTranscriptMessageKind kind = 4;
 }
 
 // Structural rich content projected alongside Message.message and
@@ -677,6 +693,9 @@ message Message {
 
   // Canonical card projection for anchored replies and materialized subthreads.
   optional MessageSubthread subthread = 25;
+
+  // Explicit false suppresses unread for generated/historical rows.
+  optional bool counts_as_unread = 26;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -1602,6 +1621,10 @@ enum Method {
   REQUEST_BOT_FILESYSTEM = 143;
   ANSWER_BOT_FILESYSTEM = 144;
   SET_SPACE_PHOTO = 145;
+  MOVE_GRID_CALL_HERE = 146;
+  OPEN_GRID_THREAD = 147;
+  SET_GRID_TRANSCRIPTION = 148;
+  LIST_GRID_TRANSCRIPTS = 149;
 }
 
 message RpcCall {
@@ -1752,6 +1775,10 @@ message RpcCall {
     RequestBotFilesystemInput requestBotFilesystem = 144;
     AnswerBotFilesystemInput answerBotFilesystem = 145;
     SetSpacePhotoInput setSpacePhoto = 146;
+    MoveGridCallHereInput moveGridCallHere = 147;
+    OpenGridThreadInput openGridThread = 148;
+    SetGridTranscriptionInput setGridTranscription = 149;
+    ListGridTranscriptsInput listGridTranscripts = 150;
   }
 }
 
@@ -1904,6 +1931,10 @@ message RpcResult {
     RequestBotFilesystemResult requestBotFilesystem = 144;
     AnswerBotFilesystemResult answerBotFilesystem = 145;
     SetSpacePhotoResult setSpacePhoto = 146;
+    MoveGridCallHereResult moveGridCallHere = 147;
+    OpenGridThreadResult openGridThread = 148;
+    SetGridTranscriptionResult setGridTranscription = 149;
+    ListGridTranscriptsResult listGridTranscripts = 150;
   }
 }
 
@@ -2078,7 +2109,57 @@ message GridRoom {
   int64 updated_at = 7;
   repeated GridAvatar avatars = 8;
   optional GridConnection connection = 9;
+  optional int64 room_thread_id = 10;
+  bool transcription_available = 11;
+  optional GridTranscription transcription = 12;
 }
+
+enum GridTranscriptionState {
+  GRID_TRANSCRIPTION_UNSPECIFIED = 0;
+  GRID_TRANSCRIPTION_STARTING = 1;
+  GRID_TRANSCRIPTION_ACTIVE = 2;
+  GRID_TRANSCRIPTION_STOPPING = 3;
+  GRID_TRANSCRIPTION_STOPPED = 4;
+  GRID_TRANSCRIPTION_INTERRUPTED = 5;
+}
+
+message GridTranscription {
+  string run_id = 1;
+  GridTranscriptionState state = 2;
+  optional int64 transcript_chat_id = 3;
+  int32 revision = 4;
+}
+
+enum GridTranscriptDestination {
+  GRID_TRANSCRIPT_LAST = 0;
+  GRID_TRANSCRIPT_NEW = 1;
+  GRID_TRANSCRIPT_EXISTING = 2;
+}
+
+message OpenGridThreadInput {
+  int64 room_id = 1;
+  string expected_membership_id = 2;
+}
+message OpenGridThreadResult { int64 chat_id = 1; repeated Update updates = 2; }
+message SetGridTranscriptionInput {
+  int64 room_id = 1;
+  string expected_membership_id = 2;
+  int32 expected_generation = 3;
+  optional string expected_run_id = 4;
+  int32 expected_revision = 5;
+  bool enabled = 6;
+  GridTranscriptDestination destination = 7;
+  optional int64 transcript_chat_id = 8;
+  string request_id = 9;
+}
+message SetGridTranscriptionResult { Grid grid = 1; repeated Update updates = 2; }
+message ListGridTranscriptsInput { int64 room_id = 1; }
+message GridTranscriptDestinationInfo {
+  int64 transcript_chat_id = 1;
+  string title = 2;
+  bool busy = 3;
+}
+message ListGridTranscriptsResult { repeated GridTranscriptDestinationInfo transcripts = 1; }
 
 // Replaceable current state for one Space's implicit Grid.
 message Grid {
@@ -2089,6 +2170,22 @@ message Grid {
   // Server-owned monotonic revision for this Space's complete Grid snapshot.
   // Clients must not replace a newer snapshot with a lower revision.
   int64 revision = 5;
+  // Effective server capability, including ownership fence enforcement.
+  // New clients must not admit media through an older/disabled server.
+  bool call_transfer_enabled = 6;
+}
+
+// Personalized control ownership, disclosed only to the authenticated user.
+// call_id stays stable across an explicit device transfer; membership_id is
+// replaced on each transfer/resume and fences commands and media credentials.
+message GridCurrentCall {
+  string call_id = 1;
+  int64 space_id = 2;
+  int64 room_id = 3;
+  string membership_id = 4;
+  bool owned_by_current_session = 5;
+  // Coarse existing session client kind (ios, macos, etc.), not a device ID.
+  string owner_client_type = 6;
 }
 
 // Short-lived, session-targeted LiveKit credentials. Never persist or include
@@ -2099,11 +2196,21 @@ message GridConnectionCredentials {
   string participant_identity = 3;
   string token = 4;
   int64 expires_at = 5;
+  string call_id = 6;
+  string membership_id = 7;
 }
 
-message GetGridInput { int64 space_id = 1; }
+message GetGridInput {
+  int64 space_id = 1;
+  // Explicit renewal by the admitted owner. Omit for read-only browsing when
+  // call-transfer enforcement is active. A stale fence never renews presence.
+  optional string expected_membership_id = 2;
+}
 
-message GetGridResult { Grid grid = 1; }
+message GetGridResult {
+  Grid grid = 1;
+  optional GridCurrentCall current_call = 2;
+}
 
 // Home-level discovery for every Grid-enabled Space the current user can see.
 // This is a bounded summary: full rooms remain available only through GetGrid.
@@ -2116,31 +2223,66 @@ message GridHomeSpace {
 
 message GetGridHomeInput {}
 
-message GetGridHomeResult { repeated GridHomeSpace spaces = 1; }
+message GetGridHomeResult {
+  repeated GridHomeSpace spaces = 1;
+  optional GridCurrentCall current_call = 2;
+  bool call_transfer_enabled = 3;
+}
 
 message CreateGridRoomInput {
   int64 space_id = 1;
   optional bool microphone_enabled = 2;
+  // Required when call_transfer_enabled: empty expects no active presence;
+  // nonempty must match the current session's live membership exactly.
+  optional string expected_membership_id = 3;
 }
 
 message CreateGridRoomResult {
   repeated Grid grids = 1;
   optional GridConnectionCredentials connection = 2;
+  // Successful claims report the projection captured at commit. A newer
+  // accepted Grid/self state wins; this field alone cannot admit media.
+  optional GridCurrentCall current_call = 3;
 }
 
 message JoinGridRoomInput {
   int64 room_id = 1;
   optional bool microphone_enabled = 2;
+  optional string expected_membership_id = 3;
 }
 
 message JoinGridRoomResult {
   repeated Grid grids = 1;
   optional GridConnectionCredentials connection = 2;
+  optional GridCurrentCall current_call = 3;
 }
 
-message LeaveGridRoomInput { int64 expected_room_id = 1; }
+message LeaveGridRoomInput {
+  int64 expected_room_id = 1;
+  optional string expected_membership_id = 2;
+}
 
-message LeaveGridRoomResult { repeated Grid grids = 1; }
+message LeaveGridRoomResult {
+  repeated Grid grids = 1;
+  // Display/repair only; leaving never grants a replacement admission.
+  optional GridCurrentCall current_call = 2;
+}
+
+// Explicitly move this user's existing room participation to the authenticated
+// calling session (also used for a same-login cold-process Resume).
+message MoveGridCallHereInput {
+  string call_id = 1;
+  string expected_membership_id = 2;
+}
+
+message MoveGridCallHereResult {
+  repeated Grid grids = 1;
+  optional GridConnectionCredentials connection = 2;
+  // Captured at the claim's commit when moved=true; display/repair otherwise.
+  optional GridCurrentCall current_call = 3;
+  // False means the expected call/membership changed; no claim was performed.
+  bool moved = 4;
+}
 
 message SetGridRoomTitleInput {
   int64 room_id = 1;
@@ -2164,6 +2306,7 @@ message DeleteGridRoomResult { Grid grid = 1; }
 message PrepareGridConnectionInput {
   int64 room_id = 1;
   int32 generation = 2;
+  optional string expected_membership_id = 3;
 }
 
 enum GridConnectionUnavailableReason {
@@ -2180,6 +2323,7 @@ message PrepareGridConnectionResult {
 message SetGridAvatarMicrophoneEnabledInput {
   int64 expected_room_id = 1;
   bool enabled = 2;
+  optional string expected_membership_id = 3;
 }
 
 message SetGridAvatarMicrophoneEnabledResult { bool enabled = 1; }

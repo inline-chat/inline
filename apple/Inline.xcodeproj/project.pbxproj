@@ -85,6 +85,9 @@
 		E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
+		F00200022FA2000100000001 /* InlineGrid in Frameworks */ = {isa = PBXBuildFile; productRef = F00200012FA2000100000001 /* InlineGrid */; };
+		F00200042FA2000100000001 /* InlineGrid in Frameworks */ = {isa = PBXBuildFile; productRef = F00200032FA2000100000001 /* InlineGrid */; };
+		F00200062FA2000100000001 /* InlineRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F00200052FA2000100000001 /* InlineRTC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -281,6 +284,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F00200022FA2000100000001 /* InlineGrid in Frameworks */,
+				F00200062FA2000100000001 /* InlineRTC in Frameworks */,
 				E12407240000000100000003 /* InlineIntents in Frameworks */,
 				CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */,
 				CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */,
@@ -312,6 +317,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F00200042FA2000100000001 /* InlineGrid in Frameworks */,
 				A83010022F52000100000001 /* InlineAppIntents in Frameworks */,
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
@@ -490,6 +496,8 @@
 			);
 			name = InlineIOS;
 			packageProductDependencies = (
+				F00200012FA2000100000001 /* InlineGrid */,
+				F00200052FA2000100000001 /* InlineRTC */,
 				E12407240000000100000002 /* InlineIntents */,
 				C35E950D2CAC497700D569AF /* GRDB */,
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
@@ -536,6 +544,7 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
+				F00200032FA2000100000001 /* InlineGrid */,
 				A83010002F52000100000001 /* InlineAppIntents */,
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
@@ -2349,6 +2358,9 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineCLIInstaller;
 		};
+		F00200012FA2000100000001 /* InlineGrid */ = {isa = XCSwiftPackageProductDependency; productName = InlineGrid; };
+		F00200032FA2000100000001 /* InlineGrid */ = {isa = XCSwiftPackageProductDependency; productName = InlineGrid; };
+		F00200052FA2000100000001 /* InlineRTC */ = {isa = XCSwiftPackageProductDependency; productName = InlineRTC; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CD2660FC2CA01CAE00EB186F /* Project object */;

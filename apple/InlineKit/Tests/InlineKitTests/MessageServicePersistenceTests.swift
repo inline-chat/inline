@@ -6,6 +6,72 @@ import Testing
 
 @Suite("Message Service Persistence")
 struct MessageServicePersistenceTests {
+  @Test("transcript metadata and quietness survive durable JSON before row construction")
+  func transcriptPersistenceAndProvenance() throws {
+    var proto = InlineProtocol.Message.with {
+      $0.id = 101
+      $0.chatID = 44
+      $0.fromID = 9
+      $0.date = 1
+      $0.out = true
+      $0.peerID.chat.chatID = 44
+      $0.message = "Transcript · Ada: Let’s ship the small version."
+      $0.countsAsUnread = false
+      $0.serviceMessage.gridTranscript = .with {
+        $0.runID = "run-1"
+        $0.segmentID = "segment-2"
+        $0.speakerUserID = 10
+        $0.kind = GridTranscriptMessageKind(rawValue: 0)!
+      }
+    }
+    let message = Message(from: proto)
+    let payload = try #require(message.contentPayload)
+    let restored = try JSONDecoder().decode(Client_MessageContentPayload.self, from: JSONEncoder().encode(payload))
+    #expect(restored.hasCountsAsUnread)
+    #expect(!restored.countsAsUnread)
+    #expect(restored.serviceMessage.gridTranscript.runID == "run-1")
+    #expect(restored.serviceMessage.gridTranscript.speakerUserID == 10)
+    #expect(!message.countsAsUnread)
+    #expect(message.serviceDisplayText(actorName: "Creator") == "Transcript · Ada: Let’s ship the small version.")
+    #expect(message.stringRepresentationPlain == proto.message)
+    #expect(try !(#require(message.serviceDisplayText(actorName: "Creator")?.contains("You"))))
+    proto.clearCountsAsUnread()
+    #expect(!Message(from: proto).countsAsUnread)
+    proto.clearServiceMessage()
+    #expect(Message(from: proto).countsAsUnread)
+  }
+
+  @Test("original anchors and continuation links retain validated UTF16 thread ranges", arguments: [
+    GridTranscriptMessageKind.gridTranscriptStarted, .gridTranscriptLink,
+  ])
+  func continuationNavigation(kind: GridTranscriptMessageKind) {
+    let isAnchor = kind == .gridTranscriptStarted
+    let body = isAnchor ? "Grid transcription" : "Continue in Planning"
+    let proto = InlineProtocol.Message.with {
+      $0.message = body
+      $0.serviceMessage.gridTranscript.kind = kind
+      $0.entities.entities = [.with {
+        $0.type = .thread
+        $0.offset = isAnchor ? 0 : 12
+        $0.length = isAnchor ? 18 : 8
+        $0.thread.chatID = 77
+      }, .with {
+        $0.type = .thread
+        $0.offset = Int64.max
+        $0.length = 8
+        $0.thread.chatID = 88
+      }]
+    }
+    let message = Message(from: proto)
+    let expected: [MessageServiceDisplaySegment] = isAnchor ? [
+      .init(text: body, link: .thread(77)),
+    ] : [
+      .init(text: "Continue in "),
+      .init(text: "Planning", link: .thread(77)),
+    ]
+    #expect(message.serviceDisplaySegments(actorName: "Creator") == expected)
+  }
+
   @Test("protocol service payload is persisted and exposed via helpers")
   func protocolServicePayloadPersistedAndReadable() {
     var proto = InlineProtocol.Message()

@@ -10,6 +10,7 @@ extension Client_MessageContentPayload: Codable {
     case replies
     case serviceMessage
     case subthread
+    case countsAsUnread
   }
 
   public init(from decoder: Decoder) throws {
@@ -19,6 +20,7 @@ extension Client_MessageContentPayload: Codable {
     let replies = try container.decodeIfPresent(MessageReplies.self, forKey: .replies)
     let serviceMessage = try container.decodeIfPresent(MessageService.self, forKey: .serviceMessage)
     let subthread = try container.decodeIfPresent(MessageSubthread.self, forKey: .subthread)
+    let countsAsUnread = try container.decodeIfPresent(Bool.self, forKey: .countsAsUnread)
 
     self.init()
     if let voice {
@@ -35,6 +37,9 @@ extension Client_MessageContentPayload: Codable {
     }
     if let subthread {
       self.subthread = subthread
+    }
+    if let countsAsUnread {
+      self.countsAsUnread = countsAsUnread
     }
   }
 
@@ -55,6 +60,9 @@ extension Client_MessageContentPayload: Codable {
     if hasSubthread {
       try container.encode(subthread, forKey: .subthread)
     }
+    if hasCountsAsUnread {
+      try container.encode(countsAsUnread, forKey: .countsAsUnread)
+    }
   }
 }
 
@@ -63,11 +71,13 @@ extension MessageService: Codable {
     case event
     case threadBacklink
     case pinnedMessage
+    case gridTranscript
   }
 
   private enum Event: String, Codable {
     case threadBacklink
     case pinnedMessage
+    case gridTranscript
   }
 
   public init(from decoder: Decoder) throws {
@@ -89,6 +99,10 @@ extension MessageService: Codable {
         if let message = try container.decodeIfPresent(MessageServicePinnedMessage.self, forKey: .pinnedMessage) {
           pinnedMessage = message
         }
+      case .gridTranscript:
+        if let transcript = try container.decodeIfPresent(MessageServiceGridTranscript.self, forKey: .gridTranscript) {
+          gridTranscript = transcript
+        }
     }
   }
 
@@ -101,9 +115,38 @@ extension MessageService: Codable {
       case .pinnedMessage:
         try container.encode(Event.pinnedMessage, forKey: .event)
         try container.encode(pinnedMessage, forKey: .pinnedMessage)
+      case .gridTranscript:
+        try container.encode(Event.gridTranscript, forKey: .event)
+        try container.encode(gridTranscript, forKey: .gridTranscript)
       case nil:
         break
     }
+  }
+}
+
+extension MessageServiceGridTranscript: Codable {
+  private enum CodingKeys: String, CodingKey { case runID, segmentID, speakerUserID, kind }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init()
+    runID = try container.decodeIfPresent(String.self, forKey: .runID) ?? ""
+    segmentID = try container.decodeIfPresent(String.self, forKey: .segmentID) ?? ""
+    if let speakerUserID = try container.decodeIfPresent(Int64.self, forKey: .speakerUserID) {
+      self.speakerUserID = speakerUserID
+    }
+    let rawKind = try container.decodeIfPresent(Int.self, forKey: .kind) ?? 0
+    kind = GridTranscriptMessageKind(rawValue: rawKind) ?? .UNRECOGNIZED(rawKind)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(runID, forKey: .runID)
+    try container.encode(segmentID, forKey: .segmentID)
+    if hasSpeakerUserID {
+      try container.encode(speakerUserID, forKey: .speakerUserID)
+    }
+    try container.encode(kind.rawValue, forKey: .kind)
   }
 }
 
@@ -200,7 +243,7 @@ extension MessageSubthread: Codable {
 
     self.init()
     chatID = try container.decodeIfPresent(Int64.self, forKey: .chatID) ?? 0
-    kind = Kind(rawValue: try container.decodeIfPresent(Int.self, forKey: .kind) ?? 0) ?? .unspecified
+    kind = try Kind(rawValue: container.decodeIfPresent(Int.self, forKey: .kind) ?? 0) ?? .unspecified
     if let title = try container.decodeIfPresent(String.self, forKey: .title) {
       self.title = title
     }

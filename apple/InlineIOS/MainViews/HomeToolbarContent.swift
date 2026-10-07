@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineUI
 import RealtimeV2
@@ -8,15 +9,19 @@ struct HomeToolbarContent: ToolbarContent {
   private let router: Router
   @ObservedObject private var realtimeState: RealtimeState
   @ObservedObject private var notificationSettings: NotificationSettingsManager
+  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridIOSEnabled = false
+  private let onOpenGrid: () -> Void
 
   init(
     router: Router,
     realtimeState: RealtimeState,
-    notificationSettings: NotificationSettingsManager
+    notificationSettings: NotificationSettingsManager,
+    onOpenGrid: @escaping () -> Void
   ) {
     self.router = router
     _realtimeState = ObservedObject(wrappedValue: realtimeState)
     _notificationSettings = ObservedObject(wrappedValue: notificationSettings)
+    self.onOpenGrid = onOpenGrid
   }
 
   var body: some ToolbarContent {
@@ -64,6 +69,11 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var dotsButton: some View {
     Menu {
+      if gridIOSEnabled,
+         GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry {
+        Button("Grid", systemImage: "square.grid.2x2", action: onOpenGrid)
+      }
+
       Button {
         router.presentSheet(.inviteToInline)
       } label: {

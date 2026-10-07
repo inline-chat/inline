@@ -9615,6 +9615,7 @@ mod tests {
                         block_content: None,
                         agent_session: None,
                         subthread: None,
+                        counts_as_unread: None,
                     }),
                 })),
             }],

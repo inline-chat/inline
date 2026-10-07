@@ -1,4 +1,5 @@
 import { Layer } from "effect"
+import { GridTranscriptionWorkerRoutesLive } from "./gridTranscription.effect"
 import {
   AuthApiGroup,
 } from "../../controllers/auth.effect"
@@ -70,29 +71,32 @@ export const makeCandidateHttpApplication = ({
   const botApi = makeBotApiBase(apiBaseUrl)
     .add(BotApiGroup)
 
-  return makeHttpApplication({
-    platform: defineExecutableHttpApi({
-      ...defineOpenApiDocument({
-        api: platformApi,
-        jsonPath: "/v1/reference/json",
-        swaggerPath: "/v1/reference",
+  return Layer.merge(
+    makeHttpApplication({
+      platform: defineExecutableHttpApi({
+        ...defineOpenApiDocument({
+          api: platformApi,
+          jsonPath: "/v1/reference/json",
+          swaggerPath: "/v1/reference",
+        }),
+        handlers: Layer.mergeAll(
+          AuthRouteGroupLive,
+          V1IdentitySpacesRouteGroupLive,
+          V1MessagingProvidersRouteGroupLive,
+          AuxiliaryRouteGroupLive,
+          AdminRouteGroupLive,
+        ),
       }),
-      handlers: Layer.mergeAll(
-        AuthRouteGroupLive,
-        V1IdentitySpacesRouteGroupLive,
-        V1MessagingProvidersRouteGroupLive,
-        AuxiliaryRouteGroupLive,
-        AdminRouteGroupLive,
-      ),
-    }),
-    bot: defineExecutableHttpApi({
-      ...defineOpenApiDocument({
-        api: botApi,
-        jsonPath: "/bot-api-reference/json",
-        swaggerPath: "/bot-api-reference",
+      bot: defineExecutableHttpApi({
+        ...defineOpenApiDocument({
+          api: botApi,
+          jsonPath: "/bot-api-reference/json",
+          swaggerPath: "/bot-api-reference",
+        }),
+        handlers: BotRouteGroupLive,
       }),
-      handlers: BotRouteGroupLive,
+      middleware,
     }),
-    middleware,
-  })
+    GridTranscriptionWorkerRoutesLive,
+  )
 }

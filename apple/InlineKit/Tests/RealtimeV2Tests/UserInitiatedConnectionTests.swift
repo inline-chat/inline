@@ -71,6 +71,52 @@ struct UserInitiatedConnectionTests {
     }
   }
 
+  @Test("admitted media survives UIKit grace without claiming foreground and ends on release")
+  func mediaRetentionPastGrace() async {
+    let (manager, session) = fixture()
+    await manager.setMediaRetention(eligible: true, revision: 1)
+    #expect(await opens(manager))
+    await manager.applicationBecameInactive(keepConnection: true)
+    let id = await manager.currentSnapshot().sessionID
+    let before = await session.stops
+    await manager.scheduledEventDidFire(.backgroundGraceExpired, sessionID: id)
+    #expect(await manager.currentSnapshot().state == .open)
+    #expect(await manager.currentSnapshot().constraints.appActive == false)
+    #expect(await session.stops == before)
+    await manager.setMediaRetention(eligible: false, revision: 2)
+    #expect(await manager.currentSnapshot().state == .backgroundSuspended)
+    #expect(await session.stops == before + 1)
+    await manager.shutdownForTesting()
+  }
+
+  @Test("stale media eligibility cannot reopen a withdrawn media owner")
+  func staleMediaRetention() async {
+    let (manager, session) = fixture()
+    await manager.setMediaRetention(eligible: true, revision: 1)
+    #expect(await opens(manager))
+    await manager.setMediaRetention(eligible: false, revision: 3)
+    #expect(await manager.currentSnapshot().state == .backgroundSuspended)
+    let starts = await session.starts
+    await manager.setMediaRetention(eligible: true, revision: 2)
+    #expect(await manager.currentSnapshot().state == .backgroundSuspended)
+    #expect(await session.starts == starts)
+    await manager.shutdownForTesting()
+  }
+
+  @Test("auth loss clears media retention before a replacement authentication")
+  func authLossRetiresMedia() async {
+    let (manager, session) = fixture()
+    await manager.setMediaRetention(eligible: true, revision: 1)
+    #expect(await opens(manager))
+    await manager.setAuthAvailable(false)
+    #expect(await manager.currentSnapshot().state != .open)
+    let starts = await session.starts
+    await manager.setAuthAvailable(true)
+    #expect(await manager.currentSnapshot().state != .open)
+    #expect(await session.starts == starts)
+    await manager.shutdownForTesting()
+  }
+
   private func fixture() -> (ConnectionManager, IntentActivitySession) {
     let session = IntentActivitySession()
     return (ConnectionManager(session: session, constraints: .init(

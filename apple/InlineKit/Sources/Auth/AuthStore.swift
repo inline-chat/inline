@@ -294,7 +294,7 @@ actor AuthStore {
       status: .authenticated(record),
       didHydrate: true
     )
-    try persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
+    try await persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
       try self.replaceStoredAuthority(
         with: [
           Self.legacyTokenKey: Data(token.utf8),
@@ -365,7 +365,7 @@ actor AuthStore {
       log.info("AUTH2_TEMPORARY_ROTATION persisted")
       return
     }
-    try persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
+    try await persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
       try self.replaceStoredAuthority(
         with: [Self.inlineProtocolCredentialsKey: data],
         replacing: [Self.legacyTokenKey, Self.credentialsV2Key],
@@ -696,12 +696,25 @@ actor AuthStore {
     snapshot: AuthSnapshot,
     loginAttempt: AuthLoginAttempt?,
     writeAuthority: () throws -> Void
-  ) throws {
+  ) async throws {
     let finalizeImmediately = loginAttempt == nil
     let currentSnapshot = cache.snapshot()
     let preservesAccountMutationGeneration = finalizeImmediately &&
       currentSnapshot.isLoggedIn &&
       currentSnapshot.currentUserId == snapshot.currentUserId
+    let identicalImplicitBearer: Bool
+    if loginAttempt == nil,
+       case let .authenticated(current) = currentSnapshot.status,
+       case let .authenticated(next) = snapshot.status
+    {
+      identicalImplicitBearer = current.userId == next.userId && current.token == next.token
+    } else {
+      identicalImplicitBearer = false
+    }
+    // Preserve the existing mutation-generation policy, but require a physical retirement
+    // whenever server authority may change. Only an identical implicit bearer is provably
+    // unchanged here; same-session native temporary-key renewal bypasses this helper above.
+    let previousAccount = identicalImplicitBearer ? nil : try? cache.makeAccountMutationToken()
     let authorityAttempt: AuthLoginAttempt
     if let loginAttempt {
       authorityAttempt = loginAttempt
@@ -741,6 +754,28 @@ actor AuthStore {
     stagedAuthorityBaseline = baseline
 
     do {
+      if let previousAccount {
+        // An already-running media engine does not perform account mutations on every frame.
+        // Retire its old authority before storage/projection work can suspend a native login.
+        let retirement = await MainActor.run {
+          let retirement = AuthAccountAuthorityRetirement(previousAccount: previousAccount) {
+            self.cache.isStagedAuthorityOwned(by: authorityAttempt)
+              && self.cache.isLoginAttemptCurrent(authorityAttempt)
+          }
+          NotificationCenter.default.post(
+            name: .authAccountAuthorityWillChange,
+            object: self.cache,
+            userInfo: ["retirement": retirement]
+          )
+          return retirement
+        }
+        guard await retirement.waitForRetirement() else { throw AuthStorageError.loginUnavailable }
+      }
+      // The MainActor delivery can let logout or a newer login win on this actor.
+      try validateLoginAttempt(authorityAttempt)
+      guard cache.isStagedAuthorityOwned(by: authorityAttempt) else {
+        throw credentialCommitFenceError(for: authorityAttempt)
+      }
       try writeAuthority()
       if let userID = snapshot.currentUserId {
         UserDefaults.standard.set(NSNumber(value: userID), forKey: userDefaultsKey)
@@ -757,7 +792,7 @@ actor AuthStore {
         _ = try finalizeCredentialsCommittedByLoginAttempt(authorityAttempt)
       }
     } catch {
-      if hasPendingLogout() == false {
+      if hasPendingLogout() == false, cache.isStagedAuthorityOwned(by: authorityAttempt) {
         do {
           try restoreStoredAuthority(baseline)
           UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
@@ -773,7 +808,9 @@ actor AuthStore {
             "AUTH2_LOGIN failed to restore prior authority; retaining transition fence",
             error: error
           )
-          promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID, reason: "authority_restore_failed")
+          if hasPendingLogout() == false, cache.isStagedAuthorityOwned(by: authorityAttempt) {
+            promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID, reason: "authority_restore_failed")
+          }
         }
       }
       throw error

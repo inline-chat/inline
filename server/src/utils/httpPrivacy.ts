@@ -5,5 +5,6 @@ export const redactCredentialPath = (path: string): string => path
 
 /** These APIs can return credentials or private content, including on GET/error paths. */
 export const requiresPrivateResponse = (path: string): boolean =>
+  /^\/_internal\/grid-transcription(?:\/|$)/i.test(path) ||
   /^\/v1(?:\/|$)/i.test(path) ||
   (/^\/bot(?:[^/]*)(?:\/|$)/i.test(path) && !/^\/bot-api-reference(?:\/|$)/i.test(path))

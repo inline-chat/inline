@@ -113,6 +113,13 @@ export const LIVEKIT_URL = process.env["LIVEKIT_URL"]
 export const LIVEKIT_API_KEY = process.env["LIVEKIT_API_KEY"]
 export const LIVEKIT_API_SECRET = process.env["LIVEKIT_API_SECRET"]
 export const LIVEKIT_PROVIDER = process.env["LIVEKIT_PROVIDER"] ?? "self_hosted"
+// Coordinate activation across the server fleet and upgraded Apple clients.
+// Do not turn this off with live transferred calls: doing so restores legacy
+// unfenced behavior. Production process environment remains immutable.
+export const isGridCallTransferEnabled = () => {
+  const value = process.env["GRID_CALL_TRANSFER_ENABLED"]?.trim().toLowerCase()
+  return value === "true" || value === "1"
+}
 export const LIVEKIT_CLOUD_URL = process.env["LIVEKIT_CLOUD_URL"]
 export const LIVEKIT_CLOUD_API_KEY = process.env["LIVEKIT_CLOUD_API_KEY"]
 export const LIVEKIT_CLOUD_API_SECRET = process.env["LIVEKIT_CLOUD_API_SECRET"]

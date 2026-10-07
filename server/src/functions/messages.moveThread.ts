@@ -13,6 +13,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
+import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
 
 const log = new Log("functions.moveThread")
 
@@ -185,6 +186,8 @@ export async function moveThread(
           ...(targetSpaceId !== null ? { newSpaceId: BigInt(targetSpaceId) } : {}),
         },
       }
+
+      await invalidateGridTranscriptionForHistory(tx, { chatIds: [chat.id], reason: "chat_moved" })
 
       const update = await UpdatesModel.insertUpdate(tx, {
         update: updatePayload,

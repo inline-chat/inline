@@ -71,6 +71,8 @@ actor ConnectionManager {
   private var probeNonce: UInt64?
   private var pendingPingNonce: UInt64?
   private var backgroundConnectionRetained = false
+  private var mediaConnectionRetained = false
+  private var mediaRetentionRevision: UInt64 = 0
   // System-invoked work may run while UIKit is inactive. Keep lifecycle state truthful.
   private var userInitiatedOperations = 0
 
@@ -129,6 +131,10 @@ actor ConnectionManager {
 
   func endUserInitiatedOperation() async {
     await enqueue(.userInitiatedOperationFinished)
+  }
+
+  func setMediaRetention(eligible: Bool, revision: UInt64) async {
+    await enqueue(.mediaRetentionChanged(eligible: eligible, revision: revision))
   }
 
   func setAuthAvailable(_ available: Bool) async {
@@ -218,6 +224,7 @@ actor ConnectionManager {
   func shutdownForTesting() async {
     cancelAllTimers()
     backgroundConnectionRetained = false
+    mediaConnectionRetained = false
     pendingPingNonce = nil
     commandTask?.cancel()
     sessionTask?.cancel()
@@ -244,7 +251,8 @@ actor ConnectionManager {
 
     case .userInitiatedOperationFinished:
       userInitiatedOperations = max(0, userInitiatedOperations - 1)
-      if userInitiatedOperations == 0, !constraints.appActive, !backgroundConnectionRetained {
+      if userInitiatedOperations == 0, !constraints.appActive, !backgroundConnectionRetained,
+         !mediaConnectionRetained {
         // Preserve auth loss, explicit stop, and network failure as the stronger constraints.
         if constraints.authAvailable, constraints.networkAvailable, constraints.userWantsConnection {
           await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
@@ -252,11 +260,25 @@ actor ConnectionManager {
         }
       }
 
+    case let .mediaRetentionChanged(eligible, revision):
+      guard revision > mediaRetentionRevision else { return }
+      mediaRetentionRevision = revision
+      mediaConnectionRetained = eligible && constraints.authAvailable && constraints.userWantsConnection
+      if !constraints.appActive, !backgroundConnectionRetained, !mediaConnectionRetained,
+         userInitiatedOperations == 0, constraints.authAvailable,
+         constraints.networkAvailable, constraints.userWantsConnection {
+        await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
+        await stopTransportAndReset()
+      } else {
+        await evaluateConstraints(resetBackoff: false)
+      }
+
     case .start:
       constraints.userWantsConnection = true
       await evaluateConstraints(resetBackoff: false)
 
     case .stop:
+      mediaConnectionRetained = false
       constraints.userWantsConnection = false
       await transition(to: .stopped, reason: .userStop)
       await stopTransportAndReset()
@@ -275,6 +297,7 @@ actor ConnectionManager {
       await evaluateConstraints(resetBackoff: true)
 
     case .authLost:
+      mediaConnectionRetained = false
       constraints.authAvailable = false
       log.info("Realtime auth constraint applied available=0 state=\(state) session=\(sessionID)")
       await handleConstraintLoss(reason: .authLost)
@@ -332,7 +355,7 @@ actor ConnectionManager {
       attempt = 0
       backgroundConnectionRetained = false
       cancelBackoff()
-      if !transportWasRetained, userInitiatedOperations == 0, state == .open {
+      if !transportWasRetained, userInitiatedOperations == 0, !mediaConnectionRetained, state == .open {
         await forceReconnect(reason: .none)
       } else {
         await evaluateConstraints(resetBackoff: true)
@@ -345,7 +368,7 @@ actor ConnectionManager {
       )
       constraints.appActive = false
       backgroundConnectionRetained = keepConnection
-      if !keepConnection, userInitiatedOperations == 0 {
+      if !keepConnection, userInitiatedOperations == 0, !mediaConnectionRetained {
         await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
         await stopTransportAndReset()
       }
@@ -458,7 +481,7 @@ actor ConnectionManager {
     case .backgroundGraceExpired:
       guard !constraints.appActive else { return }
       backgroundConnectionRetained = false
-      guard userInitiatedOperations == 0 else { return }
+      guard userInitiatedOperations == 0, !mediaConnectionRetained else { return }
       await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
       await stopTransportAndReset()
 
@@ -724,7 +747,8 @@ actor ConnectionManager {
   }
 
   private func constraintsSatisfied() -> Bool {
-    let appActiveEffective = constraints.appActive || backgroundConnectionRetained || userInitiatedOperations > 0
+    let appActiveEffective = constraints.appActive || backgroundConnectionRetained
+      || mediaConnectionRetained || userInitiatedOperations > 0
     return constraints.authAvailable && constraints.networkAvailable && appActiveEffective && constraints.userWantsConnection
   }
 

@@ -497,7 +497,7 @@ public extension Chat {
   static func updateLastMsgIds(_ db: Database, messages: [Message]) throws {
     var newestByChatId: [Int64: Message] = [:]
 
-    for message in messages {
+    for message in messages where !message.isGridTranscript {
       if let current = newestByChatId[message.chatId],
          !shouldAdvanceLastMessage(
            currentLastMsgId: current.messageId,

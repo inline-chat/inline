@@ -150,7 +150,12 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     public var highPassFilter = false
     /// Keep the high-pass filter provider-selected when it is enabled.
     public var highPassFilterMode: HighpassFilterMode = .automatic
-    public init() {}
+    public init() {
+      #if os(iOS)
+      echoCancellationMode = .platform
+      noiseSuppressionMode = .platform
+      #endif
+    }
   }
 
   public struct Publishing: Equatable, Sendable {
@@ -198,7 +203,13 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     /// How much non-Grid audio is reduced while voice processing is active.
     public var duckingLevel: DuckingLevel = .minimum
 
-    public init() {}
+    public init() {
+      #if os(iOS)
+      // Native voice processing and the system route work together on iPhone.
+      // The desktop AUHAL cold-start measurements do not apply to iOS.
+      platformVoiceProcessingAllowed = true
+      #endif
+    }
 
     public enum DuckingLevel: Equatable, Sendable {
       case systemDefault

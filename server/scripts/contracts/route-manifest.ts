@@ -3,6 +3,7 @@ import { mkdir, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { app } from "../../src/legacyServer"
 import { makeCandidateHttpApplication } from "../../src/core/http/candidateApplication"
+import { gridTranscriptionWorkerPaths } from "../../src/core/http/gridTranscription.effect"
 import {
   startCoreHttpServer,
   type CoreHttpServerHandle,
@@ -142,6 +143,7 @@ const routesFromOpenApi = (
 }
 
 const candidateRawRoutes: ReadonlyArray<Route> = [
+  ...gridTranscriptionWorkerPaths.map((path) => ({ method: "POST", path })),
   { method: "GET", path: "//" },
   {
     method: "GET",
@@ -206,6 +208,7 @@ const comparableLegacyRoutes =
 
 const intentionalCandidateOnly =
   new Set([
+    ...gridTranscriptionWorkerPaths.map((path) => `POST\t${path}`),
     "DELETE\t/admin/reserved-usernames",
     "GET\t/",
     "GET\t/admin/email-campaigns",

@@ -23,7 +23,7 @@ struct DialogTranslationMigrationTests {
       INSERT INTO dialog (id, peerUserId, translationEnabled) VALUES (8002, 8002, 0);
       INSERT INTO dialog (id, peerUserId, translationEnabled) VALUES (8003, 8003, NULL);
       INSERT INTO chat (id, date) VALUES (9001, '2026-09-05 00:00:00');
-      INSERT INTO message (messageId, chatId, date, text) VALUES (1, 9001, '2026-09-05 00:00:00', 'Original');
+      INSERT INTO message (messageId, chatId, fromId, date, text) VALUES (1, 9001, 8001, '2026-09-05 00:00:00', 'Original');
       INSERT INTO translation (messageId, chatId, date, language, translation)
         VALUES (1, 9001, '2026-09-05 00:00:00', 'en', 'Preserved translation');
       """)

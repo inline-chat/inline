@@ -12,6 +12,11 @@ protocol GridAudioDriver: Sendable {
   var recordingStartsWithMicrophoneSender: Bool { get }
 
   func configure(_ configuration: InlineRTCConfiguration) async throws
+  func setMediaDemandActive(_ active: Bool, epoch: UInt64) async throws
+  /// Provider operations and room retirements have all returned. Direction
+  /// idle alone cannot transfer AVAudioSession writer authority on iOS.
+  func mediaDidQuiesce(epoch: UInt64) async
+  func resumeListeningAfterSafetyPause() async throws
   /// Opens a new media epoch after a completed terminal barrier. This is not
   /// capture demand; it only allows the next WebRTC transport to invoke the
   /// custom device lifecycle.
@@ -63,6 +68,9 @@ enum GridAudioPlayoutRecoveryDeferral: String, Equatable, Sendable {
 }
 
 extension GridAudioDriver {
+  func setMediaDemandActive(_: Bool, epoch _: UInt64) async throws {}
+  func mediaDidQuiesce(epoch _: UInt64) async {}
+  func resumeListeningAfterSafetyPause() async throws {}
   var preparationRequiresRTCTransport: Bool { false }
   var recordingStartsWithMicrophoneSender: Bool { false }
 
@@ -184,6 +192,8 @@ actor GridAudioEngine {
   private var desiredOutputVolume: Float = 1
   private var lastTransitionMilliseconds: Int?
   private var microphonePermission: InlineRTCMicrophonePermission = .notDetermined
+  private var safetyPauseRevision: UInt64 = 0
+  private var isSafetyPaused = false
   /// Configuration/prepare failures require an explicit retry. Input-route
   /// failures have their own narrower suspension and never block leave/stop.
   private var engineReconcileSuspended = false
@@ -507,8 +517,20 @@ actor GridAudioEngine {
     !rtcTransportReady
   }
 
+  func setMediaDemandActive(_ active: Bool, epoch: UInt64) async throws {
+    try await driver.setMediaDemandActive(active, epoch: epoch)
+  }
+
+  func mediaDidQuiesce(epoch: UInt64) async {
+    await driver.mediaDidQuiesce(epoch: epoch)
+  }
+
   func rtcTransportPreparationGeneration() -> UInt64 {
     rtcTransportGeneration
+  }
+
+  func rtcTransportRequiresPreparation() -> Bool {
+    driver.preparationRequiresRTCTransport
   }
 
   /// Closes capture preparation while a fresh provider room is being created.
@@ -650,6 +672,14 @@ actor GridAudioEngine {
   }
 
   func retry() async {
+    let outputResume = await mutateDriver("resume-listening") { [driver] in
+      try await driver.resumeListeningAfterSafetyPause()
+    }
+    if case let .failure(error) = outputResume {
+      state = .failed(error.localizedDescription)
+      emitSnapshot()
+      return
+    }
     microphonePermission = await permissionDriver.status()
     engineReconcileSuspended = false
     cancelInputRouteRetry(resetAttempt: true)
@@ -1785,6 +1815,36 @@ actor GridAudioEngine {
     switch event {
     case .devicesChanged:
       deviceListChanged()
+    case .safetyPaused:
+      isSafetyPaused = true
+      safetyPauseRevision &+= 1
+      captureLeases.removeAll()
+      keepPreparedThroughCooldown = false
+      cooldownGeneration &+= 1
+      recoveryDemandGeneration &+= 1
+      engineRecoveryTask?.cancel()
+      engineRecoveryTask = nil
+      engineRecoveryPending = false
+      lifetimeHealthTask?.cancel()
+      lifetimeHealthTask = nil
+      engineReconcileSuspended = true
+      let health = await driver.runtimeHealth()
+      observeRuntimeHealth(health)
+      appliedPrepared = health.isRecording
+      captureEngineHealthy = false
+      state = health.isRecording
+        ? .failed("Audio could not pause safely. Leave Grid and try again.")
+        : .cold
+      emitSnapshot()
+    case .listeningResumed:
+      isSafetyPaused = false
+      engineReconcileSuspended = false
+      observeRuntimeHealth(await driver.runtimeHealth())
+      appliedPrepared = false
+      captureEngineHealthy = false
+      updateStableState()
+      emitSnapshot()
+      scheduleReconcile()
     case let .engineStarting(playout, recording):
       if !engineRecoveryInFlight {
         engineRecoveryTask?.cancel()
@@ -1796,12 +1856,16 @@ actor GridAudioEngine {
       scheduleEngineHealthCheck()
     case let .engineStopped(playout, recording),
          let .engineDisabled(playout, recording):
+      observeRuntimeHealth(await driver.runtimeHealth())
+      emitSnapshot()
       await audioEngineStopped(playout: playout, recording: recording)
     case let .expectedEngineStop(playout, recording),
          let .expectedEngineDisable(playout, recording):
       log.debug(
         "GRID_ENGINE phase=audio_engine_transition_expected playout=\(playout) recording=\(recording)"
       )
+      observeRuntimeHealth(await driver.runtimeHealth())
+      emitSnapshot()
     }
   }
 
@@ -1825,7 +1889,9 @@ actor GridAudioEngine {
       },
       outputVolume: desiredOutputVolume,
       lastTransitionMilliseconds: lastTransitionMilliseconds,
-      microphonePermission: microphonePermission
+      microphonePermission: microphonePermission,
+      safetyPauseRevision: safetyPauseRevision,
+      isSafetyPaused: isSafetyPaused
     )
   }
 
