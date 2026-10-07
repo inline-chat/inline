@@ -51,9 +51,11 @@
 
 If asked to use subagents you can use these models, however most tasks can stay with one agent.
 
-- `luna`, `xhigh`: search, map, filter, and extract evidence. Have the main agent interpret the findings.
-- `sol` (`gpt-6.1-sol`): `medium` for small patches; `high` or `xhigh` for implementation, audits, and reviews.
+- `luna`, `xhigh`: analyze, find, map, filter, and extract evidence from extensive text. Have the main agent interpret the findings.
+- `sol` (`gpt-6.1-sol`): `medium` for small patches; `high` or `xhigh` for implementation, audits, deducting important summaries, and reviews.
 - `astra`: `medium` for substantial design or tricky implementation; `high` or `xhigh` for difficult debugging and important correctness reviews.
+
+Be careful if you don't specify subagent model it will inherit the parent.
 
 ## Product Design
 
