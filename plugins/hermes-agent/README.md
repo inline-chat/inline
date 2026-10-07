@@ -424,6 +424,30 @@ the normal reply.
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
 
+## Shared transcripts in groups and threads
+
+To share one conversation transcript among admitted participants in a group
+or thread, add these keys at the root of the `config.yaml` used by the Hermes
+gateway process, outside `platforms.inline.extra`:
+
+```yaml
+group_sessions_per_user: false
+thread_sessions_per_user: false
+```
+
+Hermes defaults `group_sessions_per_user` to `true` (groups split by sender)
+and `thread_sessions_per_user` to `false` (threads shared). These settings
+affect every messaging platform governed by that gateway configuration.
+For separate profile gateways, configure each gateway's profile separately.
+With a multiplexed gateway, do not assume a secondary profile's values control
+its sessions; this adapter does not qualify per-profile session-policy overrides.
+
+Distinct Hermes profile/gateway namespaces keep separate conversation sessions.
+Swapping a bot token within one profile does not create a new transcript namespace.
+These flags select shared sessions; they do not merge existing histories, import
+all Inline history, grant permissions, or change access, mention, or bot wake rules.
+Restart the gateway through its existing process manager after editing.
+
 ## Error Reporting And Privacy
 
 The Inline adapter and its supervised sidecar keep error reporting disabled
