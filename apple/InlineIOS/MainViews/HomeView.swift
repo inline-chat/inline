@@ -24,7 +24,6 @@ struct HomeView: View {
 
   @State private var text = ""
   @State private var searchModel: InlineSearchViewModel?
-  @State private var isGridPresented = false
 
   private var chatItems: [HomeChatItem] {
     let visibleChats = home.chats.filter { $0.dialog.archived != true }
@@ -43,14 +42,12 @@ struct HomeView: View {
           router: router,
           realtimeState: realtimeState,
           notificationSettings: notificationSettings,
-          onOpenGrid: { isGridPresented = true }
+          onOpenGrid: { router.push(.grid(initialSpaceID: nil)) }
         )
       }
-      .gridHomeEntry(
-        isPresented: $isGridPresented,
-        spaces: home.spaces.map(\.space),
-        isVisible: text.isEmpty
-      )
+      .gridHomeEntry(isVisible: text.isEmpty) {
+        router.push(.grid(initialSpaceID: nil))
+      }
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()
       .onAppear {

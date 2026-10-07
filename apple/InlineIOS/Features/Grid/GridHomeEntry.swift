@@ -23,77 +23,55 @@ struct GridHomeEntryProjection {
     for home in homes {
       for avatar in home.recentAvatars where seen.insert(avatar.user.id).inserted {
         preview.append(avatar)
-        if preview.count == 4 { break }
+        if preview.count == 4 {
+          break
+        }
       }
-      if preview.count == 4 { break }
+      if preview.count == 4 {
+        break
+      }
     }
     avatars = preview
   }
 
-  var showsPill: Bool { isEligible && activeCount > 0 && !avatars.isEmpty }
-  var showsMenuEntry: Bool { isEligible && !showsPill }
+  var showsPill: Bool {
+    isEligible && activeCount > 0 && !avatars.isEmpty
+  }
+
+  var showsMenuEntry: Bool {
+    isEligible
+  }
 }
 
 extension View {
-  func gridHomeEntry(
-    isPresented: Binding<Bool>,
-    spaceID: Int64? = nil,
-    spaces: [InlineKit.Space] = [],
-    isVisible: Bool = true
-  ) -> some View {
-    modifier(GridHomeEntryModifier(
-      isPresented: isPresented,
-      spaceID: spaceID,
-      spaces: spaces,
-      isVisible: isVisible
-    ))
+  func gridHomeEntry(isVisible: Bool = true, onOpen: @escaping () -> Void) -> some View {
+    modifier(GridHomeEntryModifier(isVisible: isVisible, onOpen: onOpen))
   }
 }
 
 private struct GridHomeEntryModifier: ViewModifier {
-  @Binding var isPresented: Bool
-  let spaceID: Int64?
-  let spaces: [InlineKit.Space]
   let isVisible: Bool
-
+  let onOpen: () -> Void
   @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var isEnabled = false
 
   func body(content: Content) -> some View {
-    Group {
-      if isEnabled {
-        content.modifier(GridEnabledHomeEntryModifier(
-          isPresented: $isPresented,
-          spaceID: spaceID,
-          spaces: spaces,
-          isVisible: isVisible
-        ))
-      } else {
-        content
-      }
-    }
-    .onChange(of: isEnabled) { wasEnabled, enabled in
-      if wasEnabled && !enabled {
-        isPresented = false
-      }
+    if isEnabled {
+      content.modifier(GridEnabledHomeEntryModifier(isVisible: isVisible, onOpen: onOpen))
+    } else {
+      content
     }
   }
 }
 
 private struct GridEnabledHomeEntryModifier: ViewModifier {
-  @Binding var isPresented: Bool
-  let spaceID: Int64?
-  let spaces: [InlineKit.Space]
   let isVisible: Bool
+  let onOpen: () -> Void
   @Environment(\.scenePhase) private var scenePhase
   private let store = GridRuntime.shared.rooms
 
   func body(content: Content) -> some View {
     let projection = GridHomeEntryProjection(store: store, spaceID: nil)
     let showsPill = isVisible && projection.showsPill
-    let presentation = Binding(
-      get: { isPresented && projection.isEligible },
-      set: { isPresented = $0 }
-    )
 
     Group {
       if #available(iOS 26.0, *) {
@@ -102,7 +80,7 @@ private struct GridEnabledHomeEntryModifier: ViewModifier {
             avatars: projection.avatars,
             activeCount: projection.activeCount,
             isVisible: showsPill,
-            onOpen: { isPresented = true }
+            onOpen: onOpen
           )
         }
       } else {
@@ -111,25 +89,16 @@ private struct GridEnabledHomeEntryModifier: ViewModifier {
             avatars: projection.avatars,
             activeCount: projection.activeCount,
             isVisible: showsPill,
-            onOpen: { isPresented = true }
+            onOpen: onOpen
           )
         }
       }
-    }
-    .popover(isPresented: presentation, attachmentAnchor: .point(.top), arrowEdge: .top) {
-      GridRoomsView(store: store, spaces: spaces, initialSpaceID: spaceID)
-        .presentationCompactAdaptation(.sheet)
-        .presentationDetents([.height(280), .medium, .large])
-        .presentationDragIndicator(.visible)
     }
     .task { await store.loadHome() }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
         Task { await store.loadHome() }
       }
-    }
-    .onChange(of: projection.isEligible) { _, eligible in
-      if !eligible { isPresented = false }
     }
   }
 }

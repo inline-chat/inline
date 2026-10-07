@@ -269,6 +269,7 @@ enum Destination: DestinationType, Codable {
   case chatMessage(peer: Peer, messageID: Int64)
   case voiceMessage(peer: Peer, messageID: Int64)
   case chatInfo(chatItem: SpaceChatItem)
+  case grid(initialSpaceID: Int64?)
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
   case integrationOptions(spaceId: Int64, provider: String)
@@ -419,7 +420,7 @@ extension Destination {
     switch self {
     case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _), let .voiceMessage(peer, _):
       peer
-    case .chats, .archived, .spaces, .space, .chatInfo, .spaceSettings,
+    case .chats, .archived, .spaces, .space, .chatInfo, .grid, .spaceSettings,
          .spaceIntegrations, .integrationOptions, .createSpaceChat, .createThread, .createSpace:
       nil
     }

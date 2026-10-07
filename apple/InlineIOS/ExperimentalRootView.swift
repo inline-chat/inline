@@ -133,7 +133,6 @@ private struct ExperimentalAuthedRootView: View {
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
-  @State private var isGridPresented = false
   @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridIOSEnabled = false
   @State private var isCleaningOpenChats = false
   @State private var iPadCommandRequest: IPadCommandRequest?
@@ -459,11 +458,7 @@ private struct ExperimentalAuthedRootView: View {
     .toolbar {
       experimentalToolbarContent()
     }
-    .gridHomeEntry(
-      isPresented: $isGridPresented,
-      spaceID: nav.activeSpaceId,
-      spaces: compactSpaceList.spaces
-    )
+    .gridHomeEntry(onOpen: openGrid)
     .safeAreaInset(edge: .bottom, spacing: 0) {
       IPadSidebarSwitcher(selection: iPadSidebarScopeBinding)
     }
@@ -484,12 +479,7 @@ private struct ExperimentalAuthedRootView: View {
         .toolbar {
           experimentalToolbarContent()
         }
-        .gridHomeEntry(
-          isPresented: $isGridPresented,
-          spaceID: nav.activeSpaceId,
-          spaces: compactSpaceList.spaces,
-          isVisible: !isSearchActivePresentation
-        )
+        .gridHomeEntry(isVisible: !isSearchActivePresentation, onOpen: openGrid)
         .navigationDestination(for: Destination.self) { destination in
           ExperimentalDestinationView(
             nav: bindableNav,
@@ -906,6 +896,12 @@ private struct ExperimentalAuthedRootView: View {
     )
   }
 
+  private func openGrid() {
+    guard gridIOSEnabled,
+          GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).isEligible else { return }
+    openHomeDestination(.grid(initialSpaceID: nav.activeSpaceId))
+  }
+
   private func openHomeDestination(_ destination: Destination) {
     if usesIPadSplitView {
       router[IPadNavigationLane.canonicalTab] = [destination]
@@ -1208,7 +1204,7 @@ private struct ExperimentalAuthedRootView: View {
       },
       onGrid: gridIOSEnabled
         && GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry
-        ? { isGridPresented = true }
+        ? openGrid
         : nil
     )
     // Fill the iPad toolbar target without changing the phone toolbar layout.

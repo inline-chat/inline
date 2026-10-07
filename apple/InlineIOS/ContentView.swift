@@ -177,6 +177,8 @@ private struct AuthedAppRoot: View {
       .id(peer)
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
+    case let .grid(initialSpaceID):
+      GridDestinationView(initialSpaceID: initialSpaceID)
     case let .spaceSettings(spaceId):
       SpaceSettingsView(spaceId: spaceId)
     case let .spaceIntegrations(spaceId):

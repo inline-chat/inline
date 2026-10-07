@@ -8,6 +8,34 @@ import InlineUI
 import SwiftUI
 import UIKit
 
+/// Uses the same process-owned room service as Home and the active call.
+struct GridDestinationView: View {
+  let initialSpaceID: Int64?
+  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var isEnabled = false
+  @EnvironmentObject private var spaceList: CompactSpaceList
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    Group {
+      if isEnabled {
+        GridRoomsView(
+          store: GridRuntime.shared.rooms,
+          spaces: spaceList.spaces,
+          initialSpaceID: initialSpaceID
+        )
+      } else {
+        ContentUnavailableView("Grid is unavailable", systemImage: "square.grid.2x2")
+          .navigationTitle("Grid")
+      }
+    }
+    .onChange(of: isEnabled) { _, enabled in
+      if !enabled {
+        dismiss()
+      }
+    }
+  }
+}
+
 struct GridRoomsView: View {
   let store: GridRoomService
   let spaces: [InlineKit.Space]
@@ -35,18 +63,18 @@ struct GridRoomsView: View {
   private var actionFailure: GridActionFailure? {
     let hasConnectionFailure = store.media.connectionState == .failed
     let connectionError = hasConnectionFailure ? store.media.lastConnectionError : nil
-    let audioError: String?
-    if case let .failed(message) = store.media.audioState {
-      audioError = message
+    let audioError: String? = if case let .failed(message) = store.media.audioState {
+      message
     } else {
-      audioError = nil
+      nil
     }
     let storeError = store.membershipMutationInFlight ? nil : store.lastError
-    let errors = [storeError, connectionError, audioError].compactMap { $0 }
+    let errors = [storeError, connectionError, audioError].compactMap(\.self)
     let hasMediaFailure = hasConnectionFailure || audioError != nil || store.media.providerCircuitOpen
     let audio = InlineAudioSession.shared
     if audio.isQuarantined && (store.hasLocalAdmission || !errors.isEmpty)
-      || errors.contains(InlineAudioSessionError.quarantined.localizedDescription) {
+      || errors.contains(InlineAudioSessionError.quarantined.localizedDescription)
+    {
       return .restartRequired
     }
     guard !errors.isEmpty || hasMediaFailure else { return nil }
@@ -60,94 +88,97 @@ struct GridRoomsView: View {
   }
 
   var body: some View {
-    NavigationStack {
-      VStack(spacing: 16) {
-        if let spaceID = effectiveSpaceID {
-          GridRoomCollection(store: store, spaceID: spaceID, onViewShare: { avatar, share in
-            guard let identity = store.mediaSessionIdentity else { return }
-            selectedShare = GridScreenShareSelection(
-              mediaSessionIdentity: identity,
-              participantIdentity: share.participantIdentity,
-              publicationID: share.publicationID,
-              displayName: InlineKit.User(from: avatar.user).displayName
-            )
-          })
-
-          GridCurrentRoomControls(store: store, spaceID: store.currentCall?.spaceID ?? spaceID)
-          if !store.callTransferEnabled {
-            Text("Grid is unavailable")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .padding(20)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .navigationTitle("Grid")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .principal) {
-          GridSpacePicker(
-            homeSpaces: store.orderedHomeSpaces,
-            spaces: spaces,
-            selectedSpaceID: effectiveSpaceID,
-            onSelect: { selectedSpaceID = $0 }
+    VStack(spacing: 16) {
+      if let spaceID = effectiveSpaceID {
+        GridRoomCollection(store: store, spaceID: spaceID, onViewShare: { avatar, share in
+          guard let identity = store.mediaSessionIdentity else { return }
+          selectedShare = GridScreenShareSelection(
+            mediaSessionIdentity: identity,
+            participantIdentity: share.participantIdentity,
+            publicationID: share.publicationID,
+            displayName: InlineKit.User(from: avatar.user).displayName
           )
+        })
+
+        GridCurrentRoomControls(store: store, spaceID: store.currentCall?.spaceID ?? spaceID)
+        if !store.callTransferEnabled {
+          Text("Grid is unavailable")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
-        ToolbarItem(placement: .topBarTrailing) {
-          Button("Done", systemImage: "xmark") { dismiss() }
-            .labelStyle(.iconOnly)
-            .accessibilityLabel("Close Grid")
-        }
-      }
-      .task(id: effectiveSpaceID) {
-        if let spaceID = effectiveSpaceID { await store.load(spaceID: spaceID) }
-      }
-      .onChange(of: actionFailure, initial: true) { _, failure in
-        if let failure {
-          presentedFailure = failure
-          store.clearLastError()
-        }
-      }
-      .alert(presentedFailure?.title ?? "Unable to update Grid", isPresented: Binding(
-        get: { presentedFailure != nil },
-        set: { if !$0 { presentedFailure = nil } }
-      ), presenting: presentedFailure) { failure in
-        if failure.canRetryAudio && store.hasLocalAdmission {
-          Button("Retry Audio") {
-            guard store.hasLocalAdmission, store.currentCall?.ownedByCurrentSession == true,
-                  !InlineAudioSession.shared.isQuarantined else { return }
-            store.retryAudio()
-          }
-            .disabled(store.membershipMutationInFlight)
-        } else if failure == .update {
-          Button("Refresh") {
-            Task {
-              await store.loadHome()
-              if let spaceID = effectiveSpaceID { await store.load(spaceID: spaceID) }
-            }
-          }
-        }
-        if let call = store.currentCall, call.ownedByCurrentSession {
-          Button("Leave Grid", role: .destructive) {
-            if let current = store.currentCall, current.ownedByCurrentSession {
-              store.leaveCurrentRoom(spaceID: current.spaceID)
-            }
-          }
-        }
-        if failure == .recordingConflict || failure == .restartRequired {
-          Button("Close Grid", role: .cancel) { dismiss() }
-        } else {
-          Button("Cancel", role: .cancel) {}
-        }
-      } message: { failure in
-        Text(failure.message)
-      }
-      .fullScreenCover(item: $selectedShare) { selection in
-        GridScreenShareViewer(store: store, selection: selection)
+      } else {
+        ContentUnavailableView("Grid is unavailable", systemImage: "square.grid.2x2")
       }
     }
-    .frame(idealWidth: 360, idealHeight: 280)
+    .padding(20)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .navigationTitle("Grid")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .principal) {
+        GridSpacePicker(
+          homeSpaces: store.orderedHomeSpaces,
+          spaces: spaces,
+          selectedSpaceID: effectiveSpaceID,
+          onSelect: { selectedSpaceID = $0 }
+        )
+      }
+    }
+    .task { await store.loadHome() }
+    .task(id: effectiveSpaceID) {
+      if let spaceID = effectiveSpaceID {
+        await store.load(spaceID: spaceID)
+      }
+    }
+    .onChange(of: actionFailure, initial: true) { _, failure in
+      if let failure {
+        presentedFailure = failure
+        store.clearLastError()
+      }
+    }
+    .alert(presentedFailure?.title ?? "Unable to update Grid", isPresented: Binding(
+      get: { presentedFailure != nil },
+      set: {
+        if !$0 {
+          presentedFailure = nil
+        }
+      }
+    ), presenting: presentedFailure) { failure in
+      if failure.canRetryAudio && store.hasLocalAdmission {
+        Button("Retry Audio") {
+          guard store.hasLocalAdmission, store.currentCall?.ownedByCurrentSession == true,
+                !InlineAudioSession.shared.isQuarantined else { return }
+          store.retryAudio()
+        }
+        .disabled(store.membershipMutationInFlight)
+      } else if failure == .update {
+        Button("Refresh") {
+          Task {
+            await store.loadHome()
+            if let spaceID = effectiveSpaceID {
+              await store.load(spaceID: spaceID)
+            }
+          }
+        }
+      }
+      if let call = store.currentCall, call.ownedByCurrentSession {
+        Button("Leave Grid", role: .destructive) {
+          if let current = store.currentCall, current.ownedByCurrentSession {
+            store.leaveCurrentRoom(spaceID: current.spaceID)
+          }
+        }
+      }
+      if failure == .recordingConflict || failure == .restartRequired {
+        Button("Close Grid", role: .cancel) { dismiss() }
+      } else {
+        Button("Cancel", role: .cancel) {}
+      }
+    } message: { failure in
+      Text(failure.message)
+    }
+    .fullScreenCover(item: $selectedShare) { selection in
+      GridScreenShareViewer(store: store, selection: selection)
+    }
   }
 }
 
@@ -166,15 +197,17 @@ private enum GridActionFailure: Equatable {
 
   var message: String {
     switch self {
-    case .recordingConflict: InlineAudioSessionError.recordingOwnsAudio.localizedDescription
-    case .restartRequired: InlineAudioSessionError.quarantined.localizedDescription
-    case .retirementPending: InlineAudioSessionError.retirementPending.localizedDescription
-    case .audio: String(localized: "Grid audio could not start. Try again.")
-    case .update: String(localized: "Grid could not be updated. Refresh and try again.")
+      case .recordingConflict: InlineAudioSessionError.recordingOwnsAudio.localizedDescription
+      case .restartRequired: InlineAudioSessionError.quarantined.localizedDescription
+      case .retirementPending: InlineAudioSessionError.retirementPending.localizedDescription
+      case .audio: String(localized: "Grid audio could not start. Try again.")
+      case .update: String(localized: "Grid could not be updated. Refresh and try again.")
     }
   }
 
-  var canRetryAudio: Bool { self == .audio || self == .retirementPending }
+  var canRetryAudio: Bool {
+    self == .audio || self == .retirementPending
+  }
 }
 
 private struct GridSpacePicker: View {
@@ -365,7 +398,10 @@ private struct GridRoomAvatarOverflow: View {
             Button {
               onViewShare(avatar, share)
             } label: {
-              Label("View \(InlineKit.User(from: avatar.user).displayName)’s screen", systemImage: "rectangle.on.rectangle")
+              Label(
+                "View \(InlineKit.User(from: avatar.user).displayName)’s screen",
+                systemImage: "rectangle.on.rectangle"
+              )
             }
           }
         }
@@ -424,7 +460,7 @@ struct GridCurrentRoomControls: View {
 
   var body: some View {
     if let call = store.currentCall, call.spaceID == spaceID {
-      if call.ownedByCurrentSession && store.hasLocalAdmission {
+      if call.ownedByCurrentSession, store.hasLocalAdmission {
         GridLocalAudioControls(store: store, spaceID: spaceID)
       } else {
         HStack(spacing: 16) {
@@ -487,7 +523,7 @@ private struct GridLocalAudioControls: View {
     }
     .frame(maxWidth: .infinity)
     .onChange(of: store.media.microphonePermission) { _, permission in
-      if requestedUnmute && (permission == .denied || permission == .restricted) {
+      if requestedUnmute, permission == .denied || permission == .restricted {
         audioAlert = .microphonePermission
         requestedUnmute = false
       } else if permission == .authorized {
@@ -496,11 +532,17 @@ private struct GridLocalAudioControls: View {
     }
     .alert(alertTitle, isPresented: Binding(
       get: { audioAlert != nil },
-      set: { if !$0 { audioAlert = nil } }
+      set: {
+        if !$0 {
+          audioAlert = nil
+        }
+      }
     )) {
       if audioAlert == .microphonePermission {
         Button("Open Settings") {
-          if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+          if let url = URL(string: UIApplication.openSettingsURLString) {
+            openURL(url)
+          }
         }
         Button("Cancel", role: .cancel) {}
       } else {
@@ -539,7 +581,9 @@ private struct GridLocalAudioControls: View {
             do {
               try await audio.setSpeakerPreferred(preferred)
             } catch {
-              if !(error is CancellationError) { audioAlert = .outputRoute }
+              if !(error is CancellationError) {
+                audioAlert = .outputRoute
+              }
             }
           }
         } label: {
@@ -602,7 +646,7 @@ private struct GridRoomFlowLayout: Layout {
     var usedWidth: CGFloat = 0
     for view in subviews {
       let size = view.sizeThatFits(.unspecified)
-      if x > 0 && x + size.width > width {
+      if x > 0, x + size.width > width {
         y += rowHeight + spacing
         x = 0
         rowHeight = 0
@@ -620,7 +664,7 @@ private struct GridRoomFlowLayout: Layout {
     var rowHeight: CGFloat = 0
     for view in subviews {
       let size = view.sizeThatFits(.unspecified)
-      if x > bounds.minX && x + size.width > bounds.maxX {
+      if x > bounds.minX, x + size.width > bounds.maxX {
         y += rowHeight + spacing
         x = bounds.minX
         rowHeight = 0
