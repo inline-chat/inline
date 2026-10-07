@@ -104,8 +104,10 @@ public struct GetChatTransaction: Transaction2 {
 
   @discardableResult
   static func repairPeerProfilePhoto(_ user: InlineProtocol.User, in db: Database) throws -> Bool {
-    if let existing = try User.fetchOne(db, id: user.id), !profilePhotoNeedsRepair(existing: existing, incoming: user) {
-      return false
+    if let existing = try User.fetchOne(db, id: user.id) {
+      // Message imports may create a nameless peer before its full profile arrives.
+      let fillsDisplayName = existing.needsDisplayNameFetch && !User(from: user).needsDisplayNameFetch
+      guard fillsDisplayName || profilePhotoNeedsRepair(existing: existing, incoming: user) else { return false }
     }
 
     _ = try User.save(db, user: user)

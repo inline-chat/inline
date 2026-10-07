@@ -1607,6 +1607,19 @@ public actor RealtimeV2 {
     timeout: Duration = .seconds(20),
     operation: @escaping @Sendable (RealtimeV2) async throws -> Value
   ) async throws -> Value {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    // A URL can arrive before persistent storage promotion or the auth observer.
+    // Retain that request while the existing owners admit it, without opening
+    // transaction admission or projecting into the temporary launch database.
+    while !storageIsReady() || !acceptsTransactions {
+      try Task.checkCancellation()
+      try auth.validateAccountMutation(accountToken)
+      guard !isPreparingForTermination else { throw CancellationError() }
+      guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
+      try await Task.sleep(for: min(.milliseconds(50), clock.now.duration(to: deadline)))
+    }
+    guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
     try validateUserInitiatedOperation(accountToken)
     // Finish any previous-owner drain before admitting this operation into that same drain.
     guard let owner = await ensureTransactionOwnerIfNeeded(), isCurrentTransactionOwner(owner) else {
@@ -1632,13 +1645,12 @@ public actor RealtimeV2 {
             try await Task.sleep(for: .milliseconds(50))
           }
           try await self.validateUserInitiatedOperation(accountToken)
+          guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
           let result = try await operation(self)
           try await self.validateUserInitiatedOperation(accountToken)
           return result
         }
         group.addTask {
-          let clock = ContinuousClock()
-          let deadline = clock.now.advanced(by: timeout)
           while clock.now < deadline {
             try await self.validateUserInitiatedOperation(accountToken)
             try await Task.sleep(for: min(.milliseconds(50), clock.now.duration(to: deadline)))
