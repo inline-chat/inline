@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { ModelError } from "@in/server/db/models/_errors"
 import {
   documents,
@@ -155,15 +156,11 @@ async function getPhotoById(photoId: bigint): Promise<DbFullPhoto | undefined> {
   return processFullPhoto(result)
 }
 
-export async function getPhotosByIds(photoIds: bigint[]): Promise<DbFullPhoto[]> {
-  const ids = [...new Set(
-    photoIds
-      .map(Number)
-      .filter((id) => Number.isSafeInteger(id) && id > 0),
-  )]
+export async function getPhotosByIds(photoIds: bigint[], tx?: Transaction): Promise<DbFullPhoto[]> {
+  const ids = [...new Set(photoIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))]
   if (ids.length === 0) return []
 
-  const results = await db._query.photos.findMany({
+  const results = await (tx ?? db)._query.photos.findMany({
     where: inArray(photos.id, ids),
     with: {
       photoSizes: {

@@ -1,6 +1,7 @@
+import { canonicalMediaForFile } from "@in/server/modules/message/canonicalMediaForFile"
 import { db } from "@in/server/db"
 import { eq, and } from "drizzle-orm"
-import { chats, messages, users, type DbFile, type DbMessage, type DbUser } from "@in/server/db/schema"
+import { chats, users, type DbFile, type DbMessage, type DbUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -25,7 +26,7 @@ import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { MessageEntities, Update, type BlockContent } from "@inline-chat/protocol/core"
+import { MessageEntities, Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
@@ -35,12 +36,10 @@ import {
   notificationText,
 } from "@in/server/modules/notifications/messagePreview"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
-import { ChatModel } from "@in/server/db/models/chats"
-import {
-  insertPreparedBlockContent,
-  prepareBlockContent,
-  type PreparedBlockContent,
-} from "@in/server/modules/message/blockContentStorage"
+import { MessageModel } from "@in/server/db/models/messages"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -67,10 +66,12 @@ export const Input = Type.Object({
   ),
 
   isSticker: Optional(Type.Boolean()),
-  parseMarkdown: Optional(Type.Boolean({
-    description:
-      "Parse Inline's supported Markdown surface. Defaults to true; false preserves the supplied syntax literally.",
-  })),
+  parseMarkdown: Optional(
+    Type.Boolean({
+      description:
+        "Parse Inline's supported Markdown surface. Defaults to true; false preserves the supplied syntax literally.",
+    }),
+  ),
 })
 
 type Input = Static<typeof Input>
@@ -139,10 +140,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   // Encrypt
   const encryptedText = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities.length > 0
-    ? encryptMessageEntities(binaryEntities)
-    : undefined
-  const hasLink = detectHasLink({ entities }) ? true : undefined
+  const encryptedEntities =
+    binaryEntities && binaryEntities.length > 0 ? encryptMessageEntities(binaryEntities) : undefined
+  const hasLink = detectHasLink({ entities })
 
   // File
   let file: DbFile | undefined
@@ -160,30 +160,15 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  // Insert new message with nested select for messageId sequence
-  const newMessage = await db.transaction(async (tx) => {
-    // First lock the specific chat row
-    const [chat] = await tx
-      .select()
-      .from(chats)
-      .where(eq(chats.id, chatId))
-      .for("update") // This locks the row
-      .limit(1)
-
-    if (!chat) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
-
-    const nextId = ChatModel.nextMessageId(chat)
-    const blockContentId = preparedBlockContent
-      ? await insertPreparedBlockContent(tx, preparedBlockContent, 0)
-      : null
-
-    // Insert the new message
-    const [message] = await tx
-      .insert(messages)
-      .values({
-        chatId: chatId,
+  const { message: newMessage, update: durableUpdate } = await db.transaction(async (tx) => {
+    // Preserve chat -> file lock order with other message writers.
+    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+    if (!lockedChat) throw new InlineError(InlineError.ApiError.PEER_INVALID)
+    const media = file ? await canonicalMediaForFile(tx, file.id) : {}
+    return MessageModel.insertMessage(
+      {
+        ...media,
+        chatId,
         fromId: context.currentUserId,
         text: null,
         textEncrypted: encryptedText?.encrypted ?? null,
@@ -192,28 +177,16 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         entitiesEncrypted: encryptedEntities?.encrypted ?? null,
         entitiesIv: encryptedEntities?.iv ?? null,
         entitiesTag: encryptedEntities?.authTag ?? null,
-        messageId: nextId,
         replyToMsgId: replyToMsgId ?? null,
         randomId: randomId ?? null,
         fileId: file?.id ?? null,
         date: messageDate,
         isSticker: input.isSticker ?? false,
         hasLink,
-        blockContentId,
-      })
-      .returning()
-
-    // Update the lastMsgId
-    await tx
-      .update(chats)
-      .set({ lastMsgId: nextId, messageIdCounter: nextId })
-      .where(eq(chats.id, chatId))
-
-    return message
-      ? ({ ...message, blockContent: preparedBlockContent?.blockContent ?? null } satisfies DbMessage & {
-          blockContent?: BlockContent | null
-        })
-      : undefined
+      },
+      preparedBlockContent,
+      tx,
+    )
   })
 
   if (!newMessage) {
@@ -227,8 +200,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     files: file ? [file] : null,
   })
 
-  sendMessageUpdate({
+  await sendMessageUpdate({
     message: { message: newMessage, file },
+    durableUpdate,
     peerId: input.peerId ?? peerId,
     currentUserId: context.currentUserId,
   })
@@ -249,10 +223,8 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     // Don't send push notifications to self
     input.peerUserId !== context.currentUserId
   ) {
-    const title = notificationText(
-      currentUser.firstName ?? currentUser.username,
-      maxNotificationNameBytes,
-    ) || "New Message"
+    const title =
+      notificationText(currentUser.firstName ?? currentUser.username, maxNotificationNameBytes) || "New Message"
     sendPushNotificationToUser({
       userId: Number(input.peerUserId),
       title,
@@ -334,15 +306,19 @@ export const getChatIdFromPeer = async (
 
 // HERE YOU ARE DENA
 const sendMessageUpdate = async ({
+  durableUpdate,
   peerId,
   message,
   currentUserId,
 }: {
+  durableUpdate: UpdateSeqAndDate
   peerId: TPeerInfo
   message: { message: DbMessage; file: DbFile | undefined }
   currentUserId: number
 }) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
+  const [fullMessage] = await MessageModel.getMessagesByIds(message.message.chatId, [BigInt(message.message.messageId)])
+  if (!fullMessage) throw new InlineError(InlineError.ApiError.INTERNAL)
 
   if (updateGroup.type === "dmUsers") {
     updateGroup.userIds.forEach((userId) => {
@@ -360,14 +336,15 @@ const sendMessageUpdate = async ({
       }
 
       let newMessageUpdate: Update = {
+        seq: durableUpdate.seq,
+        date: encodeDateStrict(durableUpdate.date),
         update: {
           oneofKind: "newMessage",
           newMessage: {
-            message: Encoders.message({
-              message: message.message,
-              file: message.file,
+            message: Encoders.fullMessage({
+              message: fullMessage,
               encodingForUserId: userId,
-              encodingForPeer: { legacyPeer: encodingForPeer },
+              encodingForPeer: { peer: Encoders.peer(encodingForPeer) },
             }),
           },
         },
@@ -399,14 +376,15 @@ const sendMessageUpdate = async ({
       }
 
       let newMessageUpdate: Update = {
+        seq: durableUpdate.seq,
+        date: encodeDateStrict(durableUpdate.date),
         update: {
           oneofKind: "newMessage",
           newMessage: {
-            message: Encoders.message({
-              message: message.message,
-              file: message.file,
+            message: Encoders.fullMessage({
+              message: fullMessage,
               encodingForUserId: userId,
-              encodingForPeer: { legacyPeer: peerId },
+              encodingForPeer: { peer: Encoders.peer(peerId) },
             }),
           },
         },
@@ -530,9 +508,4 @@ const sendPushNotificationToUser = async ({
       userId,
     })
   }
-}
-
-// Update the chat's last message ID
-async function updateLastMessageId(chatId: number, messageId: number) {
-  await db.update(chats).set({ lastMsgId: messageId }).where(eq(chats.id, chatId))
 }

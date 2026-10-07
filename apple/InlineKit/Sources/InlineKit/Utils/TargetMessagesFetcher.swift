@@ -22,7 +22,7 @@ public actor TargetMessagesFetcher {
   }
 
   private let log = Log.scoped("TargetMessagesFetcher")
-  private let maxBatchSize = 200
+  private let maxBatchSize = 100
   private let resolveMissingIds: MissingMessageIDsProvider
   private let fetchMessages: FetchMessagesOperation
 

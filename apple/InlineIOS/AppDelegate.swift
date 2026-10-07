@@ -18,6 +18,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
   @MainActor private var spaceJoinGeneration: UInt64 = 0
+  @MainActor private var chatLinkTask: Task<Void, Never>?
+  @MainActor private var chatLinkGeneration: UInt64 = 0
 
   func application(
     _ application: UIApplication,
@@ -77,15 +79,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   @MainActor
   func handleDeepLink(_ url: URL, router: Router) -> Bool {
     guard let deepLink = InlineDeepLink(url: url) else { return false }
+    cancelPendingChatLink()
 
     let request: AppNavigationRequest
     switch deepLink {
     case let .user(id):
       request = .chat(peer: .user(id: id))
     case let .chat(id):
-      request = .chat(peer: .thread(id: id))
+      openChatLink(chatID: id, messageID: nil, router: router)
+      return true
     case let .message(chatId, messageId):
-      request = .message(peer: .thread(id: chatId), messageID: messageId)
+      openChatLink(chatID: chatId, messageID: messageId, router: router)
+      return true
     case .publicSpace, .spaceInvite:
       guard let reference = SpaceJoinReference(deepLink: deepLink) else { return false }
       spaceJoinGeneration &+= 1
@@ -98,6 +103,70 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     router.navigate(request)
     openInInboxAfterExternalNavigation(request.peer)
     return true
+  }
+
+  @MainActor
+  private func openChatLink(chatID: Int64, messageID: Int64?, router: Router) {
+    let generation = chatLinkGeneration
+    let auth = Auth.shared.handle
+    let admittedAccount = try? auth.beginAccountMutation()
+    let initialStatus = auth.snapshot().status
+    let snapshots = admittedAccount == nil ? auth.snapshots : nil
+    let initialTab = router.selectedTab
+    let initialPath = router.selectedTabPath
+    chatLinkTask = Task { @MainActor [weak self] in
+      var accountForError = admittedAccount
+      defer {
+        if self?.chatLinkGeneration == generation { self?.chatLinkTask = nil }
+      }
+      do {
+        let account: AuthAccountMutationToken
+        if let admittedAccount {
+          account = admittedAccount
+        } else {
+          guard let snapshots else { return }
+          guard let hydratedAccount = try await ChatLinkResolver.waitForAccount(
+            initialStatus: initialStatus, snapshots: snapshots, auth: auth
+          ) else { return }
+          account = hydratedAccount
+          accountForError = account
+        }
+        guard let peer = try await ChatLinkResolver.resolvePeer(chatID: chatID, account: account) else {
+          throw ChatLinkError.unavailable
+        }
+        try auth.validateAccountMutation(account)
+        guard !Task.isCancelled, self?.chatLinkGeneration == generation,
+              router.selectedTab == initialTab, router.selectedTabPath == initialPath
+        else { return }
+        let request: AppNavigationRequest = if let messageID {
+          .message(peer: peer, messageID: messageID)
+        } else {
+          .chat(peer: peer)
+        }
+        router.navigate(request)
+        self?.openInInboxAfterExternalNavigation(peer)
+      } catch is CancellationError {
+        return
+      } catch {
+        guard !Task.isCancelled, self?.chatLinkGeneration == generation,
+              router.selectedTab == initialTab, router.selectedTabPath == initialPath,
+              let accountForError,
+              (try? auth.validateAccountMutation(accountForError)) != nil
+        else { return }
+        ToastManager.shared.showToast("Couldn’t open chat link", type: .error)
+      }
+    }
+  }
+
+  @MainActor
+  private func cancelPendingChatLink() {
+    chatLinkGeneration &+= 1
+    chatLinkTask?.cancel()
+    chatLinkTask = nil
+  }
+
+  private enum ChatLinkError: Error {
+    case unavailable
   }
 
   @MainActor
@@ -313,6 +382,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       return
     }
 
+    cancelPendingChatLink()
     let waitsForSceneActivation = UIApplication.shared.applicationState == .background
       || !sceneRouterRegistry.hasActiveRouter()
     let navigationReservation = sceneRouterRegistry.reserveNavigation(

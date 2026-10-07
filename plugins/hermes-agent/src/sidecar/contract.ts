@@ -31,6 +31,13 @@ export function inboundEventNeedsSenderResolution(event: GenericInboundEvent): b
   return !botSettingsEventKinds.has(event.kind ?? "")
 }
 
+export function inboundEventIsServiceMessage(event: GenericInboundEvent): boolean {
+  if (event.kind !== "message.new" && event.kind !== "message.edit") return false
+  const message = asOptionalRecord(event.message)
+  const raw = asOptionalRecord(message?.raw)
+  return Boolean(asOptionalRecord(message?.serviceMessage) || asOptionalRecord(raw?.serviceMessage))
+}
+
 export class SidecarError extends Error {
   readonly errorKind: ErrorKind
 
@@ -163,6 +170,7 @@ export function normalizeMessage(message: Record<string, unknown>): Record<strin
     replies: message.replies ?? null,
     actions: message.actions ?? null,
     rev: message.rev ?? null,
+    ...(asOptionalRecord(message.serviceMessage) ? { serviceMessage: message.serviceMessage } : {}),
     raw: message,
   }
 }

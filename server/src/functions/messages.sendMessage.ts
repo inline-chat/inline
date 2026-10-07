@@ -48,7 +48,11 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
-import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "@in/server/modules/notifications/messagePreview"
+import {
+  maxNotificationNameBytes,
+  messageNotificationBody,
+  notificationText,
+} from "@in/server/modules/notifications/messagePreview"
 import { notificationPhotoUrl } from "@in/server/modules/notifications/notificationPhoto"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
@@ -172,10 +176,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
     const sourceContext = chatAgentContext(sourceChat)
     const destinationContext = chatAgentContext(chat)
-    if (
-      Number(sourceContext?.botUserId) !== currentUserId ||
-      destinationContext === undefined
-    ) {
+    if (Number(sourceContext?.botUserId) !== currentUserId || destinationContext === undefined) {
       throw RealtimeRpcError.BadRequest()
     }
   }
@@ -197,9 +198,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     (layer, connection) => Math.max(layer, connection.layer ?? 0),
     0,
   )
-  const isRealtimeV3Session = currentSessionConnections.some(
-    ({ version }) => version === ConnVersion.REALTIME_V3,
-  )
+  const isRealtimeV3Session = currentSessionConnections.some(({ version }) => version === ConnVersion.REALTIME_V3)
 
   const outgoingText = input.message
     ? await processOutgoingText({
@@ -245,7 +244,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
   entities = groupMentions.entities
   const destinationAgentContext = chatAgentContext(chat)
-  const selfMentionsExactBoundAgent = Number(destinationAgentContext?.botUserId) === currentUserId &&
+  const selfMentionsExactBoundAgent =
+    Number(destinationAgentContext?.botUserId) === currentUserId &&
     (entities?.entities ?? []).some((entity) => {
       if (entity.entity.oneofKind !== "mention") return false
       const mention = entity.entity.mention
@@ -254,20 +254,17 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   if (selfMentionsExactBoundAgent && input.sourceChatId === undefined) {
     throw RealtimeRpcError.BadRequest()
   }
-  const mentionedUserIds = new Set<number>([
-    ...getMentionedUserIds(entities),
-    ...groupMentions.mentionedUserIds,
-  ])
+  const mentionedUserIds = new Set<number>([...getMentionedUserIds(entities), ...groupMentions.mentionedUserIds])
 
   let preparedBlockContent: PreparedBlockContent | undefined
   const parsedBlockContent = input.blockContent
     ? { blockContent: input.blockContent, imageSources: [] }
     : outgoingText?.blockContent
-      ? {
-          blockContent: outgoingText.blockContent,
-          imageSources: outgoingText.blockImageSources ?? [],
-        }
-      : undefined
+    ? {
+        blockContent: outgoingText.blockContent,
+        imageSources: outgoingText.blockImageSources ?? [],
+      }
+    : undefined
   if (text && parsedBlockContent) {
     try {
       preparedBlockContent = prepareBlockContent({
@@ -285,9 +282,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
-  const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
-    ? getPreviewRoutesFromMessage(text, entities)
-    : []
+  const previewRoutes =
+    text && !input.skipLinkProcessing && !hasInputUrlPreview ? getPreviewRoutesFromMessage(text, entities) : []
   const hasLink = detectHasLink({ entities }) || hasInputUrlPreview || previewRoutes.length > 0
 
   // Encrypt
@@ -326,10 +322,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let initialAgentContext: AgentThreadContext | undefined
   let encodedInitialAgentContext: Buffer | undefined
   if (input.initialAgentContext) {
-    initialAgentContext = await validateAgentThreadContext(
-      input.initialAgentContext,
-      { bindingActorUserId: currentUserId, operation: "initial_message" },
-    )
+    initialAgentContext = await validateAgentThreadContext(input.initialAgentContext, {
+      bindingActorUserId: currentUserId,
+      operation: "initial_message",
+    })
     const botUserId = Number(initialAgentContext.botUserId)
     encodedInitialAgentContext = encodeAgentThreadContext(initialAgentContext)
     if (chat.agentContext !== null) {
@@ -349,16 +345,19 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     const visibleBotIds = await getBotUserIdsForChatScope(chat, currentUserId)
     if (!visibleBotIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
 
-    const hasConsumableInput = Boolean(text?.trim()) ||
-      mediaType === "photo" || mediaType === "video" || mediaType === "document" || mediaType === "voice"
+    const hasConsumableInput =
+      Boolean(text?.trim()) ||
+      mediaType === "photo" ||
+      mediaType === "video" ||
+      mediaType === "document" ||
+      mediaType === "voice"
     if (!hasConsumableInput) throw RealtimeRpcError.BadRequest()
   }
 
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities.length > 0
-    ? encryptMessageEntities(binaryEntities)
-    : undefined
+  const encryptedEntities =
+    binaryEntities && binaryEntities.length > 0 ? encryptMessageEntities(binaryEntities) : undefined
   const binaryActions = normalizedActions ? MessageActions.toBinary(normalizedActions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
 
@@ -391,36 +390,62 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let update: UpdateSeqAndDate
   let agentContextUpdate: UpdateSeqAndDate | undefined
   try {
-    // insert new msg with new ID
-    ;({ chat, message: newMessage, update, agentContextUpdate } = await MessageModel.insertMessage({
-      chatId: chatId,
-      fromId: fromId,
-      textEncrypted: encryptedMessage?.encrypted ?? null,
-      textIv: encryptedMessage?.iv ?? null,
-      textTag: encryptedMessage?.authTag ?? null,
-      replyToMsgId: replyToMsgIdNumber,
-      fwdFromPeerUserId: fwdFromPeerUserId,
-      fwdFromPeerChatId: fwdFromPeerChatId,
-      fwdFromMessageId: fwdFromMessageId,
-      fwdFromSenderId: fwdFromSenderId,
-      randomId: input.randomId,
-      date: date,
-      mediaType: mediaType,
-      photoId: dbFullPhoto?.id ?? null,
-      videoId: dbFullVideo?.id ?? null,
-      documentId: dbFullDocument?.id ?? null,
-      voiceId: dbFullVoice?.id ?? null,
-      isSticker: input.isSticker ?? false,
-      hasLink: hasLink,
-      entitiesEncrypted: encryptedEntities?.encrypted ?? null,
-      entitiesIv: encryptedEntities?.iv ?? null,
-      entitiesTag: encryptedEntities?.authTag ?? null,
-      actionsEncrypted: encryptedActions?.encrypted ?? null,
-      actionsIv: encryptedActions?.iv ?? null,
-      actionsTag: encryptedActions?.authTag ?? null,
-    }, preparedBlockContent, undefined, initialAgentContext && encodedInitialAgentContext
-      ? { value: initialAgentContext, encoded: encodedInitialAgentContext }
-      : undefined))
+    // The first history snapshot must see the message and its initial attachments together.
+    ;({
+      chat,
+      message: newMessage,
+      update,
+      agentContextUpdate,
+    } = await db.transaction(async (tx) => {
+      const inserted = await MessageModel.insertMessage(
+        {
+          chatId: chatId,
+          fromId: fromId,
+          textEncrypted: encryptedMessage?.encrypted ?? null,
+          textIv: encryptedMessage?.iv ?? null,
+          textTag: encryptedMessage?.authTag ?? null,
+          replyToMsgId: replyToMsgIdNumber,
+          fwdFromPeerUserId: fwdFromPeerUserId,
+          fwdFromPeerChatId: fwdFromPeerChatId,
+          fwdFromMessageId: fwdFromMessageId,
+          fwdFromSenderId: fwdFromSenderId,
+          randomId: input.randomId,
+          date: date,
+          mediaType: mediaType,
+          photoId: dbFullPhoto?.id ?? null,
+          videoId: dbFullVideo?.id ?? null,
+          documentId: dbFullDocument?.id ?? null,
+          voiceId: dbFullVoice?.id ?? null,
+          isSticker: input.isSticker ?? false,
+          hasLink: hasLink,
+          entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+          entitiesIv: encryptedEntities?.iv ?? null,
+          entitiesTag: encryptedEntities?.authTag ?? null,
+          actionsEncrypted: encryptedActions?.encrypted ?? null,
+          actionsIv: encryptedActions?.iv ?? null,
+          actionsTag: encryptedActions?.authTag ?? null,
+        },
+        preparedBlockContent,
+        tx,
+        initialAgentContext && encodedInitialAgentContext
+          ? { value: initialAgentContext, encoded: encodedInitialAgentContext }
+          : undefined,
+      )
+      if (input.messageAttachments && input.messageAttachments.length > 0) {
+        const attachmentRows = input.messageAttachments
+          .map((attachment) => ({
+            messageId: inserted.message.globalId,
+            externalTaskId: attachment.externalTaskId ?? null,
+            urlPreviewId: attachment.urlPreviewId ?? null,
+          }))
+          .filter((attachment) => attachment.externalTaskId !== null || attachment.urlPreviewId !== null)
+
+        if (attachmentRows.length > 0) {
+          await tx.insert(messageAttachments).values(attachmentRows)
+        }
+      }
+      return inserted
+    }))
   } catch (error) {
     if (error instanceof ModelError && error.code === ModelError.Codes.AGENT_CONTEXT_ALREADY_SET) {
       if (input.randomId && encodedInitialAgentContext && initialAgentContext) {
@@ -454,20 +479,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     sourceMessageRevision: newMessage.rev,
     entities,
   })
-
-  if (input.messageAttachments && input.messageAttachments.length > 0) {
-    const attachmentRows = input.messageAttachments
-      .map((attachment) => ({
-        messageId: newMessage.globalId,
-        externalTaskId: attachment.externalTaskId ?? null,
-        urlPreviewId: attachment.urlPreviewId ?? null,
-      }))
-      .filter((attachment) => attachment.externalTaskId !== null || attachment.urlPreviewId !== null)
-
-    if (attachmentRows.length > 0) {
-      await db.insert(messageAttachments).values(attachmentRows)
-    }
-  }
 
   const titleAttachments = documentTitleContext(dbFullDocument)
 
@@ -900,10 +911,7 @@ const autoFollowThreadMessage = async ({
       }
 
       return (
-        unhiddenUserIds.has(dialog.userId) &&
-        dialog.open === true &&
-        dialog.order != null &&
-        dialog.archived !== true
+        unhiddenUserIds.has(dialog.userId) && dialog.open === true && dialog.order != null && dialog.archived !== true
       )
     }),
   })
@@ -1004,11 +1012,13 @@ const pushUpdates = async ({
   // The successful mutation's receipt is independent of a later recipient
   // projection, which may already exclude a concurrently removed sender.
   const selfUpdates = [messageIdUpdate, messageUpdateForUser(currentUserId)]
-  const sends = resolvedUpdateGroup.userIds.map((userId) => RealtimeUpdates.pushToUser(
-    userId,
-    userId === currentUserId ? selfUpdates : [messageUpdateForUser(userId)],
-    userId === currentUserId ? { skipSessionId } : undefined,
-  ))
+  const sends = resolvedUpdateGroup.userIds.map((userId) =>
+    RealtimeUpdates.pushToUser(
+      userId,
+      userId === currentUserId ? selfUpdates : [messageUpdateForUser(userId)],
+      userId === currentUserId ? { skipSessionId } : undefined,
+    ),
+  )
 
   await Promise.all(sends)
   return { selfUpdates, updateGroup: resolvedUpdateGroup }
@@ -1175,10 +1185,7 @@ async function recoverInitialAgentMessageRetry(input: {
   const persistedContext = persistedChat ? chatAgentContext(persistedChat) : undefined
   // The committed message already owns its optional Agent/configuration. Retry
   // identity is anchored by sender, random ID, Chat, and the required bot target.
-  if (
-    message.chatId !== input.chatId ||
-    persistedContext?.botUserId !== input.expectedContext.botUserId
-  ) {
+  if (message.chatId !== input.chatId || persistedContext?.botUserId !== input.expectedContext.botUserId) {
     throw RealtimeRpcError.BadRequest()
   }
   return selfUpdatesFromExistingMessage(input.randomId, input.currentUserId)
@@ -1244,28 +1251,49 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // Resolve policy/provider preparation first, then take one current authority
   // snapshot immediately before submitting the eligible notification audience.
-  const prepared = await Promise.all(recipientUserIds.map(async (userId) => {
-    try {
-      const send = await prepareNotificationForUser({
-        userId, messageInfo, messageText, messageEntities, mentionedUserIds, replyMentionUserIds,
-        chat, isNudge, isUrgentNudge, updateGroup, inputPeer, currentUserId, senderNameInfo,
-        senderProfilePhotoUrl: senderPhoto?.cdnUrl,
-        senderHasProfilePhoto: senderPhoto?.hasPhoto,
-        dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
-      })
-      return send ? { userId, send } : undefined
-    } catch (error) {
-      log.error("Failed to prepare message notification", { error, userId, chatId: chat.id })
-      return undefined
-    }
-  }))
+  const prepared = await Promise.all(
+    recipientUserIds.map(async (userId) => {
+      try {
+        const send = await prepareNotificationForUser({
+          userId,
+          messageInfo,
+          messageText,
+          messageEntities,
+          mentionedUserIds,
+          replyMentionUserIds,
+          chat,
+          isNudge,
+          isUrgentNudge,
+          updateGroup,
+          inputPeer,
+          currentUserId,
+          senderNameInfo,
+          senderProfilePhotoUrl: senderPhoto?.cdnUrl,
+          senderHasProfilePhoto: senderPhoto?.hasPhoto,
+          dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
+        })
+        return send ? { userId, send } : undefined
+      } catch (error) {
+        log.error("Failed to prepare message notification", { error, userId, chatId: chat.id })
+        return undefined
+      }
+    }),
+  )
   const notifications = prepared.filter((value) => value !== undefined)
-  const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: notifications.map((value) => value.userId) })
-  await Promise.all(notifications.filter((value) => access.get(chat.id)?.has(value.userId)).map(async (value) => {
-    try { await value.send() } catch (error) {
-      log.error("Failed to send message notification", { error, userId: value.userId, chatId: chat.id })
-    }
-  }))
+  const access = await getEffectiveChatAccessUserIds(db, [chat.id], {
+    userIds: notifications.map((value) => value.userId),
+  })
+  await Promise.all(
+    notifications
+      .filter((value) => access.get(chat.id)?.has(value.userId))
+      .map(async (value) => {
+        try {
+          await value.send()
+        } catch (error) {
+          log.error("Failed to send message notification", { error, userId: value.userId, chatId: chat.id })
+        }
+      }),
+  )
 }
 
 /**
@@ -1343,7 +1371,8 @@ async function prepareNotificationForUser({
   const isDM = inputPeer.type.oneofKind === "user"
   const isReplyToUser = replyMentionUserIds.has(userId)
   const isExplicitlyMentioned =
-    mentionedUserIds.has(userId) || (messageEntities ? isUserMentioned(messageEntities, userId, mentionedUserIds) : false)
+    mentionedUserIds.has(userId) ||
+    (messageEntities ? isUserMentioned(messageEntities, userId, mentionedUserIds) : false)
 
   const decision = decideNotification({
     mode: effectiveMode,
@@ -1411,24 +1440,24 @@ async function prepareNotificationForUser({
 
   const pushSubmission = !suppressionDecision.suppress
     ? await Notifications.prepareSendToUser({
-      userId,
-      payload: {
-        kind: "send_message",
-        senderUserId: messageInfo.message.fromId,
-        threadId: `chat_${messageInfo.message.chatId}`,
-        isThread: chat?.type == "thread",
-        isReplyThread: chat != null ? isReplyThread(chat) : false,
-        messageId: String(messageInfo.message.messageId),
-        title,
-        body,
-        isUrgentNudge: isUrgentNudge,
-        senderDisplayName: senderName ?? undefined,
-        senderProfilePhotoUrl,
-        senderHasProfilePhoto,
-        threadEmoji: chat?.emoji ?? undefined,
-        photoUrl: messageInfo.message.isSticker ? undefined : notificationPhotoUrl(messageInfo.photo),
-      },
-    })
+        userId,
+        payload: {
+          kind: "send_message",
+          senderUserId: messageInfo.message.fromId,
+          threadId: `chat_${messageInfo.message.chatId}`,
+          isThread: chat?.type == "thread",
+          isReplyThread: chat != null ? isReplyThread(chat) : false,
+          messageId: String(messageInfo.message.messageId),
+          title,
+          body,
+          isUrgentNudge: isUrgentNudge,
+          senderDisplayName: senderName ?? undefined,
+          senderProfilePhotoUrl,
+          senderHasProfilePhoto,
+          threadEmoji: chat?.emoji ?? undefined,
+          photoUrl: messageInfo.message.isSticker ? undefined : notificationPhotoUrl(messageInfo.photo),
+        },
+      })
     : undefined
 
   return async () => {

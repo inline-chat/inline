@@ -1,10 +1,25 @@
 import Foundation
-import Testing
-
 @testable import InlineKit
+import Testing
 
 @Suite("Target Messages Fetcher")
 struct TargetMessagesFetcherTests {
+  @Test("large one-time target sets drain in bounded exact-ID requests")
+  func batchesLargeOneTimeTargetSets() async {
+    let recorder = FetchRecorder()
+    let fetcher = TargetMessagesFetcher(
+      resolveMissingIds: { _, ids in ids },
+      fetchMessages: { _, ids in await recorder.record(ids) }
+    )
+    let requested = Array(1 ... 201).map(Int64.init)
+    await fetcher.ensureCachedOnce(peer: .thread(id: 10), chatId: 10, messageIds: requested)
+    #expect(await waitForCondition(timeout: .seconds(2)) { await recorder.count() == 3 })
+    let batches = await recorder.batchesAsSets()
+    #expect(batches.allSatisfy { !$0.isEmpty && $0.count <= 100 })
+    #expect(batches.reduce(into: Set<Int64>()) { $0.formUnion($1) } == Set(requested))
+    #expect(batches.reduce(0) { $0 + $1.count } == requested.count)
+  }
+
   @Test("does not fetch when all message ids are already cached")
   func doesNotFetchWhenNoMissingIds() async {
     let recorder = FetchRecorder()

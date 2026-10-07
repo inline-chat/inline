@@ -1,5 +1,5 @@
-import GRDB
 import AppKit
+import GRDB
 import InlineKit
 import InlineUI
 import Logger
@@ -36,6 +36,7 @@ struct ChatInfo: View {
   @Environment(\.nav) private var nav
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject var fullChat: FullChatViewModel
+  @EnvironmentStateObject private var mediaState: ChatInfoMediaState
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
   @EnvironmentStateObject private var linksState: ChatInfoLinksState
   @EnvironmentStateObject private var voiceMemosState: ChatInfoVoiceMemosState
@@ -47,6 +48,7 @@ struct ChatInfo: View {
   private let defaultTab: ChatInfoDefaultTab?
   @State private var selectedTab: ChatInfoTab = .files
   @State private var didApplyDefaultTab = false
+  @State private var resourceResolutionFailed = false
   @State private var isOwnerOrAdmin = false
   @State private var isCreator = false
   @State private var canEditChatInfo = false
@@ -115,7 +117,7 @@ struct ChatInfo: View {
     guard peerId.isThread,
           let chat = fullChat.chat,
           chat.spaceId != nil,
-          (isOwnerOrAdmin || isCreator)
+          isOwnerOrAdmin || isCreator
     else {
       return false
     }
@@ -152,7 +154,7 @@ struct ChatInfo: View {
     if shouldShowParticipantsTab {
       tabs.append(.participants)
     }
-    tabs.append(contentsOf: [.files, .voice, .links])
+    tabs.append(contentsOf: [.media, .files, .voice, .links])
     return tabs
   }
 
@@ -164,13 +166,16 @@ struct ChatInfo: View {
     "\(peerId.toString())-\(fullChat.chat?.id ?? 0)-\(fullChat.chat?.spaceId ?? 0)-\(fullChat.chat?.createdBy ?? 0)-\(dependencies?.auth.currentUserId ?? 0)"
   }
 
-  public init(peerId: Peer, defaultTab: ChatInfoDefaultTab? = nil) {
+  init(peerId: Peer, defaultTab: ChatInfoDefaultTab? = nil) {
     self.peerId = peerId
     self.defaultTab = defaultTab
     _selectedTab = State(initialValue: ChatInfoTab(defaultTab))
     _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peerId))
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peerId)
+    }
+    _mediaState = EnvironmentStateObject { env in
+      ChatInfoMediaState(db: env.appDatabase, peer: peerId)
     }
     _documentsState = EnvironmentStateObject { env in
       ChatInfoDocumentsState(db: env.appDatabase, peer: peerId)
@@ -192,7 +197,7 @@ struct ChatInfo: View {
         header
         infoCard
 
-        Picker("Tabs", selection: $selectedTab) {
+        Picker("Tabs", selection: resourceTabSelection) {
           ForEach(availableTabs, id: \.self) { tab in
             Text(tab.title).tag(tab)
           }
@@ -211,20 +216,23 @@ struct ChatInfo: View {
     .frame(maxWidth: .infinity, alignment: .top)
     .navigationTitle(chatTitle)
     .onAppear {
-      updateViewModels()
       ensureSelectedTab()
+      updateViewModels()
       syncTranslationState()
       syncIconDraft()
     }
+    .onDisappear { deactivateResources() }
+    .onChange(of: selectedTab) { _, _ in updateViewModels() }
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
     }
     .task(id: peerId) {
-      if peerId.asUserId() != nil {
-        _ = try? await realtimeV2.send(.getChat(peer: peerId))
-      }
+      await resolveResourceChat()
     }
     .onChange(of: chatId) { _, _ in
+      if chatId != nil {
+        resourceResolutionFailed = false
+      }
       updateViewModels()
       syncIconDraft()
     }
@@ -268,12 +276,9 @@ struct ChatInfo: View {
       } else {
         ChatIcon(peer: .chat(chat), size: 100)
       }
-    } else {
-      EmptyView()
     }
   }
 
-  @ViewBuilder
   private var header: some View {
     VStack(spacing: 8) {
       icon
@@ -434,7 +439,9 @@ struct ChatInfo: View {
         }
       },
       message: { group in
-        Text("Remove \(group.name) from this chat? Members may still have access through direct participants, parent access, or another group.")
+        Text(
+          "Remove \(group.name) from this chat? Members may still have access through direct participants, parent access, or another group."
+        )
       }
     )
   }
@@ -484,8 +491,7 @@ struct ChatInfo: View {
     .accessibilityLabel("Visibility")
   }
 
-  @ViewBuilder
-  private func infoRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+  private func infoRow(_ title: String, @ViewBuilder content: () -> some View) -> some View {
     HStack(alignment: .center, spacing: 12) {
       Text(title)
         .foregroundStyle(.secondary)
@@ -503,31 +509,38 @@ struct ChatInfo: View {
   @ViewBuilder
   private var tabContent: some View {
     switch selectedTab {
-    case .files:
-      filesTab
-    case .media:
-      filesTab
-    case .voice:
-      voiceTab
-    case .links:
-      linksTab
-    case .participants:
-      participantsTab
+      case .files:
+        filesTab
+      case .media:
+        mediaTab
+      case .voice:
+        voiceTab
+      case .links:
+        linksTab
+      case .participants:
+        participantsTab
     }
+  }
+
+  @ViewBuilder
+  private var mediaTab: some View {
+    if let model = mediaState.mediaViewModel {
+      ChatInfoMediaList(mediaViewModel: model, onShowInChat: showMessageInChat)
+    } else {
+      resourceResolutionView
+    }
+  }
+
+  private func showMessageInChat(_ message: Message) {
+    dependencies?.requestOpenChat(peer: peerId, targetMessageId: message.messageId)
   }
 
   @ViewBuilder
   private var filesTab: some View {
     if let documentsViewModel = documentsState.documentsViewModel {
-      ChatInfoFilesList(documentsViewModel: documentsViewModel)
+      ChatInfoFilesList(documentsViewModel: documentsViewModel, onShowInChat: showMessageInChat)
     } else {
-      HStack {
-        Spacer()
-        ProgressView()
-          .controlSize(.small)
-        Spacer()
-      }
-      .padding(.vertical, 32)
+      resourceResolutionView
     }
   }
 
@@ -536,16 +549,11 @@ struct ChatInfo: View {
     if let voiceMemosViewModel = voiceMemosState.voiceMemosViewModel {
       ChatInfoVoiceMemosList(
         voiceMemosViewModel: voiceMemosViewModel,
-        accentColor: themeAccentColor
+        accentColor: themeAccentColor,
+        onShowInChat: showMessageInChat
       )
     } else {
-      HStack {
-        Spacer()
-        ProgressView()
-          .controlSize(.small)
-        Spacer()
-      }
-      .padding(.vertical, 32)
+      resourceResolutionView
     }
   }
 
@@ -557,15 +565,38 @@ struct ChatInfo: View {
   @ViewBuilder
   private var linksTab: some View {
     if let linksViewModel = linksState.linksViewModel {
-      ChatInfoLinksList(linksViewModel: linksViewModel)
+      ChatInfoLinksList(linksViewModel: linksViewModel, onShowInChat: showMessageInChat)
     } else {
-      HStack {
-        Spacer()
-        ProgressView()
-          .controlSize(.small)
-        Spacer()
+      resourceResolutionView
+    }
+  }
+
+  private var resourceResolutionView: some View {
+    VStack(spacing: 8) {
+      if resourceResolutionFailed {
+        Text("Couldn't load chat.").foregroundStyle(.secondary)
+        Button("Retry") { Task { await resolveResourceChat() } }
+      } else {
+        ProgressView().controlSize(.small)
       }
-      .padding(.vertical, 32)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 32)
+  }
+
+  @MainActor
+  private func resolveResourceChat() async {
+    resourceResolutionFailed = false
+    do {
+      if chatId == nil {
+        let resolved = try await fullChat.ensureChat()
+        resourceResolutionFailed = resolved == nil
+      } else if peerId.asUserId() != nil {
+        _ = try await realtimeV2.send(.getChat(peer: peerId))
+      }
+    } catch {
+      guard !Task.isCancelled else { return }
+      resourceResolutionFailed = chatId == nil
     }
   }
 
@@ -618,11 +649,43 @@ struct ChatInfo: View {
     }
   }
 
+  private var resourceTabSelection: Binding<ChatInfoTab> {
+    Binding(get: { selectedTab }, set: { tab in
+      guard tab != selectedTab else { return }
+      deactivateResources()
+      selectedTab = tab
+      updateViewModels()
+    })
+  }
+
+  private func deactivateResources() {
+    mediaState.mediaViewModel?.deactivate()
+    documentsState.documentsViewModel?.deactivate()
+    linksState.linksViewModel?.deactivate()
+    voiceMemosState.voiceMemosViewModel?.deactivate()
+  }
+
   private func updateViewModels() {
+    if selectedTab != .media {
+      mediaState.mediaViewModel?.deactivate()
+    }
+    if selectedTab != .files {
+      documentsState.documentsViewModel?.deactivate()
+    }
+    if selectedTab != .links {
+      linksState.linksViewModel?.deactivate()
+    }
+    if selectedTab != .voice {
+      voiceMemosState.voiceMemosViewModel?.deactivate()
+    }
     guard let chatId, chatId > 0 else { return }
-    documentsState.updateChatId(chatId)
-    linksState.updateChatId(chatId)
-    voiceMemosState.updateChatId(chatId)
+    switch selectedTab {
+      case .media: mediaState.updateChatId(chatId)
+      case .files: documentsState.updateChatId(chatId)
+      case .links: linksState.updateChatId(chatId)
+      case .voice: voiceMemosState.updateChatId(chatId)
+      default: break
+    }
     if shouldShowParticipantsTab {
       participantsState.updateChatId(chatId)
     }
@@ -763,7 +826,9 @@ struct ChatInfo: View {
 
   private func removeParticipant(userId: Int64) {
     guard case let .thread(chatId) = peerId else { return }
-    if let currentUserId = dependencies?.auth.currentUserId, currentUserId == userId { return }
+    if let currentUserId = dependencies?.auth.currentUserId, currentUserId == userId {
+      return
+    }
 
     Task {
       do {
@@ -834,18 +899,18 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
 
   init(_ tab: ChatInfoDefaultTab?) {
     switch tab {
-    case .none:
-      self = .participants
-    case .participants:
-      self = .participants
-    case .files:
-      self = .files
-    case .media:
-      self = .files
-    case .voice:
-      self = .voice
-    case .links:
-      self = .links
+      case .none:
+        self = .participants
+      case .participants:
+        self = .participants
+      case .files:
+        self = .files
+      case .media:
+        self = .media
+      case .voice:
+        self = .voice
+      case .links:
+        self = .links
     }
   }
 
@@ -1009,6 +1074,26 @@ private enum ChatInfoAvatarPreviewError: Error {
 }
 
 @MainActor
+private final class ChatInfoMediaState: ObservableObject {
+  @Published private(set) var mediaViewModel: ChatMediaViewModel?
+  private let db: AppDatabase
+  private let peer: Peer
+  private var currentChatId: Int64 = 0
+
+  init(db: AppDatabase, peer: Peer) {
+    self.db = db
+    self.peer = peer
+  }
+
+  func updateChatId(_ chatId: Int64) {
+    guard chatId > 0, chatId != currentChatId else { return }
+    currentChatId = chatId
+    mediaViewModel?.deactivate()
+    mediaViewModel = ChatMediaViewModel(db: db, chatId: chatId, peer: peer, excludeStickerMedia: true)
+  }
+}
+
+@MainActor
 private final class ChatInfoDocumentsState: ObservableObject {
   @Published private(set) var documentsViewModel: ChatDocumentsViewModel?
 
@@ -1025,6 +1110,7 @@ private final class ChatInfoDocumentsState: ObservableObject {
     guard chatId > 0 else { return }
     guard chatId != currentChatId else { return }
     currentChatId = chatId
+    documentsViewModel?.deactivate()
     documentsViewModel = ChatDocumentsViewModel(db: db, chatId: chatId, peer: peer)
   }
 }
@@ -1046,6 +1132,7 @@ private final class ChatInfoLinksState: ObservableObject {
     guard chatId > 0 else { return }
     guard chatId != currentChatId else { return }
     currentChatId = chatId
+    linksViewModel?.deactivate()
     linksViewModel = ChatLinksViewModel(db: db, chatId: chatId, peer: peer)
   }
 }
@@ -1067,6 +1154,7 @@ private final class ChatInfoVoiceMemosState: ObservableObject {
     guard chatId > 0 else { return }
     guard chatId != currentChatId else { return }
     currentChatId = chatId
+    voiceMemosViewModel?.deactivate()
     voiceMemosViewModel = ChatVoiceMemosViewModel(db: db, chatId: chatId, peer: peer)
   }
 }
@@ -1094,17 +1182,77 @@ private final class ChatInfoParticipantsState: ObservableObject {
   }
 }
 
+private struct ChatInfoMediaList: View {
+  @ObservedObject var mediaViewModel: ChatMediaViewModel
+  let onShowInChat: (Message) -> Void
+
+  var body: some View {
+    LazyVStack(alignment: .leading, spacing: 12) {
+      ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
+        Text(chatInfoDateLabel(group.date))
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(.secondary)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
+          ForEach(group.messages) { media in
+            ChatInfoMediaCell(media: media)
+              .id(media.photo != nil)
+              .aspectRatio(1, contentMode: .fit)
+              .clipShape(RoundedRectangle(cornerRadius: 8))
+              .contextMenu { Button("Show in Chat") { onShowInChat(media.message) } }
+              .onAppear { Task { await mediaViewModel.loadMoreIfNeeded(currentMessageId: media.message.messageId) } }
+          }
+        }
+      }
+      ChatInfoResourceFooter(
+        state: mediaViewModel.loadState, isEmpty: mediaViewModel.mediaMessages.isEmpty,
+        emptyMessage: "No media found in this chat.", loadMore: mediaViewModel.loadMore, retry: mediaViewModel.retry
+      )
+    }
+    .padding(.horizontal, 16)
+    .task { await mediaViewModel.loadInitial() }
+    .onDisappear { mediaViewModel.deactivate() }
+  }
+}
+
+private struct ChatInfoMediaCell: NSViewRepresentable {
+  let media: MediaMessage
+
+  func makeNSView(context: Context) -> NSView {
+    let message = fullMessage()
+    if media.photo != nil {
+      return NewPhotoView(message, scrollState: .idle, roundsAllCorners: true)
+    }
+    return NewVideoView(message, scrollState: .idle, roundsAllCorners: true)
+  }
+
+  func updateNSView(_ view: NSView, context: Context) {
+    let message = fullMessage()
+    (view as? NewPhotoView)?.update(with: message)
+    (view as? NewVideoView)?.update(with: message)
+  }
+
+  private func fullMessage() -> FullMessage {
+    var message = FullMessage(
+      senderInfo: nil,
+      message: media.message,
+      reactions: [],
+      repliedToMessage: nil,
+      attachments: []
+    )
+    message.photoInfo = media.photo
+    message.videoInfo = media.video
+    return message
+  }
+}
+
 private struct ChatInfoFilesList: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
 
+  let onShowInChat: (Message) -> Void
+
   var body: some View {
-    Group {
-      if documentsViewModel.documentMessages.isEmpty {
-        Text("No files found in this chat.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.vertical, 32)
-      } else {
+    VStack(spacing: 0) {
+      if !documentsViewModel.documentMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 8) {
           ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
             VStack(alignment: .leading, spacing: 6) {
@@ -1116,6 +1264,7 @@ private struct ChatInfoFilesList: View {
 
               ForEach(group.messages, id: \.id) { documentMessage in
                 ChatInfoDocumentRow(documentMessage: documentMessage)
+                  .contextMenu { Button("Show in Chat") { onShowInChat(documentMessage.message) } }
                   .padding(.horizontal, 16)
                   .padding(.vertical, 4)
                   .onAppear {
@@ -1130,24 +1279,27 @@ private struct ChatInfoFilesList: View {
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: documentsViewModel.loadState, isEmpty: documentsViewModel.documentMessages.isEmpty,
+        emptyMessage: "No files found in this chat.", loadMore: documentsViewModel.loadMore,
+        retry: documentsViewModel.retry
+      )
     }
     .task {
       await documentsViewModel.loadInitial()
     }
+    .onDisappear { documentsViewModel.deactivate() }
   }
 }
 
 private struct ChatInfoLinksList: View {
   @ObservedObject var linksViewModel: ChatLinksViewModel
 
+  let onShowInChat: (Message) -> Void
+
   var body: some View {
-    Group {
-      if linksViewModel.linkMessages.isEmpty {
-        Text("No links found in this chat.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.vertical, 32)
-      } else {
+    VStack(spacing: 0) {
+      if !linksViewModel.linkMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 12) {
           ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
             VStack(alignment: .leading, spacing: 8) {
@@ -1157,6 +1309,7 @@ private struct ChatInfoLinksList: View {
 
               ForEach(group.messages, id: \.id) { linkMessage in
                 ChatInfoLinkRow(linkMessage: linkMessage)
+                  .contextMenu { Button("Show in Chat") { onShowInChat(linkMessage.message) } }
                   .onAppear {
                     Task {
                       await linksViewModel.loadMoreIfNeeded(currentMessageId: linkMessage.message.messageId)
@@ -1168,10 +1321,15 @@ private struct ChatInfoLinksList: View {
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: linksViewModel.loadState, isEmpty: linksViewModel.linkMessages.isEmpty,
+        emptyMessage: "No links found in this chat.", loadMore: linksViewModel.loadMore, retry: linksViewModel.retry
+      )
     }
     .task {
       await linksViewModel.loadInitial()
     }
+    .onDisappear { linksViewModel.deactivate() }
   }
 }
 
@@ -1179,14 +1337,11 @@ private struct ChatInfoVoiceMemosList: View {
   @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
   let accentColor: Color
 
+  let onShowInChat: (Message) -> Void
+
   var body: some View {
-    Group {
-      if voiceMemosViewModel.voiceMemoMessages.isEmpty {
-        Text("No voice memos found in this chat.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.vertical, 32)
-      } else {
+    VStack(spacing: 0) {
+      if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 12) {
           ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
             VStack(alignment: .leading, spacing: 8) {
@@ -1199,21 +1354,28 @@ private struct ChatInfoVoiceMemosList: View {
                   voiceMemo: voiceMemo,
                   accentColor: accentColor
                 )
-                  .onAppear {
-                    Task {
-                      await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
-                    }
+                .contextMenu { Button("Show in Chat") { onShowInChat(voiceMemo.message) } }
+                .onAppear {
+                  Task {
+                    await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
                   }
+                }
               }
             }
             .padding(.horizontal, 16)
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: voiceMemosViewModel.loadState, isEmpty: voiceMemosViewModel.voiceMemoMessages.isEmpty,
+        emptyMessage: "No voice memos found in this chat.", loadMore: voiceMemosViewModel.loadMore,
+        retry: voiceMemosViewModel.retry
+      )
     }
     .task {
       await voiceMemosViewModel.loadInitial()
     }
+    .onDisappear { voiceMemosViewModel.deactivate() }
   }
 }
 
@@ -1274,9 +1436,8 @@ private struct ChatInfoLinkRow: View {
   let linkMessage: LinkMessage
   @Environment(\.openURL) private var openURL
 
-  private static let detector: NSDataDetector? = {
-    try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-  }()
+  private static let detector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link
+    .rawValue)
 
   private var url: URL? {
     parseURL(linkMessage.urlPreview?.url) ?? firstURL(from: linkMessage.message.text)

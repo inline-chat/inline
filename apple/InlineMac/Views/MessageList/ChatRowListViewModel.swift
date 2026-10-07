@@ -42,7 +42,10 @@ final class ChatRowListViewModel {
 
   private(set) var showUnreadAfter: Int64?
   private(set) var collapsedMaxId: Int64?
-  var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
+  var threadAnchor: FullMessage? {
+    progressiveViewModel.threadAnchor
+  }
+
   var highestPositiveMessageId: Int64? {
     progressiveViewModel.messages.lazy
       .map(\.message.messageId)
@@ -50,12 +53,29 @@ final class ChatRowListViewModel {
       .max()
   }
 
-  var rowCount: Int { rows.count }
-  var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
-  var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
-  var needsNewerHistoryRepair: Bool { progressiveViewModel.needsNewerHistoryRepair }
-  var historyCoverage: MessageHistoryCoverageProjection { progressiveViewModel.historyCoverage }
-  var reversed: Bool { progressiveViewModel.reversed }
+  var rowCount: Int {
+    rows.count
+  }
+
+  var canLoadOlderFromLocal: Bool {
+    progressiveViewModel.canLoadOlderFromLocal
+  }
+
+  var canLoadNewerFromLocal: Bool {
+    progressiveViewModel.canLoadNewerFromLocal
+  }
+
+  var needsNewerHistoryRepair: Bool {
+    progressiveViewModel.needsNewerHistoryRepair
+  }
+
+  var historyCoverage: MessageHistoryCoverageProjection {
+    progressiveViewModel.historyCoverage
+  }
+
+  var reversed: Bool {
+    progressiveViewModel.reversed
+  }
 
   // MARK: - Init
 
@@ -73,7 +93,11 @@ final class ChatRowListViewModel {
   // MARK: - Public API
 
   func observe(_ callback: @escaping (MessagesProgressiveViewModel.MessagesChangeSet) -> Void) {
-    progressiveViewModel.observe(callback)
+    progressiveViewModel.observe { [weak self] update in
+      callback(update)
+      self?.progressiveViewModel.ensureThreadAnchorCached()
+    }
+    progressiveViewModel.ensureThreadAnchorCached()
   }
 
   func apply(_ update: MessagesProgressiveViewModel.MessagesChangeSet) -> UpdateKind {
@@ -129,15 +153,24 @@ final class ChatRowListViewModel {
     publish: Bool = true,
     allowUnavailableLocal: Bool = false
   ) async -> Bool {
-    await progressiveViewModel.loadBatchAsync(at: direction, publish: publish, allowUnavailableLocal: allowUnavailableLocal)
+    await progressiveViewModel.loadBatchAsync(
+      at: direction,
+      publish: publish,
+      allowUnavailableLocal: allowUnavailableLocal
+    )
   }
 
-  func loadLatestWindow() {
-    progressiveViewModel.loadLatestWindow()
+  @discardableResult
+  func loadLatestWindow() async throws -> Bool {
+    try await progressiveViewModel.loadLatestWindowAsync()
   }
 
   func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
+  }
+
+  func setHistoryAnchor(_ messageID: Int64) {
+    progressiveViewModel.setHistoryAnchor(messageID)
   }
 
   func isCertifiedHistoryContinuation(
@@ -255,7 +288,9 @@ final class ChatRowListViewModel {
     if let anchorId,
        updated.contains(where: { $0.id == anchorId }),
        !rows.contains(where: {
-         if case let .parentMessage(id) = $0 { return id == anchorId }
+         if case let .parentMessage(id) = $0 {
+           return id == anchorId
+         }
          return false
        })
     {
@@ -389,7 +424,7 @@ final class ChatRowListViewModel {
     rowIdxsByMsgId = allIdxsByMsgId
   }
 
-  private func rowIdxs<S: Sequence>(forMsgIds ids: S) -> IndexSet where S.Element == Int64 {
+  private func rowIdxs(forMsgIds ids: some Sequence<Int64>) -> IndexSet {
     var idxs = IndexSet()
 
     for id in ids {
@@ -427,8 +462,7 @@ final class ChatRowListViewModel {
     return removed
   }
 
-  private func sameMsgIds<C1: Collection, C2: Collection>(_ lhs: C1, _ rhs: C2) -> Bool
-  where C1.Element == FullMessage, C2.Element == FullMessage {
+  private func sameMsgIds(_ lhs: some Collection<FullMessage>, _ rhs: some Collection<FullMessage>) -> Bool {
     lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0.id == $1.id }
   }
 

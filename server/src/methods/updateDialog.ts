@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { Optional, Type, type Static } from "@sinclair/typebox"
 import { encodeDialogInfo, TDialogInfo } from "@in/server/api-types"
-import { dialogs } from "../db/schema"
+import { chats, dialogs, users } from "../db/schema"
 import { TInputId } from "../types/methods"
 import { InlineError } from "../types/errors"
 import { and, eq, or, sql } from "drizzle-orm"
@@ -17,8 +17,10 @@ import {
   isLinkedSubthread,
   promoteLinkedSubthreadDialogsToChatList,
 } from "@in/server/modules/subthreads"
-import { dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
+import { dialogOpenDefaultsForChat, dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 const TDialogOrder = Type.String({ minLength: 1, maxLength: 128, pattern: "^[0-9A-Za-z]+$" })
 
@@ -83,21 +85,65 @@ export const handler = async (
   let shouldPromoteToChatList = false
 
   let dialog = await db.transaction(async (tx) => {
-    const [existingDialog] = await tx
-      .select({
-        archived: dialogs.archived,
-        chatListHidden: dialogs.chatListHidden,
-        chatId: dialogs.chatId,
-        open: dialogs.open,
-        order: dialogs.order,
-        pinnedOrder: dialogs.pinnedOrder,
-      })
+    // Protect the chat lifetime before taking the user owner: participant writers
+    // lock chats before allocating user updates, and INSERT needs the chat FK lock.
+    const chat = input.archived !== undefined && "threadId" in peerId
+      ? (await tx.select().from(chats).where(eq(chats.id, peerId.threadId)).for("key share").limit(1))[0]
+      : undefined
+    // Serialize archive state reads and pin/open allocation before touching dialogs.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, currentUserId)).for("no key update").limit(1)
+
+    const stateFields = {
+      archived: dialogs.archived,
+      chatListHidden: dialogs.chatListHidden,
+      chatId: dialogs.chatId,
+      open: dialogs.open,
+      order: dialogs.order,
+      pinnedOrder: dialogs.pinnedOrder,
+    }
+    let [existingDialog] = await tx
+      .select(stateFields)
       .from(dialogs)
       .where(whereClause)
       .limit(1)
 
     if (!existingDialog) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      if (input.archived === undefined || !("threadId" in peerId)) {
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
+
+      // Invitations grant access before the invitee's first dialog is materialized.
+      // Archive only needs a personal preference row; it must not change membership or follow/open choices.
+      if (!chat || chat.type !== "thread") {
+        throw new InlineError(InlineError.ApiError.PEER_INVALID)
+      }
+      try {
+        await AccessGuards.ensureChatAccess(chat, currentUserId, tx)
+      } catch (error) {
+        if (
+          RealtimeRpcError.is(error, RealtimeRpcError.Code.PEER_ID_INVALID)
+          || RealtimeRpcError.is(error, RealtimeRpcError.Code.SPACE_ID_INVALID)
+        ) {
+          throw new InlineError(InlineError.ApiError.PEER_INVALID, { cause: error })
+        }
+        throw error
+      }
+
+      const [createdDialog] = await tx
+        .insert(dialogs)
+        .values({
+          chatId: chat.id,
+          userId: currentUserId,
+          spaceId: chat.spaceId,
+          ...dialogOpenDefaultsForChat(chat),
+          ...(isLinkedSubthread(chat) ? { chatListHidden: true } : {}),
+        })
+        .onConflictDoNothing({ target: [dialogs.chatId, dialogs.userId] })
+        .returning(stateFields)
+      existingDialog = createdDialog ?? (await tx.select(stateFields).from(dialogs).where(whereClause).limit(1))[0]
+      if (!existingDialog) {
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
     }
 
     previousArchived = existingDialog.archived

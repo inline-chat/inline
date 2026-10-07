@@ -1,3 +1,4 @@
+import { ModelError } from "@in/server/db/models/_errors"
 import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -313,6 +314,7 @@ export const encodeFullMessage = ({
     }
   } else if (message.voice) {
     const encodedVoice = encodeVoice({ voice: message.voice })
+    if (!encodedVoice) throw ModelError.VoiceInvalid
     media = encodedVoice
       ? {
           media: {
@@ -385,9 +387,7 @@ export const encodeFullMessage = ({
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
-    hasLink:
-      message.hasLink ??
-      (detectHasLink({ entities: message.entities }) || hasLinkFromAttachments ? true : undefined),
+    hasLink: message.hasLink === true || detectHasLink({ entities: message.entities }) || hasLinkFromAttachments,
     attachments: attachments,
     reactions: hasReactions
       ? {

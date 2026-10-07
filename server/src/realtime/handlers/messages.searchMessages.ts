@@ -13,8 +13,7 @@ export const searchMessages = async (
 
   const queries = input.queries ?? []
   const hasQueries = queries.some((query) => query.trim().length > 0)
-  const hasFilter =
-    input.filter !== undefined && input.filter !== SearchMessagesFilter.FILTER_UNSPECIFIED
+  const hasFilter = input.filter !== undefined && input.filter !== SearchMessagesFilter.FILTER_UNSPECIFIED
   if (!hasQueries && !hasFilter) {
     throw RealtimeRpcError.BadRequest()
   }
@@ -33,5 +32,5 @@ export const searchMessages = async (
     },
   )
 
-  return { messages: result.messages }
+  return { seq: result.seq, messages: result.messages }
 }

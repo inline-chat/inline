@@ -36,7 +36,7 @@ public class DataManager: ObservableObject {
     token: AuthAccountMutationToken,
     _ updates: @escaping @Sendable (Database) throws -> Result
   ) async throws -> Result {
-    let auth = self.auth
+    let auth = auth
     return try await database.dbWriter.write { db in
       try auth.validateAccountMutation(token)
       return try updates(db)
@@ -49,11 +49,9 @@ public class DataManager: ObservableObject {
     do {
       let result = try await InlineRPCClient.shared.getMe()
 
-      let user = try await writeAccountProjection(token: mutationToken) { db in
+      return try await writeAccountProjection(token: mutationToken) { db in
         try User.save(db, user: result.user)
       }
-
-      return user
     } catch {
       log.error("Error fetching user", error: error)
       throw error
@@ -67,7 +65,8 @@ public class DataManager: ObservableObject {
       let photoID: String?
       if let photoData {
         let upload = try await ApiClient.shared.uploadFile(
-          type: .photo, data: photoData, filename: "space-photo.png", mimeType: .init(text: "image/png"), progress: { _ in }
+          type: .photo, data: photoData, filename: "space-photo.png", mimeType: .init(text: "image/png"),
+          progress: { _ in }
         )
         photoID = upload.fileUniqueId
       } else {
@@ -79,7 +78,7 @@ public class DataManager: ObservableObject {
         name: name, photoFileUniqueID: photoID, accountToken: mutationToken
       )
       let space = Space(from: result.space)
-      let log = self.log
+      let log = log
       try await writeAccountProjection(token: mutationToken) { db in
         do {
           try space.save(db)
@@ -132,7 +131,7 @@ public class DataManager: ObservableObject {
   public func getSpaces() async throws -> [Space] {
     log.trace("getSpaces")
     let mutationToken = try beginAccountMutation()
-    let auth = self.auth
+    let auth = auth
     let spaces = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
       return try Space.catalogActive().fetchAll(db)
@@ -197,7 +196,7 @@ public class DataManager: ObservableObject {
   public func getPrivateChats() async throws -> [Chat] {
     log.trace("getPrivateChats")
     let mutationToken = try beginAccountMutation()
-    let auth = self.auth
+    let auth = auth
     let chats = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
       return try Chat
@@ -214,7 +213,7 @@ public class DataManager: ObservableObject {
   public func getDialogs(spaceId: Int64) async throws -> [Dialog] {
     log.trace("get local dialogs for space \(spaceId)")
     let mutationToken = try beginAccountMutation()
-    let auth = self.auth
+    let auth = auth
     let dialogs = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
       return try Dialog
@@ -264,22 +263,19 @@ public class DataManager: ObservableObject {
       "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
-    let historyResult = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
-    let transaction = GetChatHistoryTransaction(
+    let hasChat = try await database.reader.read { [peerId_] db in
+      try Chat.getByPeerId(db: db, peerId: peerId_) != nil
+    }
+    try auth.validateAccountMutation(mutationToken)
+    if !hasChat {
+      _ = try await Api.realtime.send(.getChat(peer: peerId_), expectedAccount: mutationToken)
+    }
+    _ = try await Api.realtime.send(GetChatHistoryTransaction(
       peer: peerId_,
       mode: .historyModeLatest,
       limit: 100
-    )
-
-    try await writeAccountProjection(token: mutationToken) { db in
-      try GetChatHistoryTransaction.apply(historyResult, context: transaction.context, db: db)
-    }
-
-    // Publish
-    // Reload messages
-    Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId_, animated: true)
-    }
+    ), expectedAccount: mutationToken)
+    try auth.validateAccountMutation(mutationToken)
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
@@ -318,7 +314,10 @@ public class DataManager: ObservableObject {
       try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
     }
 
-    let requestOrder = try await writeAccountProjection(token: mutationToken) { db -> (order: String?, pinnedOrder: String?) in
+    let requestOrder = try await writeAccountProjection(token: mutationToken) { db -> (
+      order: String?,
+      pinnedOrder: String?
+    ) in
       var orderForRequest: String?
       var pinnedOrderForRequest: String?
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
@@ -655,7 +654,9 @@ public class DataManager: ObservableObject {
     try await writeAccountProjection(token: mutationToken) { db in
       let member = Member(from: result.member)
       try member.reconcileProjection(db)
-      if result.hasUser { _ = try User.save(db, user: result.user) }
+      if result.hasUser {
+        _ = try User.save(db, user: result.user)
+      }
     }
   }
 
@@ -666,7 +667,6 @@ public class DataManager: ObservableObject {
     try await InlineRPCClient.shared.deleteMessage(peerID: peerId, messageID: messageId)
 
     try await writeAccountProjection(token: mutationToken) { db in
-
       if var chat = try Chat.fetchOne(db, id: chatId) {
         if chat.lastMsgId == messageId {
           let previousMessage = try Message
@@ -727,9 +727,9 @@ public class DataManager: ObservableObject {
         .filter(Column("messageId") == messageId)
         .fetchOne(db),
         let attachment = try Attachment
-          .filter(Column("messageId") == message.globalId)
-          .filter(Column("externalTaskId") == externalTaskId)
-          .fetchOne(db),
+        .filter(Column("messageId") == message.globalId)
+        .filter(Column("externalTaskId") == externalTaskId)
+        .fetchOne(db),
         let attachmentID = attachment.attachmentId
       else { return nil }
       return (message.peerId, attachmentID)

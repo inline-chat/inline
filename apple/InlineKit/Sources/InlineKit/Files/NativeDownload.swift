@@ -167,8 +167,8 @@ struct NativeDocumentDownload: NativeFilePartFetching {
   let auth: AuthHandle
   let accountToken: AuthAccountMutationToken
 
-  init() throws {
-    auth = Auth.shared.handle
+  init(auth: AuthHandle = Auth.shared.handle) throws {
+    self.auth = auth
     accountToken = try auth.beginAccountMutation()
     guard auth.inlineProtocolCredentials() != nil else { throw NativeFileDownloadError.requiresV3 }
   }

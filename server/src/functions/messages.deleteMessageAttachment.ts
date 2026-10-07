@@ -1,5 +1,12 @@
-import type { DeleteMessageAttachmentInput, DeleteMessageAttachmentResult, InputPeer, MessageAttachment, Update } from "@inline-chat/protocol/core"
+import type {
+  DeleteMessageAttachmentInput,
+  DeleteMessageAttachmentResult,
+  InputPeer,
+  MessageAttachment,
+  Update,
+} from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import { refreshAttachmentMembership } from "@in/server/modules/message/attachmentMembership"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { chats, messageAttachments, messages } from "@in/server/db/schema"
@@ -58,6 +65,8 @@ export const deleteMessageAttachment = async (
     await tx
       .delete(messageAttachments)
       .where(and(eq(messageAttachments.id, attachmentId), eq(messageAttachments.messageId, message.globalId)))
+
+    await refreshAttachmentMembership(tx, message)
 
     const update = await UpdatesModel.insertUpdate(tx, {
       update: {

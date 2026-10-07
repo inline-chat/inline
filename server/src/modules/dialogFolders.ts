@@ -1,12 +1,7 @@
 import type { Dialog, DialogFolder, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { DialogsModel } from "@in/server/db/models/dialogs"
-import {
-  dialogFolders,
-  dialogs,
-  type DbDialog,
-  type DbDialogFolder,
-} from "@in/server/db/schema"
+import { dialogFolders, dialogs, type DbDialog, type DbDialogFolder } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -65,16 +60,8 @@ export async function enqueueDialogFolderUpdate(input: {
   }
 }
 
-export function pushDialogFolderUpdate(
-  userId: number,
-  update: Update,
-  skipSessionId?: number,
-): void {
-  RealtimeUpdates.pushToUser(
-    userId,
-    [update],
-    skipSessionId === undefined ? undefined : { skipSessionId },
-  )
+export function pushDialogFolderUpdate(userId: number, update: Update, skipSessionId?: number): void {
+  RealtimeUpdates.pushToUser(userId, [update], skipSessionId === undefined ? undefined : { skipSessionId })
 }
 
 export async function rootDialogFolderPositions(
@@ -96,10 +83,7 @@ export async function rootDialogFolderPositions(
     dialogConditions.push(notInArray(dialogs.chatId, input.excludingChatIds))
   }
 
-  const folderConditions = [
-    eq(dialogFolders.userId, input.userId),
-    isNull(dialogFolders.pinnedOrder),
-  ]
+  const folderConditions = [eq(dialogFolders.userId, input.userId), isNull(dialogFolders.pinnedOrder)]
   if (input.excludingFolderId !== undefined) {
     folderConditions.push(ne(dialogFolders.id, input.excludingFolderId))
   }
@@ -115,16 +99,10 @@ export async function rootDialogFolderPositions(
     .where(and(...folderConditions))
     .orderBy(asc(dialogFolders.order))
 
-  return [...dialogRows, ...folderRows]
-    .flatMap((row) => (row.order == null ? [] : [row.order]))
-    .sort()
+  return [...dialogRows, ...folderRows].flatMap((row) => (row.order == null ? [] : [row.order])).sort()
 }
 
-export async function folderChildren(
-  tx: Transaction,
-  userId: number,
-  folderId: number,
-): Promise<DbDialog[]> {
+export async function folderChildren(tx: Transaction, userId: number, folderId: number): Promise<DbDialog[]> {
   return tx
     .select()
     .from(dialogs)
@@ -145,8 +123,8 @@ export async function ownedDialogFolder(
   return folder
 }
 
-export async function getDialogFolders(userId: number): Promise<DbDialogFolder[]> {
-  return db
+export async function getDialogFolders(userId: number, tx?: Transaction): Promise<DbDialogFolder[]> {
+  return (tx ?? db)
     .select()
     .from(dialogFolders)
     .where(eq(dialogFolders.userId, userId))

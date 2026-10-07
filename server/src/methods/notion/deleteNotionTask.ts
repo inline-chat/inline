@@ -1,3 +1,5 @@
+import { lockAttachmentChat, persistAttachmentMutation } from "@in/server/modules/message/attachmentMembership"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { Type, type Static } from "@sinclair/typebox"
 import { Log } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
@@ -51,18 +53,12 @@ export const handler = async (
     await Authorize.spaceMember(connectorSpaceId, context.currentUserId)
 
     if (externalTask.application === "linear") {
-      await deleteFromLinear(
-        externalTask.taskId,
-        connectorSpaceId,
-      )
+      await deleteFromLinear(externalTask.taskId, connectorSpaceId)
     } else {
-      await deleteFromNotion(
-        externalTask.taskId,
-        connectorSpaceId,
-      )
+      await deleteFromNotion(externalTask.taskId, connectorSpaceId)
     }
 
-    await deleteFromDatabase(externalTaskId)
+    const durableUpdate = await deleteFromDatabase(externalTaskId, message.globalId, chatId, messageAttachmentId)
 
     await sendAttachmentDeletedUpdate(
       message,
@@ -72,6 +68,7 @@ export const handler = async (
       messageId,
       chatId,
       context.currentUserId,
+      durableUpdate,
     )
 
     Log.shared.info("Successfully deleted attachment and external task", {
@@ -97,17 +94,10 @@ const verifyAndGetData = async (externalTaskId: number, messageId: number, chatI
       messageAttachmentId: messageAttachments.id,
     })
     .from(messageAttachments)
-    .innerJoin(
-      externalTasks,
-      eq(messageAttachments.externalTaskId, BigInt(externalTaskId)),
-    )
+    .innerJoin(externalTasks, eq(messageAttachments.externalTaskId, BigInt(externalTaskId)))
     .innerJoin(messages, eq(messageAttachments.messageId, messages.globalId))
     .innerJoin(chats, eq(messages.chatId, chats.id))
-    .where(and(
-      eq(externalTasks.id, externalTaskId),
-      eq(messages.messageId, messageId),
-      eq(chats.id, chatId),
-    ))
+    .where(and(eq(externalTasks.id, externalTaskId), eq(messages.messageId, messageId), eq(chats.id, chatId)))
     .limit(1)
 
   if (!bound) {
@@ -118,12 +108,7 @@ const verifyAndGetData = async (externalTaskId: number, messageId: number, chatI
     })
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  const {
-    task: externalTask,
-    boundMessage: message,
-    boundChat: chat,
-    messageAttachmentId,
-  } = bound
+  const { task: externalTask, boundMessage: message, boundChat: chat, messageAttachmentId } = bound
 
   // Verify the user has permission to delete this task
   if (externalTask.assignedUserId !== BigInt(currentUserId)) {
@@ -162,12 +147,33 @@ const deleteFromNotion = async (pageId: string, connectorSpaceId: number | null)
   Log.shared.info("Successfully archived Notion page", { pageId })
 }
 
-const deleteFromDatabase = async (externalTaskId: number) => {
-  await db.transaction(async (tx) => {
-    // Delete message attachment
-    await tx.delete(messageAttachments).where(eq(messageAttachments.externalTaskId, BigInt(externalTaskId)))
-
-    await tx.delete(externalTasks).where(eq(externalTasks.id, externalTaskId))
+const deleteFromDatabase = async (
+  externalTaskId: number,
+  messageGlobalId: bigint,
+  chatId: number,
+  attachmentId: number,
+) => {
+  return db.transaction(async (tx) => {
+    const chat = await lockAttachmentChat(tx, chatId)
+    const [deleted] = await tx
+      .delete(messageAttachments)
+      .where(
+        and(
+          eq(messageAttachments.id, attachmentId),
+          eq(messageAttachments.messageId, messageGlobalId),
+          eq(messageAttachments.externalTaskId, BigInt(externalTaskId)),
+        ),
+      )
+      .returning()
+    if (!deleted) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    const update = await persistAttachmentMutation(tx, chat, messageGlobalId, attachmentId)
+    const [remaining] = await tx
+      .select({ id: messageAttachments.id })
+      .from(messageAttachments)
+      .where(eq(messageAttachments.externalTaskId, BigInt(externalTaskId)))
+      .limit(1)
+    if (!remaining) await tx.delete(externalTasks).where(eq(externalTasks.id, externalTaskId))
+    return update
   })
 }
 
@@ -179,6 +185,7 @@ const sendAttachmentDeletedUpdate = async (
   messageId: number,
   chatId: number,
   currentUserId: number,
+  durableUpdate: UpdateSeqAndDate,
 ) => {
   try {
     const peerId: TPeerInfo =
@@ -212,6 +219,8 @@ const sendAttachmentDeletedUpdate = async (
       updateGroup.userIds.forEach((userId: number) => {
         const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -223,6 +232,8 @@ const sendAttachmentDeletedUpdate = async (
     } else if (updateGroup.type === "threadUsers") {
       updateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -235,6 +246,8 @@ const sendAttachmentDeletedUpdate = async (
       const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
       userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,

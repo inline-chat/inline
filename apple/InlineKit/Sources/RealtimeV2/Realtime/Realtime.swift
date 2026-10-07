@@ -16,20 +16,20 @@ public enum RealtimeDirectRpcError: Error, PrivacySafeErrorCategoryProviding {
 
   public var privacySafeErrorCategory: String {
     switch self {
-    case .notAuthorized:
-      "realtime_rpc:not_authorized"
-    case .notConnected:
-      "realtime_rpc:not_connected"
-    case .timeout:
-      "realtime_rpc:timeout"
-    case .commitOutcomeUnknown:
-      "realtime_rpc:commit_outcome_unknown"
-    case .capacityExceeded:
-      "realtime_rpc:capacity_exceeded"
-    case let .rpcError(errorCode, _, code):
-      "realtime_rpc:application:\(errorCode.rawValue):\(code)"
-    case .unknown:
-      "realtime_rpc:unknown"
+      case .notAuthorized:
+        "realtime_rpc:not_authorized"
+      case .notConnected:
+        "realtime_rpc:not_connected"
+      case .timeout:
+        "realtime_rpc:timeout"
+      case .commitOutcomeUnknown:
+        "realtime_rpc:commit_outcome_unknown"
+      case .capacityExceeded:
+        "realtime_rpc:capacity_exceeded"
+      case let .rpcError(errorCode, _, code):
+        "realtime_rpc:application:\(errorCode.rawValue):\(code)"
+      case .unknown:
+        "realtime_rpc:unknown"
     }
   }
 }
@@ -112,7 +112,7 @@ public actor RealtimeV2 {
   private var sync: Sync
   private var transactions: Transactions
 
-  // Public
+  /// Public
   public nonisolated let stateObject: RealtimeState
 
   // MARK: - Private Properties
@@ -154,6 +154,12 @@ public actor RealtimeV2 {
   private var isPreparingForTermination = false
   private var mediaRetentionRevision: UInt64 = 0
   private var transactionRetryTask: Task<Void, Never>?
+  private struct HistoryCompletion {
+    let transactionID: TransactionId
+    let task: Task<Void, Never>
+  }
+
+  private var historyCompletions: [UUID: HistoryCompletion] = [:]
   private var transactionOperationsInProgress = 0
   private var transactionDrainWaiters: [CheckedContinuation<Void, Never>] = []
   private var directRPCOperationsInProgress = 0
@@ -173,7 +179,7 @@ public actor RealtimeV2 {
     syncStorage: SyncStorage,
     persistenceHandler: TransactionPersistenceHandler? = nil,
     blockerResolver: (any TransactionBlockerResolver)? = nil,
-    storageIsReady: @escaping @Sendable () -> Bool = { true },
+    storageIsReady: @escaping @Sendable () -> Bool = { true }
   ) {
     self.auth = auth
     self.storageIsReady = storageIsReady
@@ -195,6 +201,8 @@ public actor RealtimeV2 {
       userWantsConnection: true
     )
     connectionManager = ConnectionManager(session: session, constraints: initialConstraints)
+    let transactionStore = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
+    transactions = transactionStore
     let syncConfig = RealtimeConfigStore.initialSyncConfig()
     sync = Sync(
       applyUpdates: applyUpdates,
@@ -202,9 +210,23 @@ public actor RealtimeV2 {
       client: session,
       config: syncConfig,
       acceptsWork: false,
-      auth: auth
+      auth: auth,
+      historyAdmission: { key, explicitChatID in
+        var keys: Set<TransactionExecutionKey> = []
+        let chatID: Int64? = if let explicitChatID {
+          explicitChatID
+        } else {
+          try? await syncStorage.getHistoryChatID(for: key)
+        }
+        if let chatID {
+          keys.insert(.init(namespace: "chat-mutation", value: "thread:\(chatID)"))
+        }
+        if case let .chat(peer) = key, case let .user(user) = peer.type {
+          keys.insert(.init(namespace: "chat-mutation", value: "user:\(user.userID)"))
+        }
+        return await transactionStore.canAdmitHistory(keys: keys)
+      }
     )
-    transactions = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
     stateObject = RealtimeState()
     authAdapter = AuthConnectionAdapter(
       auth: auth,
@@ -321,6 +343,7 @@ public actor RealtimeV2 {
     await connectionManager.stop()
     await session.waitForDirectDispatches()
     await retryTask?.value
+    await cancelHistoryCompletions()
     await waitForTransactionOperationsToFinish()
     await waitForDirectRPCOperationsToFinish()
 
@@ -400,6 +423,7 @@ public actor RealtimeV2 {
     for task in listenerTasks {
       await task.value
     }
+    await cancelHistoryCompletions()
     await waitForTransactionOperationsToFinish()
     await waitForDirectRPCOperationsToFinish()
     // An admitted operation can enqueue lifecycle cleanup while the drains above suspend.
@@ -491,59 +515,63 @@ public actor RealtimeV2 {
         let event = envelope.event
 
         switch event {
-        case let .ack(msgId):
-          self.log.trace("Received ACK for message \(msgId)")
-          await self.ackTransaction(msgId: msgId)
+          case let .ack(msgId):
+            self.log.trace("Received ACK for message \(msgId)")
+            await self.ackTransaction(msgId: msgId)
 
-        case let .rpcResult(msgId, rpcResult):
-          self.log.trace("Received RPC result for message \(msgId)")
-          await self.completeTransaction(msgId: msgId, rpcResult: rpcResult)
+          case let .rpcResult(msgId, rpcResult):
+            self.log.trace("Received RPC result for message \(msgId)")
+            if let transactionID = await self.transactions.historyReadTransactionID(rpcMsgId: msgId) {
+              self.scheduleHistoryCompletion(msgId: msgId, result: rpcResult, transactionID: transactionID)
+            } else {
+              await self.completeTransaction(msgId: msgId, rpcResult: rpcResult)
+            }
 
-        case let .rpcError(msgId, rpcError):
-          self.log.trace("Received RPC error for message \(msgId)")
-          await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError))
+          case let .rpcError(msgId, rpcError):
+            self.log.trace("Received RPC error for message \(msgId)")
+            await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError))
 
-        case let .rpcCommitOutcomeUnknown(msgId):
-          self.log.warning("Received carrier commit-unknown result for message \(msgId)")
-          await self.completeTransaction(
-            msgId: msgId,
-            error: TransactionError.commitOutcomeUnknownAfterReconnect
-          )
+          case let .rpcCommitOutcomeUnknown(msgId):
+            self.log.warning("Received carrier commit-unknown result for message \(msgId)")
+            await self.completeTransaction(
+              msgId: msgId,
+              error: TransactionError.commitOutcomeUnknownAfterReconnect
+            )
 
-        case let .rpcRejectedBeforeExecution(msgId):
-          self.log.warning("Received carrier pre-execution rejection for message \(msgId)")
-          await self.completeTransaction(
-            msgId: msgId,
-            error: TransactionError.rejectedBeforeExecution
-          )
+          case let .rpcRejectedBeforeExecution(msgId):
+            self.log.warning("Received carrier pre-execution rejection for message \(msgId)")
+            await self.completeTransaction(
+              msgId: msgId,
+              error: TransactionError.rejectedBeforeExecution
+            )
 
-        case let .updates(updates):
-          self.log.trace("Received updates \(updates)")
-          // The connection snapshot stream is independent from the ordered session-event stream.
-          // Consult the manager-owned generation directly so the first update after protocolOpen
-          // cannot be dropped merely because the UI snapshot listener has not caught up yet.
-          let currentSessionID = await self.connectionManager.currentSnapshot().sessionID
-          guard envelope.originatingSessionID == currentSessionID,
-                let mutationToken = try? self.auth.beginAccountMutation()
-          else { break }
-          await self.sync.process(
-            updates: updates.updates,
-            mutationToken: mutationToken
-          )
+          case let .updates(updates):
+            self.log.trace("Received updates \(updates)")
+            // The connection snapshot stream is independent from the ordered session-event stream.
+            // Consult the manager-owned generation directly so the first update after protocolOpen
+            // cannot be dropped merely because the UI snapshot listener has not caught up yet.
+            let currentSessionID = await self.connectionManager.currentSnapshot().sessionID
+            guard envelope.originatingSessionID == currentSessionID,
+                  let mutationToken = try? self.auth.beginAccountMutation()
+            else { break }
+            await self.sync.process(
+              updates: updates.updates,
+              mutationToken: mutationToken
+            )
 
-        case let .grid(event):
-          self.publishGridEvent(event)
+          case let .grid(event):
+            self.publishGridEvent(event)
 
-        case .authFailed:
-          self.log.error("Realtime handshake failed due to missing auth token")
-          await self.handleMissingAuthTokenHandshakeFailure()
+          case .authFailed:
+            self.log.error("Realtime handshake failed due to missing auth token")
+            await self.handleMissingAuthTokenHandshakeFailure()
 
-        case let .connectionError(reason):
-          self.log.error("Received server connection error during handshake reason=\(reason)")
-          await self.handleConnectionErrorDuringHandshake(reason: reason)
+          case let .connectionError(reason):
+            self.log.error("Received server connection error during handshake reason=\(reason)")
+            await self.handleConnectionErrorDuringHandshake(reason: reason)
 
-        default:
-          break
+          default:
+            break
         }
         await envelope.markProcessed()
       }
@@ -552,34 +580,35 @@ public actor RealtimeV2 {
     // Transactions
     Task { [weak self] in
       guard let self else { return }
-      self.log.trace("Starting transactions listener")
-      for await _ in await self.transactions.queueStream {
-        guard await self.canExecuteTransactions(), let owner = await self.activeTransactionOwner() else {
-          self.log.trace("Skipping transaction queue stream because its connection or account owner is unavailable")
+      log.trace("Starting transactions listener")
+      for await _ in await transactions.queueStream {
+        guard await canExecuteTransactions(), let owner = await activeTransactionOwner() else {
+          log.trace("Skipping transaction queue stream because its connection or account owner is unavailable")
           continue
         }
 
-        transactionDrain: while await self.canExecuteTransactions(),
-                                await self.isCurrentTransactionOwner(owner),
-                                let dequeueResult = await self.transactions.dequeue(
+        transactionDrain: while await canExecuteTransactions(),
+                                await isCurrentTransactionOwner(owner),
+                                let dequeueResult = await transactions.dequeue(
                                   owner: owner,
-                                  maximumOutstanding: self.maximumOutstandingTransactions
-                                ) {
+                                  maximumOutstanding: maximumOutstandingTransactions
+                                )
+        {
           switch dequeueResult {
             case let .ready(transaction):
-              self.log.trace("Dequeued transaction \(transaction.id)")
-              if await self.runTransaction(transaction, owner: owner) == .deferred {
+              log.trace("Dequeued transaction \(transaction.id)")
+              if await runTransaction(transaction, owner: owner) == .deferred {
                 break transactionDrain
               }
             case let .failed(transaction):
-              self.log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
-              await self.failQueuedTransaction(transaction, error: .dependencyFailed)
+              log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
+              await failQueuedTransaction(transaction, error: .dependencyFailed)
             case let .expired(transaction):
-              self.log.trace("Discarding expired ephemeral transaction \(transaction.id)")
-              await self.recordTransactionDiagnostics(ephemeralExpired: 1)
-              await self.failQueuedTransaction(transaction, error: .timeout)
+              log.trace("Discarding expired ephemeral transaction \(transaction.id)")
+              await recordTransactionDiagnostics(ephemeralExpired: 1)
+              await failQueuedTransaction(transaction, error: .timeout)
             case let .capacityLimited(pressure):
-              await self.recordTransactionDiagnostics(
+              await recordTransactionDiagnostics(
                 windowSaturations: 1,
                 pressure: pressure
               )
@@ -676,7 +705,8 @@ public actor RealtimeV2 {
     // no-op, so forcing `.connecting` here would strand subsequent system work and sends.
     await connectionManager.start()
     guard !isPreparingForTermination,
-          (try? auth.validateAccountMutation(mutationToken)) != nil else {
+          (try? auth.validateAccountMutation(mutationToken)) != nil
+    else {
       await connectionManager.setAuthAvailable(false)
       await connectionManager.stop()
       return
@@ -695,7 +725,8 @@ public actor RealtimeV2 {
     guard let mutationToken = try? auth.beginAccountMutation() else { return }
     await connectionManager.setAuthAvailable(true)
     guard !isPreparingForTermination,
-          (try? auth.validateAccountMutation(mutationToken)) != nil else {
+          (try? auth.validateAccountMutation(mutationToken)) != nil
+    else {
       await connectionManager.setAuthAvailable(false)
       return
     }
@@ -711,13 +742,32 @@ public actor RealtimeV2 {
       return .deferred
     }
     log.trace("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
-    let transaction = transactionWrapper.transaction
+    var transaction = transactionWrapper.transaction
     let queueDurationMilliseconds = max(0, Int(Date().timeIntervalSince(transactionWrapper.date) * 1_000))
     log.debug(
       "Transaction dispatch started transaction_id=\(transactionWrapper.id) method=\(transaction.method) queue_ms=\(queueDurationMilliseconds)"
     )
     beginTransactionOperation()
     defer { endTransactionOperation() }
+
+    do {
+      transaction = try await transaction.preparingForDispatch()
+      guard isCurrentTransactionOwner(expectedOwner),
+            await transactions.installPreparedTransaction(
+              transaction, transactionId: transactionWrapper.id, owner: expectedOwner
+            ) else { return .deferred }
+      if transaction.historyReadBucket != nil,
+         await !transactions.canAdmitHistory(keys: transaction.historyReadExecutionKeys)
+      {
+        await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+        scheduleTransactionQueueRetry()
+        return .deferred
+      }
+    } catch {
+      await transactions.cancel(transactionId: transactionWrapper.id)
+      resumeTransactionContinuation(for: transactionWrapper.id, throwing: error)
+      return .dispatched
+    }
 
     do {
       guard isCurrentTransactionOwner(expectedOwner) else {
@@ -798,6 +848,76 @@ public actor RealtimeV2 {
     await transactions.ack(rpcMsgId: msgId)
   }
 
+  /// A page witness may need later envelopes on this same ordered carrier.
+  private func scheduleHistoryCompletion(
+    msgId: UInt64, result: InlineProtocol.RpcResult.OneOf_Result?, transactionID: TransactionId
+  ) {
+    guard let owner = transactionOwner else { return }
+    let id = UUID()
+    beginTransactionOperation()
+    let task = Task<Void, Never> { [weak self] in
+      await self?.performHistoryCompletion(id: id, owner: owner, msgId: msgId, result: result)
+    }
+    historyCompletions[id] = HistoryCompletion(transactionID: transactionID, task: task)
+  }
+
+  private func performHistoryCompletion(
+    id: UUID, owner: TransactionOwner, msgId: UInt64, result: InlineProtocol.RpcResult.OneOf_Result?
+  ) async {
+    defer {
+      historyCompletions.removeValue(forKey: id)
+      endTransactionOperation()
+    }
+    guard isCurrentTransactionOwner(owner) else { return }
+    await completeTransaction(msgId: msgId, rpcResult: result)
+  }
+
+  private func cancelHistoryCompletions() async {
+    let ending = historyCompletions.values.map(\.task)
+    for task in ending {
+      task.cancel()
+    }
+    for task in ending {
+      await task.value
+    }
+  }
+
+  private func historySnapshotSequence(_ result: InlineProtocol.RpcResult.OneOf_Result?) -> Int64? {
+    switch result {
+      case let .getChatHistory(page): page.hasSeq ? page.seq : nil
+      case let .searchMessages(page): page.hasSeq ? page.seq : nil
+      case let .getMessages(page): page.hasSeq ? page.seq : nil
+      case let .getChat(page): page.hasChat && page.chat.hasSeq ? Int64(page.chat.seq) : nil
+      default: nil
+    }
+  }
+
+  private func historySnapshotBucket(
+    _ result: InlineProtocol.RpcResult.OneOf_Result?, requestedKey: BucketKey
+  ) throws(TransactionExecutionError) -> BucketKey {
+    guard case let .getChat(page) = result else { return requestedKey }
+    guard case let .chat(requestedPeer) = requestedKey,
+          page.hasChat, page.hasDialog, page.chat.id > 0,
+          page.dialog.peer.type == page.chat.peerID.type,
+          !page.dialog.hasChatID || page.dialog.chatID == page.chat.id
+    else { throw .invalid }
+    // A raw DM chat ID resolves to a user bucket. Validate that identity before
+    // asking sync to catch up; the writer repeats validation before saving.
+    switch requestedPeer.type {
+      case let .chat(chat):
+        guard chat.chatID == page.chat.id else { throw .invalid }
+        switch page.chat.peerID.type {
+          case let .chat(peer) where peer.chatID == chat.chatID: break
+          case let .user(peer) where peer.userID > 0: break
+          default: throw .invalid
+        }
+      case let .user(user):
+        guard user.userID > 0, page.chat.peerID.type == requestedPeer.type else { throw .invalid }
+      default: throw .invalid
+    }
+    return .chat(peer: page.chat.peerID)
+  }
+
   private func completeTransaction(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async {
     guard let completingOwner = transactionOwner else { return }
     beginTransactionOperation()
@@ -827,6 +947,16 @@ public actor RealtimeV2 {
     )
 
     do {
+      if let bucket = transaction.historyReadBucket {
+        guard let seq = historySnapshotSequence(rpcResult) else { throw TransactionExecutionError.historyUnavailable }
+        let snapshotBucket = try historySnapshotBucket(rpcResult, requestedKey: bucket)
+        try await sync.reachHistorySnapshot(snapshotBucket, seq: seq)
+        try Task.checkCancellation()
+        guard isCurrentTransactionOwner(completingOwner) else { throw CancellationError() }
+        guard await transactions.canAdmitHistory(keys: transaction.historyReadExecutionKeys) else {
+          throw TransactionExecutionError.staleHistory
+        }
+      }
       try await transaction.apply(rpcResult)
       guard completingOwner == transactionOwner else {
         await transaction.cancelled()
@@ -848,7 +978,7 @@ public actor RealtimeV2 {
       await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
       await transactions.signalQueue()
-      resumeTransactionContinuation(for: transactionId, throwing: TransactionError.invalid)
+      resumeTransactionContinuation(for: transactionId, throwing: error)
     }
   }
 
@@ -1017,7 +1147,7 @@ public actor RealtimeV2 {
     continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>,
     cancellationState: TransactionSendCancellationState
   ) async {
-    defer { endTransactionOperation() }
+    defer { endTransactionSubmission(transaction, owner: owner) }
 
     if cancellationState.isCancellationRequested() {
       cancellationState.finish()
@@ -1087,6 +1217,9 @@ public actor RealtimeV2 {
   }
 
   private func cancelTransaction(transactionId: TransactionId) async {
+    for completion in historyCompletions.values where completion.transactionID == transactionId {
+      completion.task.cancel()
+    }
     resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
     await transactions.cancel(transactionId: transactionId)
   }
@@ -1149,7 +1282,7 @@ public actor RealtimeV2 {
     transactionOwnerTransitionID = transitionID
     let transitionTask = Task<Void, Never> { [weak self] in
       guard let self else { return }
-      await self.transitionTransactionOwner(to: accountID)
+      await transitionTransactionOwner(to: accountID)
     }
     transactionOwnerTransitionTask = transitionTask
     await transitionTask.value
@@ -1180,6 +1313,7 @@ public actor RealtimeV2 {
       transactionRetryTask = nil
       endingRetryTask?.cancel()
       await endingRetryTask?.value
+      await cancelHistoryCompletions()
       await waitForTransactionOperationsToFinish()
       await transactions.reset(owner: previousOwner, deletePersisted: true)
       await sync.clearSyncState(acceptNewWork: false)
@@ -1212,6 +1346,7 @@ public actor RealtimeV2 {
   }
 
   private func beginTransactionSubmission(
+    invalidatesHistory: Bool = false,
     expectedAccount: AuthAccountMutationToken? = nil
   ) async -> TransactionOwner? {
     guard auth.hasPendingAccountTransition() == false,
@@ -1222,7 +1357,18 @@ public actor RealtimeV2 {
       return nil
     }
     beginTransactionOperation()
+    if invalidatesHistory, await !transactions.beginHistoryMutationSubmission(owner: owner) {
+      endTransactionOperation()
+      return nil
+    }
     return owner
+  }
+
+  private func endTransactionSubmission(_ transaction: any Transaction2, owner: TransactionOwner) {
+    if transaction.invalidatesHistory {
+      Task { await transactions.endHistoryMutationSubmission(owner: owner) }
+    }
+    endTransactionOperation()
   }
 
   private func isCurrentTransactionOwner(_ owner: TransactionOwner) -> Bool {
@@ -1278,7 +1424,9 @@ public actor RealtimeV2 {
     guard directRPCOperationsInProgress == 0 else { return }
     let waiters = directRPCDrainWaiters
     directRPCDrainWaiters.removeAll()
-    for waiter in waiters { waiter.resume() }
+    for waiter in waiters {
+      waiter.resume()
+    }
   }
 
   private func waitForDirectRPCOperationsToFinish() async {
@@ -1330,7 +1478,10 @@ public actor RealtimeV2 {
     let cancellationState = TransactionSendCancellationState()
 
     return try await withTaskCancellationHandler {
-      guard let owner = await beginTransactionSubmission(expectedAccount: expectedAccount) else {
+      guard let owner = await beginTransactionSubmission(
+        invalidatesHistory: transaction.invalidatesHistory,
+        expectedAccount: expectedAccount
+      ) else {
         cancellationState.finish()
         await transaction.cancelled()
         throw CancellationError()
@@ -1344,7 +1495,7 @@ public actor RealtimeV2 {
         } catch {
           cancellationState.finish()
           await transaction.cancelled()
-          await endTransactionOperation()
+          await endTransactionSubmission(transaction, owner: owner)
           throw error
         }
       }
@@ -1352,14 +1503,14 @@ public actor RealtimeV2 {
       guard await admitEphemeralTransactionWhileConnected(transaction) else {
         cancellationState.finish()
         await transaction.failed(error: .timeout)
-        await endTransactionOperation()
+        await endTransactionSubmission(transaction, owner: owner)
         throw TransactionError.timeout
       }
 
       guard !Task.isCancelled, !cancellationState.isCancellationRequested() else {
         cancellationState.finish()
         await transaction.cancelled()
-        await endTransactionOperation()
+        await endTransactionSubmission(transaction, owner: owner)
         throw CancellationError()
       }
 
@@ -1370,7 +1521,7 @@ public actor RealtimeV2 {
       guard await transaction.validateOptimisticState() else {
         cancellationState.finish()
         await transaction.cancelled()
-        await endTransactionOperation()
+        await endTransactionSubmission(transaction, owner: owner)
         throw TransactionError.rejectedBeforeExecution
       }
 
@@ -1431,20 +1582,22 @@ public actor RealtimeV2 {
     transactionId: TransactionId,
     validateOptimisticState: Bool
   ) async -> Bool {
-    guard !Task.isCancelled, let owner = await beginTransactionSubmission() else {
+    guard !Task.isCancelled,
+          let owner = await beginTransactionSubmission(invalidatesHistory: transaction.invalidatesHistory)
+    else {
       await transaction.cancelled()
       return false
     }
 
     guard await admitEphemeralTransactionWhileConnected(transaction) else {
       await transaction.failed(error: .timeout)
-      await endTransactionOperation()
+      await endTransactionSubmission(transaction, owner: owner)
       return false
     }
 
     guard !Task.isCancelled else {
       await transaction.cancelled()
-      await endTransactionOperation()
+      await endTransactionSubmission(transaction, owner: owner)
       return false
     }
 
@@ -1454,14 +1607,14 @@ public actor RealtimeV2 {
       guard await transaction.validateOptimisticState() else {
         log.error("Rejected queued transaction with missing optimistic state method=\(transaction.method)")
         await transaction.cancelled()
-        await endTransactionOperation()
+        await endTransactionSubmission(transaction, owner: owner)
         return false
       }
     }
 
     guard !Task.isCancelled, await isCurrentTransactionOwner(owner) else {
       await transaction.cancelled()
-      await endTransactionOperation()
+      await endTransactionSubmission(transaction, owner: owner)
       return false
     }
 
@@ -1475,7 +1628,7 @@ public actor RealtimeV2 {
         await cancelSupersededEphemeralTransactions(superseded)
       case .ownerUnavailable, .persistenceFailed:
         await transaction.cancelled()
-        await endTransactionOperation()
+        await endTransactionSubmission(transaction, owner: owner)
         return false
     }
 
@@ -1484,11 +1637,11 @@ public actor RealtimeV2 {
       if !preserveForNextLaunch {
         await transactions.cancel(transactionId: transactionId)
       }
-      await endTransactionOperation()
+      await endTransactionSubmission(transaction, owner: owner)
       return preserveForNextLaunch
     }
 
-    await endTransactionOperation()
+    await endTransactionSubmission(transaction, owner: owner)
     log.trace("Queued transaction method=\(transaction.method)")
     await transactions.signalQueue()
     return true
@@ -1564,7 +1717,9 @@ public actor RealtimeV2 {
     guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
     // External integrations may have resolved their destination before hopping to this actor.
     // Validate at admission so an old request cannot be sent using a replacement account.
-    if let accountToken { try auth.validateAccountMutation(accountToken) }
+    if let accountToken {
+      try auth.validateAccountMutation(accountToken)
+    }
     try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
     beginDirectRPCOperation()
     defer { endDirectRPCOperation() }
@@ -1595,7 +1750,7 @@ public actor RealtimeV2 {
           throw RealtimeDirectRpcError.rpcError(errorCode: errorCode, message: message, code: code)
         case .stopped:
           throw RealtimeDirectRpcError.notConnected
-        }
+      }
     } catch is CancellationError {
       throw CancellationError()
     } catch {
@@ -1622,6 +1777,19 @@ public actor RealtimeV2 {
     timeout: Duration = .seconds(20),
     operation: @escaping @Sendable (RealtimeV2) async throws -> Value
   ) async throws -> Value {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    // A URL can arrive before persistent storage promotion or the auth observer.
+    // Retain that request while the existing owners admit it, without opening
+    // transaction admission or projecting into the temporary launch database.
+    while !storageIsReady() || !acceptsTransactions {
+      try Task.checkCancellation()
+      try auth.validateAccountMutation(accountToken)
+      guard !isPreparingForTermination else { throw CancellationError() }
+      guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
+      try await Task.sleep(for: min(.milliseconds(50), clock.now.duration(to: deadline)))
+    }
+    guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
     try validateUserInitiatedOperation(accountToken)
     // Finish any previous-owner drain before admitting this operation into that same drain.
     guard let owner = await ensureTransactionOwnerIfNeeded(), isCurrentTransactionOwner(owner) else {
@@ -1641,19 +1809,20 @@ public actor RealtimeV2 {
           while true {
             let transportIsOpen = await manager.currentSnapshot().state == .open
             let transactionsAreReady = try await self.isUserInitiatedOperationReady(accountToken)
-            if transportIsOpen, transactionsAreReady { break }
+            if transportIsOpen, transactionsAreReady {
+              break
+            }
             try Task.checkCancellation()
             try await self.validateUserInitiatedOperation(accountToken)
             try await Task.sleep(for: .milliseconds(50))
           }
           try await self.validateUserInitiatedOperation(accountToken)
+          guard clock.now < deadline else { throw RealtimeDirectRpcError.timeout }
           let result = try await operation(self)
           try await self.validateUserInitiatedOperation(accountToken)
           return result
         }
         group.addTask {
-          let clock = ContinuousClock()
-          let deadline = clock.now.advanced(by: timeout)
           while clock.now < deadline {
             try await self.validateUserInitiatedOperation(accountToken)
             try await Task.sleep(for: min(.milliseconds(50), clock.now.duration(to: deadline)))
@@ -1689,7 +1858,9 @@ public actor RealtimeV2 {
   ) throws {
     guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
     do {
-      if let account { try auth.validateAccountMutation(account) }
+      if let account {
+        try auth.validateAccountMutation(account)
+      }
       try auth.requireAccountMutationAllowed(allowDuringLogout: allowDuringLogout)
     } catch {
       throw RealtimeDirectRpcError.notAuthorized
@@ -1734,9 +1905,13 @@ public actor RealtimeV2 {
       method: .createCliSession,
       input: .createCliSession(.with {
         $0.deviceID = deviceID
-        if let deviceName { $0.deviceName = deviceName }
+        if let deviceName {
+          $0.deviceName = deviceName
+        }
         $0.clientVersion = clientVersion
-        if let osVersion { $0.osVersion = osVersion }
+        if let osVersion {
+          $0.osVersion = osVersion
+        }
       })
     )
 
@@ -1857,7 +2032,9 @@ public actor RealtimeV2 {
       throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
     guard let boundaryUpdate = collapseResult.updates.first(where: {
-      if case .dialogCollapsedMaxID = $0.update { return true }
+      if case .dialogCollapsedMaxID = $0.update {
+        return true
+      }
       return false
     }), case let .dialogCollapsedMaxID(boundary) = boundaryUpdate.update else {
       throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
@@ -1915,7 +2092,7 @@ public actor RealtimeV2 {
     return resolutions
   }
 
-#if DEBUG || DEBUG_BUILD
+  #if DEBUG || DEBUG_BUILD
   public func runSyncDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
     await sync.runDebugScenario(scenario)
   }
@@ -1966,7 +2143,7 @@ public actor RealtimeV2 {
       summary: "Connection cycle did not reopen within 15 seconds (state: \(snapshot.state))."
     )
   }
-#endif
+  #endif
 
   // MARK: - Helpers
 
@@ -1984,10 +2161,10 @@ public actor RealtimeV2 {
 
   private func mapConnectionState(_ state: ConnectionState) -> RealtimeConnectionState {
     switch state {
-    case .open:
-      return .connected
-    case .connectingTransport, .authenticating, .backoff, .waitingForConstraints, .backgroundSuspended, .stopped:
-      return .connecting
+      case .open:
+        .connected
+      case .connectingTransport, .authenticating, .backoff, .waitingForConstraints, .backgroundSuspended, .stopped:
+        .connecting
     }
   }
 
@@ -2004,11 +2181,10 @@ public actor RealtimeV2 {
   }
 
   private func publishConnectionStateIfNeeded() async {
-    let nextState: RealtimeConnectionState
-    if transportConnectionState == .connected && syncActivityInProgress {
-      nextState = .updating
+    let nextState: RealtimeConnectionState = if transportConnectionState == .connected, syncActivityInProgress {
+      .updating
     } else {
-      nextState = transportConnectionState
+      transportConnectionState
     }
 
     guard nextState != currentConnectionState else { return }
@@ -2020,10 +2196,10 @@ public actor RealtimeV2 {
 
   private func canExecuteTransactions() -> Bool {
     switch currentConnectionState {
-    case .connected, .updating:
-      true
-    case .connecting:
-      false
+      case .connected, .updating:
+        true
+      case .connecting:
+        false
     }
   }
 
@@ -2073,7 +2249,9 @@ public actor RealtimeV2 {
     }
 
     let isWarning = counters.windowSaturations > 0 || counters.capacityRejections > 0
-    if isWarning { lastTransactionWarningDiagnosticAt = now }
+    if isWarning {
+      lastTransactionWarningDiagnosticAt = now
+    }
     PerformanceTrace.breadcrumb(
       "realtime_transaction_pressure",
       category: "realtime.transaction",
@@ -2158,12 +2336,12 @@ public actor RealtimeV2 {
 
   private func isMissingAuthToken() -> Bool {
     switch auth.snapshot().status {
-    case .reauthRequired:
-      return true
-    case .authenticated(let credentials):
-      return credentials.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    case .hydrating, .unauthenticated, .locked, .loggingOut, .authenticatedV3:
-      return false
+      case .reauthRequired:
+        true
+      case let .authenticated(credentials):
+        credentials.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      case .hydrating, .unauthenticated, .locked, .loggingOut, .authenticatedV3:
+        false
     }
   }
 
@@ -2171,35 +2349,37 @@ public actor RealtimeV2 {
     guard case let .rpcError(rpcError) = error else { return false }
 
     switch rpcError.errorCode {
-    case .badRequest,
-         .peerIDInvalid,
-         .messageIDInvalid,
-         .userIDInvalid,
-         .userAlreadyMember,
-         .spaceIDInvalid,
-         .chatIDInvalid,
-         .emailInvalid,
-         .phoneNumberInvalid,
-         .spaceAdminRequired,
-         .spaceOwnerRequired,
-         .usernameInvalid,
-         .usernameTaken,
-         .firstNameInvalid,
-         .urlPreviewUnavailable,
-         .agentSessionMessageImmutable,
-         .spaceInviteInvalid:
-      return true
-    case .unknown,
-         .unauthenticated,
-         .rateLimit,
-         .internalError,
-         .UNRECOGNIZED(_):
-      return false
+      case .badRequest,
+           .peerIDInvalid,
+           .messageIDInvalid,
+           .userIDInvalid,
+           .userAlreadyMember,
+           .spaceIDInvalid,
+           .chatIDInvalid,
+           .emailInvalid,
+           .phoneNumberInvalid,
+           .spaceAdminRequired,
+           .spaceOwnerRequired,
+           .usernameInvalid,
+           .usernameTaken,
+           .firstNameInvalid,
+           .urlPreviewUnavailable,
+           .agentSessionMessageImmutable,
+           .spaceInviteInvalid:
+        return true
+      case .unknown,
+           .unauthenticated,
+           .rateLimit,
+           .internalError,
+           .UNRECOGNIZED:
+        return false
     }
   }
 
   private func isRejectedBeforeExecution(_ error: TransactionError) -> Bool {
-    if case .rejectedBeforeExecution = error { return true }
+    if case .rejectedBeforeExecution = error {
+      return true
+    }
     return false
   }
 }

@@ -5,7 +5,7 @@ import Logger
 import RealtimeV2
 
 public struct SearchMessagesTransaction: Transaction2 {
-  // Private
+  /// Private
   private var log = Log.scoped("Transactions/SearchMessages")
 
   // Properties
@@ -19,6 +19,7 @@ public struct SearchMessagesTransaction: Transaction2 {
     public var offsetID: Int64?
     public var limit: Int32?
     public var filter: InlineProtocol.SearchMessagesFilter?
+    public var admissionToken: HistoryPageAdmissionToken?
 
     enum CodingKeys: String, CodingKey {
       case peer
@@ -26,6 +27,7 @@ public struct SearchMessagesTransaction: Transaction2 {
       case offsetID
       case limit
       case filterRawValue
+      case admissionToken
     }
 
     public init(
@@ -50,6 +52,7 @@ public struct SearchMessagesTransaction: Transaction2 {
       limit = try container.decodeIfPresent(Int32.self, forKey: .limit)
       let rawValue = try container.decodeIfPresent(Int.self, forKey: .filterRawValue)
       filter = rawValue.flatMap { InlineProtocol.SearchMessagesFilter(rawValue: $0) }
+      admissionToken = try container.decodeIfPresent(HistoryPageAdmissionToken.self, forKey: .admissionToken)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -58,6 +61,7 @@ public struct SearchMessagesTransaction: Transaction2 {
       try container.encode(queries, forKey: .queries)
       try container.encodeIfPresent(offsetID, forKey: .offsetID)
       try container.encodeIfPresent(limit, forKey: .limit)
+      try container.encodeIfPresent(admissionToken, forKey: .admissionToken)
       if let filter {
         try container.encode(filter.rawValue, forKey: .filterRawValue)
       }
@@ -72,6 +76,28 @@ public struct SearchMessagesTransaction: Transaction2 {
     filter: InlineProtocol.SearchMessagesFilter? = nil
   ) {
     context = Context(peer: peer, queries: queries, offsetID: offsetID, limit: limit, filter: filter)
+  }
+
+  public var historyReadChatID: Int64? {
+    context.admissionToken?.chatId
+  }
+
+  public var historyReadBucket: BucketKey? {
+    .chat(peer: context.peer.toHistoryProtocolPeer())
+  }
+
+  public func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction2 {
+    do {
+      var prepared = self
+      let admission = try await AppDatabase.shared.dbWriter.write { db in
+        let peer = try HistoryPageAdmissionToken.canonicalPeer(db, peer: context.peer)
+        return try (peer, HistoryPageAdmissionToken.capture(db, peer: peer))
+      }
+      prepared.context.peer = admission.0
+      prepared.context.admissionToken = admission.1
+      return prepared
+    } catch HistoryPageAdmissionError.missingChat { throw .historyUnavailable }
+    catch { throw .invalid }
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -112,13 +138,7 @@ public struct SearchMessagesTransaction: Transaction2 {
 
     do {
       _ = try await AppDatabase.shared.dbWriter.write { db in
-        for message in response.messages {
-          do {
-            _ = try Message.save(db, protocolMessage: message, publishChanges: false)
-          } catch {
-            log.error("Failed to save message", error: error)
-          }
-        }
+        try Self.apply(response, context: context, db: db)
       }
 
       Task.detached(priority: .userInitiated) { @MainActor in
@@ -126,10 +146,42 @@ public struct SearchMessagesTransaction: Transaction2 {
       }
 
       log.trace("searchMessages saved")
+    } catch HistoryPageAdmissionError.stale {
+      throw .staleHistory
+    } catch HistoryPageAdmissionError.unavailable {
+      throw .historyUnavailable
     } catch {
       log.error("Failed to save search messages", error: error)
       throw TransactionExecutionError.invalid
     }
+  }
+
+  public static func apply(_ response: InlineProtocol.SearchMessagesResult, context: Context, db: Database) throws {
+    var context = context
+    context.peer = try HistoryPageAdmissionToken.canonicalPeer(db, peer: context.peer)
+
+    let chatID = try HistoryPageAdmissionToken.resolveChatId(db, peer: context.peer)
+    guard let token = context.admissionToken else { throw HistoryPageAdmissionError.stale }
+    try token.validateSnapshot(db, peer: context.peer, seq: response.hasSeq ? response.seq : nil)
+    guard let scope = MessageHistoryScope(filter: context.filter) else { throw HistoryPageAdmissionError.malformedPage }
+    let limit = Int(context.limit ?? 50)
+    guard 1 ... 100 ~= limit, response.messages.count <= limit else { throw HistoryPageAdmissionError.malformedPage }
+    if let offset = context.offsetID {
+      guard 1 ... MessageHistoryHole.positiveMessageIDMax ~= offset,
+            response.messages.allSatisfy({ $0.id < offset }) else { throw HistoryPageAdmissionError.malformedPage }
+    }
+    try HistoryPageReducer.validateMessages(response.messages, chatId: chatID, peer: context.peer, scope: scope)
+    _ = try HistoryPageReducer.save(response.messages, db: db)
+    // Text search is a projection, never proof of interval-wide tag membership.
+    guard scope != .timeline, context.queries.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    else { return }
+    let upper = context.offsetID.map { $0 - 1 } ?? MessageHistoryHole.positiveMessageIDMax
+    let lower = response.messages.count < limit ? 1 : response.messages.last?.id ?? 1
+    guard lower <= upper else { return }
+    try HistoryPageReducer.admitCoverage(
+      [lower ... upper], messages: response.messages, chatId: chatID, scope: scope,
+      token: token, db: db
+    )
   }
 
   public func failed(error: TransactionError2) async {

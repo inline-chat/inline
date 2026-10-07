@@ -19,14 +19,8 @@ struct MediaTabView: View {
   }
 
   var body: some View {
-    Group {
-      if mediaViewModel.mediaMessages.isEmpty {
-        VStack(spacing: 8) {
-          Text("No media found in this chat.")
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-      } else {
+    VStack(spacing: 0) {
+      if !mediaViewModel.mediaMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
           ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
             Section {
@@ -52,22 +46,26 @@ struct MediaTabView: View {
         .padding(.horizontal, 8)
         .padding(.bottom, 12)
       }
+      ChatInfoResourceFooter(
+        state: mediaViewModel.loadState, isEmpty: mediaViewModel.mediaMessages.isEmpty,
+        emptyMessage: "No media found in this chat.", loadMore: mediaViewModel.loadMore, retry: mediaViewModel.retry
+      )
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .task {
       await mediaViewModel.loadInitial()
     }
     .onAppear(perform: prefetchVisible)
-    .onChange(of: mediaViewModel.mediaMessages.count) { _ in
+    .onChange(of: mediaViewModel.mediaMessages.count) { _, _ in
       prefetchVisible()
     }
     .onDisappear {
+      mediaViewModel.deactivate()
       prefetchTask?.cancel()
       prefetchTask = nil
     }
   }
 
-  @ViewBuilder
   private func mediaCell(for mediaMessage: MediaMessage) -> some View {
     ZStack {
       Rectangle()
@@ -88,12 +86,11 @@ struct MediaTabView: View {
     .aspectRatio(1, contentMode: .fill)
     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     .contextMenu {
-      // we don't support navigating to arbitary places i nchat yet
-//      Button {
-//        onShowInChat(mediaMessage.message)
-//      } label: {
-//        Label("Show in Chat", systemImage: "text.bubble")
-//      }
+      Button {
+        onShowInChat(mediaMessage.message)
+      } label: {
+        Label("Show in Chat", systemImage: "text.bubble")
+      }
       switch mediaMessage.kind {
         case let .photo(photoInfo):
           Button {
@@ -134,8 +131,8 @@ struct MediaTabView: View {
         let imageViewer = ImageViewerController(
           imageURL: url,
           sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image
-//          showInChatAction: { onShowInChat(mediaMessage.message) }
+          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
+          showInChatAction: { onShowInChat(mediaMessage.message) }
         )
         topViewController()?.present(imageViewer, animated: false)
       case let .video(videoInfo):
@@ -143,8 +140,8 @@ struct MediaTabView: View {
         let imageViewer = ImageViewerController(
           videoURL: url,
           sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image
-//          showInChatAction: { onShowInChat(mediaMessage.message) }
+          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
+          showInChatAction: { onShowInChat(mediaMessage.message) }
         )
         topViewController()?.present(imageViewer, animated: false)
       case .none:

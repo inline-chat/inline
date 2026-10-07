@@ -32,6 +32,10 @@ public struct DeleteMessageAttachmentTransaction: Transaction2 {
     })
   }
 
+  public var executionKey: TransactionExecutionKey? {
+    .peerMutation(context.peerId)
+  }
+
   public func optimistic() async {}
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {

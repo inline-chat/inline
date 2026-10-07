@@ -143,6 +143,25 @@ enables and configures the plugin. Do not reset the Hermes home or replace a
 conflicting bot credential to recover a partial setup. If setup reports a
 conflict, confirm the intended bot before using `--replace`.
 
+## Install from the Hermes Catalog
+
+You can also install Inline from the [Hermes plugin catalog](https://hermes-agent.nousresearch.com/docs/plugins/inline-platform):
+
+```bash
+hermes plugins install inline-platform
+```
+
+In the same Hermes home and profile, enable the plugin and configure the gateway:
+
+```bash
+hermes plugins enable inline-platform
+hermes gateway setup
+```
+
+Select **Inline** and configure its bot credential. Restart through your existing
+process manager, then check `hermes inline status --json --probe` and verify a
+reply in Inline.
+
 ## Verify
 
 The guided setup uses `npm exec`; it does not require a global `inline-hermes`
@@ -180,7 +199,14 @@ complete the checks above before declaring it ready.
 
 ## Update
 
-Run in the same user, home, profile, and persistent npm prefix used at install:
+For a catalog installation:
+
+```bash
+hermes plugins update inline-platform
+hermes gateway restart
+```
+
+For an npm installation, run in the same user, home, profile, and persistent npm prefix used at install:
 
 ```bash
 inline update
@@ -194,6 +220,30 @@ hermes inline status --json --probe
 Adapter `0.0.19` no longer provides `/inline_update`; update through the package
 manager. `install --force` refreshes plugin files while preserving Hermes
 configuration and credentials.
+
+## Shared transcripts in groups and threads
+
+To share one conversation transcript among admitted participants in a group
+or thread, add these keys at the root of the `config.yaml` used by the Hermes
+gateway process, outside `platforms.inline.extra`:
+
+```yaml
+group_sessions_per_user: false
+thread_sessions_per_user: false
+```
+
+Hermes defaults `group_sessions_per_user` to `true` (groups split by sender)
+and `thread_sessions_per_user` to `false` (threads shared). These settings
+affect every messaging platform governed by that gateway configuration.
+For separate profile gateways, configure each gateway's profile separately.
+With a multiplexed gateway, do not assume a secondary profile's values control
+its sessions; this adapter does not qualify per-profile session-policy overrides.
+
+Distinct Hermes profile/gateway namespaces keep separate conversation sessions.
+Swapping a bot token within one profile does not create a new transcript namespace.
+These flags select shared sessions; they do not merge existing histories, import
+all Inline history, grant permissions, or change access, mention, or bot wake rules.
+Restart the gateway through its existing process manager after editing.
 
 ## Source
 

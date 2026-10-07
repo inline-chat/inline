@@ -60,6 +60,7 @@ actor Transactions {
   private let persistenceHandler: TransactionPersistenceHandler?
   private let blockerResolver: (any TransactionBlockerResolver)?
   private var satisfiedBlockers: Set<TransactionBlocker> = []
+  private var historyMutationSubmissions = 0
   private var executionOwners: [TransactionExecutionKey: TransactionId] = [:]
   private var owner: TransactionOwner?
   private var acceptsTransactions = false
@@ -80,7 +81,9 @@ actor Transactions {
   }
 
   func activate(owner newOwner: TransactionOwner) async {
-    if owner == newOwner, acceptsTransactions { return }
+    if owner == newOwner, acceptsTransactions {
+      return
+    }
 
     guard owner == nil else {
       log.error("Refusing transaction owner replacement without an explicit reset")
@@ -139,6 +142,7 @@ actor Transactions {
     transactionRpcMap.removeAll()
     pendingAckMsgIds.removeAll()
     satisfiedBlockers.removeAll()
+    historyMutationSubmissions = 0
 
     if invokeCancellationHandlers {
       for wrapper in wrappers {
@@ -168,12 +172,12 @@ actor Transactions {
       owner: expectedOwner
     )
     switch result {
-    case let .accepted(superseded):
-      for wrapper in superseded {
-        await wrapper.transaction.cancelled()
-      }
-    case .ownerUnavailable, .persistenceFailed:
-      return nil
+      case let .accepted(superseded):
+        for wrapper in superseded {
+          await wrapper.transaction.cancelled()
+        }
+      case .ownerUnavailable, .persistenceFailed:
+        return nil
     }
     queueContinuation.yield(())
     return transactionId
@@ -243,6 +247,11 @@ actor Transactions {
 
     for transactionId in Array(_queue.keys) {
       guard let wrapper = _queue[transactionId] else { continue }
+      if wrapper.transaction.historyReadBucket != nil,
+         !canAdmitHistory(keys: wrapper.transaction.historyReadExecutionKeys)
+      {
+        continue
+      }
 
       switch await blockerState(for: wrapper) {
         case .ready:
@@ -279,6 +288,11 @@ actor Transactions {
 
     for transactionId in Array(_queue.keys) {
       guard let wrapper = _queue[transactionId] else { continue }
+      if wrapper.transaction.historyReadBucket != nil,
+         !canAdmitHistory(keys: wrapper.transaction.historyReadExecutionKeys)
+      {
+        continue
+      }
 
       let state = await blockerState(for: wrapper)
       guard acceptsTransactions,
@@ -304,6 +318,51 @@ actor Transactions {
     }
 
     return nil
+  }
+
+  /// The existing owner closes the short interval before optimism enters its queue.
+  func beginHistoryMutationSubmission(owner expectedOwner: TransactionOwner) -> Bool {
+    guard owner == expectedOwner else { return false }
+    historyMutationSubmissions += 1
+    return true
+  }
+
+  func endHistoryMutationSubmission(owner expectedOwner: TransactionOwner) {
+    guard owner == expectedOwner else { return }
+    historyMutationSubmissions = max(0, historyMutationSubmissions - 1)
+    queueContinuation.yield(())
+  }
+
+  func canAdmitHistory(keys: Set<TransactionExecutionKey>) -> Bool {
+    guard historyMutationSubmissions == 0 else { return false }
+    func blocks(_ key: TransactionExecutionKey) -> Bool {
+      keys.contains(key) || key.namespace == "space-mutation"
+    }
+    // Completion removes a wrapper before apply finishes; its execution lane
+    // remains owned until the existing terminal path releases it.
+    if executionOwners.keys.contains(where: blocks) {
+      return false
+    }
+    return !uniqueTransactions().contains { wrapper in
+      wrapper.transaction.invalidatesHistory && wrapper.transaction.executionKey.map(blocks) == true
+    }
+  }
+
+  func installPreparedTransaction(
+    _ transaction: any Transaction2, transactionId: TransactionId, owner expectedOwner: TransactionOwner
+  ) -> Bool {
+    guard acceptsTransactions, owner == expectedOwner, let wrapper = inFlight[transactionId] else { return false }
+    inFlight[transactionId] = TransactionWrapper(
+      id: wrapper.id, date: wrapper.date, transaction: transaction,
+      rpcErrorRetryCount: wrapper.rpcErrorRetryCount, dispatchPhase: wrapper.dispatchPhase
+    )
+    return true
+  }
+
+  func historyReadTransactionID(rpcMsgId: UInt64) -> TransactionId? {
+    guard let id = transactionRpcMap[rpcMsgId],
+          let wrapper = inFlight[id] ?? sent[id], wrapper.transaction.historyReadBucket != nil else { return nil }
+    return id
   }
 
   /// Mark a transaction as running, which means it has an RPC call in progress.
@@ -640,7 +699,9 @@ actor Transactions {
       cancelledAny = true
     }
     rescheduleEphemeralExpiryTimer()
-    if cancelledAny { queueContinuation.yield(()) }
+    if cancelledAny {
+      queueContinuation.yield(())
+    }
   }
 
   func cancel(
@@ -669,7 +730,9 @@ actor Transactions {
       cancelledAny = true
     }
     rescheduleEphemeralExpiryTimer()
-    if cancelledAny { queueContinuation.yield(()) }
+    if cancelledAny {
+      queueContinuation.yield(())
+    }
   }
 
   func cancel(transactionId: TransactionId) async {
@@ -715,7 +778,9 @@ actor Transactions {
   }
 
   private func waitUntilActive(owner expectedOwner: TransactionOwner) async -> Bool {
-    if acceptsTransactions, owner == expectedOwner { return true }
+    if acceptsTransactions, owner == expectedOwner {
+      return true
+    }
     guard owner == expectedOwner else { return false }
 
     return await withCheckedContinuation { continuation in

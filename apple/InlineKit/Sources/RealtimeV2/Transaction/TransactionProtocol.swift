@@ -4,6 +4,8 @@ import Logger
 
 public enum TransactionExecutionError: Error {
   case invalid
+  case staleHistory
+  case historyUnavailable
 }
 
 public enum TransactionBlocker: Hashable, Codable, Sendable {
@@ -90,6 +92,11 @@ public protocol Transaction: Sendable, Codable {
 
   func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input?
 
+  /// Capture admission after leaving the queue; the returned query owns its token.
+  func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction
+  var historyReadChatID: Int64? { get }
+  var historyReadBucket: BucketKey? { get }
+
   /// Apply the result of the query to database
   /// Error propagated to the caller of the query
   func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError)
@@ -141,10 +148,10 @@ func transactionFailureLogScope(method: InlineProtocol.Method) -> String {
   let methodName = String(describing: method)
   let isSafeMethodName = methodName.utf8.count <= 40 && methodName.utf8.allSatisfy { byte in
     switch byte {
-    case 48 ... 57, 65 ... 90, 95, 97 ... 122:
-      true
-    default:
-      false
+      case 48 ... 57, 65 ... 90, 95, 97 ... 122:
+        true
+      default:
+        false
     }
   }
   let suffix = isSafeMethodName ? methodName : "method_\(method.rawValue)"
@@ -152,31 +159,84 @@ func transactionFailureLogScope(method: InlineProtocol.Method) -> String {
 }
 
 public extension Transaction {
+  func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction {
+    self
+  }
+
+  var historyReadChatID: Int64? {
+    nil
+  }
+
+  var historyReadBucket: BucketKey? {
+    nil
+  }
+
+  var invalidatesHistory: Bool {
+    switch method {
+      case .deleteMessages, .editMessage, .clearChatHistory, .deleteMessageAttachment: true
+      default: false
+    }
+  }
+
+  var historyReadExecutionKeys: Set<TransactionExecutionKey> {
+    var keys: Set<TransactionExecutionKey> = []
+    if let chatID = historyReadChatID, chatID > 0 {
+      keys.insert(.init(namespace: "chat-mutation", value: "thread:\(chatID)"))
+    }
+    if case let .chat(peer) = historyReadBucket {
+      switch peer.type {
+        case let .user(user): keys.insert(.init(namespace: "chat-mutation", value: "user:\(user.userID)"))
+        case let .chat(chat): keys.insert(.init(namespace: "chat-mutation", value: "thread:\(chat.chatID)"))
+        default: break
+      }
+    }
+    return keys
+  }
+
   func cancelled() async {}
   func optimistic() async {}
-  func validateOptimisticState() async -> Bool { true }
+  func validateOptimisticState() async -> Bool {
+    true
+  }
+
   func failed(error: TransactionError) async {
     Log.scoped(transactionFailureLogScope(method: method))
       .error("Transaction failed", error: error)
   }
+
   func commitOutcomeUnknown() async {}
-  var blockers: [TransactionBlocker] { [] }
-  var satisfiedBlockersOnSuccess: [TransactionBlocker] { [] }
-  var executionKey: TransactionExecutionKey? { nil }
-  var reconnectReplayPolicy: TransactionReconnectPolicy? { nil }
-  var ephemeralCoalescingKey: String? { nil }
+  var blockers: [TransactionBlocker] {
+    []
+  }
+
+  var satisfiedBlockersOnSuccess: [TransactionBlocker] {
+    []
+  }
+
+  var executionKey: TransactionExecutionKey? {
+    nil
+  }
+
+  var reconnectReplayPolicy: TransactionReconnectPolicy? {
+    nil
+  }
+
+  var ephemeralCoalescingKey: String? {
+    nil
+  }
+
   var effectiveReconnectReplayPolicy: TransactionReconnectPolicy {
     if let reconnectReplayPolicy {
       return reconnectReplayPolicy
     }
 
     switch type {
-    case .query:
-      return .replaySafe
-    case .mutation:
-      return .neverReplay
-    case .ephemeral:
-      return .neverReplay
+      case .query:
+        return .replaySafe
+      case .mutation:
+        return .neverReplay
+      case .ephemeral:
+        return .neverReplay
     }
   }
 

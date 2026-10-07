@@ -16,7 +16,78 @@ const flush = async () => {
   for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve))
 }
 
-it.each(["recover", "abort"])("real SDK, directory and stream isolate held sender lookup across %s", async action => {
+it.each([
+  { kind: "newMessage", serviceKind: "threadBacklink" },
+  { kind: "editMessage", serviceKind: "threadBacklink" },
+  { kind: "newMessage", serviceKind: "pinnedMessage" },
+  { kind: "editMessage", serviceKind: "pinnedMessage" },
+] as const)("service $kind $serviceKind advances SDK receipt before the same-chat human ACK", async ({ kind, serviceKind }) => {
+  const { client, transport } = createWireClient()
+  const stream = new InboundStream()
+  const consumer = new PassThrough()
+  const lines: string[] = []
+  consumer.on("data", (chunk) => lines.push(chunk.toString()))
+  stream.attach(consumer)
+  const abort = new AbortController()
+  let consuming: Promise<void> | undefined
+  let senderLookups = 0
+  try {
+    const connecting = client.connect()
+    await flush()
+    await transport.connect()
+    await flush()
+    await transport.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    await connecting
+    consuming = client.consumeEvents((event) => deliverInboundEvent(event, {
+      meId: "777", meUsername: "bot", signal: abort.signal,
+      resolveSender: async () => {
+        senderLookups++
+        return { profile: { id: "42", bot: false }, provenanceVerified: true }
+      },
+      deliver: (event) => stream.deliver(event),
+    }))
+    const servicePayload = serviceKind === "threadBacklink"
+      ? { event: { oneofKind: "threadBacklink" as const, threadBacklink: { sourceChatId: 99n } } }
+      : { event: { oneofKind: "pinnedMessage" as const, pinnedMessage: { messageId: 3n } } }
+    const message = (seq: number, service: boolean) => ({
+      id: BigInt(seq), chatId: 10n, fromId: 42n, date: 100n,
+      message: "Pinned a message · Reply in thread",
+      peerId: { type: { oneofKind: "chat" as const, chat: { chatId: 10n } } },
+      entities: { entities: service ? [{ offset: 0, length: 4, entity: { oneofKind: "mention" as const, mention: { userId: 777n } } }] : [] },
+      ...(service ? { serviceMessage: servicePayload } : {}),
+    })
+    const service = kind === "newMessage"
+      ? Update.create({ seq: 2, date: 100n, update: { oneofKind: "newMessage", newMessage: { message: message(2, true) } } })
+      : Update.create({ seq: 2, date: 100n, update: { oneofKind: "editMessage", editMessage: { message: message(2, true) } } })
+    const payload = ServerProtocolMessage.create({ body: { oneofKind: "message", message: {
+      payload: { oneofKind: "update", update: { updates: [service,
+        Update.create({ seq: 3, date: 100n, update: { oneofKind: "newMessage", newMessage: { message: message(3, false) } } }),
+      ] } },
+    } } })
+    const decoded = ServerProtocolMessage.fromBinary(ServerProtocolMessage.toBinary(payload))
+    // Prove the actual typed oneof survived encoding before asserting intake.
+    expect(decoded).toMatchObject({ body: { message: { payload: { update: { updates: [
+      { update: { [kind]: { message: { serviceMessage: servicePayload } } } }, {},
+    ] } } } } })
+    await transport.emitMessage(decoded)
+    await flush()
+    expect(lines).toHaveLength(1)
+    expect(senderLookups).toBe(1)
+    const human = JSON.parse(lines[0]!)
+    expect(human).toMatchObject({ chatId: "10", seq: 3, message: { message: "Pinned a message · Reply in thread" } })
+    expect(client.exportState().lastSeqByChatId).toEqual({ "10": 2, "20": 1 })
+    stream.acknowledge(human._inlineDeliveryId)
+    await flush()
+    expect(client.exportState().lastSeqByChatId).toEqual({ "10": 3, "20": 1 })
+  } finally {
+    abort.abort()
+    stream.close()
+    await client.close()
+    await consuming
+  }
+})
+
+function createWireClient() {
   // Script only the remote wire; all SDK, directory and delivery objects are real.
   const wire = new Readable({ objectMode: true, read() {} })
   const transport = {
@@ -66,6 +137,11 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
       save: async () => {},
     },
   })
+  return { client, transport, reply }
+}
+
+it.each(["recover", "abort"])("real SDK, directory and stream isolate held sender lookup across %s", async action => {
+  const { client, transport, reply } = createWireClient()
   const directory = new InlineUserDirectory(client)
   const stream = new InboundStream()
   const consumer = new PassThrough()

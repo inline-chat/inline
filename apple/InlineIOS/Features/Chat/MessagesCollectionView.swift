@@ -48,8 +48,14 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   private var contextMenuKeyboardViewport: ContextMenuViewport?
-  var isContextMenuInteractionActive: Bool { contextMenuPhase != .idle }
-  var isReactionPickerPresented: Bool { coordinator.isReactionPickerPresented }
+  var isContextMenuInteractionActive: Bool {
+    contextMenuPhase != .idle
+  }
+
+  var isReactionPickerPresented: Bool {
+    coordinator.isReactionPickerPresented
+  }
+
   var onContextMenuWillDisplay: (() -> Void)?
   var onContextMenuDidEnd: (() -> Void)?
 
@@ -87,17 +93,20 @@ final class MessagesCollectionView: UICollectionView {
     if !viewport.wasAtBottom, let anchor = viewport.anchor,
        let source = dataSource as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>,
        let indexPath = source.indexPath(for: anchor.item),
-       let frame = layoutAttributesForItem(at: indexPath)?.frame {
+       let frame = layoutAttributesForItem(at: indexPath)?.frame
+    {
       // New messages and resized rows change content coordinates while the menu
       // is open. Preserve the same message on screen, not a stale raw offset.
       offset.y += frame.minY - anchor.minY
     }
     setContentOffset(clampedSendAnimationContentOffset(offset), animated: false)
   }
+
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
   private var pendingScrollMessageID: Int64?
   private var pendingScrollLoadTask: Task<Void, Never>?
+  private var returnToLatestTask: Task<Void, Never>?
   private var messageFocusRevision: UInt64 = 0
   private let sendAnimationScrollState = SendMessageAnimationScrollState()
   private var scrollAffordanceState = ScrollAffordanceState()
@@ -147,7 +156,10 @@ final class MessagesCollectionView: UICollectionView {
     super.init(frame: .zero, collectionViewLayout: layout)
 
     setupCollectionView()
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MessagesCollectionView, _: UITraitCollection) in
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (
+      view: MessagesCollectionView,
+      _: UITraitCollection
+    ) in
       let wasAtBottom = view.visualBottomDistance <= 1
       let layout = view.collectionViewLayout as? AnimatedCompositionalLayout
       if !wasAtBottom {
@@ -176,7 +188,9 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   #if DEBUG
-  var pendingMessageFocusIDForTesting: Int64? { pendingScrollMessageID }
+  var pendingMessageFocusIDForTesting: Int64? {
+    pendingScrollMessageID
+  }
 
   /// Exercises the production picker with in-memory fixtures in device tests.
   func reactionPickerForTesting(for message: FullMessage) -> UIView {
@@ -308,6 +322,7 @@ final class MessagesCollectionView: UICollectionView {
     NotificationCenter.default.removeObserver(self)
 
     pendingScrollLoadTask?.cancel()
+    returnToLatestTask?.cancel()
     cancelSendAnimationScrollAnimations()
     coordinator.dispose()
 
@@ -320,6 +335,49 @@ final class MessagesCollectionView: UICollectionView {
 
   func scrollToBottom() {
     cancelContextMenuKeyboardRestoration()
+    guard !coordinator.viewModel.historyCoverage.isAtCertifiedLiveEnd else {
+      scrollToLoadedWindowBottom()
+      return
+    }
+    guard returnToLatestTask == nil else { return }
+    cancelPendingMessageFocus()
+    let revision = messageFocusRevision
+    let account = try? Auth.shared.handle.beginAccountMutation()
+    returnToLatestTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer {
+        if messageFocusRevision == revision {
+          returnToLatestTask = nil
+        }
+      }
+      do {
+        guard let account else { throw CancellationError() }
+        _ = try await coordinator.viewModel.loadLatestWindowAsync()
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        scrollToLoadedWindowBottom()
+        var transaction = GetChatHistoryTransaction(peer: peerId, mode: .historyModeLatest)
+        transaction.type = .ephemeral()
+        _ = try await Api.realtime.send(transaction, expectedAccount: account)
+        try Task.checkCancellation()
+        _ = try await coordinator.viewModel.loadLatestWindowAsync()
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        scrollToLoadedWindowBottom()
+      } catch is CancellationError {
+        return
+      } catch {
+        // Keep a useful cached latest window while retaining unknown coverage.
+        _ = try? await coordinator.viewModel.loadLatestWindowAsync()
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        scrollToLoadedWindowBottom()
+        ToastManager.shared.showToast("Could not load latest history", type: .error)
+      }
+    }
+  }
+
+  private func scrollToLoadedWindowBottom() {
     guard !itemsEmpty else { return }
 
     let visibleHeight = bounds.height
@@ -346,6 +404,8 @@ final class MessagesCollectionView: UICollectionView {
 
   func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage: Bool = false) {
     cancelContextMenuKeyboardRestoration()
+    returnToLatestTask?.cancel()
+    returnToLatestTask = nil
     messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
     pendingScrollLoadTask?.cancel()
@@ -357,7 +417,11 @@ final class MessagesCollectionView: UICollectionView {
       return
     }
 
-    guard !resolvePendingMessageScroll() else { return }
+    if coordinator.viewModel.historyCoverage.isCertifiedMessage(messageID),
+       resolvePendingMessageScroll()
+    {
+      return
+    }
 
     let peer = peerId
     let unavailableMessage = requiresExactMessage ? "Message unavailable" : "Could not load that message"
@@ -372,8 +436,9 @@ final class MessagesCollectionView: UICollectionView {
           limit: limit
         )
         guard let self, !Task.isCancelled, pendingScrollMessageID == messageID else { return }
-        guard (!requiresExactMessage || !isHiddenByCollapsedHistory(messageID)),
-              outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID) else {
+        guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID),
+              outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID)
+        else {
           pendingScrollMessageID = nil
           pendingScrollLoadTask = nil
           ToastManager.shared.showToast(
@@ -398,6 +463,9 @@ final class MessagesCollectionView: UICollectionView {
             systemImage: "exclamationmark.triangle.fill"
           )
           return
+        }
+        if displayedMessageID != messageID {
+          ToastManager.shared.showToast("Message unavailable. Showing nearby history.", type: .info)
         }
       } catch is CancellationError {
         return
@@ -795,10 +863,14 @@ final class MessagesCollectionView: UICollectionView {
   ) -> IndexPath? {
     for (sectionIndex, section) in coordinator.listSections.enumerated() {
       for (itemIndex, item) in section.items.enumerated() {
-        if item.isThreadAnchor, !includeThreadAnchor { continue }
+        if item.isThreadAnchor, !includeThreadAnchor {
+          continue
+        }
         guard let message = coordinator.message(for: item) else { continue }
         guard message.message.messageId == messageId else { continue }
-        if let chatId, message.message.chatId != chatId { continue }
+        if let chatId, message.message.chatId != chatId {
+          continue
+        }
 
         let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
         // Validate the index path before returning
@@ -1242,8 +1314,6 @@ private extension MessagesCollectionView {
     private var olderHistoryCheckScheduled = false
     private var newerLoadTask: Task<Void, Never>?
     private var lastNewerAttempt: (messageID: Int64, date: Date)?
-    private var threadAnchorFetchTask: Task<Void, Never>?
-    private var didExhaustThreadAnchorFetch = false
     private var isPresentingImageViewer = false
     private let groupCalendar = Calendar.current
     private let avatarOverlayController = MessageAvatarOverlayViewController()
@@ -1292,6 +1362,7 @@ private extension MessagesCollectionView {
         view?.finishGeometryTransition(generation: generation)
       }
     }
+
     private var contextMenuPreview: (
       configuration: UIContextMenuConfiguration,
       item: MessageListItem,
@@ -1305,6 +1376,7 @@ private extension MessagesCollectionView {
         cell.isContextMenuSourceHidden = contextMenuSourceItem != nil && item == contextMenuSourceItem
       }
     }
+
     private var lastVisibleReadCandidateID: Int64?
     private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
 
@@ -1560,15 +1632,19 @@ private extension MessagesCollectionView {
         // If an action kept the keyboard closed, the old keyboard-area offset
         // can now lie outside the scrollable range even with correct insets.
         let minY = -collectionView.adjustedContentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height
-          + collectionView.adjustedContentInset.bottom)
+        let maxY = max(
+          minY,
+          collectionView.contentSize.height - collectionView.bounds.height
+            + collectionView.adjustedContentInset.bottom
+        )
         let offset = collectionView.contentOffset
         collectionView.setContentOffset(
           CGPoint(x: offset.x, y: min(maxY, max(minY, offset.y))), animated: false
         )
         collectionView.restoreContextMenuViewport()
         if collectionView.contextMenuKeyboardViewport?.keyboardSettled == true,
-           !collectionView.isReactionPickerPresented {
+           !collectionView.isReactionPickerPresented
+        {
           collectionView.cancelContextMenuKeyboardRestoration()
         }
         if self?.contextMenuPreview?.configuration === configuration {
@@ -1780,9 +1856,14 @@ private extension MessagesCollectionView {
 
     func nearestDisplayedMessageID(to coordinate: Int64) -> Int64? {
       let messageIDs = messages.lazy.map(\.message.messageId).filter { $0 > 0 }
-      if messageIDs.contains(coordinate) { return coordinate }
-      return messageIDs.filter { $0 > coordinate }.min()
+      if messageIDs.contains(coordinate) {
+        return coordinate
+      }
+      let neighbor = messageIDs.filter { $0 > coordinate }.min()
         ?? messageIDs.filter { $0 < coordinate }.max()
+      return neighbor.flatMap {
+        viewModel.historyCoverage.isCertifiedContinuation(between: coordinate, and: $0) ? $0 : nil
+      }
     }
 
     private static func cell(
@@ -2500,15 +2581,16 @@ private extension MessagesCollectionView {
           animator.finishAnimation(at: .end)
         }
       }
-      for transition in v2GeometryTransitions { transition.finish() }
+      for transition in v2GeometryTransitions {
+        transition.finish()
+      }
       v2GeometryTransitions.removeAll()
       olderLoadTask?.cancel()
       olderLoadTask = nil
       olderHistoryPagination.reset()
       newerLoadTask?.cancel()
       newerLoadTask = nil
-      threadAnchorFetchTask?.cancel()
-      threadAnchorFetchTask = nil
+      viewModel.cancelThreadAnchorHydration()
       mediaWarmupTask?.cancel()
       mediaWarmupTask = nil
       let thumbnailWarmups = mediaWarmups
@@ -2558,81 +2640,9 @@ private extension MessagesCollectionView {
       }
     }
 
-    private struct ThreadAnchorFetchRequest {
-      let parentPeer: Peer
-      let parentMessageId: Int64
-    }
-
     private func ensureThreadAnchorCachedIfNeeded() {
       guard !isPreview else { return }
-      guard threadAnchorFetchTask == nil else { return }
-      guard !didExhaustThreadAnchorFetch else { return }
-      guard viewModel.threadAnchor == nil else { return }
-      guard case .thread = peerId else { return }
-
-      threadAnchorFetchTask = Task { @MainActor [weak self] in
-        guard let self else { return }
-        defer { self.threadAnchorFetchTask = nil }
-
-        for attempt in 1 ... 3 {
-          guard !Task.isCancelled else { return }
-          guard viewModel.threadAnchor == nil else { return }
-          guard let request = await Self.threadAnchorFetchRequest(peer: peerId) else {
-            await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
-            continue
-          }
-
-          do {
-            _ = try await Api.realtime.send(.getMessages(
-              peer: request.parentPeer,
-              messageIds: [request.parentMessageId]
-            ))
-          } catch {
-            Log.shared.error("Failed to fetch reply thread anchor message", error: error)
-            await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
-            continue
-          }
-
-          guard !Task.isCancelled else { return }
-          if viewModel.reloadThreadAnchorFromLocal() {
-            setInitialData(animated: false)
-            return
-          }
-
-          await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
-        }
-
-        didExhaustThreadAnchorFetch = true
-      }
-    }
-
-    private static func sleepBeforeThreadAnchorRetry(attempt: Int) async {
-      guard attempt < 3 else { return }
-      try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
-    }
-
-    private static func threadAnchorFetchRequest(peer: Peer) async -> ThreadAnchorFetchRequest? {
-      guard case let .thread(threadId) = peer else { return nil }
-
-      do {
-        return try await AppDatabase.shared.reader.read { db in
-          guard let chat = try Chat.fetchOne(db, id: threadId),
-                let parentChatId = chat.parentChatId,
-                let parentMessageId = chat.parentMessageId,
-                let parentChat = try Chat.fetchOne(db, id: parentChatId)
-          else {
-            return nil
-          }
-
-          return ThreadAnchorFetchRequest(
-            parentPeer: parentChat.peerId.toPeer(),
-            parentMessageId: parentMessageId
-          )
-        }
-      } catch {
-        Log.shared.error("Failed to load reply thread anchor metadata", error: error)
-        return nil
-      }
+      viewModel.ensureThreadAnchorCached()
     }
 
     private var hasLinearConnected: Bool = false
@@ -2922,9 +2932,9 @@ private extension MessagesCollectionView {
       // transaction consumes the latest generation for every changed row.
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
-        self.v2GeometryFlushScheduled = false
-        guard self.pendingSnapshotApplies == 0 else { return }
-        self.flushV2GeometryChanges()
+        v2GeometryFlushScheduled = false
+        guard pendingSnapshotApplies == 0 else { return }
+        flushV2GeometryChanges()
       }
     }
 
@@ -2934,7 +2944,8 @@ private extension MessagesCollectionView {
       pendingV2GeometryViewport = nil
       pendingV2GeometryTransitions.removeAll(keepingCapacity: true)
       guard let collectionView = currentCollectionView as? MessagesCollectionView,
-            let window = collectionView.window else {
+            let window = collectionView.window
+      else {
         for transition in pending {
           transition.apply()
           transition.finish()
@@ -3004,7 +3015,9 @@ private extension MessagesCollectionView {
 
       let animations = {
         geometry.applyTargetTransforms()
-        for transition in transitions { transition.apply() }
+        for transition in transitions {
+          transition.apply()
+        }
         collectionView.layoutIfNeeded()
         for transition in transitions where transition.isCurrent {
           transition.cell?.layoutIfNeeded()
@@ -3013,7 +3026,9 @@ private extension MessagesCollectionView {
 
       guard !UIAccessibility.isReduceMotionEnabled else {
         UIView.performWithoutAnimation(animations)
-        for transition in transitions { transition.finish() }
+        for transition in transitions {
+          transition.finish()
+        }
         v2GeometryTransitions.removeAll()
         return
       }
@@ -3021,9 +3036,9 @@ private extension MessagesCollectionView {
       let animator = UIViewPropertyAnimator(duration: 0.28, curve: .easeInOut)
       animator.addAnimations(animations)
       animator.addCompletion { [weak self, weak animator, weak collectionView] _ in
-        guard let self, let animator, self.v2GeometryAnimator === animator else { return }
-        self.v2GeometryAnimator = nil
-        self.v2GeometryTransitions.removeAll()
+        guard let self, let animator, v2GeometryAnimator === animator else { return }
+        v2GeometryAnimator = nil
+        v2GeometryTransitions.removeAll()
         for transition in transitions {
           transition.finish()
           if transition.isCurrent, let cell = transition.cell {
@@ -3222,22 +3237,29 @@ private extension MessagesCollectionView {
       let appendsOlderHistory: Bool = {
         guard !animatingDifferences else { return false }
         let previousItems = dataSource.snapshot().itemIdentifiers.filter {
-          if case .message = $0 { return true }
+          if case .message = $0 {
+            return true
+          }
           return false
         }
         let nextItems = snapshot.itemIdentifiers.filter {
-          if case .message = $0 { return true }
+          if case .message = $0 {
+            return true
+          }
           return false
         }
         return OlderHistoryPagination.appendsOlderItems(previous: previousItems, next: nextItems)
       }()
-      if appendsOlderHistory {
+      // Hole repair may replace a disconnected cache segment, not just append
+      // older rows. Preserve a stable visible row through either transition.
+      let preservesHistoryAnchor = appendsOlderHistory || (!animatingDifferences && !isAtBottomForUnread)
+      if preservesHistoryAnchor {
         layout?.preserveVisibleMessageForHistoryUpdate()
       }
 
       pendingSnapshotApplies += 1
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
-        if appendsOlderHistory {
+        if preservesHistoryAnchor {
           layout?.finishHistoryUpdate()
         }
         defer {
@@ -3358,7 +3380,9 @@ private extension MessagesCollectionView {
     private func mediaWarmupIndexPathsAroundVisible() -> (visible: [IndexPath], nearby: [IndexPath]) {
       guard let collectionView = currentCollectionView else { return ([], []) }
       let visibleIndexPaths = collectionView.indexPathsForVisibleItems.sorted {
-        if $0.section != $1.section { return $0.section < $1.section }
+        if $0.section != $1.section {
+          return $0.section < $1.section
+        }
         return $0.item < $1.item
       }
 
@@ -4129,7 +4153,7 @@ private extension MessagesCollectionView {
 
       let selectedEmojis = Set(currentMessage.reactions
         .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
-        .map { $0.reaction.emoji })
+        .map(\.reaction.emoji))
       let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
         self?.dismissContextMenuIfNeeded()
         self?.toggleReaction(
@@ -4158,7 +4182,9 @@ private extension MessagesCollectionView {
       )
     }
 
-    var isReactionPickerPresented: Bool { reactionPickerPresentation != nil }
+    var isReactionPickerPresented: Bool {
+      reactionPickerPresentation != nil
+    }
 
     private func createReactionButton(
       reaction: String,
@@ -4577,7 +4603,10 @@ private extension MessagesCollectionView {
 
       if isMessageSending {
         if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+          let copyPhotoAction = UIAction(
+            title: "Copy Photo",
+            image: UIImage(systemName: "doc.on.clipboard")
+          ) { [weak cell] _ in
             guard let cell, cell.message?.id == fullMessage.id else { return }
             if let image = cell.messageView?.newPhotoView.getCurrentImage() {
               UIPasteboard.general.image = image
@@ -4622,7 +4651,10 @@ private extension MessagesCollectionView {
 
       if isMessageFailed {
         if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+          let copyPhotoAction = UIAction(
+            title: "Copy Photo",
+            image: UIImage(systemName: "doc.on.clipboard")
+          ) { [weak cell] _ in
             guard let cell, cell.message?.id == fullMessage.id else { return }
             if let image = cell.messageView?.newPhotoView.getCurrentImage() {
               UIPasteboard.general.image = image
@@ -4654,7 +4686,10 @@ private extension MessagesCollectionView {
       }
 
       if fullMessage.photoInfo != nil {
-        let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak cell] _ in
+        let copyPhotoAction = UIAction(
+          title: "Copy Photo",
+          image: UIImage(systemName: "doc.on.clipboard")
+        ) { [weak cell] _ in
           guard let cell, cell.message?.id == fullMessage.id else { return }
           if let image = cell.messageView?.newPhotoView.getCurrentImage() {
             UIPasteboard.general.image = image
@@ -4710,7 +4745,10 @@ private extension MessagesCollectionView {
       actions.append(replyThreadAction)
 
       if !message.isSubthreadPlacement {
-        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) { [weak self] _ in
+        let forwardAction = UIAction(
+          title: "Forward",
+          image: UIImage(systemName: "arrowshape.turn.up.right")
+        ) { [weak self] _ in
           guard let self else { return }
           presentForwardSheet(fullMessage)
         }
@@ -5043,8 +5081,11 @@ private extension MessagesCollectionView {
         if (collectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == false,
            let currentIndexPath = dataSource.indexPath(for: state.item),
            let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
-           let messageView = cell.messageView {
-          if let preview = liveTargetedPreview(for: messageView) { return preview }
+           let messageView = cell.messageView
+        {
+          if let preview = liveTargetedPreview(for: messageView) {
+            return preview
+          }
         }
         return state.preview
       }
@@ -5220,6 +5261,13 @@ private extension MessagesCollectionView {
       let isAtBottom = messagesCollectionView.isAtVisualBottomForUnread
       isAtBottomForUnread = isAtBottom
       viewModel.setAtBottom(isAtBottom)
+      if isUserInteractingWithScrollView, !isAtBottom,
+         let indexPath = messagesCollectionView.indexPathsForVisibleItems.sorted().first,
+         let item = dataSource.itemIdentifier(for: indexPath),
+         let message = message(for: item)
+      {
+        viewModel.setHistoryAnchor(message.message.messageId)
+      }
 
       if isAtBottom, viewModel.historyCoverage.isAtCertifiedLiveEnd {
         markMessagesSeen()
@@ -5245,8 +5293,13 @@ private extension MessagesCollectionView {
       let needsRemote = viewModel.needsNewerHistoryRepair
       if needsRemote,
          let attempt = lastNewerAttempt, attempt.messageID == newestID,
-         Date().timeIntervalSince(attempt.date) < 2 { return }
-      if needsRemote { lastNewerAttempt = (newestID, Date()) }
+         Date().timeIntervalSince(attempt.date) < 2
+      {
+        return
+      }
+      if needsRemote {
+        lastNewerAttempt = (newestID, Date())
+      }
       let peer = peerId
       newerLoadTask = Task { @MainActor [weak self] in
         defer { self?.newerLoadTask = nil }
@@ -5344,12 +5397,12 @@ private extension MessagesCollectionView {
       olderHistoryCheckScheduled = true
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
-        self.olderHistoryCheckScheduled = false
-        guard self.olderHistoryPagination.hasDemand, self.pendingSnapshotApplies == 0 else { return }
+        olderHistoryCheckScheduled = false
+        guard olderHistoryPagination.hasDemand, pendingSnapshotApplies == 0 else { return }
         // A page can finish after the gesture or before its snapshot finishes.
         // Recheck the final geometry from both completions, never from a stale content size.
-        self.currentCollectionView?.layoutIfNeeded()
-        self.loadOlderMessagesIfNeeded()
+        currentCollectionView?.layoutIfNeeded()
+        loadOlderMessagesIfNeeded()
       }
     }
 

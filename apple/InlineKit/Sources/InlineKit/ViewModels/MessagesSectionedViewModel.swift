@@ -39,15 +39,42 @@ public class MessagesSectionedViewModel {
   // MARK: - Public Properties
 
   public var sections: [MessageSection] = []
-  public var messages: [FullMessage] { visibleMessages }
-  public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
-  public var oldestLoadedMessageId: Int64? { progressiveViewModel.oldestLoadedMessageId }
-  public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
-  public var newestLoadedMessageId: Int64? { progressiveViewModel.newestLoadedMessageId }
-  public var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
-  public var needsNewerHistoryRepair: Bool { progressiveViewModel.needsNewerHistoryRepair }
-  public var historyCoverage: MessageHistoryCoverageProjection { progressiveViewModel.historyCoverage }
-  public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
+  public var messages: [FullMessage] {
+    visibleMessages
+  }
+
+  public var messagesByID: [Int64: FullMessage] {
+    progressiveViewModel.messagesByID
+  }
+
+  public var oldestLoadedMessageId: Int64? {
+    progressiveViewModel.oldestLoadedMessageId
+  }
+
+  public var canLoadOlderFromLocal: Bool {
+    progressiveViewModel.canLoadOlderFromLocal
+  }
+
+  public var newestLoadedMessageId: Int64? {
+    progressiveViewModel.newestLoadedMessageId
+  }
+
+  public var canLoadNewerFromLocal: Bool {
+    progressiveViewModel.canLoadNewerFromLocal
+  }
+
+  public var needsNewerHistoryRepair: Bool {
+    progressiveViewModel.needsNewerHistoryRepair
+  }
+
+  public var historyCoverage: MessageHistoryCoverageProjection {
+    progressiveViewModel.historyCoverage
+  }
+
+  public var threadAnchor: FullMessage? {
+    progressiveViewModel.threadAnchor
+  }
+
   public private(set) var collapsedMaxId: Int64?
   public var highestPositiveMessageId: Int64? {
     progressiveViewModel.messages.lazy
@@ -149,6 +176,14 @@ public class MessagesSectionedViewModel {
     return true
   }
 
+  @discardableResult
+  public func loadLatestWindowAsync() async throws -> Bool {
+    guard try await progressiveViewModel.loadLatestWindowAsync() else { return false }
+    rebuildSections()
+    callback?(.reload(animated: false))
+    return true
+  }
+
   public func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
   }
@@ -163,6 +198,10 @@ public class MessagesSectionedViewModel {
     )
   }
 
+  public func setHistoryAnchor(_ messageID: Int64) {
+    progressiveViewModel.setHistoryAnchor(messageID)
+  }
+
   public func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     guard self.collapsedMaxId != collapsedMaxId else { return }
     self.collapsedMaxId = collapsedMaxId
@@ -173,6 +212,14 @@ public class MessagesSectionedViewModel {
   @discardableResult
   public func reloadThreadAnchorFromLocal() -> Bool {
     progressiveViewModel.reloadThreadAnchorFromLocal()
+  }
+
+  public func ensureThreadAnchorCached() {
+    progressiveViewModel.ensureThreadAnchorCached()
+  }
+
+  public func cancelThreadAnchorHydration() {
+    progressiveViewModel.cancelThreadAnchorHydration()
   }
 
   public func dispose() {
@@ -206,8 +253,8 @@ public class MessagesSectionedViewModel {
     }
   }
 
-  // Keep section sorting aligned with MessagesProgressiveViewModel so same-second
-  // messages remain deterministic across reloads and incremental updates.
+  /// Keep section sorting aligned with MessagesProgressiveViewModel so same-second
+  /// messages remain deterministic across reloads and incremental updates.
   static func sortMessagesForSection(_ messages: [FullMessage]) -> [FullMessage] {
     MessagesProgressiveViewModel.stableSortedMessages(messages, reversed: true)
   }
@@ -380,7 +427,7 @@ public class MessagesSectionedViewModel {
                   // their temporary ids/global ids sort behind same-second messages.
                   sections[sectionIndex].messages.insert(contentsOf: messagesToPrepend, at: 0)
                 } else if let newestNewMessage, let newestExistingMessage,
-                   Self.isNewerMessage(newestNewMessage, than: newestExistingMessage)
+                          Self.isNewerMessage(newestNewMessage, than: newestExistingMessage)
                 {
                   // New messages are newer, insert at beginning
                   sections[sectionIndex].messages.insert(contentsOf: sortedMessages, at: 0)

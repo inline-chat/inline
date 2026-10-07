@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Foundation
 import Logger
@@ -156,13 +157,19 @@ public final class FileDownloader: NSObject, Sendable {
   private var activeDownloadTokens: [String: UUID] = [:]
   private var finalizationTasks: [String: FinalizationTask] = [:]
   private var session: URLSession!
+  private let auth: AuthHandle
   private let log = Log.scoped("FileDownloader")
   private let progressThrottler = DownloadProgressThrottler()
   private var terminalStateKeys = BoundedTerminalStateKeys(limit: terminalStateRetentionLimit)
   private var inactivePublisherKeys = BoundedTerminalStateKeys(limit: inactivePublisherRetentionLimit)
   private var sessionResetTask: Task<Void, Never>?
 
-  override private init() {
+  override private convenience init() {
+    self.init(auth: Auth.shared.handle)
+  }
+
+  init(auth: AuthHandle) {
+    self.auth = auth
     super.init()
     makeSession()
   }
@@ -211,10 +218,16 @@ public final class FileDownloader: NSObject, Sendable {
     for message: Message? = nil,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
+    do {
+      _ = try auth.beginAccountMutation()
+    } catch {
+      completion(.failure(URLError(.cancelled)))
+      return
+    }
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled, let message {
-        let source = try NativeDocumentDownload()
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth), let message {
+        let source = try NativeDocumentDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
             documentID: document.document.documentId, message: message, to: destination, progress: progress

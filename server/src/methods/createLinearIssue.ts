@@ -1,3 +1,5 @@
+import { lockAttachmentChat, persistAttachmentMutation } from "@in/server/modules/message/attachmentMembership"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { Optional, Type, type Static } from "@sinclair/typebox"
 import { eq, and, gte, lte } from "drizzle-orm"
 import { chatParticipants, users, messages } from "../db/schema"
@@ -28,10 +30,7 @@ import { encodeMessageAttachmentUpdate } from "../realtime/encoders/encodeMessag
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
 import { providerTaskModel, providerTaskReasoningEffort } from "@in/server/modules/integrations/providerTaskModel"
-import {
-  readStoredTaskMessageText,
-  resolveLinearTaskSourceText,
-} from "@in/server/libs/linear/taskContext"
+import { readStoredTaskMessageText, resolveLinearTaskSourceText } from "@in/server/libs/linear/taskContext"
 import {
   findExistingProviderTask,
   isProviderTaskIdempotencyConflict,
@@ -68,10 +67,7 @@ export const Response = Type.Object({
   link: Optional(Type.String()),
 })
 
-export const handler = async (
-  input: Static<typeof Input>,
-  context: Context,
-): Promise<Static<typeof Response>> => {
+export const handler = async (input: Static<typeof Input>, context: Context): Promise<Static<typeof Response>> => {
   const { currentUserId } = context
   const signal = providerSignal(context.signal)
   const startTime = Date.now()
@@ -110,9 +106,7 @@ export const handler = async (
     sourceMessageId: message.globalId,
     connectorSpaceId: spaceId,
   }
-  const replay = linearTaskReplayResponse(
-    await findExistingProviderTask(taskIdentity),
-  )
+  const replay = linearTaskReplayResponse(await findExistingProviderTask(taskIdentity))
   if (replay) {
     Log.shared.info("Replayed existing Linear issue creation", {
       currentUserId,
@@ -150,7 +144,9 @@ export const handler = async (
       })
       .from(messages)
       .innerJoin(users, eq(messages.fromId, users.id))
-      .where(and(eq(messages.chatId, chatId), gte(messages.messageId, contextStart), lte(messages.messageId, contextEnd)))
+      .where(
+        and(eq(messages.chatId, chatId), gte(messages.messageId, contextStart), lte(messages.messageId, contextEnd)),
+      )
       .orderBy(messages.messageId)
       .limit(40),
     db
@@ -266,35 +262,37 @@ export const handler = async (
     spaceId,
     labelCount: labels.labels?.length ?? 0,
   })
-  const completion = await openaiClient.chat.completions.parse({
-    model: providerTaskModel,
-    verbosity: "low",
-    reasoning_effort: providerTaskReasoningEffort,
-    messages: [
-      {
-        role: "user",
-        content: prompt({
-          primaryMessage: {
-            author: contextWindow.find((m) => m.messageId === messageId)?.author ?? "Someone",
-            text: sourceText,
-          },
-          surroundingMessages: contextWindow
-            .filter((m) => m.messageId !== messageId)
-            .map((m) => ({ author: m.author, text: m.text }))
-            .slice(-20),
-          participants,
-          linearWorkspaceUsers: linearUsers.users,
-          labels: labels.labels,
-        }),
-      },
-    ],
-    response_format: zodResponseFormat(issueSchema, "linearIssue"),
-    signal,
-  }).catch((error) => {
-    if (signal.aborted) throw error
-    Log.shared.error("Failed to generate Linear issue data", { error, chatId, messageId, currentUserId, spaceId })
-    return null
-  })
+  const completion = await openaiClient.chat.completions
+    .parse({
+      model: providerTaskModel,
+      verbosity: "low",
+      reasoning_effort: providerTaskReasoningEffort,
+      messages: [
+        {
+          role: "user",
+          content: prompt({
+            primaryMessage: {
+              author: contextWindow.find((m) => m.messageId === messageId)?.author ?? "Someone",
+              text: sourceText,
+            },
+            surroundingMessages: contextWindow
+              .filter((m) => m.messageId !== messageId)
+              .map((m) => ({ author: m.author, text: m.text }))
+              .slice(-20),
+            participants,
+            linearWorkspaceUsers: linearUsers.users,
+            labels: labels.labels,
+          }),
+        },
+      ],
+      response_format: zodResponseFormat(issueSchema, "linearIssue"),
+      signal,
+    })
+    .catch((error) => {
+      if (signal.aborted) throw error
+      Log.shared.error("Failed to generate Linear issue data", { error, chatId, messageId, currentUserId, spaceId })
+      return null
+    })
   if (!completion) return { link: undefined }
 
   try {
@@ -312,9 +310,7 @@ export const handler = async (
     })
 
     const allowedLabelIds = new Set(labels.labels.map((label) => label.id))
-    const filteredLabelIds = response.labelIds
-      .filter((id) => allowedLabelIds.has(String(id)))
-      .slice(0, 3)
+    const filteredLabelIds = response.labelIds.filter((id) => allowedLabelIds.has(String(id))).slice(0, 3)
     const droppedLabelIdsCount = response.labelIds.length - filteredLabelIds.length
     if (droppedLabelIdsCount > 0) {
       Log.shared.warn("Dropping invalid labelIds from OpenAI response", {
@@ -364,28 +360,36 @@ export const handler = async (
 
     const encryptedTitle = await encrypt(response.title)
 
-    const { externalTask, attachmentRow } = await db.transaction(async (tx) => {
-      const [externalTask] = await tx.insert(externalTasks).values({
-        application: "linear",
-        taskId: result.taskId,
-        status: "todo",
-        assignedUserId: BigInt(currentUserId),
-        connectorSpaceId: spaceId,
-        sourceMessageId: message.globalId,
-        number: result.identifier ?? "",
-        url: result.link ?? "",
-        title: encryptedTitle.encrypted,
-        titleIv: encryptedTitle.iv,
-        titleTag: encryptedTitle.authTag,
-        date: new Date(),
-      }).returning()
+    const { externalTask, attachmentRow, durableUpdate } = await db.transaction(async (tx) => {
+      const lockedChat = await lockAttachmentChat(tx, chatId)
+      const [externalTask] = await tx
+        .insert(externalTasks)
+        .values({
+          application: "linear",
+          taskId: result.taskId,
+          status: "todo",
+          assignedUserId: BigInt(currentUserId),
+          connectorSpaceId: spaceId,
+          sourceMessageId: message.globalId,
+          number: result.identifier ?? "",
+          url: result.link ?? "",
+          title: encryptedTitle.encrypted,
+          titleIv: encryptedTitle.iv,
+          titleTag: encryptedTitle.authTag,
+          date: new Date(),
+        })
+        .returning()
       if (!externalTask?.id) throw new Error("Failed to create Linear external task record")
-      const [attachmentRow] = await tx.insert(messageAttachments).values({
-        messageId: message.globalId,
-        externalTaskId: BigInt(externalTask.id),
-      }).returning()
+      const [attachmentRow] = await tx
+        .insert(messageAttachments)
+        .values({
+          messageId: message.globalId,
+          externalTaskId: BigInt(externalTask.id),
+        })
+        .returning()
       if (!attachmentRow?.id) throw new Error("Failed to create Linear message attachment")
-      return { externalTask, attachmentRow }
+      const durableUpdate = await persistAttachmentMutation(tx, lockedChat, message.globalId, attachmentRow.id)
+      return { externalTask, attachmentRow, durableUpdate }
     })
     providerTaskPersisted = true
     Log.shared.debug("Created Linear external task record", {
@@ -407,6 +411,7 @@ export const handler = async (
     })
 
     await pushMessageAttachmentUpdate({
+      durableUpdate,
       messageId,
       chatId,
       peerId,
@@ -426,22 +431,24 @@ export const handler = async (
         currentUserId,
         chatId,
         isThread: peerId && "threadId" in peerId,
-      }).then(() => {
-        Log.shared.debug("Sent Linear issue push notification to message sender", {
-          currentUserId,
-          chatId,
-          messageId,
-          toUserId: messageSenderId,
-        })
-      }).catch((error) => {
-        Log.shared.error("Failed to send Linear task creation notification", {
-          error,
-          chatId,
-          messageId,
-          currentUserId,
-          toUserId: messageSenderId,
-        })
       })
+        .then(() => {
+          Log.shared.debug("Sent Linear issue push notification to message sender", {
+            currentUserId,
+            chatId,
+            messageId,
+            toUserId: messageSenderId,
+          })
+        })
+        .catch((error) => {
+          Log.shared.error("Failed to send Linear task creation notification", {
+            error,
+            chatId,
+            messageId,
+            currentUserId,
+            toUserId: messageSenderId,
+          })
+        })
     }
 
     Log.shared.info("Completed Linear issue creation", {
@@ -477,9 +484,7 @@ export const handler = async (
         })
     }
     if (idempotencyConflict) {
-      const replay = linearTaskReplayResponse(
-        await findExistingProviderTask(taskIdentity),
-      )
+      const replay = linearTaskReplayResponse(await findExistingProviderTask(taskIdentity))
       if (replay) {
         Log.shared.info("Converged concurrent Linear issue creation", {
           currentUserId,
@@ -592,6 +597,7 @@ async function sendNotificationToUser({
 }
 
 const pushMessageAttachmentUpdate = async ({
+  durableUpdate,
   messageId,
   chatId,
   peerId,
@@ -600,6 +606,7 @@ const pushMessageAttachmentUpdate = async ({
   externalTask,
   taskTitle,
 }: {
+  durableUpdate: UpdateSeqAndDate
   messageId: number
   chatId: number
   peerId: TPeerInfo
@@ -652,6 +659,8 @@ const pushMessageAttachmentUpdate = async ({
         const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
 
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -672,6 +681,8 @@ const pushMessageAttachmentUpdate = async ({
       })
       updateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -694,6 +705,8 @@ const pushMessageAttachmentUpdate = async ({
       })
       userIds.forEach((userId) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,

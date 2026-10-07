@@ -5,7 +5,7 @@ import Logger
 import RealtimeV2
 
 public struct GetChatHistoryTransaction: Transaction2 {
-  // Private
+  /// Private
   private var log = Log.scoped("Transactions/GetChatHistory")
 
   // Properties
@@ -24,6 +24,7 @@ public struct GetChatHistoryTransaction: Transaction2 {
     public var beforeLimit: Int32?
     public var afterLimit: Int32?
     public var includeAnchor: Bool?
+    public var admissionToken: HistoryPageAdmissionToken?
   }
 
   public init(peer: Peer, offsetID: Int64? = nil, limit: Int32? = nil) {
@@ -35,7 +36,7 @@ public struct GetChatHistoryTransaction: Transaction2 {
         ? InlineProtocol.GetChatHistoryMode.historyModeLatest
         : .historyModeOlder).rawValue,
       anchorID: nil,
-      beforeID: offsetID,
+      beforeID: nil,
       afterID: nil,
       beforeLimit: nil,
       afterLimit: nil,
@@ -68,6 +69,28 @@ public struct GetChatHistoryTransaction: Transaction2 {
     )
   }
 
+  public var historyReadChatID: Int64? {
+    context.admissionToken?.chatId
+  }
+
+  public var historyReadBucket: BucketKey? {
+    .chat(peer: context.peer.toHistoryProtocolPeer())
+  }
+
+  public func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction2 {
+    do {
+      var prepared = self
+      let admission = try await AppDatabase.shared.dbWriter.write { db in
+        let peer = try HistoryPageAdmissionToken.canonicalPeer(db, peer: context.peer)
+        return try (peer, HistoryPageAdmissionToken.capture(db, peer: peer))
+      }
+      prepared.context.peer = admission.0
+      prepared.context.admissionToken = admission.1
+      return prepared
+    } catch HistoryPageAdmissionError.missingChat { throw .historyUnavailable }
+    catch { throw .invalid }
+  }
+
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .getChatHistory(.with {
       $0.peerID = context.peer.toInputPeer()
@@ -80,15 +103,28 @@ public struct GetChatHistoryTransaction: Transaction2 {
         $0.limit = limit
       }
       if let modeRawValue = context.modeRawValue,
-         let mode = InlineProtocol.GetChatHistoryMode(rawValue: modeRawValue) {
+         let mode = InlineProtocol.GetChatHistoryMode(rawValue: modeRawValue)
+      {
         $0.mode = mode
       }
-      if let anchorID = context.anchorID { $0.anchorID = anchorID }
-      if let beforeID = context.beforeID { $0.beforeID = beforeID }
-      if let afterID = context.afterID { $0.afterID = afterID }
-      if let beforeLimit = context.beforeLimit { $0.beforeLimit = beforeLimit }
-      if let afterLimit = context.afterLimit { $0.afterLimit = afterLimit }
-      if let includeAnchor = context.includeAnchor { $0.includeAnchor = includeAnchor }
+      if let anchorID = context.anchorID {
+        $0.anchorID = anchorID
+      }
+      if let beforeID = context.beforeID {
+        $0.beforeID = beforeID
+      }
+      if let afterID = context.afterID {
+        $0.afterID = afterID
+      }
+      if let beforeLimit = context.beforeLimit {
+        $0.beforeLimit = beforeLimit
+      }
+      if let afterLimit = context.afterLimit {
+        $0.afterLimit = afterLimit
+      }
+      if let includeAnchor = context.includeAnchor {
+        $0.includeAnchor = includeAnchor
+      }
     })
   }
 
@@ -123,6 +159,10 @@ public struct GetChatHistoryTransaction: Transaction2 {
       }
 
       log.trace("getChatHistory saved")
+    } catch HistoryPageAdmissionError.stale {
+      throw .staleHistory
+    } catch HistoryPageAdmissionError.unavailable {
+      throw .historyUnavailable
     } catch {
       log.error("Failed to save chat history", error: error)
       throw TransactionExecutionError.invalid
@@ -143,112 +183,104 @@ public struct GetChatHistoryTransaction: Transaction2 {
     context: Context,
     db: Database
   ) throws {
-    let chatID: Int64
-    switch context.peer {
-      case let .thread(id):
-        chatID = id
-      case let .user(userID):
-        guard let chat = try Chat
-          .filter(Chat.Columns.peerUserId == userID)
-          .fetchOne(db)
-        else { throw TransactionExecutionError.invalid }
-        chatID = chat.id
-    }
+    var context = context
+    context.peer = try HistoryPageAdmissionToken.canonicalPeer(db, peer: context.peer)
 
-    guard response.messages.allSatisfy({
-      $0.id > 0 && $0.chatID == chatID
-    }) else {
-      throw TransactionExecutionError.invalid
-    }
-
-    var savedMessages: [Message] = []
-    savedMessages.reserveCapacity(response.messages.count)
-    for message in response.messages {
-      savedMessages.append(try Message.save(
-        db,
-        protocolMessage: message,
-        publishChanges: false,
-        materializeMissingReferences: true
-      ))
-    }
-    // Message persistence materializes a missing Chat for a cold thread. Cursor
-    // foreign keys must exist before the first row projection is constructed.
+    let chatID = try HistoryPageAdmissionToken.resolveChatId(db, peer: context.peer)
+    guard let token = context.admissionToken else { throw HistoryPageAdmissionError.stale }
+    try token.validateSnapshot(db, peer: context.peer, seq: response.hasSeq ? response.seq : nil)
+    try HistoryPageReducer.validateMessages(response.messages, chatId: chatID, peer: context.peer)
+    guard let ranges = provenCoverages(context: context, messageIDs: response.messages.map(\.id))
+    else { throw HistoryPageAdmissionError.malformedPage }
+    let savedMessages = try HistoryPageReducer.save(response.messages, db: db)
     try Acknowledgement.save(db, cursors: response.acknowledgements.cursors, chatId: chatID)
     try Chat.updateLastMsgIds(db, messages: savedMessages)
+    try HistoryPageReducer.admitCoverage(
+      ranges, messages: response.messages, chatId: chatID, scope: .timeline,
+      token: token, db: db
+    )
+  }
 
-    if let range = provenCoverage(context: context, messageIDs: response.messages.map(\.id)) {
-      try MessageHistoryCoverageStore.subtract(
-        db,
-        chatId: chatID,
-        lowerId: range.lowerBound,
-        upperId: range.upperBound
-      )
+  static func provenCoverage(context: Context, messageIDs: [Int64]) -> ClosedRange<Int64>? {
+    guard let ranges = provenCoverages(context: context, messageIDs: messageIDs), ranges.count == 1 else { return nil }
+    return ranges[0]
+  }
+
+  /// Empty sides and excluded anchors never acquire coverage accidentally.
+  static func provenCoverages(context: Context, messageIDs: [Int64]) -> [ClosedRange<Int64>]? {
+    let maximum = MessageHistoryHole.positiveMessageIDMax
+    guard messageIDs.allSatisfy({ 1 ... maximum ~= $0 }), Set(messageIDs).count == messageIDs.count,
+          let requested = validLimit(context.limit, fallback: 60)
+    else { return nil }
+    let ids = messageIDs.sorted()
+    let mode = context.modeRawValue.flatMap(InlineProtocol.GetChatHistoryMode.init(rawValue:))
+      ?? (context.offsetID == nil ? .historyModeLatest : .historyModeOlder)
+    for id in [context.offsetID, context.anchorID, context.beforeID, context.afterID].compactMap(\.self) {
+      guard 1 ... maximum ~= id else { return nil }
+    }
+    guard context.offsetID == nil || context.beforeID == nil || context.offsetID == context.beforeID else { return nil }
+    if mode != .historyModeAround {
+      guard context.beforeLimit == nil, context.afterLimit == nil, context.includeAnchor == nil else { return nil }
+    }
+    switch mode {
+      case .historyModeLatest, .historyModeUnspecified:
+        guard context.offsetID == nil, context.beforeID == nil, context.afterID == nil, context.anchorID == nil,
+              ids.count <= requested else { return nil }
+        return [(ids.count < requested ? 1 : ids.first ?? 1) ... maximum]
+      case .historyModeOlder:
+        guard let before = context.beforeID ?? context.offsetID, context.afterID == nil, context.anchorID == nil,
+              ids.count <= requested, ids.allSatisfy({ $0 < before }) else { return nil }
+        guard before > 1 else { return [] }
+        return [(ids.count < requested ? 1 : ids.first ?? 1) ... (before - 1)]
+      case .historyModeNewer:
+        guard let after = context.afterID, context.offsetID == nil, context.beforeID == nil, context.anchorID == nil,
+              ids.count <= requested, ids.allSatisfy({ $0 > after }) else { return nil }
+        guard after < maximum else { return [] }
+        return [(after + 1) ... (ids.count < requested ? maximum : ids.last ?? maximum)]
+      case .historyModeAround:
+        guard let anchor = context.anchorID, context.offsetID == nil, context.beforeID == nil, context.afterID == nil
+        else { return nil }
+        let includeAnchor = context.includeAnchor ?? true
+        let anchorCount = includeAnchor && ids.contains(anchor) ? 1 : 0
+        guard let beforeLimit = validLimit(context.beforeLimit, fallback: requested / 2, allowZero: true),
+              let afterLimit = validLimit(
+                context.afterLimit,
+                fallback: max(0, requested - requested / 2 - anchorCount),
+                allowZero: true
+              ),
+              beforeLimit + afterLimit + anchorCount <= 100
+        else { return nil }
+        let older = ids.filter { $0 < anchor }
+        let newer = ids.filter { $0 > anchor }
+        guard older.count <= beforeLimit, newer.count <= afterLimit,
+              includeAnchor || !ids.contains(anchor) else { return nil }
+        var ranges: [ClosedRange<Int64>] = []
+        if beforeLimit > 0, anchor > 1 {
+          ranges.append((older.count < beforeLimit ? 1 : older.first ?? 1) ... (anchor - 1))
+        }
+        if includeAnchor {
+          ranges.append(anchor ... anchor)
+        }
+        if afterLimit > 0, anchor < maximum {
+          ranges.append((anchor + 1) ... (newer.count < afterLimit ? maximum : newer.last ?? maximum))
+        }
+        // Merge adjacent proof intervals, retaining a real excluded-anchor gap.
+        var merged: [ClosedRange<Int64>] = []
+        for range in ranges {
+          if let last = merged.last, last.upperBound + 1 == range.lowerBound {
+            merged[merged.count - 1] = last.lowerBound ... range.upperBound
+          } else {
+            merged.append(range)
+          }
+        }
+        return merged
+      case .UNRECOGNIZED: return nil
     }
   }
 
-  static func provenCoverage(
-    context: Context,
-    messageIDs: [Int64]
-  ) -> ClosedRange<Int64>? {
-    guard messageIDs.allSatisfy({ 1 ... MessageHistoryHole.positiveMessageIDMax ~= $0 }) else {
-      return nil
-    }
-    let ids = messageIDs.sorted()
-    let mode = context.modeRawValue
-      .flatMap(InlineProtocol.GetChatHistoryMode.init(rawValue:))
-      ?? (context.offsetID == nil ? .historyModeLatest : .historyModeOlder)
-    switch mode {
-      case .historyModeLatest, .historyModeUnspecified:
-        guard let minimum = ids.first else {
-          return 1 ... MessageHistoryHole.positiveMessageIDMax
-        }
-        return minimum ... MessageHistoryHole.positiveMessageIDMax
-
-      case .historyModeOlder:
-        guard let before = context.beforeID ?? context.offsetID, before > 1 else { return nil }
-        let upper = min(before - 1, MessageHistoryHole.positiveMessageIDMax)
-        let lower = ids.first ?? 1
-        guard lower <= upper, ids.allSatisfy({ $0 < before }) else { return nil }
-        return lower ... upper
-
-      case .historyModeNewer:
-        guard let after = context.afterID, after < MessageHistoryHole.positiveMessageIDMax else { return nil }
-        let lower = max(1, after + 1)
-        let upper = ids.last ?? MessageHistoryHole.positiveMessageIDMax
-        guard lower <= upper, ids.allSatisfy({ $0 > after }) else { return nil }
-        return lower ... upper
-
-      case .historyModeAround:
-        guard let coordinate = context.anchorID,
-              1 ... MessageHistoryHole.positiveMessageIDMax ~= coordinate
-        else { return nil }
-
-        let includeAnchor = context.includeAnchor ?? true
-        let anchorCount = ids.count(where: { $0 == coordinate })
-        guard anchorCount <= 1, includeAnchor || anchorCount == 0 else { return nil }
-
-        let requestedLimit = max(0, Int(context.limit ?? 60))
-        let defaultBeforeLimit = requestedLimit / 2
-        let defaultAfterLimit = max(requestedLimit - defaultBeforeLimit - anchorCount, 0)
-        let beforeLimit = max(0, Int(context.beforeLimit ?? Int32(clamping: defaultBeforeLimit)))
-        let afterLimit = max(0, Int(context.afterLimit ?? Int32(clamping: defaultAfterLimit)))
-        let olderIDs = ids.filter { $0 < coordinate }
-        let newerIDs = ids.filter { $0 > coordinate }
-        guard olderIDs.count <= beforeLimit, newerIDs.count <= afterLimit else { return nil }
-
-        // AROUND queries the exact coordinate and both numeric sides in one
-        // repeatable-read server snapshot. A short side proves its absolute
-        // boundary; otherwise only the returned extent is certified. Always
-        // include a requested anchor that the snapshot proved was deleted.
-        let lower = olderIDs.count < beforeLimit ? 1 : (olderIDs.first ?? coordinate)
-        let upper = newerIDs.count < afterLimit
-          ? MessageHistoryHole.positiveMessageIDMax
-          : (newerIDs.last ?? coordinate)
-        return min(lower, coordinate) ... max(upper, coordinate)
-
-      case .UNRECOGNIZED:
-        return nil
-    }
+  private static func validLimit(_ value: Int32?, fallback: Int, allowZero: Bool = false) -> Int? {
+    let limit = value.map(Int.init) ?? fallback
+    return (allowZero ? 0 : 1) ... 100 ~= limit ? limit : nil
   }
 }
 

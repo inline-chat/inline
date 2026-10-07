@@ -1,3 +1,5 @@
+import { lockAttachmentChat, persistAttachmentMutation } from "@in/server/modules/message/attachmentMembership"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { Log } from "@in/server/utils/log"
 import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -92,56 +94,60 @@ async function processLoomMetadata(
       )
     }
 
-    // Create URL preview record
-    const [urlPreviewRecord] = await db
-      .insert(urlPreview)
-      .values({
-        url: urlEncrypted.encrypted,
-        urlIv: urlEncrypted.iv,
-        urlTag: urlEncrypted.authTag,
-        siteName: "Loom",
-        provider: "loom",
-        mediaType: "video",
-        mediaKind: "embed",
-        title: titleEncrypted.encrypted,
-        titleIv: titleEncrypted.iv,
-        titleTag: titleEncrypted.authTag,
-        description: descriptionEncrypted?.encrypted,
-        descriptionIv: descriptionEncrypted?.iv,
-        descriptionTag: descriptionEncrypted?.authTag,
-        photoId: photoId,
-        embedUrl: embedUrlEncrypted?.encrypted,
-        embedUrlIv: embedUrlEncrypted?.iv,
-        embedUrlTag: embedUrlEncrypted?.authTag,
-        embedType: metadata.embedUrl ? "iframe" : null,
-        embedWidth: metadata.embedWidth,
-        embedHeight: metadata.embedHeight,
-        embedDuration: metadata.duration,
-        hasLargeMedia: true,
-        showLargeMedia: true,
-        duration: metadata.duration,
-        date: new Date(),
-      })
-      .returning()
-    if (!urlPreviewRecord) {
-      log.error("Failed to create URL preview record")
-      return
-    }
+    const { urlPreviewRecord, attachment, durableUpdate } = await db.transaction(async (tx) => {
+      const lockedChat = await lockAttachmentChat(tx, Number(chatId))
+      // Create URL preview record
+      const [urlPreviewRecord] = await tx
+        .insert(urlPreview)
+        .values({
+          url: urlEncrypted.encrypted,
+          urlIv: urlEncrypted.iv,
+          urlTag: urlEncrypted.authTag,
+          siteName: "Loom",
+          provider: "loom",
+          mediaType: "video",
+          mediaKind: "embed",
+          title: titleEncrypted.encrypted,
+          titleIv: titleEncrypted.iv,
+          titleTag: titleEncrypted.authTag,
+          description: descriptionEncrypted?.encrypted,
+          descriptionIv: descriptionEncrypted?.iv,
+          descriptionTag: descriptionEncrypted?.authTag,
+          photoId: photoId,
+          embedUrl: embedUrlEncrypted?.encrypted,
+          embedUrlIv: embedUrlEncrypted?.iv,
+          embedUrlTag: embedUrlEncrypted?.authTag,
+          embedType: metadata.embedUrl ? "iframe" : null,
+          embedWidth: metadata.embedWidth,
+          embedHeight: metadata.embedHeight,
+          embedDuration: metadata.duration,
+          hasLargeMedia: true,
+          showLargeMedia: true,
+          duration: metadata.duration,
+          date: new Date(),
+        })
+        .returning()
+      if (!urlPreviewRecord) {
+        throw new Error("Failed to create URL preview record")
+      }
 
-    // Create link between message and URL preview
-    const [attachment] = await db
-      .insert(messageAttachments)
-      .values({
-        messageId: message.globalId,
-        urlPreviewId: BigInt(urlPreviewRecord.id),
-        externalTaskId: null,
-      })
-      .returning()
+      // Create link between message and URL preview
+      const [attachment] = await tx
+        .insert(messageAttachments)
+        .values({
+          messageId: message.globalId,
+          urlPreviewId: BigInt(urlPreviewRecord.id),
+          externalTaskId: null,
+        })
+        .returning()
 
-    if (!attachment) {
-      log.error("Failed to create attachment record")
-      return
-    }
+      if (!attachment) {
+        throw new Error("Failed to create attachment record")
+      }
+
+      const durableUpdate = await persistAttachmentMutation(tx, lockedChat, message.globalId, attachment.id)
+      return { urlPreviewRecord, attachment, durableUpdate }
+    })
 
     // Create and send update
     await sendLoomUpdate(
@@ -153,6 +159,7 @@ async function processLoomMetadata(
       inputPeer,
       currentUserId,
       BigInt(attachment.id),
+      durableUpdate,
     )
   } catch (error) {
     log.error("Error processing Loom metadata", { error })
@@ -219,6 +226,7 @@ async function sendLoomUpdate(
   inputPeer: InputPeer,
   currentUserId: number,
   attachmentId: bigint,
+  durableUpdate: UpdateSeqAndDate,
 ): Promise<void> {
   try {
     // Get photo data if exists
@@ -292,6 +300,8 @@ async function sendLoomUpdate(
             : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
 
         let update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(message.messageId),
           chatId,
           encodingForUserId,
@@ -306,6 +316,8 @@ async function sendLoomUpdate(
         const encodingForUserId = userId
 
         let update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(message.messageId),
           chatId,
           encodingForUserId,

@@ -2,17 +2,40 @@ import AsyncAlgorithms
 import Auth
 import Foundation
 import GRDB
+@testable import InlineKit
 import InlineProtocol
 import Logger
-import Testing
-
-@testable import InlineKit
 @testable import RealtimeV2
+import Testing
 
 @Suite("SyncTests", .serialized)
 final class SyncTests {
+  @Test("reset cancels a fixed history witness before its withheld catch-up reply", .timeLimit(.minutes(1)))
+  func resetCancelsHistoryWitness() async {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let client = FakeProtocolClient(responses: [], gateFirstCall: true)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    let outcome = HistoryWitnessOutcome()
+    let witness = Task {
+      do { try await sync.reachHistorySnapshot(key, seq: 6) }
+      catch is CancellationError { await outcome.recordCancellation() }
+      catch {}
+    }
+    await client.waitForFirstCallStarted()
+    let reset = Task { await sync.clearSyncState(acceptNewWork: false) }
+    #expect(await waitForCondition(timeout: .seconds(2)) { await outcome.wasCancelled })
+    // The protocol fake deliberately ignores cancellation. Reset must release
+    // the page waiter even while the existing actor is still draining that RPC.
+    await client.releaseFirstCall()
+    await reset.value
+    await witness.value
+    #expect(await storage.getBucketState(for: key).seq == 0)
+  }
+
   @Test("cursor conflict already covered durably completes without another request")
-  func conflictReconcilesCoveredDemand() async throws {
+  func conflictReconcilesCoveredDemand() async {
     let storage = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
     await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
@@ -46,7 +69,7 @@ final class SyncTests {
   }
 
   @Test("a warm actor reloads a deleted cursor before dismissing an equal hint")
-  func deletedCursorDoesNotSuppressHint() async throws {
+  func deletedCursorDoesNotSuppressHint() async {
     let storage = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
     let apply = RecordingApplyUpdates()
@@ -70,7 +93,7 @@ final class SyncTests {
   }
 
   @Test("partially superseded catch-up retries from durable progress")
-  func conflictRebuildsRemainingDemand() async throws {
+  func conflictRebuildsRemainingDemand() async {
     let storage = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
     await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
@@ -109,7 +132,7 @@ final class SyncTests {
   }
 
   @Test("queued child captures removal evidence only after acquiring a fetch slot")
-  func queuedChildCapturesCurrentRemovalEvidence() async throws {
+  func queuedChildCapturesCurrentRemovalEvidence() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let response = makeGetUpdatesResult(
@@ -141,7 +164,7 @@ final class SyncTests {
   }
 
   @Test("durable progress past a frozen target completes without an invalid RPC")
-  func durableOvershootRetiresFrozenTarget() async throws {
+  func durableOvershootRetiresFrozenTarget() async {
     let storage = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
     await storage.setBucketState(for: key, state: .init(date: 130, seq: 7))
@@ -160,13 +183,13 @@ final class SyncTests {
   }
 
   @Test("sync config defaults")
-  func testSyncConfigDefaults() {
+  func syncConfigDefaults() {
     #expect(SyncConfig.default.lastSyncSafetyGapSeconds == 15)
     #expect(SyncConfig.default.maxConcurrentBucketFetches == 4)
   }
 
   @Test("retry cadence jitters fast attempts and remains bounded indefinitely")
-  func testRetryCadenceBounds() {
+  func retryCadenceBounds() {
     for (attempt, base) in [1_000, 2_000, 4_000, 5_000, 5_000, 5_000].enumerated() {
       let base = Int64(base)
       #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 0) == .milliseconds(base * 8 / 10))
@@ -200,7 +223,7 @@ final class SyncTests {
   }
 
   @Test("state RPC failure retains discovery until the exact user page commits")
-  func stateRequestFailurePreservesUserReplayAndCheckpoint() async throws {
+  func stateRequestFailurePreservesUserReplayAndCheckpoint() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 10))
     let apply = RecordingApplyUpdates()
@@ -245,14 +268,14 @@ final class SyncTests {
       return user.seq == 2 && global.lastSyncDate == 105 &&
         stats.discoveryTargetsPending == 0 && stats.activeBucketFetches == 0
     })
-    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await (apply.appliedUpdates).map(\.seq) == [1, 2])
     #expect(await client.getUpdatesStartSequences() == [0])
     #expect(await client.getUpdatesEndSequences() == [2])
     await sync.prepareForTermination()
   }
 
   @Test("failed user page retains its cursor and retries from the same coordinate")
-  func userPageRequestFailureReplaysWithoutLoss() async throws {
+  func userPageRequestFailureReplaysWithoutLoss() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let peer = makeChatPeer(chatId: 1)
@@ -280,14 +303,14 @@ final class SyncTests {
       let activity = await sync.getStats().activeBucketFetches
       return state.seq == 2 && activity == 0
     })
-    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await (apply.appliedUpdates).map(\.seq) == [1, 2])
     #expect(await client.getUpdatesStartSequences() == [0, 0])
     #expect(await client.getUpdatesEndSequences() == [2, 2])
     await sync.prepareForTermination()
   }
 
   @Test("only an accepted new session wakes discovery")
-  func testAcceptedSessionIsSoleDiscoveryWake() async throws {
+  func acceptedSessionIsSoleDiscoveryWake() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 100))
     let client = FakeProtocolClient(responses: [], methodResponses: [
@@ -313,7 +336,7 @@ final class SyncTests {
   }
 
   @Test("reconnect wakes rate-limited work without dormant bucket reads")
-  func testReconnectWakesOnlyUnresolvedRuntimeBucket() async throws {
+  func reconnectWakesOnlyUnresolvedRuntimeBucket() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 100))
     var dormant: [BucketKey: BucketState] = [:]
@@ -329,7 +352,11 @@ final class SyncTests {
           seq: 1, date: 120, updates: [makeChatInfoUpdate(seq: 1, date: 120)], final: true, resultType: .slice
         )],
       ],
-      methodErrors: [.getUpdates: [ProtocolSessionError.rpcError(errorCode: .rateLimit, message: "rate limit", code: 429)]]
+      methodErrors: [.getUpdates: [ProtocolSessionError.rpcError(
+        errorCode: .rateLimit,
+        message: "rate limit",
+        code: 429
+      )]]
     )
     let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
     await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
@@ -348,15 +375,27 @@ final class SyncTests {
   }
 
   @Test("latest demand captures one fixed target across pages")
-  func testLatestDemandCapturesFixedTarget() async throws {
+  func latestDemandCapturesFixedTarget() async {
     let storage = InMemorySyncStorage()
     let client = FakeProtocolClient(responses: [], methodResponses: [
       .getChat: [makeGetChatResult(chatId: 7, seq: 2)],
       .getUpdates: [
-        makeGetUpdatesResult(seq: 1, date: 101, updates: [], final: false, resultType: .slice,
-                             skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)),
-        makeGetUpdatesResult(seq: 2, date: 102, updates: [], final: true, resultType: .slice,
-                             skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)),
+        makeGetUpdatesResult(
+          seq: 1,
+          date: 101,
+          updates: [],
+          final: false,
+          resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)
+        ),
+        makeGetUpdatesResult(
+          seq: 2,
+          date: 102,
+          updates: [],
+          final: true,
+          resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)
+        ),
       ],
     ])
     let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
@@ -372,15 +411,27 @@ final class SyncTests {
   }
 
   @Test("latest arriving during a finite pass cannot borrow its completion")
-  func testLatestDemandDoesNotBorrowEarlierFinitePass() async throws {
+  func latestDemandDoesNotBorrowEarlierFinitePass() async {
     let storage = InMemorySyncStorage()
     let client = FakeProtocolClient(responses: [], gateCallNumbers: [1, 2], methodResponses: [
       .getChat: [makeGetChatResult(chatId: 7, seq: 2)],
       .getUpdates: [
-        makeGetUpdatesResult(seq: 1, date: 101, updates: [], final: true, resultType: .slice,
-                             skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)),
-        makeGetUpdatesResult(seq: 2, date: 102, updates: [], final: true, resultType: .slice,
-                             skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)),
+        makeGetUpdatesResult(
+          seq: 1,
+          date: 101,
+          updates: [],
+          final: true,
+          resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)
+        ),
+        makeGetUpdatesResult(
+          seq: 2,
+          date: 102,
+          updates: [],
+          final: true,
+          resultType: .slice,
+          skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)
+        ),
       ],
     ])
     let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
@@ -401,7 +452,7 @@ final class SyncTests {
   }
 
   @Test("initial child page carries removal evidence independently of User traffic")
-  func testInitialChildPageCarriesUserAdmissionFence() async throws {
+  func initialChildPageCarriesUserAdmissionFence() async throws {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 4))
     let apply = RecordingApplyUpdates()
@@ -423,7 +474,7 @@ final class SyncTests {
   }
 
   @Test("duplicate live update satisfies its already-durable active discovery target")
-  func testDuplicateLiveUpdateDoesNotPinDiscovery() async throws {
+  func duplicateLiveUpdateDoesNotPinDiscovery() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 10))
     await storage.setBucketState(for: .chat(peer: makeChatPeer(chatId: 1)), state: BucketState(date: 20, seq: 5))
@@ -442,7 +493,7 @@ final class SyncTests {
   }
 
   @Test("contiguous live suffix arriving during apply drains without a catch-up RPC")
-  func testContiguousLiveSuffixDuringApplyStaysLocal() async throws {
+  func contiguousLiveSuffixDuringApplyStaysLocal() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.gateNextApply()
@@ -460,17 +511,26 @@ final class SyncTests {
   }
 
   @Test("snapshot rejects an invalidated account lease before actor or RPC work")
-  func testSnapshotRejectsStaleAccountLease() async throws {
+  func snapshotRejectsStaleAccountLease() async throws {
     let auth = Auth.mocked(authenticated: true)
     let token = try auth.handle.beginAccountMutation()
     let storage = InMemorySyncStorage()
     let client = FakeProtocolClient(responses: [])
-    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client,
-                    config: .default, auth: auth.handle)
+    let sync = Sync(
+      applyUpdates: RecordingApplyUpdates(),
+      syncStorage: storage,
+      client: client,
+      config: .default,
+      auth: auth.handle
+    )
     await sync.activateGeneration()
     _ = try auth.beginLogoutSynchronously()
     do {
-      try await sync.installSnapshotOutcome(seededStates: [:], catchUpTargets: [.space(id: 10): 5], expectedAccount: token)
+      try await sync.installSnapshotOutcome(
+        seededStates: [:],
+        catchUpTargets: [.space(id: 10): 5],
+        expectedAccount: token
+      )
       Issue.record("stale account snapshot was admitted")
     } catch {}
     #expect(await client.getCallCount() == 0)
@@ -479,14 +539,14 @@ final class SyncTests {
   }
 
   @Test("realtime config store returns sync defaults")
-  func testRealtimeConfigStoreInitialConfig() {
+  func realtimeConfigStoreInitialConfig() {
     let config = RealtimeConfigStore.initialSyncConfig()
     #expect(config.lastSyncSafetyGapSeconds == SyncConfig.default.lastSyncSafetyGapSeconds)
     #expect(config.maxConcurrentBucketFetches == SyncConfig.default.maxConcurrentBucketFetches)
   }
 
   @Test("bucket commits dynamically dispatch through the apply-updates owner")
-  func testBucketCommitExistentialDispatch() async {
+  func bucketCommitExistentialDispatch() async {
     let recorder = BucketCommitApplyRecorder()
     let owner: any ApplyUpdates = recorder
     let commit = UpdateBucketCommit(
@@ -509,7 +569,7 @@ final class SyncTests {
   }
 
   @Test("direct bucket updates do not advance the discovery checkpoint")
-  func testDirectBucketUpdatePreservesDiscoveryCheckpoint() async throws {
+  func directBucketUpdatePreservesDiscoveryCheckpoint() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -534,7 +594,7 @@ final class SyncTests {
   }
 
   @Test("account mutation token reaches direct, sequenced, and catch-up apply boundaries")
-  func testAccountMutationTokenPropagation() async throws {
+  func accountMutationTokenPropagation() async throws {
     let auth = Auth.mocked(authenticated: true)
     let token = try auth.handle.beginAccountMutation()
 
@@ -595,7 +655,7 @@ final class SyncTests {
   }
 
   @Test("coalesces bucket fetches while in-flight")
-  func testCoalescedFetch() async throws {
+  func coalescedFetch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -643,7 +703,7 @@ final class SyncTests {
   }
 
   @Test("stale hasNewUpdates hint does not trigger fetch")
-  func testStaleHasNewUpdatesDoesNotFetch() async throws {
+  func staleHasNewUpdatesDoesNotFetch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -685,7 +745,7 @@ final class SyncTests {
   }
 
   @Test("sequenced chatInfo updates advance bucket state")
-  func testSequencedChatInfoAdvancesBucketState() async throws {
+  func sequencedChatInfoAdvancesBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -710,7 +770,7 @@ final class SyncTests {
   }
 
   @Test("sequenced chat permission updates advance user bucket state")
-  func testSequencedChatPermissionsAdvanceUserBucketState() async throws {
+  func sequencedChatPermissionsAdvanceUserBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -736,7 +796,7 @@ final class SyncTests {
   }
 
   @Test("sequenced durable user updates advance the user bucket")
-  func testSequencedDurableUserUpdateAdvancesUserBucketState() async throws {
+  func sequencedDurableUserUpdateAdvancesUserBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -763,7 +823,7 @@ final class SyncTests {
   }
 
   @Test("sequenced space settings advance the space bucket")
-  func testSequencedSpaceSettingsAdvanceSpaceBucketState() async throws {
+  func sequencedSpaceSettingsAdvanceSpaceBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -790,7 +850,7 @@ final class SyncTests {
   }
 
   @Test("message updates apply during catch-up")
-  func testMessageUpdatesApplyDuringCatchUp() async throws {
+  func messageUpdatesApplyDuringCatchUp() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -832,7 +892,7 @@ final class SyncTests {
   }
 
   @Test("message updates apply from chat bucket hints")
-  func testMessageUpdatesApplyFromChatBucketHints() async throws {
+  func messageUpdatesApplyFromChatBucketHints() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -873,7 +933,7 @@ final class SyncTests {
   }
 
   @Test("chatSkipPts applies during catch-up and advances bucket")
-  func testChatSkipPtsCatchupAdvancesBucket() async throws {
+  func chatSkipPtsCatchupAdvancesBucket() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -909,7 +969,7 @@ final class SyncTests {
   }
 
   @Test("sync activity callback toggles during full sync fetch")
-  func testSyncActivityCallbackTogglesDuringFullSyncFetch() async throws {
+  func syncActivityCallbackTogglesDuringFullSyncFetch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let response = makeGetUpdatesResult(
@@ -951,7 +1011,7 @@ final class SyncTests {
   }
 
   @Test("sync activity callback stays active during bucket fetch")
-  func testSyncActivityCallbackStaysActiveDuringBucketFetch() async throws {
+  func syncActivityCallbackStaysActiveDuringBucketFetch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let response = makeGetUpdatesResult(
@@ -993,7 +1053,7 @@ final class SyncTests {
   }
 
   @Test("sync activity stays active when config changes during fetch")
-  func testSyncActivityStaysActiveWhenConfigChangesDuringFetch() async throws {
+  func syncActivityStaysActiveWhenConfigChangesDuringFetch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let response = makeGetUpdatesResult(
@@ -1041,7 +1101,7 @@ final class SyncTests {
   }
 
   @Test("warm chat TOO_LONG repairs an authoritative snapshot")
-  func testWarmChatTooLongRepairsAndAdvances() async throws {
+  func warmChatTooLongRepairsAndAdvances() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1114,7 +1174,7 @@ final class SyncTests {
   }
 
   @Test("raw DM message and canonical hint share the existing user bucket")
-  func rawDMUpdateUsesCanonicalCursor() async throws {
+  func rawDMUpdateUsesCanonicalCursor() async {
     let storage = InMemorySyncStorage()
     let userPeer = makeUserPeer(userId: 1_900)
     let canonical = BucketKey.chat(peer: userPeer)
@@ -1175,8 +1235,13 @@ final class SyncTests {
     #expect(await storage.setBucketState(for: canonical, state: .init(date: 100, seq: 5)))
     #expect(await storage.setBucketState(for: raw, state: .init(date: 0, seq: 0)))
     let snapshot = InlineProtocol.GetChatResult.with {
-      $0.chat = .with { $0.id = 4; $0.peerID = userPeer; $0.seq = 6 }
-      $0.dialog = .with { $0.chatID = 4; $0.peer = userPeer }
+      $0.chat = .with { $0.id = 4
+        $0.peerID = userPeer
+        $0.seq = 6
+      }
+      $0.dialog = .with { $0.chatID = 4
+        $0.peer = userPeer
+      }
     }
     let transport = SyncScriptedTransport(chatResult: coldLookup ? snapshot : nil)
     let session = ProtocolSession(transport: transport, auth: Auth.mocked(authenticated: true).handle)
@@ -1199,7 +1264,7 @@ final class SyncTests {
       await transport.push([makeChatHasNewUpdatesSignal(chatId: 4, updateSeq: 6)])
     }
     let converged = await waitForCondition(timeout: .seconds(5)) {
-      (try? await storage.getBucketState(for: canonical).seq) == 6
+      await (try? storage.getBucketState(for: canonical).seq) == 6
     }
     await session.reset()
     await sync.prepareForTermination()
@@ -1215,7 +1280,7 @@ final class SyncTests {
   }
 
   @Test("a second raw DM hint during canonical fetch retains its later target")
-  func rawDMHintArrivingDuringFetchReplaysLaterTarget() async throws {
+  func rawDMHintArrivingDuringFetchReplaysLaterTarget() async {
     let storage = InMemorySyncStorage()
     let userPeer = makeUserPeer(userId: 1_900)
     let canonical = BucketKey.chat(peer: userPeer)
@@ -1252,7 +1317,7 @@ final class SyncTests {
   }
 
   @Test("cold raw latest demand remains latest when a finite hint arrives")
-  func coldRawLatestRetainsAuthoritativeTarget() async throws {
+  func coldRawLatestRetainsAuthoritativeTarget() async {
     let storage = InMemorySyncStorage()
     let userPeer = makeUserPeer(userId: 1_900)
     let canonical = BucketKey.chat(peer: userPeer)
@@ -1347,7 +1412,7 @@ final class SyncTests {
   }
 
   @Test("cold chat lookup rejects a different chat without creating a bucket")
-  func coldLookupRejectsUnrelatedChat() async throws {
+  func coldLookupRejectsUnrelatedChat() async {
     let storage = InMemorySyncStorage()
     await storage.setCanonicalPeer(nil, forChatID: 4)
     let client = FakeProtocolClient(
@@ -1366,7 +1431,7 @@ final class SyncTests {
   }
 
   @Test("permanent cold DM lookup denial retires its unresolved demand")
-  func coldRawDMDenialRetiresDemand() async throws {
+  func coldRawDMDenialRetiresDemand() async {
     let storage = InMemorySyncStorage()
     let raw = BucketKey.chat(peer: makeChatPeer(chatId: 4))
     await storage.setCanonicalPeer(nil, forChatID: 4)
@@ -1390,7 +1455,7 @@ final class SyncTests {
   }
 
   @Test("transient cold DM lookup retains demand until canonical catch-up commits")
-  func coldRawDMTransientLookupRetries() async throws {
+  func coldRawDMTransientLookupRetries() async {
     let storage = InMemorySyncStorage()
     let userPeer = makeUserPeer(userId: 1_900)
     let canonical = BucketKey.chat(peer: userPeer)
@@ -1431,7 +1496,7 @@ final class SyncTests {
   }
 
   @Test("cold DM target satisfied durably during lookup retry needs no replay")
-  func coldRawDMRetryObservesDurableTarget() async throws {
+  func coldRawDMRetryObservesDurableTarget() async {
     let storage = InMemorySyncStorage()
     let userPeer = makeUserPeer(userId: 1_900)
     let canonical = BucketKey.chat(peer: userPeer)
@@ -1466,7 +1531,7 @@ final class SyncTests {
   }
 
   @Test("account reset during cold local lookup cannot issue a stale getChat")
-  func staleColdLookupCannotStartRemoteRepair() async throws {
+  func staleColdLookupCannotStartRemoteRepair() async {
     let storage = InMemorySyncStorage()
     await storage.setCanonicalPeer(nil, forChatID: 4)
     await storage.gateCanonicalLookup(number: 2)
@@ -1486,7 +1551,7 @@ final class SyncTests {
   }
 
   @Test("cold chat TOO_LONG repairs chat snapshot and advances")
-  func testColdChatTooLongRepairsAndAdvances() async throws {
+  func coldChatTooLongRepairsAndAdvances() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1554,7 +1619,7 @@ final class SyncTests {
   }
 
   @Test("chat TOO_LONG retains its cursor when authoritative repair fails")
-  func testChatTooLongRetainsCursorWhenRepairFails() async throws {
+  func chatTooLongRetainsCursorWhenRepairFails() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -1605,7 +1670,7 @@ final class SyncTests {
   }
 
   @Test("chat TOO_LONG rejects a metadata-only response that omits the current tail")
-  func testChatTooLongRejectsMissingRecentWindow() async throws {
+  func chatTooLongRejectsMissingRecentWindow() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1641,7 +1706,7 @@ final class SyncTests {
   }
 
   @Test("space TOO_LONG repairs its authoritative snapshot and advances")
-  func testSpaceTooLongRepairsAndAdvances() async throws {
+  func spaceTooLongRepairsAndAdvances() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1691,7 +1756,7 @@ final class SyncTests {
   }
 
   @Test("space TOO_LONG retains its cursor when authoritative repair fails")
-  func testSpaceTooLongRetainsCursorWhenRepairFails() async throws {
+  func spaceTooLongRetainsCursorWhenRepairFails() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1735,7 +1800,7 @@ final class SyncTests {
   }
 
   @Test("user TOO_LONG captures state before fetching account projections")
-  func testUserTooLongCapturesStateBeforeSnapshot() async throws {
+  func userTooLongCapturesStateBeforeSnapshot() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1819,7 +1884,7 @@ final class SyncTests {
   }
 
   @Test("user TOO_LONG rejects a post-projection checkpoint behind its first checkpoint")
-  func testUserTooLongRejectsRegressedReplayBound() async throws {
+  func userTooLongRejectsRegressedReplayBound() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1871,7 +1936,7 @@ final class SyncTests {
   }
 
   @Test("account catalog rebase retires only its exact omitted bucket actor")
-  func testUserTooLongRetiresExactCatalogBucketActor() async throws {
+  func userTooLongRetiresExactCatalogBucketActor() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -1941,7 +2006,7 @@ final class SyncTests {
   }
 
   @Test("user repair waits for exact child targets before advancing its cursor")
-  func testUserRepairFinalizationWaitsForChildTargets() async throws {
+  func userRepairFinalizationWaitsForChildTargets() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2016,7 +2081,7 @@ final class SyncTests {
   }
 
   @Test("failed user finalization retries retained evidence without another User fetch")
-  func testFailedUserRepairFinalizationSchedulesRetry() async throws {
+  func failedUserRepairFinalizationSchedulesRetry() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2103,7 +2168,7 @@ final class SyncTests {
   }
 
   @Test("inaccessible finite repair child re-admits the account without faking child progress")
-  func testInaccessibleFiniteUserRepairChildRestartsProjection() async throws {
+  func inaccessibleFiniteUserRepairChildRestartsProjection() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2131,7 +2196,10 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default, auth: auth.handle)
     await sync.activateGeneration()
     // Gate just the child response so the first user TOO_LONG can succeed.
-    await client.setError(afterGetUpdatesCalls: 1, error: .rpcError(errorCode: .peerIDInvalid, message: "no access", code: 400))
+    await client.setError(
+      afterGetUpdatesCalls: 1,
+      error: .rpcError(errorCode: .peerIDInvalid, message: "no access", code: 400)
+    )
     await sync.process(updates: [makeDurableUpdate(seq: 10, date: 200, payload: .updatedUser(.init()))])
     #expect(await waitForCondition { await client.getCalledMethods().filter { $0 == .getUpdates }.count == 2 })
     await apply.setUserRepairOutcome(.applied(
@@ -2151,13 +2219,25 @@ final class SyncTests {
   }
 
   @Test("new demand during inactive publication receives a successor fetch")
-  func testDemandDuringInactivePublicationIsNotStranded() async throws {
+  func demandDuringInactivePublicationIsNotStranded() async {
     let storage = InMemorySyncStorage()
     let client = FakeProtocolClient(responses: [
-      makeGetUpdatesResult(seq: 1, date: 100, updates: [], final: true, resultType: .slice,
-                           skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)),
-      makeGetUpdatesResult(seq: 2, date: 101, updates: [], final: true, resultType: .slice,
-                           skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)),
+      makeGetUpdatesResult(
+        seq: 1,
+        date: 100,
+        updates: [],
+        final: true,
+        resultType: .slice,
+        skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1)
+      ),
+      makeGetUpdatesResult(
+        seq: 2,
+        date: 101,
+        updates: [],
+        final: true,
+        resultType: .slice,
+        skippedSequences: makeIrrelevantSkippedSequences(after: 1, through: 2)
+      ),
     ])
     let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
     let gate = InactiveSyncActivityGate()
@@ -2174,7 +2254,7 @@ final class SyncTests {
   }
 
   @Test("transient cursor load failure retries only the exact target")
-  func testTransientBucketStateLoadRetainsRetryOwner() async throws {
+  func transientBucketStateLoadRetainsRetryOwner() async {
     let base = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 7))
     let storage = TransientBucketReadFailureStorage(base: base, failingKey: key)
@@ -2193,7 +2273,7 @@ final class SyncTests {
   }
 
   @Test("malformed TOO_LONG cannot fast-forward a bucket")
-  func testMalformedTooLongCannotFastForward() async throws {
+  func malformedTooLongCannotFastForward() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -2231,8 +2311,11 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
-  @Test("getUpdatesState response with missing child hints cannot borrow a user target", arguments: [Int32(0), Int32(10)])
-  func testGetUpdatesStateWithUpdatesDoesNotAdvanceLastSyncDate(userSeq: Int32) async throws {
+  @Test(
+    "getUpdatesState response with missing child hints cannot borrow a user target",
+    arguments: [Int32(0), Int32(10)]
+  )
+  func getUpdatesStateWithUpdatesDoesNotAdvanceLastSyncDate(userSeq: Int32) async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -2265,7 +2348,7 @@ final class SyncTests {
   }
 
   @Test("discovery checkpoint waits for every hinted bucket to apply")
-  func testDiscoveryCheckpointWaitsForHintedBucketApplication() async throws {
+  func discoveryCheckpointWaitsForHintedBucketApplication() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
@@ -2319,7 +2402,7 @@ final class SyncTests {
   }
 
   @Test("non-fresh checkpoint retries a transient global cursor write failure")
-  func testNonFreshCheckpointRetriesGlobalWriteFailure() async throws {
+  func nonFreshCheckpointRetriesGlobalWriteFailure() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 10))
     await storage.failNextStateWrites(1)
@@ -2358,7 +2441,7 @@ final class SyncTests {
   }
 
   @Test("empty getUpdatesState response advances lastSyncDate")
-  func testEmptyGetUpdatesStateAdvancesLastSyncDate() async throws {
+  func emptyGetUpdatesStateAdvancesLastSyncDate() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -2393,7 +2476,7 @@ final class SyncTests {
   }
 
   @Test("catch-up applies updates in seq order")
-  func testCatchupOrdersUpdatesBySeq() async throws {
+  func catchupOrdersUpdatesBySeq() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -2432,7 +2515,7 @@ final class SyncTests {
   }
 
   @Test("direct updates advance bucket state")
-  func testDirectUpdateAdvancesBucketState() async throws {
+  func directUpdateAdvancesBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -2457,7 +2540,7 @@ final class SyncTests {
   }
 
   @Test("sync config update does not disable existing buckets")
-  func testSyncConfigUpdateDoesNotDisableExistingBuckets() async throws {
+  func syncConfigUpdateDoesNotDisableExistingBuckets() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -2502,7 +2585,7 @@ final class SyncTests {
   }
 
   @Test("fresh connection captures a later bound and replays B plus one")
-  func testFreshConnectionInstallsCurrentCheckpoint() async throws {
+  func freshConnectionInstallsCurrentCheckpoint() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let checkpoint = makeGetUpdatesStateResult(date: 100, seq: 42)
@@ -2556,7 +2639,7 @@ final class SyncTests {
   }
 
   @Test("authenticated fresh connection installs an account snapshot before its exact checkpoint")
-  func testAuthenticatedFreshConnectionRepairsAccountSnapshot() async throws {
+  func authenticatedFreshConnectionRepairsAccountSnapshot() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2628,7 +2711,7 @@ final class SyncTests {
   }
 
   @Test("fresh bootstrap carries a child hint through P1 until its persisted seed is reported")
-  func testFreshBootstrapDoesNotCommitPastQueuedChildHint() async throws {
+  func freshBootstrapDoesNotCommitPastQueuedChildHint() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2680,7 +2763,7 @@ final class SyncTests {
   }
 
   @Test("failed fresh repair handoff requeues its exact discovery targets")
-  func testFailedFreshRepairHandoffRequeuesDiscoveryTargets() async throws {
+  func failedFreshRepairHandoffRequeuesDiscoveryTargets() async throws {
     let baseStorage = InMemorySyncStorage()
     let storage = FailNextUserReadSyncStorage(base: baseStorage)
     let apply = RecordingApplyUpdates()
@@ -2733,7 +2816,7 @@ final class SyncTests {
   }
 
   @Test("authenticated fresh bootstrap crosses Sync and the real database admission boundary")
-  func testAuthenticatedFreshBootstrapWithRealDatabase() async throws {
+  func authenticatedFreshBootstrapWithRealDatabase() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let database = try AppDatabase(queue)
     let storage = GRDBSyncStorage(db: database)
@@ -2833,7 +2916,7 @@ final class SyncTests {
     "authenticated fresh connection retains zero while preserving successful projections",
     arguments: BootstrapProjectionFailure.allCases
   )
-  func testAuthenticatedFreshConnectionRetainsZeroWhenSnapshotFails(
+  func authenticatedFreshConnectionRetainsZeroWhenSnapshotFails(
     _ failedProjection: BootstrapProjectionFailure
   ) async throws {
     let storage = InMemorySyncStorage()
@@ -2899,7 +2982,7 @@ final class SyncTests {
     "authenticated fresh bootstrap retries a transient projection failure without admitting its baseline",
     arguments: BootstrapProjectionFailure.allCases
   )
-  func testAuthenticatedFreshConnectionRetriesProjectionFailure(
+  func authenticatedFreshConnectionRetriesProjectionFailure(
     _ failedProjection: BootstrapProjectionFailure
   ) async throws {
     let storage = InMemorySyncStorage()
@@ -2938,9 +3021,9 @@ final class SyncTests {
     )
 
     await sync.activateGeneration()
-    await sync.acceptedSessionOpened(
+    try await sync.acceptedSessionOpened(
       sessionID: 1,
-      mutationToken: try auth.handle.beginAccountMutation()
+      mutationToken: auth.handle.beginAccountMutation()
     )
     #expect(await waitForCondition(timeout: .seconds(1)) {
       await apply.persistedBootstrapProjectionKinds.count == 2
@@ -2962,7 +3045,7 @@ final class SyncTests {
   }
 
   @Test("cancelled fresh bootstrap may keep partial projections but never admits a baseline")
-  func testCancelledFreshBootstrapDoesNotAdmitBaseline() async throws {
+  func cancelledFreshBootstrapDoesNotAdmitBaseline() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2990,9 +3073,9 @@ final class SyncTests {
     )
 
     await sync.activateGeneration()
-    await sync.acceptedSessionOpened(
+    try await sync.acceptedSessionOpened(
       sessionID: 1,
-      mutationToken: try auth.handle.beginAccountMutation()
+      mutationToken: auth.handle.beginAccountMutation()
     )
     #expect(await waitForCondition(timeout: .seconds(1)) {
       let methods = await client.getCalledMethods()
@@ -3013,7 +3096,7 @@ final class SyncTests {
   }
 
   @Test("authenticated zero-date bootstrap preserves a user cursor ahead of its captured checkpoint")
-  func testAuthenticatedFreshConnectionAcceptsCheckpointBehindUserCursor() async throws {
+  func authenticatedFreshConnectionAcceptsCheckpointBehindUserCursor() async throws {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 300, seq: 75))
     let apply = RecordingApplyUpdates()
@@ -3044,9 +3127,9 @@ final class SyncTests {
     )
 
     await sync.activateGeneration()
-    await sync.acceptedSessionOpened(
+    try await sync.acceptedSessionOpened(
       sessionID: 1,
-      mutationToken: try auth.handle.beginAccountMutation()
+      mutationToken: auth.handle.beginAccountMutation()
     )
     #expect(await waitForCondition(timeout: .seconds(3)) {
       let globalDate = await storage.getState().lastSyncDate
@@ -3067,7 +3150,7 @@ final class SyncTests {
   }
 
   @Test("fresh empty checkpoint captures the first concurrent user update")
-  func testFreshEmptyCheckpointCapturesFirstConcurrentUpdate() async throws {
+  func freshEmptyCheckpointCapturesFirstConcurrentUpdate() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let update1 = makeDurableUpdate(seq: 1, date: 110, payload: .updateUserSettings(.init()))
@@ -3111,26 +3194,29 @@ final class SyncTests {
   }
 
   @Test("date-less completion never admits mutations or unresolved targets", arguments: InvalidEmptyCompletion.allCases)
-  func testInvalidEmptyCompletionIsRejected(_ invalid: InvalidEmptyCompletion) async throws {
+  func invalidEmptyCompletionIsRejected(_ invalid: InvalidEmptyCompletion) async {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 42))
     let apply = RecordingApplyUpdates()
     var page = InlineProtocol.GetUpdatesResult.with {
-      $0.seq = 42; $0.date = 0; $0.final = true; $0.resultType = .empty
+      $0.seq = 42
+      $0.date = 0
+      $0.final = true
+      $0.resultType = .empty
     }
     var target: Int64 = 42
     switch invalid {
-    case .nonfinal: page.final = false
-    case .belowTarget: target = 43
-    case .advancing:
-      target = 43
-      page.seq = 43
-      page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
-    case .negativeDate: page.date = -1
-    case .slice: page.resultType = .slice
-    case .sidecars: page.sidecars = .init()
-    case .updates: page.updates = [makeChatInfoUpdate(seq: 43, date: 110)]
-    case .skips: page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
+      case .nonfinal: page.final = false
+      case .belowTarget: target = 43
+      case .advancing:
+        target = 43
+        page.seq = 43
+        page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
+      case .negativeDate: page.date = -1
+      case .slice: page.resultType = .slice
+      case .sidecars: page.sidecars = .init()
+      case .updates: page.updates = [makeChatInfoUpdate(seq: 43, date: 110)]
+      case .skips: page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
     }
     let client = FakeProtocolClient(responses: [.getUpdates(page)])
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
@@ -3151,7 +3237,7 @@ final class SyncTests {
   }
 
   @Test("repeated malformed pages retain the cursor without inferring snapshot repair")
-  func testRepeatedMalformedPagesDoNotInferRepair() async throws {
+  func repeatedMalformedPagesDoNotInferRepair() async {
     let sink = MatchingLogSink(
       fragment: "start=5|target=6|seq=6|result=slice|final=true|updates=0|skipped=0|accounted=0"
     )
@@ -3210,7 +3296,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint does not regress a partially persisted user cursor")
-  func testFreshCheckpointPreservesNewerUserCursor() async throws {
+  func freshCheckpointPreservesNewerUserCursor() async {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 110, seq: 50))
     let apply = RecordingApplyUpdates()
@@ -3248,7 +3334,7 @@ final class SyncTests {
   }
 
   @Test("connected event during checkpoint discovery schedules one follow-up")
-  func testConnectedEventDuringCheckpointDiscoverySchedulesFollowUp() async throws {
+  func connectedEventDuringCheckpointDiscoverySchedulesFollowUp() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(
@@ -3281,7 +3367,7 @@ final class SyncTests {
   }
 
   @Test("overlapping discovery rounds cannot borrow an earlier round target")
-  func testOverlappingDiscoveryRoundsRequireIndependentTargets() async throws {
+  func overlappingDiscoveryRoundsRequireIndependentTargets() async {
     let storage = InMemorySyncStorage()
     await storage.setState(SyncState(lastSyncDate: 10))
     let client = FakeProtocolClient(
@@ -3336,7 +3422,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint retries a response missing user sequence")
-  func testFreshCheckpointRetriesMissingUserSequence() async throws {
+  func freshCheckpointRetriesMissingUserSequence() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     var missingSequence = InlineProtocol.GetUpdatesStateResult()
@@ -3369,7 +3455,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint retries an invalid RPC result")
-  func testFreshCheckpointRetriesInvalidResult() async throws {
+  func freshCheckpointRetriesInvalidResult() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(
@@ -3400,7 +3486,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint retries a negative user sequence")
-  func testFreshCheckpointRetriesNegativeUserSequence() async throws {
+  func freshCheckpointRetriesNegativeUserSequence() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(
@@ -3430,7 +3516,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint retries a transient bucket cursor write failure")
-  func testFreshCheckpointRetriesBucketWriteFailure() async throws {
+  func freshCheckpointRetriesBucketWriteFailure() async {
     let storage = InMemorySyncStorage()
     await storage.failNextBucketStateWrites(1)
     let apply = RecordingApplyUpdates()
@@ -3462,7 +3548,7 @@ final class SyncTests {
   }
 
   @Test("fresh checkpoint retries a transient global cursor write failure")
-  func testFreshCheckpointRetriesGlobalWriteFailure() async throws {
+  func freshCheckpointRetriesGlobalWriteFailure() async {
     let storage = InMemorySyncStorage()
     await storage.failNextStateWrites(1)
     let apply = RecordingApplyUpdates()
@@ -3499,7 +3585,7 @@ final class SyncTests {
   }
 
   @Test("partial fresh checkpoint replays an existing lower user cursor")
-  func testPartialFreshCheckpointReplaysExistingUserCursor() async throws {
+  func partialFreshCheckpointReplaysExistingUserCursor() async {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 10))
     let client = FakeProtocolClient(responses: [], methodResponses: [
@@ -3522,7 +3608,7 @@ final class SyncTests {
   }
 
   @Test("snapshot advances an actor that was already fetching from an older cursor")
-  func testSnapshotAdvancesExistingBucketActor() async throws {
+  func snapshotAdvancesExistingBucketActor() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let peer = makeChatPeer(chatId: 1)
@@ -3569,7 +3655,7 @@ final class SyncTests {
   }
 
   @Test("old sync state keeps its real discovery cursor")
-  func testOldSyncStateKeepsDiscoveryCursor() async throws {
+  func oldSyncStateKeepsDiscoveryCursor() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -3598,7 +3684,7 @@ final class SyncTests {
   }
 
   @Test("a server-regressed checkpoint enters admitted user repair before rewinding global state")
-  func testServerRegressedCheckpointUsesUserRepair() async throws {
+  func serverRegressedCheckpointUsesUserRepair() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -3635,7 +3721,7 @@ final class SyncTests {
     )
     await sync.activateGeneration()
 
-    await sync.acceptedSessionOpened(sessionID: 1, mutationToken: try auth.handle.beginAccountMutation())
+    try await sync.acceptedSessionOpened(sessionID: 1, mutationToken: auth.handle.beginAccountMutation())
     let repaired = await waitForCondition {
       await storage.getState().lastSyncDate == 185
     }
@@ -3645,8 +3731,8 @@ final class SyncTests {
     let repairedUser = await storage.getBucketState(for: .user)
     #expect(repairedUser.seq == 40)
     #expect(repairedUser.date == 300)
-    #expect((await apply.repairedUsers).first?.requiresProjectionAudit == true)
-    #expect((await apply.repairedUsers).first?.replacesActiveCatalog == false)
+    #expect(await (apply.repairedUsers).first?.requiresProjectionAudit == true)
+    #expect(await (apply.repairedUsers).first?.replacesActiveCatalog == false)
     // Regression is admitted only after repair convergence and uses the
     // server's explicit regressed marker (200), not the monotonic user cursor
     // date retained by the repair owner (300).
@@ -3657,7 +3743,7 @@ final class SyncTests {
   }
 
   @Test("regression audits an equal user cursor and catches only the returned child")
-  func testServerRegressedCheckpointAuditsEqualUserCursorAndChildTarget() async throws {
+  func serverRegressedCheckpointAuditsEqualUserCursorAndChildTarget() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -3741,7 +3827,7 @@ final class SyncTests {
   }
 
   @Test("catalog snapshot resolves seeded finite targets without sweeping buckets")
-  func testCatalogSnapshotInstallsSeededFiniteTargetWithoutSweep() async throws {
+  func catalogSnapshotInstallsSeededFiniteTargetWithoutSweep() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let auth = Auth.mocked(authenticated: true)
@@ -3776,7 +3862,7 @@ final class SyncTests {
   }
 
   @Test("catalog seed retires a waiting finite hint without a new target")
-  func testCatalogSeedRetiresWaitingFiniteHint() async throws {
+  func catalogSeedRetiresWaitingFiniteHint() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let auth = Auth.mocked(authenticated: true)
@@ -3794,7 +3880,7 @@ final class SyncTests {
           final: true,
           resultType: .slice,
           skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 5)
-        )]
+        )],
       ]
     )
     let sync = Sync(
@@ -3815,7 +3901,7 @@ final class SyncTests {
       expectedAccount: token
     )
     #expect(resolutions.isEmpty)
-    #expect((await sync.getStats()).queuedDiscoveryTargets == 0)
+    #expect(await (sync.getStats()).queuedDiscoveryTargets == 0)
 
     await client.releaseFirstCall()
     let settled = await waitForCondition {
@@ -3826,7 +3912,7 @@ final class SyncTests {
   }
 
   @Test("global storage read failure does not become a fresh checkpoint")
-  func testGlobalStorageReadFailureDoesNotBootstrap() async throws {
+  func globalStorageReadFailureDoesNotBootstrap() async {
     let storage = ReadFailingSyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(
@@ -3848,9 +3934,9 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
-#if DEBUG || DEBUG_BUILD
+  #if DEBUG || DEBUG_BUILD
   @Test("debug zero-date scenario requests a fresh current checkpoint")
-  func testDebugZeroDateScenarioRequestsFreshCheckpoint() async throws {
+  func debugZeroDateScenarioRequestsFreshCheckpoint() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(
@@ -3883,7 +3969,7 @@ final class SyncTests {
   }
 
   @Test("debug clear-state scenario clears storage and queues discovery")
-  func testDebugClearStateScenarioClearsStorageAndQueuesDiscovery() async throws {
+  func debugClearStateScenarioClearsStorageAndQueuesDiscovery() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -3904,7 +3990,7 @@ final class SyncTests {
   }
 
   @Test("debug user rewind does not sweep chat buckets")
-  func testDebugUserRewindDoesNotSweepChatBuckets() async throws {
+  func debugUserRewindDoesNotSweepChatBuckets() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let userDate: Int64 = 500
@@ -3934,7 +4020,7 @@ final class SyncTests {
   }
 
   @Test("debug buffer overflow uses the normal bounded recovery path")
-  func testDebugBufferOverflowUsesBoundedRecovery() async throws {
+  func debugBufferOverflowUsesBoundedRecovery() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let initialPage = makeGetUpdatesResult(
@@ -3979,10 +4065,10 @@ final class SyncTests {
     #expect(stats.buckets.first(where: { $0.key == key })?.seq == overflowTarget)
     await sync.prepareForTermination()
   }
-#endif
+  #endif
 
   @Test("user bucket catch-up applies updateReadMaxId")
-  func testUserBucketAppliesUpdateReadMaxId() async throws {
+  func userBucketAppliesUpdateReadMaxId() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4031,7 +4117,7 @@ final class SyncTests {
   }
 
   @Test("chatMoved catch-up updates are applied")
-  func testChatMovedCatchupApplies() async throws {
+  func chatMovedCatchupApplies() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4072,7 +4158,7 @@ final class SyncTests {
   }
 
   @Test("user bucket catch-up applies chatOpen")
-  func testUserBucketAppliesChatOpen() async throws {
+  func userBucketAppliesChatOpen() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await storage.setState(SyncState(lastSyncDate: 50))
@@ -4117,7 +4203,7 @@ final class SyncTests {
   }
 
   @Test("user catch-up applies every durable user update kind")
-  func testUserCatchUpAppliesEveryDurableUserUpdateKind() async throws {
+  func userCatchUpAppliesEveryDurableUserUpdateKind() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await storage.setState(SyncState(lastSyncDate: 50))
@@ -4171,7 +4257,7 @@ final class SyncTests {
   }
 
   @Test("catch-up advances past a forward-compatible unknown update")
-  func testCatchUpAdvancesPastUnknownFutureUpdate() async throws {
+  func catchUpAdvancesPastUnknownFutureUpdate() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4208,7 +4294,7 @@ final class SyncTests {
   }
 
   @Test("large catch-up keeps global Updating through background pages")
-  func testLargeCatchUpKeepsSyncActivityThroughBackgroundPages() async throws {
+  func largeCatchUpKeepsSyncActivityThroughBackgroundPages() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     var pages: [InlineProtocol.RpcResult.OneOf_Result?] = []
@@ -4260,19 +4346,22 @@ final class SyncTests {
     #expect(await waitForCondition { await activity.sequence == [true, false] })
     let finalActivity = await activity.sequence
     #expect(finalActivity == [true, false])
-    #expect(await client.getUpdatesEndSequences() == Array<Int64?>(repeating: 2_000, count: 20))
+    #expect(await client.getUpdatesEndSequences() == [Int64?](repeating: 2_000, count: 20))
     await sync.prepareForTermination()
   }
 
   @Test("ACK catch-up and live delivery advance the correct DM or group bucket", arguments: [false, true])
-  func testAcknowledgementSyncRouting(directMessage: Bool) async throws {
+  func acknowledgementSyncRouting(directMessage: Bool) async {
     let peer: InlineProtocol.Peer = directMessage
       ? .with { $0.user = .with { $0.userID = 7 } }
       : makeChatPeer(chatId: 42)
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let cursor = InlineProtocol.ChatAcknowledgement.with {
-      $0.chatID = 42; $0.userID = 9; $0.maxID = 10; $0.peerID = peer
+      $0.chatID = 42
+      $0.userID = 9
+      $0.maxID = 10
+      $0.peerID = peer
     }
     let first = makeDurableUpdate(seq: 1, date: 100, payload: .acknowledgement(cursor))
     let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
@@ -4280,7 +4369,9 @@ final class SyncTests {
     )])
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
     let signal = InlineProtocol.Update.with {
-      $0.chatHasNewUpdates = .with { $0.peerID = peer; $0.updateSeq = 1 }
+      $0.chatHasNewUpdates = .with { $0.peerID = peer
+        $0.updateSeq = 1
+      }
     }
     await sync.process(updates: [signal])
     let caughtUp = await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 1 }
@@ -4297,7 +4388,7 @@ final class SyncTests {
   }
 
   @Test("legacy sequenced reaction records remain replayable without making reactions durable")
-  func testChatCatchUpAppliesDurableReactionUpdates() async throws {
+  func chatCatchUpAppliesDurableReactionUpdates() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let updates = [
@@ -4332,7 +4423,7 @@ final class SyncTests {
   }
 
   @Test("space catch-up accounts for durable space settings")
-  func testSpaceCatchUpAccountsForSpaceSettings() async throws {
+  func spaceCatchUpAccountsForSpaceSettings() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     var payload = InlineProtocol.UpdateSpaceSettings()
@@ -4364,7 +4455,7 @@ final class SyncTests {
   }
 
   @Test("chat catch-up apply failure retains cursor without snapshot repair")
-  func testChatCatchUpApplyFailureRepairsAndAdvancesBucketState() async throws {
+  func chatCatchUpApplyFailureRepairsAndAdvancesBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
@@ -4407,7 +4498,7 @@ final class SyncTests {
   }
 
   @Test("space catch-up apply failure does not advance bucket state")
-  func testSpaceCatchUpApplyFailureDoesNotAdvanceBucketState() async throws {
+  func spaceCatchUpApplyFailureDoesNotAdvanceBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
@@ -4446,7 +4537,7 @@ final class SyncTests {
   }
 
   @Test("catch-up bucket state storage failure does not advance bucket state")
-  func testCatchUpBucketStateStorageFailureDoesNotAdvanceBucketState() async throws {
+  func catchUpBucketStateStorageFailureDoesNotAdvanceBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4490,7 +4581,7 @@ final class SyncTests {
   }
 
   @Test("non-retryable bucket error retires actor but preserves bucket state")
-  func testNonRetryableBucketErrorClearsBucketState() async throws {
+  func nonRetryableBucketErrorClearsBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4529,7 +4620,7 @@ final class SyncTests {
   }
 
   @Test("isolated realtime apply failure keeps bucket state for repair")
-  func testIsolatedRealtimeApplyFailureKeepsBucketStateForRepair() async throws {
+  func isolatedRealtimeApplyFailureKeepsBucketStateForRepair() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
@@ -4554,7 +4645,7 @@ final class SyncTests {
   }
 
   @Test("non-retryable fetch clears buffered realtime")
-  func testNonRetryableFetchClearsBufferedRealtime() async throws {
+  func nonRetryableFetchClearsBufferedRealtime() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4596,7 +4687,7 @@ final class SyncTests {
   }
 
   @Test("non-retryable fetch invalidates queued bucket actor work")
-  func testNonRetryableFetchInvalidatesQueuedBucketActorWork() async throws {
+  func nonRetryableFetchInvalidatesQueuedBucketActorWork() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4631,7 +4722,7 @@ final class SyncTests {
   }
 
   @Test("sequenced updateReadMaxId realtime update advances user bucket state")
-  func testRealtimeUpdateReadMaxIdAdvancesUserBucketState() async throws {
+  func realtimeUpdateReadMaxIdAdvancesUserBucketState() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -4658,7 +4749,7 @@ final class SyncTests {
   }
 
   @Test("a replayed current user record repairs a user gap through the existing catch-up RPC")
-  func testReplayedCurrentUserRecordTriggersUserGapRepair() async throws {
+  func replayedCurrentUserRecordTriggersUserGapRepair() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let first = makeUpdateReadMaxIdUpdate(
@@ -4707,8 +4798,8 @@ final class SyncTests {
     #expect(repaired)
     #expect(await client.getUpdatesStartSequences() == [0])
     #expect(await client.getUpdatesEndSequences() == [2])
-    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
-    #expect((await apply.appliedSources) == [.syncCatchup, .syncCatchup])
+    #expect(await (apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await (apply.appliedSources) == [.syncCatchup, .syncCatchup])
     let appliedSidecars = await apply.appliedSidecars
     #expect(appliedSidecars.count == 1)
     #expect(appliedSidecars[0].chats.map(\.id) == [1])
@@ -4716,7 +4807,7 @@ final class SyncTests {
   }
 
   @Test("a user durable hint fetches a bounded authoritative user page")
-  func testUserHasNewUpdatesHintTriggersUserGapRepair() async throws {
+  func userHasNewUpdatesHintTriggersUserGapRepair() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let first = makeUpdateReadMaxIdUpdate(
@@ -4756,13 +4847,13 @@ final class SyncTests {
     #expect(repaired)
     #expect(await client.getUpdatesStartSequences() == [0])
     #expect(await client.getUpdatesEndSequences() == [2])
-    #expect((await apply.appliedUpdates).map(\.seq) == [1, 2])
-    #expect((await apply.appliedSources) == [.syncCatchup, .syncCatchup])
+    #expect(await (apply.appliedUpdates).map(\.seq) == [1, 2])
+    #expect(await (apply.appliedSources) == [.syncCatchup, .syncCatchup])
     await sync.prepareForTermination()
   }
 
   @Test("buffers out-of-order realtime updates and repairs gap via fetch")
-  func testRealtimeOutOfOrderIsBufferedUntilGapRepair() async throws {
+  func realtimeOutOfOrderIsBufferedUntilGapRepair() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4801,7 +4892,7 @@ final class SyncTests {
   }
 
   @Test("oversized realtime buffer falls back to authoritative repair")
-  func testRealtimeBufferLimitUsesAuthoritativeRepair() async throws {
+  func realtimeBufferLimitUsesAuthoritativeRepair() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -4846,7 +4937,7 @@ final class SyncTests {
   }
 
   @Test("catch-up forwards sidecars with fetched updates")
-  func testCatchupForwardsSidecarsWithFetchedUpdates() async throws {
+  func catchupForwardsSidecarsWithFetchedUpdates() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4897,7 +4988,7 @@ final class SyncTests {
   }
 
   @Test("realtime updates do not overtake pending catch-up batch")
-  func testRealtimeDoesNotOvertakePendingCatchupBatch() async throws {
+  func realtimeDoesNotOvertakePendingCatchupBatch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -4949,7 +5040,7 @@ final class SyncTests {
   }
 
   @Test("realtime structural updates do not overtake pending catch-up batch")
-  func testRealtimeStructuralUpdatesDoNotOvertakePendingCatchupBatch() async throws {
+  func realtimeStructuralUpdatesDoNotOvertakePendingCatchupBatch() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5000,7 +5091,7 @@ final class SyncTests {
   }
 
   @Test("stale getUpdates seq retains live updates until bounded catch-up retry succeeds")
-  func testStaleServerSeqDoesNotLoopAndRealtimeContinues() async throws {
+  func staleServerSeqDoesNotLoopAndRealtimeContinues() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5059,7 +5150,7 @@ final class SyncTests {
   }
 
   @Test("a stale hint cannot advance beyond an authoritative empty page")
-  func testStaleHintDoesNotAdvanceBeyondEmptyPage() async throws {
+  func staleHintDoesNotAdvanceBeyondEmptyPage() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5112,7 +5203,7 @@ final class SyncTests {
   }
 
   @Test("declared-final page below a frozen target cannot apply rows or advance cursor date")
-  func testFinalPageBelowTargetAppliesNothing() async throws {
+  func finalPageBelowTargetAppliesNothing() async {
     let storage = InMemorySyncStorage()
     let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
     await storage.setBucketState(for: key, state: BucketState(date: 100, seq: 5))
@@ -5136,7 +5227,7 @@ final class SyncTests {
   }
 
   @Test("non-progress does not skip a missing buffered sequence or busy-loop")
-  func testNonProgressDoesNotSkipMissingBufferedSequence() async throws {
+  func nonProgressDoesNotSkipMissingBufferedSequence() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5181,7 +5272,7 @@ final class SyncTests {
   }
 
   @Test("buffered realtime applies after multi-slice catch-up in order")
-  func testBufferedRealtimeAppliesAfterMultiSliceCatchup() async throws {
+  func bufferedRealtimeAppliesAfterMultiSliceCatchup() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5234,7 +5325,7 @@ final class SyncTests {
   }
 
   @Test("catch-up begins after the realtime cursor without replaying older sequences")
-  func testCatchupBeginsAfterRealtimeCursor() async throws {
+  func catchupBeginsAfterRealtimeCursor() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5278,7 +5369,7 @@ final class SyncTests {
   }
 
   @Test("fetch does not regress bucket state behind newer realtime updates")
-  func testFetchDoesNotRegressAfterRealtimeAdvance() async throws {
+  func fetchDoesNotRegressAfterRealtimeAdvance() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let realtimeUpdate = makeNewMessageUpdate(seq: 1, date: 90)
@@ -5317,7 +5408,7 @@ final class SyncTests {
   }
 
   @Test("authoritative user skip defeats a buffered obsolete grant across apply retry", arguments: [false, true])
-  func testAuthoritativeSkipDropsBufferedGrant(failFirstApply: Bool) async throws {
+  func authoritativeSkipDropsBufferedGrant(failFirstApply: Bool) async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     if failFirstApply {
@@ -5405,7 +5496,7 @@ final class SyncTests {
   }
 
   @Test("future realtime messages wait for catch-up pointer")
-  func testFutureRealtimeMessagesWaitForCatchupPointer() async throws {
+  func futureRealtimeMessagesWaitForCatchupPointer() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5461,7 +5552,7 @@ final class SyncTests {
   }
 
   @Test("failed live suffix after completed catch-up retains cursor, activity, and bounded retry")
-  func testFailedRealtimeSuffixRetainsRetryAfterCatchup() async throws {
+  func failedRealtimeSuffixRetainsRetryAfterCatchup() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResultSequence([
@@ -5497,7 +5588,7 @@ final class SyncTests {
   }
 
   @Test("each catch-up page commits its cursor and restarts from the last durable page")
-  func testCatchupPageCommitAndRestart() async throws {
+  func catchupPageCommitAndRestart() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResultSequence([
@@ -5547,7 +5638,7 @@ final class SyncTests {
   }
 
   @Test("global fetch limiter caps concurrent getUpdates RPCs across buckets")
-  func testGlobalFetchLimiterCapsConcurrency() async throws {
+  func globalFetchLimiterCapsConcurrency() async {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -5619,9 +5710,17 @@ private func waitForCondition(
   return true
 }
 
+private actor HistoryWitnessOutcome {
+  private(set) var wasCancelled = false
+  func recordCancellation() {
+    wasCancelled = true
+  }
+}
+
 final actor FakeProtocolClient: ProtocolClientType {
   nonisolated let events = AsyncChannel<ProtocolSessionEventEnvelope>()
-  private let responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult.OneOf_Result?)?
+  private let responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol
+    .RpcResult.OneOf_Result?)?
 
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
   private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
@@ -5652,7 +5751,8 @@ final actor FakeProtocolClient: ProtocolClientType {
     gateMethods: Set<InlineProtocol.Method> = [],
     methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil,
     methodErrors: [InlineProtocol.Method: [Error]] = [:],
-    responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult.OneOf_Result?)? = nil
+    responseProvider: (@Sendable (InlineProtocol.Method, RpcCall.OneOf_Input?) async throws -> InlineProtocol.RpcResult
+      .OneOf_Result?)? = nil
   ) {
     self.responseProvider = responseProvider
     self.responses = responses
@@ -5707,7 +5807,8 @@ final actor FakeProtocolClient: ProtocolClientType {
     }
 
     if method == .getUpdates, let pending = deferredGetUpdatesError,
-       updatesStartSequences.count > pending.afterCalls {
+       updatesStartSequences.count > pending.afterCalls
+    {
       deferredGetUpdatesError = nil
       throw pending.error
     }
@@ -5718,7 +5819,9 @@ final actor FakeProtocolClient: ProtocolClientType {
       throw error
     }
 
-    if let responseProvider { return try await responseProvider(method, input) }
+    if let responseProvider {
+      return try await responseProvider(method, input)
+    }
     if let responsesForMethod = methodResponses?[method], !responsesForMethod.isEmpty {
       var updated = responsesForMethod
       let value = updated.removeFirst()
@@ -5815,10 +5918,14 @@ actor RecordingApplyUpdates: ApplyUpdates {
   private var applyGate: CheckedContinuation<Void, Never>?
   private var applyGateArrival: CheckedContinuation<Void, Never>?
 
-  func gateNextApply() { shouldGateNextApply = true }
+  func gateNextApply() {
+    shouldGateNextApply = true
+  }
 
   func waitUntilApplyGated() async {
-    if applyGate != nil { return }
+    if applyGate != nil {
+      return
+    }
     await withCheckedContinuation { applyGateArrival = $0 }
   }
 
@@ -5873,11 +5980,10 @@ actor RecordingApplyUpdates: ApplyUpdates {
     if let sidecars {
       appliedSidecars.append(sidecars)
     }
-    let nextResult: UpdateApplyResult
-    if resultSequence.isEmpty {
-      nextResult = result
+    let nextResult: UpdateApplyResult = if resultSequence.isEmpty {
+      result
     } else {
-      nextResult = resultSequence.removeFirst()
+      resultSequence.removeFirst()
     }
     guard nextResult.failedCount > 0 else {
       return .success(count: updates.count)
@@ -6031,7 +6137,9 @@ private actor InactiveSyncActivityGate {
   }
 
   func waitUntilInactive() async {
-    if reachedInactive { return }
+    if reachedInactive {
+      return
+    }
     await withCheckedContinuation { arrival = $0 }
   }
 
@@ -6056,23 +6164,41 @@ private actor TransientBucketReadFailureStorage: SyncStorage {
     await base.canonicalPeer(forChatID: chatID)
   }
 
-  func getState() async throws -> SyncState { await base.getState() }
-  func setState(_ state: SyncState) async -> Bool { await base.setState(state) }
+  func getState() async throws -> SyncState {
+    await base.getState()
+  }
+
+  func setState(_ state: SyncState) async -> Bool {
+    await base.setState(state)
+  }
+
   func getBucketState(for key: BucketKey) async throws -> BucketState {
     attempts += 1
-    if key == failingKey, attempts == 1 { throw ReadFailure() }
+    if key == failingKey, attempts == 1 {
+      throw ReadFailure()
+    }
     return await base.getBucketState(for: key)
   }
 
   func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
     await base.setBucketState(for: key, state: state)
   }
+
   func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
     await base.advanceBucketState(for: key, state: state)
   }
-  func removeBucketState(for key: BucketKey) async -> Bool { await base.removeBucketState(for: key) }
-  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool { await base.setBucketStates(states: states) }
-  func clearSyncState() async -> Bool { await base.clearSyncState() }
+
+  func removeBucketState(for key: BucketKey) async -> Bool {
+    await base.removeBucketState(for: key)
+  }
+
+  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
+    await base.setBucketStates(states: states)
+  }
+
+  func clearSyncState() async -> Bool {
+    await base.clearSyncState()
+  }
 }
 
 actor SyncActivityRecorder {
@@ -6096,6 +6222,7 @@ actor InMemorySyncStorage: SyncStorage {
   func setRemovalRevision(_ value: Int64) {
     removalRevision = value
   }
+
   private var state = SyncState(lastSyncDate: 0)
   private var bucketStates: [BucketKey: BucketState] = [:]
   private var canonicalChatPeers: [Int64: InlineProtocol.Peer?] = [:]
@@ -6119,7 +6246,9 @@ actor InMemorySyncStorage: SyncStorage {
   }
 
   func waitForCanonicalLookupStarted() async {
-    if canonicalLookupStarted { return }
+    if canonicalLookupStarted {
+      return
+    }
     await withCheckedContinuation { canonicalLookupStartWaiters.append($0) }
   }
 
@@ -6133,15 +6262,21 @@ actor InMemorySyncStorage: SyncStorage {
     if let gatedCanonicalLookupNumber, canonicalLookupCount == gatedCanonicalLookupNumber {
       self.gatedCanonicalLookupNumber = nil
       canonicalLookupStarted = true
-      for waiter in canonicalLookupStartWaiters { waiter.resume() }
+      for waiter in canonicalLookupStartWaiters {
+        waiter.resume()
+      }
       canonicalLookupStartWaiters.removeAll()
       await withCheckedContinuation { canonicalLookupGate = $0 }
     }
-    if let peer = canonicalChatPeers[chatID] { return peer }
+    if let peer = canonicalChatPeers[chatID] {
+      return peer
+    }
     return .with { $0.chat.chatID = chatID }
   }
 
-  func readBucketKeys() -> [BucketKey] { bucketReadKeys }
+  func readBucketKeys() -> [BucketKey] {
+    bucketReadKeys
+  }
 
   func setFailBucketStateWrites(_ value: Bool) {
     failBucketStateWrites = value
@@ -6228,7 +6363,9 @@ actor InMemorySyncStorage: SyncStorage {
   }
 
   private func shouldFailBucketStateWrite() -> Bool {
-    if failBucketStateWrites { return true }
+    if failBucketStateWrites {
+      return true
+    }
     guard bucketStateWriteFailuresRemaining > 0 else { return false }
     bucketStateWriteFailuresRemaining -= 1
     return true

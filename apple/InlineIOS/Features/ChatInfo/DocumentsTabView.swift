@@ -6,16 +6,11 @@ struct DocumentsTabView: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
   let peerUserId: Int64?
   let peerThreadId: Int64?
+  let onShowInChat: (Message) -> Void
 
   var body: some View {
     VStack(spacing: 16) {
-      if documentsViewModel.documentMessages.isEmpty {
-        VStack(spacing: 8) {
-          Text("No files found in this chat.")
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-      } else {
+      if !documentsViewModel.documentMessages.isEmpty {
         // Documents content without scroll
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
@@ -24,7 +19,8 @@ struct DocumentsTabView: View {
               ForEach(group.messages, id: \.id) { documentMessage in
                 DocumentRow(
                   documentMessage: documentMessage,
-                  chatId: peerThreadId
+                  chatId: peerThreadId,
+                  onShowInChat: { onShowInChat(documentMessage.message) }
                 )
                 .padding(.bottom, 4)
                 .onAppear {
@@ -54,14 +50,20 @@ struct DocumentsTabView: View {
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: documentsViewModel.loadState, isEmpty: documentsViewModel.documentMessages.isEmpty,
+        emptyMessage: "No files found in this chat.", loadMore: documentsViewModel.loadMore,
+        retry: documentsViewModel.retry
+      )
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task {
       await documentsViewModel.loadInitial()
     }
+    .onDisappear { documentsViewModel.deactivate() }
   }
 
-  // Format date for display
+  /// Format date for display
   private func formatDate(_ date: Date) -> String {
     let calendar = Calendar.current
     let now = Date()

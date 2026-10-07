@@ -200,6 +200,18 @@ describe("sidecar contract helpers", () => {
     })
   })
 
+  it.each(["threadBacklink", "pinnedMessage"])("preserves typed %s service metadata through normalization", (oneofKind) => {
+    const serviceMessage = { event: { oneofKind, [oneofKind]:
+      oneofKind === "threadBacklink" ? { sourceChatId: 99n } : { messageId: 3n },
+    } }
+    expect(normalizeInboundEvent({ kind: "message.new", chatId: 10n,
+      message: { id: 1n, serviceMessage },
+    }, "777")).toMatchObject({ message: {
+      serviceMessage: { event: { oneofKind, [oneofKind]: oneofKind === "threadBacklink" ? { sourceChatId: "99" } : { messageId: "3" } } },
+      raw: { serviceMessage: { event: { oneofKind } } },
+    } })
+  })
+
   it("normalizes action callback data to base64", () => {
     expect(normalizeInboundEvent({
       kind: "message.action.invoke",

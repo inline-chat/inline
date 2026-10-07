@@ -1,12 +1,62 @@
 import Foundation
-import InlineProtocol
-import Testing
-
 @testable import InlineKit
+import InlineProtocol
 @testable import RealtimeV2
+import Testing
 
 @Suite("RealtimeV2 transaction execution ordering", .serialized)
 struct TransactionExecutionOrderingTests {
+  @Test("history invalidation can enter the existing owner while persisted work loads")
+  func historySubmissionDuringActivation() async throws {
+    let owner = TransactionOwner(accountID: 45, generation: 1)
+    let persistence = OrderingPersistence(gateLoad: true)
+    let transactions = Transactions(persistenceHandler: persistence)
+    let activation = Task { await transactions.activate(owner: owner) }
+    await persistence.waitUntilLoadStarts()
+
+    #expect(await transactions.beginHistoryMutationSubmission(owner: owner))
+    let submission = Task {
+      await transactions.queue(
+        transaction: DeleteMessageTransaction(messageIds: [1], peerId: .thread(id: 70), chatId: 70),
+        owner: owner
+      )
+    }
+    await persistence.releaseLoad()
+    await activation.value
+    let mutationID = try #require(await submission.value)
+    await transactions.endHistoryMutationSubmission(owner: owner)
+    let dispatched = try #require(await readyWrapper(from: transactions.dequeue(owner: owner)))
+    #expect(dispatched.id == mutationID)
+  }
+
+  @Test("history waits for matching pending and applying mutations while other chats drain")
+  func historyDoesNotOvertakeMutation() async throws {
+    let owner = TransactionOwner(accountID: 46, generation: 1)
+    let transactions = Transactions()
+    await transactions.activate(owner: owner)
+    let historyID = try #require(await transactions.queue(
+      transaction: GetChatHistoryTransaction(peer: .thread(id: 70)), owner: owner
+    ))
+    let mutationID = try #require(await transactions.queue(
+      transaction: DeleteMessageTransaction(messageIds: [1], peerId: .thread(id: 70), chatId: 70), owner: owner
+    ))
+    let unrelatedID = try #require(await transactions.queue(
+      transaction: GetChatHistoryTransaction(peer: .thread(id: 71)), owner: owner
+    ))
+
+    let mutation = try #require(await readyWrapper(from: transactions.dequeue(owner: owner)))
+    #expect(mutation.id == mutationID)
+    let unrelated = try #require(await readyWrapper(from: transactions.dequeue(owner: owner)))
+    #expect(unrelated.id == unrelatedID)
+    #expect(await transactions.dequeue(owner: owner) == nil)
+    await transactions.running(transactionId: mutationID, rpcMsgId: 12)
+    let applying = try #require(await transactions.complete(rpcMsgId: 12, owner: owner))
+    #expect(await transactions.dequeue(owner: owner) == nil)
+    await transactions.finishExecution(for: applying)
+    let history = try #require(await readyWrapper(from: transactions.dequeue(owner: owner)))
+    #expect(history.id == historyID)
+  }
+
   @Test("same-key work is serialized while unrelated keys bypass it")
   func serializesOnlyMatchingKeys() async throws {
     let transactions = Transactions()
@@ -180,7 +230,10 @@ private struct OrderedMutation: Transaction2, Codable {
 
   var method: InlineProtocol.Method = .UNRECOGNIZED(9_999_981)
   var type: TransactionKindType = .mutation()
-  var reconnectReplayPolicy: TransactionReconnectPolicy? { .replaySafe }
+  var reconnectReplayPolicy: TransactionReconnectPolicy? {
+    .replaySafe
+  }
+
   var context: Context
 
   init(marker: Int, key: String) {
@@ -191,12 +244,37 @@ private struct OrderedMutation: Transaction2, Codable {
     TransactionExecutionKey(namespace: "ordering-test", value: context.key)
   }
 
-  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
   func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
 }
 
 private actor OrderingPersistence: TransactionPersistenceHandler {
   private var storage: [TransactionOwner: [TransactionWrapper]] = [:]
+  private let gateLoad: Bool
+  private var loadStarted = false
+  private var loadReleased = false
+  private var loadArrival: CheckedContinuation<Void, Never>?
+  private var loadGate: CheckedContinuation<Void, Never>?
+
+  init(gateLoad: Bool = false) {
+    self.gateLoad = gateLoad
+  }
+
+  func waitUntilLoadStarts() async {
+    if loadStarted {
+      return
+    }
+    await withCheckedContinuation { loadArrival = $0 }
+  }
+
+  func releaseLoad() {
+    loadReleased = true
+    loadGate?.resume()
+    loadGate = nil
+  }
 
   func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
     var transactions = storage[owner] ?? []
@@ -210,7 +288,13 @@ private actor OrderingPersistence: TransactionPersistenceHandler {
   }
 
   func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] {
-    storage[owner] ?? []
+    loadStarted = true
+    loadArrival?.resume()
+    loadArrival = nil
+    if gateLoad, !loadReleased {
+      await withCheckedContinuation { loadGate = $0 }
+    }
+    return storage[owner] ?? []
   }
 
   func deleteAllTransactions(for owner: TransactionOwner) async throws {

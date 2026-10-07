@@ -22,6 +22,7 @@ import {
   type Update,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import { refreshAttachmentMembership } from "@in/server/modules/message/attachmentMembership"
 import { MessageModel, type ProcessedMessageAttachment } from "@in/server/db/models/messages"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import {
@@ -730,7 +731,11 @@ function previewCandidateText(text: string, entities?: MessageEntities | null): 
     .flatMap((entity) => {
       const start = Number(entity.offset)
       const end = start + Number(entity.length)
-      return Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end > start && start < text.length
+      return Number.isSafeInteger(start) &&
+        Number.isSafeInteger(end) &&
+        start >= 0 &&
+        end > start &&
+        start < text.length
         ? [{ start, end: Math.min(end, text.length) }]
         : []
     })
@@ -779,6 +784,22 @@ async function maybeScheduleTitleGenerationAfterPreviews(
   })
 }
 
+// Previous previews may advance rev while this batch is running. Fence edits to
+// the URL source itself so all previews from unchanged text can still publish.
+function samePreviewSource(current: DbMessage, source: DbMessage): boolean {
+  const sameBytes = (left: Buffer | null, right: Buffer | null) =>
+    left === null ? right === null : right !== null && left.equals(right)
+  return (
+    current.text === source.text &&
+    sameBytes(current.textEncrypted, source.textEncrypted) &&
+    sameBytes(current.textIv, source.textIv) &&
+    sameBytes(current.textTag, source.textTag) &&
+    sameBytes(current.entitiesEncrypted, source.entitiesEncrypted) &&
+    sameBytes(current.entitiesIv, source.entitiesIv) &&
+    sameBytes(current.entitiesTag, source.entitiesTag)
+  )
+}
+
 async function insertPreviewAttachment(
   message: DbMessage,
   chatId: number,
@@ -788,6 +809,15 @@ async function insertPreviewAttachment(
     const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
     if (!chat) {
       throw new Error("Chat not found while inserting URL preview")
+    }
+
+    const [currentMessage] = await tx
+      .select()
+      .from(messages)
+      .where(and(eq(messages.globalId, message.globalId), eq(messages.chatId, chatId)))
+      .limit(1)
+    if (!currentMessage || !samePreviewSource(currentMessage, message)) {
+      throw new Error("URL preview parent changed")
     }
 
     const [preview] = await tx
@@ -852,6 +882,8 @@ async function insertPreviewAttachment(
       throw new Error("Message attachment insert returned no row")
     }
 
+    await refreshAttachmentMembership(tx, currentMessage)
+
     const update = await UpdatesModel.insertUpdate(tx, {
       update: {
         oneofKind: "messageAttachment",
@@ -865,19 +897,13 @@ async function insertPreviewAttachment(
       entity: chat,
     })
 
-    await Promise.all([
-      tx
-        .update(chats)
-        .set({
-          updateSeq: update.seq,
-          lastUpdateDate: update.date,
-        })
-        .where(eq(chats.id, chatId)),
-      tx
-        .update(messages)
-        .set({ hasLink: true })
-        .where(and(eq(messages.globalId, message.globalId), eq(messages.chatId, chatId))),
-    ])
+    await tx
+      .update(chats)
+      .set({
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(chats.id, chatId))
 
     return { attachmentId: attachment.id, update }
   })
@@ -1025,17 +1051,17 @@ function previewSourceFromMetadata(
     externalUrl: externalUrlEncrypted?.encrypted ?? null,
     externalUrlIv: externalUrlEncrypted?.iv ?? null,
     externalUrlTag: externalUrlEncrypted?.authTag ?? null,
-    externalMimeType: metadata.media?.kind === "external_video" ? (metadata.media.mimeType ?? null) : null,
-    externalWidth: metadata.media?.kind === "external_video" ? (metadata.media.width ?? null) : null,
-    externalHeight: metadata.media?.kind === "external_video" ? (metadata.media.height ?? null) : null,
-    externalDuration: metadata.media?.kind === "external_video" ? (metadata.media.duration ?? null) : null,
+    externalMimeType: metadata.media?.kind === "external_video" ? metadata.media.mimeType ?? null : null,
+    externalWidth: metadata.media?.kind === "external_video" ? metadata.media.width ?? null : null,
+    externalHeight: metadata.media?.kind === "external_video" ? metadata.media.height ?? null : null,
+    externalDuration: metadata.media?.kind === "external_video" ? metadata.media.duration ?? null : null,
     embedUrl: embedUrlEncrypted?.encrypted ?? null,
     embedUrlIv: embedUrlEncrypted?.iv ?? null,
     embedUrlTag: embedUrlEncrypted?.authTag ?? null,
-    embedType: metadata.media?.kind === "embed" ? (metadata.media.embedType ?? null) : null,
-    embedWidth: metadata.media?.kind === "embed" ? (metadata.media.width ?? null) : null,
-    embedHeight: metadata.media?.kind === "embed" ? (metadata.media.height ?? null) : null,
-    embedDuration: metadata.media?.kind === "embed" ? (metadata.media.duration ?? null) : null,
+    embedType: metadata.media?.kind === "embed" ? metadata.media.embedType ?? null : null,
+    embedWidth: metadata.media?.kind === "embed" ? metadata.media.width ?? null : null,
+    embedHeight: metadata.media?.kind === "embed" ? metadata.media.height ?? null : null,
+    embedDuration: metadata.media?.kind === "embed" ? metadata.media.duration ?? null : null,
     hasLargeMedia: metadata.layout?.hasLargeMedia ?? null,
     showLargeMedia: metadata.layout?.showLargeMedia ?? null,
     cacheId,
@@ -1144,7 +1170,9 @@ async function resolvePreviewImage(
 ): Promise<{ metadata: UrlPreviewResult; photoId: number | null }> {
   const candidates = Array.from(
     new Set(
-      [metadata.imageUrl, ...(metadata.fallbackImageUrls ?? [])].filter((candidate): candidate is string => !!candidate),
+      [metadata.imageUrl, ...(metadata.fallbackImageUrls ?? [])].filter(
+        (candidate): candidate is string => !!candidate,
+      ),
     ),
   ).slice(0, maxImageCandidates)
 

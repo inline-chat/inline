@@ -11,14 +11,11 @@ struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   let isPresentedModally: Bool
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
-  @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
-  @EnvironmentStateObject var linksViewModel: ChatLinksViewModel
-  @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
-  @EnvironmentStateObject var voiceMemosViewModel: ChatVoiceMemosViewModel
+  @EnvironmentStateObject private var resources: ChatInfoResourcesState
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
   @StateObject var userGroupsViewModel: UserGroupsViewModel
-  @State  var space: Space?
+  @State var space: Space?
   @State var isSearching = false
   @State var searchText = ""
   @State var searchResults: [UserInfo] = []
@@ -30,21 +27,21 @@ struct ChatInfoView: View {
   @Environment(Router.self) var router
   @Environment(\.dismiss) private var dismiss
   @State var selectedTab: ChatInfoTab
-  @State  var showMakePublicAlert = false
-  @State  var showMakePrivateSheet = false
-  @State  var showClearHistorySheet = false
-  @State  var selectedVisibilityParticipants: Set<Int64> = []
-  @State  var chat: Chat?
-  @State  var chatSubscription: AnyCancellable?
-  @State  var dialogNotificationSubscription: AnyCancellable?
-  @State  var isEditingInfo = false
-  @State  var draftTitle = ""
-  @State  var draftEmoji = ""
-  @State  var isEmojiPickerPresented = false
-  @State  var emojiPickerPresentationGeneration: UInt64 = 0
-  @State  var isSavingInfo = false
-  @FocusState  var isTitleFocused: Bool
-  @State  var notificationSelection: DialogNotificationSettingSelection
+  @State var showMakePublicAlert = false
+  @State var showMakePrivateSheet = false
+  @State var showClearHistorySheet = false
+  @State var selectedVisibilityParticipants: Set<Int64> = []
+  @State var chat: Chat?
+  @State var chatSubscription: AnyCancellable?
+  @State var dialogNotificationSubscription: AnyCancellable?
+  @State var isEditingInfo = false
+  @State var draftTitle = ""
+  @State var draftEmoji = ""
+  @State var isEmojiPickerPresented = false
+  @State var emojiPickerPresentationGeneration: UInt64 = 0
+  @State var isSavingInfo = false
+  @FocusState var isTitleFocused: Bool
+  @State var notificationSelection: DialogNotificationSettingSelection
   @State private var notificationMutationGeneration: UInt64 = 0
   @State private var canChangeVisibility = false
 
@@ -54,12 +51,16 @@ struct ChatInfoView: View {
     [.info, .media, .voice, .files, .links]
   }
 
+  var documentMessages: [DocumentMessage] {
+    resources.files?.documentMessages ?? []
+  }
+
   var currentChat: Chat? {
     chat ?? chatItem.chat
   }
 
   var currentChatId: Int64 {
-    currentChat?.id ?? chatItem.chat?.id ?? 0
+    currentChat?.id ?? chatItem.chat?.id ?? chatItem.dialog.chatId ?? 0
   }
 
   var isPrivate: Bool {
@@ -193,35 +194,10 @@ struct ChatInfoView: View {
       chatId: chatItem.chat?.id ?? 0
     ))
 
-    _documentsViewModel = EnvironmentStateObject { env in
-      ChatDocumentsViewModel(
+    _resources = EnvironmentStateObject { env in
+      ChatInfoResourcesState(
         db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0,
-        peer: chatItem.peerId
-      )
-    }
-
-    _linksViewModel = EnvironmentStateObject { env in
-      ChatLinksViewModel(
-        db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0,
-        peer: chatItem.peerId
-      )
-    }
-
-    _mediaViewModel = EnvironmentStateObject { env in
-      ChatMediaViewModel(
-        db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0,
-        peer: chatItem.peerId,
-        excludeStickerMedia: true
-      )
-    }
-
-    _voiceMemosViewModel = EnvironmentStateObject { env in
-      ChatVoiceMemosViewModel(
-        db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0,
+        chatId: chatItem.chat?.id ?? chatItem.dialog.chatId ?? 0,
         peer: chatItem.peerId
       )
     }
@@ -325,25 +301,34 @@ struct ChatInfoView: View {
                   ))
               }
             case .media:
-              MediaTabView(
-                mediaViewModel: mediaViewModel,
-                onShowInChat: showMessageInChat
-              )
+              if let model = resources.media {
+                MediaTabView(mediaViewModel: model, onShowInChat: showMessageInChat)
+              } else {
+                resourceResolutionView
+              }
             case .voice:
-              VoiceMemosTabView(
-                voiceMemosViewModel: voiceMemosViewModel,
-                onShowInChat: showMessageInChat
-              )
+              if let model = resources.voice {
+                VoiceMemosTabView(voiceMemosViewModel: model, onShowInChat: showMessageInChat)
+              } else {
+                resourceResolutionView
+              }
             case .files:
-              DocumentsTabView(
-                documentsViewModel: documentsViewModel,
-                peerUserId: chatItem.dialog.peerUserId,
-                peerThreadId: chatItem.dialog.peerThreadId
-              )
+              if let model = resources.files {
+                DocumentsTabView(
+                  documentsViewModel: model,
+                  peerUserId: chatItem.dialog.peerUserId,
+                  peerThreadId: currentChatId > 0 ? currentChatId : nil,
+                  onShowInChat: showMessageInChat
+                )
+              } else {
+                resourceResolutionView
+              }
             case .links:
-              LinksTabView(
-                linksViewModel: linksViewModel
-              )
+              if let model = resources.links {
+                LinksTabView(linksViewModel: model, onShowInChat: showMessageInChat)
+              } else {
+                resourceResolutionView
+              }
           }
         }
         .animation(.easeInOut(duration: 0.3), value: selectedTab)
@@ -351,7 +336,11 @@ struct ChatInfoView: View {
       .coordinateSpace(name: "mainScroll")
     }
     .onAppear {
-      if isEditingInfo { startEditingChatInfo() }
+      if isEditingInfo {
+        startEditingChatInfo()
+      }
+      resources.updateChatId(currentChatId)
+      resources.select(selectedTab)
       subscribeToChatUpdates()
       subscribeToDialogNotificationUpdates()
       Task {
@@ -377,6 +366,7 @@ struct ChatInfoView: View {
       }
     }
     .onDisappear {
+      resources.deactivate()
       chatSubscription?.cancel()
       chatSubscription = nil
       dialogNotificationSubscription?.cancel()
@@ -391,6 +381,17 @@ struct ChatInfoView: View {
       }
     }
     .interactiveDismissDisabled(isSavingInfo)
+    .onChange(of: currentChatId) { _, chatId in
+      resources.updateChatId(chatId)
+      resources.select(selectedTab)
+    }
+    .onChange(of: selectedTab) { _, tab in resources.select(tab) }
+    .task(id: chatItem.peerId) {
+      if currentChatId <= 0 {
+        do { _ = try await Api.realtime.send(.getChat(peer: chatItem.peerId)) }
+        catch { resources.resolutionFailed = true }
+      }
+    }
     .task(id: visibilityPermissionKey) {
       await refreshVisibilityPermission()
     }
@@ -533,17 +534,40 @@ struct ChatInfoView: View {
     }
   }
 
-  @MainActor
-   func subscribeToChatUpdates() {
-    guard chatSubscription == nil else { return }
-    guard case let .thread(chatId) = chatItem.peerId else { return }
-
-    chatSubscription = ObjectCache.shared.getChatPublisher(id: chatId)
-      .sink { updatedChat in
-        DispatchQueue.main.async {
-          self.chat = updatedChat
+  private var resourceResolutionView: some View {
+    VStack(spacing: 8) {
+      if resources.resolutionFailed {
+        Text("Couldn't load chat.").foregroundStyle(.secondary)
+        Button("Retry") {
+          Task {
+            resources.resolutionFailed = false
+            do { _ = try await Api.realtime.send(.getChat(peer: chatItem.peerId)) }
+            catch { resources.resolutionFailed = true }
+          }
         }
+      } else {
+        ProgressView()
       }
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 24)
+  }
+
+  @MainActor
+  func subscribeToChatUpdates() {
+    guard chatSubscription == nil else { return }
+    chatSubscription = ValueObservation.tracking { [peer = chatItem.peerId] db in
+      try Chat.getByPeerId(db: db, peerId: peer)
+    }
+    .publisher(in: database.dbWriter, scheduling: .async(onQueue: .main))
+    .sink(
+      receiveCompletion: { completion in
+        if case let .failure(error) = completion {
+          Log.shared.error("Failed to observe chat info", error: error)
+        }
+      },
+      receiveValue: { updatedChat in chat = updatedChat }
+    )
   }
 
   @MainActor
@@ -564,7 +588,7 @@ struct ChatInfoView: View {
           }
         },
         receiveValue: { dialog in
-          self.notificationSelection = dialog?.notificationSelection ?? .global
+          notificationSelection = dialog?.notificationSelection ?? .global
         }
       )
   }
@@ -641,6 +665,7 @@ struct ChatInfoView: View {
           cancelEditingChatInfo()
         }
 
+        resources.select(newTab)
         selectedTab = newTab
       }
     )
@@ -712,12 +737,12 @@ private struct IOSClearChatHistorySheet: View {
 
   private var keepLastDays: Int32 {
     switch range {
-    case .all:
-      0
-    case let .keep(days):
-      Int32(days)
-    case .custom:
-      Int32(customDays)
+      case .all:
+        0
+      case let .keep(days):
+        Int32(days)
+      case .custom:
+        Int32(customDays)
     }
   }
 
@@ -762,7 +787,11 @@ private struct IOSClearChatHistorySheet: View {
       },
       onFailure: { _ in
         ToastManager.shared.hideToast()
-        ToastManager.shared.showToast("Failed to delete history", type: .error, systemImage: "exclamationmark.triangle.fill")
+        ToastManager.shared.showToast(
+          "Failed to delete history",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
       }
     )
 
@@ -793,23 +822,23 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
 
   var id: String {
     switch self {
-    case .all:
-      "all"
-    case let .keep(days):
-      "keep-\(days)"
-    case .custom:
-      "custom"
+      case .all:
+        "all"
+      case let .keep(days):
+        "keep-\(days)"
+      case .custom:
+        "custom"
     }
   }
 
   var title: String {
     switch self {
-    case .all:
-      "All history"
-    case let .keep(days):
-      "Keep last \(days) days"
-    case .custom:
-      "Custom"
+      case .all:
+        "All history"
+      case let .keep(days):
+        "Keep last \(days) days"
+      case .custom:
+        "Custom"
     }
   }
 }
@@ -891,11 +920,11 @@ private struct DialogNotificationSettingsRows: View {
 }
 
 struct InfoTabView: View {
-  @EnvironmentObject  var chatInfoView: ChatInfoViewEnvironment
-  @State  var participantToRemove: UserInfo?
-  @State  var showRemoveAlert = false
-  @State  var groupToRemove: UserGroup?
-  @State  var showRemoveGroupAlert = false
+  @EnvironmentObject var chatInfoView: ChatInfoViewEnvironment
+  @State var participantToRemove: UserInfo?
+  @State var showRemoveAlert = false
+  @State var groupToRemove: UserGroup?
+  @State var showRemoveGroupAlert = false
 
   private var cardBackgroundColor: Color {
     Color(uiColor: .secondarySystemGroupedBackground)
@@ -934,7 +963,9 @@ struct InfoTabView: View {
       }
     } message: {
       if let group = groupToRemove {
-        Text("Remove \(group.name) from this thread? Members may still have access through direct participants, parent access, or another group.")
+        Text(
+          "Remove \(group.name) from this thread? Members may still have access through direct participants, parent access, or another group."
+        )
       }
     }
   }
@@ -1080,7 +1111,6 @@ struct InfoTabView: View {
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 
-  @ViewBuilder
   private var participantsGrid: some View {
     LazyVGrid(columns: [
       GridItem(.flexible()),
@@ -1194,7 +1224,6 @@ struct InfoTabView: View {
       set: { chatInfoView.updateNotificationSelection($0) }
     )
   }
-
 }
 
 struct ParticipantAvatarView: UIViewRepresentable {
@@ -1257,7 +1286,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       true
     }
 
-     func resolveAvatarURL(
+    func resolveAvatarURL(
       for userInfo: UserInfo,
       fallbackImage: UIImage?
     ) -> (url: URL, isTemporary: Bool)? {
@@ -1285,7 +1314,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       return (temporaryUrl, true)
     }
 
-     func cacheTemporaryImage(_ image: UIImage) -> URL? {
+    func cacheTemporaryImage(_ image: UIImage) -> URL? {
       guard let data = image.jpegData(compressionQuality: 0.95) else { return nil }
       let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("avatar-\(UUID().uuidString).jpg")
@@ -1298,7 +1327,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       }
     }
 
-     func snapshotImage(from view: UIView) -> UIImage? {
+    func snapshotImage(from view: UIView) -> UIImage? {
       guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
       let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
       return renderer.image { context in
@@ -1306,7 +1335,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       }
     }
 
-     func findViewController(from view: UIView) -> UIViewController? {
+    func findViewController(from view: UIView) -> UIViewController? {
       var responder: UIResponder? = view
       while let nextResponder = responder?.next {
         if let viewController = nextResponder as? UIViewController {
@@ -1315,6 +1344,77 @@ struct ParticipantAvatarView: UIViewRepresentable {
         responder = nextResponder
       }
       return nil
+    }
+  }
+}
+
+@MainActor
+private final class ChatInfoResourcesState: ObservableObject {
+  @Published private(set) var media: ChatMediaViewModel?
+  @Published private(set) var files: ChatDocumentsViewModel?
+  @Published private(set) var voice: ChatVoiceMemosViewModel?
+  @Published private(set) var links: ChatLinksViewModel?
+  @Published var resolutionFailed = false
+  private let db: AppDatabase
+  private let peer: Peer
+  private var chatId: Int64 = 0
+
+  init(db: AppDatabase, chatId: Int64, peer: Peer) {
+    self.db = db
+    self.peer = peer
+    updateChatId(chatId)
+  }
+
+  func updateChatId(_ chatId: Int64) {
+    guard chatId > 0, self.chatId != chatId else { return }
+    self.chatId = chatId
+    resolutionFailed = false
+    deactivate()
+    media = nil
+    files = nil
+    voice = nil
+    links = nil
+  }
+
+  func deactivate() {
+    media?.deactivate()
+    files?.deactivate()
+    voice?.deactivate()
+    links?.deactivate()
+  }
+
+  func select(_ tab: ChatInfoTab) {
+    if tab != .media {
+      media?.deactivate()
+    }
+    if tab != .files {
+      files?.deactivate()
+    }
+    if tab != .voice {
+      voice?.deactivate()
+    }
+    if tab != .links {
+      links?.deactivate()
+    }
+    guard chatId > 0 else { return }
+    switch tab {
+      case .media:
+        if media == nil {
+          media = ChatMediaViewModel(db: db, chatId: chatId, peer: peer, excludeStickerMedia: true)
+        }
+      case .files:
+        if files == nil {
+          files = ChatDocumentsViewModel(db: db, chatId: chatId, peer: peer)
+        }
+      case .voice:
+        if voice == nil {
+          voice = ChatVoiceMemosViewModel(db: db, chatId: chatId, peer: peer)
+        }
+      case .links:
+        if links == nil {
+          links = ChatLinksViewModel(db: db, chatId: chatId, peer: peer)
+        }
+      default: break
     }
   }
 }

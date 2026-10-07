@@ -1,15 +1,11 @@
 import type { InputPeer, Message } from "@inline-chat/protocol/core"
-import { ModelError } from "@in/server/db/models/_errors"
-import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
-import { UsersModel } from "@in/server/db/models/users"
-import type { DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { Log } from "@in/server/utils/log"
+
+import { MAX_HISTORY_ID, withHistorySnapshot } from "@in/server/modules/message/historySnapshot"
 
 type Input = {
   peerId: InputPeer
@@ -18,96 +14,48 @@ type Input = {
 
 type Output = {
   messages: Message[]
+  seq: bigint
 }
-
-const log = new Log("functions.getMessages")
 
 export const getMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
   validateMessageIds(input.messageIds)
 
-  const chat = await getChatWithAccess(input.peerId, context.currentUserId)
-
-  if (input.messageIds.length === 0) {
-    return { messages: [] }
-  }
-
-  const uniqueIds = uniqueMessageIds(input.messageIds)
-  const fullMessages = await MessageModel.getMessagesByIds(chat.id, uniqueIds)
-  const orderedMessages = orderMessagesByRequestedIds(input.messageIds, fullMessages)
-  const threadProjections = await getMessageThreadProjectionsMap({
-    parentChatId: chat.id,
-    parentMessageIds: orderedMessages.map((message) => message.messageId),
-    userId: context.currentUserId,
-  })
-  const canonicalPeer = Encoders.peerFromChat(chat, { currentUserId: context.currentUserId })
-
-  return {
-    messages: orderedMessages.map((message) => {
-      const threadProjection = threadProjections.get(message.messageId)
-      return Encoders.fullMessage({
-        message,
-        encodingForUserId: context.currentUserId,
-        encodingForPeer: { inputPeer: canonicalPeer },
-        replies: threadProjection?.replies,
-        subthread: threadProjection?.subthread,
-      })
-    }),
-  }
-}
-
-async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): Promise<DbChat> {
-  let chat: DbChat
-
-  try {
-    chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId })
-  } catch (error) {
-    if (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID) {
-      if (inputPeer.type.oneofKind === "user") {
-        const peerUserId = Number(inputPeer.type.user.userId)
-
-        if (!peerUserId || peerUserId <= 0) {
-          throw RealtimeRpcError.UserIdInvalid()
-        }
-
-        const user = await UsersModel.getUserById(peerUserId)
-        if (!user || UsersModel.isDeleted(user)) {
-          throw RealtimeRpcError.UserIdInvalid()
-        }
-
-        log.info("Auto-creating private chat and dialogs", {
-          currentUserId,
-          peerUserId,
-        })
-
-        await ChatModel.createUserChatAndDialog({
-          peerUserId,
-          currentUserId,
-        })
-
-        await ChatModel.createUserChatAndDialog({
-          peerUserId: currentUserId,
-          currentUserId: peerUserId,
-        })
-
-        chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId })
-      } else if (inputPeer.type.oneofKind === "chat") {
-        throw RealtimeRpcError.ChatIdInvalid()
-      } else {
-        throw error
-      }
-    } else {
-      throw error
+  return withHistorySnapshot(input.peerId, context.currentUserId, async (tx, chat) => {
+    if (input.messageIds.length === 0) {
+      return { messages: [], seq: BigInt(chat.updateSeq ?? 0) }
     }
-  }
 
-  await AccessGuards.ensureChatAccess(chat, currentUserId)
+    const uniqueIds = uniqueMessageIds(input.messageIds)
+    const fullMessages = await MessageModel.getMessagesByIds(chat.id, uniqueIds, { tx })
+    const orderedMessages = orderMessagesByRequestedIds(uniqueIds, fullMessages)
+    const threadProjections = await getMessageThreadProjectionsMap({
+      parentChatId: chat.id,
+      parentMessageIds: orderedMessages.map((message) => message.messageId),
+      userId: context.currentUserId,
+      tx,
+    })
 
-  return chat
+    const canonicalPeer = Encoders.peerFromChat(chat, { currentUserId: context.currentUserId })
+
+    return {
+      seq: BigInt(chat.updateSeq ?? 0),
+      messages: orderedMessages.map((message) => {
+        const threadProjection = threadProjections.get(message.messageId)
+        return Encoders.fullMessage({
+          message,
+          encodingForUserId: context.currentUserId,
+          encodingForPeer: { inputPeer: canonicalPeer },
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
+        })
+      }),
+    }
+  })
 }
 
 function validateMessageIds(messageIds: bigint[]): void {
   for (const messageId of messageIds) {
-    if (messageId <= 0n) {
+    if (messageId <= 0n || messageId > MAX_HISTORY_ID) {
       throw RealtimeRpcError.MessageIdInvalid()
     }
   }

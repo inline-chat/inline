@@ -22,5 +22,5 @@ export const getMessages = async (
     },
   )
 
-  return { messages: result.messages }
+  return { seq: result.seq, messages: result.messages }
 }

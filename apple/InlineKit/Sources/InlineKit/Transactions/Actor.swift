@@ -189,6 +189,7 @@ actor TransactionsActor {
 
         return result
       } catch {
+        try Task.checkCancellation()
         // If error is cancel/timeout just propagate – no retry.
         if case TransactionError.canceled = error {
           throw error

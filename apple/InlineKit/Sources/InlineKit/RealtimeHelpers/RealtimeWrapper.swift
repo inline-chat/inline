@@ -1,9 +1,9 @@
-/// The entry point to use the API from UI code
-/// Scope:
-/// - Start a connection
-/// - Allow calling methods and getting a response back
-/// - Allow listening to events???
-/// - Integrate update manager?
+// The entry point to use the API from UI code
+// Scope:
+// - Start a connection
+// - Allow calling methods and getting a response back
+// - Allow listening to events???
+// - Integrate update manager?
 
 import Auth
 import Combine
@@ -11,7 +11,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-
 import SwiftUI
 
 public final actor Realtime: Sendable {
@@ -168,7 +167,31 @@ public final actor Realtime: Sendable {
   ) async throws
     -> RpcResult.OneOf_Result?
   {
-    try await api.invoke(method, input: input, discardIfNotConnected: discardIfNotConnected)
+    if method == .getChatHistory {
+      guard case let .getChatHistory(historyInput)? = input else {
+        throw InlineRPCClientError.unexpectedResponse
+      }
+      var transaction = GetChatHistoryTransaction(
+        peer: historyInput.peerID.toPeer(),
+        mode: historyInput.hasMode ? historyInput
+          .mode : (historyInput.hasOffsetID ? .historyModeOlder : .historyModeLatest),
+        anchorID: historyInput.hasAnchorID ? historyInput.anchorID : nil,
+        beforeID: historyInput.hasBeforeID ? historyInput.beforeID : nil,
+        afterID: historyInput.hasAfterID ? historyInput.afterID : nil,
+        limit: historyInput.hasLimit ? historyInput.limit : nil,
+        beforeLimit: historyInput.hasBeforeLimit ? historyInput.beforeLimit : nil,
+        afterLimit: historyInput.hasAfterLimit ? historyInput.afterLimit : nil,
+        includeAnchor: historyInput.hasIncludeAnchor ? historyInput.includeAnchor : nil
+      )
+      transaction.context.offsetID = historyInput.hasOffsetID ? historyInput.offsetID : nil
+      if discardIfNotConnected {
+        transaction.type = .ephemeral()
+      }
+      // Dispatch preparation and the canonical reducer own snapshot admission.
+      let account = try Auth.shared.handle.beginAccountMutation()
+      return try await Api.realtime.send(transaction, expectedAccount: account)
+    }
+    return try await api.invoke(method, input: input, discardIfNotConnected: discardIfNotConnected)
   }
 
   public func loggedOut() async {
@@ -211,8 +234,8 @@ public extension Realtime {
         case let .deleteMessages(result):
           await handleResult_deleteMessages(result, mutationToken: mutationToken)
 
-        case let .getChatHistory(result):
-          try handleResult_getChatHistory(input!, result, mutationToken: mutationToken)
+        case .getChatHistory:
+          break // Already admitted by the prepared transaction in invoke().
 
         case let .createChat(result):
           try handleResult_createChat(result, mutationToken: mutationToken)
@@ -280,49 +303,6 @@ public extension Realtime {
     log.trace("deleteMessages result: \(result)")
 
     await applyUpdates(result.updates, mutationToken: mutationToken)
-  }
-
-  private func handleResult_getChatHistory(
-    _ input: RpcCall.OneOf_Input,
-    _ result: GetChatHistoryResult,
-    mutationToken: AuthAccountMutationToken
-  ) throws {
-    log.trace("saving getChatHistory result")
-
-    // need to extract peer id from input
-    guard case let .getChatHistory(getChatHistoryInput) = input else {
-      log.error("could not infer peerId")
-      return
-    }
-
-    let peerId = getChatHistoryInput.peerID.toPeer()
-    let context = GetChatHistoryTransaction.Context(
-      peer: peerId,
-      offsetID: getChatHistoryInput.hasOffsetID ? getChatHistoryInput.offsetID : nil,
-      limit: getChatHistoryInput.hasLimit ? getChatHistoryInput.limit : nil,
-      modeRawValue: getChatHistoryInput.hasMode ? getChatHistoryInput.mode.rawValue : nil,
-      anchorID: getChatHistoryInput.hasAnchorID ? getChatHistoryInput.anchorID : nil,
-      beforeID: getChatHistoryInput.hasBeforeID ? getChatHistoryInput.beforeID : nil,
-      afterID: getChatHistoryInput.hasAfterID ? getChatHistoryInput.afterID : nil,
-      beforeLimit: getChatHistoryInput.hasBeforeLimit ? getChatHistoryInput.beforeLimit : nil,
-      afterLimit: getChatHistoryInput.hasAfterLimit ? getChatHistoryInput.afterLimit : nil,
-      includeAnchor: getChatHistoryInput.hasIncludeAnchor ? getChatHistoryInput.includeAnchor : nil
-    )
-
-    Task.detached(priority: .userInitiated) {
-      do {
-        _ = try await self.db.dbWriter.write { db in
-          try Auth.shared.handle.validateAccountMutation(mutationToken)
-          try GetChatHistoryTransaction.apply(result, context: context, db: db)
-        }
-
-        await MainActor.run {
-          MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
-        }
-      } catch {
-        self.log.error("Failed to save chat history", error: error)
-      }
-    }
   }
 
   private func handleResult_createChat(

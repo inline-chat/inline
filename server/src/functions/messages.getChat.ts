@@ -325,8 +325,13 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         })
       })
 
-      const [peer] = peerUserId
-        ? await UsersModel.getUsersWithPhotos([peerUserId], { tx })
+      // Chat-table links to a DM have the same counterpart as user-peer opens.
+      // Use the authorized snapshot's peer so fresh clients can import its profile.
+      const snapshotPeerUserId = encodedChat.peerId?.type.oneofKind === "user"
+        ? Number(encodedChat.peerId.type.user.userId)
+        : undefined
+      const [peer] = snapshotPeerUserId
+        ? await UsersModel.getUsersWithPhotos([snapshotPeerUserId], { tx })
         : []
 
       return {

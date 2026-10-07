@@ -117,7 +117,8 @@ public actor UpdatesEngine: Sendable {
             publishChanges: source != .syncCatchup, animated: true
           )
           if source == .syncCatchup, !affected.isEmpty,
-             let chat = try Chat.fetchOne(db, id: cursor.chatID) {
+             let chat = try Chat.fetchOne(db, id: cursor.chatID)
+          {
             reloadPeers.insert(chat.peerId.toPeer())
           }
 
@@ -235,6 +236,7 @@ public actor UpdatesEngine: Sendable {
 
         case let .dialogTranslation(value):
           try value.apply(db)
+
         case let .dialogFollowMode(dialogFollowMode):
           try dialogFollowMode.apply(db)
 
@@ -258,15 +260,16 @@ public actor UpdatesEngine: Sendable {
             deferredEffects.append(.messageActionAnswered(messageActionAnswered))
           }
 
-      case let .spaceProfile(profile):
-        if var space = try Space.fetchOne(db, key: profile.spaceID),
-           Int64(space.seq ?? 0) <= Int64(update.seq) {
-          space.photoFileUniqueId = profile.hasPhotoFileUniqueID ? profile.photoFileUniqueID : nil
-          space.photoURL = profile.hasPhotoURL ? profile.photoURL : nil
-          space.isPro = profile.isPro
-          space.seq = Int(update.seq)
-          try space.save(db)
-        }
+        case let .spaceProfile(profile):
+          if var space = try Space.fetchOne(db, key: profile.spaceID),
+             Int64(space.seq ?? 0) <= Int64(update.seq)
+          {
+            space.photoFileUniqueId = profile.hasPhotoFileUniqueID ? profile.photoFileUniqueID : nil
+            space.photoURL = profile.hasPhotoURL ? profile.photoURL : nil
+            space.isPro = profile.isPro
+            space.seq = Int(update.seq)
+            try space.save(db)
+          }
 
         case .messageActionInvoked, .spaceSettings:
           // These records are durable so Sync must account for their sequence.
@@ -358,7 +361,8 @@ public actor UpdatesEngine: Sendable {
     }
     if let bucketCommit,
        !bucketSettingsUpdates.isEmpty,
-       (bucketCommit.key != .user || bucketSettingsUpdates.contains(where: { !$0.hasSettings })) {
+       bucketCommit.key != .user || bucketSettingsUpdates.contains(where: { !$0.hasSettings })
+    {
       let failedCount = max(updates.count, 1)
       log.error(
         "Refusing malformed or non-user bucket settings apply",
@@ -578,18 +582,18 @@ public actor UpdatesEngine: Sendable {
               throw privacySafeDurableApplyError(error, phase: "dialog_counts")
             }
           }
-          let committedState: BucketState?
-          if isFinalChunk,
-             priorFailedCount == 0,
-             writeFailed == 0,
-             let bucketCommit {
-            committedState = try GRDBSyncStorage.advanceBucketState(
+          let committedState: BucketState? = if isFinalChunk,
+                                                priorFailedCount == 0,
+                                                writeFailed == 0,
+                                                let bucketCommit
+          {
+            try GRDBSyncStorage.advanceBucketState(
               for: bucketCommit.key,
               state: bucketCommit.state,
               in: db
             )
           } else {
-            committedState = nil
+            nil
           }
           return (
             chunkReloadPeers,
@@ -821,8 +825,8 @@ public actor UpdatesEngine: Sendable {
           }),
           zip(recentMessages, recentMessages.dropFirst()).allSatisfy({ $0.0.id > $0.1.id }),
           snapshot.chat.chat.hasLastMsgID
-            ? recentMessages.first?.id == snapshot.chat.chat.lastMsgID
-            : recentMessages.isEmpty
+          ? recentMessages.first?.id == snapshot.chat.chat.lastMsgID
+          : recentMessages.isEmpty
     else {
       log.error(
         "Chat repair snapshot is invalid",
@@ -852,7 +856,8 @@ public actor UpdatesEngine: Sendable {
               && DbBucketState.Columns.entityId == bucketKey.getEntityId()
           )
           .fetchOne(db),
-          existing.seq >= Int64(snapshot.chat.chat.seq) {
+          existing.seq >= Int64(snapshot.chat.chat.seq)
+        {
           if try Chat.fetchOne(db, id: snapshot.chat.chat.id) != nil {
             return BucketState(date: existing.date, seq: existing.seq)
           }
@@ -873,23 +878,13 @@ public actor UpdatesEngine: Sendable {
         var chat = Chat(from: snapshot.chat.chat)
         let authoritativeLastMessageID = chat.lastMsgId
         chat.participantRosterComplete = false
-        if snapshot.chat.hasAnchorMessage {
-          let anchor = snapshot.chat.anchorMessage
-          guard let parentChatID = chat.parentChatId,
-                let parentMessageID = chat.parentMessageId,
-                anchor.id == parentMessageID,
-                anchor.chatID == parentChatID,
-                validatedPeer(anchor.peerID) != nil
-          else {
-            throw DurableUpdateApplyError.invalidParentReference(chatID: chat.id)
-          }
-          _ = try Message.save(
-            db,
-            protocolMessage: anchor,
-            publishChanges: false,
-            materializeMissingReferences: true
-          )
-        }
+        let currentHistoryRevision = try Int64.fetchOne(
+          db, sql: "SELECT historyAdmissionRevision FROM chat WHERE id = ?", arguments: [chatID]
+        )
+        let admitsHistoryRows = snapshot.allowsHistoryRows &&
+          (snapshot.expectedHistoryRevision == nil || snapshot.expectedHistoryRevision == currentHistoryRevision)
+        // A child bucket's sequence never orders its parent anchor body.
+
         try self.requireStructuralReferences(for: chat, db: db)
         try chat.saveWithValidLastMsg(db)
         try Acknowledgement.save(db, cursors: snapshot.chat.chat.acknowledgements.cursors, chatId: chat.id)
@@ -899,36 +894,29 @@ public actor UpdatesEngine: Sendable {
           _ = try snapshot.chat.dialog.saveFull(db)
         }
 
-        for message in recentMessages {
-          _ = try Message.save(
-            db,
-            protocolMessage: message,
-            publishChanges: false,
-            materializeMissingReferences: true
-          )
+        if admitsHistoryRows {
+          for message in recentMessages {
+            _ = try Message.save(
+              db,
+              protocolMessage: message,
+              publishChanges: false,
+              materializeMissingReferences: true
+            )
+          }
+
+          for pinnedMessage in snapshot.pinnedMessages {
+            _ = try Message.save(
+              db,
+              protocolMessage: pinnedMessage,
+              publishChanges: false,
+              materializeMissingReferences: true
+            )
+          }
         }
 
-        for pinnedMessage in snapshot.pinnedMessages {
-          _ = try Message.save(
-            db,
-            protocolMessage: pinnedMessage,
-            publishChanges: false,
-            materializeMissingReferences: true
-          )
-        }
-
-        // Repair proves current chat metadata and the exact pin rows, not any
-        // older history interval. Preserve cached messages, certify the newest
-        // ordinary-message window, and leave only the older range demand-driven.
-        try MessageHistoryCoverageStore.invalidate(db, chatId: chatID)
-        if let oldestRecentID = recentMessages.last?.id {
-          try MessageHistoryCoverageStore.subtract(
-            db,
-            chatId: chatID,
-            lowerId: oldestRecentID,
-            upperId: MessageHistoryHole.positiveMessageIDMax
-          )
-        }
+        // TOO_LONG proves metadata and explicit pin rows, not any history
+        // interval. Every tag space must become unknown together.
+        try MessageHistoryCoverageStore.invalidateAll(db, chatId: chatID)
 
         // The first save may have withheld lastMsgId until its message row was
         // materialized. Re-apply the same authoritative Chat after the window.
@@ -1038,7 +1026,8 @@ public actor UpdatesEngine: Sendable {
               && DbBucketState.Columns.entityId == bucketKey.getEntityId()
           )
           .fetchOne(db),
-          existing.seq >= Int64(snapshot.space.seq) {
+          existing.seq >= Int64(snapshot.space.seq)
+        {
           if try Space.fetchOne(db, id: repair.spaceID) != nil {
             return BucketState(date: existing.date, seq: existing.seq)
           }
@@ -1115,12 +1104,19 @@ public actor UpdatesEngine: Sendable {
               )
               .fetchOne(db))
             let userProjectionIsCurrent = currentCursor.state.seq <= snapshot.checkpointState.seq
+            let coldChatIDs = try GetChatsTransaction.coldBootstrapChatIDs(
+              chats,
+              expectedRemovalRevision: snapshot.catalogHistoryAdmission?.expectedRemovalRevision,
+              allowedChatIDs: snapshot.catalogHistoryAdmission?.allowedChatIDs ?? [],
+              in: db
+            )
             let imported = try GetChatsTransaction.applySnapshot(
               chats,
               userProjectionAdmission: userProjectionIsCurrent
                 ? .alreadyValidated
                 : .missingOnly,
               replacesActiveCatalog: userProjectionIsCurrent,
+              coldBootstrapChatIDs: coldChatIDs,
               in: db
             )
             return (currentCursor, imported)
@@ -1321,10 +1317,17 @@ public actor UpdatesEngine: Sendable {
               : []
             failures = []
           } else {
+            let coldChatIDs = try GetChatsTransaction.coldBootstrapChatIDs(
+              repair.chats,
+              expectedRemovalRevision: repair.catalogHistoryAdmission?.expectedRemovalRevision,
+              allowedChatIDs: repair.catalogHistoryAdmission?.allowedChatIDs ?? [],
+              in: db
+            )
             let imported = try GetChatsTransaction.applySnapshot(
               repair.chats,
               userProjectionAdmission: userProjectionIsCurrent ? .alreadyValidated : .missingOnly,
               replacesActiveCatalog: repair.replacesActiveCatalog && userProjectionIsCurrent,
+              coldBootstrapChatIDs: coldChatIDs,
               in: db
             )
             seededStates = imported.seededStates
@@ -1437,7 +1440,7 @@ public actor UpdatesEngine: Sendable {
         guard try User.fetchOne(db, id: expectedUserID) != nil else {
           throw DurableUpdateApplyError.unresolvedUserRepairAccount(expectedUserID)
         }
-        let currentUserCursor = DurableBucketAdmissionState(try DbBucketState
+        let currentUserCursor = try DurableBucketAdmissionState(DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
               && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
@@ -1463,7 +1466,7 @@ public actor UpdatesEngine: Sendable {
           else {
             throw DurableUpdateApplyError.unresolvedUserRepairTarget(key)
           }
-          let durableTarget = DurableBucketAdmissionState(try DbBucketState
+          let durableTarget = try DurableBucketAdmissionState(DbBucketState
             .filter(
               DbBucketState.Columns.bucketType == coordinates.bucket
                 && DbBucketState.Columns.entityId == coordinates.entityID
@@ -1515,7 +1518,8 @@ public actor UpdatesEngine: Sendable {
     var exactChatRoots = userAuthorizedChats
     if case let .chat(bucketPeer) = bucketKey,
        let ownerPeer = validatedPeer(bucketPeer),
-       let snapshot = sidecars.chats.last(where: { validatedPeer($0.peerID) == ownerPeer }) {
+       let snapshot = sidecars.chats.last(where: { validatedPeer($0.peerID) == ownerPeer })
+    {
       exactChatRoots[snapshot.id] = snapshot
     }
     var directChatRoots = userAuthorizedChatIDs
@@ -1575,7 +1579,8 @@ public actor UpdatesEngine: Sendable {
         throw DurableUpdateApplyError.invalidBucket(.chat(peer: dialog.peer))
       }
       if try Dialog.get(peerId: peer).fetchOne(db) == nil,
-         try sidecarDialogDependenciesExist(dialog, db: db) {
+         try sidecarDialogDependenciesExist(dialog, db: db)
+      {
         _ = try dialog.saveFull(db)
       }
     }
@@ -1640,20 +1645,10 @@ public actor UpdatesEngine: Sendable {
           parentChatID: parentChatId
         )
       }
-      guard try Message
-        .filter(Message.Columns.chatId == parentChatId)
-        .filter(Message.Columns.messageId == parentMessageId)
-        .fetchCount(db) > 0
-      else {
-        throw DurableUpdateApplyError.unresolvedParentMessage(
-          chatID: chat.id,
-          parentChatID: parentChatId,
-          parentMessageID: parentMessageId
-        )
-      }
+      // Parent coordinates outlive a removed parent body. Hydration uses its
+      // own witnessed lookup; a child snapshot cannot authorize that body.
     }
   }
-
 }
 
 // MARK: Extensions
@@ -1662,55 +1657,55 @@ enum RealtimeUpdateDiagnostics {
   static func kind(of update: InlineProtocol.Update.OneOf_Update?) -> String {
     guard let update else { return "missing" }
     switch update {
-    case .newMessage: return "newMessage"
-    case .acknowledgement: return "acknowledgement"
-    case .editMessage: return "editMessage"
-    case .updateMessageID: return "updateMessageID"
-    case .deleteMessages: return "deleteMessages"
-    case .updateComposeAction: return "updateComposeAction"
-    case .updateUserStatus: return "updateUserStatus"
-    case .messageAttachment: return "messageAttachment"
-    case .updateReaction: return "updateReaction"
-    case .deleteReaction: return "deleteReaction"
-    case .participantAdd: return "participantAdd"
-    case .participantDelete: return "participantDelete"
-    case .newChat: return "newChat"
-    case .deleteChat: return "deleteChat"
-    case .spaceMemberAdd: return "spaceMemberAdd"
-    case .spaceMemberDelete: return "spaceMemberDelete"
-    case .joinSpace: return "joinSpace"
-    case .updateReadMaxID: return "updateReadMaxID"
-    case .updateUserSettings: return "updateUserSettings"
-    case .newMessageNotification: return "newMessageNotification"
-    case .markAsUnread: return "markAsUnread"
-    case .chatSkipPts: return "chatSkipPts"
-    case .chatHasNewUpdates: return "chatHasNewUpdates"
-    case .spaceHasNewUpdates: return "spaceHasNewUpdates"
-    case .userHasNewUpdates: return "userHasNewUpdates"
-    case .spaceMemberUpdate: return "spaceMemberUpdate"
-    case .chatVisibility: return "chatVisibility"
-    case .dialogArchived: return "dialogArchived"
-    case .chatInfo: return "chatInfo"
-    case .pinnedMessages: return "pinnedMessages"
-    case .chatMoved: return "chatMoved"
-    case .dialogNotificationSettings: return "dialogNotificationSettings"
-    case .chatOpen: return "chatOpen"
-    case .messageActionInvoked: return "messageActionInvoked"
-    case .messageActionAnswered: return "messageActionAnswered"
-    case .clearChatHistory_p: return "clearChatHistory"
-    case .botPresence: return "botPresence"
-    case .dialogTranslation: return "dialogTranslation"
-    case .dialogFollowMode: return "dialogFollowMode"
-    case .updatedUser: return "updatedUser"
-    case .participantGroupAdd: return "participantGroupAdd"
-    case .participantGroupDelete: return "participantGroupDelete"
-    case .userAddedToChat: return "userAddedToChat"
-    case .userRemovedFromChat: return "userRemovedFromChat"
-    case .spaceProfile: return "spaceProfile"
-    case .spaceSettings: return "spaceSettings"
-    case .chatPermissions: return "chatPermissions"
-    case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
-    case .dialogFolder: return "dialogFolder"
+      case .newMessage: return "newMessage"
+      case .acknowledgement: return "acknowledgement"
+      case .editMessage: return "editMessage"
+      case .updateMessageID: return "updateMessageID"
+      case .deleteMessages: return "deleteMessages"
+      case .updateComposeAction: return "updateComposeAction"
+      case .updateUserStatus: return "updateUserStatus"
+      case .messageAttachment: return "messageAttachment"
+      case .updateReaction: return "updateReaction"
+      case .deleteReaction: return "deleteReaction"
+      case .participantAdd: return "participantAdd"
+      case .participantDelete: return "participantDelete"
+      case .newChat: return "newChat"
+      case .deleteChat: return "deleteChat"
+      case .spaceMemberAdd: return "spaceMemberAdd"
+      case .spaceMemberDelete: return "spaceMemberDelete"
+      case .joinSpace: return "joinSpace"
+      case .updateReadMaxID: return "updateReadMaxID"
+      case .updateUserSettings: return "updateUserSettings"
+      case .newMessageNotification: return "newMessageNotification"
+      case .markAsUnread: return "markAsUnread"
+      case .chatSkipPts: return "chatSkipPts"
+      case .chatHasNewUpdates: return "chatHasNewUpdates"
+      case .spaceHasNewUpdates: return "spaceHasNewUpdates"
+      case .userHasNewUpdates: return "userHasNewUpdates"
+      case .spaceMemberUpdate: return "spaceMemberUpdate"
+      case .chatVisibility: return "chatVisibility"
+      case .dialogArchived: return "dialogArchived"
+      case .chatInfo: return "chatInfo"
+      case .pinnedMessages: return "pinnedMessages"
+      case .chatMoved: return "chatMoved"
+      case .dialogNotificationSettings: return "dialogNotificationSettings"
+      case .chatOpen: return "chatOpen"
+      case .messageActionInvoked: return "messageActionInvoked"
+      case .messageActionAnswered: return "messageActionAnswered"
+      case .clearChatHistory_p: return "clearChatHistory"
+      case .botPresence: return "botPresence"
+      case .dialogTranslation: return "dialogTranslation"
+      case .dialogFollowMode: return "dialogFollowMode"
+      case .updatedUser: return "updatedUser"
+      case .participantGroupAdd: return "participantGroupAdd"
+      case .participantGroupDelete: return "participantGroupDelete"
+      case .userAddedToChat: return "userAddedToChat"
+      case .userRemovedFromChat: return "userRemovedFromChat"
+      case .spaceProfile: return "spaceProfile"
+      case .spaceSettings: return "spaceSettings"
+      case .chatPermissions: return "chatPermissions"
+      case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
+      case .dialogFolder: return "dialogFolder"
     }
   }
 }
@@ -1789,22 +1784,38 @@ private func userAuthorizedDialogDependencyPeers(
   for update in updates {
     switch update.update {
       case let .dialogArchived(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .updateReadMaxID(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .markAsUnread(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .dialogNotificationSettings(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .dialogTranslation(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .dialogFollowMode(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .dialogCollapsedMaxID(value):
-        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+        if let peer = validatedPeer(value.peerID) {
+          peers.insert(peer)
+        }
       case let .dialogFolder(value):
         for dialog in value.dialogs {
-          if let peer = validatedPeer(dialog.peer) { peers.insert(peer) }
+          if let peer = validatedPeer(dialog.peer) {
+            peers.insert(peer)
+          }
         }
       default:
         break
@@ -1869,7 +1880,8 @@ private func userAuthorizedSidecarChatIDs(
         snapshot.parentChatID > 0,
         let parent = snapshots[snapshot.parentChatID],
         validatedPeer(parent.peerID) == .thread(id: parent.id),
-        admitted.insert(parent.id).inserted {
+        admitted.insert(parent.id).inserted
+  {
     pending.append(parent.id)
   }
   return admitted
@@ -1885,7 +1897,7 @@ enum DurableUpdateFailureCause: String, Sendable {
   case databaseBusy = "database_busy"
   case databaseCorrupt = "database_corrupt"
   case invalidData = "invalid_data"
-  case other = "other"
+  case other
 }
 
 struct DurableUpdateFailure: Error, Sendable, PrivacySafeErrorCategoryProviding {
@@ -2129,7 +2141,8 @@ private func dialogCountCoveredSequence(
 ) throws -> Int64? {
   if let bucketCommit,
      case let .chat(bucketPeer) = bucketCommit.key,
-     validatedPeer(bucketPeer) == validatedPeer(snapshotPeer) {
+     validatedPeer(bucketPeer) == validatedPeer(snapshotPeer)
+  {
     return bucketCommit.state.seq
   }
   guard let coordinates = validatedBucketCoordinates(.chat(peer: snapshotPeer)) else {
@@ -2215,7 +2228,8 @@ func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) thr
     chat.participantRosterComplete = try Chat.fetchOne(db, id: chat.id)?.participantRosterComplete ?? false
     if let parentChatId = chat.parentChatId,
        !sidecarChatIds.contains(parentChatId),
-       try Chat.fetchOne(db, id: parentChatId) == nil {
+       try Chat.fetchOne(db, id: parentChatId) == nil
+    {
       chat.parentChatId = nil
       chat.parentMessageId = nil
     }
@@ -2435,7 +2449,8 @@ extension InlineProtocol.UpdateNewMessage {
        msg.out == false,
        msg.countsAsUnread,
        MacNotifications.isFreshMessage(message, now: Date()),
-       let currentUserID = Auth.shared.getCurrentUserId() {
+       let currentUserID = Auth.shared.getCurrentUserId()
+    {
       db.afterNextTransaction { committedDB in
         do {
           let replyToMessageID = message.hasReplyToMsgID ? message.replyToMsgID : nil
@@ -2482,8 +2497,8 @@ extension InlineProtocol.UpdateNewMessage {
 }
 
 extension InlineProtocol.UpdateNewMessageNotification {
-  // Compatibility event for older Mac clients. New clients derive all local
-  // notification work from the durable newMessage update.
+  /// Compatibility event for older Mac clients. New clients derive all local
+  /// notification work from the durable newMessage update.
   func apply(_: Database) throws {}
 }
 
@@ -2584,31 +2599,7 @@ extension InlineProtocol.UpdateDeleteMessages {
       throw RealtimeUpdateApplyError.missingChat(peerID.toPeer())
     }
 
-    // let chat = try Chat.fetchOne(db, id: chatId)
-    let chatId = chat.id
-    var prevChatLastMsgId = chat.lastMsgId
-
-    // Delete messages
-    for messageId in messageIds {
-      // Update last message first
-      if prevChatLastMsgId == messageId {
-        let previousMessage = try Message.latestActivityMessage(db, chatId: chat.id, excluding: messageIds)
-
-        var updatedChat = chat
-        updatedChat.lastMsgId = previousMessage?.messageId
-        try updatedChat.save(db)
-
-        // Track the newly promoted last message so consecutive deletions
-        // keep advancing the chat tail correctly.
-        prevChatLastMsgId = previousMessage?.messageId
-      }
-
-      // TODO: Optimize this to use keys
-      try Message
-        .filter(Column("messageId") == messageId)
-        .filter(Column("chatId") == chatId)
-        .deleteAll(db)
-    }
+    try Message.deleteMessages(db, messageIds: messageIds, chatId: chat.id)
 
     if publishChanges {
       db.afterNextTransaction { _ in
@@ -2623,73 +2614,59 @@ extension InlineProtocol.UpdateDeleteMessages {
 extension InlineProtocol.UpdateMessageAttachment {
   @discardableResult
   func apply(_ db: Database, publishChanges: Bool = true) throws -> Peer? {
-    if attachment.attachment == nil {
-      let attachmentId = attachment.id
-
-      if let existing = try Attachment
-        .filter(Column("attachmentId") == attachmentId)
-        .fetchOne(db)
-      {
-        if let externalTaskId = existing.externalTaskId {
-          try ExternalTask
-            .filter(Column("id") == externalTaskId)
-            .deleteAll(db)
-        }
-
-        if let urlPreviewId = existing.urlPreviewId {
-          try UrlPreview
-            .filter(Column("id") == urlPreviewId)
-            .deleteAll(db)
-        }
-
-        try Attachment
-          .filter(Column("attachmentId") == attachmentId)
-          .deleteAll(db)
-
-        Log.shared.debug("Deleted attachment (attachmentId: \(attachmentId))")
-      } else {
-        // Legacy fallback: older servers used the externalTaskId as the MessageAttachment.id for deletion updates.
-        try Attachment
-          .filter(Column("externalTaskId") == attachmentId)
-          .deleteAll(db)
-
-        try ExternalTask
-          .filter(Column("id") == attachmentId)
-          .deleteAll(db)
-
-        Log.shared.debug("Deleted attachment via legacy externalTaskId: \(attachmentId)")
-      }
-    } else {
-      guard attachment.attachment != nil else {
-        Log.shared.error("Message attachment is nil")
-        return nil
-      }
-
-      let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
-        .fetchOne(db)
-
-      if let message {
-        _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
-        Log.shared.debug("Saved message attachment (attachmentId: \(attachment.id)) for message \(messageID) in chat \(chatID)")
-      } else {
-        Log.shared.warning("Message not found for attachment update")
-      }
+    try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatID)
+    let parent = try Message.fetchOne(db, key: ["messageId": messageID, "chatId": chatID])
+    let existing = try Attachment.filter(Column("attachmentId") == attachment.id).fetchOne(db)
+    if let existing, existing.messageId != parent?.globalId {
+      throw HistoryPageAdmissionError.malformedPage
     }
-
-    let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
-      .fetchOne(db)
-
-    if let message {
+    let addsPreview = if case .urlPreview = attachment.attachment {
+      true
+    } else {
+      false
+    }
+    let removingPreviewOrUnknown = attachment.attachment == nil && (existing == nil || existing?.urlPreviewId != nil)
+    if attachment.attachment == nil {
+      if let existing {
+        try Attachment.filter(Column("id") == existing.id).deleteAll(db)
+      } else if let globalID = parent?.globalId {
+        // Legacy external-task IDs must affect this occurrence alone.
+        try Attachment.filter(Column("messageId") == globalID)
+          .filter(Column("externalTaskId") == attachment.id).deleteAll(db)
+      }
+      // Preview, photo and task caches may be shared by other occurrences.
+    } else if let globalID = parent?.globalId {
+      _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: globalID)
+    }
+    if var parent {
+      if addsPreview {
+        parent.hasLink = true
+        parent.resourceFlags |= MessageResourceFlags.link.rawValue
+        try parent.update(db)
+      }
+      if removingPreviewOrUnknown {
+        // A partial deletion DTO cannot make stale cached text authoritative.
+        // Preserve suppressed membership, invalidate demand and hydrate once.
+        try MessageHistoryCoverageStore.invalidate(db, chatId: chatID, scope: .links)
+        let peer = parent.peerId
+        let id = messageID
+        db.afterNextTransaction { _ in
+          Task { _ = try? await Api.realtime.send(GetMessagesTransaction(peer: peer, messageIds: [id])) }
+        }
+      }
       if publishChanges {
+        let saved = parent
         db.afterNextTransaction { _ in
           Task(priority: .userInitiated) { @MainActor in
-            MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+            MessagesPublisher.shared.messageUpdatedSync(message: saved, peer: saved.peerId, animated: true)
           }
         }
       }
-      return message.peerId
+      return parent.peerId
     }
-
+    if try Chat.fetchOne(db, id: chatID) != nil {
+      try MessageHistoryCoverageStore.invalidate(db, chatId: chatID, scope: .links)
+    }
     return nil
   }
 }
@@ -2753,6 +2730,11 @@ extension InlineProtocol.UpdateEditMessage {
     publishChanges: Bool,
     materializeMissingReferences: Bool = false
   ) throws -> Bool {
+    guard try Chat.fetchOne(db, id: message.chatID) != nil else {
+      try HistoryPageAdmissionToken.advanceRevision(db, chatId: message.chatID)
+      return false
+    }
+    let existing = try Message.fetchOne(db, key: ["chatId": message.chatID, "messageId": message.id])
     let result = try Message.saveWithResult(
       db,
       protocolMessage: message,
@@ -2761,6 +2743,26 @@ extension InlineProtocol.UpdateEditMessage {
     )
 
     guard result.disposition.isAccepted else { return false }
+    // Even an edit whose row was not cached can change a resource predicate.
+    // Omitted IDs in older filtered pages have no per-message revision to check.
+    try HistoryPageAdmissionToken.advanceRevision(db, chatId: message.chatID)
+
+    // Live edit DTOs can omit hydration. An omitted media union cannot safely
+    // mean removal, so invalidate only those old tag spaces and hydrate once.
+    let oldMedia = MessageResourceFlags(rawValue: existing?.resourceFlags ?? 0)
+      .intersection([.photo, .video, .file, .voice])
+    if !message.hasMedia, !oldMedia.isEmpty {
+      for scope in MessageHistoryScope.allCases
+        where scope != .timeline && !scope.resourceMask.intersection(oldMedia).isEmpty
+      {
+        try MessageHistoryCoverageStore.invalidate(db, chatId: message.chatID, scope: scope)
+      }
+      let peer = result.message.peerId
+      let id = message.id
+      db.afterNextTransaction { _ in
+        Task { _ = try? await Api.realtime.send(GetMessagesTransaction(peer: peer, messageIds: [id])) }
+      }
+    }
 
     let translations = Translation
       .filter(Translation.Columns.messageId == message.id)
@@ -2879,7 +2881,8 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
     if !hasMemberID,
        let existingMember,
        let updateDate,
-       existingMember.date > updateDate {
+       existingMember.date > updateDate
+    {
       try SpaceMemberEventState.observe(
         spaceID: spaceID,
         userID: userID,
@@ -2990,7 +2993,8 @@ extension InlineProtocol.UpdateSpaceMemberUpdate {
     let currentUserId = Auth.shared.getCurrentUserId()
     if updatedMember.userId == currentUserId,
        previousCanAccessPublic == true,
-       updatedMember.canAccessPublicChats == false {
+       updatedMember.canAccessPublicChats == false
+    {
       try Member.removePublicThreadsForSpace(spaceID: updatedMember.spaceId, in: db)
     }
   }
@@ -3225,7 +3229,8 @@ extension InlineProtocol.UpdateDialogNotificationSettings {
 extension InlineProtocol.UpdateDialogTranslation {
   func apply(_ db: Database) throws {
     guard let peer = validatedPeer(peerID),
-          var dialog = try Dialog.get(peerId: peer).fetchOne(db) else {
+          var dialog = try Dialog.get(peerId: peer).fetchOne(db)
+    else {
       throw TransactionExecutionError.invalid
     }
     dialog.translationEnabled = enabled
@@ -3292,33 +3297,33 @@ extension InlineProtocol.UpdateChatOpen {
 extension InlineProtocol.UpdateDialogFolder {
   func apply(_ db: Database) throws {
     switch folderChange {
-    case let .folder(folder):
-      try folder.saveFull(db)
-      for dialog in dialogs {
-        try dialog.saveFull(db)
-        try DialogCatalogStore.include(
-          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
-          in: db
-        )
-      }
-    case let .deletedFolderID(folderID):
-      for dialog in dialogs {
-        try dialog.saveFull(db)
-        try DialogCatalogStore.include(
-          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
-          in: db
-        )
-      }
-      try DialogFolder.deleteOne(db, key: folderID)
-    case .none:
-      // Membership-only moves still carry complete changed dialogs.
-      for dialog in dialogs {
-        try dialog.saveFull(db)
-        try DialogCatalogStore.include(
-          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
-          in: db
-        )
-      }
+      case let .folder(folder):
+        try folder.saveFull(db)
+        for dialog in dialogs {
+          try dialog.saveFull(db)
+          try DialogCatalogStore.include(
+            dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+            in: db
+          )
+        }
+      case let .deletedFolderID(folderID):
+        for dialog in dialogs {
+          try dialog.saveFull(db)
+          try DialogCatalogStore.include(
+            dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+            in: db
+          )
+        }
+        try DialogFolder.deleteOne(db, key: folderID)
+      case .none:
+        // Membership-only moves still carry complete changed dialogs.
+        for dialog in dialogs {
+          try dialog.saveFull(db)
+          try DialogCatalogStore.include(
+            dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+            in: db
+          )
+        }
     }
   }
 }
@@ -3335,7 +3340,8 @@ extension InlineProtocol.UpdateReadMaxId {
         // Direct transaction results and sequenced User-bucket replay can
         // deliver the same read projection through different paths. Treat an
         // equal marker as already applied so it cannot erase a later explicit
-        // mark-unread; reject a lower marker so neither frontier nor count can
+        // MARK: - unread; reject a lower marker so neither frontier nor count can
+
         // regress.
         Log.shared.debug(
           "Ignored non-advancing read max id for peer \(peerID.toPeer()) current: \(currentReadMaxID) incoming: \(readMaxID)"
