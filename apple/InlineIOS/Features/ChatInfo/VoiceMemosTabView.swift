@@ -9,13 +9,7 @@ struct VoiceMemosTabView: View {
 
   var body: some View {
     VStack(spacing: 16) {
-      if voiceMemosViewModel.voiceMemoMessages.isEmpty {
-        VStack(spacing: 8) {
-          Text("No voice memos found in this chat.")
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-      } else {
+      if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
             Section {
@@ -54,11 +48,17 @@ struct VoiceMemosTabView: View {
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: voiceMemosViewModel.loadState, isEmpty: voiceMemosViewModel.voiceMemoMessages.isEmpty,
+        emptyMessage: "No voice memos found in this chat.", loadMore: voiceMemosViewModel.loadMore,
+        retry: voiceMemosViewModel.retry
+      )
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task {
       await voiceMemosViewModel.loadInitial()
     }
+    .onDisappear { voiceMemosViewModel.deactivate() }
   }
 
   private func formatDate(_ date: Date) -> String {

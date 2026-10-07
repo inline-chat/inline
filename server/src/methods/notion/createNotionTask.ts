@@ -1,3 +1,5 @@
+import { lockAttachmentChat, persistAttachmentMutation } from "@in/server/modules/message/attachmentMembership"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { Type, type Static } from "@sinclair/typebox"
 import { Log, LogLevel } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
@@ -8,10 +10,7 @@ import { eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
 import { getUpdateGroup, type UpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
-import {
-  MessageAttachmentExternalTask_Status,
-  type MessageAttachment,
-} from "@inline-chat/protocol/core"
+import { MessageAttachmentExternalTask_Status, type MessageAttachment } from "@inline-chat/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
 import { encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
@@ -79,9 +78,7 @@ export const handler = async (
     sourceMessageId: message.globalId,
     connectorSpaceId: spaceId,
   }
-  const replay = notionTaskReplayResponse(
-    await findExistingProviderTask(taskIdentity),
-  )
+  const replay = notionTaskReplayResponse(await findExistingProviderTask(taskIdentity))
   if (replay) {
     Log.shared.info("Replayed existing Notion task creation", {
       currentUserId: context.currentUserId,
@@ -148,28 +145,36 @@ export const handler = async (
     stage = "write_task_and_attachment"
     const dbOperationsStart = Date.now()
     const localWrite = await db.transaction(async (tx) => {
-      const [externalTaskResult] = await tx.insert(externalTasks).values({
-        application: "notion",
-        taskId: result.pageId,
-        status: "todo",
-        assignedUserId: BigInt(context.currentUserId),
-        connectorSpaceId: spaceId,
-        sourceMessageId: message.globalId,
-        title: encryptedTitle?.encrypted ?? null,
-        titleIv: encryptedTitle?.iv ?? null,
-        titleTag: encryptedTitle?.authTag ?? null,
-        url: result.url,
-        date: new Date(),
-      }).returning()
+      const lockedChat = await lockAttachmentChat(tx, chatId)
+      const [externalTaskResult] = await tx
+        .insert(externalTasks)
+        .values({
+          application: "notion",
+          taskId: result.pageId,
+          status: "todo",
+          assignedUserId: BigInt(context.currentUserId),
+          connectorSpaceId: spaceId,
+          sourceMessageId: message.globalId,
+          title: encryptedTitle?.encrypted ?? null,
+          titleIv: encryptedTitle?.iv ?? null,
+          titleTag: encryptedTitle?.authTag ?? null,
+          url: result.url,
+          date: new Date(),
+        })
+        .returning()
       if (!externalTaskResult?.id) throw new Error("Failed to create external task")
-      const [messageAttachmentRow] = await tx.insert(messageAttachments).values({
-        messageId: message.globalId,
-        externalTaskId: BigInt(externalTaskResult.id),
-      }).returning()
+      const [messageAttachmentRow] = await tx
+        .insert(messageAttachments)
+        .values({
+          messageId: message.globalId,
+          externalTaskId: BigInt(externalTaskResult.id),
+        })
+        .returning()
       if (!messageAttachmentRow?.id) throw new Error("Failed to create message attachment")
-      return { externalTaskResult, messageAttachmentRow }
+      const durableUpdate = await persistAttachmentMutation(tx, lockedChat, message.globalId, messageAttachmentRow.id)
+      return { externalTaskResult, messageAttachmentRow, durableUpdate }
     })
-    const { externalTaskResult, messageAttachmentRow } = localWrite
+    const { externalTaskResult, messageAttachmentRow, durableUpdate } = localWrite
     providerPagePersisted = true
     logDevTelemetry("Notion task database writes completed", {
       ...devTelemetry,
@@ -191,6 +196,7 @@ export const handler = async (
     // Add message attachment update
     parallelOperations.push(
       messageAttachmentUpdate({
+        durableUpdate,
         messageId,
         peerId,
         currentUserId: context.currentUserId,
@@ -254,9 +260,7 @@ export const handler = async (
       await compensateNotionPage(spaceId, createdProviderPageId)
     }
     if (idempotencyConflict) {
-      const replay = notionTaskReplayResponse(
-        await findExistingProviderTask(taskIdentity),
-      )
+      const replay = notionTaskReplayResponse(await findExistingProviderTask(taskIdentity))
       if (replay) {
         Log.shared.info("Converged concurrent Notion task creation", {
           currentUserId: context.currentUserId,
@@ -303,6 +307,7 @@ async function compensateNotionPage(spaceId: number, pageId: string): Promise<vo
 }
 
 const messageAttachmentUpdate = async ({
+  durableUpdate,
   messageId,
   peerId,
   currentUserId,
@@ -312,6 +317,7 @@ const messageAttachmentUpdate = async ({
   decryptedTitle,
   updateGroup,
 }: {
+  durableUpdate: UpdateSeqAndDate
   messageId: number
   peerId: TPeerInfo
   currentUserId: number
@@ -361,6 +367,8 @@ const messageAttachmentUpdate = async ({
       updateGroup.userIds.forEach((userId: number) => {
         const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -372,6 +380,8 @@ const messageAttachmentUpdate = async ({
     } else if (updateGroup.type === "threadUsers") {
       updateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
@@ -384,6 +394,8 @@ const messageAttachmentUpdate = async ({
       const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
       userIds.forEach((userId) => {
         const update = encodeMessageAttachmentUpdate({
+          seq: durableUpdate.seq,
+          date: durableUpdate.date,
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,

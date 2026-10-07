@@ -4,7 +4,7 @@ import InlineProtocol
 
 /// Manages media database operations for the application
 final class MediaHelpers: Sendable {
-  public static let shared = MediaHelpers()
+  static let shared = MediaHelpers()
   private let database: AppDatabase
 
   init(database: AppDatabase = AppDatabase.shared) {
@@ -405,7 +405,16 @@ final class MediaHelpers: Sendable {
   func attachPhotoToMessage(photo: Photo, message: inout Message) throws {
     try database.dbWriter.write { db in
       message.photoId = photo.photoId
+      message.videoId = nil
+      message.documentId = nil
+      message.fileId = nil
+      message.setVoiceContent(nil)
+      let oldFlags = message.resourceFlags
+      replaceMediaFlags(of: &message, with: .photo)
       try message.update(db)
+      if oldFlags != message.resourceFlags {
+        try HistoryPageAdmissionToken.advanceRevision(db, chatId: message.chatId)
+      }
     }
   }
 
@@ -416,7 +425,16 @@ final class MediaHelpers: Sendable {
   func attachVideoToMessage(video: Video, message: inout Message) throws {
     try database.dbWriter.write { db in
       message.videoId = video.videoId
+      message.photoId = nil
+      message.documentId = nil
+      message.fileId = nil
+      message.setVoiceContent(nil)
+      let oldFlags = message.resourceFlags
+      replaceMediaFlags(of: &message, with: .video)
       try message.update(db)
+      if oldFlags != message.resourceFlags {
+        try HistoryPageAdmissionToken.advanceRevision(db, chatId: message.chatId)
+      }
     }
   }
 
@@ -427,8 +445,23 @@ final class MediaHelpers: Sendable {
   func attachDocumentToMessage(document: Document, message: inout Message) throws {
     try database.dbWriter.write { db in
       message.documentId = document.documentId
+      message.photoId = nil
+      message.videoId = nil
+      message.fileId = nil
+      message.setVoiceContent(nil)
+      let oldFlags = message.resourceFlags
+      replaceMediaFlags(of: &message, with: .file)
       try message.update(db)
+      if oldFlags != message.resourceFlags {
+        try HistoryPageAdmissionToken.advanceRevision(db, chatId: message.chatId)
+      }
     }
+  }
+
+  private func replaceMediaFlags(of message: inout Message, with flags: MessageResourceFlags) {
+    let mediaMask: MessageResourceFlags = [.photo, .video, .file, .voice]
+    message.resourceFlags = (message.resourceFlags & ~mediaMask.rawValue)
+      | (message.isSticker != true ? flags.rawValue : 0)
   }
 
   // MARK: - Utility Methods
@@ -449,7 +482,9 @@ final class MediaHelpers: Sendable {
         .filter(PhotoSize.Columns.width != nil && PhotoSize.Columns.height != nil)
         .fetchAll(db)
 
-      if sizes.isEmpty { return nil }
+      if sizes.isEmpty {
+        return nil
+      }
 
       // Sort by area, largest first
       let sortedSizes = sizes.sorted {

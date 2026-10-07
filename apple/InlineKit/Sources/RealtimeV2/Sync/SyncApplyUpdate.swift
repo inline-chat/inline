@@ -79,6 +79,8 @@ public struct ChatRepairSnapshot: Sendable {
   public let mutationToken: AuthAccountMutationToken
   public let expectedRemovalRevision: Int64?
   public let reason: String
+  public let expectedHistoryRevision: Int64?
+  public let allowsHistoryRows: Bool
 
   public init(
     peer: InlineProtocol.Peer,
@@ -87,7 +89,9 @@ public struct ChatRepairSnapshot: Sendable {
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
     reason: String,
-    expectedRemovalRevision: Int64? = nil
+    expectedRemovalRevision: Int64? = nil,
+    expectedHistoryRevision: Int64? = nil,
+    allowsHistoryRows: Bool = true
   ) {
     self.peer = peer
     self.chat = chat
@@ -96,6 +100,8 @@ public struct ChatRepairSnapshot: Sendable {
     self.mutationToken = mutationToken
     self.expectedRemovalRevision = expectedRemovalRevision
     self.reason = reason
+    self.expectedHistoryRevision = expectedHistoryRevision
+    self.allowsHistoryRows = allowsHistoryRows
   }
 }
 
@@ -150,6 +156,18 @@ public struct UserBootstrapCatalogPersistence: Sendable {
   }
 }
 
+/// Dispatch-time fence for importing a coherent catalog's last message into a
+/// truly absent chat. This never certifies a history range.
+public struct ColdHistoryBootstrapAdmission: Sendable {
+  public let expectedRemovalRevision: Int64
+  public let allowedChatIDs: Set<Int64>
+
+  public init(expectedRemovalRevision: Int64, allowedChatIDs: Set<Int64>) {
+    self.expectedRemovalRevision = expectedRemovalRevision
+    self.allowedChatIDs = allowedChatIDs
+  }
+}
+
 public struct UserRepairSnapshot: Sendable {
   public let chats: InlineProtocol.GetChatsResult
   public let me: InlineProtocol.GetMeResult
@@ -165,6 +183,7 @@ public struct UserRepairSnapshot: Sendable {
   /// projection independently. Final admission consumes the durable catalog
   /// metadata without repeating projection writes.
   public let bootstrapCatalogPersistence: UserBootstrapCatalogPersistence?
+  public let catalogHistoryAdmission: ColdHistoryBootstrapAdmission?
   /// An authoritative account rebase may replace active catalog inclusion.
   /// Projection audits and other scoped repairs must leave omissions inert.
   public let replacesActiveCatalog: Bool
@@ -191,6 +210,7 @@ public struct UserRepairSnapshot: Sendable {
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
     bootstrapCatalogPersistence: UserBootstrapCatalogPersistence? = nil,
+    catalogHistoryAdmission: ColdHistoryBootstrapAdmission? = nil,
     replacesActiveCatalog: Bool = false,
     requiresProjectionAudit: Bool = false,
     reason: String
@@ -203,6 +223,7 @@ public struct UserRepairSnapshot: Sendable {
     self.targetState = targetState
     self.mutationToken = mutationToken
     self.bootstrapCatalogPersistence = bootstrapCatalogPersistence
+    self.catalogHistoryAdmission = catalogHistoryAdmission
     self.replacesActiveCatalog = replacesActiveCatalog
     self.requiresProjectionAudit = requiresProjectionAudit
     self.reason = reason
@@ -222,15 +243,18 @@ public struct UserBootstrapProjectionSnapshot: Sendable {
   public let projection: UserBootstrapProjection
   public let checkpointState: BucketState
   public let mutationToken: AuthAccountMutationToken
+  public let catalogHistoryAdmission: ColdHistoryBootstrapAdmission?
 
   public init(
     projection: UserBootstrapProjection,
     checkpointState: BucketState,
-    mutationToken: AuthAccountMutationToken
+    mutationToken: AuthAccountMutationToken,
+    catalogHistoryAdmission: ColdHistoryBootstrapAdmission? = nil
   ) {
     self.projection = projection
     self.checkpointState = checkpointState
     self.mutationToken = mutationToken
+    self.catalogHistoryAdmission = catalogHistoryAdmission
   }
 }
 

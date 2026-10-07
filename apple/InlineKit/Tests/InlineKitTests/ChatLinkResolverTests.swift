@@ -120,6 +120,7 @@ struct ChatLinkResolverTests {
       result.chat = .with {
         $0.id = chatID
         $0.date = 10
+        $0.seq = 0
         $0.peerID.user.userID = peerID
       }
       result.dialog = .with {
@@ -133,7 +134,8 @@ struct ChatLinkResolverTests {
           $0.bot = true
         }
       }
-      try await GetChatTransaction(peer: .thread(id: chatID)).apply(.getChat(result))
+      let prepared = try await GetChatTransaction(peer: .thread(id: chatID)).preparingForDispatch()
+      try await prepared.apply(.getChat(result))
       try await database.reader.read { db in
         let savedPeer = try #require(try User.fetchOne(db, id: peerID))
         let savedChat = try #require(try Chat.fetchOne(db, id: chatID))
@@ -167,10 +169,11 @@ struct ChatLinkResolverTests {
       chatID: chatID, account: account, database: database, auth: auth.handle
     ) { requestedID, _ in
       var result = InlineProtocol.GetChatResult()
-      result.chat = .with { $0.id = requestedID; $0.date = 10; $0.peerID.user.userID = peerID }
+      result.chat = .with { $0.id = requestedID; $0.date = 10; $0.seq = 0; $0.peerID.user.userID = peerID }
       result.dialog = .with { $0.chatID = requestedID; $0.peer.user.userID = peerID }
       result.user = .with { $0.id = peerID; $0.firstName = "Linked Bot"; $0.bot = true }
-      try await GetChatTransaction(peer: .thread(id: requestedID)).apply(.getChat(result))
+      let prepared = try await GetChatTransaction(peer: .thread(id: requestedID)).preparingForDispatch()
+      try await prepared.apply(.getChat(result))
       return Chat(from: result.chat)
     }
     #expect(peer == .user(id: peerID))

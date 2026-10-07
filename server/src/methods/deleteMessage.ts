@@ -1,18 +1,11 @@
-import { db } from "@in/server/db"
-import { eq, and, desc } from "drizzle-orm"
-import { chats, messages } from "@in/server/db/schema"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { deleteMessage as canonicalDeleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { TPeerInfo } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
-import { getUpdateGroup } from "../modules/updates"
-import type { Update } from "@inline-chat/protocol/core"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { RealtimeUpdates } from "@in/server/realtime/message"
-import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { getChatIdFromPeer } from "@in/server/methods/sendMessage"
-import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 
 export const Input = Type.Object({
   messageId: TInputId,
@@ -33,12 +26,12 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   const messageId = Number(input.messageId)
-  if (isNaN(messageId)) {
+  if (!Number.isInteger(messageId) || messageId <= 0 || messageId > 2_147_483_647) {
     throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
   }
 
   const chatId = Number(input.chatId)
-  if (isNaN(chatId)) {
+  if (!Number.isInteger(chatId) || chatId <= 0 || chatId > 2_147_483_647) {
     throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
   }
 
@@ -55,91 +48,32 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
 
-  await deleteMessage(messageId, chatId, context.currentUserId)
-  await deleteMessageUpdate({
-    messageId,
-    peerId,
-    currentUserId: context.currentUserId,
-  })
-}
-
-const deleteMessage = async (messageId: number, chatId: number, currentUserId: number) => {
+  await getAuthorizedChat(chatId, context.currentUserId)
   try {
-    let chat = await getAuthorizedChat(chatId, currentUserId)
-
-    if (await isImportedAgentMessage(chatId, messageId)) {
-      throw new InlineError(InlineError.ApiError.AGENT_SESSION_MESSAGE_IMMUTABLE)
-    }
-
-    let [message] = await db
-      .select()
-      .from(messages)
-      .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-
-    if (chat.lastMsgId === messageId) {
-      const previousMessages = await db
-        .select()
-        .from(messages)
-        .where(eq(messages.chatId, chatId))
-        .orderBy(desc(messages.date))
-        .limit(1)
-        .offset(1)
-
-      const newLastMsgId = previousMessages[0]?.messageId || null
-      await db.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
-
-      await db.delete(messages).where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-    } else {
-      await db.delete(messages).where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-    }
+    await canonicalDeleteMessage(
+      {
+        peer:
+          "userId" in peerId
+            ? { type: { oneofKind: "user", user: { userId: BigInt(peerId.userId) } } }
+            : { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+        messageIds: [BigInt(messageId)],
+      },
+      { currentUserId: context.currentUserId, currentSessionId: 0 },
+    )
   } catch (error) {
-    Log.shared.error("Error deleting message:", error)
+    if (error instanceof RealtimeRpcError) {
+      const mapped =
+        error.code === RealtimeRpcError.Code.SPACE_ADMIN_REQUIRED
+          ? InlineError.ApiError.SPACE_ADMIN_REQUIRED
+          : error.code === RealtimeRpcError.Code.AGENT_SESSION_MESSAGE_IMMUTABLE
+          ? InlineError.ApiError.AGENT_SESSION_MESSAGE_IMMUTABLE
+          : error.code === RealtimeRpcError.Code.MESSAGE_ID_INVALID
+          ? InlineError.ApiError.MSG_ID_INVALID
+          : error.code === RealtimeRpcError.Code.PEER_ID_INVALID
+          ? InlineError.ApiError.PEER_INVALID
+          : InlineError.ApiError.BAD_REQUEST
+      throw new InlineError(mapped)
+    }
     throw error
-  }
-}
-
-const deleteMessageUpdate = async ({
-  messageId,
-  peerId,
-  currentUserId,
-}: {
-  messageId: number
-  peerId: TPeerInfo
-  currentUserId: number
-}) => {
-  const updateGroup = await getUpdateGroup(peerId, { currentUserId })
-
-  if (updateGroup.type === "dmUsers") {
-    updateGroup.userIds.forEach((userId) => {
-      let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
-
-      // New updates
-      let messageDeletedUpdate: Update = {
-        update: {
-          oneofKind: "deleteMessages",
-          deleteMessages: {
-            messageIds: [BigInt(messageId)],
-            peerId: Encoders.peer(encodingForPeer),
-          },
-        },
-      }
-
-      RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
-    })
-  } else if (updateGroup.type === "threadUsers") {
-    updateGroup.userIds.forEach((userId) => {
-      // New updates
-      let messageDeletedUpdate: Update = {
-        update: {
-          oneofKind: "deleteMessages",
-          deleteMessages: {
-            messageIds: [BigInt(messageId)],
-            peerId: Encoders.peer(peerId),
-          },
-        },
-      }
-
-      RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
-    })
   }
 }

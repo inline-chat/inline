@@ -48,8 +48,8 @@ extension ChatInfoView {
     searchResults = []
     participantSearchTask = Task {
       do {
-        let local = InviteDirectory.mergedUsers(
-          local: try await InviteDirectory.localUsers(query: query, database: database),
+        let local = try await InviteDirectory.mergedUsers(
+          local: InviteDirectory.localUsers(query: query, database: database),
           remote: [],
           excluding: excludedUserIDs
         )
@@ -214,7 +214,6 @@ extension ChatInfoView {
     }
   }
 
-  @ViewBuilder
   var chatInfoHeader: some View {
     VStack {
       if isDM, let userInfo = chatItem.userInfo {
@@ -411,12 +410,11 @@ extension ChatInfoView {
       publicChatSection
     }
 
-    if !documentsViewModel.documentMessages.isEmpty {
+    if !documentMessages.isEmpty {
       documentsSection
     }
   }
 
-  @ViewBuilder
   var privateChatSection: some View {
     Section {
       if let userInfo = chatItem.userInfo {
@@ -440,7 +438,6 @@ extension ChatInfoView {
     }
   }
 
-  @ViewBuilder
   var participantsSection: some View {
     Section("Participants") {
       if isOwnerOrAdmin, isPrivate {
@@ -504,9 +501,8 @@ extension ChatInfoView {
     }
   }
 
-  @ViewBuilder
   var documentsSection: some View {
-    ForEach(documentsViewModel.documentMessages, id: \.id) { documentMessage in
+    ForEach(documentMessages, id: \.id) { documentMessage in
       DocumentRow(
         documentMessage: documentMessage,
         chatId: currentChatId == 0 ? nil : currentChatId
@@ -535,7 +531,6 @@ extension ChatInfoView {
     )
   }
 
-  @ViewBuilder
   var searchSheet: some View {
     SearchParticipantsView(
       searchText: $searchText,

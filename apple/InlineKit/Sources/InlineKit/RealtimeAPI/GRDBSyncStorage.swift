@@ -58,6 +58,23 @@ public struct GRDBSyncStorage: SyncStorage {
     self.db = db
   }
 
+  public func getHistoryChatID(for key: BucketKey) async throws -> Int64? {
+    guard case let .chat(peer) = key else { return nil }
+    return try await db.reader.read { db in try Chat.getByPeerId(db: db, peerId: peer.toPeer())?.id }
+  }
+
+  public func getHistoryRevision(for key: BucketKey) async throws -> Int64 {
+    guard case let .chat(peer) = key else { return 0 }
+    return try await db.reader.read { db in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer.toPeer()) else { return 0 }
+      return try Int64.fetchOne(
+        db,
+        sql: "SELECT historyAdmissionRevision FROM chat WHERE id = ?",
+        arguments: [chat.id]
+      ) ?? 0
+    }
+  }
+
   public func getRemovalRevision() async throws -> Int64 {
     try await db.reader.read { try SyncRemovalRevision.read($0) }
   }
@@ -73,8 +90,9 @@ public struct GRDBSyncStorage: SyncStorage {
       // real thread from a DM stub with no counterpart mapping yet.
       if chat.type == .thread,
          try Dialog
-           .filter(Dialog.Columns.peerThreadId == chatID && Dialog.Columns.chatId == chatID)
-           .fetchOne(db) != nil {
+         .filter(Dialog.Columns.peerThreadId == chatID && Dialog.Columns.chatId == chatID)
+         .fetchOne(db) != nil
+      {
         return .with { $0.chat.chatID = chatID }
       }
       return nil
@@ -111,7 +129,8 @@ public struct GRDBSyncStorage: SyncStorage {
           DbBucketState.Columns.bucketType == key.getBucket()
             && DbBucketState.Columns.entityId == key.getEntityId()
         )
-        .fetchOne(db) {
+        .fetchOne(db)
+      {
         return BucketState(date: state.date, seq: state.seq)
       }
       return BucketState(date: 0, seq: 0)

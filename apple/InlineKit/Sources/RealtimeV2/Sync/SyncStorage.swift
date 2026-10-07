@@ -70,6 +70,8 @@ public enum BucketKey: Sendable, Hashable {
 }
 
 public protocol SyncStorage: Sendable {
+  func getHistoryRevision(for key: BucketKey) async throws -> Int64
+  func getHistoryChatID(for key: BucketKey) async throws -> Int64?
   func getRemovalRevision() async throws -> Int64
   /// A local chat row can identify a DM by its counterpart user. An unknown
   /// chat ID returns nil so admission can resolve it through getChat.
@@ -99,6 +101,15 @@ public protocol SyncStorage: Sendable {
 }
 
 public extension SyncStorage {
+  func getHistoryRevision(for key: BucketKey) async throws -> Int64 {
+    0
+  }
+
+  func getHistoryChatID(for key: BucketKey) async throws -> Int64? {
+    guard case let .chat(peer) = key, case let .chat(chat) = peer.type else { return nil }
+    return chat.chatID
+  }
+
   /// Stores without destructive projection writers have no invalidations.
   func getRemovalRevision() async throws -> Int64 {
     0

@@ -64,12 +64,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case isSticker
     case hasLink
     case entities
+    case resourceFlags
   }
 
-  // Locally autoincremented id
+  /// Locally autoincremented id
   public var globalId: Int64?
 
-  // Stable ID for fetched messages (not to be created messages)
+  /// Stable ID for fetched messages (not to be created messages)
   public var stableId: Int64 {
     globalId ?? 0
   }
@@ -90,15 +91,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  // Only set for outgoing messages
+  /// Only set for outgoing messages
   public var randomId: Int64?
 
-  // From API, unique per chat
+  /// From API, unique per chat
   public var messageId: Int64
 
   public var date: Date
 
-  // Raw message text
+  /// Raw message text
   public var text: String?
 
   // One of these must be set
@@ -129,6 +130,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var isSticker: Bool?
   public var hasLink: Bool?
   public var entities: MessageEntities?
+  /// Authoritative tag membership. A filtered absence proof may clear a bit
+  /// while retaining the canonical payload for ordinary history and byte cache.
+  public var resourceFlags: Int64 = 0
 
   public var blockContent: InlineProtocol.BlockContent? {
     blockContentPayload?.content
@@ -182,9 +186,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   private static let log = Log.scoped("Message")
   private static let allowedLinkSchemes: Set<String> = ["http", "https"]
-  private static let linkDetector: NSDataDetector? = {
-    try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-  }()
+  private static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link
+    .rawValue)
 
   public enum Columns {
     public static let globalId = Column(CodingKeys.globalId)
@@ -215,6 +218,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let blockContentPayload = Column(CodingKeys.blockContentPayload)
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
+    public static let resourceFlags = Column(CodingKeys.resourceFlags)
   }
 
   public static let acknowledgements = hasMany(
@@ -246,7 +250,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.file)
   }
 
-  // Add hasMany for all files attached to this message
+  /// Add hasMany for all files attached to this message
   public static let files = hasMany(
     File.self,
     using: ForeignKey(["id"], to: ["messageLocalId"])
@@ -255,21 +259,21 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.files)
   }
 
-  // Relationship to photo using photoId (server ID)
+  /// Relationship to photo using photoId (server ID)
   static let photo = belongsTo(Photo.self, using: ForeignKey(["photoId"], to: ["photoId"]))
 
   var photo: QueryInterfaceRequest<Photo> {
     request(for: Message.photo)
   }
 
-  // Relationship to video using videoId (server ID)
+  /// Relationship to video using videoId (server ID)
   static let video = belongsTo(Video.self, using: ForeignKey(["videoId"], to: ["videoId"]))
 
   var video: QueryInterfaceRequest<Video> {
     request(for: Message.video)
   }
 
-  // Relationship to document using documentId (server ID)
+  /// Relationship to document using documentId (server ID)
   static let document = belongsTo(Document.self, using: ForeignKey(["documentId"], to: ["documentId"]))
 
   var document: QueryInterfaceRequest<Document> {
@@ -305,7 +309,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.forwardFromPeerThread)
   }
 
-  // needs chat id as well
+  /// needs chat id as well
   public static let repliedToMessage = belongsTo(
     Message.self,
     key: "repliedToMessage",
@@ -332,7 +336,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.attachments)
   }
 
-  // Relationship to translation
+  /// Relationship to translation
   public static let translations = hasMany(
     Translation.self,
     using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
@@ -407,6 +411,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.hasLink = hasLink
     self.entities = entities
     updateHasLinkIfNeeded()
+    resourceFlags = MessageResourceFlags.classify(self).rawValue
 
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
@@ -414,7 +419,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public init(from: ApiMessage) {
-    let randomId: Int64? = if let randomId = from.randomId { Int64(randomId) } else { nil }
+    let randomId: Int64? = if let randomId = from.randomId {
+      Int64(randomId)
+    } else {
+      nil
+    }
 
     self.init(
       messageId: from.id,
@@ -491,7 +500,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  private static func detectHasLink(text: String?, entities: MessageEntities?) -> Bool {
+  static func detectHasLink(text: String?, entities: MessageEntities?) -> Bool {
     if let entities,
        entities.entities.contains(where: { $0.type == .url || $0.type == .textURL })
     {
@@ -671,30 +680,30 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   ) throws {
     for block in blocks {
       switch block.kind {
-      case let .image(image):
-        try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
-      case let .album(album):
-        for image in album.images {
+        case let .image(image):
           try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
-        }
-      case let .list(list):
-        for item in list.items {
-          try materializeBlockPhotos(db, blocks: item.children, materializedPhotoIDs: &materializedPhotoIDs)
-        }
-      case let .disclosure(disclosure):
-        try materializeBlockPhotos(
-          db,
-          blocks: disclosure.children,
-          materializedPhotoIDs: &materializedPhotoIDs
-        )
-      case let .quote(quote):
-        try materializeBlockPhotos(
-          db,
-          blocks: quote.children,
-          materializedPhotoIDs: &materializedPhotoIDs
-        )
-      case .paragraph, .heading, .code, .separator, .footer, .table, .math, nil:
-        break
+        case let .album(album):
+          for image in album.images {
+            try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
+          }
+        case let .list(list):
+          for item in list.items {
+            try materializeBlockPhotos(db, blocks: item.children, materializedPhotoIDs: &materializedPhotoIDs)
+          }
+        case let .disclosure(disclosure):
+          try materializeBlockPhotos(
+            db,
+            blocks: disclosure.children,
+            materializedPhotoIDs: &materializedPhotoIDs
+          )
+        case let .quote(quote):
+          try materializeBlockPhotos(
+            db,
+            blocks: quote.children,
+            materializedPhotoIDs: &materializedPhotoIDs
+          )
+        case .paragraph, .heading, .code, .separator, .footer, .table, .math, nil:
+          break
       }
     }
   }
@@ -704,7 +713,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     image: InlineProtocol.BlockImage,
     materializedPhotoIDs: inout Set<Int64>
   ) throws {
-    guard case let .ready(photo)? = image.state, photo.id > 0 else { return }
+    guard case let .ready(photo)? = image.state else { return }
+    guard photo.id > 0 else {
+      throw HistoryPageAdmissionError.malformedPage
+    }
     guard materializedPhotoIDs.insert(photo.id).inserted else { return }
     try Photo.savePhotoFromProtocol(db, photo: photo)
   }
@@ -714,61 +726,61 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     existing: Client_MessageContentPayload?
   ) -> Client_MessageContentPayload? {
     switch (incoming, existing) {
-    case let (incoming?, existing?):
-      var merged = incoming
-      if incoming.hasVoice || existing.hasVoice {
-        if incoming.hasVoice {
-          merged.voice = mergedVoiceContent(
-            incoming: incoming.voice,
-            existing: existing.hasVoice ? existing.voice : nil
-          )
-        } else if existing.hasVoice {
-          merged.voice = existing.voice
+      case let (incoming?, existing?):
+        var merged = incoming
+        if incoming.hasVoice || existing.hasVoice {
+          if incoming.hasVoice {
+            merged.voice = mergedVoiceContent(
+              incoming: incoming.voice,
+              existing: existing.hasVoice ? existing.voice : nil
+            )
+          } else if existing.hasVoice {
+            merged.voice = existing.voice
+          }
         }
-      }
 
-      if incoming.hasActions || existing.hasActions {
-        if incoming.hasActions {
-          merged.actions = incoming.actions
-        } else if existing.hasActions {
-          merged.actions = existing.actions
+        if incoming.hasActions || existing.hasActions {
+          if incoming.hasActions {
+            merged.actions = incoming.actions
+          } else if existing.hasActions {
+            merged.actions = existing.actions
+          }
         }
-      }
 
-      if incoming.hasReplies || existing.hasReplies {
-        if incoming.hasReplies {
-          merged.replies = incoming.replies
-        } else if existing.hasReplies {
-          merged.replies = existing.replies
+        if incoming.hasReplies || existing.hasReplies {
+          if incoming.hasReplies {
+            merged.replies = incoming.replies
+          } else if existing.hasReplies {
+            merged.replies = existing.replies
+          }
         }
-      }
 
-      if incoming.hasServiceMessage || existing.hasServiceMessage {
-        if incoming.hasServiceMessage {
-          merged.serviceMessage = incoming.serviceMessage
-        } else if existing.hasServiceMessage {
-          merged.serviceMessage = existing.serviceMessage
+        if incoming.hasServiceMessage || existing.hasServiceMessage {
+          if incoming.hasServiceMessage {
+            merged.serviceMessage = incoming.serviceMessage
+          } else if existing.hasServiceMessage {
+            merged.serviceMessage = existing.serviceMessage
+          }
         }
-      }
 
-      if incoming.hasSubthread || existing.hasSubthread {
-        if incoming.hasSubthread {
-          merged.subthread = incoming.subthread
-        } else if existing.hasSubthread {
-          merged.subthread = existing.subthread
+        if incoming.hasSubthread || existing.hasSubthread {
+          if incoming.hasSubthread {
+            merged.subthread = incoming.subthread
+          } else if existing.hasSubthread {
+            merged.subthread = existing.subthread
+          }
         }
-      }
 
-      return hasContentPayload(merged) ? merged : nil
+        return hasContentPayload(merged) ? merged : nil
 
-    case let (incoming?, nil):
-      return hasContentPayload(incoming) ? incoming : nil
+      case let (incoming?, nil):
+        return hasContentPayload(incoming) ? incoming : nil
 
-    case let (nil, existing?):
-      return hasContentPayload(existing) ? existing : nil
+      case let (nil, existing?):
+        return hasContentPayload(existing) ? existing : nil
 
-    case (nil, nil):
-      return nil
+      case (nil, nil):
+        return nil
     }
   }
 
@@ -776,7 +788,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     incoming: Client_MessageVoiceContent,
     existing: Client_MessageVoiceContent?
   ) -> Client_MessageVoiceContent {
-    guard let existing else { return incoming }
+    guard let existing, incoming.voiceID == 0 || incoming.voiceID == existing.voiceID else { return incoming }
 
     var merged = incoming
     if merged.voiceID == 0 {
@@ -951,11 +963,10 @@ public enum MessagePreviewText {
       .filter { !$0.isEmpty }
       .joined(separator: " ")
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let label: String
-    if let normalizedName, !normalizedName.isEmpty {
-      label = normalizedName
+    let label: String = if let normalizedName, !normalizedName.isEmpty {
+      normalizedName
     } else {
-      label = "Document"
+      "Document"
     }
     return includesEmoji ? "📄 \(label)" : label
   }
@@ -1111,7 +1122,6 @@ public extension Message {
 
     return savedMessage
   }
-
 }
 
 public extension ApiMessage {
@@ -1147,6 +1157,7 @@ public extension ApiMessage {
           nil
         }
       message.fileId = file?.id
+      message.resourceFlags = MessageResourceFlags.classify(message).rawValue
 
       try message.saveMessage(db, publishChanges: false) // publish is below
     }
@@ -1197,13 +1208,15 @@ public extension Message {
     _ db: Database,
     protocolMessage: InlineProtocol.Message,
     publishChanges: Bool = false,
-    materializeMissingReferences: Bool = false
+    materializeMissingReferences: Bool = false,
+    authoritativeSnapshot: Bool = false
   ) throws -> Message {
     try saveWithResult(
       db,
       protocolMessage: protocolMessage,
       publishChanges: publishChanges,
-      materializeMissingReferences: materializeMissingReferences
+      materializeMissingReferences: materializeMissingReferences,
+      authoritativeSnapshot: authoritativeSnapshot
     ).message
   }
 
@@ -1211,11 +1224,19 @@ public extension Message {
     _ db: Database,
     protocolMessage: InlineProtocol.Message,
     publishChanges: Bool = false,
-    materializeMissingReferences: Bool = false
+    materializeMissingReferences: Bool = false,
+    authoritativeSnapshot: Bool = false
   ) throws -> ProtocolMessageSaveResult {
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
     let existing = try Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
+    let insertsWithinKnownSpan: Bool = if existing == nil, id > 0 {
+      try (Int64.fetchOne(
+        db, sql: "SELECT MAX(messageId) FROM message WHERE chatId = ? AND messageId > 0", arguments: [chatId]
+      ) ?? 0) >= id
+    } else {
+      false
+    }
     let disposition = protocolSaveDisposition(
       protocolMessage: protocolMessage,
       existing: existing
@@ -1238,12 +1259,19 @@ public extension Message {
 
     let isUpdate = existing != nil
     var message = Message(from: protocolMessage)
+    if protocolMessage.attachments.attachments.contains(where: {
+      if case .urlPreview = $0.attachment {
+        return true
+      }
+      return false
+    }) {
+      message.hasLink = true
+    }
     let textOrEntitiesChanged = existing.map {
-      let sameText: Bool
-      switch ($0.text, message.text) {
-      case let (previous?, current?): sameText = previous.utf8.elementsEqual(current.utf8)
-      case (nil, nil): sameText = true
-      default: sameText = false
+      let sameText: Bool = switch ($0.text, message.text) {
+        case let (previous?, current?): previous.utf8.elementsEqual(current.utf8)
+        case (nil, nil): true
+        default: false
       }
       // Entity and block offsets address literal UTF-16, not Swift String's
       // canonical Unicode equivalence. Translation invalidation must agree.
@@ -1265,25 +1293,49 @@ public extension Message {
 
     if let existing {
       message.globalId = existing.globalId
-      message.status = existing.status
+      message.randomId = existing.randomId
+      if !authoritativeSnapshot {
+        message.status = existing.status
+      }
       message.fileId = existing.fileId
-      message.date = existing.date // keep optimistic date for now until we fix message reordering
-      message.photoId = message.photoId ?? existing.photoId
-      message.videoId = message.videoId ?? existing.videoId
-      message.documentId = message.documentId ?? existing.documentId
+      if !authoritativeSnapshot {
+        message.date = existing.date
+      }
+      if !authoritativeSnapshot && !protocolMessage.hasMedia {
+        message.photoId = message.photoId ?? existing.photoId
+        message.videoId = message.videoId ?? existing.videoId
+        message.documentId = message.documentId ?? existing.documentId
+      }
       message.transactionId = message.transactionId ?? existing.transactionId
-      message.isSticker = message.isSticker ?? existing.isSticker
-      message.hasLink = message.hasLink ?? existing.hasLink
+      if !authoritativeSnapshot {
+        message.isSticker = message.isSticker ?? existing.isSticker
+        message.hasLink = message.hasLink ?? existing.hasLink
+      }
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
       message.forwardFromPeerThreadId = message.forwardFromPeerThreadId ?? existing.forwardFromPeerThreadId
       message.forwardFromMessageId = message.forwardFromMessageId ?? existing.forwardFromMessageId
       message.forwardFromUserId = message.forwardFromUserId ?? existing.forwardFromUserId
-      message.contentPayload = mergedContentPayload(
-        incoming: message.contentPayload,
-        existing: existing.contentPayload
-      )
+      if authoritativeSnapshot {
+        // A full snapshot owns presence as well as value. Only same-voice local
+        // bytes are retained; omitted structural associations stay omitted.
+        if var payload = message.contentPayload, payload.hasVoice {
+          payload.voice = mergedVoiceContent(incoming: payload.voice, existing: existing.voiceContent)
+          message.contentPayload = payload
+        }
+      } else {
+        message.contentPayload = mergedContentPayload(
+          incoming: message.contentPayload,
+          existing: existing.contentPayload
+        )
+      }
+      if authoritativeSnapshot || protocolMessage.hasMedia, !protocolMessage.media.voice.hasVoice {
+        message.setVoiceContent(nil)
+      }
+      if authoritativeSnapshot || protocolMessage.hasMedia {
+        message.fileId = nil
+      }
       if !protocolMessage.hasActions {
         message.actions = nil
       }
@@ -1300,13 +1352,40 @@ public extension Message {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
+      if authoritativeSnapshot, let globalId = message.globalId {
+        try Attachment.filter(Column("messageId") == globalId).deleteAll(db)
+      }
+
       // 2. Then save attachments, using the now-persisted message.globalId
       if protocolMessage.hasAttachments {
         for attachment in protocolMessage.attachments.attachments {
-          try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+          let saved = try Attachment.saveWithInnerItems(
+            db,
+            attachment: attachment,
+            messageClientGlobalId: message.globalId!
+          )
+          if authoritativeSnapshot,
+             saved.messageId != message.globalId
+          {
+            throw HistoryPageAdmissionError.malformedPage
+          }
         }
       }
 
+      message.resourceFlags = MessageResourceFlags.classify(message).rawValue
+      if !authoritativeSnapshot {
+        // Partial updates must not reconstruct a previously suppressed tag from
+        // stale omitted media. Explicit media/text fields alone replace tags.
+        let mediaMask: MessageResourceFlags = [.photo, .video, .file, .voice]
+        if !protocolMessage.hasMedia {
+          message.resourceFlags = (message.resourceFlags & ~mediaMask.rawValue)
+            | (existing.resourceFlags & mediaMask.rawValue)
+        }
+        if !protocolMessage.hasMessage, !protocolMessage.hasEntities, !protocolMessage.hasHasLink_p {
+          message.resourceFlags = (message.resourceFlags & ~MessageResourceFlags.link.rawValue)
+            | (existing.resourceFlags & MessageResourceFlags.link.rawValue)
+        }
+      }
       message = try message.saveMessage(
         db,
         publishChanges: false,
@@ -1318,6 +1397,8 @@ public extension Message {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
+      message.resourceFlags = MessageResourceFlags.classify(message).rawValue
+
       message = try message.saveMessage(db, publishChanges: false) // publish is below
 
       if protocolMessage.hasReactions {
@@ -1328,9 +1409,22 @@ public extension Message {
 
       if protocolMessage.hasAttachments {
         for attachment in protocolMessage.attachments.attachments {
-          try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+          let saved = try Attachment.saveWithInnerItems(
+            db,
+            attachment: attachment,
+            messageClientGlobalId: message.globalId!
+          )
+          if authoritativeSnapshot,
+             saved.messageId != message.globalId
+          {
+            throw HistoryPageAdmissionError.malformedPage
+          }
         }
       }
+    }
+
+    if insertsWithinKnownSpan || (existing.map { $0.resourceFlags != message.resourceFlags } ?? false) {
+      try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatId)
     }
 
     if publishChanges {
@@ -1369,8 +1463,12 @@ public extension Message {
     guard protocolMessage.hasRev else {
       return existing.rev > 0 ? .stale : .equal
     }
-    if protocolMessage.rev < existing.rev { return .stale }
-    if protocolMessage.rev > existing.rev { return .newer }
+    if protocolMessage.rev < existing.rev {
+      return .stale
+    }
+    if protocolMessage.rev > existing.rev {
+      return .newer
+    }
     return .equal
   }
 
@@ -1585,7 +1683,9 @@ public extension Message {
   }
 
   var hasText: Bool {
-    if isSubthreadPlacement { return false }
+    if isSubthreadPlacement {
+      return false
+    }
     guard let text else { return false }
     return !text.isEmpty
   }
@@ -1618,18 +1718,18 @@ public extension Message {
 
       let kind: MessageThreadCard.Kind
       switch subthread.kind {
-      case .reply:
-        kind = .reply
-      case .subthread:
-        kind = .subthread
-      case .unspecified, .UNRECOGNIZED:
-        return nil
+        case .reply:
+          kind = .reply
+        case .subthread:
+          kind = .subthread
+        case .unspecified, .UNRECOGNIZED:
+          return nil
       }
 
       let title = subthread.hasTitle
         ? subthread.title.trimmingCharacters(in: .whitespacesAndNewlines)
         : nil
-      if kind == .subthread && title?.isEmpty != false {
+      if kind == .subthread, title?.isEmpty != false {
         return nil
       }
 
@@ -1710,37 +1810,40 @@ public extension Message {
     chatId: Int64,
     deleteMedia: Bool = false
   ) throws {
-    // Fetch the chat once so we can update its `lastMsgId` if needed.
-    let chat = try Chat.fetchOne(db, id: chatId)
-
-    // Keep track of the current `lastMsgId` so we can update it when we delete it.
-    var prevChatLastMsgId = chat?.lastMsgId
-
-    for messageId in messageIds {
-      // If the message we are about to delete is the last message of the chat,
-      // we need to promote the previous message (if any) to be the new last one.
-      if prevChatLastMsgId == messageId {
-        let previousMessage = try Message
-          .filter(Column("chatId") == chat?.id)
-          .order(Column("date").desc)
-          .limit(1, offset: 1)
-          .fetchOne(db)
-
-        var updatedChat = chat
-        updatedChat?.lastMsgId = previousMessage?.messageId
-        try updatedChat?.save(db)
-
-        // Preserve the information that we have already handled the current
-        // `lastMsgId` so subsequent deletions in the same batch don't repeat
-        // the update work unnecessarily.
-        prevChatLastMsgId = messageId
-      }
-
-      // Remove the message itself.
-      try Message
-        .filter(Column("messageId") == messageId)
-        .filter(Column("chatId") == chatId)
-        .deleteAll(db)
+    let promotesLast = try Chat.fetchOne(db, id: chatId)?.lastMsgId.map(messageIds.contains) ?? false
+    if promotesLast {
+      // The composite SET NULL FK would also null chat.id. Clear its nullable
+      // coordinate explicitly, then choose a survivor after the entire batch.
+      try Chat.filter(Chat.Columns.id == chatId).updateAll(db, Chat.Columns.lastMsgId.set(to: nil))
     }
+    for start in stride(from: 0, to: messageIds.count, by: 500) {
+      let chunk = Array(messageIds[start ..< min(start + 500, messageIds.count)])
+      try Message.filter(Column("chatId") == chatId)
+        .filter(chunk.contains(Column("messageId"))).deleteAll(db)
+    }
+    if promotesLast {
+      let confirmed = try Message
+        .filter(Column("chatId") == chatId && Column("messageId") > 0)
+        .filter(Column("status") == nil || Column("status") == MessageSendingStatus.sent)
+        .order(Column("messageId").desc)
+        .fetchOne(db)
+      let optimistic = try Message
+        .filter(Column("chatId") == chatId)
+        .filter(Column("messageId") <= 0 || [MessageSendingStatus.sending, .failed].contains(Column("status")))
+        .order(Column("date").desc, Column("messageId").desc)
+        .fetchOne(db)
+      var survivor = confirmed
+      if let optimistic, Chat.shouldAdvanceLastMessage(
+        currentLastMsgId: confirmed?.messageId,
+        currentLastMsgDate: confirmed?.date,
+        newLastMsgId: optimistic.messageId,
+        newDate: optimistic.date
+      ) {
+        survivor = optimistic
+      }
+      try Chat.filter(Chat.Columns.id == chatId).updateAll(db, Chat.Columns.lastMsgId.set(to: survivor?.messageId))
+    }
+    // A delete of an uncached coordinate still fences every dispatched page.
+    try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatId)
   }
 }

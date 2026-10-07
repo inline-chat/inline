@@ -40,6 +40,7 @@ mod tests {
     #[test]
     fn filtered_empty_page_retains_the_scanned_cursor_and_existing_fields() {
         let mut payload = proto::SearchMessagesResult {
+            seq: Some(41),
             messages: vec![
                 proto::Message {
                     id: 20,
@@ -56,6 +57,7 @@ mod tests {
         page.returned_count = 0;
         let json = serde_json::to_value(MessagePageOutput { payload, page }).unwrap();
         assert_eq!(json["messages"], serde_json::json!([]));
+        assert_eq!(json["seq"], 41);
         assert_eq!(json["page"]["nextOffsetId"], 10);
         assert_eq!(json["page"]["fetchedCount"], 2);
         assert_eq!(json["page"]["returnedCount"], 0);

@@ -3247,6 +3247,8 @@ message GetChatHistoryInput {
 message GetChatHistoryResult {
   repeated Message messages = 1;
   optional ChatAcknowledgements acknowledgements = 2;
+  // Chat update sequence of the coherent read snapshot (not a pagination cursor).
+  optional int64 seq = 3;
 }
 
 message GetChatTranscriptInput {
@@ -3304,7 +3306,10 @@ message GetMessagesInput {
   repeated int64 message_ids = 2;
 }
 
-message GetMessagesResult { repeated Message messages = 1; }
+message GetMessagesResult {
+  repeated Message messages = 1;
+  optional int64 seq = 2;
+}
 
 enum ThreadReferenceKind {
   THREAD_REFERENCE_KIND_UNSPECIFIED = 0;
@@ -3383,7 +3388,10 @@ message SearchMessagesInput {
   optional SearchMessagesFilter filter = 5;
 }
 
-message SearchMessagesResult { repeated Message messages = 1; }
+message SearchMessagesResult {
+  repeated Message messages = 1;
+  optional int64 seq = 2;
+}
 
 enum ExternalResourceProvider {
   EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED = 0;

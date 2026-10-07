@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -42,7 +43,8 @@ public final class MessageHistoryRepairCoordinator {
     guard 1 ... MessageHistoryHole.positiveMessageIDMax ~= anchorID else {
       throw RepairError.invalidResponse
     }
-    let windowLimit = Int32(clamping: max(60, limit))
+    let windowLimit = Int32(max(60, min(100, limit)))
+    let account = try? Auth.shared.handle.beginAccountMutation()
     let cached = try await database.reader.read { db in
       let chat = try Chat.getByPeerId(db: db, peerId: peer)
       let window = try Self.aroundCache(db, chat: chat, anchorID: anchorID, limit: Int(windowLimit))
@@ -56,10 +58,11 @@ public final class MessageHistoryRepairCoordinator {
     guard cached.needsHistory else { return .notNeeded }
 
     do {
+      guard let account else { throw CancellationError() }
       // A cold DM needs its canonical Chat before the history transaction can
       // persist messages. Use the normal chat transaction, not notification state.
       if !cached.hasChat {
-        _ = try await Api.realtime.send(.getChat(peer: peer))
+        _ = try await Api.realtime.send(.getChat(peer: peer), expectedAccount: account)
         try Task.checkCancellation()
       }
       var transaction = GetChatHistoryTransaction(
@@ -71,8 +74,10 @@ public final class MessageHistoryRepairCoordinator {
       )
       // Repairing context for an existing target is optional: do not queue that
       // refinement behind an offline connection and delay an otherwise usable jump.
-      if cached.hasTarget { transaction.type = .ephemeral() }
-      let rpcResult = try await Api.realtime.send(transaction)
+      if cached.hasTarget {
+        transaction.type = .ephemeral()
+      }
+      let rpcResult = try await Api.realtime.send(transaction, expectedAccount: account)
       try Task.checkCancellation()
       guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
         throw RepairError.invalidResponse
@@ -131,10 +136,10 @@ public final class MessageHistoryRepairCoordinator {
       // is materialized, only certified tail coverage proves that older is the
       // correct fallback rather than a premature cached choice.
       let upper = newer.first ?? MessageHistoryHole.positiveMessageIDMax
-      return (
+      return try (
         false,
         hasWindow,
-        try MessageHistoryCoverageStore.intersects(
+        MessageHistoryCoverageStore.intersects(
           db,
           chatId: chat.id,
           lowerId: min(lower, anchorID),
@@ -152,10 +157,10 @@ public final class MessageHistoryRepairCoordinator {
     let upper = newer.count == afterLimit
       ? (newer.last ?? anchorID)
       : MessageHistoryHole.positiveMessageIDMax
-    return (
+    return try (
       true,
       true,
-      try MessageHistoryCoverageStore.intersects(
+      MessageHistoryCoverageStore.intersects(
         db,
         chatId: chat.id,
         lowerId: lower,

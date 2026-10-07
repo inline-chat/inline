@@ -13,10 +13,10 @@ enum DatabaseCredentialPreparationError: Error, Equatable, PrivacySafeErrorCateg
 
   var privacySafeErrorCategory: String {
     switch self {
-    case .keychainLocked: "database_credentials:keychain_locked"
-    case .keyUnavailable: "database_credentials:key_unavailable"
-    case .keychainFailure: "database_credentials:keychain_failure"
-    case .persistentDatabaseUnavailable: "database_credentials:persistent_unavailable"
+      case .keychainLocked: "database_credentials:keychain_locked"
+      case .keyUnavailable: "database_credentials:key_unavailable"
+      case .keychainFailure: "database_credentials:keychain_failure"
+      case .persistentDatabaseUnavailable: "database_credentials:persistent_unavailable"
     }
   }
 }
@@ -32,8 +32,8 @@ public enum PersistentStoreOpenFailureReason: String, Sendable, Equatable {
   case databaseCannotOpen = "database_cannot_open"
   case databaseIO = "database_io"
   case databaseUnreadable = "database_unreadable"
-  case migration = "migration"
-  case unknown = "unknown"
+  case migration
+  case unknown
 }
 
 public struct PersistentStoreOpenFailure: Error, Sendable, Equatable, PrivacySafeErrorCategoryProviding {
@@ -61,8 +61,8 @@ public enum PersistentStoreAdmission: Sendable, Equatable {
 private enum PersistentStoreStartupDiagnostics {
   private static let slowOpenThresholdMs = 5_000
   private static let reportLock = NSLock()
-  nonisolated(unsafe) private static var reportedEvents: Set<String> = []
-  nonisolated(unsafe) private static var startupAttemptCount = 0
+  private nonisolated(unsafe) static var reportedEvents: Set<String> = []
+  private nonisolated(unsafe) static var startupAttemptCount = 0
 
   static func report(
     admission: PersistentStoreAdmission,
@@ -80,15 +80,15 @@ private enum PersistentStoreStartupDiagnostics {
     let state: String
     let failure: PersistentStoreOpenFailure?
     switch admission {
-    case .ready:
-      state = "ready"
-      failure = nil
-    case .retryable(let value):
-      state = "retryable"
-      failure = value
-    case .terminal(let value):
-      state = "terminal"
-      failure = value
+      case .ready:
+        state = "ready"
+        failure = nil
+      case let .retryable(value):
+        state = "retryable"
+        failure = value
+      case let .terminal(value):
+        state = "terminal"
+        failure = value
     }
 
     let breadcrumb = Breadcrumb(
@@ -105,13 +105,12 @@ private enum PersistentStoreStartupDiagnostics {
     ]
     SentrySDK.addBreadcrumb(breadcrumb)
 
-    let event: String?
-    if state == "terminal" {
-      event = "apple_persistent_store_unavailable"
+    let event: String? = if state == "terminal" {
+      "apple_persistent_store_unavailable"
     } else if durationMs >= slowOpenThresholdMs {
-      event = "apple_persistent_store_open_slow"
+      "apple_persistent_store_open_slow"
     } else {
-      event = nil
+      nil
     }
     guard let event else { return }
 
@@ -151,10 +150,10 @@ public final class AppDatabase: @unchecked Sendable {
   private var _dbWriter: any DatabaseWriter
   private var preparedDatabaseKey: String?
   private var persistentOpenFailure: PersistentStoreOpenFailure?
-#if DEBUG
+  #if DEBUG
   private static let warnLock = NSLock()
-  nonisolated(unsafe) private static var warnedInMemoryObservationSites: Set<String> = []
-#endif
+  private nonisolated(unsafe) static var warnedInMemoryObservationSites: Set<String> = []
+  #endif
 
   public var dbWriter: any DatabaseWriter {
     writerLock.withLock { _dbWriter }
@@ -176,15 +175,15 @@ public final class AppDatabase: @unchecked Sendable {
         sqliteExtendedCode: nil
       )
       switch failure.disposition {
-      case .retryable:
-        return .retryable(failure)
-      case .terminal:
-        return .terminal(failure)
+        case .retryable:
+          return .retryable(failure)
+        case .terminal:
+          return .terminal(failure)
       }
     }
   }
 
-#if DEBUG
+  #if DEBUG
   /// Debug helper to detect GRDB observations being created while `AppDatabase` is using the
   /// in-memory fallback. Observations capture the provided reader/writer; if they bind to the
   /// in-memory DB before promotion, they will not automatically "follow" the promoted DB.
@@ -200,7 +199,9 @@ public final class AppDatabase: @unchecked Sendable {
 
     let key = "\(file):\(line):\(context)"
     let shouldLog = Self.warnLock.withLock {
-      if Self.warnedInMemoryObservationSites.contains(key) { return false }
+      if Self.warnedInMemoryObservationSites.contains(key) {
+        return false
+      }
       Self.warnedInMemoryObservationSites.insert(key)
       return true
     }
@@ -211,7 +212,7 @@ public final class AppDatabase: @unchecked Sendable {
       "DB_INMEMORY_OBSERVATION context=\(context) site=\(file):\(line)\n\(stack)"
     )
   }
-#else
+  #else
   @inlinable
   public func warnIfInMemoryDatabaseForObservation(
     _ context: StaticString,
@@ -223,7 +224,7 @@ public final class AppDatabase: @unchecked Sendable {
     _ = file
     _ = line
   }
-#endif
+  #endif
   static let log = Log.scoped(
     "AppDatabase",
     // Enable tracing for seeing all SQL statements
@@ -240,7 +241,7 @@ public final class AppDatabase: @unchecked Sendable {
     try translationPreferences.observe(dbWriter)
   }
 
-  internal func swapWriter(_ newWriter: any DatabaseWriter) {
+  func swapWriter(_ newWriter: any DatabaseWriter) {
     do {
       try translationPreferences.observe(newWriter)
     } catch {
@@ -253,17 +254,17 @@ public final class AppDatabase: @unchecked Sendable {
     }
   }
 
-  internal func recordPersistentOpenFailure(_ failure: PersistentStoreOpenFailure) {
+  func recordPersistentOpenFailure(_ failure: PersistentStoreOpenFailure) {
     writerLock.withLock {
       persistentOpenFailure = failure
     }
   }
 
-  internal func isCredentialStoragePrepared(for key: String) -> Bool {
+  func isCredentialStoragePrepared(for key: String) -> Bool {
     writerLock.withLock { preparedDatabaseKey == key }
   }
 
-  internal func markCredentialStoragePrepared(for key: String?) {
+  func markCredentialStoragePrepared(for key: String?) {
     writerLock.withLock { preparedDatabaseKey = key }
   }
 
@@ -516,9 +517,11 @@ public extension AppDatabase {
       try db.create(table: "attachment") { t in
         t.autoIncrementedPrimaryKey("id")
         t.column("messageId", .integer).references(
-          "message", column: "globalId", onDelete: .cascade)
+          "message", column: "globalId", onDelete: .cascade
+        )
         t.column("externalTaskId", .integer).references(
-          "externalTask", column: "id", onDelete: .cascade)
+          "externalTask", column: "id", onDelete: .cascade
+        )
       }
     }
 
@@ -578,11 +581,14 @@ public extension AppDatabase {
       // Update message table to reference media
       try db.alter(table: "message") { t in
         t.add(column: "photoId", .integer).references(
-          "photo", column: "photoId", onDelete: .setNull)
+          "photo", column: "photoId", onDelete: .setNull
+        )
         t.add(column: "videoId", .integer).references(
-          "video", column: "videoId", onDelete: .setNull)
+          "video", column: "videoId", onDelete: .setNull
+        )
         t.add(column: "documentId", .integer).references(
-          "document", column: "documentId", onDelete: .setNull)
+          "document", column: "documentId", onDelete: .setNull
+        )
       }
     }
 
@@ -614,7 +620,8 @@ public extension AppDatabase {
     migrator.registerMigration("add urlPreviewId to attachment") { db in
       try db.alter(table: "attachment") { t in
         t.add(column: "urlPreviewId", .integer).references(
-          "urlPreview", column: "id", onDelete: .cascade)
+          "urlPreview", column: "id", onDelete: .cascade
+        )
       }
     }
 
@@ -626,11 +633,14 @@ public extension AppDatabase {
       try db.create(table: "attachment") { t in
         t.autoIncrementedPrimaryKey("id")
         t.column("messageId", .integer).references(
-          "message", column: "globalId", onDelete: .cascade)
+          "message", column: "globalId", onDelete: .cascade
+        )
         t.column("externalTaskId", .integer).references(
-          "externalTask", column: "id", onDelete: .cascade)
+          "externalTask", column: "id", onDelete: .cascade
+        )
         t.column("urlPreviewId", .integer).references(
-          "urlPreview", column: "id", onDelete: .cascade)
+          "urlPreview", column: "id", onDelete: .cascade
+        )
         t.column("attachmentId", .integer).unique().indexed()
       }
     }
@@ -965,15 +975,15 @@ public extension AppDatabase {
 
     migrator.registerMigration("backfill dialog chat list hidden") { db in
       try db.execute(sql: """
-        UPDATE dialog
-        SET chatListHidden = 1
-        WHERE chatListHidden IS NULL AND sidebarVisible = 0
-        """)
+      UPDATE dialog
+      SET chatListHidden = 1
+      WHERE chatListHidden IS NULL AND sidebarVisible = 0
+      """)
       try db.execute(sql: """
-        UPDATE dialog
-        SET chatListHidden = NULL
-        WHERE chatListHidden = 1 AND sidebarVisible = 1
-        """)
+      UPDATE dialog
+      SET chatListHidden = NULL
+      WHERE chatListHidden = 1 AND sidebarVisible = 1
+      """)
     }
 
     migrator.registerMigration("url preview media type") { db in
@@ -1113,7 +1123,7 @@ public extension AppDatabase {
     }
 
     migrator.registerMigration("animated video metadata") { db in
-      let columnNames = Set(try db.columns(in: "video").map(\.name))
+      let columnNames = try Set(db.columns(in: "video").map(\.name))
 
       try db.alter(table: "video") { t in
         if !columnNames.contains("isAnimated") {
@@ -1132,7 +1142,7 @@ public extension AppDatabase {
     }
 
     migrator.registerMigration("space public handle") { db in
-      let columnNames = Set(try db.columns(in: "space").map(\.name))
+      let columnNames = try Set(db.columns(in: "space").map(\.name))
       try db.alter(table: "space") { t in
         if !columnNames.contains("handle") {
           t.add(column: "handle", .text)
@@ -1363,9 +1373,67 @@ public extension AppDatabase {
       }
     }
 
-    /// TODOs:
-    /// - Add indexes for performance
-    /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
+    migrator.registerMigration("scoped message history coverage") { db in
+      try db.alter(table: "chat") { table in
+        table.add(column: "historyAdmissionRevision", .integer).notNull().defaults(to: 0)
+      }
+      try db.alter(table: "message") { table in
+        table.add(column: "resourceFlags", .integer).notNull().defaults(to: 0)
+      }
+      try db.execute(sql: "DROP TRIGGER messageHistoryHole_seed_chat")
+      try db.rename(table: "messageHistoryHole", to: "unscopedMessageHistoryHole")
+      try db.create(table: "messageHistoryHole") { table in
+        table.column("chatId", .integer).notNull().references("chat", onDelete: .cascade)
+        table.column("scope", .integer).notNull()
+        table.column("lowerId", .integer).notNull()
+        table.column("upperId", .integer).notNull()
+        table.primaryKey(["chatId", "scope", "lowerId", "upperId"])
+        table.check(Column("scope") >= 0 && Column("scope") <= 6)
+        table.check(Column("lowerId") > 0)
+        table.check(Column("upperId") >= Column("lowerId") && Column("upperId") <= 2_147_483_647)
+      }
+      // Preserve existing ordinary coverage; cached resource rows prove nothing
+      // about resource coverage, so all fixed tags begin unknown.
+      try db.execute(sql: """
+      INSERT INTO messageHistoryHole (chatId, scope, lowerId, upperId)
+      SELECT chatId, 0, lowerId, MIN(upperId, 2147483647)
+      FROM unscopedMessageHistoryHole WHERE lowerId <= 2147483647
+      """)
+      try db.drop(table: "unscopedMessageHistoryHole")
+      for scope in MessageHistoryScope.allCases where scope != .timeline {
+        try db.execute(
+          sql: "INSERT INTO messageHistoryHole SELECT id, ?, 1, 2147483647 FROM chat",
+          arguments: [scope.rawValue]
+        )
+      }
+      try db.execute(sql: """
+      CREATE TRIGGER messageHistoryHole_seed_chat
+      AFTER INSERT ON chat
+      BEGIN
+        INSERT INTO messageHistoryHole (chatId, scope, lowerId, upperId)
+        VALUES (NEW.id, 0, 1, 2147483647), (NEW.id, 1, 1, 2147483647),
+               (NEW.id, 2, 1, 2147483647), (NEW.id, 3, 1, 2147483647),
+               (NEW.id, 4, 1, 2147483647), (NEW.id, 5, 1, 2147483647),
+               (NEW.id, 6, 1, 2147483647);
+      END
+      """)
+      let messages = try Message.fetchCursor(db)
+      while let message = try messages.next() {
+        try db.execute(
+          sql: "UPDATE message SET resourceFlags = ? WHERE globalId = ?",
+          arguments: [MessageResourceFlags.classify(message).rawValue, message.globalId]
+        )
+      }
+      try db.execute(sql: """
+      UPDATE message SET resourceFlags = resourceFlags | 16
+      WHERE EXISTS (SELECT 1 FROM attachment
+                    WHERE attachment.messageId = message.globalId AND attachment.urlPreviewId IS NOT NULL)
+      """)
+    }
+
+    // TODOs:
+    // - Add indexes for performance
+    // - Add timestamp integer types instead of Date for performance and faster sort, less storage
     return migrator
   }
 }
@@ -1428,10 +1496,10 @@ public extension AppDatabase {
   static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     // Default configuration: prefer the stable database key if available; fall back to legacy "123".
     let passphrase: String = switch DatabaseKeyStore.load() {
-    case .available(let key):
-      key
-    default:
-      "123"
+      case let .available(key):
+        key
+      default:
+        "123"
     }
     return makeConfiguration(passphrase: passphrase, base)
   }
@@ -1534,17 +1602,17 @@ public extension AppDatabase {
     for availability: DatabaseKeyAvailability
   ) throws -> String {
     switch availability {
-    case .available(let key):
-      return key
-    case .locked:
-      log.warning("AppDatabase.authenticated called while keychain is locked")
-      throw DatabaseCredentialPreparationError.keychainLocked
-    case .notFound:
-      log.warning("AppDatabase.authenticated called without database key")
-      throw DatabaseCredentialPreparationError.keyUnavailable
-    case .error(let status):
-      log.error("AppDatabase.authenticated failed to get database key status=\(status)")
-      throw DatabaseCredentialPreparationError.keychainFailure(status)
+      case let .available(key):
+        return key
+      case .locked:
+        log.warning("AppDatabase.authenticated called while keychain is locked")
+        throw DatabaseCredentialPreparationError.keychainLocked
+      case .notFound:
+        log.warning("AppDatabase.authenticated called without database key")
+        throw DatabaseCredentialPreparationError.keyUnavailable
+      case let .error(status):
+        log.error("AppDatabase.authenticated failed to get database key status=\(status)")
+        throw DatabaseCredentialPreparationError.keychainFailure(status)
     }
   }
 
@@ -1683,12 +1751,12 @@ public extension AppDatabase {
       do {
         // Reset the database passphrase to a default value
         switch DatabaseKeyStore.getOrCreate() {
-        case .available(let key):
-          try AppDatabase.changePassphrase(key)
-          AppDatabase.shared.markCredentialStoragePrepared(for: key)
-        default:
-          try AppDatabase.changePassphrase("123")
-          AppDatabase.shared.markCredentialStoragePrepared(for: nil)
+          case let .available(key):
+            try AppDatabase.changePassphrase(key)
+            AppDatabase.shared.markCredentialStoragePrepared(for: key)
+          default:
+            try AppDatabase.changePassphrase("123")
+            AppDatabase.shared.markCredentialStoragePrepared(for: nil)
         }
       } catch {
         throw logoutCleanupError(phase: .rotatePassphrase, error: error)
@@ -1821,14 +1889,14 @@ public extension AppDatabase {
 
   private static func keyStatus(_ availability: DatabaseKeyAvailability) -> String {
     switch availability {
-    case .available:
-      return "available"
-    case .locked:
-      return "locked"
-    case .notFound:
-      return "notFound"
-    case .error(let status):
-      return "error(\(status))"
+      case .available:
+        "available"
+      case .locked:
+        "locked"
+      case .notFound:
+        "notFound"
+      case let .error(status):
+        "error(\(status))"
     }
   }
 
@@ -1836,29 +1904,29 @@ public extension AppDatabase {
     for availability: DatabaseKeyAvailability
   ) -> PersistentStoreOpenFailure? {
     switch availability {
-    case .available:
-      return nil
-    case .locked:
-      return PersistentStoreOpenFailure(
-        reason: .keychainLocked,
-        disposition: .retryable,
-        sqliteCode: nil,
-        sqliteExtendedCode: nil
-      )
-    case .notFound:
-      return PersistentStoreOpenFailure(
-        reason: .keyUnavailable,
-        disposition: .terminal,
-        sqliteCode: nil,
-        sqliteExtendedCode: nil
-      )
-    case .error:
-      return PersistentStoreOpenFailure(
-        reason: .keychainFailure,
-        disposition: .terminal,
-        sqliteCode: nil,
-        sqliteExtendedCode: nil
-      )
+      case .available:
+        nil
+      case .locked:
+        PersistentStoreOpenFailure(
+          reason: .keychainLocked,
+          disposition: .retryable,
+          sqliteCode: nil,
+          sqliteExtendedCode: nil
+        )
+      case .notFound:
+        PersistentStoreOpenFailure(
+          reason: .keyUnavailable,
+          disposition: .terminal,
+          sqliteCode: nil,
+          sqliteExtendedCode: nil
+        )
+      case .error:
+        PersistentStoreOpenFailure(
+          reason: .keychainFailure,
+          disposition: .terminal,
+          sqliteCode: nil,
+          sqliteExtendedCode: nil
+        )
     }
   }
 
@@ -1878,30 +1946,30 @@ public extension AppDatabase {
     let reason: PersistentStoreOpenFailureReason
     let disposition: PersistentStoreOpenFailure.Disposition
     switch databaseError.resultCode {
-    case .SQLITE_BUSY:
-      reason = .databaseBusy
-      disposition = .retryable
-    case .SQLITE_LOCKED:
-      reason = .databaseLocked
-      disposition = .retryable
-    case .SQLITE_FULL:
-      reason = .databaseFull
-      disposition = .terminal
-    case .SQLITE_READONLY:
-      reason = .databaseReadOnly
-      disposition = .terminal
-    case .SQLITE_CANTOPEN:
-      reason = .databaseCannotOpen
-      disposition = .terminal
-    case .SQLITE_IOERR:
-      reason = .databaseIO
-      disposition = .terminal
-    case .SQLITE_CORRUPT, .SQLITE_NOTADB:
-      reason = .databaseUnreadable
-      disposition = .terminal
-    default:
-      reason = duringMigration ? .migration : .unknown
-      disposition = .terminal
+      case .SQLITE_BUSY:
+        reason = .databaseBusy
+        disposition = .retryable
+      case .SQLITE_LOCKED:
+        reason = .databaseLocked
+        disposition = .retryable
+      case .SQLITE_FULL:
+        reason = .databaseFull
+        disposition = .terminal
+      case .SQLITE_READONLY:
+        reason = .databaseReadOnly
+        disposition = .terminal
+      case .SQLITE_CANTOPEN:
+        reason = .databaseCannotOpen
+        disposition = .terminal
+      case .SQLITE_IOERR:
+        reason = .databaseIO
+        disposition = .terminal
+      case .SQLITE_CORRUPT, .SQLITE_NOTADB:
+        reason = .databaseUnreadable
+        disposition = .terminal
+      default:
+        reason = duringMigration ? .migration : .unknown
+        disposition = .terminal
     }
     return PersistentStoreOpenFailure(
       reason: reason,
@@ -1958,10 +2026,9 @@ public extension AppDatabase {
       //            #if DEBUG
       //            let databaseURL = directoryURL.appendingPathComponent("db_dev.sqlite")
       //            #else
-      let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
+      return directoryURL.appendingPathComponent("db.sqlite")
       //            #endif
 
-      return databaseURL
     } catch {
       log.error("Failed to resolve database path", error: error)
       fatalError("Failed to resolve database path \(error)")
@@ -2024,7 +2091,10 @@ public extension AppDatabase {
     )
     #if !DEBUG_BUILD
     if ProjectConfig.userProfile == "devbuild" {
-      log.error("DevBuild profile is active without DEBUG_BUILD; build devbuilds through scripts/macos/build-local-app.sh")
+      log
+        .error(
+          "DevBuild profile is active without DEBUG_BUILD; build devbuilds through scripts/macos/build-local-app.sh"
+        )
     }
     #endif
 
@@ -2051,10 +2121,10 @@ public extension AppDatabase {
       do {
         // Prefer dbKey if available; fall back to legacy.
         let passphrase: String = switch DatabaseKeyStore.load() {
-        case .available(let key):
-          key
-        default:
-          "123"
+          case let .available(key):
+            key
+          default:
+            "123"
         }
         let dbQueue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: passphrase))
         let database = try AppDatabase(dbQueue)
@@ -2076,46 +2146,50 @@ public extension AppDatabase {
     // If the database file doesn't exist yet, only create it when the keychain is available.
     if fileExists == false {
       switch DatabaseKeyStore.getOrCreate() {
-      case .available(let key):
-        do {
-          return admit(try openPersistent(passphrase: key, candidateLabel: "new_db_key").db)
-        } catch {
-          log.error("Failed to create persistent database with dbKey; using in-memory", error: error)
-          return admit(openInMemory(after: persistentOpenFailure(for: error, duringMigration: true)))
-        }
-      case .locked:
-        log.warning("Keychain locked; using in-memory database until credentials are available")
-        return admit(openInMemory(after: persistentOpenFailure(
-          afterExhaustingCandidatesWith: .locked,
-          lastError: nil
-        )))
-      case .notFound:
-        log.warning("No database key available; using in-memory database")
-        return admit(openInMemory(after: persistentOpenFailure(
-          afterExhaustingCandidatesWith: .notFound,
-          lastError: nil
-        )))
-      case .error(let status):
-        log.warning("Database key creation failed; using in-memory database")
-        return admit(openInMemory(after: persistentOpenFailure(
-          afterExhaustingCandidatesWith: .error(status: status),
-          lastError: nil
-        )))
+        case let .available(key):
+          do {
+            return try admit(openPersistent(passphrase: key, candidateLabel: "new_db_key").db)
+          } catch {
+            log.error("Failed to create persistent database with dbKey; using in-memory", error: error)
+            return admit(openInMemory(after: persistentOpenFailure(for: error, duringMigration: true)))
+          }
+        case .locked:
+          log.warning("Keychain locked; using in-memory database until credentials are available")
+          return admit(openInMemory(after: persistentOpenFailure(
+            afterExhaustingCandidatesWith: .locked,
+            lastError: nil
+          )))
+        case .notFound:
+          log.warning("No database key available; using in-memory database")
+          return admit(openInMemory(after: persistentOpenFailure(
+            afterExhaustingCandidatesWith: .notFound,
+            lastError: nil
+          )))
+        case let .error(status):
+          log.warning("Database key creation failed; using in-memory database")
+          return admit(openInMemory(after: persistentOpenFailure(
+            afterExhaustingCandidatesWith: .error(status: status),
+            lastError: nil
+          )))
       }
     }
 
     let dbKey: String? = switch DatabaseKeyStore.load() {
-    case .available(let key):
-      key
-    default:
-      nil
+      case let .available(key):
+        key
+      default:
+        nil
     }
 
     let token = Auth.shared.getToken()
 
     var candidates: [(label: String, passphrase: String)] = []
-    if let dbKey { candidates.append((label: "dbKey", passphrase: dbKey)) }
-    if let token, token != dbKey { candidates.append((label: "token", passphrase: token)) }
+    if let dbKey {
+      candidates.append((label: "dbKey", passphrase: dbKey))
+    }
+    if let token, token != dbKey {
+      candidates.append((label: "token", passphrase: token))
+    }
     candidates.append((label: "legacy123", passphrase: "123"))
 
     var authoritativeKeyError: (any Error)?
@@ -2131,19 +2205,19 @@ public extension AppDatabase {
         // Migrate legacy DB encryption (token / "123") to dbKey once we can.
         if candidate.label != "dbKey" {
           switch DatabaseKeyStore.getOrCreate() {
-          case .available(let newKey) where newKey != candidate.passphrase:
-            do {
-              try rotatePassphrase(pool: opened.pool, to: newKey)
-              // Drop the old pool (wrong config) and reopen with the new key.
-              return admit(try openPersistent(
-                passphrase: newKey,
-                candidateLabel: "rotated_db_key"
-              ).db)
-            } catch {
-              log.error("Failed to rotate DB passphrase to dbKey; continuing with legacy key", error: error)
-            }
-          default:
-            break
+            case let .available(newKey) where newKey != candidate.passphrase:
+              do {
+                try rotatePassphrase(pool: opened.pool, to: newKey)
+                // Drop the old pool (wrong config) and reopen with the new key.
+                return try admit(openPersistent(
+                  passphrase: newKey,
+                  candidateLabel: "rotated_db_key"
+                ).db)
+              } catch {
+                log.error("Failed to rotate DB passphrase to dbKey; continuing with legacy key", error: error)
+              }
+            default:
+              break
           }
         }
 
@@ -2182,10 +2256,10 @@ public extension AppDatabase {
     let reopened = makeShared()
     guard reopened.dbWriter is DatabasePool else {
       switch reopened.persistentStoreAdmission {
-      case .ready:
-        break
-      case .retryable(let failure), .terminal(let failure):
-        shared.recordPersistentOpenFailure(failure)
+        case .ready:
+          break
+        case let .retryable(failure), let .terminal(failure):
+          shared.recordPersistentOpenFailure(failure)
       }
       return nil
     }

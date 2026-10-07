@@ -7022,6 +7022,7 @@ mod cli_parsing_tests {
         let output = TranslatedChatHistoryOutput {
             page: MessagePage::new(&[], false),
             payload: proto::GetChatHistoryResult {
+                seq: Some(42),
                 messages: vec![proto::Message {
                     id: 7,
                     message: Some("hello".to_string()),
@@ -7041,6 +7042,7 @@ mod cli_parsing_tests {
 
         assert_eq!(value["messages"].as_array().unwrap().len(), 1);
         assert_eq!(value["messages"][0]["id"], 7);
+        assert_eq!(value["seq"], 42);
         assert_eq!(value["translations"].as_array().unwrap().len(), 1);
     }
 
@@ -7049,6 +7051,7 @@ mod cli_parsing_tests {
         let output = TranslatedSearchMessagesOutput {
             page: MessagePage::new(&[], false),
             payload: proto::SearchMessagesResult {
+                seq: Some(43),
                 messages: vec![proto::Message {
                     id: 8,
                     message: Some("hola".to_string()),
@@ -7067,6 +7070,7 @@ mod cli_parsing_tests {
 
         assert_eq!(value["messages"].as_array().unwrap().len(), 1);
         assert_eq!(value["messages"][0]["id"], 8);
+        assert_eq!(value["seq"], 43);
         assert_eq!(value["translations"].as_array().unwrap().len(), 1);
     }
 

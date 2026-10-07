@@ -1,10 +1,9 @@
 import Foundation
 import GRDB
+@testable import InlineKit
 import InlineProtocol
 import RealtimeV2
 import Testing
-
-@testable import InlineKit
 
 @Suite("Durable message history coverage")
 struct MessageHistoryCoverageTests {
@@ -41,7 +40,7 @@ struct MessageHistoryCoverageTests {
     }
   }
 
-  @Test("only GET_CHAT_HISTORY results certify numeric coverage")
+  @Test("ordinary pages prove every fixed tag scope")
   func historyResultClosesCoverage() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
@@ -79,16 +78,18 @@ struct MessageHistoryCoverageTests {
       protocolMessage.peerID = .with { $0.chat.chatID = 7 }
       var response = InlineProtocol.GetChatHistoryResult()
       response.messages = [protocolMessage]
-      let transaction = GetChatHistoryTransaction(
+      var transaction = GetChatHistoryTransaction(
         peer: .thread(id: 7),
         mode: .historyModeLatest,
         limit: 100
       )
+      transaction.context.admissionToken = try HistoryPageAdmissionToken.capture(db, chatId: 7)
+      response.seq = 0
       try GetChatHistoryTransaction.apply(response, context: transaction.context, db: db)
 
-      #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
-        MessageHistoryHole(chatId: 7, lowerId: 1, upperId: 49),
-      ])
+      for scope in MessageHistoryScope.allCases {
+        #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7, scope: scope).isEmpty)
+      }
     }
   }
 
@@ -112,6 +113,36 @@ struct MessageHistoryCoverageTests {
       GetChatHistoryTransaction.provenCoverage(context: newer.context, messageIDs: []) ==
         51 ... MessageHistoryHole.positiveMessageIDMax
     )
+  }
+
+  @Test("matching released older cursors admit coverage while contradictory cursors cannot")
+  func matchingOlderCursorCompatibility() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    try await queue.write { (db: Database) throws in
+      try User(id: 1, email: nil, firstName: "History").insert(db)
+      try Chat(id: 7, date: Date(timeIntervalSince1970: 1), type: .thread, title: "Coverage", spaceId: nil).insert(db)
+      var transaction = GetChatHistoryTransaction(peer: .thread(id: 7), offsetID: 10, limit: 3)
+      transaction.context.beforeID = 10
+      transaction.context.admissionToken = try HistoryPageAdmissionToken.capture(db, chatId: 7)
+      let page = InlineProtocol.GetChatHistoryResult.with {
+        $0.seq = 0
+        $0.messages = [9, 8, 7].map { id in
+          .with {
+            $0.id = Int64(id)
+            $0.chatID = 7
+            $0.fromID = 1
+            $0.peerID = .with { $0.chat.chatID = 7 }
+            $0.date = Int64(id)
+          }
+        }
+      }
+      try GetChatHistoryTransaction.apply(page, context: transaction.context, db: db)
+      #expect(try Message.fetchCount(db) == 3)
+      #expect(try MessageHistoryCoverageStore.intersects(db, chatId: 7, lowerId: 7, upperId: 9) == false)
+      transaction.context.beforeID = 8
+      #expect(GetChatHistoryTransaction.provenCoverages(context: transaction.context, messageIDs: [7]) == nil)
+    }
   }
 
   @Test("non-positive message IDs reject the page without partial writes")
@@ -141,24 +172,26 @@ struct MessageHistoryCoverageTests {
     invalid.id = 0
     var response = InlineProtocol.GetChatHistoryResult()
     response.messages = [valid, invalid]
-    let transaction = GetChatHistoryTransaction(
+    var transaction = GetChatHistoryTransaction(
       peer: .thread(id: 7),
       mode: .historyModeLatest,
       limit: 100
     )
+    transaction.context.admissionToken = try await queue.read { try HistoryPageAdmissionToken.capture($0, chatId: 7) }
+    response.seq = 0
     let invalidResponse = response
     let context = transaction.context
 
-    #expect(throws: TransactionExecutionError.self) {
+    #expect(throws: HistoryPageAdmissionError.self) {
       try queue.write { (db: Database) throws in
         try GetChatHistoryTransaction.apply(invalidResponse, context: context, db: db)
       }
     }
 
     let (messageCount, holes) = try await queue.read { (db: Database) throws in
-      (
-        try Message.fetchCount(db),
-        try MessageHistoryCoverageStore.holes(db, chatId: 7)
+      try (
+        Message.fetchCount(db),
+        MessageHistoryCoverageStore.holes(db, chatId: 7)
       )
     }
     #expect(messageCount == 0)
@@ -198,7 +231,7 @@ struct MessageHistoryCoverageTests {
       limit: 100
     )
     #expect(GetChatHistoryTransaction.provenCoverage(context: latest.context, messageIDs: [50, 40]) ==
-      40 ... MessageHistoryHole.positiveMessageIDMax)
+      1 ... MessageHistoryHole.positiveMessageIDMax)
 
     let around = GetChatHistoryTransaction(
       peer: .thread(id: 7),
@@ -214,7 +247,8 @@ struct MessageHistoryCoverageTests {
       1 ... MessageHistoryHole.positiveMessageIDMax)
 
     let fullWindow = GetChatHistoryTransaction(
-      peer: .thread(id: 7), mode: .historyModeAround, anchorID: 50, limit: 4
+      peer: .thread(id: 7), mode: .historyModeAround, anchorID: 50, limit: 5,
+      beforeLimit: 2, afterLimit: 2
     )
     #expect(GetChatHistoryTransaction.provenCoverage(context: fullWindow.context, messageIDs: [40, 45, 55, 60]) ==
       40 ... 60)

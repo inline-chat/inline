@@ -37,11 +37,7 @@ import {
 } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { messageAttachments, type DbMessageAttachment } from "@in/server/db/schema/attachments"
-import {
-  decryptMessage,
-  encryptMessage,
-  encryptMessageEntities,
-} from "@in/server/modules/encryption/encryptMessage"
+import { decryptMessage, encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or, sql } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
@@ -59,10 +55,7 @@ import {
   type PreparedBlockContent,
 } from "@in/server/modules/message/blockContentStorage"
 import { decryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
-import {
-  collectReadyBlockPhotoIds,
-  validateBlockContent,
-} from "@in/server/modules/message/blockContent"
+import { collectReadyBlockPhotoIds, validateBlockContent } from "@in/server/modules/message/blockContent"
 import { decryptAgentRef } from "@in/server/modules/agentSessions/crypto"
 
 const log = new Log("MessageModel", LogLevel.INFO)
@@ -94,12 +87,14 @@ export const MessageModel = {
 
 export type DbInputFullAttachment = DbMessageAttachment & {
   externalTask?: DbExternalTask | null
-  linkEmbed?: (DbLinkEmbed & {
-    photo?: InputDbFullPhoto | null
-    authorPhoto?: InputDbFullPhoto | null
-    video?: InputDbFullVideo | null
-    document?: InputDbFullDocument | null
-  }) | null
+  linkEmbed?:
+    | (DbLinkEmbed & {
+        photo?: InputDbFullPhoto | null
+        authorPhoto?: InputDbFullPhoto | null
+        video?: InputDbFullVideo | null
+        document?: InputDbFullDocument | null
+      })
+    | null
 }
 
 export type DbInputFullMessage = DbMessage & {
@@ -242,6 +237,8 @@ type GetMessagesMode = "latest" | "older" | "newer" | "around"
 
 type GetMessagesInput = {
   currentUserId: number
+  tx?: Transaction
+  chatId?: number
   offsetId?: bigint
   limit?: number
   mode?: GetMessagesMode
@@ -320,7 +317,10 @@ function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
   return "latest"
 }
 
-async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Map<bigint, DbInputFullAttachment[]>> {
+async function getAttachmentsByMessageGlobalIds(
+  globalIds: bigint[],
+  tx?: Transaction,
+): Promise<Map<bigint, DbInputFullAttachment[]>> {
   const ids = Array.from(new Set(globalIds))
   const byMessageId = new Map<bigint, DbInputFullAttachment[]>()
 
@@ -328,7 +328,7 @@ async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Ma
     return byMessageId
   }
 
-  const attachments = await db._query.messageAttachments.findMany({
+  const attachments = await (tx ?? db)._query.messageAttachments.findMany({
     where: inArray(messageAttachments.messageId, ids),
     orderBy: asc(messageAttachments.id),
     with: messageAttachmentRelations,
@@ -351,8 +351,14 @@ async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Ma
   return byMessageId
 }
 
-async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
-  const attachmentsByMessageId = await getAttachmentsByMessageGlobalIds(messagesList.map((message) => message.globalId))
+async function addMessageAttachments(
+  messagesList: DbInputFullMessage[],
+  tx?: Transaction,
+): Promise<DbInputFullMessage[]> {
+  const attachmentsByMessageId = await getAttachmentsByMessageGlobalIds(
+    messagesList.map((message) => message.globalId),
+    tx,
+  )
 
   return messagesList.map((message) => ({
     ...message,
@@ -360,11 +366,14 @@ async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promis
   }))
 }
 
-async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
+async function addAgentSessionInfo(
+  messagesList: DbInputFullMessage[],
+  tx?: Transaction,
+): Promise<DbInputFullMessage[]> {
   const globalIds = Array.from(new Set(messagesList.map((message) => message.globalId)))
   if (globalIds.length === 0) return messagesList
 
-  const rows = await db
+  const rows = await (tx ?? db)
     .select({
       messageGlobalId: agentSessionMessages.messageGlobalId,
       agentSessionId: agentSessionMessages.agentSessionId,
@@ -400,16 +409,16 @@ async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<
   }))
 }
 
-async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFullMessage[]> {
-  const hydrated = await addAgentSessionInfo(await addMessageAttachments(messagesList))
+async function processMessages(messagesList: DbInputFullMessage[], tx?: Transaction): Promise<DbFullMessage[]> {
+  const hydrated = await addAgentSessionInfo(await addMessageAttachments(messagesList, tx), tx)
   const processed = hydrated.map(processMessage)
   const readyPhotoIdsByMessage = processed.map((message) =>
-    message.blockContent ? collectReadyBlockPhotoIds(message.blockContent) : []
+    message.blockContent ? collectReadyBlockPhotoIds(message.blockContent) : [],
   )
   const readyPhotoIds = readyPhotoIdsByMessage.flat()
   if (readyPhotoIds.length === 0) return processed
 
-  const photos = await FileModel.getPhotosByIds(readyPhotoIds)
+  const photos = await FileModel.getPhotosByIds(readyPhotoIds, tx)
   if (photos.length === 0) return processed
 
   const photosById = new Map(photos.map((photo) => [BigInt(photo.id), photo]))
@@ -423,12 +432,9 @@ async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFu
   })
 }
 
-async function getMessages(
-  inputPeer: InputPeer,
-  input: GetMessagesInput,
-): Promise<DbFullMessage[]> {
+async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promise<DbFullMessage[]> {
   const { currentUserId } = input
-  let chatId = await ChatModel.getChatIdFromInputPeer(inputPeer, { currentUserId })
+  const chatId = input.chatId ?? (await ChatModel.getChatIdFromInputPeer(inputPeer, { currentUserId }))
 
   if (!chatId) {
     throw ModelError.ChatInvalid
@@ -437,21 +443,21 @@ async function getMessages(
   const mode = getResolvedHistoryMode(input)
 
   if (mode === "latest") {
-    const latestMessages = await db._query.messages.findMany({
+    const latestMessages = await (input.tx ?? db)._query.messages.findMany({
       where: eq(messages.chatId, chatId),
       orderBy: desc(messages.messageId),
       limit: input.limit ?? 60,
       with: fullMessageRelations,
     })
 
-    return processMessages(latestMessages)
+    return processMessages(latestMessages, input.tx)
   }
 
   if (mode === "older") {
     const beforeId = input.beforeId ?? input.offsetId
     const beforeIdNumber = beforeId ? Number(beforeId) : undefined
 
-    const olderMessages = await db._query.messages.findMany({
+    const olderMessages = await (input.tx ?? db)._query.messages.findMany({
       where: beforeIdNumber
         ? and(eq(messages.chatId, chatId), lt(messages.messageId, beforeIdNumber))
         : eq(messages.chatId, chatId),
@@ -460,7 +466,7 @@ async function getMessages(
       with: fullMessageRelations,
     })
 
-    return processMessages(olderMessages)
+    return processMessages(olderMessages, input.tx)
   }
 
   if (mode === "newer") {
@@ -470,7 +476,7 @@ async function getMessages(
 
     const afterIdNumber = Number(input.afterId)
 
-    const newerMessagesAsc = await db._query.messages.findMany({
+    const newerMessagesAsc = await (input.tx ?? db)._query.messages.findMany({
       where: and(eq(messages.chatId, chatId), gt(messages.messageId, afterIdNumber)),
       orderBy: asc(messages.messageId),
       limit: input.limit ?? 60,
@@ -478,7 +484,7 @@ async function getMessages(
     })
 
     newerMessagesAsc.reverse()
-    return processMessages(newerMessagesAsc)
+    return processMessages(newerMessagesAsc, input.tx)
   }
 
   // mode === "around"
@@ -489,56 +495,52 @@ async function getMessages(
   const anchorIdNumber = Number(input.anchorId)
   const includeAnchor = input.includeAnchor ?? true
   const aroundLimit = input.limit ?? 60
-  const combinedAround = await db.transaction(
-    async (tx) => {
-      const anchorMessages = includeAnchor
+  const readAround = async (tx: Transaction) => {
+    const anchorMessages = includeAnchor
+      ? await tx._query.messages.findMany({
+          where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
+          limit: 1,
+          with: fullMessageRelations,
+        })
+      : []
+
+    const defaultBeforeLimit = Math.floor(aroundLimit / 2)
+    const defaultAfterLimit = Math.max(aroundLimit - defaultBeforeLimit - anchorMessages.length, 0)
+    const beforeLimit = Math.max(input.beforeLimit ?? defaultBeforeLimit, 0)
+    const afterLimit = Math.max(input.afterLimit ?? defaultAfterLimit, 0)
+
+    const beforeMessages =
+      beforeLimit > 0
         ? await tx._query.messages.findMany({
-            where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
-            limit: 1,
+            where: and(eq(messages.chatId, chatId), lt(messages.messageId, anchorIdNumber)),
+            orderBy: desc(messages.messageId),
+            limit: beforeLimit,
+            with: fullMessageRelations,
+          })
+        : []
+    const afterMessages =
+      afterLimit > 0
+        ? await tx._query.messages.findMany({
+            where: and(eq(messages.chatId, chatId), gt(messages.messageId, anchorIdNumber)),
+            orderBy: asc(messages.messageId),
+            limit: afterLimit,
             with: fullMessageRelations,
           })
         : []
 
-      const defaultBeforeLimit = Math.floor(aroundLimit / 2)
-      const defaultAfterLimit = Math.max(aroundLimit - defaultBeforeLimit - anchorMessages.length, 0)
-      const beforeLimit = Math.max(input.beforeLimit ?? defaultBeforeLimit, 0)
-      const afterLimit = Math.max(input.afterLimit ?? defaultAfterLimit, 0)
-
-      const beforeMessages =
-        beforeLimit > 0
-          ? await tx._query.messages.findMany({
-              where: and(eq(messages.chatId, chatId), lt(messages.messageId, anchorIdNumber)),
-              orderBy: desc(messages.messageId),
-              limit: beforeLimit,
-              with: fullMessageRelations,
-            })
-          : []
-      const afterMessages =
-        afterLimit > 0
-          ? await tx._query.messages.findMany({
-              where: and(eq(messages.chatId, chatId), gt(messages.messageId, anchorIdNumber)),
-              orderBy: asc(messages.messageId),
-              limit: afterLimit,
-              with: fullMessageRelations,
-            })
-          : []
-
-      return [...beforeMessages, ...anchorMessages, ...afterMessages]
-    },
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  )
+    return [...beforeMessages, ...anchorMessages, ...afterMessages]
+  }
+  const combinedAround = input.tx
+    ? await readAround(input.tx)
+    : await db.transaction(readAround, { isolationLevel: "repeatable read", accessMode: "read only" })
 
   combinedAround.sort((a, b) => b.messageId - a.messageId)
 
-  return processMessages(combinedAround)
+  return processMessages(combinedAround, input.tx)
 }
 
 /** Reads the newest message identities and core rows from an existing snapshot. */
-async function getLatestMessagesForChat(
-  chatId: number,
-  limit: number,
-  tx: Transaction,
-): Promise<DbFullMessage[]> {
+async function getLatestMessagesForChat(chatId: number, limit: number, tx: Transaction): Promise<DbFullMessage[]> {
   const latestMessages = await tx._query.messages.findMany({
     where: eq(messages.chatId, chatId),
     orderBy: desc(messages.messageId),
@@ -546,46 +548,68 @@ async function getLatestMessagesForChat(
     with: fullMessageRelations,
   })
 
-  return processMessages(latestMessages)
+  return processMessages(latestMessages, tx)
 }
 
 async function getMessagesWithMediaFilter(input: {
   chatId: number
   offsetId?: bigint
   limit: number
-  filter: MessageMediaFilter
+  filter: Exclude<MessageMediaFilter, "links">
+  tx?: Transaction
 }): Promise<DbFullMessage[]> {
-  const offsetIdNumber = input.offsetId ? Number(input.offsetId) : undefined
-  const baseWhereClause = offsetIdNumber
-    ? and(eq(messages.chatId, input.chatId), lt(messages.messageId, offsetIdNumber))
-    : eq(messages.chatId, input.chatId)
-  const mediaClause = buildMediaFilterClause(input.filter)
-  const whereClause = and(baseWhereClause, mediaClause)
-
-  const result = await db._query.messages.findMany({
-    where: whereClause,
+  const beforeId = input.offsetId === undefined ? undefined : Number(input.offsetId)
+  const result = await (input.tx ?? db)._query.messages.findMany({
+    where: and(
+      eq(messages.chatId, input.chatId),
+      beforeId === undefined ? undefined : lt(messages.messageId, beforeId),
+      buildMediaFilterClause(input.filter),
+    ),
     orderBy: desc(messages.messageId),
     limit: input.limit,
     with: fullMessageRelations,
   })
-
-  return processMessages(result)
+  return processMessages(result, input.tx)
 }
 
-function buildMediaFilterClause(filter: MessageMediaFilter) {
+export function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
+  // Unsupported fileId-only attachments remain ordinary history rows. Resource
+  // predicates omit them before LIMIT so a short matching page proves exhaustion.
+  const photos = not(isNull(messages.photoId))
+  const videos = and(isNull(messages.photoId), not(isNull(messages.videoId)))
+  const notNudge = sql`${messages.mediaType} IS DISTINCT FROM 'nudge'`
   switch (filter) {
     case "photos":
-      return not(isNull(messages.photoId))
+      return and(photos, notNudge, sql`${messages.isSticker} IS NOT TRUE`)
     case "videos":
-      return not(isNull(messages.videoId))
+      return and(videos, notNudge, sql`${messages.isSticker} IS NOT TRUE`)
     case "photo_video":
-      return or(not(isNull(messages.photoId)), not(isNull(messages.videoId)))
+      return and(or(photos, videos), notNudge, sql`${messages.isSticker} IS NOT TRUE`)
     case "documents":
-      return not(isNull(messages.documentId))
+      return and(
+        isNull(messages.photoId),
+        isNull(messages.videoId),
+        not(isNull(messages.documentId)),
+        notNudge,
+        sql`${messages.isSticker} IS NOT TRUE`,
+      )
     case "links":
-      return eq(messages.hasLink, true)
+      return or(
+        eq(messages.hasLink, true),
+        isNull(messages.hasLink),
+        sql`EXISTS (SELECT 1 FROM message_attachments AS preview_attachment WHERE
+        preview_attachment.message_id = ${messages.globalId} AND preview_attachment.url_preview_id IS NOT NULL)`,
+      )
     case "voice_memos":
-      return not(isNull(messages.voiceId))
+      return and(
+        isNull(messages.photoId),
+        isNull(messages.videoId),
+        isNull(messages.documentId),
+        not(isNull(messages.voiceId)),
+        notNudge,
+      )
+    default:
+      return undefined
   }
 }
 
@@ -613,6 +637,9 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
     ...message,
     text,
     entities,
+    hasLink:
+      (message.hasLink ?? detectHasLink({ entities })) ||
+      (message.messageAttachments?.some((attachment) => attachment.linkEmbed != null) ?? false),
     actions:
       message.actionsEncrypted && message.actionsIv && message.actionsTag
         ? MessageActions.fromBinary(
@@ -657,11 +684,7 @@ function decodeBlockContentProjection(
     const textMatches = stored.text === text
     const entitiesMatch = equalMessageEntities(stored.entities, entities)
     if (!textMatches || !entitiesMatch) {
-      const mismatchKind = !textMatches && !entitiesMatch
-        ? "text_and_entities"
-        : textMatches
-          ? "entities"
-          : "text"
+      const mismatchKind = !textMatches && !entitiesMatch ? "text_and_entities" : textMatches ? "entities" : "text"
       log.error("block content mirror mismatch", {
         mismatchKind,
         contentSchemaVersion: row.schemaVersion,
@@ -732,16 +755,10 @@ async function insertMessage(
       const selectedProjectId = initialAgentContext.value.configuration?.projectId
       if (
         existingSession &&
-        (
-          existingSession.botUserId !== Number(initialAgentContext.value.botUserId) ||
-          (
-            selectedProjectId !== undefined &&
-            (
-              existingSession.projectRefEncrypted === null ||
-              decryptAgentRef(existingSession.projectRefEncrypted) !== selectedProjectId
-            )
-          )
-        )
+        (existingSession.botUserId !== Number(initialAgentContext.value.botUserId) ||
+          (selectedProjectId !== undefined &&
+            (existingSession.projectRefEncrypted === null ||
+              decryptAgentRef(existingSession.projectRefEncrypted) !== selectedProjectId)))
       ) {
         throw ModelError.AgentContextAlreadySet
       }
@@ -762,9 +779,7 @@ async function insertMessage(
       : undefined
 
     const nextId = ChatModel.nextMessageId(chat)
-    const blockContentId = preparedBlockContent
-      ? await insertPreparedBlockContent(tx, preparedBlockContent, 0)
-      : null
+    const blockContentId = preparedBlockContent ? await insertPreparedBlockContent(tx, preparedBlockContent, 0) : null
 
     // Insert the new message
     const [newDbMessage] = await tx
@@ -809,9 +824,7 @@ async function insertMessage(
     return {
       chat: {
         ...chat,
-        agentContext: initialAgentContext
-          ? Buffer.from(initialAgentContext.encoded)
-          : chat.agentContext,
+        agentContext: initialAgentContext ? Buffer.from(initialAgentContext.encoded) : chat.agentContext,
         lastMsgId: nextId,
         messageIdCounter: nextId,
         updateSeq: update.seq,
@@ -875,12 +888,7 @@ async function deleteMessages(
     // Delete message
     let deleted = await tx
       .delete(messages)
-      .where(
-        and(
-          eq(messages.chatId, chatId),
-          inArray(messages.messageId, messageIdsNum),
-        ),
-      )
+      .where(and(eq(messages.chatId, chatId), inArray(messages.messageId, messageIdsNum)))
       .returning()
 
     if (deleted.length === 0) {
@@ -890,7 +898,7 @@ async function deleteMessages(
 
     await deleteUnreferencedBlockContents(
       tx,
-      deleted.flatMap((message) => message.blockContentId ? [message.blockContentId] : []),
+      deleted.flatMap((message) => (message.blockContentId ? [message.blockContentId] : [])),
     )
 
     let [message] = await tx
@@ -977,9 +985,7 @@ async function editMessage(input: EditMessageInput): Promise<{
 
   const encryptedMessage = text ? encryptMessage(text) : null
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : null
-  const encryptedEntities = binaryEntities && binaryEntities.length > 0
-    ? encryptMessageEntities(binaryEntities)
-    : null
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptMessageEntities(binaryEntities) : null
   const binaryActions = actions ? MessageActions.toBinary(actions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
   const hasLink = detectHasLink({ entities })
@@ -1010,8 +1016,10 @@ async function editMessage(input: EditMessageInput): Promise<{
       }
       throw ModelError.MessageInvalid
     }
-    if ((input.expectedRevision !== undefined && (currentMessage.rev ?? 0) !== input.expectedRevision)
-      || (input.expectedVoiceId !== undefined && currentMessage.voiceId !== input.expectedVoiceId)) {
+    if (
+      (input.expectedRevision !== undefined && (currentMessage.rev ?? 0) !== input.expectedRevision) ||
+      (input.expectedVoiceId !== undefined && currentMessage.voiceId !== input.expectedVoiceId)
+    ) {
       throw new MessageRevisionConflict()
     }
 
@@ -1115,10 +1123,7 @@ async function editMessage(input: EditMessageInput): Promise<{
     return {
       message: {
         ...editedMessage,
-        blockContent:
-          input.blockContent === undefined
-            ? undefined
-            : input.blockContent?.blockContent ?? null,
+        blockContent: input.blockContent === undefined ? undefined : input.blockContent?.blockContent ?? null,
       },
       update,
     }
@@ -1179,12 +1184,14 @@ export function processMessageTranslation(translation: DbTranslation): Processed
 export function processAttachments(
   attachments: (DbMessageAttachment & {
     externalTask?: DbExternalTask | null
-    linkEmbed?: (DbLinkEmbed & {
-      photo?: InputDbFullPhoto | null
-      authorPhoto?: InputDbFullPhoto | null
-      video?: InputDbFullVideo | null
-      document?: InputDbFullDocument | null
-    }) | null
+    linkEmbed?:
+      | (DbLinkEmbed & {
+          photo?: InputDbFullPhoto | null
+          authorPhoto?: InputDbFullPhoto | null
+          video?: InputDbFullVideo | null
+          document?: InputDbFullDocument | null
+        })
+      | null
   })[],
 ): ProcessedMessageAttachment[] {
   return attachments.map((attachment) => {
@@ -1503,5 +1510,5 @@ async function getMessagesByIds(
     with: fullMessageRelations,
   })
 
-  return processMessages(result)
+  return processMessages(result, options?.tx)
 }

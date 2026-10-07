@@ -24,9 +24,14 @@ extension InlineProtocol.UpdateClearChatHistory {
 
   private func applyPeer(_ db: Database, peer: Peer, publishChanges: Bool) throws -> [Peer] {
     guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else {
+      // Compatibility clears may arrive without a sequence-witnessed chat
+      // snapshot. An absent root still fences a dispatched cold catalog.
+      try SyncRemovalRevision.advance(db)
       Log.shared.error("Failed to find chat for peer \(peer)")
       return []
     }
+
+    try MessageHistoryCoverageStore.invalidateAll(db, chatId: chat.id)
 
     let cutoffDate = hasBeforeDate ? Date(timeIntervalSince1970: TimeInterval(beforeDate)) : nil
 
@@ -44,6 +49,7 @@ extension InlineProtocol.UpdateClearChatHistory {
       try deletePinnedMessagesForClearedMessages(db, chatId: chat.id, cutoffDate: cutoffDate)
       try Message
         .filter(Message.Columns.chatId == chat.id)
+        .filter(sql: "messageId > 0 AND (status IS NULL OR status = 1)")
         .filter(Message.Columns.date < cutoffDate)
         .deleteAll(db)
     } else {
@@ -62,6 +68,7 @@ extension InlineProtocol.UpdateClearChatHistory {
 
       try Message
         .filter(Message.Columns.chatId == chat.id)
+        .filter(sql: "messageId > 0 AND (status IS NULL OR status = 1)")
         .deleteAll(db)
     }
 
@@ -103,11 +110,18 @@ extension InlineProtocol.UpdateClearChatHistory {
   }
 
   private func applySpace(_ db: Database, spaceId: Int64, publishChanges: Bool) throws -> [Peer] {
+    // Space clears are sequenced in the space bucket, including when no chat
+    // is cached. Fence cold chat snapshots before any per-chat selection.
+    try SyncRemovalRevision.advance(db)
     let affectedChatIds = try Chat
       .filter(Chat.Columns.spaceId == spaceId)
       .select(Chat.Columns.id)
       .asRequest(of: Int64.self)
       .fetchAll(db)
+
+    for chatID in affectedChatIds {
+      try MessageHistoryCoverageStore.invalidateAll(db, chatId: chatID)
+    }
 
     let cutoffDate = hasBeforeDate ? Date(timeIntervalSince1970: TimeInterval(beforeDate)) : nil
 
@@ -147,6 +161,7 @@ extension InlineProtocol.UpdateClearChatHistory {
         sql: """
         DELETE FROM message
         WHERE chatId IN (SELECT id FROM chat WHERE spaceId = ?)
+          AND messageId > 0 AND (status IS NULL OR status = 1)
           AND date < ?
         """,
         arguments: cutoffArguments
@@ -164,6 +179,7 @@ extension InlineProtocol.UpdateClearChatHistory {
         sql: """
         DELETE FROM message
         WHERE chatId IN (SELECT id FROM chat WHERE spaceId = ?)
+          AND messageId > 0 AND (status IS NULL OR status = 1)
         """,
         arguments: [spaceId]
       )

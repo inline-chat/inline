@@ -15077,11 +15077,22 @@ public nonisolated struct GetChatHistoryResult: Sendable {
   /// Clears the value of `acknowledgements`. Subsequent reads from it will return its default value.
   public mutating func clearAcknowledgements() {self._acknowledgements = nil}
 
+  /// Chat update sequence of the coherent read snapshot (not a pagination cursor).
+  public var seq: Int64 {
+    get {_seq ?? 0}
+    set {_seq = newValue}
+  }
+  /// Returns true if `seq` has been explicitly set.
+  public var hasSeq: Bool {self._seq != nil}
+  /// Clears the value of `seq`. Subsequent reads from it will return its default value.
+  public mutating func clearSeq() {self._seq = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _acknowledgements: ChatAcknowledgements? = nil
+  fileprivate var _seq: Int64? = nil
 }
 
 public nonisolated struct GetChatTranscriptInput: Sendable {
@@ -15386,9 +15397,20 @@ public nonisolated struct GetMessagesResult: Sendable {
 
   public var messages: [Message] = []
 
+  public var seq: Int64 {
+    get {_seq ?? 0}
+    set {_seq = newValue}
+  }
+  /// Returns true if `seq` has been explicitly set.
+  public var hasSeq: Bool {self._seq != nil}
+  /// Clears the value of `seq`. Subsequent reads from it will return its default value.
+  public mutating func clearSeq() {self._seq = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _seq: Int64? = nil
 }
 
 public nonisolated struct ThreadReferenceItem: Sendable {
@@ -15600,9 +15622,20 @@ public nonisolated struct SearchMessagesResult: Sendable {
 
   public var messages: [Message] = []
 
+  public var seq: Int64 {
+    get {_seq ?? 0}
+    set {_seq = newValue}
+  }
+  /// Returns true if `seq` has been explicitly set.
+  public var hasSeq: Bool {self._seq != nil}
+  /// Clears the value of `seq`. Subsequent reads from it will return its default value.
+  public mutating func clearSeq() {self._seq = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _seq: Int64? = nil
 }
 
 /// Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
@@ -42574,7 +42607,7 @@ nonisolated extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatHistoryResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}acknowledgements\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}acknowledgements\0\u{1}seq\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42584,6 +42617,7 @@ nonisolated extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._acknowledgements) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._seq) }()
       default: break
       }
     }
@@ -42600,12 +42634,16 @@ nonisolated extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._acknowledgements {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._seq {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatHistoryResult, rhs: GetChatHistoryResult) -> Bool {
     if lhs.messages != rhs.messages {return false}
     if lhs._acknowledgements != rhs._acknowledgements {return false}
+    if lhs._seq != rhs._seq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -42791,7 +42829,7 @@ nonisolated extension GetMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension GetMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetMessagesResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}seq\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42800,20 +42838,29 @@ nonisolated extension GetMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._M
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._seq) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.messages.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
     }
+    try { if let v = self._seq {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetMessagesResult, rhs: GetMessagesResult) -> Bool {
     if lhs.messages != rhs.messages {return false}
+    if lhs._seq != rhs._seq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -43102,7 +43149,7 @@ nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SearchMessagesResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}seq\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -43111,20 +43158,29 @@ nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._seq) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.messages.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
     }
+    try { if let v = self._seq {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SearchMessagesResult, rhs: SearchMessagesResult) -> Bool {
     if lhs.messages != rhs.messages {return false}
+    if lhs._seq != rhs._seq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

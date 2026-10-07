@@ -13,20 +13,20 @@ public enum TransactionError: Error, PrivacySafeErrorCategoryProviding {
 
   public var privacySafeErrorCategory: String {
     switch self {
-    case let .rpcError(error):
-      "transaction:rpc:\(error.errorCode.rawValue):\(error.code)"
-    case .timeout:
-      "transaction:timeout"
-    case .invalid:
-      "transaction:invalid"
-    case .persistenceFailed:
-      "transaction:persistence_failed"
-    case .commitOutcomeUnknownAfterReconnect:
-      "transaction:commit_outcome_unknown"
-    case .rejectedBeforeExecution:
-      "transaction:rejected_before_execution"
-    case .dependencyFailed:
-      "transaction:dependency_failed"
+      case let .rpcError(error):
+        "transaction:rpc:\(error.errorCode.rawValue):\(error.code)"
+      case .timeout:
+        "transaction:timeout"
+      case .invalid:
+        "transaction:invalid"
+      case .persistenceFailed:
+        "transaction:persistence_failed"
+      case .commitOutcomeUnknownAfterReconnect:
+        "transaction:commit_outcome_unknown"
+      case .rejectedBeforeExecution:
+        "transaction:rejected_before_execution"
+      case .dependencyFailed:
+        "transaction:dependency_failed"
     }
   }
 }
@@ -34,8 +34,8 @@ public enum TransactionError: Error, PrivacySafeErrorCategoryProviding {
 extension TransactionError {
   static func executionError(_ error: TransactionExecutionError) -> Self {
     switch error {
-      case .invalid:
-        // Map invalid execution errors to cancelled since it represents a failed transaction state
+      case .invalid, .staleHistory, .historyUnavailable:
+        // Preserve the existing failure lifecycle; callers keep the precise execution error.
         .invalid
     }
   }

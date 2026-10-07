@@ -59,7 +59,7 @@ export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: Enc
     untitled: chat.isUntitled === true ? true : undefined,
     number: chat.threadNumber ?? undefined,
     permissions,
-    seq: chat.updateSeq ?? undefined,
+    seq: chat.updateSeq ?? 0,
     agentContext: chatAgentContext(chat),
   }
 }
@@ -78,16 +78,20 @@ export async function encodeChatForUser(
 
 export async function encodeChatsForUser(
   chats: DbChat[],
-  options: { encodingForUserId: number },
+  options: { encodingForUserId: number; tx?: Transaction },
 ): Promise<Chat[]> {
-  const permissionsByChatId = await resolveChatPermissionsBatch(chats, options.encodingForUserId)
-  const acknowledgements = await getChatAcknowledgements(chats.map(chat => chat.id))
-  return chats.map((chat) =>
-    ({ ...encodeChat(chat, {
+  const permissionsByChatId = await resolveChatPermissionsBatch(chats, options.encodingForUserId, options.tx)
+  const acknowledgements = await getChatAcknowledgements(
+    chats.map((chat) => chat.id),
+    { tx: options.tx },
+  )
+  return chats.map((chat) => ({
+    ...encodeChat(chat, {
       ...options,
       permissions: permissionsByChatId.get(chat.id) ?? { canUpdateInfo: false },
-    }), acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] } }),
-  )
+    }),
+    acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] },
+  }))
 }
 
 export async function encodeChatForUsers(chat: DbChat, userIds: number[]): Promise<Map<number, Chat>> {
@@ -96,10 +100,13 @@ export async function encodeChatForUsers(chat: DbChat, userIds: number[]): Promi
   return new Map(
     userIds.map((userId) => [
       userId,
-      { ...encodeChat(chat, {
-        encodingForUserId: userId,
-        permissions: permissionsByUserId.get(userId)?.get(chat.id) ?? { canUpdateInfo: false },
-      }), acknowledgements },
+      {
+        ...encodeChat(chat, {
+          encodingForUserId: userId,
+          permissions: permissionsByUserId.get(userId)?.get(chat.id) ?? { canUpdateInfo: false },
+        }),
+        acknowledgements,
+      },
     ]),
   )
 }

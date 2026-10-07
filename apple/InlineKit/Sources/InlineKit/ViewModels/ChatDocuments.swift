@@ -4,10 +4,10 @@ import InlineProtocol
 import Logger
 import SwiftUI
 
-/// View model that publishes all **documents** that were shared inside a chat.
-///
-/// A *document* here refers to any `InlineProtocol.Document` (files, PDFs, etc.)
-/// that was attached to a message. We expose them as an array of `DocumentInfo`
+// View model that publishes all **documents** that were shared inside a chat.
+//
+// A *document* here refers to any `InlineProtocol.Document` (files, PDFs, etc.)
+// that was attached to a message. We expose them as an array of `DocumentInfo`
 
 // MARK: - DocumentMessage
 
@@ -15,7 +15,10 @@ import SwiftUI
 public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, PersistableRecord, Sendable,
   Identifiable
 {
-  public var id: Int64 { document.id }
+  public var id: Int64 {
+    message.messageId
+  }
+
   public var message: Message
   public var document: DocumentInfo
 
@@ -32,7 +35,8 @@ public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, Pe
   /// Query request for fetching document messages with all related data
   public static func queryRequest() -> QueryInterfaceRequest<DocumentMessage> {
     Message
-      .filter(Column("documentId") != nil)
+      .filter(sql: "resourceFlags & ? != 0", arguments: [MessageHistoryScope.files.resourceMask.rawValue])
+      .filter(Message.Columns.documentId != nil)
       // Include document info with thumbnail
       .including(
         optional: Message.document.forKey(CodingKeys.document)
@@ -47,200 +51,65 @@ public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, Pe
 }
 
 @MainActor
-public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable {
-  private let chatId: Int64
-  private let peer: Peer
-  private let db: AppDatabase
+public final class ChatDocumentsViewModel: ChatResourceWindow<DocumentMessage>, @unchecked Sendable {
+  public var documentMessages: [DocumentMessage] {
+    rows
+  }
 
-  @Published public private(set) var documents: [DocumentInfo] = []
-  @Published public private(set) var documentMessages: [DocumentMessage] = []
-
-  private var cancellable: AnyCancellable?
-  private var messagesCancellable: AnyCancellable?
-  private var isLoading = false
-  private var hasMore = true
-  private var nextOffsetId: Int64?
-  private var hasStarted = false
-
-  private let pageSize: Int32 = 50
-
-  // MARK: – Initialization
+  public var documents: [DocumentInfo] {
+    rows.map(\.document)
+  }
 
   public init(db: AppDatabase, chatId: Int64, peer: Peer) {
-    self.db = db
-    self.chatId = chatId
-    self.peer = peer
-    fetchDocuments()
-    fetchDocumentMessages()
-  }
-
-  // MARK: – Private helpers
-
-  private func fetchDocuments() {
-    db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documents")
-    cancellable = ValueObservation
-      .tracking { [chatId] db in
-        // 1. Pick all messages from the chat that have an associated document.
-        try Message
-          .filter(Column("chatId") == chatId)
-          .filter(Column("documentId") != nil)
-          // 2. Bring the underlying `Document` (and its thumbnail) into the row
-          //    so that GRDB can build a `DocumentInfo` value for us.
-          .including(
-            optional: Message.document
-              .forKey(DocumentInfo.CodingKeys.document) // map to `document` property
-              .including(
-                optional: Document.thumbnail
-                  .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
-                  .forKey(DocumentInfo.CodingKeys.thumbnail) // map to `thumbnail` property
-              )
-          )
-          // 3. We only care about the `DocumentInfo` portion of each row.
-          .asRequest(of: DocumentInfo.self)
-          .fetchAll(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { Log.shared.error("Failed to load chat documents \($0)") },
-        receiveValue: { [weak self] infos in
-          // Remove duplicates (same underlying document) while keeping order
-          var seen: Set<Int64> = []
-          let unique = infos.filter { info in
-            let insert = seen.insert(info.id)
-            return insert.inserted
-          }
-          self?.documents = unique.sorted { $0.document.date > $1.document.date }
-        }
-      )
-  }
-
-  private func fetchDocumentMessages() {
-    db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documentMessages")
-    messagesCancellable = ValueObservation
-      .tracking { [chatId] db in
+    super.init(
+      db: db,
+      chatId: chatId,
+      peer: peer,
+      scope: .files,
+      fetchRows: { db, limit in
         try DocumentMessage.queryRequest()
-          .filter(Column("chatId") == chatId)
-          .order(Column("date").desc)
+          .filter(Message.Columns.chatId == chatId)
+          .order(Message.Columns.messageId.desc)
+          .limit(limit)
           .fetchAll(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { Log.shared.error("Failed to load document messages \($0)") },
-        receiveValue: { [weak self] messages in
-          // Remove duplicates (same underlying document) while keeping order
-          var seen: Set<Int64> = []
-          let unique = messages.filter { message in
-            let insert = seen.insert(message.document.id)
-            return insert.inserted
-          }
-          self?.documentMessages = unique
-        }
-      )
+      },
+      messageID: { $0.message.messageId }
+    )
   }
 
-  // MARK: - Helper Methods
-
-  // Group documents by date
   public var groupedDocuments: [DocumentGroup] {
-    let calendar = Calendar.current
-    let grouped = Dictionary(grouping: documents) { document in
-      calendar.startOfDay(for: document.document.date)
-    }
-
-    return grouped.map { date, documents in
-      DocumentGroup(date: date, documents: documents.sorted { $0.document.date > $1.document.date })
-    }.sorted { $0.date > $1.date }
+    groupedDocumentMessages.map { DocumentGroup(date: $0.date, documents: $0.messages.map(\.document)) }
   }
 
-  // Group document messages by date
-  public var groupedDocumentMessages: [DocumentMessageGroup] {
-    let calendar = Calendar.current
-    let grouped = Dictionary(grouping: documentMessages) { documentMessage in
-      calendar.startOfDay(for: documentMessage.message.date)
-    }
+  @Published public private(set) var groupedDocumentMessages: [DocumentMessageGroup] = []
 
-    return grouped.map { date, messages in
-      DocumentMessageGroup(date: date, messages: messages.sorted { $0.message.date > $1.message.date })
-    }.sorted { $0.date > $1.date }
+  override public func rowsDidChange() {
+    groupedDocumentMessages = Dictionary(grouping: rows) { Calendar.current.startOfDay(for: $0.message.date) }
+      .map { DocumentMessageGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
+        if lhs.message.date != rhs.message.date {
+          return lhs.message.date > rhs.message.date
+        }
+        return lhs.message.messageId > rhs.message.messageId
+      }) }
+      .sorted { $0.date > $1.date }
   }
 
-  /// Get document message for a specific document ID
   public func documentMessage(for documentId: Int64) -> DocumentMessage? {
-    documentMessages.first { $0.document.id == documentId }
+    rows.first { $0.document.id == documentId }
   }
 
-  /// Get all document messages from a specific sender
   public func documentMessages(from senderId: Int64) -> [DocumentMessage] {
-    documentMessages.filter { $0.message.fromId == senderId }
-  }
-
-  // MARK: - Remote Fetching
-
-  public func loadInitial() async {
-    guard !hasStarted else { return }
-    hasStarted = true
-    await loadMore(reset: true)
-  }
-
-  public func loadMoreIfNeeded(currentMessageId: Int64) async {
-    guard let lastMessageId = documentMessages.last?.message.id else { return }
-    guard currentMessageId == lastMessageId else { return }
-    await loadMore(reset: false)
-  }
-
-  private func loadMore(reset: Bool) async {
-    guard !isLoading else { return }
-
-    if reset {
-      nextOffsetId = nil
-      hasMore = true
-    }
-
-    guard hasMore else { return }
-
-    isLoading = true
-    defer { isLoading = false }
-
-    do {
-      let result = try await Api.realtime.send(
-        .searchMessages(
-          peer: peer,
-          queries: [],
-          offsetID: nextOffsetId,
-          limit: pageSize,
-          filter: .filterDocuments
-        )
-      )
-
-      guard case let .searchMessages(response) = result else {
-        return
-      }
-
-      guard !response.messages.isEmpty else {
-        hasMore = false
-        return
-      }
-
-      if let lastMessageId = response.messages.last?.id {
-        nextOffsetId = lastMessageId
-      }
-
-      if response.messages.count < pageSize {
-        hasMore = false
-      }
-    } catch {
-      Log.shared.error("Failed to load document messages", error: error)
-    }
+    rows.filter { $0.message.fromId == senderId }
   }
 }
 
-// Helper struct for grouped documents
+/// Helper struct for grouped documents
 public struct DocumentGroup {
   public let date: Date
   public let documents: [DocumentInfo]
 }
 
-// Helper struct for grouped document messages
+/// Helper struct for grouped document messages
 public struct DocumentMessageGroup {
   public let date: Date
   public let messages: [DocumentMessage]

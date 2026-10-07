@@ -30,7 +30,7 @@ actor ChatLinkTestTransport: Transport {
     var result = InlineProtocol.RpcResult()
     result.reqMsgID = message.id
     result.result = .getChat(.with {
-      $0.chat = .with { $0.id = input.peerID.chat.chatID; $0.date = 10; $0.peerID.user.userID = 8_409_231 }
+      $0.chat = .with { $0.id = input.peerID.chat.chatID; $0.date = 10; $0.seq = 0; $0.peerID.user.userID = 8_409_231 }
       $0.dialog = .with { $0.chatID = input.peerID.chat.chatID; $0.peer.user.userID = 8_409_231 }
       $0.user = .with { $0.id = 8_409_231; $0.firstName = "Cold Bot"; $0.bot = true }
     })

@@ -11,6 +11,7 @@ import {
   type Update,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import { refreshAttachmentMembership } from "@in/server/modules/message/attachmentMembership"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import {
@@ -176,7 +177,7 @@ export async function addSpaceUrlPreviewExclusion(
           },
         },
         bucket: UpdateBucket.Chat,
-        entity: lockedChat,
+        entity: { ...lockedChat, updateSeq: deleted.at(-1)?.update.seq ?? lockedChat.updateSeq },
       })
 
       deleted.push({ attachmentId: row.attachment.id, update })
@@ -184,6 +185,7 @@ export async function addSpaceUrlPreviewExclusion(
 
     const lastUpdate = deleted.at(-1)?.update
     if (lastUpdate) {
+      await refreshAttachmentMembership(tx, message)
       await tx
         .update(chats)
         .set({
@@ -236,11 +238,7 @@ async function insertSpaceUrlPreviewExclusion(input: {
   pathPrefix: string
   createdBy: number
 }): Promise<DbSpaceUrlPreviewExclusion> {
-  const [inserted] = await db
-    .insert(spaceUrlPreviewExclusions)
-    .values(input)
-    .onConflictDoNothing()
-    .returning()
+  const [inserted] = await db.insert(spaceUrlPreviewExclusions).values(input).onConflictDoNothing().returning()
 
   if (inserted) {
     return inserted

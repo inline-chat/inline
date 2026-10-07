@@ -90,9 +90,9 @@ public struct CreateSubthreadTransaction: Transaction2 {
           _ = try response.dialog.saveFull(db)
         }
 
-        if response.hasAnchorMessage {
-          _ = try Message.save(db, protocolMessage: response.anchorMessage, publishChanges: false)
-        }
+        // The returned anchor is owned by the parent bucket. Creation's
+        // child metadata does not witness its freshness; parent navigation
+        // hydrates through the parent's guarded getMessages/history path.
       }
     } catch {
       log.error("Failed to save createSubthread result", error: error)

@@ -13,9 +13,11 @@ public struct GetChatsTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public var expectedUserBucketState: ExpectedUserBucketState?
+    public var expectedRemovalRevision: Int64?
 
-    public init(expectedUserBucketState: ExpectedUserBucketState? = nil) {
+    public init(expectedUserBucketState: ExpectedUserBucketState? = nil, expectedRemovalRevision: Int64? = nil) {
       self.expectedUserBucketState = expectedUserBucketState
+      self.expectedRemovalRevision = expectedRemovalRevision
     }
   }
 
@@ -35,13 +37,23 @@ public struct GetChatsTransaction: Transaction2 {
     case context
   }
 
-  // Private
+  /// Private
   private var log = Log.scoped("Transactions/GetChats")
 
   public init(expectedUserBucketState: BucketState? = nil) {
     context = Context(
       expectedUserBucketState: expectedUserBucketState.map(ExpectedUserBucketState.init)
     )
+  }
+
+  public func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction2 {
+    do {
+      var prepared = self
+      prepared.context.expectedRemovalRevision = try await AppDatabase.shared.dbWriter.read { db in
+        try SyncRemovalRevision.read(db)
+      }
+      return prepared
+    } catch { throw .invalid }
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -69,6 +81,7 @@ public struct GetChatsTransaction: Transaction2 {
 
     do {
       let mutationToken = try Auth.shared.handle.beginAccountMutation()
+      let allowedChatIDs = Set(result.chats.map(\.id))
       let span = PerformanceTrace.begin(
         "InitialGetChatsApply",
         category: .launch,
@@ -78,23 +91,15 @@ public struct GetChatsTransaction: Transaction2 {
       do {
         importResult = try await AppDatabase.shared.dbWriter.write { db in
           try Auth.shared.handle.validateAccountMutation(mutationToken)
-          return try Self.applySnapshot(
-            result,
-            userProjectionAdmission: context.expectedUserBucketState.map {
-              .compareAndSwap(expected: $0)
-            } ?? .missingOnly,
-            in: db
-          )
+          return try Self.applyCatalog(result, context: context, allowedChatIDs: allowedChatIDs, in: db)
         }
         span.end("success=1")
       } catch {
         span.end("success=0")
         throw error
       }
-      // Ordinary GET_CHATS is catalog-only. It may reconcile actors for truly
-      // pristine children seeded by this writer, but must never turn repair
-      // targets into an account-wide child sweep. Only two-phase user repair
-      // consumes `catchUpTargets`.
+      // Only a truly absent chat may install its coherent last-message
+      // snapshot. Warm chats preserve their replay cursor and canonical rows.
       _ = try await Api.realtime.installSnapshotOutcome(
         seededStates: importResult.catalogActorStates,
         catchUpTargets: [:],
@@ -109,10 +114,52 @@ public struct GetChatsTransaction: Transaction2 {
     }
   }
 
+  static func applyCatalog(
+    _ result: InlineProtocol.GetChatsResult, context: Context,
+    allowedChatIDs: Set<Int64> = [], in db: Database
+  ) throws -> SnapshotImportResult {
+    let coldChatIDs = try coldBootstrapChatIDs(
+      result, expectedRemovalRevision: context.expectedRemovalRevision,
+      allowedChatIDs: allowedChatIDs, in: db
+    )
+    return try applySnapshot(
+      result,
+      userProjectionAdmission: context.expectedUserBucketState.map {
+        .compareAndSwap(expected: $0)
+      } ?? .missingOnly,
+      coldBootstrapChatIDs: coldChatIDs,
+      in: db
+    )
+  }
+
+  /// Freeze true absence before any catalog model is written. A stale account
+  /// removal or an existing model/cursor/body makes this a metadata-only read.
+  static func coldBootstrapChatIDs(
+    _ result: InlineProtocol.GetChatsResult, expectedRemovalRevision: Int64?,
+    allowedChatIDs: Set<Int64>, in db: Database
+  ) throws -> Set<Int64> {
+    guard let expectedRemovalRevision,
+          try SyncRemovalRevision.read(db) == expectedRemovalRevision else { return [] }
+    var ids: Set<Int64> = []
+    for chat in result.chats where allowedChatIDs.contains(chat.id) && validChatIdentity(chat) {
+      guard try Chat.fetchOne(db, id: chat.id) == nil else { continue }
+      let key = BucketKey.chat(peer: chat.peerID)
+      guard try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == key.getBucket())
+        .filter(DbBucketState.Columns.entityId == key.getEntityId())
+        .fetchCount(db) == 0,
+        try Message.filter(Message.Columns.chatId == chat.id).fetchCount(db) == 0
+      else { continue }
+      ids.insert(chat.id)
+    }
+    return ids
+  }
+
   static func applySnapshot(
     _ result: InlineProtocol.GetChatsResult,
     userProjectionAdmission: UserProjectionAdmission = .missingOnly,
     replacesActiveCatalog: Bool = false,
+    coldBootstrapChatIDs: Set<Int64> = [],
     in db: Database
   ) throws -> SnapshotImportResult {
     var seededStates: [BucketKey: BucketState] = [:]
@@ -156,7 +203,9 @@ public struct GetChatsTransaction: Transaction2 {
         failures.record(.spaceCursors)
         continue
       }
-      if admission.isPristine && !allowsPristineChildren { continue }
+      if admission.isPristine && !allowsPristineChildren {
+        continue
+      }
 
       if replacesActiveCatalog {
         guard let sequence else {
@@ -215,7 +264,9 @@ public struct GetChatsTransaction: Transaction2 {
             in: db
           )
         }) {
-          if admission.isPristine { seededStates[admission.bucketKey] = state }
+          if admission.isPristine {
+            seededStates[admission.bucketKey] = state
+          }
           admittedSpaceIDs.insert(space.id)
         }
       } else {
@@ -248,7 +299,9 @@ public struct GetChatsTransaction: Transaction2 {
         failures.record(.chatCursors)
         continue
       }
-      if admission.isPristine && !allowsPristineChildren { continue }
+      if admission.isPristine && !allowsPristineChildren {
+        continue
+      }
 
       if replacesActiveCatalog {
         guard let sequence else {
@@ -256,7 +309,9 @@ public struct GetChatsTransaction: Transaction2 {
           continue
         }
         guard sequence >= (admission.cursorSequence ?? 0) else {
-          if !admission.modelExists { failures.record(.chats) }
+          if !admission.modelExists {
+            failures.record(.chats)
+          }
           continue
         }
 
@@ -268,8 +323,7 @@ public struct GetChatsTransaction: Transaction2 {
           chat: chat,
           lastMsgId: lastMsgId,
           bucketKey: admission.bucketKey,
-          bucketSequence: sequence,
-          publishesState: true
+          bucketSequence: sequence
         ))
         continue
       }
@@ -313,12 +367,10 @@ public struct GetChatsTransaction: Transaction2 {
         chat: chat,
         lastMsgId: lastMsgId,
         bucketKey: admission.bucketKey,
-        bucketSequence: sequence,
-        publishesState: admission.isPristine
+        bucketSequence: sequence
       ))
     }
 
-    let snapshotChatIDs = Set(pendingChats.map { $0.chat.id })
     let messagesByChatID = Dictionary(grouping: result.messages, by: \.chatID)
     while !pendingChats.isEmpty {
       var deferredChats: [PendingChat] = []
@@ -326,20 +378,25 @@ public struct GetChatsTransaction: Transaction2 {
 
       for pending in pendingChats {
         if let parentChatId = pending.chat.parentChatId,
-           try Chat.fetchOne(db, key: parentChatId) == nil {
+           try Chat.fetchOne(db, key: parentChatId) == nil
+        {
           deferredChats.append(pending)
           continue
         }
 
         attemptedCount += 1
-        if let state = try applyPristineChatSnapshot(
-          pending,
-          messages: messagesByChatID[pending.chat.id] ?? [],
-          in: db,
-          failures: &failures
-        ) {
-          if pending.publishesState { seededStates[pending.bucketKey] = state }
+        if coldBootstrapChatIDs.contains(pending.chat.id) {
+          if let state = try applyColdChatSnapshot(
+            pending, messages: messagesByChatID[pending.chat.id] ?? [],
+            in: db, failures: &failures
+          ) {
+            seededStates[pending.bucketKey] = state
+            continue
+          }
+          // A malformed/missing body must not certify a cursor. Metadata is
+          // still useful, with unknown holes and no last-message pointer.
         }
+        try applyPristineChatSnapshot(pending, in: db, failures: &failures)
       }
 
       guard attemptedCount > 0 else {
@@ -347,44 +404,6 @@ public struct GetChatsTransaction: Transaction2 {
         break
       }
       pendingChats = deferredChats
-    }
-
-    let suppressedPristineChatIDs = Set(chats.indices.compactMap { index -> Int64? in
-      guard !allowsPristineChildren, chatAdmissions[index]?.isPristine == true else { return nil }
-      return chats[index].id
-    })
-    let insertableMessageChatIDs = Set(chats.indices.compactMap { index -> Int64? in
-      guard let admission = chatAdmissions[index], chats[index].hasSeq,
-            Int64(chats[index].seq) >= (admission.cursorSequence ?? 0) else { return nil }
-      return chats[index].id
-    })
-    for message in result.messages where !snapshotChatIDs.contains(message.chatID)
-      && !suppressedPristineChatIDs.contains(message.chatID) {
-      guard message.id > 0, message.chatID > 0 else {
-        failures.record(.messages)
-        continue
-      }
-      guard validPeer(message.peerID) else {
-        failures.record(.messages)
-        continue
-      }
-      guard try Chat.fetchOne(db, key: message.chatID) != nil else {
-        failures.record(.messages)
-        continue
-      }
-
-      // Revision checks protect an existing row, but a deleted row has no
-      // revision left to compare. Only a sequence-certified snapshot may
-      // materialize absent rows; stale/unsequenced catalogs cannot resurrect
-      // a deletion already consumed by the child cursor.
-      if !insertableMessageChatIDs.contains(message.chatID),
-         try Message.fetchOne(db, key: ["chatId": message.chatID, "messageId": message.id]) == nil {
-        continue
-      }
-
-      _ = try attempt(.messages, in: db, failures: &failures, {
-        try Message.save(db, protocolMessage: message, publishChanges: false)
-      })
     }
 
     if allowsUserProjectionReplacements {
@@ -403,7 +422,7 @@ public struct GetChatsTransaction: Transaction2 {
           failures.record(.dialogs)
           continue
         }
-        _ = try attempt(.dialogs, in: db, failures: &failures, {
+        _ = try attempt(.dialogs, in: db, failures: &failures) {
           try dialog.saveFull(
             db,
             preservingExistingReadState: replacesActiveCatalog
@@ -412,7 +431,7 @@ public struct GetChatsTransaction: Transaction2 {
             dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
             in: db
           )
-        })
+        }
       }
     }
 
@@ -427,7 +446,6 @@ public struct GetChatsTransaction: Transaction2 {
           chats: chats,
           dialogs: result.dialogs,
           folders: result.folders,
-          messages: result.messages,
           in: db
         )
       }
@@ -442,80 +460,77 @@ public struct GetChatsTransaction: Transaction2 {
     )
   }
 
+  private static func applyColdChatSnapshot(
+    _ pending: PendingChat, messages: [InlineProtocol.Message],
+    in db: Database, failures: inout SnapshotFailureAccumulator
+  ) throws -> BucketState? {
+    guard let sequence = pending.bucketSequence, sequence >= 0,
+          let lastMsgId = pending.lastMsgId,
+          1 ... MessageHistoryHole.positiveMessageIDMax ~= lastMsgId
+    else { return nil }
+    let lastRows = messages.filter { $0.id == lastMsgId }
+    guard lastRows.count == 1 else {
+      failures.record(.lastMessages)
+      return nil
+    }
+    do {
+      try HistoryPageReducer.validateMessages(
+        lastRows, chatId: pending.chat.id, peer: pending.protocolChat.peerID.toPeer()
+      )
+    } catch {
+      failures.record(.messages)
+      return nil
+    }
+    var state: BucketState?
+    do {
+      try db.inSavepoint {
+        var chat = pending.chat
+        try chat.saveFull(db)
+        // Catalog users/sidecars must already satisfy the full row. Do not
+        // fabricate references for this one-message cold snapshot.
+        _ = try Message.save(db, protocolMessage: lastRows[0], authoritativeSnapshot: true)
+        chat.lastMsgId = lastMsgId
+        try chat.saveFull(db)
+        try Acknowledgement.save(
+          db, cursors: pending.protocolChat.acknowledgements.cursors,
+          chatId: chat.id, publishChanges: true
+        )
+        state = try GRDBSyncStorage.seedSnapshotBucketState(for: pending.bucketKey, seq: sequence, in: db)
+        // The last-message row supplies a preview, never range coverage.
+        return .commit
+      }
+    } catch {
+      guard isRecoverableRecordError(error) || error is HistoryPageAdmissionError else { throw error }
+      failures.record(.messages)
+      return nil
+    }
+    return state
+  }
+
   private static func applyPristineChatSnapshot(
     _ pending: PendingChat,
-    messages: [InlineProtocol.Message],
     in db: Database,
     failures: inout SnapshotFailureAccumulator
-  ) throws -> BucketState? {
-    var seededState: BucketState?
+  ) throws {
     try db.inSavepoint {
-      let savedChat: Chat
       do {
-        let saved = try pending.chat.saveFull(db)
-        try Acknowledgement.save(db, cursors: pending.protocolChat.acknowledgements.cursors, chatId: saved.id, publishChanges: true)
-        savedChat = saved
+        var chat = pending.chat
+        chat.lastMsgId = try Chat.fetchOne(db, id: chat.id)?.lastMsgId
+        let saved = try chat.saveFull(db)
+        try Acknowledgement.save(
+          db,
+          cursors: pending.protocolChat.acknowledgements.cursors,
+          chatId: saved.id,
+          publishChanges: true
+        )
       } catch {
         guard isRecoverableRecordError(error) else { throw error }
         failures.record(.chats)
         return .rollback
       }
 
-      var isComplete = true
-      for message in messages {
-        guard message.id > 0, message.chatID == savedChat.id else {
-          failures.record(.messages)
-          isComplete = false
-          continue
-        }
-        guard validPeer(message.peerID) else {
-          failures.record(.messages)
-          isComplete = false
-          continue
-        }
-        if try attempt(.messages, in: db, failures: &failures, {
-          try Message.save(db, protocolMessage: message, publishChanges: false)
-        }) == nil {
-          isComplete = false
-        }
-      }
-
-      if let lastMsgId = pending.lastMsgId {
-        let hasLastMessage = try Message
-          .filter(Column("chatId") == savedChat.id)
-          .filter(Column("messageId") == lastMsgId)
-          .fetchCount(db) > 0
-        if hasLastMessage {
-          var updatedChat = savedChat
-          updatedChat.lastMsgId = lastMsgId
-          if try attempt(.lastMessages, in: db, failures: &failures, {
-            try updatedChat.saveFull(db)
-          }) == nil {
-            isComplete = false
-          }
-        } else {
-          failures.record(.lastMessages)
-          isComplete = false
-        }
-      }
-
-      guard isComplete, let bucketSequence = pending.bucketSequence else {
-        return .commit
-      }
-      do {
-        seededState = try GRDBSyncStorage.seedSnapshotBucketState(
-          for: pending.bucketKey,
-          seq: bucketSequence,
-          in: db
-        )
-        return .commit
-      } catch {
-        guard isRecoverableRecordError(error) else { throw error }
-        failures.record(.chatCursors)
-        return .rollback
-      }
+      return .commit
     }
-    return seededState
   }
 
   /// Telegram-style reset semantics: rebuild active catalog inclusion while
@@ -525,7 +540,6 @@ public struct GetChatsTransaction: Transaction2 {
     chats: [InlineProtocol.Chat],
     dialogs: [InlineProtocol.Dialog],
     folders: [InlineProtocol.DialogFolder],
-    messages: [InlineProtocol.Message],
     in db: Database
   ) throws -> Set<BucketKey> {
     var retiredBucketKeys = Set<BucketKey>()
@@ -538,11 +552,11 @@ public struct GetChatsTransaction: Transaction2 {
     let activeDialogIDs = Set(dialogs.compactMap { dialog -> Int64? in
       switch dialog.peer.type {
         case let .user(user) where user.userID > 0:
-          return Dialog.getDialogId(peerUserId: user.userID)
+          Dialog.getDialogId(peerUserId: user.userID)
         case let .chat(chat) where chat.chatID > 0:
-          return Dialog.getDialogId(peerThreadId: chat.chatID)
+          Dialog.getDialogId(peerThreadId: chat.chatID)
         default:
-          return nil
+          nil
       }
     })
     let activeDialogs = try Dialog.catalogActive().fetchAll(db)
@@ -559,19 +573,11 @@ public struct GetChatsTransaction: Transaction2 {
       try folder.delete(db)
     }
 
-    let messagesByChatID = Dictionary(grouping: messages, by: \.chatID)
     for chat in chats {
-      try MessageHistoryCoverageStore.invalidate(db, chatId: chat.id)
-      guard let lastMessageID = chat.hasLastMsgID ? Optional(chat.lastMsgID) : nil,
-            lastMessageID > 0,
-            messagesByChatID[chat.id]?.contains(where: { $0.id == lastMessageID }) == true
-      else { continue }
-      try MessageHistoryCoverageStore.subtract(
-        db,
-        chatId: chat.id,
-        lowerId: lastMessageID,
-        upperId: MessageHistoryHole.positiveMessageIDMax
-      )
+      // A catalog last-message row is data, not an ordinary interval proof.
+      // Root repair loses continuity for every tag space, so none may inherit
+      // coverage from this partial collection of message coordinates.
+      try MessageHistoryCoverageStore.invalidateAll(db, chatId: chat.id)
     }
 
     return retiredBucketKeys
@@ -685,7 +691,9 @@ public struct GetChatsTransaction: Transaction2 {
     existingHasSequence: Bool,
     existingSequence: Int32
   ) -> Bool {
-    if candidateHasSequence != existingHasSequence { return candidateHasSequence }
+    if candidateHasSequence != existingHasSequence {
+      return candidateHasSequence
+    }
     guard candidateHasSequence else { return false }
     return candidateSequence > existingSequence
   }
@@ -702,9 +710,9 @@ public struct GetChatsTransaction: Transaction2 {
     in db: Database
   ) throws -> [ChildSnapshotAdmission?] {
     let ids = Array(Set(spaces.lazy.filter { $0.id > 0 }.map(\.id)))
-    let existingIDs = ids.isEmpty
+    let existingIDs = try ids.isEmpty
       ? Set<Int64>()
-      : Set(try Space.filter(ids.contains(Space.Columns.id)).fetchAll(db).map(\.id))
+      : Set(Space.filter(ids.contains(Space.Columns.id)).fetchAll(db).map(\.id))
     let cursorSequences = try bucketCursorSequences(
       bucketType: BucketKey.space(id: 0).getBucket(),
       entityIDs: ids,
@@ -730,9 +738,9 @@ public struct GetChatsTransaction: Transaction2 {
   ) throws -> [ChildSnapshotAdmission?] {
     let validChats = chats.filter(validChatIdentity)
     let ids = Array(Set(validChats.map(\.id)))
-    let existingIDs = ids.isEmpty
+    let existingIDs = try ids.isEmpty
       ? Set<Int64>()
-      : Set(try Chat.filter(ids.contains(Chat.Columns.id)).fetchAll(db).map(\.id))
+      : Set(Chat.filter(ids.contains(Chat.Columns.id)).fetchAll(db).map(\.id))
     let entityIDs = Array(Set(validChats.map { BucketKey.chat(peer: $0.peerID).getEntityId() }))
     let cursorSequences = try bucketCursorSequences(
       bucketType: BucketKey.chat(peer: .init()).getBucket(),
@@ -759,8 +767,8 @@ public struct GetChatsTransaction: Transaction2 {
     in db: Database
   ) throws -> [Int64: Int64] {
     guard !entityIDs.isEmpty else { return [:] }
-    return Dictionary(
-      uniqueKeysWithValues: try DbBucketState
+    return try Dictionary(
+      uniqueKeysWithValues: DbBucketState
         .filter(
           DbBucketState.Columns.bucketType == bucketType
             && entityIDs.contains(DbBucketState.Columns.entityId)
@@ -797,23 +805,23 @@ public struct GetChatsTransaction: Transaction2 {
     in db: Database
   ) throws -> UserProjectionDisposition {
     switch admission {
-    case .missingOnly:
-      return .missingOnly
-    case .alreadyValidated:
-      return .applied
-    case let .compareAndSwap(expected):
-      let record = try DbBucketState
-        .filter(
-          DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
-            && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
+      case .missingOnly:
+        return .missingOnly
+      case .alreadyValidated:
+        return .applied
+      case let .compareAndSwap(expected):
+        let record = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
+              && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
+          )
+          .fetchOne(db)
+        let actual = ExpectedUserBucketState(
+          BucketState(date: record?.date ?? 0, seq: record?.seq ?? 0)
         )
-        .fetchOne(db)
-      let actual = ExpectedUserBucketState(
-        BucketState(date: record?.date ?? 0, seq: record?.seq ?? 0)
-      )
-      return actual == expected
-        ? .applied
-        : .superseded(expected: expected, actual: actual)
+        return actual == expected
+          ? .applied
+          : .superseded(expected: expected, actual: actual)
     }
   }
 
@@ -835,11 +843,10 @@ public struct GetChatsTransaction: Transaction2 {
       order.append(user.id)
     }
 
-    let existingIDs: Set<Int64>
-    if allowsReplacements || order.isEmpty {
-      existingIDs = []
+    let existingIDs: Set<Int64> = if allowsReplacements || order.isEmpty {
+      []
     } else {
-      existingIDs = Set(try User
+      try Set(User
         .filter(order.contains(User.Columns.id))
         .fetchAll(db)
         .map(\.id))
@@ -912,9 +919,9 @@ public struct GetChatsTransaction: Transaction2 {
 
   private static func validPeer(_ peer: InlineProtocol.Peer) -> Bool {
     switch peer.type {
-    case let .user(user): user.userID > 0
-    case let .chat(chat): chat.chatID > 0
-    case .none: false
+      case let .user(user): user.userID > 0
+      case let .chat(chat): chat.chatID > 0
+      case .none: false
     }
   }
 
@@ -951,7 +958,9 @@ public struct GetChatsTransaction: Transaction2 {
 
     /// The only bucket state ordinary catalog transactions may publish to the
     /// in-memory sync actors. Repair targets deliberately stay excluded.
-    var catalogActorStates: [BucketKey: BucketState] { seededStates }
+    var catalogActorStates: [BucketKey: BucketState] {
+      seededStates
+    }
   }
 
   enum UserProjectionAdmission: Sendable {
@@ -1029,7 +1038,6 @@ public struct GetChatsTransaction: Transaction2 {
     var lastMsgId: Int64?
     var bucketKey: BucketKey
     var bucketSequence: Int64?
-    var publishesState: Bool
   }
 
   private struct ChildSnapshotAdmission {

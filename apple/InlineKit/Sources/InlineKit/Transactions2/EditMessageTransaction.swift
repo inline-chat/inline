@@ -23,7 +23,7 @@ public struct EditMessageTransaction: Transaction2 {
     case context
   }
 
-  // Private
+  /// Private
   private var log = Log.scoped("Transactions/EditMessage")
 
   public init(message: InlineKit.Message, text: String, entities: MessageEntities? = nil) {
@@ -53,17 +53,31 @@ public struct EditMessageTransaction: Transaction2 {
 
   // Computed
 
-  var messageId: Int64 { context.messageId }
-  var text: String { context.text }
-  var chatId: Int64 { context.chatId }
-  var peerId: Peer { context.peerId }
-  var entities: MessageEntities? { context.entities }
+  var messageId: Int64 {
+    context.messageId
+  }
+
+  var text: String {
+    context.text
+  }
+
+  var chatId: Int64 {
+    context.chatId
+  }
+
+  var peerId: Peer {
+    context.peerId
+  }
+
+  var entities: MessageEntities? {
+    context.entities
+  }
 
   public var executionKey: TransactionExecutionKey? {
     .chatMutation(chatID: context.chatId)
   }
 
-  // Methods
+  /// Methods
   public func optimistic() async {
     log.debug("Optimistic edit message \(messageId) \(peerId) \(chatId)")
     do {
@@ -88,10 +102,19 @@ public struct EditMessageTransaction: Transaction2 {
   /// one write. An unchanged string can still have a formatting-only edit.
   func applyOptimisticEdit(in db: Database, date: Date = Date()) throws {
     guard var message = try Message
-      .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db),
-      message.text?.utf8.elementsEqual(text.utf8) != true || message.entities != entities else { return }
+      .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
+    else {
+      try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatId)
+      return
+    }
+    guard message.text?.utf8.elementsEqual(text.utf8) != true || message.entities != entities else { return }
+    try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatId)
     message.text = text
     message.entities = entities
+    message.hasLink = Message.detectHasLink(text: text, entities: entities)
+    // Text owns only link membership; suppressed stale media stays suppressed.
+    message.resourceFlags = (message.resourceFlags & ~MessageResourceFlags.link.rawValue)
+      | (message.hasLink == true ? MessageResourceFlags.link.rawValue : 0)
     message.editDate = date
     message.blockContentPayload = .literalMath(text: text, entities: entities)
     try message.saveMessage(db, preserveExistingBlockContentWhenMissing: false)

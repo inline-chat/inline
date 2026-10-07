@@ -8922,6 +8922,12 @@ export interface GetChatHistoryResult {
      * @generated from protobuf field: optional ChatAcknowledgements acknowledgements = 2;
      */
     acknowledgements?: ChatAcknowledgements;
+    /**
+     * Chat update sequence of the coherent read snapshot (not a pagination cursor).
+     *
+     * @generated from protobuf field: optional int64 seq = 3;
+     */
+    seq?: bigint;
 }
 /**
  * @generated from protobuf message GetChatTranscriptInput
@@ -9078,6 +9084,10 @@ export interface GetMessagesResult {
      * @generated from protobuf field: repeated Message messages = 1;
      */
     messages: Message[];
+    /**
+     * @generated from protobuf field: optional int64 seq = 2;
+     */
+    seq?: bigint;
 }
 /**
  * @generated from protobuf message ThreadReferenceItem
@@ -9232,6 +9242,10 @@ export interface SearchMessagesResult {
      * @generated from protobuf field: repeated Message messages = 1;
      */
     messages: Message[];
+    /**
+     * @generated from protobuf field: optional int64 seq = 2;
+     */
+    seq?: bigint;
 }
 /**
  * Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
@@ -37679,7 +37693,8 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
     constructor() {
         super("GetChatHistoryResult", [
             { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 2, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements }
+            { no: 2, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements },
+            { no: 3, name: "seq", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatHistoryResult>): GetChatHistoryResult {
@@ -37700,6 +37715,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
                 case /* optional ChatAcknowledgements acknowledgements */ 2:
                     message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
                     break;
+                case /* optional int64 seq */ 3:
+                    message.seq = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -37718,6 +37736,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
         /* optional ChatAcknowledgements acknowledgements = 2; */
         if (message.acknowledgements)
             ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 seq = 3; */
+        if (message.seq !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37967,7 +37988,8 @@ export const GetMessagesInput = new GetMessagesInput$Type();
 class GetMessagesResult$Type extends MessageType<GetMessagesResult> {
     constructor() {
         super("GetMessagesResult", [
-            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 2, name: "seq", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetMessagesResult>): GetMessagesResult {
@@ -37985,6 +38007,9 @@ class GetMessagesResult$Type extends MessageType<GetMessagesResult> {
                 case /* repeated Message messages */ 1:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional int64 seq */ 2:
+                    message.seq = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -38000,6 +38025,9 @@ class GetMessagesResult$Type extends MessageType<GetMessagesResult> {
         /* repeated Message messages = 1; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 seq = 2; */
+        if (message.seq !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38422,7 +38450,8 @@ export const SearchMessagesInput = new SearchMessagesInput$Type();
 class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
     constructor() {
         super("SearchMessagesResult", [
-            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 2, name: "seq", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SearchMessagesResult>): SearchMessagesResult {
@@ -38440,6 +38469,9 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
                 case /* repeated Message messages */ 1:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional int64 seq */ 2:
+                    message.seq = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -38455,6 +38487,9 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
         /* repeated Message messages = 1; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 seq = 2; */
+        if (message.seq !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

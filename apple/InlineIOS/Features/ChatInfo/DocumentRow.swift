@@ -12,6 +12,7 @@ struct DocumentRow: View {
 
   let documentMessage: DocumentMessage
   let chatId: Int64?
+  let onShowInChat: (() -> Void)?
 
   @State var isBeingRemoved = false
   @State var documentState: DocumentState = .needsDownload
@@ -27,36 +28,42 @@ struct DocumentRow: View {
     case downloading(bytesReceived: Int64, totalBytes: Int64)
   }
 
-  var documentInfo: DocumentInfo { documentMessage.document }
-  var document: InlineKit.Document { documentInfo.document }
-  
+  var documentInfo: DocumentInfo {
+    documentMessage.document
+  }
+
+  var document: InlineKit.Document {
+    documentInfo.document
+  }
+
   // MARK: - Computed Properties
-  
+
   /// The file URL for the document if it exists locally
   var documentURL: URL? {
     guard let localPath = document.localPath else {
       return nil
     }
-    
+
     let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
     let fileURL = cacheDirectory.appendingPathComponent(localPath)
-    
+
     // Only return the URL if the file actually exists
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return nil
     }
-    
+
     return fileURL
   }
-  
+
   /// Whether the document is ready for preview (locally available with valid URL)
   var canPreview: Bool {
     documentState == .locallyAvailable && documentURL != nil
   }
 
-  init(documentMessage: DocumentMessage, chatId: Int64? = nil) {
+  init(documentMessage: DocumentMessage, chatId: Int64? = nil, onShowInChat: (() -> Void)? = nil) {
     self.documentMessage = documentMessage
     self.chatId = chatId
+    self.onShowInChat = onShowInChat
   }
 
   // MARK: - Body
@@ -94,6 +101,11 @@ struct DocumentRow: View {
           } label: {
             Label("Share", systemImage: "square.and.arrow.up")
           }
+      }
+      if let onShowInChat {
+        Button { onShowInChat() } label: {
+          Label("Show in Chat", systemImage: "text.bubble")
+        }
       }
     }
     .onTapGesture {

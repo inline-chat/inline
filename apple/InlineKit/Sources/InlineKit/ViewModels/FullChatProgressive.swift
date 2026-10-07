@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import GRDB
 import Logger
+import RealtimeV2
 
 /// Immutable history-continuity evidence for one loaded transcript window.
 /// Message rows are materialization only; every certified edge or adjacency is
@@ -98,6 +99,37 @@ public struct MessageHistoryCoverageProjection: Sendable, Equatable {
     )
   }
 
+  /// A cached resource or search row is not evidence that transcript history
+  /// through its coordinate has been loaded.
+  public func isCertifiedMessage(_ messageID: Int64) -> Bool {
+    messageID > 0 && !Self.intersects(unknownRanges, lowerID: messageID, upperID: messageID)
+  }
+
+  /// Selects one continuous materialized component. Unknown intervals stay at
+  /// its paging edges rather than being silently crossed by sparse cache rows.
+  public func contiguousWindow(
+    from messages: [FullMessage],
+    around anchorID: Int64? = nil
+  ) -> [FullMessage] {
+    let ids = Array(Set(messages.lazy.map(\.message.messageId).filter { $0 > 0 })).sorted()
+    guard let newestID = ids.last else { return messages }
+    let coordinate = anchorID ?? newestID
+    let anchorIndex = ids.firstIndex(where: { $0 >= coordinate }) ?? (ids.count - 1)
+    var lower = anchorIndex
+    var upper = anchorIndex
+    while lower > 0, isCertifiedContinuation(between: ids[lower - 1], and: ids[lower]) {
+      lower -= 1
+    }
+    while upper + 1 < ids.count, isCertifiedContinuation(between: ids[upper], and: ids[upper + 1]) {
+      upper += 1
+    }
+    let includesLiveRows = upper == ids.count - 1 && anchorID == nil
+    return messages.filter {
+      let id = $0.message.messageId
+      return id > 0 ? (ids[lower] ... ids[upper]).contains(id) : includesLiveRows
+    }
+  }
+
   /// Returns the highest concrete read marker that can advance from the
   /// authoritative dialog frontier without crossing unknown history.
   ///
@@ -163,10 +195,10 @@ public struct MessageHistoryCoverageProjection: Sendable, Equatable {
   }
 }
 
-/// todos
-/// - listen to changes of count to first id - last id to detect new messages in between
-/// - do a refetch on update instead of manually checking things (90/10)
-/// -
+// todos
+// - listen to changes of count to first id - last id to detect new messages in between
+// - do a refetch on update instead of manually checking things (90/10)
+// -
 
 @MainActor
 public class MessagesProgressiveViewModel {
@@ -198,18 +230,35 @@ public class MessagesProgressiveViewModel {
   public var needsNewerHistoryRepair: Bool {
     !canLoadNewerFromLocal && !historyCoverage.isAtCertifiedLiveEnd
   }
+
   public private(set) var threadAnchor: FullMessage?
+  private(set) var threadAnchorFetchTask: Task<Void, Never>?
+  private var didExhaustThreadAnchorFetch = false
 
   public struct InitialState: Sendable {
     public let messages: [FullMessage]
     public let threadAnchor: FullMessage?
     public let loadedWindowMetadata: LoadedWindowMetadata
 
-    public var oldestLoadedMessageId: Int64? { loadedWindowMetadata.oldestLoadedMessageId }
-    public var newestLoadedMessageId: Int64? { loadedWindowMetadata.newestLoadedMessageId }
-    public var canLoadOlderFromLocal: Bool { loadedWindowMetadata.canLoadOlderFromLocal }
-    public var canLoadNewerFromLocal: Bool { loadedWindowMetadata.canLoadNewerFromLocal }
-    public var historyCoverage: MessageHistoryCoverageProjection { loadedWindowMetadata.historyCoverage }
+    public var oldestLoadedMessageId: Int64? {
+      loadedWindowMetadata.oldestLoadedMessageId
+    }
+
+    public var newestLoadedMessageId: Int64? {
+      loadedWindowMetadata.newestLoadedMessageId
+    }
+
+    public var canLoadOlderFromLocal: Bool {
+      loadedWindowMetadata.canLoadOlderFromLocal
+    }
+
+    public var canLoadNewerFromLocal: Bool {
+      loadedWindowMetadata.canLoadNewerFromLocal
+    }
+
+    public var historyCoverage: MessageHistoryCoverageProjection {
+      loadedWindowMetadata.historyCoverage
+    }
 
     public init(
       messages: [FullMessage],
@@ -222,8 +271,8 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  // internals
-  // was 80
+  /// internals
+  /// was 80
   public static func defaultInitialLimit() -> Int {
     if let height = ScreenMetrics.height {
       (Int(height.rounded()) / 24) + 30
@@ -238,14 +287,19 @@ public class MessagesProgressiveViewModel {
   private let db: AppDatabase
   private let publisher: MessagesPublisher
   private let currentUserId: Int64?
+  private let accountMutationToken: AuthAccountMutationToken?
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
   private var loadedWindowMetadataGeneration: UInt64 = 0
   private var reloadGeneration: UInt64 = 0
   private var reloadTask: Task<Void, Never>?
 
-  // Note:
-  // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
+  deinit {
+    threadAnchorFetchTask?.cancel()
+  }
+
+  /// Note:
+  /// limit, cursor, range, etc are internals to this module. the view layer should not care about this.
   public init(
     peer: Peer,
     reversed: Bool = false,
@@ -258,6 +312,7 @@ public class MessagesProgressiveViewModel {
     db = database
     self.publisher = publisher
     self.currentUserId = currentUserId
+    accountMutationToken = try? Auth.shared.handle.beginAccountMutation()
     self.peer = peer
     self.maximumWindowCount = maximumWindowCount.map { max(60, $0) }
     self.reversed = reversed
@@ -284,8 +339,9 @@ public class MessagesProgressiveViewModel {
       .store(in: &cancellable)
   }
 
-  private func applyInitialState(_ state: InitialState) {
-    messages = reapplyingPendingAcknowledgements(to: state.messages)
+  private func applyInitialState(_ state: InitialState, around anchorID: Int64? = nil) {
+    let projected = state.loadedWindowMetadata.projecting(state.messages, around: anchorID)
+    messages = reapplyingPendingAcknowledgements(to: Self.stableSortedMessages(projected.messages, reversed: reversed))
     threadAnchor = state.threadAnchor?.withoutAcknowledgements
     if messages.isEmpty {
       minDate = .init()
@@ -293,12 +349,12 @@ public class MessagesProgressiveViewModel {
     } else {
       updateRange()
     }
-    oldestLoadedMessageId = state.oldestLoadedMessageId
-    newestLoadedMessageId = state.newestLoadedMessageId
-    canLoadOlderFromLocal = state.canLoadOlderFromLocal
-    canLoadNewerFromLocal = state.canLoadNewerFromLocal
-    historyCoverage = state.historyCoverage
-    atBottom = state.historyCoverage.isAtCertifiedLiveEnd
+    oldestLoadedMessageId = projected.metadata.oldestLoadedMessageId
+    newestLoadedMessageId = projected.metadata.newestLoadedMessageId
+    canLoadOlderFromLocal = projected.metadata.canLoadOlderFromLocal
+    canLoadNewerFromLocal = projected.metadata.canLoadNewerFromLocal
+    historyCoverage = projected.metadata.historyCoverage
+    atBottom = projected.metadata.historyCoverage.isAtCertifiedLiveEnd
   }
 
   private func loadThreadAnchorFromLocalIfNeeded() {
@@ -328,7 +384,7 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  // Set an observer to update the UI
+  /// Set an observer to update the UI
   public func observe(_ callback: @escaping (MessagesChangeSet) -> Void) {
     if self.callback != nil {
       Log.shared.warning(
@@ -345,7 +401,9 @@ public class MessagesProgressiveViewModel {
   }
 
   public func loadBatch(at direction: MessagesLoadDirection, publish: Bool = true) {
-    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd { return }
+    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd {
+      return
+    }
     let request = buildAdditionalLoadRequest(direction: direction)
     log.trace(
       "Loading batch direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
@@ -354,6 +412,9 @@ public class MessagesProgressiveViewModel {
   }
 
   public func loadLatestWindow() {
+    invalidatePendingReload()
+    historyAnchorID = nil
+    atBottom = true
     loadMessages(.limit(initialLimit))
   }
 
@@ -363,10 +424,16 @@ public class MessagesProgressiveViewModel {
     publish: Bool = true,
     allowUnavailableLocal: Bool = false
   ) async -> Bool {
-    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd { return false }
+    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd {
+      return false
+    }
     if !allowUnavailableLocal {
-      if direction == .older, !canLoadOlderFromLocal { return false }
-      if direction == .newer, !canLoadNewerFromLocal { return false }
+      if direction == .older, !canLoadOlderFromLocal {
+        return false
+      }
+      if direction == .newer, !canLoadNewerFromLocal {
+        return false
+      }
     }
 
     let request = buildAdditionalLoadRequest(direction: direction)
@@ -378,15 +445,21 @@ public class MessagesProgressiveViewModel {
 
   public func setAtBottom(_ atBottom: Bool) {
     let followsLatest = atBottom && historyCoverage.isAtCertifiedLiveEnd
-    if maximumWindowCount != nil, self.atBottom != followsLatest { invalidatePendingReload() }
+    if maximumWindowCount != nil, self.atBottom != followsLatest {
+      invalidatePendingReload()
+    }
     self.atBottom = followsLatest
-    if self.atBottom { historyAnchorID = nil }
+    if self.atBottom {
+      historyAnchorID = nil
+    }
   }
 
-  /// Opt-in anchored consumers keep history reloads centered on the visible coordinate.
+  /// Keep history reloads in the continuous component containing the visible coordinate.
   public func setHistoryAnchor(_ messageID: Int64) {
-    guard maximumWindowCount != nil, messageID > 0 else { return }
-    if historyAnchorID != messageID { invalidatePendingReload() }
+    guard messageID > 0 else { return }
+    if historyAnchorID != messageID {
+      invalidatePendingReload()
+    }
     historyAnchorID = messageID
     atBottom = false
   }
@@ -401,14 +474,17 @@ public class MessagesProgressiveViewModel {
       guard let rows = try Self.localWindowAroundCoordinate(db, peer: peer, messageID: messageId, limit: count) else {
         return nil
       }
-      return (rows, try Self.loadedWindowMetadata(db, peer: peer, messages: rows))
+      return try (rows, Self.loadedWindowMetadata(db, peer: peer, messages: rows))
     }
     try Task.checkCancellation()
     guard generation == reloadGeneration, let snapshot else { return false }
     metadataTask?.cancel()
     loadedWindowMetadataGeneration &+= 1
     // Parent publications can arrive during the read; retain the current parent.
-    applyInitialState(.init(messages: snapshot.messages, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
+    applyInitialState(
+      .init(messages: snapshot.messages, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata),
+      around: messageId
+    )
     messages = reapplyingPendingAcknowledgements(to: messages)
     atBottom = false
     historyAnchorID = messageId
@@ -427,7 +503,11 @@ public class MessagesProgressiveViewModel {
     guard generation == reloadGeneration else { return false }
     metadataTask?.cancel()
     loadedWindowMetadataGeneration &+= 1
-    applyInitialState(.init(messages: snapshot.messages, threadAnchor: threadAnchor, loadedWindowMetadata: snapshot.metadata))
+    applyInitialState(.init(
+      messages: snapshot.messages,
+      threadAnchor: threadAnchor,
+      loadedWindowMetadata: snapshot.metadata
+    ))
     messages = reapplyingPendingAcknowledgements(to: messages)
     historyAnchorID = nil
     return true
@@ -438,6 +518,108 @@ public class MessagesProgressiveViewModel {
     let previousAnchor = threadAnchor
     loadThreadAnchorFromLocalIfNeeded()
     return previousAnchor != threadAnchor
+  }
+
+  /// Parent messages have their own chat sequence and admission token. Hydrate
+  /// them with an exact parent query, independent of the reply transcript page.
+  /// Call after attaching an observer; cells and row construction stay pure.
+  public func ensureThreadAnchorCached() {
+    let account = accountMutationToken
+    ensureThreadAnchorCached { parentPeer, messageID in
+      guard let account else { throw TransactionExecutionError.historyUnavailable }
+      let hasParent = try await AppDatabase.shared.reader.read { db in
+        try Chat.getByPeerId(db: db, peerId: parentPeer) != nil
+      }
+      if !hasParent {
+        _ = try await Api.realtime.send(.getChat(peer: parentPeer), expectedAccount: account)
+      }
+      let result = try await Api.realtime.send(
+        .getMessages(peer: parentPeer, messageIds: [messageID]),
+        expectedAccount: account
+      )
+      guard case let .getMessages(response) = result else { throw TransactionExecutionError.invalid }
+      return response.messages.contains { $0.id == messageID }
+    }
+  }
+
+  func ensureThreadAnchorCached(
+    using fetch: @escaping @Sendable (Peer, Int64) async throws -> Bool
+  ) {
+    guard case .thread = peer, threadAnchor == nil,
+          threadAnchorFetchTask == nil, !didExhaustThreadAnchorFetch else { return }
+    let database = db
+    let threadPeer = peer
+    let log = log
+    threadAnchorFetchTask = Task { [weak self] in
+      defer { self?.threadAnchorFetchTask = nil }
+      for attempt in 1 ... 3 {
+        guard !Task.isCancelled, self != nil, self?.threadAnchor == nil else { return }
+        do {
+          let local = try await database.reader.read { db in
+            try Self.threadAnchorSnapshot(db, peer: threadPeer)
+          }
+          guard !Task.isCancelled else { return }
+          // Chat metadata may arrive with the transcript's initial load. A
+          // future ordinary publication can retry once the parent is known.
+          guard let local else { return }
+          if let anchor = local.anchor {
+            self?.threadAnchor = anchor.withoutAcknowledgements
+            self?.callback?(.reload(animated: false))
+            return
+          }
+          let hasRemoteBody = try await fetch(local.parentPeer, local.messageID)
+          guard !Task.isCancelled else { return }
+          let refreshed = try await database.reader.read { db in
+            try Self.threadAnchorSnapshot(db, peer: threadPeer)
+          }
+          guard !Task.isCancelled else { return }
+          let previous = self?.threadAnchor
+          self?.threadAnchor = refreshed?.anchor?.withoutAcknowledgements
+          if previous != self?.threadAnchor {
+            self?.callback?(.reload(animated: false))
+          }
+          // A successful exact lookup with no body is authoritative absence.
+          // Retry only failures, never poll a deleted/unavailable parent.
+          self?.didExhaustThreadAnchorFetch = !hasRemoteBody || self?.threadAnchor == nil
+          return
+        } catch is CancellationError {
+          return
+        } catch {
+          log.error("Failed to hydrate reply thread anchor", error: error)
+          if attempt == 3 {
+            return
+          }
+          do { try await Task.sleep(for: .seconds(attempt)) }
+          catch { return }
+        }
+      }
+    }
+  }
+
+  public func cancelThreadAnchorHydration() {
+    threadAnchorFetchTask?.cancel()
+  }
+
+  private struct ThreadAnchorSnapshot: Sendable {
+    let parentPeer: Peer
+    let messageID: Int64
+    let anchor: FullMessage?
+  }
+
+  private nonisolated static func threadAnchorSnapshot(_ db: Database, peer: Peer) throws -> ThreadAnchorSnapshot? {
+    guard case let .thread(threadID) = peer,
+          let chat = try Chat.fetchOne(db, id: threadID),
+          let parentID = chat.parentChatId,
+          let messageID = chat.parentMessageId, messageID > 0 else { return nil }
+    let parent = try Chat.fetchOne(db, id: parentID)
+    let anchor = try FullMessage.queryRequest()
+      .filter(Column("chatId") == parentID && Column("messageId") == messageID)
+      .fetchOne(db)
+    return ThreadAnchorSnapshot(
+      parentPeer: parent?.peerId.toPeer() ?? .thread(id: parentID),
+      messageID: messageID,
+      anchor: anchor
+    )
   }
 
   public enum MessagesChangeSet {
@@ -486,14 +668,16 @@ public class MessagesProgressiveViewModel {
           let newMessages = reapplyingPendingAcknowledgements(
             to: messageAdd.messages.filter {
               guard !existingIds.contains($0.id) else { return false }
-              guard maximumWindowCount != nil, historyAnchorID != nil else { return true }
+              guard historyAnchorID != nil, !atBottom else { return true }
               return $0.message.messageId > 0
                 && $0.message.messageId >= (oldestLoadedMessageId ?? 0)
                 && $0.message.messageId <= (newestLoadedMessageId ?? 0)
             }
           )
           guard !newMessages.isEmpty else {
-            if maximumWindowCount != nil { updateLoadedWindowMetadata() }
+            if historyAnchorID != nil || maximumWindowCount != nil {
+              updateLoadedWindowMetadata()
+            }
             return nil
           }
 
@@ -505,7 +689,8 @@ public class MessagesProgressiveViewModel {
             messages.append(contentsOf: newMessages)
           }
           if let maximumWindowCount, atBottom, messages.count > maximumWindowCount {
-            messages = reversed ? Array(messages.prefix(maximumWindowCount)) : Array(messages.suffix(maximumWindowCount))
+            messages = reversed ? Array(messages.prefix(maximumWindowCount)) :
+              Array(messages.suffix(maximumWindowCount))
           }
 
           // NOTE: Sorting after incremental inserts can desync the collection/table data source.
@@ -513,7 +698,11 @@ public class MessagesProgressiveViewModel {
           // sort()
 
           updateRange()
+          let materializedIDs = messages.map(\.id)
           updateLoadedWindowMetadata()
+          if materializedIDs != messages.map(\.id) {
+            return .reload(animated: false)
+          }
 
           // Return changeset
           return MessagesChangeSet.added(
@@ -547,7 +736,11 @@ public class MessagesProgressiveViewModel {
 
           // Update ange
           updateRange()
+          let materializedIDs = messages.map(\.id)
           updateLoadedWindowMetadata()
+          if materializedIDs != messages.map(\.id) {
+            return .reload(animated: false)
+          }
 
           // Return changeset
           return MessagesChangeSet.deleted(deletedGlobalIds, indexSet: sortedIndices)
@@ -556,7 +749,11 @@ public class MessagesProgressiveViewModel {
       case let .update(messageUpdate):
         if let threadAnchor, messageUpdate.message.id == threadAnchor.id {
           self.threadAnchor = messageUpdate.message.withoutAcknowledgements
-          return MessagesChangeSet.updated([messageUpdate.message.withoutAcknowledgements], indexSet: [], animated: messageUpdate.animated ?? true)
+          return MessagesChangeSet.updated(
+            [messageUpdate.message.withoutAcknowledgements],
+            indexSet: [],
+            animated: messageUpdate.animated ?? true
+          )
         }
 
         if messageUpdate.peer == peer {
@@ -565,13 +762,19 @@ public class MessagesProgressiveViewModel {
             // Confirming an optimistic message outside an anchored window can
             // create its first positive newer candidate. Refresh the edge even
             // though that message does not belong in the visible projection.
-            if maximumWindowCount != nil { updateLoadedWindowMetadata() }
+            if historyAnchorID != nil || maximumWindowCount != nil {
+              updateLoadedWindowMetadata()
+            }
             return nil
           }
 
           messages[index] = reapplyingPendingAcknowledgements(to: messageUpdate.message)
           updateRange() // ??
+          let materializedIDs = messages.map(\.id)
           updateLoadedWindowMetadata()
+          if materializedIDs != messages.map(\.id) {
+            return .reload(animated: false)
+          }
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
@@ -589,7 +792,8 @@ public class MessagesProgressiveViewModel {
           let next = nextMessages[index]
           if previous.acknowledgements != next.acknowledgements
             || previous.acknowledgementAction(currentUserId: currentUserId)
-              != next.acknowledgementAction(currentUserId: currentUserId) {
+            != next.acknowledgementAction(currentUserId: currentUserId)
+          {
             updated.append(next)
             indices.append(index)
           }
@@ -607,7 +811,7 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.reload(animated: animated)
         }
 
-        if reloadPeer == self.peer {
+        if reloadPeer == peer {
           scheduleReload(animated: animated)
           return nil
         }
@@ -632,15 +836,17 @@ public class MessagesProgressiveViewModel {
   /// must not. A generation fence prevents a delayed snapshot from overwriting
   /// a newer incremental publication, pagination result, or reload request.
   private func scheduleReload(animated: Bool?) {
-    let mode: PublisherReloadMode
-    if let maximumWindowCount, let historyAnchorID {
-      mode = .around(anchorID: historyAnchorID, limit: min(maximumWindowCount, max(initialLimit, messages.count)))
+    let mode: PublisherReloadMode = if let historyAnchorID, !atBottom {
+      .around(
+        anchorID: historyAnchorID,
+        limit: min(maximumWindowCount ?? max(initialLimit, messages.count), max(initialLimit, messages.count))
+      )
     } else if atBottom {
-      mode = .replaceLatest(limit: min(initialLimit, maximumWindowCount ?? initialLimit))
+      .replaceLatest(limit: min(initialLimit, maximumWindowCount ?? initialLimit))
     } else if !historyCoverage.isAtCertifiedLiveEnd {
-      mode = .mergeLatest(limit: initialLimit)
+      .mergeLatest(limit: initialLimit)
     } else {
-      mode = .preserveRange(minDate: minDate, maxDate: maxDate, limit: messages.count)
+      .preserveRange(minDate: minDate, maxDate: maxDate, limit: messages.count)
     }
 
     reloadGeneration &+= 1
@@ -662,19 +868,19 @@ public class MessagesProgressiveViewModel {
           existingMessages: existingMessages,
           mode: mode
         )
-        guard !Task.isCancelled, let self, self.reloadGeneration == generation else { return }
+        guard !Task.isCancelled, let self, reloadGeneration == generation else { return }
 
-        self.messages = self.reapplyingPendingAcknowledgements(to: snapshot.messages)
-        self.updateRange()
-        let metadataRequest = self.beginLoadedWindowMetadataRequest()
-        _ = self.applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest)
-        self.reloadTask = nil
-        self.callback?(.reload(animated: animated))
+        messages = reapplyingPendingAcknowledgements(to: snapshot.messages)
+        updateRange()
+        let metadataRequest = beginLoadedWindowMetadataRequest()
+        _ = applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest)
+        reloadTask = nil
+        callback?(.reload(animated: animated))
       } catch is CancellationError {
         return
       } catch {
-        guard !Task.isCancelled, let self, self.reloadGeneration == generation else { return }
-        self.reloadTask = nil
+        guard !Task.isCancelled, let self, reloadGeneration == generation else { return }
+        reloadTask = nil
         Log.shared.error("Failed to reload messages", error: error)
       }
     }
@@ -696,11 +902,16 @@ public class MessagesProgressiveViewModel {
   ) async throws -> PublisherReloadSnapshot {
     try await database.reader.read { db in
       var query = baseQuery(for: peer, currentUserId: currentUserId)
-        .order(Column("date").desc, Column("messageId").desc)
+        .filter(Column("messageId") > 0)
+        .order(Column("messageId").desc)
       switch mode {
         case let .around(anchorID, limit):
-          let rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ?? existingMessages
-          return PublisherReloadSnapshot(messages: rows, metadata: try loadedWindowMetadata(db, peer: peer, messages: rows))
+          let rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ??
+            existingMessages
+          return try PublisherReloadSnapshot(
+            messages: rows,
+            metadata: loadedWindowMetadata(db, peer: peer, messages: rows)
+          )
         case let .replaceLatest(limit), let .mergeLatest(limit):
           query = query.limit(limit)
         case let .preserveRange(minDate, maxDate, limit):
@@ -710,17 +921,26 @@ public class MessagesProgressiveViewModel {
             .limit(limit)
       }
 
-      let fetched = try query.fetchAll(db)
-      let normalized = reversed ? fetched : Array(fetched.reversed())
+      var fetched = try query.fetchAll(db)
+      switch mode {
+        case .replaceLatest, .mergeLatest:
+          fetched += try baseQuery(for: peer, currentUserId: currentUserId)
+            .filter(Column("messageId") <= 0)
+            .order(Column("date").desc)
+            .limit(60)
+            .fetchAll(db)
+        case .around, .preserveRange: break
+      }
+      let normalized = stableSortedMessages(fetched, reversed: reversed)
       let messages = switch mode {
         case .replaceLatest, .preserveRange, .around:
           normalized
         case .mergeLatest:
           mergingLatestMessages(existing: existingMessages, latest: normalized, reversed: reversed)
       }
-      return PublisherReloadSnapshot(
+      return try PublisherReloadSnapshot(
         messages: messages,
-        metadata: try loadedWindowMetadata(db, peer: peer, messages: messages)
+        metadata: loadedWindowMetadata(db, peer: peer, messages: messages)
       )
     }
   }
@@ -751,7 +971,6 @@ public class MessagesProgressiveViewModel {
   struct AdditionalLoadRequest: Sendable {
     let direction: MessagesLoadDirection
     let limit: Int
-    let cursor: Date
     let cursorMessageId: Int64
     let prepend: Bool
   }
@@ -771,6 +990,9 @@ public class MessagesProgressiveViewModel {
     public let canLoadOlderFromLocal: Bool
     public let canLoadNewerFromLocal: Bool
     public let historyCoverage: MessageHistoryCoverageProjection
+    private let holes: [MessageHistoryHole]
+    private let olderCandidateMessageID: Int64?
+    private let newerCandidateMessageID: Int64?
 
     /// Derives all pagination authority from the same immutable set of rows,
     /// persisted holes, and nearest local candidates. Callers cannot inject
@@ -781,6 +1003,9 @@ public class MessagesProgressiveViewModel {
       olderCandidateMessageID: Int64? = nil,
       newerCandidateMessageID: Int64? = nil
     ) {
+      self.holes = holes
+      self.olderCandidateMessageID = olderCandidateMessageID
+      self.newerCandidateMessageID = newerCandidateMessageID
       let positiveMessages = messages.filter { $0.message.messageId > 0 }
       let bounds = MessagesProgressiveViewModel.loadedWindowBounds(for: positiveMessages)
       let coverage = MessageHistoryCoverageProjection(
@@ -799,6 +1024,23 @@ public class MessagesProgressiveViewModel {
         && newerCandidateMessageID != nil
         && coverage.hasCertifiedNewerEdge
       historyCoverage = coverage
+    }
+
+    fileprivate func projecting(
+      _ messages: [FullMessage], around anchorID: Int64?
+    ) -> (messages: [FullMessage], metadata: LoadedWindowMetadata) {
+      let projected = historyCoverage.contiguousWindow(from: messages, around: anchorID)
+      guard projected.map(\.id) != messages.map(\.id) else { return (messages, self) }
+      let positiveIDs = projected.lazy.map(\.message.messageId).filter { $0 > 0 }
+      let lower = positiveIDs.min()
+      let upper = positiveIDs.max()
+      let droppedIDs = messages.lazy.map(\.message.messageId).filter { $0 > 0 }
+      let older = lower.flatMap { bound in droppedIDs.filter { $0 < bound }.max() } ?? olderCandidateMessageID
+      let newer = upper.flatMap { bound in droppedIDs.filter { $0 > bound }.min() } ?? newerCandidateMessageID
+      return (projected, LoadedWindowMetadata(
+        messages: projected, holes: holes,
+        olderCandidateMessageID: older, newerCandidateMessageID: newer
+      ))
     }
   }
 
@@ -829,10 +1071,8 @@ public class MessagesProgressiveViewModel {
       return lhsKey.date < rhsKey.date ? .orderedAscending : .orderedDescending
     }
 
-    // Server message IDs are the causal order within a chat. A local database
-    // row ID depends on fetch/insert order and can therefore invert same-second
-    // messages after a refetch. Keep the row ID first only when an optimistic
-    // message is involved, because temporary message IDs are negative/random.
+    // Local row IDs depend on fetch order. Positive server IDs order ties;
+    // optimistic messages retain the local insertion-order fallback below.
     if lhsKey.messageId > 0, rhsKey.messageId > 0, lhsKey.messageId != rhsKey.messageId {
       return lhsKey.messageId < rhsKey.messageId ? .orderedAscending : .orderedDescending
     }
@@ -920,10 +1160,10 @@ public class MessagesProgressiveViewModel {
     var newest = first
 
     for message in messages.dropFirst() {
-      if isOlderByDateAndMessageId(message, than: oldest) {
+      if message.message.messageId < oldest.message.messageId {
         oldest = message
       }
-      if isNewerByDateAndMessageId(message, than: newest) {
+      if message.message.messageId > newest.message.messageId {
         newest = message
       }
     }
@@ -934,26 +1174,6 @@ public class MessagesProgressiveViewModel {
       newestDate: newest.message.date,
       newestMessageId: newest.message.messageId
     )
-  }
-
-  private nonisolated static func isOlderByDateAndMessageId(
-    _ lhs: FullMessage,
-    than rhs: FullMessage
-  ) -> Bool {
-    if lhs.message.date != rhs.message.date {
-      return lhs.message.date < rhs.message.date
-    }
-    return lhs.message.messageId < rhs.message.messageId
-  }
-
-  private nonisolated static func isNewerByDateAndMessageId(
-    _ lhs: FullMessage,
-    than rhs: FullMessage
-  ) -> Bool {
-    if lhs.message.date != rhs.message.date {
-      return lhs.message.date > rhs.message.date
-    }
-    return lhs.message.messageId > rhs.message.messageId
   }
 
   static func mergedMessages(
@@ -1054,11 +1274,16 @@ public class MessagesProgressiveViewModel {
     for request: LoadedWindowMetadataRequest
   ) -> Bool {
     guard isCurrentLoadedWindowMetadataRequest(request) else { return false }
-    oldestLoadedMessageId = metadata.oldestLoadedMessageId
-    newestLoadedMessageId = metadata.newestLoadedMessageId
-    canLoadOlderFromLocal = metadata.canLoadOlderFromLocal
-    canLoadNewerFromLocal = metadata.canLoadNewerFromLocal
-    historyCoverage = metadata.historyCoverage
+    let projection = metadata.projecting(messages, around: historyAnchorID)
+    // Coverage filters the existing order. Re-sorting here would move an
+    // optimistic insertion after the view has received its incremental index.
+    messages = projection.messages
+    updateRange()
+    oldestLoadedMessageId = projection.metadata.oldestLoadedMessageId
+    newestLoadedMessageId = projection.metadata.newestLoadedMessageId
+    canLoadOlderFromLocal = projection.metadata.canLoadOlderFromLocal
+    canLoadNewerFromLocal = projection.metadata.canLoadNewerFromLocal
+    historyCoverage = projection.metadata.historyCoverage
     return true
   }
 
@@ -1069,7 +1294,7 @@ public class MessagesProgressiveViewModel {
   nonisolated static func unknownLoadedWindowMetadata(
     for messages: [FullMessage]
   ) -> LoadedWindowMetadata {
-    return LoadedWindowMetadata(
+    LoadedWindowMetadata(
       messages: messages,
       holes: [
         MessageHistoryHole(
@@ -1125,7 +1350,9 @@ public class MessagesProgressiveViewModel {
     }
 
     var window = Array(older.reversed())
-    if let exact { window.append(exact) }
+    if let exact {
+      window.append(exact)
+    }
     window.append(contentsOf: newer)
     return stableSortedMessages(window, reversed: false)
   }
@@ -1152,6 +1379,7 @@ public class MessagesProgressiveViewModel {
       // A deferred history reload must preserve this window until scrolling
       // establishes that the user has returned to the live end of the chat.
       atBottom = false
+      historyAnchorID = messageId
       messages = reapplyingPendingAcknowledgements(to: aroundBatch)
       updateRange()
       updateLoadedWindowMetadata()
@@ -1168,14 +1396,15 @@ public class MessagesProgressiveViewModel {
   }
 
   private func buildAdditionalLoadRequest(direction: MessagesLoadDirection) -> AdditionalLoadRequest {
-    let cursor = direction == .older ? minDate : maxDate
+    if !atBottom, historyAnchorID == nil {
+      historyAnchorID = newestLoadedMessageId
+    }
     let cursorMessageId = direction == .older ? (oldestLoadedMessageId ?? 0) : (newestLoadedMessageId ?? 0)
     let limit = messages.count > 200 ? 200 : 100
     let prepend = direction == (reversed ? .newer : .older)
     return AdditionalLoadRequest(
       direction: direction,
       limit: limit,
-      cursor: cursor,
       cursorMessageId: cursorMessageId,
       prepend: prepend
     )
@@ -1183,12 +1412,14 @@ public class MessagesProgressiveViewModel {
 
   private func buildBaseOrderedQuery() -> QueryInterfaceRequest<FullMessage> {
     baseQuery()
-      .order(Column("date").desc, Column("messageId").desc)
+      .filter(Column("messageId") > 0)
+      .order(Column("messageId").desc)
   }
 
   private nonisolated static func buildBaseOrderedQuery(for peer: Peer) -> QueryInterfaceRequest<FullMessage> {
     baseQuery(for: peer)
-      .order(Column("date").desc, Column("messageId").desc)
+      .filter(Column("messageId") > 0)
+      .order(Column("messageId").desc)
   }
 
   private func buildQueryForLoad(loadMode: LoadMode, previousCount: Int) -> QueryInterfaceRequest<FullMessage> {
@@ -1230,20 +1461,20 @@ public class MessagesProgressiveViewModel {
     }
 
     let result = try db.reader.read { db in
-      try buildQueryForLoad(loadMode: loadMode, previousCount: previousCount).fetchAll(db)
+      let confirmed = try buildQueryForLoad(loadMode: loadMode, previousCount: previousCount).fetchAll(db)
+      let optimistic = try baseQuery()
+        .filter(Column("messageId") <= 0)
+        .order(Column("date").desc)
+        .limit(initialLimit)
+        .fetchAll(db)
+      return confirmed + optimistic
     }
     fetchedCount = result.count
     return result
   }
 
   private func normalizedMessagesForDisplay(_ batch: [FullMessage]) -> [FullMessage] {
-    if reversed {
-      // It's already reversed because SQL query sorts descending.
-      return batch
-    }
-
-    // Reverse back for chronological presentation in non-reversed mode.
-    return batch.reversed()
+    Self.stableSortedMessages(batch, reversed: reversed)
   }
 
   private func fetchAdditionalMessages(request: AdditionalLoadRequest) throws -> [FullMessage] {
@@ -1315,20 +1546,14 @@ public class MessagesProgressiveViewModel {
     switch request.direction {
       case .older:
         return query
-          .filter(
-            (Column("date") < request.cursor)
-              || ((Column("date") == request.cursor) && (Column("messageId") < request.cursorMessageId))
-          )
-          .order(Column("date").desc, Column("messageId").desc)
+          .filter(Column("messageId") > 0 && Column("messageId") < request.cursorMessageId)
+          .order(Column("messageId").desc)
           .limit(request.limit)
 
       case .newer:
         return query
-          .filter(
-            (Column("date") > request.cursor)
-              || ((Column("date") == request.cursor) && (Column("messageId") > request.cursorMessageId))
-          )
-          .order(Column("date").asc, Column("messageId").asc)
+          .filter(Column("messageId") > request.cursorMessageId)
+          .order(Column("messageId").asc)
           .limit(request.limit)
     }
   }
@@ -1373,20 +1598,14 @@ public class MessagesProgressiveViewModel {
 
     let olderCandidate = try baseQuery(for: peer)
       .filter(Column("messageId") > 0)
-      .filter(
-        (Column("date") < bounds.oldestDate)
-          || ((Column("date") == bounds.oldestDate) && (Column("messageId") < bounds.oldestMessageId))
-      )
-      .order(Column("date").desc, Column("messageId").desc)
+      .filter(Column("messageId") < bounds.oldestMessageId)
+      .order(Column("messageId").desc)
       .limit(1)
       .fetchOne(db)
     let newerCandidate = try baseQuery(for: peer)
       .filter(Column("messageId") > 0)
-      .filter(
-        (Column("date") > bounds.newestDate)
-          || ((Column("date") == bounds.newestDate) && (Column("messageId") > bounds.newestMessageId))
-      )
-      .order(Column("date").asc, Column("messageId").asc)
+      .filter(Column("messageId") > bounds.newestMessageId)
+      .order(Column("messageId").asc)
       .limit(1)
       .fetchOne(db)
 
@@ -1486,7 +1705,10 @@ public class MessagesProgressiveViewModel {
       // Only proceed if we have new messages to add
       if !messagesBatch.isEmpty {
         messages = reapplyingPendingAcknowledgements(
-          to: Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+          to: Self.stableSortedMessages(
+            Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend),
+            reversed: reversed
+          )
         )
 
         updateRange()
@@ -1500,6 +1722,7 @@ public class MessagesProgressiveViewModel {
   private func loadAdditionalMessagesAsync(request: AdditionalLoadRequest, publish: Bool) async -> Bool {
     let peer = peer
     let generation = reloadGeneration
+    let previousIDs = messages.map(\.id)
 
     if maximumWindowCount != nil {
       let existing = messages
@@ -1511,8 +1734,8 @@ public class MessagesProgressiveViewModel {
           let batch = try Self.buildAdditionalMessagesQuery(peer: peer, request: request, currentUserId: currentUserId)
             .fetchAll(db).filter { !existingIDs.contains($0.id) }
           let ordered = Self.stableSortedMessages(batch, reversed: reversed)
-          let merged = request.prepend ? ordered + existing : existing + ordered
-          return (messages: merged, inserted: !batch.isEmpty, metadata: try Self.loadedWindowMetadata(db, peer: peer, messages: merged))
+          let merged = Self.stableSortedMessages(existing + ordered, reversed: reversed)
+          return try (messages: merged, metadata: Self.loadedWindowMetadata(db, peer: peer, messages: merged))
         }
         guard !Task.isCancelled, generation == reloadGeneration else { return false }
         invalidatePendingReload()
@@ -1522,7 +1745,7 @@ public class MessagesProgressiveViewModel {
         _ = applyLoadedWindowMetadata(snapshot.metadata, for: beginLoadedWindowMetadataRequest())
         // No suspension after mutation: the caller can commit the matching rows
         // without cancellation leaving a half-applied page behind.
-        return snapshot.inserted
+        return previousIDs != messages.map(\.id)
       } catch is CancellationError {
         return false
       } catch {
@@ -1541,7 +1764,7 @@ public class MessagesProgressiveViewModel {
         db: db, peer: peer, request: request, currentUserId: currentUserId
       )
       let rawCount = messagesBatch.count
-      guard !Task.isCancelled else { return false }
+      guard !Task.isCancelled, generation == reloadGeneration else { return false }
 
       log.trace("loaded additional messages async: \(rawCount)")
 
@@ -1553,17 +1776,20 @@ public class MessagesProgressiveViewModel {
 
       guard !messagesBatch.isEmpty else {
         await updateLoadedWindowMetadataAsync()
-        return false
+        return previousIDs != messages.map(\.id)
       }
 
       messages = reapplyingPendingAcknowledgements(
-        to: Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+        to: Self.stableSortedMessages(
+          Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend),
+          reversed: reversed
+        )
       )
 
       updateRange()
       await updateLoadedWindowMetadataAsync()
       guard !Task.isCancelled else { return false }
-      return true
+      return previousIDs != messages.map(\.id)
     } catch {
       Log.shared.error("Failed to get messages \(error)")
       return false
@@ -1619,12 +1845,12 @@ public final class MessagesPublisher {
     var projection: FullAcknowledgement
   }
 
-#if os(iOS)
+  #if os(iOS)
   public struct ActiveChatToken: Sendable {
     fileprivate let id: UUID
     public let peer: Peer
   }
-#endif
+  #endif
 
   public struct MessageUpdate {
     public let message: FullMessage
@@ -1693,10 +1919,12 @@ public final class MessagesPublisher {
     guard !acceptsUpdates, activeDatabaseReads == 0 else { return }
     let waiters = databaseReadDrainWaiters
     databaseReadDrainWaiters.removeAll()
-    for waiter in waiters { waiter.resume() }
+    for waiter in waiters {
+      waiter.resume()
+    }
   }
 
-#if os(iOS)
+  #if os(iOS)
   private var activeChatTokens: [UUID: Peer] = [:]
   private var activePeerCounts: [Peer: Int] = [:]
 
@@ -1732,13 +1960,13 @@ public final class MessagesPublisher {
   private func shouldPublish(peer: Peer) -> Bool {
     acceptsUpdates && isChatActive(peer: peer)
   }
-#else
+  #else
   private func shouldPublish(peer _: Peer) -> Bool {
     acceptsUpdates
   }
-#endif
+  #endif
 
-  // Static methods to publish update
+  /// Static methods to publish update
   func messageAdded(message: Message, peer: Peer) async {
 //    Log.shared.debug("Message added: \(message)")
     guard beginDatabaseRead(peer: peer) else { return }
@@ -1783,14 +2011,14 @@ public final class MessagesPublisher {
     }
   }
 
-  // Static methods to publish update
+  /// Static methods to publish update
   func messageAddedSync(fullMessage: FullMessage, peer: Peer) {
     guard shouldPublish(peer: peer) else { return }
 
     publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
   }
 
-  // Message IDs not Global IDs
+  /// Message IDs not Global IDs
   public func messagesDeleted(messageIds: [Int64], peer: Peer) {
     guard shouldPublish(peer: peer) else { return }
 
@@ -1941,13 +2169,16 @@ public final class MessagesPublisher {
          !canonicalCurrent.isOptimisticProjection,
          canonicalCurrent.userId == key.userId,
          canonicalCurrent.maxId == desired.maxId,
-         canonicalCurrent.cleared == desired.cleared {
+         canonicalCurrent.cleared == desired.cleared
+      {
         resolvedKeys.append(key)
       } else {
         projections.append(.replace(pending.projection))
       }
     }
-    for key in resolvedKeys { pendingAcknowledgements.removeValue(forKey: key) }
+    for key in resolvedKeys {
+      pendingAcknowledgements.removeValue(forKey: key)
+    }
     return projections
   }
 
@@ -2077,6 +2308,7 @@ public final class MessagesPublisher {
 
 public extension MessagesProgressiveViewModel {
   func dispose() {
+    threadAnchorFetchTask?.cancel()
     if maximumWindowCount != nil {
       metadataTask?.cancel()
       metadataTask = nil

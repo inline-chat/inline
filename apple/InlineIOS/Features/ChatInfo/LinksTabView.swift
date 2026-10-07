@@ -6,32 +6,33 @@ import UIKit
 
 struct LinksTabView: View {
   @ObservedObject var linksViewModel: ChatLinksViewModel
+  let onShowInChat: (InlineKit.Message) -> Void
 
   private static let allowedLinkSchemes: Set<String> = ["http", "https"]
-  private static let linkDetector: NSDataDetector? = {
-    try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-  }()
+  private static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link
+    .rawValue)
+
   private static let fallbackLinkRegex: NSRegularExpression? = {
     let pattern = "(?i)\\b((?:https?://)?(?:[a-z0-9-]+\\.)+[a-z]{2,}(?:/[^\\s]*)?)"
     return try? NSRegularExpression(pattern: pattern, options: [])
   }()
+
   private static let linkTrimCharacters = CharacterSet(charactersIn: ".,;:!?)]}\"'")
 
   var body: some View {
     VStack(spacing: 16) {
-      if linksViewModel.linkMessages.isEmpty {
-        VStack(spacing: 8) {
-          Text("No links found in this chat.")
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-      } else {
+      if !linksViewModel.linkMessages.isEmpty {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
             let items = linkGroups(for: group)
             Section {
               ForEach(items) { item in
                 LinkRow(group: item)
+                  .contextMenu {
+                    Button { onShowInChat(item.message) } label: {
+                      Label("Show in Chat", systemImage: "text.bubble")
+                    }
+                  }
                   .padding(.bottom, 4)
                   .onAppear {
                     Task {
@@ -60,11 +61,16 @@ struct LinksTabView: View {
           }
         }
       }
+      ChatInfoResourceFooter(
+        state: linksViewModel.loadState, isEmpty: linksViewModel.linkMessages.isEmpty,
+        emptyMessage: "No links found in this chat.", loadMore: linksViewModel.loadMore, retry: linksViewModel.retry
+      )
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task {
       await linksViewModel.loadInitial()
     }
+    .onDisappear { linksViewModel.deactivate() }
   }
 
   private func formatDate(_ date: Date) -> String {
@@ -120,6 +126,7 @@ struct LinksTabView: View {
       items.append(LinkRowGroup(
         id: messageId,
         messageId: messageId,
+        message: message,
         links: messageItems
       ))
     }
@@ -239,15 +246,13 @@ struct LinksTabView: View {
       let matchRange = match.range
       let substring = (text as NSString).substring(with: matchRange)
       let display = sanitizeLinkText(substring)
-      let resolvedURL: URL?
-
-      if let url = match.url,
-         let scheme = url.scheme?.lowercased(),
-         Self.allowedLinkSchemes.contains(scheme)
+      let resolvedURL: URL? = if let url = match.url,
+                                 let scheme = url.scheme?.lowercased(),
+                                 Self.allowedLinkSchemes.contains(scheme)
       {
-        resolvedURL = url
+        url
       } else {
-        resolvedURL = urlFromString(display)
+        urlFromString(display)
       }
 
       guard let resolvedURL else { return }
@@ -453,6 +458,7 @@ private struct LinkRowItem: Identifiable {
 private struct LinkRowGroup: Identifiable {
   let id: Int64
   let messageId: Int64
+  let message: InlineKit.Message
   let links: [LinkRowItem]
 }
 

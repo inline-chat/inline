@@ -1,5 +1,6 @@
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { db } from "@in/server/db"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { DialogsModel } from "@in/server/db/models/dialogs"
@@ -53,10 +54,17 @@ const GENERIC_REPLY_THREAD_TITLE = "Message"
 type ReplyThreadTitleAnchor = Pick<DbFullMessage, "text">
 
 export async function getChatById(chatId: number): Promise<DbChat | undefined> {
-  return db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((rows) => rows[0])
+  return db
+    .select()
+    .from(chats)
+    .where(eq(chats.id, chatId))
+    .limit(1)
+    .then((rows) => rows[0])
 }
 
-export async function getAnchorMessageForChat(chat: Pick<DbChat, "parentChatId" | "parentMessageId">): Promise<DbFullMessage | undefined> {
+export async function getAnchorMessageForChat(
+  chat: Pick<DbChat, "parentChatId" | "parentMessageId">,
+): Promise<DbFullMessage | undefined> {
   if (chat.parentChatId == null || chat.parentMessageId == null) {
     return undefined
   }
@@ -86,15 +94,14 @@ export function isDefaultReplyThreadTitle(
     return true
   }
 
-  return normalizedTitle === buildDefaultReplyThreadTitle(anchorMessage).trim()
-    || normalizedTitle === buildLegacyDefaultReplyThreadTitle(anchorMessage).trim()
+  return (
+    normalizedTitle === buildDefaultReplyThreadTitle(anchorMessage).trim() ||
+    normalizedTitle === buildLegacyDefaultReplyThreadTitle(anchorMessage).trim()
+  )
 }
 
 function buildLegacyDefaultReplyThreadTitle(anchorMessage: ReplyThreadTitleAnchor | undefined): string {
-  const excerpt = anchorMessage?.text
-    ?.trim()
-    .replace(/\s+/g, " ")
-    .slice(0, LEGACY_REPLY_THREAD_TITLE_EXCERPT_LENGTH)
+  const excerpt = anchorMessage?.text?.trim().replace(/\s+/g, " ").slice(0, LEGACY_REPLY_THREAD_TITLE_EXCERPT_LENGTH)
   return `Re: ${excerpt || GENERIC_REPLY_THREAD_TITLE}`
 }
 
@@ -181,9 +188,7 @@ export async function promoteLinkedSubthreadDialogsToChatList(input: {
     .from(dialogs)
     .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, activeUserIds)))
 
-  const hiddenDialogUserIds = existingDialogs
-    .filter((dialog) => dialog.chatListHidden)
-    .map((dialog) => dialog.userId)
+  const hiddenDialogUserIds = existingDialogs.filter((dialog) => dialog.chatListHidden).map((dialog) => dialog.userId)
   const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
   const missingUserIds = activeUserIds.filter((userId) => !existingUserIds.has(userId))
 
@@ -325,14 +330,16 @@ export async function getMessageThreadProjectionsByParent(input: {
   }
 
   const query = input.tx ?? db
-  const replyParentFilter = or(...parentMessages.map(({ chatId, messageId }) => and(
-    eq(chats.parentChatId, chatId),
-    eq(chats.parentMessageId, messageId),
-  )))
-  const placedParentFilter = or(...parentMessages.map(({ chatId, messageId }) => and(
-    eq(messages.chatId, chatId),
-    eq(messages.messageId, messageId),
-  )))
+  const replyParentFilter = or(
+    ...parentMessages.map(({ chatId, messageId }) =>
+      and(eq(chats.parentChatId, chatId), eq(chats.parentMessageId, messageId)),
+    ),
+  )
+  const placedParentFilter = or(
+    ...parentMessages.map(({ chatId, messageId }) =>
+      and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)),
+    ),
+  )
 
   const replyThreads = await query
     .select({
@@ -367,50 +374,67 @@ export async function getMessageThreadProjectionsByParent(input: {
 
   const childThreads: ChildThreadProjection[] = [
     ...replyThreads.flatMap((thread): ChildThreadProjection[] =>
-      thread.parentChatId == null || thread.parentMessageId == null ? [] : [{
-        chatId: thread.chatId,
-        parentChatId: thread.parentChatId,
-        parentMessageId: thread.parentMessageId,
-        kind: MessageSubthread_Kind.REPLY,
-        title: thread.title,
-        isUntitled: thread.isUntitled,
-        autoTitleGenerated: thread.autoTitleGenerated,
-        anchorMessage: thread.isUntitled === true && thread.autoTitleGenerated == null
-          ? {
-              text: storedReplyThreadAnchorText({
-                text: thread.anchorText,
-                textEncrypted: thread.anchorTextEncrypted,
-                textIv: thread.anchorTextIv,
-                textTag: thread.anchorTextTag,
-              }),
-            }
-          : undefined,
-      }]),
-    ...placedSubthreads.map((thread): ChildThreadProjection => ({
-      ...thread,
-      kind: MessageSubthread_Kind.SUBTHREAD,
-    })),
+      thread.parentChatId == null || thread.parentMessageId == null
+        ? []
+        : [
+            {
+              chatId: thread.chatId,
+              parentChatId: thread.parentChatId,
+              parentMessageId: thread.parentMessageId,
+              kind: MessageSubthread_Kind.REPLY,
+              title: thread.title,
+              isUntitled: thread.isUntitled,
+              autoTitleGenerated: thread.autoTitleGenerated,
+              anchorMessage:
+                thread.isUntitled === true && thread.autoTitleGenerated == null
+                  ? {
+                      text: storedReplyThreadAnchorText({
+                        text: thread.anchorText,
+                        textEncrypted: thread.anchorTextEncrypted,
+                        textIv: thread.anchorTextIv,
+                        textTag: thread.anchorTextTag,
+                      }),
+                    }
+                  : undefined,
+            },
+          ],
+    ),
+    ...placedSubthreads.map(
+      (thread): ChildThreadProjection => ({
+        ...thread,
+        kind: MessageSubthread_Kind.SUBTHREAD,
+      }),
+    ),
   ]
 
-  if (childThreads.length === 0) {
+  const childAccess = await getEffectiveChatAccessUserIds(
+    query,
+    childThreads.map((thread) => thread.chatId),
+    {
+      userIds: [input.userId],
+    },
+  )
+  const visibleChildThreads = childThreads.filter((thread) => childAccess.get(thread.chatId)?.has(input.userId))
+  if (visibleChildThreads.length === 0) {
     return projectionsByParent
   }
 
   const activityByChatId = await getThreadActivityByChatId({
-    chatIds: childThreads.map((thread) => thread.chatId),
+    chatIds: visibleChildThreads.map((thread) => thread.chatId),
     userId: input.userId,
     tx: input.tx,
   })
 
-  for (const childThread of childThreads) {
+  for (const childThread of visibleChildThreads) {
     const activity = activityByChatId.get(childThread.chatId) ?? emptyThreadActivity
     const title = normalizedTitle(childThread.title)
     const subthread: MessageSubthread = {
       chatId: BigInt(childThread.chatId),
       kind: childThread.kind,
-      title: childThread.kind === MessageSubthread_Kind.SUBTHREAD
-        ? title ?? GENERIC_SUBTHREAD_TITLE
-        : usableReplyThreadTitle(childThread),
+      title:
+        childThread.kind === MessageSubthread_Kind.SUBTHREAD
+          ? title ?? GENERIC_SUBTHREAD_TITLE
+          : usableReplyThreadTitle(childThread),
       messageCount: activity.messageCount,
       hasUnread: activity.hasUnread,
       recentAuthorUserIds: activity.recentAuthorUserIds,
@@ -423,14 +447,15 @@ export async function getMessageThreadProjectionsByParent(input: {
     }
     parentProjections.set(childThread.parentMessageId, {
       subthread,
-      replies: childThread.kind === MessageSubthread_Kind.REPLY
-        ? {
-            chatId: subthread.chatId,
-            replyCount: subthread.messageCount,
-            hasUnread: subthread.hasUnread,
-            recentReplierUserIds: subthread.recentAuthorUserIds,
-          }
-        : undefined,
+      replies:
+        childThread.kind === MessageSubthread_Kind.REPLY
+          ? {
+              chatId: subthread.chatId,
+              replyCount: subthread.messageCount,
+              hasUnread: subthread.hasUnread,
+              recentReplierUserIds: subthread.recentAuthorUserIds,
+            }
+          : undefined,
     })
   }
 
@@ -445,7 +470,7 @@ export async function getMessageRepliesMap(input: {
   const projections = await getMessageThreadProjectionsMap(input)
   return new Map(
     Array.from(projections.entries()).flatMap(([messageId, projection]) =>
-      projection.replies ? [[messageId, projection.replies] as const] : []
+      projection.replies ? [[messageId, projection.replies] as const] : [],
     ),
   )
 }
@@ -570,9 +595,7 @@ async function getThreadActivityByChatId(input: {
   for (const chatId of chatIds) {
     activityByChatId.set(chatId, {
       messageCount: replyCountByChatId.get(chatId) ?? 0,
-      hasUnread:
-        (unreadCountByChatId.get(chatId) ?? 0) > 0 ||
-        unreadMarkByChatId.get(chatId) === true,
+      hasUnread: (unreadCountByChatId.get(chatId) ?? 0) > 0 || unreadMarkByChatId.get(chatId) === true,
       recentAuthorUserIds: recentReplierIdsByChatId.get(chatId) ?? [],
     })
   }
@@ -713,9 +736,10 @@ export async function emitMessageSubthreadUpdateIfNeeded(input: {
     return
   }
 
-  const parentMessage = chat.parentMessageId != null
-    ? { parentChatId: chat.parentChatId, parentMessageId: chat.parentMessageId }
-    : await getSubthreadParentMessageRef(chat.id)
+  const parentMessage =
+    chat.parentMessageId != null
+      ? { parentChatId: chat.parentChatId, parentMessageId: chat.parentMessageId }
+      : await getSubthreadParentMessageRef(chat.id)
 
   if (!parentMessage) {
     return
@@ -734,18 +758,16 @@ export async function emitMessageSubthreadUpdateIfNeeded(input: {
   })
 }
 
-export function queueSubthreadParentUpdate(input: {
-  chatId: number
-  currentUserId: number
-  reason: string
-}): void {
-  const work = Promise.resolve().then(() => emitMessageSubthreadUpdateIfNeeded(input)).catch((error) => {
-    log.warn("Failed to refresh subthread parent card", {
-      chatId: input.chatId,
-      reason: input.reason,
-      error,
+export function queueSubthreadParentUpdate(input: { chatId: number; currentUserId: number; reason: string }): void {
+  const work = Promise.resolve()
+    .then(() => emitMessageSubthreadUpdateIfNeeded(input))
+    .catch((error) => {
+      log.warn("Failed to refresh subthread parent card", {
+        chatId: input.chatId,
+        reason: input.reason,
+        error,
+      })
     })
-  })
   applicationBackgroundWork.track(work)
 }
 
