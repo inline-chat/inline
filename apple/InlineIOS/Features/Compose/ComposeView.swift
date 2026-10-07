@@ -147,16 +147,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   var onHeightChange: ((CGFloat, ComposeHeightChangeAnimation) -> Void)?
   var executeInlineCommand: ((InlineCommandAction) async throws -> InlineCommandExecution?)?
+  private let submitAttachmentSend: (TransactionSendMessage) -> Void
   private var inlineCommandTask: Task<Void, Never>?
   var peerId: InlineKit.Peer? {
     didSet {
-      if oldValue != peerId { textView.resetPastedLinks() }
+      if oldValue != peerId {
+        textView.resetPastedLinks()
+        cancelPendingAttachmentsForDestinationChange()
+      }
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
     }
   }
   var chatId: Int64? {
     didSet {
+      if oldValue != chatId { cancelPendingAttachmentsForDestinationChange() }
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
     }
@@ -241,8 +246,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     self.init(frame: frame, draftManager: DraftManager(debounceDelay: 2.0))
   }
 
-  init(frame: CGRect, draftManager: DraftManager) {
+  init(
+    frame: CGRect,
+    draftManager: DraftManager,
+    submitAttachmentSend: @escaping (TransactionSendMessage) -> Void = {
+      _ = Transactions.shared.mutate(transaction: .sendMessage($0))
+    }
+  ) {
     self.draftManager = draftManager
+    self.submitAttachmentSend = submitAttachmentSend
     super.init(frame: frame)
     setupViews()
     setupScenePhaseObserver()
@@ -361,31 +373,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     ChatState.shared.clearReplyingMessageId(peer: peerId)
 
     resetComposeStateWithoutSendAnimation()
-  }
-
-  func sendMediaItemImmediately(_ mediaItem: FileMediaItem) {
-    guard let peerId else {
-      log.debug("No peerId available for immediate media send")
-      return
-    }
-
-    Transactions.shared.mutate(
-      transaction: .sendMessage(
-        .init(
-          text: nil,
-          peerId: peerId,
-          chatId: chatId ?? 0,
-          mediaItems: [mediaItem],
-          replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
-          isSticker: nil,
-          entities: nil
-        )
-      )
-    )
-
-    if let chatId { IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId) }
-
-    ChatState.shared.clearReplyingMessageId(peer: peerId)
   }
 
   func setupViews() {
@@ -658,7 +645,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     dismissAttachmentPickerIfPresented(animated: true)
 
     ToastManager.shared.showToast(
-      "Video processing timed out. Please try again.",
+      "Attachment processing timed out. Please try again.",
       type: .error,
       systemImage: "exclamationmark.triangle.fill"
     )
@@ -1037,6 +1024,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard let chatId else { return }
     let hasPendingVideos = !pendingVideoAttachments.isEmpty
     let hasActiveUploads = hasActiveAttachmentUploads
+    if isEditing, !attachmentItems.isEmpty || hasPendingVideos {
+      cancelQueuedPendingVideoSend()
+      showFilesEditingFeedback(sending: true)
+      return
+    }
 
     if ComposePendingMediaSendBehavior.shouldQueueSendUntilPendingVideosAreReady(
       hasPendingVideos: hasPendingVideos
@@ -1202,7 +1194,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             continue
           }
 
-          Transactions.shared.mutate(transaction: .sendMessage(.init(
+          submitAttachmentSend(.init(
             text: isFirst ? text : nil,
             peerId: peerId,
             chatId: chatId,
@@ -1211,7 +1203,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             isSticker: nil,
             entities: isFirst ? entities : nil,
             sendMode: sendMode
-          )))
+          ))
         }
       }
     }
@@ -1879,6 +1871,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   // MARK: - Attachment Management
 
   func removeAttachment(_ id: String) {
+    cancelQueuedPendingVideoSend()
     // TODO: Delete from cache as well
 
     // Update state
@@ -2168,6 +2161,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
     pendingVideoAttachments.removeAll { $0.id == pendingId }
     handleAttachmentItemsChanged(animated: animated)
+  }
+
+  private func cancelPendingAttachmentsForDestinationChange() {
+    guard !pendingVideoAttachments.isEmpty else { return }
+    cancelQueuedPendingVideoSend()
+    canceledPendingVideoAttachmentIds.formUnion(pendingVideoAttachments.map(\.id))
+    pendingVideoAttachments.removeAll()
+    handleAttachmentItemsChanged(animated: false)
   }
 
   func isPendingVideoAttachmentCanceled(_ pendingId: String) -> Bool {
