@@ -61,6 +61,8 @@ Be careful if you don't specify subagent model it will inherit the parent.
 
 These are useful invariants, hints, constraints and benchmarks for assessing your implementations. In different situations some of these may not apply or be relevant so do not treat them as strict rules.
 
+- For Apple UI, follow the HIG and established native app patterns where relevant.
+
 - First-frame render is better for chat view, sidebar, messages, draft, compose. In most cases, async load and flickering when we have data locally is bad UX.
 
 - Keep view rendering and scrolling lightweight; avoid blocking I/O and expensive computation on the main thread
