@@ -29,7 +29,8 @@ struct GetChatsSnapshotTests {
     ]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [10, 11])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [10, 11], in: db)
 
       #expect(imported.failures.isEmpty)
       #expect(imported.seededStates.count == 2)
@@ -53,7 +54,8 @@ struct GetChatsSnapshotTests {
     ]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [10])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [10], in: db)
 
       #expect(failureCount(in: imported, phase: .chats) == 4)
       #expect(try Chat.fetchAll(db).map(\.id) == [10])
@@ -73,6 +75,8 @@ struct GetChatsSnapshotTests {
     result.spaces = [makeSpace(id: 1, seq: 7), makeSpace(id: 2, seq: 8)]
     result.users = [makeUser(id: 1), makeUser(id: 2)]
     result.chats = [makeChat(id: 10, seq: 10), makeChat(id: 20, seq: 20)]
+    result.chats[0].lastMsgID = 1
+    result.chats[1].lastMsgID = 2
     result.messages = [
       makeMessage(id: 1, chatID: 10, fromID: 1),
       makeMessage(id: 2, chatID: 20, fromID: 1),
@@ -83,6 +87,7 @@ struct GetChatsSnapshotTests {
       let imported = try GetChatsTransaction.applySnapshot(
         result,
         userProjectionAdmission: .alreadyValidated,
+        coldBootstrapChatIDs: [10, 20],
         in: db
       )
 
@@ -114,7 +119,7 @@ struct GetChatsSnapshotTests {
     result.messages = [makeMessage(id: 1, chatID: 10, fromID: 1)]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [10, 20], in: db)
 
       #expect(failureCount(in: imported, phase: .lastMessages) == 1)
       #expect(try Chat.fetchOne(db, key: 10)?.lastMsgId == 1)
@@ -137,6 +142,7 @@ struct GetChatsSnapshotTests {
 
     var result = InlineProtocol.GetChatsResult()
     result.chats = [makeChat(id: 10, seq: 10), invalidChat]
+    result.chats[0].lastMsgID = 1
     result.messages = [invalidMessage]
     result.dialogs = [makeDialog(chatID: 10), InlineProtocol.Dialog()]
 
@@ -144,6 +150,7 @@ struct GetChatsSnapshotTests {
       let imported = try GetChatsTransaction.applySnapshot(
         result,
         userProjectionAdmission: .alreadyValidated,
+        coldBootstrapChatIDs: [10],
         in: db
       )
 
@@ -180,7 +187,8 @@ struct GetChatsSnapshotTests {
     result.chats = [makeChat(id: 2, spaceID: 1, seq: 9)]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [2])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [2], in: db)
 
       let spaceKey = BucketKey.space(id: 1)
       let chatKey = BucketKey.chat(peer: makeChatPeer(id: 2))
@@ -247,7 +255,7 @@ struct GetChatsSnapshotTests {
 
       #expect(try Chat.fetchOne(db, key: 2)?.title == "Local Chat")
       #expect(try Chat.fetchOne(db, key: 2)?.lastMsgId == nil)
-      #expect(try Message.fetchOne(db, key: ["chatId": 2, "messageId": 1]) != nil)
+      #expect(try Message.fetchOne(db, key: ["chatId": 2, "messageId": 1]) == nil)
       #expect(try Dialog.fetchCount(db) == 1)
       #expect(try bucketState(for: chatKey, in: db)?.seq == 10)
       #expect(imported.seededStates.isEmpty)
@@ -255,7 +263,7 @@ struct GetChatsSnapshotTests {
     }
   }
 
-  @Test("ordinary catalogs expose only pristine seeds to sync actors")
+  @Test("cold catalogs expose only coherent pristine seeds to sync actors")
   func ordinaryCatalogActorStatesExcludeRepairTargets() throws {
     let queue = try makeInMemoryDB()
     let populatedKey = BucketKey.chat(peer: makeChatPeer(id: 2))
@@ -270,7 +278,8 @@ struct GetChatsSnapshotTests {
         makeChat(id: 2, seq: 30, title: "Repair Target"),
         makeChat(id: 3, seq: 20, title: "Pristine Seed"),
       ]
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [3])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [3], in: db)
 
       #expect(imported.catchUpTargets[populatedKey] == 30)
       #expect(imported.seededStates[pristineKey]?.seq == 20)
@@ -339,7 +348,8 @@ struct GetChatsSnapshotTests {
     ]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [2])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [2], in: db)
 
       #expect(imported.failures.isEmpty)
       #expect(try Space.fetchOne(db, key: 1)?.name == "Fresh Space")
@@ -413,7 +423,8 @@ struct GetChatsSnapshotTests {
     ]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [2])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [2], in: db)
 
       #expect(failureCount(in: imported, phase: .spaceCursors) == 1)
       #expect(failureCount(in: imported, phase: .chatCursors) == 1)
@@ -539,9 +550,11 @@ struct GetChatsSnapshotTests {
     result.dialogs = [makeDialog(chatID: 20)]
 
     try queue.write { (db: Database) throws in
+      addColdPreviews(to: &result, chatIDs: [20])
       let imported = try GetChatsTransaction.applySnapshot(
         result,
         userProjectionAdmission: .alreadyValidated,
+        coldBootstrapChatIDs: [20],
         in: db
       )
 
@@ -690,7 +703,8 @@ struct GetChatsSnapshotTests {
     result.messages = [makeMessage(id: 1, chatID: 20, fromID: 1)]
 
     try queue.write { (db: Database) throws in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      addColdPreviews(to: &result, chatIDs: [10, 20])
+      let imported = try GetChatsTransaction.applySnapshot(result, coldBootstrapChatIDs: [10, 20], in: db)
 
       #expect(failureCount(in: imported, phase: .chatCursors) == 1)
       #expect(try Chat.fetchOne(db, key: 20) == nil)
@@ -904,7 +918,7 @@ struct GetChatsSnapshotTests {
       #expect(imported.failures.isEmpty)
       #expect(imported.catchUpTargets.isEmpty)
       #expect(imported.seededStates[.space(id: 1)]?.seq == 6)
-      #expect(imported.seededStates[.chat(peer: makeChatPeer(id: 10))]?.seq == 6)
+      #expect(imported.seededStates[.chat(peer: makeChatPeer(id: 10))] == nil)
       #expect(imported.retiredBucketKeys == Set([
         .space(id: 2),
         .chat(peer: makeChatPeer(id: 20)),
@@ -915,7 +929,7 @@ struct GetChatsSnapshotTests {
       #expect(try Space.fetchOne(db, key: 1)?.name == "Rebased Space")
       #expect(try Chat.fetchOne(db, key: 10)?.title == "Rebased Chat")
       #expect(try bucketState(for: .space(id: 1), in: db)?.seq == 6)
-      #expect(try bucketState(for: .chat(peer: makeChatPeer(id: 10)), in: db)?.seq == 6)
+      #expect(try bucketState(for: .chat(peer: makeChatPeer(id: 10)), in: db)?.seq == 5)
       #expect(try bucketState(for: .space(id: 2), in: db)?.seq == 5)
       #expect(try bucketState(for: .chat(peer: makeChatPeer(id: 20)), in: db)?.seq == 5)
       #expect(try Space.catalogActive().fetchAll(db).map(\.id) == [1])
@@ -932,7 +946,7 @@ struct GetChatsSnapshotTests {
       #expect(try DialogFolder.fetchOne(db, key: 1) != nil)
       #expect(try DialogFolder.fetchOne(db, key: 2) == nil)
       #expect(try MessageHistoryCoverageStore.holes(db, chatId: 10) == [
-        MessageHistoryHole(chatId: 10, lowerId: 1, upperId: 4),
+        MessageHistoryHole(chatId: 10, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax),
       ])
     }
   }
@@ -981,6 +995,22 @@ struct GetChatsSnapshotTests {
 
       #expect(try Space.catalogActive().fetchCount(db) == 1)
       #expect(try Dialog.fetchOne(db, key: 10) != nil)
+    }
+  }
+
+  /// Fixtures that exercise cold seeding must supply the exact last-message
+  /// preview; ordinary metadata catalogs deliberately leave this opt-in absent.
+  private func addColdPreviews(to result: inout InlineProtocol.GetChatsResult, chatIDs: Set<Int64>) {
+    if !result.users.contains(where: { $0.id == 1 }) {
+      result.users.append(makeUser(id: 1))
+    }
+    for index in result.chats.indices where chatIDs.contains(result.chats[index].id) {
+      if !result.chats[index].hasLastMsgID { result.chats[index].lastMsgID = 1 }
+      let chatID = result.chats[index].id
+      let lastID = result.chats[index].lastMsgID
+      if !result.messages.contains(where: { $0.chatID == chatID && $0.id == lastID }) {
+        result.messages.append(makeMessage(id: lastID, chatID: chatID, fromID: 1))
+      }
     }
   }
 

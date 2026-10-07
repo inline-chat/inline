@@ -386,12 +386,19 @@ public struct GetChatsTransaction: Transaction2 {
 
         attemptedCount += 1
         if coldBootstrapChatIDs.contains(pending.chat.id) {
-          if let state = try applyColdChatSnapshot(
+          switch try applyColdChatSnapshot(
             pending, messages: messagesByChatID[pending.chat.id] ?? [],
             in: db, failures: &failures
           ) {
-            seededStates[pending.bucketKey] = state
-            continue
+            case let .seeded(state):
+              seededStates[pending.bucketKey] = state
+              continue
+            case .cursorRejected:
+              // Cursor admission owns the whole cold snapshot savepoint.
+              // A metadata retry must not resurrect its rolled-back rows.
+              continue
+            case .metadataOnly:
+              break
           }
           // A malformed/missing body must not certify a cursor. Metadata is
           // still useful, with unknown holes and no last-message pointer.
@@ -460,18 +467,24 @@ public struct GetChatsTransaction: Transaction2 {
     )
   }
 
+  private enum ColdChatSnapshotResult {
+    case seeded(BucketState)
+    case metadataOnly
+    case cursorRejected
+  }
+
   private static func applyColdChatSnapshot(
     _ pending: PendingChat, messages: [InlineProtocol.Message],
     in db: Database, failures: inout SnapshotFailureAccumulator
-  ) throws -> BucketState? {
+  ) throws -> ColdChatSnapshotResult {
     guard let sequence = pending.bucketSequence, sequence >= 0,
           let lastMsgId = pending.lastMsgId,
           1 ... MessageHistoryHole.positiveMessageIDMax ~= lastMsgId
-    else { return nil }
+    else { return .metadataOnly }
     let lastRows = messages.filter { $0.id == lastMsgId }
     guard lastRows.count == 1 else {
       failures.record(.lastMessages)
-      return nil
+      return .metadataOnly
     }
     do {
       try HistoryPageReducer.validateMessages(
@@ -479,32 +492,38 @@ public struct GetChatsTransaction: Transaction2 {
       )
     } catch {
       failures.record(.messages)
-      return nil
+      return .metadataOnly
     }
     var state: BucketState?
+    var phase = SnapshotImportPhase.chats
     do {
       try db.inSavepoint {
         var chat = pending.chat
         try chat.saveFull(db)
         // Catalog users/sidecars must already satisfy the full row. Do not
         // fabricate references for this one-message cold snapshot.
+        phase = .messages
         _ = try Message.save(db, protocolMessage: lastRows[0], authoritativeSnapshot: true)
         chat.lastMsgId = lastMsgId
+        phase = .lastMessages
         try chat.saveFull(db)
+        phase = .chats
         try Acknowledgement.save(
           db, cursors: pending.protocolChat.acknowledgements.cursors,
           chatId: chat.id, publishChanges: true
         )
+        phase = .chatCursors
         state = try GRDBSyncStorage.seedSnapshotBucketState(for: pending.bucketKey, seq: sequence, in: db)
         // The last-message row supplies a preview, never range coverage.
         return .commit
       }
     } catch {
       guard isRecoverableRecordError(error) || error is HistoryPageAdmissionError else { throw error }
-      failures.record(.messages)
-      return nil
+      failures.record(phase)
+      return phase == .chatCursors ? .cursorRejected : .metadataOnly
     }
-    return state
+    guard let state else { return .metadataOnly }
+    return .seeded(state)
   }
 
   private static func applyPristineChatSnapshot(

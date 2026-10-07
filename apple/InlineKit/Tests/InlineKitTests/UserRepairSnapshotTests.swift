@@ -137,8 +137,12 @@ struct UserRepairSnapshotTests {
     firstChat.title = "First import"
     firstChat.peerID = chatPeer(8)
     firstChat.seq = 10
+    firstChat.lastMsgID = 1
     var firstChats = InlineProtocol.GetChatsResult()
     firstChats.chats = [firstChat]
+    firstChats.users = [firstMe.user]
+    firstChats.messages = [coldPreview(chatID: 8)]
+    let removalRevision = try await queue.read { db in try SyncRemovalRevision.read(db) }
 
     #expect(await engine.persistUserBootstrapProjection(.init(
       projection: .me(firstMe),
@@ -154,7 +158,8 @@ struct UserRepairSnapshotTests {
     guard case let .chats(persistence)? = await engine.persistUserBootstrapProjection(.init(
       projection: .chats(firstChats),
       checkpointState: checkpoint,
-      mutationToken: accountToken()
+      mutationToken: accountToken(),
+      catalogHistoryAdmission: .init(expectedRemovalRevision: removalRevision, allowedChatIDs: [8])
     )) else {
       Issue.record("Expected the catalog projection to persist")
       return
@@ -845,6 +850,7 @@ struct UserRepairSnapshotTests {
     validChat.title = "Healthy"
     validChat.peerID = chatPeer(8)
     validChat.seq = 10
+    validChat.lastMsgID = 1
     var chats = InlineProtocol.GetChatsResult()
     chats.chats = [invalidChat, validChat]
 
@@ -854,6 +860,9 @@ struct UserRepairSnapshotTests {
     var me = InlineProtocol.GetMeResult()
     me.user = user
 
+    chats.users = [user]
+    chats.messages = [coldPreview(chatID: 8)]
+    let removalRevision = try await queue.read { db in try SyncRemovalRevision.read(db) }
     let committed = await engine.applyUserRepair(UserRepairSnapshot(
       chats: chats,
       me: me,
@@ -862,6 +871,7 @@ struct UserRepairSnapshotTests {
       replayThroughState: BucketState(date: 200, seq: 50),
       targetState: BucketState(date: 200, seq: 50),
       mutationToken: accountToken(),
+      catalogHistoryAdmission: .init(expectedRemovalRevision: removalRevision, allowedChatIDs: [8]),
       replacesActiveCatalog: true,
       reason: "invalid-snapshot-test"
     ))
@@ -1039,6 +1049,17 @@ struct UserRepairSnapshotTests {
       let state = try #require(try DbBucketState.fetchOne(db))
       #expect(state.date == 230)
       #expect(state.seq == 60)
+    }
+  }
+
+  private func coldPreview(chatID: Int64) -> InlineProtocol.Message {
+    .with {
+      $0.id = 1
+      $0.chatID = chatID
+      $0.peerID = chatPeer(chatID)
+      $0.fromID = 42
+      $0.date = 20
+      $0.message = "Cold preview"
     }
   }
 

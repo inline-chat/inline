@@ -2837,8 +2837,18 @@ final class SyncTests {
     chat.title = "Recovered chat"
     chat.peerID = makeChatPeer(chatId: 8)
     chat.seq = 7
+    chat.lastMsgID = 1
     var chats = InlineProtocol.GetChatsResult()
     chats.chats = [chat]
+    chats.users = [me.user]
+    chats.messages = [.with {
+      $0.id = 1
+      $0.chatID = 8
+      $0.peerID = makeChatPeer(chatId: 8)
+      $0.fromID = 1
+      $0.date = 90
+      $0.message = "Recovered preview"
+    }]
     var settings = InlineProtocol.GetUserSettingsResult()
     settings.userSettings = .init()
     var updatedUser = InlineProtocol.UpdateUpdatedUser()

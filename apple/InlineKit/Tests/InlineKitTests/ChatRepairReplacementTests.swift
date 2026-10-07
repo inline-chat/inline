@@ -210,9 +210,11 @@ struct ChatRepairReplacementTests {
       #expect(dialog.readInboxMaxId == 3)
       #expect(dialog.unreadCount == 9)
       #expect(dialog.open)
-      #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
-        MessageHistoryHole(chatId: 7, lowerId: 1, upperId: 10),
-      ])
+      for scope in MessageHistoryScope.allCases {
+        #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7, scope: scope) == [
+          MessageHistoryHole(chatId: 7, scope: scope, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax),
+        ])
+      }
     }
   }
 
@@ -345,8 +347,8 @@ struct ChatRepairReplacementTests {
     }
   }
 
-  @Test("a parent reference requires the exact parent message row")
-  func missingParentMessageDoesNotAdvance() async throws {
+  @Test("valid parent coordinates survive an unavailable parent message body")
+  func parentCoordinatesOutliveMissingMessage() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
     try await queue.write { (db: Database) throws in
       try Chat(
@@ -361,7 +363,7 @@ struct ChatRepairReplacementTests {
     snapshot.chat.parentChatID = 8
     snapshot.chat.parentMessageID = 55
 
-    let missing = await engine.applyChatRepair(ChatRepairSnapshot(
+    let withoutBody = await engine.applyChatRepair(ChatRepairSnapshot(
       peer: chatPeer(7),
       chat: snapshot,
       pinnedMessages: [],
@@ -369,12 +371,16 @@ struct ChatRepairReplacementTests {
       mutationToken: accountToken(),
       reason: "missing-parent-message"
     ))
-    #expect(missing == nil)
+    #expect(withoutBody?.seq == 5)
     try await queue.read { (db: Database) throws in
-      #expect(try Chat.fetchOne(db, id: 7)?.title == "Stale")
+      let repaired = try #require(try Chat.fetchOne(db, id: 7))
+      #expect(repaired.title == "Repaired")
+      #expect(repaired.parentChatId == 8)
+      #expect(repaired.parentMessageId == 55)
+      #expect(try Message.filter(Message.Columns.chatId == 8).fetchCount(db) == 0)
       #expect(try DbBucketState
         .filter(DbBucketState.Columns.entityId == BucketKey.chat(peer: chatPeer(7)).getEntityId())
-        .fetchOne(db)?.seq == 1)
+        .fetchOne(db)?.seq == 5)
     }
 
     try await queue.write { (db: Database) throws in
@@ -406,24 +412,56 @@ struct ChatRepairReplacementTests {
     }
   }
 
-  @Test("an exact authoritative anchor resolves the parent dependency")
-  func anchorMessageResolvesParentReference() async throws {
+  @Test("child parent coordinates never authorize an anchor body or overlay", arguments: [false, true])
+  func childSnapshotCannotAuthorizeParentAnchor(anchorMatches: Bool) async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
     var snapshot = repairedChatResult()
     snapshot.chat.parentChatID = 8
     snapshot.chat.parentMessageID = 55
-    snapshot.anchorMessage = protocolMessage(id: 55, chatID: 8, fromID: 1)
+    snapshot.anchorMessage = protocolMessage(id: anchorMatches ? 55 : 54, chatID: 8, fromID: 1)
+
+    try await queue.write { (db: Database) throws in
+      try Chat(id: 8, date: Date(timeIntervalSince1970: 10), type: .thread, title: "Parent", spaceId: nil).insert(db)
+      _ = try GRDBSyncStorage.seedSnapshotBucketState(for: .chat(peer: chatPeer(8)), seq: 9, in: db)
+    }
+    let withoutParentAdmission = await engine.applyChatRepair(ChatRepairSnapshot(
+      peer: chatPeer(7), chat: snapshot, pinnedMessages: [],
+      targetState: BucketState(date: 20, seq: 5), mutationToken: accountToken(),
+      reason: "unadmitted-parent-anchor"
+    ))
+    #expect(withoutParentAdmission?.seq == 5)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: 7)?.title == "Repaired")
+      #expect(try Chat.fetchOne(db, id: 7)?.parentMessageId == 55)
+      #expect(try Message.filter(Message.Columns.chatId == 8).fetchCount(db) == 0)
+      #expect(try DbBucketState
+        .filter(DbBucketState.Columns.entityId == BucketKey.chat(peer: chatPeer(7)).getEntityId())
+        .fetchOne(db)?.seq == 5)
+    }
+    try await queue.write { (db: Database) throws in
+      let token = try HistoryPageAdmissionToken.capture(db, chatId: 8)
+      var parentResponse = InlineProtocol.GetMessagesResult()
+      parentResponse.seq = 9
+      parentResponse.messages = [protocolMessage(id: 55, chatID: 8, fromID: 1)]
+      try GetMessagesTransaction.apply(
+        parentResponse,
+        context: .init(peer: .thread(id: 8), messageIds: [55], admissionToken: token),
+        db: db
+      )
+    }
+    snapshot.anchorMessage.message = "An unadmitted parent overlay"
+    snapshot.chat.seq = 6
 
     let committed = await engine.applyChatRepair(ChatRepairSnapshot(
       peer: chatPeer(7),
       chat: snapshot,
       pinnedMessages: [],
-      targetState: BucketState(date: 20, seq: 5),
+      targetState: BucketState(date: 20, seq: 6),
       mutationToken: accountToken(),
       reason: "anchor-resolves-parent"
     ))
 
-    #expect(committed?.seq == 5)
+    #expect(committed?.seq == 6)
     try await queue.read { (db: Database) throws in
       let repaired = try #require(try Chat.fetchOne(db, id: 7))
       #expect(repaired.parentChatId == 8)
@@ -431,6 +469,7 @@ struct ChatRepairReplacementTests {
       #expect(try Message
         .filter(Message.Columns.chatId == 8 && Message.Columns.messageId == 55)
         .fetchCount(db) == 1)
+      #expect(try Message.fetchOne(db, key: ["chatId": 8, "messageId": 55])?.text == "pinned")
     }
   }
 

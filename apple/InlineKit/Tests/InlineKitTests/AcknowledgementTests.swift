@@ -215,11 +215,15 @@ struct AcknowledgementTests {
     }
   }
 
-  @Test func coldThreadHistoryHydratesCursorBeforeFirstProjection() throws {
+  @Test func admittedThreadHistoryHydratesCursorBeforeFirstProjection() throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
     try queue.write { db in
+      try InlineKit.Chat(id: 100, date: Date(), type: .thread, title: "Cold thread", spaceId: nil).insert(db)
+      var transaction = GetChatHistoryTransaction(peer: .thread(id: 100))
+      transaction.context.admissionToken = try HistoryPageAdmissionToken.capture(db, chatId: 100)
       var response = InlineProtocol.GetChatHistoryResult()
+      response.seq = 0
       response.messages = [.with {
         $0.id = 10
         $0.chatID = 100
@@ -232,10 +236,10 @@ struct AcknowledgementTests {
         $0.chatID = 100; $0.userID = 1; $0.maxID = 10; $0.revision = 7
         $0.user = .with { $0.id = 1; $0.firstName = "Actor" }
       }]
-      #expect(try InlineKit.Chat.fetchCount(db) == 0)
+      #expect(try InlineKit.Chat.fetchCount(db) == 1)
       try GetChatHistoryTransaction.apply(
         response,
-        context: GetChatHistoryTransaction(peer: .thread(id: 100)).context,
+        context: transaction.context,
         db: db
       )
       let firstFrame = try #require(try FullMessage.queryRequest(currentUserId: 1).fetchOne(db))
@@ -258,6 +262,7 @@ struct AcknowledgementTests {
         )
         try message.saveMessage(db)
       }
+      try MessageHistoryCoverageStore.subtract(db, chatId: 100, lowerId: 10, upperId: 14)
       for cleared in [false, true] {
         let cursor = InlineProtocol.ChatAcknowledgement.with {
           $0.chatID = 100; $0.userID = 1; $0.maxID = 12

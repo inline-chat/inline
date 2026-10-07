@@ -5,7 +5,7 @@ import Testing
 
 @Suite("MessagesSectionedViewModel Ordering Tests")
 struct MessagesSectionedViewModelOrderingTests {
-  @Test("sectioned projection exposes the immutable history coverage snapshot")
+  @Test("sectioned projection exposes the contiguous window and its immutable coverage")
   @MainActor
   func projectsHistoryCoverage() {
     let date = Date(timeIntervalSince1970: 1_700_000_000)
@@ -23,9 +23,9 @@ struct MessagesSectionedViewModelOrderingTests {
       peerUserId: peer.id
     )
     let coverage = MessageHistoryCoverageProjection(
-      messages: [older, newer],
+      messages: [newer],
       holes: [MessageHistoryHole(chatId: 1, lowerId: 11, upperId: 19)],
-      olderCandidateMessageID: nil,
+      olderCandidateMessageID: 10,
       newerCandidateMessageID: nil
     )
     let viewModel = MessagesSectionedViewModel(
@@ -41,6 +41,7 @@ struct MessagesSectionedViewModelOrderingTests {
     )
 
     #expect(viewModel.historyCoverage == coverage)
+    #expect(viewModel.messages.map(\.message.messageId) == [20])
     #expect(!viewModel.isCertifiedHistoryContinuation(between: 10, and: 20))
   }
 
@@ -61,7 +62,7 @@ struct MessagesSectionedViewModelOrderingTests {
     )
     let initialState = MessagesProgressiveViewModel.InitialState(
       messages: [old, boundary, visible, pending],
-      loadedWindowMetadata: testSectionLoadedWindowMetadata(messages: [old, boundary, visible, pending])
+      loadedWindowMetadata: .init(messages: [old, boundary, visible, pending], holes: [])
     )
 
     let viewModel = MessagesSectionedViewModel(
