@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises"
 import {
+  inboundEventIsServiceMessage,
   inboundEventNeedsSenderResolution,
   normalizeInboundEvent,
   type GenericInboundEvent,
@@ -33,6 +34,8 @@ export async function deliverInboundEvent(
     deliver: (event: Json) => Promise<void>
   }
 ): Promise<void> {
+  // Resolving this intentional ignore completes the SDK receipt without a Python ACK.
+  if (inboundEventIsServiceMessage(event)) return
   const explicitMention = explicitlyMentionsSelf(event, owner.meId)
   while (!owner.signal.aborted) {
     const resolution = explicitMention

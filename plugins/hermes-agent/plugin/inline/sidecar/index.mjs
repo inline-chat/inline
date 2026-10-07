@@ -5702,6 +5702,13 @@ var botSettingsEventKinds = new Set([
 function inboundEventNeedsSenderResolution(event) {
   return !botSettingsEventKinds.has(event.kind ?? "");
 }
+function inboundEventIsServiceMessage(event) {
+  if (event.kind !== "message.new" && event.kind !== "message.edit")
+    return false;
+  const message = asOptionalRecord(event.message);
+  const raw = asOptionalRecord(message?.raw);
+  return Boolean(asOptionalRecord(message?.serviceMessage) || asOptionalRecord(raw?.serviceMessage));
+}
 
 class SidecarError extends Error {
   errorKind;
@@ -5823,6 +5830,7 @@ function normalizeMessage(message) {
     replies: message.replies ?? null,
     actions: message.actions ?? null,
     rev: message.rev ?? null,
+    ...asOptionalRecord(message.serviceMessage) ? { serviceMessage: message.serviceMessage } : {},
     raw: message
   };
 }
@@ -6021,6 +6029,8 @@ function explicitlyMentionsSelf(event, meId) {
   return message?.entities?.entities?.some((e) => e.entity?.oneofKind === "mention" && e.entity.mention?.userId?.toString() === meId) ?? false;
 }
 async function deliverInboundEvent(event, owner) {
+  if (inboundEventIsServiceMessage(event))
+    return;
   const explicitMention = explicitlyMentionsSelf(event, owner.meId);
   while (!owner.signal.aborted) {
     const resolution = explicitMention ? { provenanceVerified: false } : inboundEventNeedsSenderResolution(event) ? await owner.resolveSender(event) : { provenanceVerified: true };

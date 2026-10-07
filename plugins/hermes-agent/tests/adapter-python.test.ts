@@ -2995,6 +2995,63 @@ async def assert_reply_thread_slash_command():
 
 asyncio.run(assert_reply_thread_slash_command())
 
+async def assert_typed_service_exclusion():
+    adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+        "reply_threads": "off", "context_backfill": "off", "system_events": True}))
+    adapter._me_id = "777"
+    acknowledgements, delivered = [], []
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("service notice reached admission or effects")
+    async def sidecar(path, body):
+        assert path == "/inbound/ack", path
+        acknowledgements.append(body["deliveryId"])
+        return {"ok": True}
+    adapter._sidecar_call = sidecar
+    adapter._get_chat_info = forbidden
+    adapter._normalize_media = forbidden
+    adapter.handle_message = forbidden
+    adapter._allowed = lambda *args: (_ for _ in ()).throw(AssertionError("service reached authorization"))
+    number = 0
+    for kind in ("message.new", "message.edit"):
+        for marker in ("serviceMessage", "raw"):
+            for service in ({"event": {"oneofKind": "threadBacklink", "threadBacklink": {"sourceChatId": "99"}}},
+                    {"event": {"oneofKind": "pinnedMessage", "pinnedMessage": {"messageId": "3"}}},
+                    {}, {"event": {}}, {"futureService": {"marker": True}}):
+                number += 1
+                receipt = f"service-{number}"
+                msg = {"id": str(number), "chatId": "10", "fromId": "u1",
+                    "message": "/threads on @inlinebot Linked from Project",
+                    "entities": {"entities": [{"entity": {"oneofKind": "mention", "mention": {"userId": "777"}}}]},
+                    "peerId": {"type": {"oneofKind": "chat"}},
+                    "media": {"media": {"oneofKind": "photo", "photo": {}}}}
+                msg.update({"raw": {"serviceMessage": service}} if marker == "raw" else {"serviceMessage": service})
+                event = {"kind": kind, "chatId": "10", "seq": number,
+                    "_inlineDeliveryId": receipt, "message": msg}
+                await adapter._dispatch_message(event, edit=kind == "message.edit")
+                await adapter._on_inbound(json.dumps(event))
+                await asyncio.wait_for(adapter._inbound_deliveries[receipt], 1)
+                assert acknowledgements[-1] == receipt
+    assert len(acknowledgements) == number
+    assert adapter._seen_messages == {}
+    assert adapter._seen_message_instances == {}
+
+    human = InlineAdapter(PlatformConfig(extra={**trusted_extra, "require_mention": False,
+        "reply_threads": "off", "context_backfill": "off"}))
+    async def capture(event):
+        delivered.append(event)
+    human.handle_message = capture
+    text = "Linked from Project @inlinebot"
+    for index, malformed in enumerate((None, False, "threadBacklink", [])):
+        for marker in ("serviceMessage", "raw"):
+            msg = {"id": f"human-{index}-{marker}", "fromId": "u1", "chatId": "20", "message": text,
+                "peerId": {"type": {"oneofKind": "user", "user": {"userId": "u1"}}}}
+            msg.update({"raw": {"serviceMessage": malformed}} if marker == "raw" else {"serviceMessage": malformed})
+            await human._dispatch_message({"chatId": "20", "message": msg})
+    assert len(delivered) == 8
+    assert all(event.text == text for event in delivered)
+
+asyncio.run(assert_typed_service_exclusion())
+
 async def assert_new_message_delivery_dedup():
     def event(seq, date, text):
         return {
@@ -5062,7 +5119,10 @@ async def assert_join_mention_recovery():
     async def fake_sidecar_call(path, body):
         if path == "/history":
             history_calls.append(body)
-            return {"ok": True, "result": {"messages": [recent, boundary, too_old]}}
+            return {"ok": True, "result": {"messages": [recent, boundary, too_old,
+                {**recent, "id": "service-top", "serviceMessage": {"event": {"oneofKind": "threadBacklink"}}},
+                {**recent, "id": "service-raw", "raw": {"serviceMessage": {"event": {"oneofKind": "pinnedMessage"}}}},
+            ]}}
         return {"ok": True, "result": {}}
 
     async def fake_get_chat_info(chat_id, **kwargs):

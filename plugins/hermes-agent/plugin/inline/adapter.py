@@ -2447,7 +2447,14 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def _dispatch_message(self, event: Dict[str, Any], *, edit: bool = False) -> None:
         agent_action = event.get("_inlineAgentAction") if isinstance(event.get("_inlineAgentAction"), dict) else None
-        msg = event.get("message") or {}
+        msg = event.get("message")
+        if not isinstance(msg, dict):
+            return
+        # History/join recovery and older sidecars can reach this entry directly.
+        # Service fallback text and mentions are never conversational direction.
+        raw = msg.get("raw") if isinstance(msg.get("raw"), dict) else {}
+        if isinstance(msg.get("serviceMessage"), dict) or isinstance(raw.get("serviceMessage"), dict):
+            return
         msg_id = str(msg.get("id") or "")
         chat_id = str(event.get("chatId") or msg.get("chatId") or "")
         if not msg_id or not chat_id:
