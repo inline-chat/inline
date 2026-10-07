@@ -1,8 +1,10 @@
+import Auth
 import InlineKit
 import InlineIOSUI
 import SwiftUI
 
 struct ExperimentalView: View {
+  @ObservedObject private var auth = Auth.shared
   @AppStorage(ExperimentalFeatureFlags.agentActivityKey)
   private var agentActivityEnabled = false
 
@@ -48,11 +50,18 @@ struct ExperimentalView: View {
         SettingsItem(icon: "arrow.down.document", iconColor: .blue, title: "Native File Downloads") {
           Toggle("Native File Downloads", isOn: $nativeFileDownloadsEnabled)
             .labelsHidden()
+            .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
         }
       } header: {
         Text("Files")
       } footer: {
-        Text("Download message documents over encrypted realtime. Requires a V3 session and server support. Other media still use CDN. Turn off to retry failed downloads using CDN.")
+        if nativeFileDownloadsAvailable {
+          Text("Download message documents over encrypted realtime. Requires server support. Other media still use CDN. Turn off to use standard file downloads.")
+        } else if nativeFileDownloadsEnabled {
+          Text("Native File Downloads isn’t available for this session. Files use standard downloads. Turn off to clear the saved preference.")
+        } else {
+          Text("Native File Downloads isn’t available for this session. Files use standard downloads.")
+        }
       }
 
       Section {
@@ -87,6 +96,10 @@ struct ExperimentalView: View {
     .onAppear { _ = ExperimentalFeatureFlags.agentActivityEnabled }
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var nativeFileDownloadsAvailable: Bool {
+    auth.getInlineProtocolCredentials() != nil
   }
 }
 

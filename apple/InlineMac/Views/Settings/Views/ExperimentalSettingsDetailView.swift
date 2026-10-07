@@ -120,11 +120,23 @@ struct ExperimentalSettingsDetailView: View {
           description: "Download message documents over encrypted realtime. Other media still use CDN."
         )
       }
+      .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
     } header: {
       SettingsSectionHeader("Files")
     } footer: {
-      Text("Requires a V3 session and server support. Turn off to retry failed downloads using CDN.")
+      if nativeFileDownloadsAvailable {
+        Text("Requires server support. Turn off to use standard file downloads.")
+      } else if nativeFileDownloadsEnabled {
+        Text("Native File Downloads isn’t available for this session. Files use standard downloads. Turn off to clear the saved preference.")
+      } else {
+        Text("Native File Downloads isn’t available for this session. Files use standard downloads.")
+      }
     }
+  }
+
+  private var nativeFileDownloadsAvailable: Bool {
+    // Observe the existing auth owner so the control updates after a session change.
+    auth.getInlineProtocolCredentials() != nil
   }
 
   private var developerToolsSection: some View {
