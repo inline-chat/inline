@@ -100,7 +100,7 @@ export class TrackWorker {
     const id = await this.options.api.admit(this.options.participantIdentity, this.options.trackSid, randomUUID())
     // A late admission never grants permission to resume ingestion after a stop or leave.
     if (!this.accepting) {
-      if (this.graceful && !this.closed) await this.postEmpty(id)
+      if (this.graceful && !this.closed) this.trackPost(() => this.postEmpty(id))
       return
     }
     this.options.assertRunAuthority()
@@ -145,7 +145,7 @@ export class TrackWorker {
     if (!current) return
     this.assertFinalAuthority()
     if (!this.connection || current.samples === 0) {
-      this.trackPost(this.postEmpty(current.id))
+      this.trackPost(() => this.postEmpty(current.id))
       return
     }
     if (this.pending.size >= MAX_PENDING_TURNS) throw new TranscriptionError("overflow")
@@ -171,7 +171,7 @@ export class TrackWorker {
     if (!pending || pending.posting) throw new TranscriptionError("protocol")
     pending.posting = true
     clearTimeout(pending.timer)
-    this.trackPost(this.postFinal(turn).finally(() => {
+    this.trackPost(() => this.postFinal(turn).finally(() => {
       this.pending.delete(turn.turnId)
       this.maybeDrained()
     }))
@@ -191,7 +191,11 @@ export class TrackWorker {
     }
   }
   private async postEmpty(id: string): Promise<void> { await this.postFinal({ turnId: id, text: "" }) }
-  private trackPost(operation: Promise<void>): void {
+  private trackPost(post: () => Promise<void>): void {
+    // Provider finals arrive in commit order. Retain that order through API retries
+    // using the existing bounded posting ownership, while capture keeps consuming.
+    const predecessor = [...this.posting].at(-1)
+    const operation = predecessor ? predecessor.then(post) : post()
     this.posting.add(operation)
     void operation.catch((error: unknown) => { if (!this.closed) this.fail(error) }).finally(() => {
       this.posting.delete(operation)

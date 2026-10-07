@@ -42,9 +42,10 @@ function fixture(overrides: Partial<TrackWorkerOptions> = {}) {
 }
 function frame(speech: boolean): Int16Array { const data = new Int16Array(320); data[0] = speech ? 1 : 0; return data }
 async function utterance(value: ReturnType<typeof fixture>): Promise<void> {
+  const committedBefore = value.commits.length
   value.worker.push(frame(true))
   for (let index = 0; index < 28; index++) value.worker.push(frame(false))
-  await until(() => value.commits.length > 0 || value.failures.length > 0)
+  await until(() => value.commits.length > committedBefore || value.failures.length > 0)
   await tick()
 }
 
@@ -84,6 +85,157 @@ describe("per microphone finite turn owner", () => {
     expect(value.failures).toEqual([])
   })
 
+  test("capture continues while final persistence waits; graceful Stop drains finals in order", async () => {
+    const first = deferred<void>()
+    const attempts: string[] = []
+    const saved: FinalTurn[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId, text) {
+        attempts.push(turnId)
+        if (turnId === "segment-1") await first.promise
+        saved.push({ turnId, text })
+      },
+    } })
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    await utterance(value)
+    expect(value.commits).toEqual(["segment-1", "segment-2"])
+    value.final("segment-2", "Second phrase.")
+    await tick()
+    expect(attempts).toEqual(["segment-1"])
+    expect(saved).toEqual([])
+    let drained = false
+    const stopping = value.worker.stop(true).then(() => { drained = true })
+    await tick()
+    expect(drained).toBe(false)
+    first.resolve()
+    await stopping
+    expect(saved).toEqual([
+      { turnId: "segment-1", text: "First phrase." },
+      { turnId: "segment-2", text: "Second phrase." },
+    ])
+    expect(value.events).toContain("close")
+    expect(value.failures).toEqual([])
+  })
+
+  test("destructive Stop interrupts graceful draining before a queued successor reaches the API", async () => {
+    const first = deferred<void>()
+    const attempts: string[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId) { attempts.push(turnId); await first.promise },
+    } })
+    await utterance(value)
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.final("segment-2", "Discard this queued phrase.")
+    const stopping = value.worker.stop(true)
+    await tick()
+    await value.worker.stop(false)
+    first.resolve()
+    await stopping
+    await tick(); await tick()
+    expect(attempts).toEqual(["segment-1"])
+    expect(value.failures).toEqual([])
+  })
+
+  test("a lost first response retries the same final before posting its successor", async () => {
+    const first = deferred<void>()
+    const attempts: FinalTurn[] = []
+    const saved: FinalTurn[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId, text) {
+        attempts.push({ turnId, text })
+        if (attempts.length === 1) { await first.promise; throw new TranscriptionError("provider") }
+        saved.push({ turnId, text })
+      },
+    } })
+    await utterance(value)
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.final("segment-2", "Second phrase.")
+    await tick()
+    expect(attempts).toEqual([{ turnId: "segment-1", text: "First phrase." }])
+    const stopping = value.worker.stop(true)
+    first.resolve()
+    await stopping
+    expect(attempts).toEqual([
+      { turnId: "segment-1", text: "First phrase." },
+      { turnId: "segment-1", text: "First phrase." },
+      { turnId: "segment-2", text: "Second phrase." },
+    ])
+    expect(saved.map((turn) => turn.turnId)).toEqual(["segment-1", "segment-2"])
+    expect(value.failures).toEqual([])
+  })
+
+  test("exhausted final retries discard the queued successor", async () => {
+    const first = deferred<void>()
+    const attempts: string[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId) { attempts.push(turnId); await first.promise; throw new TranscriptionError("provider") },
+    } })
+    await utterance(value)
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.final("segment-2", "Must not pass the failed predecessor.")
+    first.resolve()
+    await until(() => value.failures.length === 1)
+    await value.worker.stop(true)
+    expect(attempts).toEqual(["segment-1", "segment-1"])
+    expect(value.failures.map((failure) => failure.code)).toEqual(["provider"])
+  })
+
+  test("run authority is rechecked before allowing a queued successor", async () => {
+    const first = deferred<void>()
+    const attempts: string[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId) { attempts.push(turnId); await first.promise },
+    } })
+    await utterance(value)
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.final("segment-2", "Must not persist after authority loss.")
+    value.revokeRun()
+    first.resolve()
+    await until(() => value.failures.length === 1)
+    expect(attempts).toEqual(["segment-1"])
+    expect(value.failures[0]?.code).toBe("expired")
+    await value.worker.stop(false)
+  })
+
+  test("graceful Stop times out a held post and discards its queued successor", async () => {
+    const first = deferred<void>()
+    const attempts: string[] = []
+    let id = 0
+    const value = fixture({ api: {
+      async admit() { return `segment-${++id}` },
+      async final(turnId) { attempts.push(turnId); await first.promise },
+    } })
+    await utterance(value)
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.final("segment-2", "Must not persist after the drain deadline.")
+    const began = performance.now()
+    await value.worker.stop(true)
+    const elapsed = performance.now() - began
+    expect(elapsed).toBeGreaterThanOrEqual(4_900)
+    expect(elapsed).toBeLessThan(6_000)
+    expect(value.events).toContain("close")
+    first.resolve()
+    await tick(); await tick()
+    expect(attempts).toEqual(["segment-1"])
+    expect(value.failures).toEqual([])
+  }, 7_000)
+
   test("queued samples are discarded if membership changes before inference", async () => {
     const value = fixture()
     value.worker.push(frame(true))
@@ -107,6 +259,38 @@ describe("per microphone finite turn owner", () => {
     expect(value.finals).toEqual([{ turnId: "late-segment", text: "" }])
     expect(value.events).not.toContain("connect")
     expect(value.audio).toHaveLength(0)
+  })
+
+  test("late admission retirement waits behind an earlier final during graceful Stop", async () => {
+    const first = deferred<void>()
+    const admitted = deferred<string>()
+    const attempts: string[] = []
+    const saved: FinalTurn[] = []
+    let admissions = 0
+    const value = fixture({ api: {
+      async admit() { return ++admissions === 1 ? "segment-1" : admitted.promise },
+      async final(turnId, text) {
+        attempts.push(turnId)
+        if (turnId === "segment-1") await first.promise
+        saved.push({ turnId, text })
+      },
+    } })
+    await utterance(value)
+    value.final("segment-1", "First phrase.")
+    value.worker.push(frame(true))
+    await until(() => admissions === 2)
+    const stopping = value.worker.stop(true)
+    admitted.resolve("segment-2")
+    await tick()
+    expect(attempts).toEqual(["segment-1"])
+    first.resolve()
+    await stopping
+    expect(saved).toEqual([
+      { turnId: "segment-1", text: "First phrase." },
+      { turnId: "segment-2", text: "" },
+    ])
+    expect(value.commits).toEqual(["segment-1"])
+    expect(value.failures).toEqual([])
   })
 
   test("late provider connect is closed after destructive stop and never sends PCM", async () => {
