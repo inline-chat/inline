@@ -1102,6 +1102,8 @@ function messagePayload(message: Message) {
     media,
     urlPreviews: messageUrlPreviews(message),
     externalTasks: messageExternalTasks(message),
+    // These read results are fully hydrated; the encoder omits known-empty reactions.
+    reactions: (message.reactions?.reactions ?? []).map((reaction) => ({ userId: reaction.userId.toString(), emoji: reaction.emoji })),
   }
 }
 
@@ -1495,6 +1497,7 @@ const messageOutputSchema = z.object({
   media: messageMediaOutputSchema,
   urlPreviews: z.array(urlPreviewOutputSchema),
   externalTasks: z.array(externalTaskOutputSchema),
+  reactions: z.array(z.object({ userId: z.string(), emoji: z.string() })).optional(),
 })
 
 const contentFilterOutputSchema = z.enum(["all", "links", "media", "photos", "videos", "documents", "files"])

@@ -1,3 +1,5 @@
+import { isSingleEmoji } from "@in/server/utils/emoji"
+import { isReactionEvent, reactionEventsEnabled } from "./config"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { McpEventSelector, EventBucket } from "./types"
 import { McpEventsError, invalidParams } from "./types"
@@ -10,6 +12,8 @@ const spaceKinds = ["spaceMemberAdd", "spaceMemberUpdate", "spaceRemoveMember", 
 const dialogKinds = ["userReadMaxId", "userMarkAsUnread", "userDialogArchived", "userDialogNotificationSettings", "userDialogTranslation", "userDialogFollowMode", "userDialogCollapsedMaxId", "userChatOpen", "userChatPermissions", "userDialogFolder"] as const satisfies readonly StoredKind[]
 
 export const eventDefinitions: readonly Definition[] = [
+  { name: "reaction.added", description: "A reaction was added in the selected chat. Includes the actor and exact emoji; read current message reactions before acting on a historical occurrence.", scope: "chat", kinds: ["reaction"] },
+  { name: "reaction.removed", description: "An explicit reaction removal in the selected chat. Message/history deletion does not synthesize removals; read current state before acting.", scope: "chat", kinds: ["reactionDeleted"] },
   { name: "message.created", description: "A new message in the selected Inline chat. Contains references; use messages.context to read it.", scope: "chat", kinds: ["newMessage"] },
   { name: "message.updated", description: "A message was edited in the selected chat. Contains a reference to its current state.", scope: "chat", kinds: ["editMessage"] },
   { name: "message.deleted", description: "Messages were deleted in the selected chat.", scope: "chat", kinds: ["deleteMessages"] },
@@ -27,7 +31,7 @@ export const eventDefinitions: readonly Definition[] = [
   { name: "space.profile.updated", description: "The selected space's profile changed. Use spaces.list to read current information.", scope: "space", kinds: ["spaceProfile"] },
   { name: "space.settings.updated", description: "The selected space's settings changed.", scope: "space", kinds: ["spaceSettings"] },
   { name: "space.history.cleared", description: "History was cleared across the selected space.", scope: "space", kinds: ["spaceClearHistory"] },
-  { name: "inline.update", description: "Journaled changes in the selected current chat or space. Reference-only; account-wide settings and live-only typing, presence and reactions are excluded. Delivery stops when the resource is deleted or access is lost.", scope: "either", kinds: [...chatKinds, ...spaceKinds] },
+  { name: "inline.update", description: "Journaled changes in the selected current chat or space. Reference-only; Account-wide settings, typing, presence and the separate reaction source are excluded. Delivery stops when the resource is deleted or access is lost.", scope: "either", kinds: [...chatKinds, ...spaceKinds] },
 ]
 
 export const eventDefinition = (name: string): Definition => {
@@ -46,22 +50,26 @@ export function parseSelector(name: string, value: unknown): McpEventSelector {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidParams()
   const record = value as Record<string, unknown>
   if ("chatId" in record && !('spaceId' in record) && definition.scope !== "space") {
-    const permitsExclude = name === "message.created" || name === "message.updated"
-    if (Object.keys(record).some((key) => key !== "chatId" && !(permitsExclude && key === "excludeSelf"))) throw invalidParams()
+    const reaction = isReactionEvent(name)
+    const permitsExclude = reaction || name === "message.created" || name === "message.updated"
+    if (Object.keys(record).some((key) => key !== "chatId" && !(permitsExclude && key === "excludeSelf") && !(reaction && (key === "messageId" || key === "emoji")))) throw invalidParams()
+    if (record["emoji"] !== undefined && (typeof record["emoji"] !== "string" || !isSingleEmoji(record["emoji"]))) throw invalidParams()
     if (record["excludeSelf"] !== undefined && typeof record["excludeSelf"] !== "boolean") throw invalidParams()
-    return { chatId: id(record["chatId"]), ...(record["excludeSelf"] === true ? { excludeSelf: true } : {}) }
+    return { chatId: id(record["chatId"]), ...(record["messageId"] !== undefined ? { messageId: id(record["messageId"]) } : {}),
+      ...(typeof record["emoji"] === "string" ? { emoji: record["emoji"] } : {}), ...(record["excludeSelf"] === true ? { excludeSelf: true } : {}) }
   }
   if ("spaceId" in record && Object.keys(record).length === 1 && (definition.scope === "space" || definition.scope === "either")) return { spaceId: id(record["spaceId"]) }
   throw invalidParams()
 }
 
 export function sourceBucket(name: string, selector: McpEventSelector, userId: number): EventBucket {
+  if (isReactionEvent(name) && "chatId" in selector) return { kind: "reaction", entityId: Number(selector.chatId) }
   if (eventDefinition(name).scope === "dialog") return { kind: "user", entityId: userId }
   return "chatId" in selector ? { kind: "chat", entityId: Number(selector.chatId) } : { kind: "space", entityId: Number(selector.spaceId) }
 }
 
 const identifier = { type: "string", pattern: "^[1-9][0-9]*$" }
-export const eventCatalog = () => eventDefinitions.map((definition) => ({
+export const eventCatalog = () => eventDefinitions.filter((definition) => !isReactionEvent(definition.name) || reactionEventsEnabled()).map((definition) => ({
   name: definition.name,
   description: definition.description,
   delivery: ["webhook"],
@@ -73,15 +81,19 @@ export const eventCatalog = () => eventDefinitions.map((definition) => ({
   } : {
     type: "object",
     properties: definition.scope === "space" ? { spaceId: identifier } : { chatId: identifier,
-      ...(definition.name === "message.created" || definition.name === "message.updated" ? { excludeSelf: { type: "boolean", description: "Ignore messages authored by the connected Inline user." } } : {}) },
+      ...(isReactionEvent(definition.name) ? {
+        messageId: { ...identifier, description: "Only this message; omit for all messages in the chat." },
+        emoji: { type: "string", description: "Match one exact emoji, including variation selectors and skin tone." },
+        excludeSelf: { type: "boolean", description: "Ignore reactions by the connected Inline user." },
+      } : definition.name === "message.created" || definition.name === "message.updated" ? { excludeSelf: { type: "boolean", description: "Ignore messages authored by the connected Inline user." } } : {}) },
     required: [definition.scope === "space" ? "spaceId" : "chatId"],
     additionalProperties: false,
   },
   payloadSchema: {
     type: "object",
-    properties: { kind: { type: "string", enum: definition.kinds }, chatId: identifier, spaceId: identifier, messageId: identifier,
+    properties: { ...(isReactionEvent(definition.name) ? { emoji: { type: "string" } } : {}), kind: { type: "string", enum: definition.kinds }, chatId: identifier, spaceId: identifier, messageId: identifier,
       messageIds: { type: "array", items: identifier }, userId: identifier, memberId: identifier, groupId: identifier, interactionId: identifier },
-    required: ["kind", ...(definition.scope === "either" ? [] : [definition.scope === "space" ? "spaceId" : "chatId"])],
+    required: ["kind", ...(isReactionEvent(definition.name) ? ["messageId", "userId", "emoji"] : []), ...(definition.scope === "either" ? [] : [definition.scope === "space" ? "spaceId" : "chatId"])],
     additionalProperties: false,
   },
 }))

@@ -4,7 +4,8 @@ import type { EventBucket, McpEventSelector } from "./types"
 import { invalidParams } from "./types"
 
 export const canonicalSelector = (selector: McpEventSelector): string => "chatId" in selector
-  ? JSON.stringify({ chatId: selector.chatId, ...(selector.excludeSelf === true ? { excludeSelf: true } : {}) })
+  ? JSON.stringify({ chatId: selector.chatId, ...(selector.messageId !== undefined ? { messageId: selector.messageId } : {}),
+    ...(selector.emoji !== undefined ? { emoji: selector.emoji } : {}), ...(selector.excludeSelf === true ? { excludeSelf: true } : {}) })
   : JSON.stringify({ spaceId: selector.spaceId })
 
 export const subscriptionId = (grantId: string, name: string, selector: McpEventSelector, url: string): string =>

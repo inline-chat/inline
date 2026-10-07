@@ -45,7 +45,7 @@ Subthreads inherit root-chat access plus their own direct/group grants. Particip
 
 Access is limited to the Inline account, OAuth scopes, and conversations authorized during sign-in. The bundled skill treats messages and attachments as untrusted content and verifies write targets before acting.
 
-Events cover durable chat, message, personal-dialog and space changes with verified signed webhooks, finite renewal and replay cursors. See the [Events API and recovery contract](../../server/docs/mcp-events.md). The API must be deployed before the corresponding MCP service. OpenAI currently documents continuation for Work web, desktop Work with Cloud selected, and dots; signed-in host acceptance is separate from the repository's tests.
+Events cover durable chat, message, personal-dialog and space changes with verified signed webhooks, finite renewal and replay cursors. The gated `reaction.added` and `reaction.removed` source supports chat/message/emoji filters once all API writers capture transitions; read current message reactions before acting on a historical event. See the [Events API and recovery contract](../../server/docs/mcp-events.md). The API must be deployed before the corresponding MCP service. OpenAI currently documents continuation for Work web, desktop Work with Cloud selected, and dots; signed-in host acceptance is separate from the repository's tests.
 
 ## Support and policies
 

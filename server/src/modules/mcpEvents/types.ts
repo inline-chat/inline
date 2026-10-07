@@ -3,10 +3,11 @@ import type { McpEventSelector, McpEventSubscription } from "@in/server/db/schem
 import type { OauthGrant } from "@in/server/db/models/oauth"
 
 export type { McpEventSelector, McpEventSubscription }
-export type EventBucket = { kind: "chat" | "space" | "user"; entityId: number }
+export type EventBucket = { kind: "chat" | "space" | "user"; entityId: number } | { kind: "reaction"; entityId: number }
 export type EventPrincipal = { grant: OauthGrant; sessionId: number }
 export type EventData = {
   kind: string
+  emoji?: string
   chatId?: string
   spaceId?: string
   messageId?: string

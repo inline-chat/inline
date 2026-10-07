@@ -1,3 +1,5 @@
+import { purgeExpiredReactionEvents } from "@in/server/db/models/mcpReactionEvents"
+import { isReactionEvent, reactionEventsEnabled } from "./config"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { isTest } from "@in/server/env"
@@ -21,11 +23,13 @@ const requestedRetry = (status: number, value?: string): number | undefined => {
 async function deliver(claim: McpEventSubscription, transport: CallbackTransport): Promise<void> {
   let active = claim
   const reauthorize = async () => {
+    if (isReactionEvent(active.name) && !reactionEventsEnabled()) throw accessDenied()
     if (!await currentClaim(active)) throw accessDenied()
     const principal = await validateGrant(await OauthModel.getGrant(active.grantId))
     await authorizeSelector(principal, active.name, active.selector)
     // Authority reads can cross a concurrent refresh/unsubscribe; fence again
     // immediately before opening the external connection or committing ACK.
+    if (isReactionEvent(active.name) && !reactionEventsEnabled()) throw accessDenied()
     if (!await currentClaim(active)) throw accessDenied()
     return principal
   }
@@ -98,6 +102,7 @@ export class McpEventsWorker {
     this.inFlight = (async () => {
       if (Date.now() >= this.nextCleanupAt) {
         await purgeExpiredSubscriptions()
+        await purgeExpiredReactionEvents()
         this.nextCleanupAt = Date.now() + 60_000
       }
       await this.runOnce()

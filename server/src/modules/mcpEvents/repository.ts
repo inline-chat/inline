@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { mcpEventSubscriptions as subscriptions, oauthGrants } from "@in/server/db/schema"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
+import { reactionEventNames, reactionEventsEnabled } from "./config"
 import { sameSecret } from "./crypto"
 import { McpEventsError, accessDenied, invalidParams, type EventOccurrence, type McpEventSelector, type McpEventSubscription } from "./types"
 
@@ -110,7 +111,7 @@ export async function claimSubscriptions(limit = 25): Promise<McpEventSubscripti
   const now = new Date()
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(subscriptions).where(and(eq(subscriptions.stopped, false), isNull(subscriptions.gapSeq),
-      gt(subscriptions.expiresAt, now), lte(subscriptions.nextAttemptAt, now), or(isNull(subscriptions.leaseUntil), lte(subscriptions.leaseUntil, now))))
+      gt(subscriptions.expiresAt, now), ...(reactionEventsEnabled() ? [] : [notInArray(subscriptions.name, [...reactionEventNames])]), lte(subscriptions.nextAttemptAt, now), or(isNull(subscriptions.leaseUntil), lte(subscriptions.leaseUntil, now))))
       .orderBy(asc(subscriptions.nextAttemptAt), asc(subscriptions.id)).limit(Math.min(100, Math.max(1, limit))).for("update", { skipLocked: true })
     const claims: McpEventSubscription[] = []
     for (const row of rows) {

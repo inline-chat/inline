@@ -1,3 +1,4 @@
+import { isReactionEvent, reactionEventsEnabled } from "./config"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { OauthModel } from "@in/server/db/models/oauth"
@@ -31,12 +32,15 @@ export async function executeEventMethod(principal: EventPrincipal, method: stri
     const selector = parseSelector("inline.update", { chatId: params["chatId"] })
     if (!("chatId" in selector)) throw invalidParams()
     await authorizeSelector(principal, "inline.update", selector)
-    return { subscriptions: (await activeSubscriptions(principal.grant.id, selector.chatId)).map((row) => ({ id: row.id, name: row.name,
+    return { subscriptions: (await activeSubscriptions(principal.grant.id, selector.chatId)).filter((row) => !isReactionEvent(row.name) || reactionEventsEnabled()).map((row) => ({ id: row.id, name: row.name,
       refreshBefore: row.expiresAt.toISOString() })) }
   }
   if (method !== "events/subscribe" && method !== "events/unsubscribe" && method !== "events/cursor") throw new McpEventsError({ code: -32601, message: "Event method not found" })
   keys(params, method === "events/cursor" ? ["name", "arguments"] : method === "events/unsubscribe" ? ["name", "arguments", "delivery"] : ["name", "arguments", "delivery", "cursor", "ttlMs"])
   const name = string(params["name"])
+  if (method !== "events/unsubscribe" && isReactionEvent(name) && !reactionEventsEnabled()) {
+    throw new McpEventsError({ code: -32011, message: "Event not found", data: { kind: "event" } })
+  }
   const selector = parseSelector(name, params["arguments"])
   const bucket = sourceBucket(name, selector, principal.grant.inlineUserId)
   const binding = { grantId: principal.grant.id, name, selector, bucket }

@@ -1,20 +1,25 @@
 import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
-import { messages, UpdateBucket } from "@in/server/db/schema"
+import { chats, messages, UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel, type UpdateBoxInput } from "@in/server/db/models/updates"
 import { Sync } from "@in/server/modules/updates/sync"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { Peer } from "@inline-chat/protocol/core"
+import { decryptReactionEvent, reactionEventPage } from "@in/server/db/models/mcpReactionEvents"
 import { eventDefinition } from "./catalog"
 import { encodeCursor, occurrenceId } from "./crypto"
 import { authorizeSelector } from "./authorization"
 import type { EventBucket, EventData, EventOccurrence, EventPrincipal, McpEventSelector } from "./types"
 
-const box = (bucket: EventBucket): UpdateBoxInput => bucket.kind === "chat" ? { type: UpdateBucket.Chat, chatId: bucket.entityId } :
+const box = (bucket: { kind: "chat" | "space" | "user"; entityId: number }): UpdateBoxInput => bucket.kind === "chat" ? { type: UpdateBucket.Chat, chatId: bucket.entityId } :
   bucket.kind === "space" ? { type: UpdateBucket.Space, spaceId: bucket.entityId } : { type: UpdateBucket.User, userId: bucket.entityId }
 
 export async function currentSequence(bucket: EventBucket): Promise<number> {
+  if (bucket.kind === "reaction") {
+    const [head] = await db.select({ seq: chats.mcpReactionSeq }).from(chats).where(eq(chats.id, bucket.entityId)).limit(1)
+    return head?.seq ?? 0
+  }
   return (await Sync.getUpdates({ bucket: box(bucket), seqStart: 0, limit: 0 })).latestSeq
 }
 
@@ -24,6 +29,10 @@ const hasReplayGap = (page: Awaited<ReturnType<typeof Sync.getUpdates>>, startSe
 }
 
 export async function replayPosition(bucket: EventBucket, seq: number, transaction: Transaction): Promise<{ latestSeq: number; gap: boolean }> {
+  if (bucket.kind === "reaction") {
+    const page = await reactionEventPage(bucket.entityId, seq, transaction)
+    return { latestSeq: page.latestSeq, gap: page.gap }
+  }
   const page = await Sync.getUpdates({ bucket: box(bucket), seqStart: seq, limit: 100 }, transaction)
   // Native sync deliberately clamps latestSeq to seqStart. Validate opaque
   // checkpoints against the genuine journal/owner tail in this same snapshot.
@@ -88,6 +97,22 @@ export type SourcePage = { gapSeq: number } | { through: number; occurrence?: Ev
 
 export async function nextOccurrence(principal: EventPrincipal, name: string, selector: McpEventSelector, startSeq: number): Promise<SourcePage> {
   const { bucket, otherUserId } = await authorizeSelector(principal, name, selector)
+  if (bucket.kind === "reaction") {
+    const page = await db.transaction((tx) => reactionEventPage(bucket.entityId, startSeq, tx), { isolationLevel: "repeatable read" })
+    if (page.gap) return { gapSeq: page.latestSeq }
+    const binding = { grantId: principal.grant.id, name, selector, bucket }
+    const definition = eventDefinition(name)
+    for (const row of page.rows) {
+      const data = decryptReactionEvent(row.payloadEncrypted)
+      if (!definition.kinds.includes(data.kind) || !("chatId" in selector) ||
+        (selector.messageId !== undefined && selector.messageId !== data.messageId) ||
+        (selector.emoji !== undefined && selector.emoji !== data.emoji) ||
+        (selector.excludeSelf === true && data.userId === String(principal.grant.inlineUserId))) continue
+      return { through: row.seq, occurrence: { eventId: occurrenceId(binding, row.seq), name, timestamp: row.occurredAt.toISOString(), data,
+        cursor: encodeCursor(binding, row.seq) } }
+    }
+    return { through: page.through }
+  }
   const page = await Sync.getUpdates({ bucket: box(bucket), seqStart: startSeq, limit: 100 })
   const lastSeq = page.updates.at(-1)?.seq ?? startSeq
   if (hasReplayGap(page, startSeq)) return { gapSeq: page.latestSeq }

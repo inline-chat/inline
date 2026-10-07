@@ -10,7 +10,8 @@ describe("ReactionModel", () => {
 
   test("concurrently adding the same reaction inserts one row", async () => {
     const user = await testUtils.createUser("reaction-user@example.com")
-    const chat = await testUtils.createTestChat()
+    const chat = await testUtils.createPrivateChat(user, user)
+    if (!chat) throw new Error("Reaction test chat missing")
     const message = await testUtils.createTestMessage({
       messageId: 1,
       fromId: user.id,
@@ -38,7 +39,8 @@ describe("ReactionModel", () => {
 
   test("deleting an absent reaction is a convergent no-op", async () => {
     const user = await testUtils.createUser("reaction-delete-user@example.com")
-    const chat = await testUtils.createTestChat()
+    const chat = await testUtils.createPrivateChat(user, user)
+    if (!chat) throw new Error("Reaction test chat missing")
     const message = await testUtils.createTestMessage({
       messageId: 1,
       fromId: user.id,
@@ -67,7 +69,8 @@ describe("ReactionModel", () => {
 
   test("adding and deleting a reaction never creates durable chat updates", async () => {
     const user = await testUtils.createUser("reaction-ephemeral-user@example.com")
-    const chat = await testUtils.createTestChat()
+    const chat = await testUtils.createPrivateChat(user, user)
+    if (!chat) throw new Error("Reaction test chat missing")
     const message = await testUtils.createTestMessage({
       messageId: 1,
       fromId: user.id,

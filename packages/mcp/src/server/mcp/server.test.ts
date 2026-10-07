@@ -8,7 +8,7 @@ import type { EventsProxy } from "./events-proxy"
 import type { McpGrant } from "./grant"
 import { InlineAccessDeniedError } from "../inline/inline-api"
 import { InlineSdkAuthenticationError, ProtocolClientError } from "@inline-chat/realtime-sdk"
-import { ConnectionError_Reason, RpcError_Code } from "@inline-chat/protocol/core"
+import { ConnectionError_Reason, Message, RpcError_Code } from "@inline-chat/protocol/core"
 import type {
   InlineApi,
   InlineConversationResolution,
@@ -1088,6 +1088,28 @@ describe("mcp tool server", () => {
       },
       hints: expect.arrayContaining([expect.stringContaining("conversations.list")]),
     })
+  })
+
+  it("returns current reactions through messages.context, including an empty hydrated state after removal", async () => {
+    const message = Message.create({ id: 44n, chatId: 7n, fromId: 2n, message: "React here", date: 100n,
+      reactions: { reactions: [{ userId: 3n, emoji: "✅", chatId: 7n, messageId: 44n, date: 101n }] } })
+    const inline = createInlineStub({ async messageContext() {
+      return { chat: defaultEligibleChat(), anchorMessageId: 44n, before: 0, after: 0, includeAnchor: true, content: "all", messages: [message] }
+    } })
+    const server = createInlineMcpServer({ grant, inline, contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    try {
+      for (const requestId of [2, 3]) {
+        await sendRequest(transport, { jsonrpc: "2.0", id: requestId, method: "tools/call",
+          params: { name: "messages.context", arguments: { chatId: "7", anchorMessageId: "44", before: 0, after: 0 } } }, { authInfo })
+        const response = await waitForResponse(sent, requestId)
+        expect(response.result.isError).not.toBe(true)
+        expect(response.result.structuredContent.messages[0].reactions).toEqual(requestId === 2 ? [{ userId: "3", emoji: "✅" }] : [])
+        // The server's full-message encoder omits the optional protobuf field for an empty set.
+        message.reactions = undefined
+      }
+    } finally { await server.close() }
   })
 
   it("supports discovery, context, and file lookup workflow", async () => {

@@ -24,6 +24,7 @@ const chat: DbChat = {
   emoji: null,
   agentContext: null,
   updateSeq: 9,
+  mcpReactionSeq: 0,
   lastUpdateDate: new Date("2026-01-01T00:00:01Z"),
 }
 

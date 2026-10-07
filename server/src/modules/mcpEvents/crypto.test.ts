@@ -32,6 +32,38 @@ describe("MCP event wire security", () => {
     expect(occurrenceId(binding, 4)).toBe(occurrenceId(binding, 4))
     expect(occurrenceId(binding, 5)).not.toBe(occurrenceId(binding, 4))
   })
+  test("reaction selectors bind exact message/emoji filters, normalize false and preserve existing identity bytes", () => {
+    const selector = parseSelector("reaction.added", { emoji: "👍🏽", messageId: "4", chatId: "12", excludeSelf: false })
+    expect(canonicalSelector(selector)).toBe('{"chatId":"12","messageId":"4","emoji":"👍🏽"}')
+    expect(canonicalSelector({ chatId: "12", excludeSelf: true })).toBe('{"chatId":"12","excludeSelf":true}')
+    const reactionBinding = { ...binding, name: "reaction.added", selector, bucket: { kind: "reaction" as const, entityId: 12 } }
+    const cursor = encodeCursor(reactionBinding, 3)
+    expect(decodeCursor(cursor, reactionBinding)).toBe(3)
+    for (const other of [
+      { ...reactionBinding, selector: { chatId: "12", messageId: "5", emoji: "👍🏽" } },
+      { ...reactionBinding, selector: { chatId: "12", messageId: "4", emoji: "👍" } },
+      { ...reactionBinding, bucket: { kind: "chat" as const, entityId: 12 } },
+    ]) expect(() => decodeCursor(cursor, other)).toThrow(McpEventsError)
+    for (const args of [
+      { chatId: "12", messageId: "0" }, { chatId: "12", messageId: "2147483648" },
+      { chatId: "12", emoji: "✅✅" }, { chatId: "12", emoji: " ✅ " },
+      { chatId: "12", excludeSelf: "true" }, { chatId: "12", action: "add" }, { spaceId: "12" },
+    ]) expect(() => parseSelector("reaction.added", args)).toThrow(McpEventsError)
+    expect(() => parseSelector("message.created", { chatId: "12", emoji: "✅" })).toThrow(McpEventsError)
+    expect(subscriptionId("g", "reaction.added", { chatId: "12", emoji: "✅", excludeSelf: false }, "https://receiver.test/"))
+      .toBe(subscriptionId("g", "reaction.added", { emoji: "✅", chatId: "12" }, "https://receiver.test/"))
+    const previous = process.env["MCP_REACTION_EVENTS_ENABLED"]
+    try {
+      process.env["MCP_REACTION_EVENTS_ENABLED"] = "true"
+      const catalog = eventCatalog()
+      expect(catalog).toHaveLength(20)
+      expect(catalog.find((entry) => entry.name === "reaction.added")?.payloadSchema.required).toEqual(["kind", "messageId", "userId", "emoji", "chatId"])
+    } finally {
+      if (previous === undefined) delete process.env["MCP_REACTION_EVENTS_ENABLED"]
+      else process.env["MCP_REACTION_EVENTS_ENABLED"] = previous
+    }
+  })
+
   test("catalog requires one bounded resource and excludes unsupported live events", () => {
     for (const args of [{}, { chatId: "12", spaceId: "3" }, { chatId: "2147483648" }, { chatId: "012" }, { chatId: "12", unrelated: true }]) expect(() => parseSelector("message.created", args)).toThrow(McpEventsError)
     expect(() => parseSelector("chat.updated", { chatId: "12", excludeSelf: true })).toThrow(McpEventsError)

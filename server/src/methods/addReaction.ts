@@ -1,6 +1,7 @@
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { ReactionModel } from "@in/server/db/models/reactions"
 import { Log } from "@in/server/utils/log"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import { encodeReactionInfo, TReactionInfo } from "../api-types"
@@ -50,6 +51,7 @@ export const handler = async (
       reaction: encodeReactionInfo(reaction),
     }
   } catch (error) {
+    if (error instanceof RealtimeRpcError) throw new InlineError(InlineError.ApiError.PEER_INVALID)
     if (error instanceof InlineError) {
       throw error
     }

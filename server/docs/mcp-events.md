@@ -1,6 +1,6 @@
 # Inline MCP Events
 
-The API owns durable event subscriptions and delivers changes from Inline's existing update journals. The MCP service authenticates each request and proxies `events/list`, `events/subscribe`, and `events/unsubscribe`; it stores no subscription state or retained OAuth bearer. Clients using MCP `2026-07-28` can discover and call these methods without creating an HTTP session. Existing Streamable HTTP clients retain their core tools and session behavior. HTML app views are currently disabled, with source preserved; authenticated JSON conversation snapshot resources remain available.
+The API owns durable event subscriptions and delivers changes from Inline's existing update journals and an independent encrypted reaction log. The MCP service authenticates each request and proxies `events/list`, `events/subscribe`, and `events/unsubscribe`; it stores no subscription state or retained OAuth bearer. Clients using MCP `2026-07-28` can discover and call these methods without creating an HTTP session. Existing Streamable HTTP clients retain their core tools and session behavior. HTML app views are currently disabled, with source preserved; authenticated JSON conversation snapshot resources remain available.
 
 ## Contract
 
@@ -29,15 +29,16 @@ Use the identical event name, arguments and callback URL to unsubscribe, with `d
 
 Unsubscribe is idempotent: an already absent or expired-and-purged identity succeeds with `{}`. It never affects another grant's matching selector/callback.
 
-The 18 advertised events are:
+The base catalog advertises 18 events. Once reaction capture is deployed to every writer and `MCP_REACTION_EVENTS_ENABLED=true`, it advertises 20:
 
 - Messages: `message.created`, `message.updated`, `message.deleted`, `message.attachments.updated`, `message.history.cleared`, `message.acknowledgement.updated`.
 - Chats: `chat.created`, `chat.updated`, `chat.visibility.updated`, `chat.moved`, `chat.participants.updated`, `chat.pins.updated`.
+- Reactions (when enabled): `reaction.added`, `reaction.removed`.
 - Personal state: `dialog.updated`.
 - Spaces: `space.members.updated`, `space.profile.updated`, `space.settings.updated`, `space.history.cleared`.
 - `inline.update`: the journaled message/chat or space changes above for one selected resource.
 
-Typing, presence and reactions currently have no durable journal replay and are excluded. Resource deletion or lost access stops delivery; it does not emit a terminal callback. Polling, push streams and webhook control messages are not advertised.
+Typing and presence are excluded. `inline.update` continues to cover the native journal only; it does not combine the independently ordered reaction source. Resource deletion or lost access stops delivery; it does not emit a terminal callback. Polling, push streams and webhook control messages are not advertised.
 
 The legacy `chat.created` name follows the journal's `newChat` marker, which also refreshes surviving chats after orphaning or detachment. It is not proof of a newly created chat. `chat.updated` includes these metadata snapshots as well as title, emoji and agent-context changes; no subscription names were removed.
 
@@ -64,6 +65,36 @@ Workers claim with `SKIP LOCKED`, finite leases and generation fences, so multip
 Ordinary renewal preserves a pending delivery's backoff and `Retry-After` deadline. Renewing the lease does not ask the callback to accept an earlier retry.
 
 The internal authenticated `POST /oauth/mcp-events` uses the existing MCP shared secret and derives authority from the supplied OAuth access token. Only the MCP service invokes internal `events/cursor` (capture the pre-question watermark) and `events/status` (confirmed active monitoring for a selected thread). Grants, sessions, current context, scopes and resource access are rechecked before callback connection and acknowledgement.
+
+## Reaction events
+
+Subscribe to `reaction.added` or `reaction.removed` with `{ chatId, messageId?, emoji?, excludeSelf? }`. Optional `messageId` narrows to one message; omitted `messageId` watches the whole chat. Optional `emoji` matches one exact stored emoji, including variation selectors and skin tone. `excludeSelf: true` excludes the connected reacting user, regardless of who authored the message. All filters narrow the existing `messages:read` grant and current chat access. The persisted emoji filter is encrypted; resource IDs remain queryable subscription metadata.
+
+```json
+{
+  "eventId": "<stable-event-id>",
+  "name": "reaction.added",
+  "timestamp": "2026-10-07T12:00:00.000Z",
+  "cursor": "<opaque-reaction-cursor>",
+  "data": { "kind": "reaction", "chatId": "123", "messageId": "456", "userId": "789", "emoji": "✅" }
+}
+```
+
+Removal uses `reaction.removed` and `kind: "reactionDeleted"`, with the same required identifiers and emoji. Timestamps describe the transition, including removal time. Facts contain no message text, profiles or aggregate counts. Reaction filters and the independent source are bound to the cursor and subscription identity; message cursors cannot resume reactions. Existing non-reaction identity and cursor bytes retain their meaning.
+
+The shared persistence model locks the chat before checking current access and changing state. A real insertion/removal increments `chats.mcp_reaction_seq` and appends an encrypted occurrence in the same transaction. Duplicate additions and absent removals do not advance it; failure rolls back the mutation and counter together. Capture also covers the legacy HTTP addition path and runs even with no subscriptions or with the catalog switch off. Native reaction fanout remains unsequenced and does not consume `chats.update_seq`.
+
+The source reads counter and rows in one snapshot and checks gaps before applying filters. Nonmatches advance the scan position without callbacks. Replay follows committed order within one chat; delivery is at least once. There is no ordering contract across subscriptions or between message and reaction sources. Read tools return current `reactions: [{ userId, emoji }]`; a fully hydrated empty set is `[]`. Read current state before taking a present-state action: an old addition can already have been removed or its message deleted.
+
+Retention targets 24 hours. Each existing worker deletes at most 1,000 expired rows per minute using `SKIP LOCKED`; a cleanup backlog can extend retention, so this is not a hard storage ceiling. The owner counter survives expiry of the final row, allowing complete-expiry and interior gaps to pause delivery. Refresh then returns `truncated: true` and the current head. Pending encrypted deliveries retain the existing subscription recovery lifetime independently of source expiry. Status omits gapped subscriptions; there is no immediate gap callback. Current state cannot reconstruct missed transitions.
+
+Message/history clearing and account deletion do not synthesize one removal per cascaded reaction. Explicit retained occurrences can refer to an absent message or actor. Chat deletion cascades its reaction log, and current access checks fence delivery.
+
+### Capture rollout
+
+Apply the single forward migration, deploy transactional capture to **every** reaction writer with exposure off, and drain old API processes before enabling `MCP_REACTION_EVENTS_ENABLED=true` on the Events API/worker fleet. New subscriptions start at the current head, with no historical backfill promise before activation. Disabling the switch hides reaction definitions, blocks registration/checkpoints, skips reaction claims and fences an in-flight callback at its next authority check. Unsubscribe remains available; pending state is preserved for existing recovery rules.
+
+The gate does not detect omissions by older writers. Before restoring old code, disable reaction exposure everywhere. A rollback to older writers invalidates replay completeness across that interval: retire affected reaction subscriptions and restart from fresh checkpoints after all capture-capable writers return. Do not silently reuse old checkpoints or claim complete replay across a mixed-writer interval. Keep the release off until this ordering is verified operationally, then rescan the host catalog and qualify actual ChatGPT continuation.
 
 ## Consultation and core thread reads
 

@@ -66,6 +66,9 @@ export const chats = pgTable(
     /** Sequence of the updates for the chat */
     updateSeq: integer("update_seq").default(0),
 
+    /** Independent MCP reaction replay position; never consumes native updateSeq. */
+    mcpReactionSeq: integer("mcp_reaction_seq").notNull().default(0),
+
     /** Date of the last update */
     lastUpdateDate: timestamp("last_update_date", {
       mode: "date",

@@ -65,7 +65,7 @@ describe("encrypted content storage compatibility", () => {
 
   it("keeps reaction uniqueness under concurrent retries and legacy migration", async () => {
     const user = await testUtils.createUser()
-    const chat = (await testUtils.createChat(null))!
+    const chat = (await testUtils.createPrivateChat(user, user))!
     await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 1, text: "message" })
     const input = { chatId: chat.id, messageId: 1, userId: user.id, emoji: "🪴" }
     const results = await Promise.all(Array.from({ length: 8 }, () => ReactionModel.insertReaction(input)))
