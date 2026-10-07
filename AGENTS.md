@@ -47,6 +47,11 @@
 - Commit messages should be lowercase and scoped when useful, for example `macos: fix ...`, `server: add ...`, or `chore: ...`.
 - When I say “commit” or “finalize and commit” review and validate the change proportionally to its risk, check it against relevant feedback, and make scoped commits.
 
+### Builds, tests, compiles
+
+- When starting a run add an entry to .running file with time started and the command used. Clear once it's done or stale.
+- Before attempting a new run, consult that file to see if there is a similar run in progress or other expensive runs that may clog the system resources if you run more simultaneous builds.
+
 ### Subagents
 
 If asked to use subagents you can use these models, however most tasks can stay with one agent.
