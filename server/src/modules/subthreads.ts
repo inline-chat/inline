@@ -545,17 +545,7 @@ async function getThreadActivityByChatId(input: {
     chatIds,
     tx: input.tx,
   })
-  const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
-
-  const unreadMarks = await query
-    .select({
-      chatId: dialogs.chatId,
-      unreadMark: dialogs.unreadMark,
-    })
-    .from(dialogs)
-    .where(and(eq(dialogs.userId, input.userId), inArray(dialogs.chatId, chatIds)))
-
-  const unreadMarkByChatId = new Map(unreadMarks.map((row) => [row.chatId, row.unreadMark === true]))
+  const hasUnreadByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount > 0 || row.unreadMark]))
 
   const recentReplierRows = await query.execute<{ chatId: number; fromId: number }>(sql`
     with distinct_recent_repliers as (
@@ -595,7 +585,7 @@ async function getThreadActivityByChatId(input: {
   for (const chatId of chatIds) {
     activityByChatId.set(chatId, {
       messageCount: replyCountByChatId.get(chatId) ?? 0,
-      hasUnread: (unreadCountByChatId.get(chatId) ?? 0) > 0 || unreadMarkByChatId.get(chatId) === true,
+      hasUnread: hasUnreadByChatId.get(chatId) ?? false,
       recentAuthorUserIds: recentReplierIdsByChatId.get(chatId) ?? [],
     })
   }
