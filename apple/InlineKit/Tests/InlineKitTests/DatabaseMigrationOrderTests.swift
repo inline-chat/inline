@@ -1,7 +1,6 @@
 import GRDB
-import Testing
-
 @testable import InlineKit
+import Testing
 
 @Suite("Database Migration Order")
 struct DatabaseMigrationOrderTests {
@@ -9,6 +8,70 @@ struct DatabaseMigrationOrderTests {
   private let messagePayloadMigration = "message block content payload"
   private let repairMigration = "repair invalid cached user presence"
   private let previousTailMigration = "dialog folder pinned order"
+
+  @Test("resource migration preserves legacy messages without a sender", arguments: [false, true])
+  func upgradesNullableSender(deletedSender: Bool) throws {
+    let migrator = makeMigrator()
+    let writer = try DatabaseQueue()
+    try migrator.migrate(writer, upTo: "space profile pictures")
+    try writer.write { db in
+      try User(id: 1, email: nil, firstName: "Deleted author").insert(db)
+      try User(id: 2, email: nil, firstName: "Retained author").insert(db)
+      try db.execute(sql: "INSERT INTO chat (id, date) VALUES (7, '2026-10-08 00:00:00')")
+      try db.execute(
+        sql: """
+        INSERT INTO message (messageId, chatId, peerThreadId, fromId, date, text, hasLink)
+        VALUES (1, 7, 7, ?, '2026-10-08 00:00:00', 'Preserved body', 1)
+        """,
+        arguments: [deletedSender ? 1 : nil]
+      )
+      try db.execute(sql: """
+      INSERT INTO message (messageId, chatId, peerThreadId, fromId, date, text)
+      VALUES (2, 7, 7, 2, '2026-10-08 00:00:00', 'Known author');
+      INSERT INTO translation (messageId, chatId, date, language, translation)
+      VALUES (1, 7, '2026-10-08 00:00:00', 'en', 'Preserved translation');
+      UPDATE messageHistoryHole SET lowerId = 3, upperId = 8 WHERE chatId = 7;
+      """)
+      if deletedSender {
+        // Exercise the real legacy ON DELETE SET NULL foreign key.
+        try db.execute(sql: "DELETE FROM user WHERE id = 1")
+      }
+      #expect(try Bool.fetchOne(db, sql: "SELECT fromId IS NULL FROM message WHERE messageId = 1") == true)
+    }
+
+    try migrator.migrate(writer)
+    try writer.write { db in
+      #expect(try Message.fetchCount(db) == 2)
+      var message = try #require(try Message.filter(Message.Columns.messageId == 1).fetchOne(db))
+      #expect(message.fromId == 0)
+      #expect(message.text == "Preserved body")
+      #expect(message.resourceFlags == MessageResourceFlags.link.rawValue)
+      #expect(try Message.filter(Message.Columns.messageId == 2).fetchOne(db)?.fromId == 2)
+      #expect(try String.fetchOne(db, sql: "SELECT translation FROM translation WHERE messageId = 1")
+        == "Preserved translation")
+      #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
+        MessageHistoryHole(chatId: 7, lowerId: 3, upperId: 8),
+      ])
+      for scope in MessageHistoryScope.allCases where scope != .timeline {
+        #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7, scope: scope) == [
+          MessageHistoryHole(chatId: 7, scope: scope, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax),
+        ])
+      }
+      // Updating an orphan must preserve SQL NULL, rather than inventing user0.
+      message.text = "Updated cached body"
+      try message.update(db)
+      #expect(try Bool.fetchOne(db, sql: "SELECT fromId IS NULL FROM message WHERE messageId = 1") == true)
+      #expect(try Message.filter(Message.Columns.messageId == 1).fetchOne(db)?.text == "Updated cached body")
+      // A newly constructed invalid sender must still fail the foreign key.
+      let invalid = Message(
+        messageId: 3, fromId: 0, date: message.date, text: "Invalid sender",
+        peerUserId: nil, peerThreadId: 7, chatId: 7
+      )
+      #expect(throws: DatabaseError.self) { try invalid.insert(db) }
+    }
+    try migrator.migrate(writer)
+    #expect(try writer.read { try Message.fetchCount($0) } == 2)
+  }
 
   @Test("existing databases acquire persistent removal evidence without changing cursors")
   func upgradesRemovalRevision() throws {

@@ -42,7 +42,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case peerUserId
     case peerThreadId
     case chatId
-    case fromId
+    case storedFromId = "fromId"
     case mentioned
     case out
     case pinned
@@ -106,7 +106,14 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var peerUserId: Int64?
   public var peerThreadId: Int64?
   public var chatId: Int64
-  public var fromId: Int64
+  // The legacy sender FK uses ON DELETE SET NULL. Retain that nullable identity
+  // in storage while keeping the nonoptional accessor (0 for an unknown sender).
+  private var storedFromId: Int64?
+  public var fromId: Int64 {
+    get { storedFromId ?? 0 }
+    set { storedFromId = newValue }
+  }
+
   public var mentioned: Bool?
   public var out: Bool?
   public var pinned: Bool?
@@ -198,7 +205,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let peerUserId = Column(CodingKeys.peerUserId)
     public static let peerThreadId = Column(CodingKeys.peerThreadId)
     public static let chatId = Column(CodingKeys.chatId)
-    public static let fromId = Column(CodingKeys.fromId)
+    public static let fromId = Column(CodingKeys.storedFromId)
     public static let mentioned = Column(CodingKeys.mentioned)
     public static let out = Column(CodingKeys.out)
     public static let pinned = Column(CodingKeys.pinned)
@@ -382,7 +389,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.randomId = randomId
     self.date = date
     self.text = text
-    self.fromId = fromId
+    storedFromId = fromId
     self.peerUserId = peerUserId
     self.peerThreadId = peerThreadId
     self.editDate = editDate
