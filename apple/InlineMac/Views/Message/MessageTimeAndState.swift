@@ -41,6 +41,13 @@ class MessageTimeAndState: NSView {
     }
   }
 
+  /// Concrete color for this view's appearance. CATextLayer skips redraws for an equal attributed
+  /// string (a dynamic color compares equal across appearances) and resolves dynamic colors at draw
+  /// time against the wrong appearance, so never hand it `textColor` directly.
+  private var resolvedTextColor: NSColor {
+    textColor.resolvedColor(with: effectiveAppearance)
+  }
+
   private var hasSymbol: Bool {
     fullMessage.message.out == true
   }
@@ -114,7 +121,7 @@ class MessageTimeAndState: NSView {
 
   private func createStatusImage() -> CGImage? {
     let status = fullMessage.message.status ?? .sent
-    let color = textColor
+    let color = resolvedTextColor
     let scale = effectiveScaleFactor
     let cacheKey = CacheKey(
       status: status,
@@ -123,7 +130,7 @@ class MessageTimeAndState: NSView {
       isOutgoing: fullMessage.message.out ?? false,
       isOverlay: isOverlay,
       usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
-      isDarkMode: NSApp.effectiveAppearance.isDarkMode
+      isDarkMode: effectiveAppearance.isDarkMode
     )
 
     if let cached = Self.imageCache[cacheKey] {
@@ -181,8 +188,12 @@ class MessageTimeAndState: NSView {
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
+    // Switch in sync with the bubble background instead of cross-fading.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
     updateTimeContent()
     updateColorStyles()
+    CATransaction.commit()
     needsLayout = true
   }
 
@@ -386,7 +397,7 @@ class MessageTimeAndState: NSView {
       string: string,
       attributes: [
         .font: Self.font,
-        .foregroundColor: textColor,
+        .foregroundColor: resolvedTextColor,
       ]
     )
     timeLayer.string = attributedString
@@ -400,7 +411,7 @@ class MessageTimeAndState: NSView {
   }
 
   private func updateColorStyles() {
-    timeLayer.foregroundColor = textColor.cgColor
+    timeLayer.foregroundColor = resolvedTextColor.cgColor
     statusLayer.contents = createStatusImage()
   }
 
