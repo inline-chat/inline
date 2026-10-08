@@ -19,6 +19,7 @@ import {
   decryptRecordWithMetadata,
   encodeAbridgedPacket,
   encodeInlineInvoke,
+  encodeMsgsAck,
   encodePing,
   encryptRecord,
   isValidObfuscatedHeader,
@@ -508,7 +509,7 @@ describe("Inline Protocol WebSocket carrier", () => {
     await transport.shutdown()
   })
 
-  test("closes overloaded sockets before copying another inbound frame", async () => {
+  test.each(["frames", "bytes"] as const)("closes at the inbound %s limit before copying another frame", async (limit) => {
     const transport = makeInlineProtocolRealtimeTransport(fixture())
     const data = upgrade(transport)
     const closes: Array<[number, string]> = []
@@ -519,12 +520,14 @@ describe("Inline Protocol WebSocket carrier", () => {
     } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
     transport.websocket.open?.(socket)
     if (!data.state) throw new Error("Expected open connection state")
-    data.state.inboundQueuedBytes = 32 * 1024 * 1024
+    if (limit === "frames") data.state.inboundQueuedFrames = 256
+    else data.state.inboundQueuedBytes = 32 * 1024 * 1024
 
     await transport.websocket.message(socket, Buffer.alloc(4))
 
     expect(closes).toEqual([[1013, "Realtime V3 overloaded"]])
-    expect(data.state.inboundQueuedFrames).toBe(0)
+    expect(data.state.inboundQueuedFrames).toBe(limit === "frames" ? 256 : 0)
+    expect(data.state.inboundQueuedBytes).toBe(limit === "bytes" ? 32 * 1024 * 1024 : 0)
     await transport.shutdown()
   })
 
@@ -753,6 +756,161 @@ describe("Inline Protocol WebSocket carrier", () => {
     }
     await transport.shutdown()
   }, 20_000)
+
+  test("drains a full native reconnect RPC burst with acknowledgements and a ping", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x1122_3344n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key,
+      keyId,
+      temporary: true,
+      expiresAt: Math.floor(Date.now() / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId,
+        nonce: 1n,
+        expiresAt: Math.floor(Date.now() / 1_000) + 600,
+        userId: 42,
+        accountSessionId: 84,
+      },
+    })
+    const ingressGate = deferred()
+    const applicationGate = deferred()
+    const started: number[] = []
+    const transport = makeInlineProtocolRealtimeTransport(runtime, {
+      applicationDispatcherFactory: () => ({
+        dispatch: async ({ payload, markExecutionStarted }) => {
+          markExecutionStarted()
+          const value = payload[0]!
+          started.push(value)
+          if (value <= 64) await applicationGate.promise
+          return { kind: "result", payload: Uint8Array.of(value) }
+        },
+      }),
+    })
+    const data = upgrade(transport)
+    const sent: Uint8Array[] = []
+    const closes: Array<[number, string]> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => closes.push([code, reason]),
+      sendBinary: (bytes: Uint8Array) => { sent.push(bytes.slice()); return bytes.length },
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+
+    let headerBytes: Uint8Array
+    do headerBytes = Uint8Array.from(randomBytes(64))
+    while (!isValidObfuscatedHeader(headerBytes))
+    const carrier = createObfuscatedClientHeader(headerBytes, 1)
+    const ids = new MessageIdGenerator()
+    let contentCount = 0
+    const sendBody = (body: Uint8Array, contentRelated: boolean): bigint => {
+      const messageId = ids.next(Date.now(), 1, 0)
+      const sequenceNumber = contentCount * 2 + (contentRelated ? 1 : 0)
+      if (contentRelated) contentCount += 1
+      const record = encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, paddingFor(body.length))
+      transport.websocket.message(socket, Buffer.from(
+        carrier.outbound.process(encodeAbridgedPacket(record, true)),
+      ))
+      return messageId
+    }
+    const drainRecords = () => sent.splice(0).flatMap((frame) => {
+      const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
+      return decoded.kind === "quickAck" ? [] : [decryptRecord(decoded.payload, key, {
+        direction: "server-to-client",
+        sessionId,
+        validServerSalts: new Set([serverSalt]),
+        nowSeconds: Date.now() / 1_000,
+      })]
+    })
+
+    try {
+      transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state!.queue
+      sendBody(encodeInlineInvoke(Uint8Array.of(255)), true)
+      await data.state!.queue
+      await Promise.all(data.state!.applicationTasks)
+      await data.state!.queue
+      await data.state!.outboundQueue
+      const pendingServerIds = drainRecords()
+        .filter((record) => record.sequenceNumber % 2 === 1)
+        .map((record) => record.messageId)
+      expect(pendingServerIds.length).toBeGreaterThan(0)
+      started.length = 0
+
+      // Hold serialized admission so the whole legal client burst reaches the host
+      // before any frame can release its reservation, as observed during reconnect.
+      data.state!.queue = ingressGate.promise
+      sendBody(encodeMsgsAck(pendingServerIds), false)
+      const requestIds = Array.from({ length: 64 }, (_, index) =>
+        sendBody(encodeInlineInvoke(Uint8Array.of(index + 1)), true),
+      )
+      const pingMessageId = sendBody(encodePing(2n), false)
+      expect(closes).toEqual([])
+      expect(data.state!.inboundQueuedFrames).toBe(66)
+
+      ingressGate.resolve()
+      await data.state!.queue
+      await data.state!.outboundQueue
+      expect(started).toEqual(Array.from({ length: 64 }, (_, index) => index + 1))
+      expect(data.state!.applicationTasks.size).toBe(64)
+      expect(data.state!.inboundQueuedFrames).toBe(0)
+      expect(data.state!.inboundQueuedBytes).toBe(0)
+      const immediate = drainRecords()
+      const acknowledged = immediate
+        .filter((record) => serviceConstructor(record.body) === ServiceConstructor.msgsAck)
+        .flatMap((record) => decodeMsgsAck(record.body))
+      expect(acknowledged).toEqual(requestIds)
+      const pong = immediate.find((record) => serviceConstructor(record.body) === ServiceConstructor.pong)
+      expect(pong).toBeDefined()
+      expect(readInt64LE(pong!.body, 4)).toBe(pingMessageId)
+      expect(readInt64LE(pong!.body, 12)).toBe(2n)
+
+      applicationGate.resolve()
+      await Promise.all(data.state!.applicationTasks)
+      await data.state!.queue
+      await data.state!.outboundQueue
+      const results = drainRecords()
+        .filter((record) => serviceConstructor(record.body) === ServiceConstructor.rpcResult)
+        .map((record) => decodeRpcResult(record.body))
+      expect(results.map((result) => result.requestMessageId).toSorted()).toEqual(requestIds.toSorted())
+      for (const result of results) {
+        expect(decodeInlineApplicationObject(result.result)).toEqual({
+          kind: "result",
+          payload: Uint8Array.of(requestIds.indexOf(result.requestMessageId) + 1),
+        })
+      }
+      expect(data.state!.applicationTasks.size).toBe(0)
+
+      const nextRequestId = sendBody(encodeInlineInvoke(Uint8Array.of(65)), true)
+      await data.state!.queue
+      await Promise.all(data.state!.applicationTasks)
+      await data.state!.queue
+      await data.state!.outboundQueue
+      const nextResult = drainRecords().find((record) =>
+        serviceConstructor(record.body) === ServiceConstructor.rpcResult,
+      )
+      expect(nextResult).toBeDefined()
+      const nextRpcResult = decodeRpcResult(nextResult!.body)
+      expect(nextRpcResult.requestMessageId).toBe(nextRequestId)
+      expect(decodeInlineApplicationObject(nextRpcResult.result)).toEqual({
+        kind: "result", payload: Uint8Array.of(65),
+      })
+      expect(closes).toEqual([])
+      expect(data.state!.inboundQueuedFrames).toBe(0)
+      expect(data.state!.inboundQueuedBytes).toBe(0)
+    } finally {
+      ingressGate.resolve()
+      applicationGate.resolve()
+      await transport.shutdown()
+    }
+  })
 
   test("admits independent application RPCs while earlier handlers are still running", async () => {
     const runtime = fixture()

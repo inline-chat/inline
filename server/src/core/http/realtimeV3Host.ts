@@ -57,7 +57,10 @@ const PROTOCOL_CLOSE_REASON = "Protocol error"
 const OVERLOAD_CLOSE_CODE = 1013
 const OVERLOAD_CLOSE_REASON = "Realtime V3 overloaded"
 const BACKPRESSURE_LIMIT = 16 * 1024 * 1024
-const MAX_QUEUED_INBOUND_FRAMES = 32
+// Native V3 permits 64 pending RPCs and queues up to 256 writes, including service
+// traffic. Admit that bounded burst before serialized decryption; application
+// concurrency and the independent inbound byte budget still bound retained work.
+const MAX_QUEUED_INBOUND_FRAMES = 256
 const MAX_QUEUED_INBOUND_BYTES = 32 * 1024 * 1024
 const MAX_QUEUED_OUTBOUND_RECORDS = 4096
 const MAX_QUEUED_OUTBOUND_BYTES = 32 * 1024 * 1024
