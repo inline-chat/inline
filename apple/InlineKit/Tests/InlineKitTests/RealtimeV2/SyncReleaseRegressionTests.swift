@@ -43,20 +43,25 @@ struct SyncReleaseRegressionTests {
       }
     }
     await session.start()
-    let updates: [InlineProtocol.Update] = (3 ... 4_099).map { sequence in
+    // Cross the byte limit with one update so the receipt deadline measures
+    // recovery, without thousands of preceding GRDB identity reads. Separate
+    // Sync tests cover the count limit through the same overflow recovery path.
+    let recoveryTarget: Int64 = 3
+    let updates: [InlineProtocol.Update] = [
       .with {
-        $0.seq = Int32(sequence)
+        $0.seq = Int32(recoveryTarget)
         $0.date = 101
         $0.update = .chatInfo(.with { $0.chatID = 7
-          $0.title = "buffered"
+          $0.title = String(repeating: "x", count: 16 * 1_024 * 1_024)
         })
-      }
-    }
+      },
+    ]
+    #expect(try updates[0].serializedData().count > 16 * 1_024 * 1_024)
     let delivery = Task { await transport.push(updates) }
     let completed = await releaseEventually {
       let state = try? await storage.getBucketState(for: key)
       let stats = await sync.getStats()
-      return state?.seq == 4_099 && stats.activeBucketFetches == 0
+      return state?.seq == recoveryTarget && stats.activeBucketFetches == 0
     }
     let bufferRecoveries = await sync.getStats().realtimeBufferRecoveries
     // Cleanup before assertions also releases the deliberately wedged old path.
@@ -66,12 +71,9 @@ struct SyncReleaseRegressionTests {
     consumer.cancel()
     await delivery.value
     #expect(completed, "A delivered reply must progress before the production 30-second RPC timeout")
-    #expect(await transport.requests == [(Int64(1), Int64(4_099))].map { SyncScriptedTransport.Request(
-      from: $0.0,
-      through: $0.1
-    ) })
+    #expect(await transport.requests == [SyncScriptedTransport.Request(from: 1, through: recoveryTarget)])
     #expect(bufferRecoveries > 0)
-    #expect(try await storage.getBucketState(for: key).seq == 4_099)
+    #expect(try await storage.getBucketState(for: key).seq == recoveryTarget)
   }
 
   @Test("a real foreign-key failure isolates its bucket and recovers without losing the update")
