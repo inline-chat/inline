@@ -7,6 +7,50 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## October 9, 2026
+
+### New
+
+- 🎧 Voice messages on iOS now **keep playing** when you switch chats or lock your phone. A playback bar lets you pause or jump back to the message.
+- 🗄️ Rebuilt **Chat Info** on iOS and macOS. Files, media, links, and voice messages now load reliably, including older ones from far back in the chat.
+- 📁 Send **folders** on macOS. Drop or attach one and Inline zips it for you.
+- Messages on iOS now follow your system **text size**.
+
+### Quality of life improvements
+
+- Files you choose on iOS now wait in the composer until you send, so you can add a message or remove a file first.
+- **Return** now sends on an iPad hardware keyboard, and **Shift-Return** adds a new line. You can turn this off in Settings.
+- Turn off **Centered Chats** in macOS Appearance settings to use the full chat width.
+- Choose a default chat icon in macOS Appearance settings.
+- Copy a chat's link on macOS with Option-Command-C.
+
+### Better tools and APIs for agents and hackers
+
+- Inline is now in the **ChatGPT plugin store**. See [Add Inline to Your Agent](/docs/add-inline).
+- [Hermes](/docs/hermes) now runs on **Umbrel**, and you can install Inline from the Hermes plugin catalog with `hermes plugins install inline-platform`.
+- Agent approvals now appear in the conversation where the agent is working, instead of your DM with it.
+- Local agents are no longer limited to four sessions at a time. Claude also keeps its permission mode, including plan mode, between turns.
+- You can now create up to **30 bots** per account.
+- [MCP](/docs/mcp) can now read exact messages, forward messages, create reply threads, filter by sender, and ask teammates a question in a private thread.
+- The [CLI](/docs/cli) can now filter messages by sender with `--sender-id`, return forwarding receipts, and list reply threads you haven't opened with `inline chats list --include-subthreads`. JSON output also includes pagination details.
+- Improved Hermes access checks and recovery of missed messages. Pin and backlink notices no longer start agent turns.
+- Improved [OpenClaw](/docs/openclaw) connection status and update details.
+
+### Fixes
+
+- Improved reconnecting and catching up on missed messages on iOS and macOS.
+- Fixed unexpected logouts on macOS after a temporary connection or sign-in failure.
+- Fixed iOS message menus leaving a blank gap when closing, and chats losing their scroll position while the reaction menu is open.
+- Fixed canceling a message that is still sending on macOS.
+- Fixed chat links that could fail to open a DM, including DMs with bots.
+- Fixed archiving group chats you were invited to but hadn't opened.
+- Fixed profile photos that stayed blank after a failed download.
+- Fixed macOS message times keeping the wrong color after switching between light and dark mode.
+- Fixed the message highlight, reply-preview layout, and swipe-to-reply avatars on iOS.
+- Improved macOS sidebar performance and preview contrast.
+
+---
+
 ## September 25, 2026
 
 ### New
