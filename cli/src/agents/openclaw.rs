@@ -18,9 +18,9 @@ const CHANNEL_PROBE_TIMEOUT_MS: &str = "10000";
 const CHANNEL_READINESS_ATTEMPTS: usize = 3;
 const CHANNEL_READINESS_RETRY_DELAY: Duration = Duration::from_secs(1);
 const PLUGIN_PACKAGE_NAME: &str = "@inline-openclaw/inline";
-const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.71-alpha.0";
+const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.71-alpha.1";
 const LEGACY_SETUP_PLUGIN_VERSION: &str = "0.0.63";
-const SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.71-alpha.0";
+const SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.71-alpha.1";
 const LEGACY_SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.63";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1195,12 +1195,12 @@ mod tests {
     fn plugin_inspection_distinguishes_healthy_and_foreign_sources() {
         let compatibility = current_compatibility();
         let healthy = inspect_plugin_json(
-            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.71-alpha.0","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.71-alpha.1","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
             compatibility,
         );
         assert!(matches!(
             healthy,
-            PluginState::Healthy { version } if version == "0.0.71-alpha.0"
+            PluginState::Healthy { version } if version == "0.0.71-alpha.1"
         ));
         assert!(matches!(
             inspect_plugin_json(
@@ -1211,7 +1211,7 @@ mod tests {
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.71-alpha.0","status":"loaded","dependencyStatus":{"requiredInstalled":true}},"diagnostics":[{"level":"error","message":"host-owned diagnostic"}]}"#,
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.71-alpha.1","status":"loaded","dependencyStatus":{"requiredInstalled":true}},"diagnostics":[{"level":"error","message":"host-owned diagnostic"}]}"#,
                 compatibility,
             ),
             PluginState::Healthy { .. }
@@ -1245,25 +1245,25 @@ mod tests {
         let inspected = r#"{
             "plugin": {
                 "packageName": "@inline-openclaw/inline",
-                "version": "0.0.71-alpha.0",
+                "version": "0.0.71-alpha.1",
                 "status": "loaded",
                 "dependencyStatus": { "requiredInstalled": true }
             },
             "install": {
                 "source": "npm",
-                "spec": "@inline-openclaw/inline@0.0.71-alpha.0",
+                "spec": "@inline-openclaw/inline@0.0.71-alpha.1",
                 "resolvedName": "@inline-openclaw/inline",
-                "resolvedVersion": "0.0.71-alpha.0",
-                "resolvedSpec": "@inline-openclaw/inline@0.0.71-alpha.0"
+                "resolvedVersion": "0.0.71-alpha.1",
+                "resolvedSpec": "@inline-openclaw/inline@0.0.71-alpha.1"
             }
         }"#;
         assert_eq!(
             verify_managed_plugin_install(inspected, compatibility).unwrap(),
-            "0.0.71-alpha.0"
+            "0.0.71-alpha.1"
         );
 
         let mismatched_resolution = inspected.replace(
-            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.71-alpha.0\"",
+            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.71-alpha.1\"",
             "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.70\"",
         );
         assert!(verify_managed_plugin_install(&mismatched_resolution, compatibility).is_err());
@@ -1272,13 +1272,13 @@ mod tests {
     #[test]
     fn host_version_selects_a_compatible_plugin_and_capability_policy() {
         let current = setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)");
-        assert_eq!(current.minimum_plugin_version, "0.0.71-alpha.0");
+        assert_eq!(current.minimum_plugin_version, "0.0.71-alpha.1");
         assert_eq!(
             current.install_args(),
             [
                 "plugins",
                 "install",
-                "@inline-openclaw/inline@0.0.71-alpha.0",
+                "@inline-openclaw/inline@0.0.71-alpha.1",
                 "--force",
                 "--accept-capabilities",
             ]

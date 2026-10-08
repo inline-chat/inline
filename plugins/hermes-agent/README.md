@@ -51,6 +51,18 @@ Unsupported or intentionally limited:
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 
+## Alpha 0.0.22-alpha.0
+
+This prerelease includes typed service-notice filtering before agent admission,
+current shared-session setup guidance, and the pinned realtime SDK `0.0.18`.
+Hermes keeps its supported agent activity surface; unsupported experimental tool
+timelines remain disabled.
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@0.0.22-alpha.0
+inline-hermes install --force
+```
+
 ## Install
 
 ```sh

@@ -36,7 +36,7 @@ Reply-thread behavior:
 
 The Inline plugin supports OpenClaw `2026.8.2` and newer, including
 `2026.9.x`, with no upper version cap. It is built against `2026.9.4`. Install
-the plugin version for your OpenClaw release line. The `0.0.71-alpha.0`
+the plugin version for your OpenClaw release line. The `0.0.71-alpha.1`
 prerelease is available for testing; `0.0.70` remains the stable release.
 
 | OpenClaw line | Inline plugin | Exact install |
@@ -53,20 +53,23 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.71-alpha.0` | `>=2026.8.2` | `0.0.19-alpha.0` | Prerelease | Reports install provenance safely, avoids false reconnect-loop status, and keeps autonomous sync-recovery diagnostics non-sticky. |
+| `0.0.71-alpha.1` | `>=2026.8.2` | `0.0.19-alpha.1` | Prerelease | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Stable | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 | `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
 | `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
 
-### Prerelease 0.0.71-alpha.0
+### Prerelease 0.0.71-alpha.1
+
+- Adds opt-in quiet agent activity timelines and removes the obsolete client-side bot-account cap.
+- Includes the expanded authorized chat-history protocol, current resource loading, and voice-room schemas through realtime SDK `0.0.19-alpha.1`.
 
 - Reports supported host installation provenance and timestamps in `/inline_version` without exposing package specs or filesystem paths.
 - Diagnoses only active reconnect loops instead of treating the lifetime reconnect count as current failure evidence.
 - Keeps SDK recovery scheduling, bucket retirement, and discovery retry observable without leaving a sticky channel error after autonomous recovery.
 - Uses inherited backend chat access for bot presence in authorized DM and Space reply threads.
-- Carries forward native reply suppression, September approvals, cancellation-safe shutdown, and realtime SDK `0.0.19-alpha.0` recovery behavior.
+- Carries forward native reply suppression, September approvals, cancellation-safe shutdown, and realtime SDK `0.0.19-alpha.1` recovery behavior.
 - Tests the extracted package against released hosts and checks that the bundled SDK matches the validated build.
 
 The CI host matrix runs on `2026.8.2`, `2026.9.1`, and npm `latest`.
@@ -79,7 +82,7 @@ bun run --cwd plugins/openclaw check:host /path/to/node_modules/openclaw
 To test the prerelease from npm:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.71-alpha.0 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.71-alpha.1 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
