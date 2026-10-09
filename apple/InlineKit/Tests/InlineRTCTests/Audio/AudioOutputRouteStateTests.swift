@@ -135,6 +135,50 @@ struct AudioOutputRouteStateTests {
     #expect(state.snapshot?.resolvedOutput.isFallingBackToAutomatic == true)
   }
 
+  @Test("Auto output failure clears when the default device changes")
+  func automaticFailureClearsForNewDefault() throws {
+    var state = AudioOutputRouteState()
+    let devices = [device("speakers"), device("airpods", name: "AirPods Pro")]
+    state.observe(inventory(defaultID: "speakers", devices: devices))
+    state.routeTransactionFailed(try #require(state.desiredResolution))
+
+    state.observe(inventory(defaultID: "airpods", devices: devices))
+
+    #expect(!state.automaticRouteFailed)
+    #expect(state.needsRouteTransaction)
+    #expect(state.desiredResolution?.activeDeviceID == "airpods")
+  }
+
+  @Test("Auto output failure clears when the same device settles into a new profile")
+  func automaticFailureClearsForNewProfile() throws {
+    var state = AudioOutputRouteState()
+    let devices = [device("airpods", name: "AirPods Pro")]
+    state.observe(inventory(defaultID: "airpods", devices: devices))
+    state.routeTransactionFailed(try #require(state.desiredResolution))
+
+    state.observe(inventory(defaultID: "airpods", devices: devices, sampleRate: 24_000))
+
+    #expect(!state.automaticRouteFailed)
+    #expect(state.needsRouteTransaction)
+  }
+
+  @Test("catalog noise does not clear an Auto output failure")
+  func automaticFailureSurvivesUnrelatedCatalogChanges() throws {
+    var state = AudioOutputRouteState()
+    let original = inventory(defaultID: "speakers", devices: [device("speakers")])
+    state.observe(original)
+    state.routeTransactionFailed(try #require(state.desiredResolution))
+    state.observe(AudioOutputDeviceInventory(
+      automaticDeviceID: original.automaticDeviceID,
+      automaticDeviceName: "Renamed speakers",
+      devices: [device("speakers", name: "Renamed speakers"), device("unrelated")],
+      routeFingerprints: original.routeFingerprints,
+      routeEpoch: original.routeEpoch + 1
+    ))
+
+    #expect(state.automaticRouteFailed)
+  }
+
   @Test("remembered output name repairs only an unambiguous stable UID")
   func rememberedNameRepairIsUnambiguous() {
     let selection = AudioOutputSelection.device(id: "old", rememberedName: "Studio Display")

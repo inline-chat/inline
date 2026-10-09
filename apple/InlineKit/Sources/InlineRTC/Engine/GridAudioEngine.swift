@@ -640,7 +640,7 @@ actor GridAudioEngine {
 
   func outputDeviceSnapshot() async -> AudioOutputDeviceSnapshot {
     let inventory = await driver.outputDeviceInventory()
-    outputRoute.observe(inventory)
+    observeOutputInventory(inventory)
     outputRoute.commitResolvedMetadataIfRouteMatches()
     let snapshot = outputRoute.snapshot
       ?? inventory.snapshot(resolving: outputRoute.desiredSelection)
@@ -813,7 +813,7 @@ actor GridAudioEngine {
     let refreshedOutputInventory = await driver.outputDeviceInventory()
     let outputInventoryChanged = previousOutputInventory != refreshedOutputInventory
     if outputInventoryChanged {
-      outputRoute.observe(refreshedOutputInventory)
+      observeOutputInventory(refreshedOutputInventory)
       outputRoute.commitResolvedMetadataIfRouteMatches()
       emitOutputDeviceSnapshot()
     }
@@ -1025,7 +1025,7 @@ actor GridAudioEngine {
 
       if outputRoute.inventory == nil {
         let inventory = await driver.outputDeviceInventory()
-        outputRoute.observe(inventory)
+        observeOutputInventory(inventory)
         outputRoute.commitResolvedMetadataIfRouteMatches()
         emitOutputDeviceSnapshot()
         continue
@@ -1053,7 +1053,7 @@ actor GridAudioEngine {
           )
         case let .failure(error):
           let inventory = await driver.outputDeviceInventory()
-          outputRoute.observe(inventory)
+          observeOutputInventory(inventory)
           emitOutputDeviceSnapshot()
           if routeRevision != outputRoute.revision
             || outputRoute.desiredResolution?.target != resolution.target {
@@ -1396,6 +1396,27 @@ actor GridAudioEngine {
     outputDeviceSnapshotContinuation.yield(snapshot)
   }
 
+  private func observeOutputInventory(_ inventory: AudioOutputDeviceInventory) {
+    let automaticOutputWasQuarantined = outputRoute.isAutomaticRouteQuarantined
+    let explicitOutputWasQuarantined = outputRoute.failedExplicitTarget != nil
+    outputRoute.observe(inventory)
+    let automaticRouteRecovered = automaticOutputWasQuarantined
+      && !outputRoute.isAutomaticRouteQuarantined
+    let explicitRouteRecovered = explicitOutputWasQuarantined
+      && outputRoute.failedExplicitTarget == nil
+    guard automaticRouteRecovered || explicitRouteRecovered else { return }
+
+    // A failed Auto fallback can suspend both routes. New evidence for either
+    // rejected route must release that suspension, including a preferred
+    // device returning while the system default itself remains unchanged.
+    cancelOutputRouteRetry(resetAttempt: true)
+    outputRouteRetrySuspended = false
+    lastOutputRouteError = nil
+    log.debug(
+      "GRID_ENGINE phase=output_route_quarantine_cleared automatic=\(automaticRouteRecovered) explicit=\(explicitRouteRecovered)"
+    )
+  }
+
   private func deviceListChanged() {
     log.debug("GRID_ENGINE phase=audio_devices_changed")
     deviceRouteGeneration &+= 1
@@ -1455,7 +1476,7 @@ actor GridAudioEngine {
     observeInputInventory(inventory)
     inputRoute.commitResolvedMetadataIfRouteMatches()
     emitInputDeviceSnapshot()
-    outputRoute.observe(outputInventory)
+    observeOutputInventory(outputInventory)
     outputRoute.commitResolvedMetadataIfRouteMatches()
     emitOutputDeviceSnapshot()
     if captureRecoveryIsDemanded(health), !captureEngineHealthy, !captureLeases.isEmpty {

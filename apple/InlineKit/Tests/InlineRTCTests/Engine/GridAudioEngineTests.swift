@@ -1844,6 +1844,90 @@ struct GridAudioEngineTests {
     #expect(recovered.output?.isFallingBackToAutomatic == false)
   }
 
+  @Test("a settled AirPods profile resumes failed Auto output without restarting capture",
+        arguments: ["event", "snapshot", "playout"])
+  func automaticOutputFailureResumesAfterProfileChange(observation: String) async throws {
+    let driver = FakeGridAudioDriver()
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      deviceChangeSettleDelay: .milliseconds(1)
+    )
+    let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
+    await engine.setInput(.automatic)
+    await engine.setOutput(.automatic)
+    await engine.acquireCaptureLease(lease)
+    try await eventually { await engine.currentSnapshot().state == .ready }
+    let prepareCount = await driver.operations().filter { $0 == "prepared:true" }.count
+
+    await driver.setOutputFailures(["automatic": 1])
+    await driver.setAutomaticOutputDeviceID("airpods")
+    await driver.emit(.devicesChanged)
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return snapshot.state == .failed("device unavailable")
+        && snapshot.currentMutationKind == nil
+    }
+
+    // Repeated catalog events and changing epochs are not new route evidence.
+    await driver.setRouteEpoch(1)
+    await driver.emit(.devicesChanged)
+    try await Task.sleep(for: .milliseconds(40))
+    #expect(await driver.operations().filter { $0 == "output:automatic" }.count == 2)
+
+    await driver.setOutputSampleRate(24_000)
+    switch observation {
+    case "event": await driver.emit(.devicesChanged)
+    case "snapshot": _ = await engine.outputDeviceSnapshot()
+    default: #expect(await engine.decodedRemoteAudioObserved() == nil)
+    }
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return snapshot.state == .ready
+        && snapshot.output?.activeDeviceID == "airpods"
+        && snapshot.route?.isOutputRouteValid == true
+    }
+
+    #expect(await driver.operations().filter { $0 == "output:automatic" }.count == 3)
+    #expect(await driver.operations().filter { $0 == "prepared:true" }.count == prepareCount)
+    #expect(await driver.operations().contains("recover") == false)
+    #expect(await driver.operations().contains("recover-playout") == false)
+    #expect(await engine.currentSnapshot().captureLeaseCount == 1)
+    _ = await engine.shutdown()
+  }
+
+  @Test("a reconnected preferred output resumes after both it and Auto failed")
+  func reconnectedOutputResumesAfterFallbackFailure() async throws {
+    let preferred = AudioOutputSelection.device(id: "airpods", rememberedName: "airpods")
+    let driver = FakeGridAudioDriver(outputFailures: ["airpods": 1, "automatic": 1])
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      deviceChangeSettleDelay: .milliseconds(1)
+    )
+    await engine.start()
+    await engine.setOutput(preferred)
+    try await eventually { await engine.currentSnapshot().state == .failed("device unavailable") }
+
+    await driver.setAvailableOutputDeviceIDs(["built-in-output"])
+    await driver.emit(.devicesChanged)
+    try await Task.sleep(for: .milliseconds(40))
+    #expect(await driver.operations().filter { $0 == "output:automatic" }.count == 1)
+
+    await driver.setAvailableOutputDeviceIDs(["built-in-output", "airpods"])
+    await driver.emit(.devicesChanged)
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return snapshot.output?.selection == preferred
+        && snapshot.output?.activeDeviceID == "airpods"
+        && snapshot.output?.isFallingBackToAutomatic == false
+        && snapshot.route?.currentOutputID == "airpods"
+        && snapshot.route?.isOutputRouteValid == true
+    }
+    #expect(await driver.operations().filter { $0 == "output:airpods" }.count == 2)
+    _ = await engine.shutdown()
+  }
+
   @Test("leaving cancels in-flight audio recovery and stale work cannot resume")
   func leaveCancelsInFlightRecovery() async throws {
     let driver = FakeGridAudioDriver(waitForRecoveryCancellation: true)
@@ -1908,6 +1992,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
   private var inputRouteValid = true
   private var outputRouteValid = true
   private var currentOutputDeviceID = "built-in-output"
+  private var automaticOutputDeviceID = "built-in-output"
   private var processing: InlineRTCAudioProcessingState?
   private var configureContinuation: CheckedContinuation<Void, Never>?
   private var prepareContinuation: CheckedContinuation<Void, Never>?
@@ -2095,7 +2180,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
         currentInputID: "built-in",
         defaultInputID: "built-in",
         currentOutputID: outputRouteValid ? currentOutputDeviceID : "missing-output",
-        defaultOutputID: "built-in-output",
+        defaultOutputID: automaticOutputDeviceID,
         inputDeviceCount: availableDeviceIDs.count,
         outputDeviceCount: 1,
         isInputRouteValid: inputRouteValid,
@@ -2182,7 +2267,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
     case .automatic:
       log.append("output:automatic")
       failureKey = "automatic"
-      selectedID = "built-in-output"
+      selectedID = automaticOutputDeviceID
     case let .device(id, _):
       log.append("output:\(id)")
       failureKey = id
@@ -2205,7 +2290,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
       AudioOutputDeviceDescriptor(
         id: $0,
         name: $0,
-        isSystemDefault: $0 == "built-in-output",
+        isSystemDefault: $0 == automaticOutputDeviceID,
         systemImage: "speaker.wave.2"
       )
     }
@@ -2223,8 +2308,8 @@ private actor FakeGridAudioDriver: GridAudioDriver {
       isAlive: true
     )
     return AudioOutputDeviceInventory(
-      automaticDeviceID: "built-in-output",
-      automaticDeviceName: "Built-in Output",
+      automaticDeviceID: automaticOutputDeviceID,
+      automaticDeviceName: automaticOutputDeviceID,
       devices: devices,
       routeFingerprints: Dictionary(
         uniqueKeysWithValues: devices.map { ($0.id, fingerprint) }
@@ -2318,6 +2403,14 @@ private actor FakeGridAudioDriver: GridAudioDriver {
 
   func setAvailableOutputDeviceIDs(_ ids: Set<String>) {
     availableOutputDeviceIDs = ids
+  }
+
+  func setAutomaticOutputDeviceID(_ id: String) {
+    automaticOutputDeviceID = id
+  }
+
+  func setOutputFailures(_ failures: [String: Int]) {
+    outputFailuresRemaining = failures
   }
 
   func setRouteEpoch(_ epoch: UInt64) {

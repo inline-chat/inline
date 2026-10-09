@@ -125,6 +125,15 @@ struct AudioOutputRouteState: Equatable, Sendable {
 
   mutating func observe(_ inventory: AudioOutputDeviceInventory) {
     guard self.inventory != inventory else { return }
+    if automaticRouteFailed {
+      let previousID = self.inventory?.automaticDeviceID
+      let currentID = inventory.automaticDeviceID
+      let previousFingerprint = previousID.flatMap { self.inventory?.routeFingerprints[$0] }
+      let currentFingerprint = currentID.flatMap { inventory.routeFingerprints[$0] }
+      if previousID != currentID || previousFingerprint != currentFingerprint {
+        automaticRouteFailed = false
+      }
+    }
     if case let .device(id, _)? = failedExplicitTarget {
       let wasAvailable = self.inventory?.devices.contains(where: { $0.id == id }) == true
       let isAvailable = inventory.devices.contains(where: { $0.id == id })
@@ -138,6 +147,8 @@ struct AudioOutputRouteState: Equatable, Sendable {
     self.inventory = inventory
     revision &+= 1
   }
+
+  var isAutomaticRouteQuarantined: Bool { automaticRouteFailed }
 
   var desiredResolution: AudioOutputRouteResolution? {
     guard let inventory else { return nil }
