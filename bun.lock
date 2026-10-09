@@ -186,7 +186,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.11-alpha.0",
+      "version": "0.0.11",
       "dependencies": {
         "@noble/ciphers": "^1.3.0",
         "@noble/hashes": "^1.8.0",
@@ -198,9 +198,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.19-alpha.0",
+      "version": "0.0.19",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.11-alpha.0",
+        "@inline-chat/protocol": "0.0.11",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -247,7 +247,7 @@
     },
     "plugins/hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.21",
+      "version": "0.0.22",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
@@ -264,9 +264,9 @@
     },
     "plugins/openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.71-alpha.0",
+      "version": "0.0.71",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.19-alpha.0",
+        "@inline-chat/realtime-sdk": "0.0.19",
         "zod": "4.4.3",
       },
       "devDependencies": {

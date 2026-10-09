@@ -3,7 +3,7 @@ label: Inline
 kind: platform
 provides_tools:
   - inline
-version: 0.0.22-alpha.0
+version: 0.0.22
 requires_hermes: ">=0.21.3"
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
