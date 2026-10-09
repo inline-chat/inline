@@ -21,6 +21,8 @@
 
 ## Builds And Checks
 
+- Never launch, boot, or run iOS/iPadOS simulators, including through tests or debug scripts, unless the user explicitly asks to use a simulator. A general build, test, debug, or validation request does not authorize simulator use.
+- Keep iPhone Mirroring stopped; do not launch or use it for development, testing, or device interaction. When work requires an iPhone, use Device Hub.
 - Prefer focused package builds/tests (`swift test`, `swift build`, Swift syntax/type checks) over full `xcodebuild`. Ideally only on touched files, and avoid repeatedly calling them for every small change.
 - Regenerate Swift protos with `bun run proto:generate-swift` from `scripts/` when needed.
 
