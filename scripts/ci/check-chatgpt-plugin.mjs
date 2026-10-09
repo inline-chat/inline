@@ -541,7 +541,7 @@ try {
   const listedEvents = await modernRequest("events/list")
   assert.equal(listedEvents.events[0].name, "message.created")
   const selector = { name: "message.created", arguments: { chatId: "7", excludeSelf: true } }
-  const delivery = { mode: "webhook", url: "https://callbacks.example.com/inline", secret: "whsec_Y2ktdGVzdC1zaWduaW5nLWtleS13aXRoLWVub3VnaC1ieXRlcw==" }
+  const delivery = { mode: "webhook", url: "https://callbacks.example.com/inline", secret: "synthetic-ci-webhook-secret-not-a-provider-credential" }
   const subscribed = await modernRequest("events/subscribe", { ...selector, delivery, cursor: "ci-cursor", ttlMs: 300_000 })
   assert.equal(subscribed.id, "ci-subscription")
   assert.equal(subscribed.truncated, false)
