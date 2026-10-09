@@ -61,6 +61,7 @@ fn launch_agent_uses_single_absolute_arguments_and_escapes_xml() {
     assert!(plist.contains("/tmp/Inline &amp; Bridge/accounts/42"));
     assert!(plist.contains("<string>bridge</string>"));
     assert!(plist.contains("<string>run</string>"));
+    assert!(plist.contains("<key>ProcessType</key>\n  <string>Standard</string>"));
     assert!(!plist.contains("sh -c"));
     assert!(!plist.contains("bot_token"));
     assert!(!plist.contains("control_token"));
