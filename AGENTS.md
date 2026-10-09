@@ -32,6 +32,7 @@
 
 - Don't run Docker locally unless explicitly approved.
 - Never launch, boot, or run simulators (including iOS and iPadOS), or run tests that boot simulators, unless the user explicitly asks to use a simulator. A general request to build, test, debug, or validate does not authorize simulator use.
+- Keep iPhone Mirroring stopped; do not launch or use it for development, testing, or device interaction. When work requires an iPhone, use Device Hub.
 - Reserve heavy builds for real checkpoints or after you're done. Avoid too frequent builds that slow us down.
 - Don't read .env files, print them, or inspect the contents. It's fine to load them into scripts for normal use or moving them with backups safely.
 - For database migrations don't change earlier committed migration, append only.
