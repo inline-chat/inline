@@ -66,6 +66,12 @@ executable if another installation shadows it on PATH. Check `inline bridge
 doctor --json` for the service's installed binary and provider executable;
 verify their versions separately from the CLI selected by the shell.
 
+When upgrading an existing macOS bot bridge to 0.7.16, run `inline bridge
+restart` with the newly installed binary once after the update. This refreshes
+the existing service definition to Standard process policy; the older updater
+process can retain its previous policy during the first restart. Verify the
+persisted policy and actual provider readiness after this new-binary restart.
+
 Keep human release notes in a reviewed file; the script creates generic notes.
 After publication, attach the reviewed text with `gh release edit cli-vVERSION
 --repo inline-chat/inline --notes-file PATH`. The current notes are in

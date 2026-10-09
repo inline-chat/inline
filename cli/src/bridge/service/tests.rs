@@ -69,6 +69,30 @@ fn launch_agent_uses_single_absolute_arguments_and_escapes_xml() {
 }
 
 #[test]
+fn launch_agent_refresh_replaces_the_old_background_policy() {
+    let (account, _, paths) = fixture();
+    let directory = tempfile::tempdir().unwrap();
+    let definition = directory.path().join("bridge.plist");
+    let expected = render_launch_agent_plist(&account, &paths).unwrap();
+    let old = expected.replace("<string>Standard</string>", "<string>Background</string>");
+    assert_ne!(old, expected);
+    fs::write(&definition, old).unwrap();
+
+    refresh_launch_agent_plist(&definition, &paths, &account).unwrap();
+
+    assert_eq!(fs::read_to_string(&definition).unwrap(), expected);
+    assert!(!definition.with_extension("service.tmp").exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&definition).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
 fn systemd_unit_uses_absolute_args_restart_bounds_and_no_secrets() {
     let (mut account, _, mut paths) = fixture();
     paths.root = PathBuf::from("/tmp/A Project/%work");

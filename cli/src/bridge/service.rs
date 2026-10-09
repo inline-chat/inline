@@ -314,8 +314,7 @@ pub(super) fn install_service(
         install_stable_binary(&paths.installed_binary)?;
 
         let plist_path = service_definition_path(&account.service_label)?;
-        let plist = render_launch_agent_plist(account, paths)?;
-        write_private_bytes(&plist_path, plist.as_bytes(), 0o600)?;
+        refresh_launch_agent_plist(&plist_path, paths, account)?;
 
         let domain = launchd_domain()?;
         for label in &account.superseded_service_labels {
@@ -482,10 +481,11 @@ pub(super) async fn restart_service(
                 "bridge account has no configured providers",
             )
         })?;
+        let plist_path = service_definition_path(&account.service_label)?;
+        refresh_launch_agent_plist(&plist_path, paths, account)?;
         let _ = stop_service(paths, account, secrets, installation).await?;
         let domain = launchd_domain()?;
         enable_launch_agent(&domain, &account.service_label)?;
-        let plist_path = service_definition_path(&account.service_label)?;
         run_launchctl(["bootstrap", &domain, plist_path.to_string_lossy().as_ref()])?;
     }
     #[cfg(target_os = "linux")]
@@ -1284,6 +1284,16 @@ fn write_private_bytes(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
 enum SystemdUnitVerification {
     Verified,
     Unavailable,
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn refresh_launch_agent_plist(
+    path: &Path,
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+) -> io::Result<()> {
+    let plist = render_launch_agent_plist(account, paths)?;
+    write_private_bytes(path, plist.as_bytes(), 0o600)
 }
 
 #[cfg(target_os = "linux")]
