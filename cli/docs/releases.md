@@ -68,8 +68,8 @@ verify their versions separately from the CLI selected by the shell.
 
 Keep human release notes in a reviewed file; the script creates generic notes.
 After publication, attach the reviewed text with `gh release edit cli-vVERSION
---repo inline-chat/inline --notes-file PATH`. The current alpha notes are in
-[v0.7.16-alpha.0.md](releases/v0.7.16-alpha.0.md); refresh them for the final
+--repo inline-chat/inline --notes-file PATH`. The current notes are in
+[v0.7.16.md](releases/v0.7.16.md); refresh them for the next
 release version and source.
 
 ## Release authentication
