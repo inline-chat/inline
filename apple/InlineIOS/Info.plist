@@ -68,7 +68,6 @@
 	<array>
 		<string>audio</string>
 		<string>remote-notification</string>
-		<string>audio</string>
 	</array>
 	<key>UIAppFonts</key>
 	<array/>
