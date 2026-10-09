@@ -80,6 +80,18 @@ public struct CreateChatTransaction: Transaction2 {
 
   // Methods
   public func optimistic() async {
+    guard context.reservedChatId != nil else { return }
+    do {
+      let currentUserId = Auth.shared.getCurrentUserId()
+      try await AppDatabase.shared.dbWriter.write { db in
+        try saveOptimisticState(db, currentUserId: currentUserId)
+      }
+    } catch {
+      log.error("Failed to create optimistic chat", error: error)
+    }
+  }
+
+  func saveOptimisticState(_ db: Database, currentUserId: Int64?) throws {
     guard let reservedChatId = context.reservedChatId else { return }
 
     let explicitTitle = Self.normalizedTitle(context.title)
@@ -92,21 +104,15 @@ public struct CreateChatTransaction: Transaction2 {
       spaceId: context.spaceId,
       emoji: context.emoji,
       isPublic: context.isPublic,
-      createdBy: Auth.shared.getCurrentUserId(),
+      createdBy: currentUserId,
       isUntitled: explicitTitle == nil ? true : nil,
       createState: .pending,
       agentContext: context.agentContext
     )
     let dialog = Dialog(optimisticForChat: chat)
 
-    do {
-      try await AppDatabase.shared.dbWriter.write { db in
-        try chat.save(db)
-        try dialog.save(db)
-      }
-    } catch {
-      log.error("Failed to create optimistic chat", error: error)
-    }
+    try chat.save(db)
+    try dialog.save(db)
   }
 
   public func validateOptimisticState() async -> Bool {

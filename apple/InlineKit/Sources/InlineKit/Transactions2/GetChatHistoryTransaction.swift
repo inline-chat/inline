@@ -12,6 +12,9 @@ public struct GetChatHistoryTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .getChatHistory
   public var context: Context
   public var type: TransactionKindType = .query()
+  // A crash can preserve the pending shell before its creation is persisted.
+  // Bound that dependency wait without expiring ready history while offline.
+  public internal(set) var dependencyTimeout: Duration? = .seconds(30)
 
   public struct Context: Sendable, Codable {
     public var peer: Peer

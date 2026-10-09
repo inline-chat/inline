@@ -821,6 +821,7 @@ actor Transactions {
 
   private func blockerState(for wrapper: TransactionWrapper) async -> BlockerEvaluation {
     guard !wrapper.transaction.blockers.isEmpty else { return .ready }
+    let expectedOwner = owner
 
     for blocker in wrapper.transaction.blockers {
       if satisfiedBlockers.contains(blocker) {
@@ -831,7 +832,12 @@ actor Transactions {
         return .blocked
       }
 
-      switch await blockerResolver.state(for: blocker) {
+      let state = await blockerResolver.state(for: blocker)
+      guard owner == expectedOwner, _queue[wrapper.id]?.id == wrapper.id else { return .blocked }
+      // Creation can finish while a database read of its earlier pending state
+      // is suspended. Authoritative success takes precedence over that read.
+      if satisfiedBlockers.contains(blocker) { continue }
+      switch state {
         case .satisfied:
           satisfiedBlockers.insert(blocker)
         case .blocked:
@@ -842,6 +848,27 @@ actor Transactions {
     }
 
     return .ready
+  }
+
+  /// Settle a dependency locally, even while offline or dispatch capacity is
+  /// full. Resolve first because creation may already have succeeded.
+  func failUnresolvedDependency(
+    transactionId: TransactionId, owner expectedOwner: TransactionOwner
+  ) async -> (wrapper: TransactionWrapper, error: TransactionError)? {
+    guard acceptsTransactions, owner == expectedOwner, let wrapper = _queue[transactionId] else { return nil }
+    let error: TransactionError
+    switch await blockerState(for: wrapper) {
+      case .ready: return nil
+      case .blocked: error = .timeout
+      case .failed: error = .dependencyFailed
+    }
+    guard acceptsTransactions, owner == expectedOwner, _queue[transactionId]?.id == wrapper.id else { return nil }
+    _queue.removeValue(forKey: transactionId)
+    rescheduleEphemeralExpiryTimer()
+    deleteFromDisk(transactionId: transactionId)
+    finishExecution(for: wrapper)
+    queueContinuation.yield(())
+    return (wrapper, error)
   }
 
   private func acquireExecutionKey(for wrapper: TransactionWrapper) -> Bool {

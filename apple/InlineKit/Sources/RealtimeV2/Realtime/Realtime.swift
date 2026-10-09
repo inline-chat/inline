@@ -167,6 +167,7 @@ public actor RealtimeV2 {
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: PendingTransactionContinuation] = [:]
+  private var dependencyTimeoutTasks: [TransactionId: Task<Void, Never>] = [:]
   private let storageIsReady: @Sendable () -> Bool
   private var didStart = false
 
@@ -252,6 +253,7 @@ public actor RealtimeV2 {
     tasks.removeAll()
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
+    for task in dependencyTimeoutTasks.values { task.cancel() }
     // Stop the transport and terminate its infinite event collector. Capture
     // only the manager so cleanup cannot extend RealtimeV2's lifetime.
     Task { [connectionManager] in
@@ -1091,7 +1093,8 @@ public actor RealtimeV2 {
   }
 
   private func getAndRemoveContinuation(for transactionId: TransactionId) -> PendingTransactionContinuation? {
-    transactionContinuations.removeValue(forKey: transactionId)
+    dependencyTimeoutTasks.removeValue(forKey: transactionId)?.cancel()
+    return transactionContinuations.removeValue(forKey: transactionId)
   }
 
   private func restartTransactions() async {
@@ -1213,6 +1216,7 @@ public actor RealtimeV2 {
     }
 
     log.trace("Queued transaction method=\(transaction.method)")
+    scheduleDependencyTimeout(for: transaction, transactionId: transactionId, owner: owner)
     await transactions.signalQueue()
   }
 
@@ -1240,6 +1244,8 @@ public actor RealtimeV2 {
   }
 
   private func resumeAllTransactionContinuations(throwing error: any Error) {
+    for task in dependencyTimeoutTasks.values { task.cancel() }
+    dependencyTimeoutTasks.removeAll()
     let pending = Array(transactionContinuations.values)
     transactionContinuations.removeAll()
     for item in pending {
@@ -1452,6 +1458,26 @@ public actor RealtimeV2 {
     }
   }
 
+  private func scheduleDependencyTimeout(
+    for transaction: any Transaction, transactionId: TransactionId, owner: TransactionOwner
+  ) {
+    guard isCurrentTransactionOwner(owner), let timeout = transaction.dependencyTimeout,
+          !transaction.blockers.isEmpty, dependencyTimeoutTasks[transactionId] == nil else { return }
+    dependencyTimeoutTasks[transactionId] = Task { [weak self] in
+      do { try await Task.sleep(for: timeout) } catch { return }
+      guard !Task.isCancelled else { return }
+      await self?.dependencyTimeoutReached(transactionId: transactionId, owner: owner)
+    }
+  }
+
+  private func dependencyTimeoutReached(transactionId: TransactionId, owner: TransactionOwner) async {
+    dependencyTimeoutTasks.removeValue(forKey: transactionId)
+    guard isCurrentTransactionOwner(owner),
+          let failure = await transactions.failUnresolvedDependency(transactionId: transactionId, owner: owner),
+          isCurrentTransactionOwner(owner) else { return }
+    await failQueuedTransaction(failure.wrapper, error: failure.error)
+  }
+
   private func retryTransactionQueueIfCurrent(owner expectedOwner: TransactionOwner) async {
     transactionRetryTask = nil
     guard acceptsTransactions, transactionOwner == expectedOwner, canExecuteTransactions() else { return }
@@ -1643,6 +1669,7 @@ public actor RealtimeV2 {
 
     await endTransactionSubmission(transaction, owner: owner)
     log.trace("Queued transaction method=\(transaction.method)")
+    await scheduleDependencyTimeout(for: transaction, transactionId: transactionId, owner: owner)
     await transactions.signalQueue()
     return true
   }

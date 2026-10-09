@@ -121,6 +121,10 @@ public protocol Transaction: Sendable, Codable {
   /// Dependencies that must be satisfied before this transaction can run remotely.
   var blockers: [TransactionBlocker] { get }
 
+  /// Bounds unresolved dependencies after queue admission. Ready or dispatched
+  /// work keeps its normal offline/reconnect behavior.
+  var dependencyTimeout: Duration? { get }
+
   /// Dependencies that become satisfied after a successful apply.
   var satisfiedBlockersOnSuccess: [TransactionBlocker] { get }
 
@@ -208,6 +212,8 @@ public extension Transaction {
   var blockers: [TransactionBlocker] {
     []
   }
+
+  var dependencyTimeout: Duration? { nil }
 
   var satisfiedBlockersOnSuccess: [TransactionBlocker] {
     []
