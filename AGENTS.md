@@ -45,6 +45,7 @@
 
 - Reuse completed checks, stage only the intended changes, verify the staged diff, and commit without unnecessary repeated validation.
 - Commit messages should be lowercase and scoped when useful, for example `macos: fix ...`, `server: add ...`, or `chore: ...`.
+- Never add yourself as a co-author in commits; no `Co-Authored-By` or other agent attribution trailers.
 - When I say “commit” or “finalize and commit” review and validate the change proportionally to its risk, check it against relevant feedback, and make scoped commits.
 
 ### Builds, tests, compiles
