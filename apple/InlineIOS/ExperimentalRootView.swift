@@ -467,7 +467,6 @@ private struct ExperimentalAuthedRootView: View {
 
     return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
       rootPage(nav: bindableNav)
-        .voicePlaybackRootPill(router: router)
         .background(Color(.systemBackground))
         .experimentalRootTitleDisplayMode()
         .navigationTitle("")
@@ -523,12 +522,14 @@ private struct ExperimentalAuthedRootView: View {
     TabView(selection: rootTabSelection) {
       Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
         chatsRoot(rootTab: .allChats)
+          .voicePlaybackRootPill(router: router)
       }
 
       // TODO: Decide the badge color before bridging UIKit's global
       // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
       Tab("Open", systemImage: openChatsTabSystemImage, value: .inbox) {
         chatsRoot(rootTab: .inbox)
+          .voicePlaybackRootPill(router: router)
       }
       .badge(homeListStore.state.presentation.inboxUnreadCount)
 
@@ -542,6 +543,7 @@ private struct ExperimentalAuthedRootView: View {
           onClose: closeSearch,
           onOpenResult: openSearchResult
         )
+        .voicePlaybackRootPill(router: router)
       }
 
       if #available(iOS 27.0, *) {

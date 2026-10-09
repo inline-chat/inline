@@ -14,7 +14,8 @@ final class PinnedMessageHeaderView: UIView {
     static let backgroundBottomInset: CGFloat = 8
     static let contentSpacing: CGFloat = 8
     static let closeButtonSize: CGFloat = max(44, EmbedMessageView.height)
-    static let fadeDuration: TimeInterval = 0.2
+    static let transitionDuration: TimeInterval = 0.28
+    static let voiceHiddenTransform = CGAffineTransform(translationX: 0, y: -8).scaledBy(x: 0.94, y: 0.94)
   }
 
   static let preferredHeight: CGFloat = max(EmbedMessageView.height, Constants.closeButtonSize)
@@ -36,8 +37,8 @@ final class PinnedMessageHeaderView: UIView {
   private var pinnedMessageObservation: AnyCancellable?
   private var messageObservation: AnyCancellable?
   private var currentMessageId: Int64?
-  private var isVisible = false
   private var isVoiceVisible = false
+  private var presentationGeneration = 0
   private var audioObservations: Set<AnyCancellable> = []
 
   private lazy var voiceHostingController: UIHostingController<VoicePlaybackPill> = {
@@ -120,7 +121,7 @@ final class PinnedMessageHeaderView: UIView {
     super.init(frame: .zero)
     setupViews()
     setupConstraints()
-    applyHiddenState()
+    updateHeaderPresentation(animated: false)
     if showsVoicePlayback { observeAudioPlayback() }
     registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: PinnedMessageHeaderView, _: UITraitCollection) in
       view.voiceHeightConstraint?.constant = VoicePlaybackPill.preferredHeight(compatibleWith: view.traitCollection)
@@ -137,7 +138,10 @@ final class PinnedMessageHeaderView: UIView {
     translatesAutoresizingMaskIntoConstraints = false
     backgroundColor = .clear
     isHidden = true
-    alpha = 0
+    backgroundView.isHidden = true
+    backgroundView.alpha = 0
+    voiceHostingController.view.isHidden = true
+    voiceHostingController.view.alpha = 0
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
@@ -251,7 +255,8 @@ final class PinnedMessageHeaderView: UIView {
           .order(PinnedMessage.Columns.position.asc)
           .fetchOne(db)
       }
-      updatePinnedMessageId(pinned?.messageId)
+      // Locally known pins belong to the first frame.
+      updatePinnedMessageId(pinned?.messageId, animated: false)
     } catch {
       log.error("Failed to read pinned message state", error: error)
     }
@@ -284,15 +289,66 @@ final class PinnedMessageHeaderView: UIView {
       .store(in: &audioObservations)
   }
 
-  private func updateHeaderPresentation() {
+  /// Each pill enters and leaves on its own, so one never restarts the other's transition.
+  private func updateHeaderPresentation(animated: Bool = true) {
     let hasPin = currentMessageId != nil
-    backgroundView.isHidden = !hasPin
-    voiceHostingController.view.isHidden = !isVoiceVisible
+    let showsVoice = isVoiceVisible
+    let isVisible = hasPin || showsVoice
+    let voiceView: UIView = voiceHostingController.view
+    let animates = animated && window != nil && !UIAccessibility.isReduceMotionEnabled
+    presentationGeneration += 1
+    let generation = presentationGeneration
+
+    if isVisible {
+      isHidden = false
+      closeButtonHeightConstraint?.constant = Constants.closeButtonSize
+    }
+    if animates {
+      // Place entering pills at their starting appearance before animating.
+      UIView.performWithoutAnimation {
+        if showsVoice, voiceView.isHidden {
+          voiceView.isHidden = false
+          voiceView.alpha = 0
+          voiceView.transform = Constants.voiceHiddenTransform
+        }
+        if hasPin, backgroundView.isHidden {
+          backgroundView.isHidden = false
+          backgroundView.alpha = 0
+        }
+        layoutIfNeeded()
+      }
+    }
+
     backgroundViewTopConstraint?.constant = Constants.backgroundTopInset
-      + (isVoiceVisible ? voiceSlotHeight : 0)
-    let height = currentPreferredHeight
-    onHeightChange?(height)
-    setVisible(height > 0)
+      + (showsVoice ? voiceSlotHeight : 0)
+    // The message list takes or gives back the space right away; only the pills animate.
+    onHeightChange?(currentPreferredHeight)
+
+    let changes = { [self] in
+      voiceView.alpha = showsVoice ? 1 : 0
+      voiceView.transform = showsVoice ? .identity : Constants.voiceHiddenTransform
+      backgroundView.alpha = hasPin ? 1 : 0
+      layoutIfNeeded()
+    }
+    let finish = { [self] in
+      guard generation == presentationGeneration else { return }
+      voiceView.isHidden = !showsVoice
+      backgroundView.isHidden = !hasPin
+      isHidden = !isVisible
+      if !isVisible { closeButtonHeightConstraint?.constant = 0 }
+    }
+
+    guard animates else {
+      changes()
+      finish()
+      return
+    }
+    UIView.animate(
+      springDuration: Constants.transitionDuration,
+      bounce: 0.1,
+      options: [.beginFromCurrentState, .allowUserInteraction],
+      animations: changes
+    ) { _ in finish() }
   }
 
   private var currentPreferredHeight: CGFloat {
@@ -327,7 +383,7 @@ final class PinnedMessageHeaderView: UIView {
       )
   }
 
-  private func updatePinnedMessageId(_ messageId: Int64?) {
+  private func updatePinnedMessageId(_ messageId: Int64?, animated: Bool = true) {
     guard messageId != currentMessageId else { return }
 
     currentMessageId = messageId
@@ -357,7 +413,7 @@ final class PinnedMessageHeaderView: UIView {
       }
       observePinnedMessageContent(messageId: messageId)
     }
-    updateHeaderPresentation()
+    updateHeaderPresentation(animated: animated)
   }
 
   private func loadPinnedMessage(messageId: Int64) -> FullMessage? {
@@ -412,53 +468,6 @@ final class PinnedMessageHeaderView: UIView {
           }
         }
       )
-  }
-
-  private func setVisible(_ visible: Bool, animate: Bool = true) {
-    guard visible != isVisible else { return }
-    isVisible = visible
-
-    let canAnimate = animate && window != nil && !UIAccessibility.isReduceMotionEnabled
-
-    if visible {
-      isHidden = false
-      alpha = canAnimate ? 0 : 1
-      closeButtonHeightConstraint?.constant = Constants.closeButtonSize
-      superview?.layoutIfNeeded()
-
-      guard canAnimate else { return }
-      UIView.animate(
-        withDuration: Constants.fadeDuration,
-        delay: 0,
-        options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
-      ) { [weak self] in
-        self?.alpha = 1
-      }
-    } else {
-      guard canAnimate else {
-        applyHiddenState()
-        return
-      }
-
-      alpha = 1
-      UIView.animate(
-        withDuration: Constants.fadeDuration,
-        delay: 0,
-        options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
-      ) { [weak self] in
-        self?.alpha = 0
-      } completion: { [weak self] _ in
-        guard let self, !self.isVisible else { return }
-        self.applyHiddenState()
-      }
-    }
-  }
-
-  private func applyHiddenState() {
-    isHidden = true
-    alpha = 0
-    closeButtonHeightConstraint?.constant = 0
-    onHeightChange?(0)
   }
 
   @objc private func primaryTapped() {

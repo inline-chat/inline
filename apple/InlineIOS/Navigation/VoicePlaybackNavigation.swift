@@ -112,6 +112,7 @@ private struct RootVoicePlaybackSlot: View {
   @ObservedObject private var player = SharedAudioPlayer.shared
   @State private var isVisible = false
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var isActive: Bool {
     guard isEnabled, router.presentedSheet == nil else { return false }
@@ -124,17 +125,19 @@ private struct RootVoicePlaybackSlot: View {
   }
 
   var body: some View {
-    Group {
+    VStack(spacing: 0) {
       if isActive, player.isVoiceSelected {
         VoicePlaybackPill { target in
           VoicePlaybackNavigation.open(target, router: router)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
-      } else {
-        Color.clear.frame(height: 0)
+        .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
       }
     }
+    .frame(maxWidth: .infinity)
+    // Only playback starting or ending animates; navigation swaps the slot instantly.
+    .animation(reduceMotion ? nil : .snappy(duration: 0.26), value: player.isVoiceSelected)
     .onAppear { isVisible = true }
     .onDisappear { isVisible = false }
     .alert("Voice playback failed", isPresented: Binding(

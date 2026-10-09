@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFAudio
 import Combine
+import ImageIO
 import MediaPlayer
 import UIKit
 
@@ -11,6 +12,8 @@ final class IOSVoicePlaybackSystem {
   private var cancellables: Set<AnyCancellable> = []
   private var commandTargets: [(MPRemoteCommand, Any)] = []
   private var publishedItem: AudioPlaybackItem?
+  private var artwork: (url: URL, image: MPMediaItemArtwork?)?
+  private var artworkTask: Task<Void, Never>?
   private let admission = AudioPlaybackCommandAdmission()
 
   init(center: AudioPlaybackCenter) {
@@ -51,12 +54,15 @@ final class IOSVoicePlaybackSystem {
       // Only clear a publication this adapter owns.
       if publishedItem != nil { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
       publishedItem = nil
+      artworkTask?.cancel()
+      artwork = nil
       setCommandsEnabled(false)
       return
     }
     setCommandsEnabled(true)
     publishedItem = item
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+    loadArtworkIfNeeded(center.display?.artworkURL)
+    var info: [String: Any] = [
       MPMediaItemPropertyTitle: center.display?.title ?? "Voice message",
       MPMediaItemPropertyArtist: center.display?.parentTitle ?? "Inline",
       MPMediaItemPropertyPlaybackDuration: center.duration,
@@ -66,6 +72,38 @@ final class IOSVoicePlaybackSystem {
       MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
       MPNowPlayingInfoPropertyIsLiveStream: false,
     ]
+    if let image = artwork?.image { info[MPMediaItemPropertyArtwork] = image }
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
+  /// Decodes the sender photo off the main actor, then republishes with it.
+  private func loadArtworkIfNeeded(_ url: URL?) {
+    guard artwork?.url != url else { return }
+    artworkTask?.cancel()
+    artwork = url.map { ($0, nil) }
+    guard let url else { return }
+    artworkTask = Task { [weak self] in
+      let thumbnail = await Task.detached(priority: .utility) { Self.makeThumbnail(contentsOf: url) }.value
+      guard !Task.isCancelled, let self, artwork?.url == url, let thumbnail else { return }
+      let image = Self.makeArtwork(thumbnail)
+      artwork?.image = image
+      if publishedItem != nil { MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] = image }
+    }
+  }
+
+  private nonisolated static func makeThumbnail(contentsOf url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: 600,
+    ] as CFDictionary)
+  }
+
+  /// Nonisolated so the system can call the artwork handler from its own queue.
+  private nonisolated static func makeArtwork(_ thumbnail: CGImage) -> MPMediaItemArtwork {
+    let image = UIImage(cgImage: thumbnail)
+    return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
   }
 
   private func install(_ remote: MPRemoteCommand, command: AudioPlaybackCenter.RemoteCommand) {

@@ -25,12 +25,18 @@ public struct AudioPlaybackDisplay: Codable, Equatable, Hashable, Sendable {
   public var parentTitle: String?
   public var subtitle: String?
   public var senderName: String?
+  /// A local image file for system now-playing surfaces.
+  public var artworkURL: URL?
 
-  public init(title: String, parentTitle: String? = nil, subtitle: String? = nil, senderName: String? = nil) {
+  public init(
+    title: String, parentTitle: String? = nil, subtitle: String? = nil, senderName: String? = nil,
+    artworkURL: URL? = nil
+  ) {
     self.title = title
     self.parentTitle = parentTitle
     self.subtitle = subtitle
     self.senderName = senderName
+    self.artworkURL = artworkURL
   }
 }
 

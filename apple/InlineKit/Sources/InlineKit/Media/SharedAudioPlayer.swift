@@ -55,6 +55,8 @@ public final class SharedAudioPlayer: ObservableObject {
 
   @Published public private(set) var loadingVoice: VoicePlaybackLoading?
   @Published public private(set) var playbackError: String?
+  /// True from the play request until audio actually starts, so controls can respond at once.
+  @Published public private(set) var isStartingPlayback = false
 
   public var isVoiceSelected: Bool { loadingVoice != nil || state.item?.kind == .voice }
 
@@ -417,6 +419,7 @@ public final class SharedAudioPlayer: ObservableObject {
     let nextState = center.state
     if let error = center.playbackError { playbackError = error }
     else if nextState.isPlaying, !state.isPlaying { playbackError = nil }
+    if isStartingPlayback != center.isStarting { isStartingPlayback = center.isStarting }
     guard state != nextState else { return }
     state = nextState
   }
@@ -433,6 +436,7 @@ public final class SharedAudioPlayer: ObservableObject {
   private func observeCenter() {
     withObservationTracking {
       _ = center.state
+      _ = center.isStarting
       _ = center.playbackError
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
@@ -445,7 +449,8 @@ public final class SharedAudioPlayer: ObservableObject {
 
   private func voicePresentation(for message: Message) -> SharedAudioPlayerPresentation {
     if let voicePresentationOverride { return voicePresentationOverride(message) }
-    let senderName = fetchUserDisplayName(id: message.fromId)
+    let sender = fetchUser(id: message.fromId)
+    let senderName = sender?.displayName
     let title = senderName.map { "Voice message from \($0)" } ?? "Voice message"
     let parentTitle = fetchPeerDisplayTitle(message.peerId)
     let subtitle = formattedDuration(seconds: message.voiceContent?.duration)
@@ -455,7 +460,8 @@ public final class SharedAudioPlayer: ObservableObject {
         title: title,
         parentTitle: parentTitle,
         subtitle: subtitle,
-        senderName: senderName
+        senderName: senderName,
+        artworkURL: sender?.getLocalURL()
       ),
       openTarget: SharedAudioPlayerOpenTarget(
         peer: AudioPlaybackPeer(message.peerId),
@@ -495,12 +501,15 @@ public final class SharedAudioPlayer: ObservableObject {
   }
 
   private func fetchUserDisplayName(id: Int64) -> String? {
+    fetchUser(id: id)?.displayName
+  }
+
+  private func fetchUser(id: Int64) -> User? {
     do {
       return try AppDatabase.shared.dbWriter.read { db in
         try User
           .filter(Column("id") == id)
-          .fetchOne(db)?
-          .displayName
+          .fetchOne(db)
       }
     } catch {
       log.error("Failed to fetch audio playback user title", error: error)
