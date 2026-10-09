@@ -121,6 +121,49 @@ struct AnchoredMessageWindowTests {
     #expect(Set(expandedIDs).count == expandedIDs.count)
     #expect(expandedIDs == expandedIDs.sorted())
   }
+
+  @Test("a message sent or received while scrolled up at the live end is shown and survives a reload")
+  @MainActor
+  func scrolledUpLiveWindowStillShowsNewMessages() async throws {
+    let fixture = try await Fixture()
+    let model = fixture.model(rows: Array(fixture.messages[79 ... 99]))
+    defer { model.dispose() }
+    // The list reports a visible row as soon as the user scrolls off the bottom.
+    model.setAtBottom(false)
+    model.setHistoryAnchor(90)
+
+    let pending = try await fixture.database.dbWriter.write { db -> FullMessage in
+      var message = Message(
+        messageId: -5, randomId: 5, fromId: 1, date: Date(timeIntervalSince1970: 200), text: "Sent while scrolled up",
+        peerUserId: nil, peerThreadId: 1, chatId: 1, out: true, status: .sending
+      )
+      try message.saveMessage(db)
+      let row = try FullMessage.queryRequest(currentUserId: 1).filter(Column("messageId") == -5).fetchOne(db)
+      return try #require(row)
+    }
+    fixture.publisher.publisher.send(.add(.init(messages: [pending], peer: .thread(id: 1))))
+    #expect(model.messages.last?.id == pending.id)
+
+    var reloaded = false
+    model.observe { if case .reload = $0 { reloaded = true } }
+    fixture.publisher.messagesReload(peer: .thread(id: 1), animated: false)
+    for _ in 0 ..< 200 where !reloaded { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(reloaded)
+    #expect(model.messages.contains { $0.id == pending.id })
+
+    let incoming = try await fixture.database.dbWriter.write { db -> FullMessage in
+      var message = Message(
+        messageId: 101, fromId: 1, date: Date(timeIntervalSince1970: 201), text: "Incoming",
+        peerUserId: nil, peerThreadId: 1, chatId: 1
+      )
+      try message.saveMessage(db)
+      let row = try FullMessage.queryRequest(currentUserId: 1).filter(Column("messageId") == 101).fetchOne(db)
+      return try #require(row)
+    }
+    fixture.publisher.publisher.send(.add(.init(messages: [incoming], peer: .thread(id: 1))))
+    #expect(model.messages.contains { $0.message.messageId == 101 })
+    #expect(model.messages.contains { $0.id == pending.id })
+  }
 }
 
 private struct Fixture {
@@ -159,10 +202,17 @@ private struct Fixture {
     }
   }
 
+  /// The prepared first frame carries the database's own paging edges.
+  private func metadata(for rows: [FullMessage]) -> MessagesProgressiveViewModel.LoadedWindowMetadata {
+    (try? database.reader.read { db in
+      try MessagesProgressiveViewModel.loadedWindowMetadata(db, peer: .thread(id: 1), messages: rows)
+    }) ?? .init(messages: rows, holes: [])
+  }
+
   @MainActor func model(rows: [FullMessage], parent: FullMessage? = nil) -> MessagesProgressiveViewModel {
     MessagesProgressiveViewModel(
       peer: .thread(id: 1),
-      initialState: .init(messages: rows, threadAnchor: parent, loadedWindowMetadata: .init(messages: rows, holes: [])),
+      initialState: .init(messages: rows, threadAnchor: parent, loadedWindowMetadata: metadata(for: rows)),
       database: database, publisher: publisher, currentUserId: 1
     )
   }

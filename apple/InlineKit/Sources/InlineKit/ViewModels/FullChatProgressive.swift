@@ -199,6 +199,7 @@ public class MessagesProgressiveViewModel {
   // Used to ignore range when reloading if at bottom
   private var atBottom: Bool = true
   private var historyAnchorID: Int64?
+  private var hasNewerLocalMessages = false
   // note: using date is most reliable as our sorting is based on date
   private var minDate: Date = .init()
   private var maxDate: Date = .init()
@@ -337,6 +338,7 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = projected.metadata.newestLoadedMessageId
     canLoadOlderFromLocal = projected.metadata.canLoadOlderFromLocal
     canLoadNewerFromLocal = projected.metadata.canLoadNewerFromLocal
+    hasNewerLocalMessages = projected.metadata.hasNewerLocalMessages
     historyCoverage = projected.metadata.historyCoverage
     atBottom = projected.metadata.historyCoverage.isAtCertifiedLiveEnd
   }
@@ -613,7 +615,10 @@ public class MessagesProgressiveViewModel {
           let newMessages = reapplyingPendingAcknowledgements(
             to: messageAdd.messages.filter {
               guard !existingIds.contains($0.id) else { return false }
-              guard historyAnchorID != nil, !atBottom else { return true }
+              // Scrolling up does not detach a window that already ends at
+              // the newest message; only a window with newer rows below it
+              // leaves new messages to paging.
+              guard historyAnchorID != nil, !atBottom, hasNewerLocalMessages else { return true }
               return $0.message.messageId > 0
                 && $0.message.messageId >= (oldestLoadedMessageId ?? 0)
                 && $0.message.messageId <= (newestLoadedMessageId ?? 0)
@@ -801,8 +806,10 @@ public class MessagesProgressiveViewModel {
         let metadataRequest = beginLoadedWindowMetadataRequest()
         // Shown rows stay while the newest history is still unknown. Once the
         // tail is certified, rows on the far side of a gap give way to it.
+        // A send that was already shown always stays.
         let retained = snapshot.metadata.historyCoverage.isAtCertifiedLiveEnd
-          ? [] : Set(existingMessages.map(\.id))
+          ? Set(existingMessages.lazy.filter { $0.message.messageId <= 0 }.map(\.id))
+          : Set(existingMessages.map(\.id))
         _ = applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest, retainingMessageIDs: retained)
         reloadTask = nil
         callback?(.reload(animated: animated))
@@ -837,10 +844,18 @@ public class MessagesProgressiveViewModel {
         .order(Column("messageId").desc)
       switch mode {
         case let .around(anchorID, limit):
-          let rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ??
+          var rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ??
             baseQuery(for: peer, currentUserId: currentUserId)
               .filter(visibleIDs.contains(Column("globalId")))
               .fetchAll(db)
+          // A send shown in this window has no history coordinate yet, or
+          // gained one after it was shown. Keep it by identity.
+          let loadedIDs = Set(rows.map(\.id))
+          let shownPendingIDs = existingMessages.filter { $0.message.messageId <= 0 }.map(\.id)
+          rows += try baseQuery(for: peer, currentUserId: currentUserId)
+            .filter(shownPendingIDs.contains(Column("globalId")))
+            .fetchAll(db)
+            .filter { !loadedIDs.contains($0.id) }
           let normalized = stableSortedMessages(rows, reversed: reversed)
           return try PublisherReloadSnapshot(
             messages: normalized,
@@ -974,6 +989,10 @@ public class MessagesProgressiveViewModel {
         && newerCandidateMessageID != nil
         && coverage.hasCertifiedNewerEdge
       historyCoverage = coverage
+    }
+
+    var hasNewerLocalMessages: Bool {
+      newerCandidateMessageID != nil
     }
 
     fileprivate func projecting(
@@ -1182,6 +1201,7 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = metadata.newestLoadedMessageId
     canLoadOlderFromLocal = metadata.canLoadOlderFromLocal
     canLoadNewerFromLocal = metadata.canLoadNewerFromLocal
+    hasNewerLocalMessages = metadata.hasNewerLocalMessages
     historyCoverage = metadata.historyCoverage
   }
 
@@ -1256,6 +1276,7 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = projection.metadata.newestLoadedMessageId
     canLoadOlderFromLocal = projection.metadata.canLoadOlderFromLocal
     canLoadNewerFromLocal = projection.metadata.canLoadNewerFromLocal
+    hasNewerLocalMessages = projection.metadata.hasNewerLocalMessages
     historyCoverage = projection.metadata.historyCoverage
     return true
   }

@@ -133,15 +133,16 @@ struct NewThreadMessageVisibilityTests {
       #expect(try MessageHistoryCoverageStore.intersects(db, chatId: 1, lowerId: 100,
                                                       upperId: MessageHistoryHole.positiveMessageIDMax) == false)
     }
-    try await fixture.reload(model, expecting: anchored ? [1] : [100, 101, 102, -456])
+    // The pending send was shown before the reload and stays in either window.
+    try await fixture.reload(model, expecting: anchored ? [1, -456] : [100, 101, 102, -456])
     #expect(model.historyCoverage.isAtCertifiedLiveEnd == !anchored)
     #expect(!model.historyCoverage.isCertifiedContinuation(between: 1, and: 100))
     #expect(model.historyCoverage.certifiedReadMaxID(after: 0, through: 102) == nil)
     if !anchored {
       #expect(!model.canLoadOlderFromLocal)
       #expect(model.oldestLoadedMessageId == 100)
-      #expect(model.messages.first(where: { $0.message.messageId == -456 })?.id == pending.id)
     }
+    #expect(model.messages.first(where: { $0.message.messageId == -456 })?.id == pending.id)
   }
 
   @Test("A live publication behind a reload reconciles deletion, edit and optimistic ID confirmation",
