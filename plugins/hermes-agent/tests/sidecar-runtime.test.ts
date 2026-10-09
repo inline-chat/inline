@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process"
 import http from "node:http"
+import { readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import net from "node:net"
 import os from "node:os"
@@ -529,6 +530,16 @@ describe("sidecar runtime", () => {
         },
       })
 
+      for (const spaceId of [undefined, "77"]) {
+        for (const participants of [undefined, []]) {
+          await expectOk(post(port, "/create-chat", {
+            title: "Connected account only",
+            ...(spaceId ? { spaceId } : {}),
+            ...(participants ? { participantUserIds: participants } : {}),
+          }, auth))
+        }
+      }
+
       const publicWithoutSpace = await post(port, "/create-chat", {
         title: "Invalid public thread",
         isPublic: true,
@@ -552,6 +563,15 @@ describe("sidecar runtime", () => {
 
       const finalHealth = await post(port, "/healthz", {}, auth)
       const diagnostics = resultOf(finalHealth.body).diagnostics
+      const createCalls = (diagnostics as {
+        calls: Array<{ method: string; params: { createChat?: { title: string; isPublic: boolean; participants: unknown[] } } }>
+      }).calls.filter((call) => call.method === "invokeUncheckedRaw:CREATE_CHAT")
+      expect(createCalls.map((call) => call.params.createChat?.participants)).toEqual([
+        [{ userId: "42" }, { userId: "43" }],
+        [],
+        ...Array.from({ length: 4 }, () => [{ userId: "999" }]),
+      ])
+      expect(createCalls.slice(2).every((call) => call.params.createChat?.isPublic === false)).toBe(true)
       const callsJson = JSON.stringify(diagnostics)
       expect(callsJson).toContain("sendMessage")
       expect(callsJson).toContain("uploadFile")
@@ -571,6 +591,52 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("Private planning")
       expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
       expect(callsJson.match(/invokeUncheckedRaw:GET_CHAT_PARTICIPANTS/g)).toHaveLength(1)
+    } finally {
+      await post(port, "/shutdown", {}, auth).catch(() => undefined)
+      sidecar.kill("SIGTERM")
+      await waitForExit(sidecar, 2_000)
+    }
+  })
+
+  it.each([null, "", "not-an-id"])("rejects a private default with an unavailable or malformed connected identity (%j)", async (identity) => {
+    const dir = await tempDir()
+    const outdir = path.join(dir, "bundle")
+    buildSidecarBundle(outdir)
+    // Replace only the mock SDK's GET_ME response at the external boundary.
+    // The connection loop, HTTP parser and CREATE_CHAT handler stay intact.
+    const entry = path.join(outdir, "index.mjs")
+    const bundle = readFileSync(entry, "utf8")
+    const mockUser = 'user: { id: 999n, username: "mock_inline_bot" }'
+    expect(bundle.split(mockUser)).toHaveLength(2)
+    writeFileSync(entry, bundle.replace(mockUser, `user: { id: ${JSON.stringify(identity)}, username: "mock_inline_bot" }`))
+    const port = await getOpenPort()
+    const token = "runtime-token"
+    const sidecar = spawn(process.execPath, [entry], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        INLINE_TOKEN: "fake-inline-token",
+        INLINE_BASE_URL: "http://127.0.0.1/mock-inline",
+        INLINE_SIDECAR_TOKEN: token,
+        INLINE_SIDECAR_PORT: String(port),
+        INLINE_SIDECAR_BIND: "127.0.0.1",
+        INLINE_STATE_PATH: path.join(dir, "state.json"),
+        INLINE_SIDECAR_TEST_MOCK: "1",
+        INLINE_SIDECAR_TEST_ALLOW_MOCK: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const logs = collectOutput(sidecar)
+    const auth = { "x-hermes-sidecar-token": token }
+    try {
+      if (identity == null) await waitForHttp(port, sidecar, logs)
+      else await waitForConnected(port, token, sidecar, logs)
+      const result = await post(port, "/create-chat", { title: "Cannot guess an account" }, auth)
+      expect(result.status).toBe(identity == null ? 503 : 400)
+      expect(result.body).toMatchObject({ ok: false, errorKind: identity == null ? "transient" : "bad_format" })
+      const health = await post(port, "/healthz", {}, auth)
+      const diagnostics = resultOf(health.body).diagnostics as { calls: Array<{ method: string }> }
+      expect(diagnostics.calls.some((call) => call.method === "invokeUncheckedRaw:CREATE_CHAT")).toBe(false)
     } finally {
       await post(port, "/shutdown", {}, auth).catch(() => undefined)
       sidecar.kill("SIGTERM")

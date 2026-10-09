@@ -789,6 +789,9 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
   if (isPublic && participantUserIds.length > 0) {
     throw new SidecarError("public create-chat cannot include participantUserIds", "bad_format")
   }
+  if (!isPublic && participantUserIds.length === 0) {
+    participantUserIds.push(readRequiredInlineId({ meId }, "meId"))
+  }
 
   const result = await client.invokeUncheckedRaw(Method.CREATE_CHAT, {
     oneofKind: "createChat",

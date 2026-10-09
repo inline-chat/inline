@@ -3315,6 +3315,25 @@ async def assert_action_thread_targets():
         ["Always Allow", "Deny"],
     ]
 
+    for count in (7, 8, 10, 11):
+        calls.clear()
+        clarify_id = f"clarify-choices-{count}"
+        choices = [f"Choice {index + 1}" for index in range(count)]
+        await adapter.send_clarify("chat:10", "Choose", choices, clarify_id, "session-choices", metadata=metadata)
+        path, body = calls[-1]
+        assert path == "/send" and body["target"] == {"chatId": "99"}
+        rows = body["actions"]["rows"]
+        actions = [action for row in rows for action in row["actions"]]
+        kept = min(count, 10)
+        assert len(rows) <= 6 and all(1 <= len(row["actions"]) <= 2 for row in rows)
+        assert [action["text"] for action in actions] == [*[str(index + 1) for index in range(kept)], "Other"]
+        expected_ids = [*[f"system:cl:{clarify_id}:{index}" for index in range(kept)], f"system:cl:{clarify_id}:other"]
+        assert [action["id"] for action in actions] == expected_ids
+        assert [action["callback"] for action in actions] == expected_ids
+        assert adapter._clarify_choices[clarify_id] == choices[:10]
+        assert adapter._clarify_sessions[clarify_id] == "session-choices"
+        assert body["text"] == "\n".join(["Clarify: Choose", "", *[f"{index + 1}. {label}" for index, label in enumerate(choices[:10])]])
+
     calls.clear()
     await adapter.send_exec_approval(
         "chat:10",

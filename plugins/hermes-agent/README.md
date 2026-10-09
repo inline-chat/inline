@@ -431,7 +431,9 @@ chat, while `create_chat` creates a new top-level destination. `create_chat`
 requires a title, defaults to private, accepts optional participant user IDs or
 a parent space ID, and requires both `space_id` and explicit `is_public: true`
 for space-wide visibility. It returns the new chat ID so Hermes can link it in
-the normal reply.
+the normal reply. Omitted or empty private participants create a conversation
+accessible only to the connected account. Include intended human participants
+explicitly; owning the bot does not grant membership in its private conversations.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.

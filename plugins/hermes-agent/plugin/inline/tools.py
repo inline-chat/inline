@@ -226,7 +226,7 @@ INLINE_TOOL_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "maxItems": 50,
-                "description": "User IDs for a private create_chat destination. Omit for a private bot-only thread.",
+                "description": "User IDs for a private create_chat destination. Omit or pass [] for a connected-account-only thread. Include intended human participants explicitly; bot ownership does not grant access.",
             },
             "is_public": {
                 "type": "boolean",

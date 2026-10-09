@@ -5024,7 +5024,7 @@ class InlineAdapter(BasePlatformAdapter):
             "target": self._target_for(chat_id, metadata),
             "text": "\n".join(lines),
             "parseMarkdown": self._parse_markdown,
-            "actions": {"rows": [{"actions": actions}]},
+            "actions": {"rows": self._action_rows(actions)},
         })
 
     async def send_exec_approval(
