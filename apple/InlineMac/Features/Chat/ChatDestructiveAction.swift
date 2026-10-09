@@ -124,16 +124,33 @@ enum ChatDestructiveActionRunner {
     dependencies: AppDependencies?,
     navigateOut: @escaping @MainActor () -> Void
   ) {
-    let currentUserId = dependencies?.auth.getCurrentUserId() ?? Auth.shared.getCurrentUserId()
-    ToastCenter.shared.showLoading(action.loadingTitle)
+    let auth = dependencies?.auth.handle ?? Auth.shared.handle
+    let accountToken: AuthAccountMutationToken
+    do {
+      accountToken = try auth.beginAccountMutation()
+    } catch {
+      log.error(action.failureTitle, error: error)
+      ToastCenter.shared.showError(action.failureTitle)
+      return
+    }
+    let databaseWriter = (dependencies?.database ?? AppDatabase.shared).dbWriter
+    let loadingID = ToastCenter.shared.showLoading(action.loadingTitle)
 
     Task(priority: .userInitiated) {
       do {
-        try await send(action, peer: peer, currentUserId: currentUserId)
-        try await deleteLocalChat(peer: peer)
+        try await send(action, peer: peer, accountToken: accountToken)
+        if action == .leave {
+          try await Chat.deleteFromLocalDatabase(
+            peerId: peer,
+            databaseWriter: databaseWriter,
+            auth: auth,
+            accountToken: accountToken
+          )
+        }
 
-        await MainActor.run {
-          ToastCenter.shared.dismiss()
+        try await MainActor.run {
+          try auth.validateAccountMutation(accountToken)
+          ToastCenter.shared.dismiss(loading: loadingID)
           if dependencies?.removeChatFromNavigation(peer: peer) != true {
             navigateOut()
           }
@@ -143,7 +160,8 @@ enum ChatDestructiveActionRunner {
         log.error(action.failureTitle, error: error)
 
         await MainActor.run {
-          ToastCenter.shared.dismiss()
+          ToastCenter.shared.dismiss(loading: loadingID)
+          guard (try? auth.validateAccountMutation(accountToken)) != nil else { return }
           ToastCenter.shared.showError(action.failureTitle)
         }
       }
@@ -153,35 +171,24 @@ enum ChatDestructiveActionRunner {
   private static func send(
     _ action: ChatDestructiveAction,
     peer: Peer,
-    currentUserId: Int64?
+    accountToken: AuthAccountMutationToken
   ) async throws {
     switch action {
     case .delete:
-      _ = try await Api.realtime.send(.deleteChat(peerId: peer))
+      _ = try await Api.realtime.send(.deleteChat(peerId: peer), expectedAccount: accountToken)
 
     case .leave:
-      guard let chatId = peer.asThreadId(), let currentUserId else {
+      guard let chatId = peer.asThreadId() else {
         throw ChatDestructiveActionError.missingCurrentUser
       }
 
-      _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, userID: currentUserId))
+      _ = try await Api.realtime.send(
+        .removeChatParticipant(chatID: chatId, userID: accountToken.userID),
+        expectedAccount: accountToken
+      )
     }
   }
 
-  private static func deleteLocalChat(peer: Peer) async throws {
-    if let chat = try Chat.getByPeerId(peerId: peer) {
-      try await chat.deleteFromLocalDatabase()
-      return
-    }
-
-    guard let chatId = peer.asThreadId() else { return }
-
-    try await AppDatabase.shared.dbWriter.write { db in
-      try Message.filter(Column("chatId") == chatId).deleteAll(db)
-      try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
-      try Chat.filter(Column("id") == chatId).deleteAll(db)
-    }
-  }
 }
 
 private enum ChatDestructiveActionError: Error {

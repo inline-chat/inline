@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -409,6 +410,29 @@ public extension Chat {
 }
 
 public extension Chat {
+  /// Removes a confirmed chat projection under the account lease that initiated it.
+  static func deleteFromLocalDatabase(
+    peerId: Peer,
+    databaseWriter: any DatabaseWriter,
+    auth: AuthHandle,
+    accountToken: AuthAccountMutationToken
+  ) async throws {
+    try await databaseWriter.write { db in
+      try auth.validateAccountMutation(accountToken)
+      let dialogId = Dialog.getDialogId(peerId: peerId)
+      let chat = try getByPeerId(db: db, peerId: peerId)
+      let dialog = try Dialog.fetchOne(db, key: dialogId)
+      guard chat != nil || dialog != nil else { return }
+      if let chat {
+        try deleteLocalChatData(db, chatId: chat.id)
+        try Dialog.deleteOne(db, key: dialogId)
+      } else {
+        try SyncRemovalRevision.advance(db)
+        try Dialog.deleteOne(db, key: dialogId)
+      }
+    }
+  }
+
   /// Deletes this chat and its dialog from the local database.
   /// - Throws: Any database error.
   func deleteFromLocalDatabase() async throws {

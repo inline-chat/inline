@@ -513,35 +513,8 @@ public class DataManager: ObservableObject {
     guard canDelete?() != false else { return false }
 
     do {
-      _ = try await Api.realtime.send(.deleteChat(peerId: peerId))
-      try await writeAccountProjection(token: mutationToken) { db in
-        try SyncRemovalRevision.advance(db)
-        do {
-          try Message.filter(Column("chatId") == threadId).deleteAll(db)
-        } catch {
-          Log.shared.error("Failed to delete chat messages", error: error)
-        }
-
-        do {
-          try Dialog.filter(Column("peerThreadId") == threadId).deleteAll(db)
-        } catch {
-          Log.shared.error("Failed to delete dialog", error: error)
-        }
-
-        do {
-          try Chat.filter(Column("id") == threadId).deleteAll(db)
-        } catch {
-          Log.shared.error("Failed to delete chat", error: error)
-        }
-      }
-
-      Task.detached {
-        NotificationCenter.default.post(
-          name: Notification.Name("chatDeletedNotification"),
-          object: nil,
-          userInfo: ["chatId": threadId]
-        )
-      }
+      _ = try await Api.realtime.send(.deleteChat(peerId: peerId), expectedAccount: mutationToken)
+      try auth.validateAccountMutation(mutationToken)
 
       return true
     } catch let error as RealtimeAPIError {
