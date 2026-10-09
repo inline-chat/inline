@@ -770,7 +770,9 @@ public class MessagesProgressiveViewModel {
   /// must not. A generation fence prevents a delayed snapshot from overwriting
   /// a newer incremental publication, pagination result, or reload request.
   private func scheduleReload(animated: Bool?) {
-    let mode: PublisherReloadMode = if let historyAnchorID, !atBottom {
+    // A scroll anchor cannot shrink a window that already reaches the cached
+    // tail. Only a window with newer cached rows reloads around its anchor.
+    let mode: PublisherReloadMode = if let historyAnchorID, !atBottom, hasNewerLocalMessages {
       .around(anchorID: historyAnchorID, limit: max(initialLimit, messages.count))
     } else if atBottom {
       .replaceLatest(limit: initialLimit)
