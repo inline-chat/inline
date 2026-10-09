@@ -2,11 +2,11 @@
 
 `@inline-chat/chat-sdk` connects [Vercel Chat SDK](https://chat-sdk.dev/) to the
 [Inline Bot API](https://inline.chat/docs/bot-api). Requires Node.js 20+ or Bun and
-Chat SDK 4.40+. This package is unreleased; the installation commands below apply
-once it is published. Development is isolated to this folder and uses published dependencies.
+Chat SDK 4.40+. The current release is `0.1.0-alpha.0`; use the `alpha` tag to install
+the prerelease. Development is isolated to this folder and uses published dependencies.
 
 ```sh
-bun add @inline-chat/chat-sdk chat @chat-adapter/state-redis
+bun add @inline-chat/chat-sdk@alpha chat @chat-adapter/state-redis
 ```
 
 ```ts

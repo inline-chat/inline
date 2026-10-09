@@ -61,10 +61,16 @@ commit, manifest version and checksums, five assets, macOS signature/notarizatio
 Homebrew version, and installed binary separately. Build-only runs retain CI
 artifacts without publishing. Local release builds are not required.
 
+For installed checks, resolve `command -v inline` and use the candidate's exact
+executable if another installation shadows it on PATH. Check `inline bridge
+doctor --json` for the service's installed binary and provider executable;
+verify their versions separately from the CLI selected by the shell.
+
 Keep human release notes in a reviewed file; the script creates generic notes.
 After publication, attach the reviewed text with `gh release edit cli-vVERSION
---repo inline-chat/inline --notes-file PATH`. The 0.7.7 draft is in
-[cli-v0.7.7.md](releases/v0.7.7.md).
+--repo inline-chat/inline --notes-file PATH`. The current alpha notes are in
+[v0.7.16-alpha.0.md](releases/v0.7.16-alpha.0.md); refresh them for the final
+release version and source.
 
 ## Release authentication
 
