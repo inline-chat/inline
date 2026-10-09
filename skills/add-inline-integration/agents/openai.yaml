@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Inline Integration"
+  short_description: "Add Inline to agent harnesses and team bots"
+  default_prompt: "Use $add-inline-integration to add Inline as another messaging platform in this system, preserving its existing integrations."

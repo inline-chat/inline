@@ -18,6 +18,16 @@ For a first bot integration, [create a bot](/docs/creating-a-bot), [receive a te
 
 If you are connecting an existing agent, use [Set Up an Agent](/docs/agents). You do not need to implement an API client for that workflow.
 
+### Add Inline to a product or bot
+
+If your agent harness, assistant product, or team bot already supports Slack, Telegram, Discord, or Teams, the [`add-inline-integration` skill](https://github.com/inline-chat/inline/tree/main/skills/add-inline-integration) guides a coding agent through adding Inline as another channel in your codebase. It covers the adapter, concept mappings from those platforms, and fallbacks for features Inline does not have yet. Install it where your coding agent runs:
+
+```bash
+npx skills add inline-chat/inline --skill add-inline-integration
+```
+
+Then ask the agent to add Inline as a messaging platform, keeping your existing integrations.
+
 ## SDKs
 
 Choose the interface before choosing its library:

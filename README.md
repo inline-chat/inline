@@ -73,6 +73,7 @@ We think of friend groups and communities as first-class citizens. At this point
 - [**Install the CLI**](https://inline.chat/docs/cli#install): Create workflows and interact with Inline with all the features of our clients.
 - [**Add Your Agents**](https://inline.chat/docs/agents): Setup your OpenClaw, Hermes Agent, or Codex, Claude, OpenCode, etc to use them from Inline.
 - [**ChatGPT plugin**](https://chatgpt.com/plugins/plugin_asdk_app_6a660963e7b481918e10c08dd1e0430f?q=inline): Connect Inline to ChatGPT.
+- [**Add Inline to your product or bot**](https://inline.chat/docs/developers#add-inline-to-a-product-or-bot): A skill for your coding agent to add Inline as a channel next to Slack, Telegram, Discord, or Teams.
 - **[MCP](https://inline.chat/docs/mcp) and [Plugins](https://inline.chat/docs/add-inline)**: Connect Inline to your favorite LLM to catch up, send messages and use threads for context.
 - [**Join the Town Hall**](https://inline.chat/s/townhall): Say hi in our little community of early users and builders.
 

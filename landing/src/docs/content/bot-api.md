@@ -7,6 +7,8 @@ The Bot API lets an integration read conversations, send messages, manage thread
 
 Start with this API for HTTP integrations. Use the [Realtime API](/docs/realtime-api) when you need a persistent connection and synchronized client state. To connect an existing agent runtime, follow [Set Up an Agent](/docs/agents).
 
+Porting an existing Slack or Telegram integration? Give your coding agent the [`add-inline-integration` skill](/docs/developers#add-inline-to-a-product-or-bot).
+
 For your first request, [create a bot](/docs/creating-a-bot), [receive a chat ID](#receive-a-chat-id), then [send a message with TypeScript](#typescript-client). If you already have a working client, jump to [Methods](#methods) or the [complete method reference](https://api.inline.chat/bot-api-reference).
 
 ## Bot API
