@@ -125,11 +125,8 @@ private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
   @State private var homeActions = ExperimentalHomeActionCoordinator()
   @State private var translationCoordinator = ExperimentalHomeTranslationCoordinator()
-  @State private var searchQuery = ""
-  @State private var searchFocusRequested = false
+  @State private var searchPresentation = ExperimentalSearchPresentation()
   @State private var searchInteractionRevision = 0
-  @State private var isSearchFieldFocused = false
-  @State private var isSearchKeyboardVisible = false
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
@@ -298,7 +295,7 @@ private struct ExperimentalAuthedRootView: View {
         bindableRouter.selectedTab = desiredTab
       }
       if desiredRootTab == .search {
-        searchFocusRequested = false
+        searchPresentation.focusRequested = false
       } else {
         lastContentRootTab = desiredRootTab
       }
@@ -319,7 +316,7 @@ private struct ExperimentalAuthedRootView: View {
         // Search-result callback and resign; IOS-06 owns route-level deferral.
         searchInteractionRevision &+= 1
         pendingSearchExit = nil
-        searchFocusRequested = false
+        searchPresentation.focusRequested = false
       }
       let desiredTab = desiredRootTab.appTab
       if bindableRouter.selectedTab != desiredTab {
@@ -331,7 +328,7 @@ private struct ExperimentalAuthedRootView: View {
           lastContentRootTab = previousRootTab
         }
         pendingSearchExit = nil
-        searchFocusRequested = false
+        searchPresentation.focusRequested = false
       } else if desiredRootTab != .newChat {
         lastContentRootTab = desiredRootTab
       }
@@ -353,12 +350,12 @@ private struct ExperimentalAuthedRootView: View {
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
       guard isSearchRootSelected else { return }
       withAnimation(searchChromeAnimation) {
-        isSearchKeyboardVisible = true
+        searchPresentation.isKeyboardVisible = true
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
       withAnimation(searchChromeAnimation) {
-        isSearchKeyboardVisible = false
+        searchPresentation.isKeyboardVisible = false
         completePendingSearchExit()
       }
     }
@@ -474,12 +471,10 @@ private struct ExperimentalAuthedRootView: View {
         .background(Color(.systemBackground))
         .experimentalRootTitleDisplayMode()
         .navigationTitle("")
-        .toolbarVisibility(isSearchActivePresentation ? .hidden : .visible, for: .navigationBar)
-        .animation(searchChromeAnimation, value: isSearchActivePresentation)
         .toolbar {
           experimentalToolbarContent()
         }
-        .gridHomeEntry(isVisible: !isSearchActivePresentation, onOpen: openGrid)
+        .modifier(ExperimentalSearchRootChrome(presentation: searchPresentation, onOpenGrid: openGrid))
         .navigationDestination(for: Destination.self) { destination in
           ExperimentalDestinationView(
             nav: bindableNav,
@@ -537,11 +532,11 @@ private struct ExperimentalAuthedRootView: View {
       }
       .badge(homeListStore.state.presentation.inboxUnreadCount)
 
-      Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-        ExperimentalSearchView(
-          query: $searchQuery,
-          focusRequested: $searchFocusRequested,
-          isActivePresentation: isSearchActivePresentation,
+      // This page owns its input and focus. The system search-tab lifecycle is
+      // intended for searchable content and can dismiss our field on tab updates.
+      Tab("Search", systemImage: "magnifyingglass", value: .search) {
+        ExperimentalSearchTab(
+          presentation: searchPresentation,
           activeSpaceId: nav.activeSpaceId,
           onFocusChanged: searchFocusChanged,
           onClose: closeSearch,
@@ -598,24 +593,21 @@ private struct ExperimentalAuthedRootView: View {
     !usesIPadSplitView && RootTab(appTab: router.selectedTab) == .search && router.selectedTabPath.isEmpty
   }
 
-  private var isSearchActivePresentation: Bool {
-    isSearchRootSelected
-      && (searchFocusRequested || isSearchFieldFocused || isSearchKeyboardVisible)
-  }
-
   private var searchChromeAnimation: Animation? {
     reduceMotion ? nil : .smooth(duration: 0.24)
   }
 
   private func selectRootTab(_ newRootTab: RootTab, previousRootTab: RootTab) {
-    guard newRootTab != .newChat else { return }
+    // UIKit may reassert the selected tab while reconciling its tab model.
+    // Reselection must not run the tab-entry lifecycle and cancel editing.
+    guard newRootTab != .newChat, newRootTab != previousRootTab else { return }
 
     if newRootTab == .search {
       if previousRootTab != .search, previousRootTab != .newChat {
         lastContentRootTab = previousRootTab
       }
       pendingSearchExit = nil
-      searchFocusRequested = false
+      searchPresentation.focusRequested = false
     } else {
       lastContentRootTab = newRootTab
     }
@@ -631,13 +623,13 @@ private struct ExperimentalAuthedRootView: View {
     createsThread: Bool = false
   ) {
     searchInteractionRevision &+= 1
-    let requiresFocusSettlement = searchFocusRequested || isSearchFieldFocused
+    let requiresFocusSettlement = searchPresentation.focusRequested || searchPresentation.isFieldFocused
     pendingSearchExit = PendingSearchExit(
       destinationTab: destinationTab,
       destination: destination,
       createsThread: createsThread
     )
-    searchFocusRequested = false
+    searchPresentation.focusRequested = false
 
     if !requiresFocusSettlement {
       completePendingSearchExit()
@@ -645,7 +637,7 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func searchFocusChanged(_ isFocused: Bool) {
-    isSearchFieldFocused = isFocused
+    searchPresentation.isFieldFocused = isFocused
     if !isFocused {
       completePendingSearchExit()
     }
@@ -654,19 +646,19 @@ private struct ExperimentalAuthedRootView: View {
   private func closeSearch() {
     searchInteractionRevision &+= 1
     pendingSearchExit = nil
-    searchFocusRequested = false
+    searchPresentation.focusRequested = false
   }
 
   private func openSearchResult(_ peer: Peer, _ destination: Destination) {
     guard isSearchRootSelected else { return }
     ExperimentalHomeNavigationPerformance.beginChatOpen(peer: peer, source: "search")
-    searchFocusRequested = false
+    searchPresentation.focusRequested = false
     router.push(destination, for: .search)
   }
 
   private func completePendingSearchExit() {
-    guard !isSearchFieldFocused,
-          !isSearchKeyboardVisible,
+    guard !searchPresentation.isFieldFocused,
+          !searchPresentation.isKeyboardVisible,
           let pendingSearchExit
     else { return }
     self.pendingSearchExit = nil

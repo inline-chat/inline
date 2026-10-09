@@ -79,6 +79,9 @@ struct ExperimentalSearchView: View {
     .onAppear {
       ensureSearchModel()
       updateSearch(for: query)
+      if focusRequested {
+        isSearchFocused = true
+      }
     }
     .onChange(of: focusRequested) { _, shouldFocus in
       if isSearchFocused != shouldFocus {
