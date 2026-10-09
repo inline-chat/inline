@@ -1057,7 +1057,7 @@ extension AppDelegate {
           log.warning("Failed to resolve notification conversation")
           return
         }
-        self.openChat(peer: peerId, targetMessageId: target.messageID)
+        self.openChat(peer: peerId, targetMessageId: target.focusMessageID)
         guard !Task.isCancelled, MessageNotificationAccount.isCurrent(account) else { return }
         await self.unarchiveIfNeeded(peer: peerId)
       }

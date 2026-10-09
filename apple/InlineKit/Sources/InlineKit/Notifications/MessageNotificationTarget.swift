@@ -10,6 +10,11 @@ public struct MessageNotificationTarget: Equatable, Sendable {
   public let peer: Peer?
   public let chatID: Int64?
   public let messageID: Int64?
+  /// Message to scroll to when the notification is opened. A new-message push
+  /// opens the chat at its usual position: its row may not have synced yet and
+  /// is the latest message anyway. Only notifications about an existing
+  /// message keep a focus target.
+  public let focusMessageID: Int64?
 
   public init?(userInfo: [AnyHashable: Any], threadIdentifier: String = "") {
     if let type = userInfo["type"] as? String, type != "messageFailed" { return nil }
@@ -22,6 +27,9 @@ public struct MessageNotificationTarget: Equatable, Sendable {
     chatID = (isThread == true ? payloadThreadID ?? payloadChatID : payloadChatID ?? payloadThreadID)
       ?? Self.chatID(threadIdentifier)
     messageID = Self.positiveID(userInfo["messageId"])
+    let refersToExistingMessage = userInfo["type"] as? String == "messageFailed"
+      || userInfo["kind"] as? String == "alert"
+    focusMessageID = refersToExistingMessage ? messageID : nil
     if isThread == true {
       peer = chatID.map { .thread(id: $0) }
     } else if let userID = Self.positiveID(userInfo["userId"]) {

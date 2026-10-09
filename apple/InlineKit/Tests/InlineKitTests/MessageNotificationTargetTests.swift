@@ -33,6 +33,20 @@ struct MessageNotificationTargetTests {
     #expect(replyWithParent?.peer == .thread(id: 19))
   }
 
+  @Test func onlyExistingMessageNotificationsKeepFocusTarget() {
+    let legacy = MessageNotificationTarget(userInfo: ["userId": 42, "messageId": "123"])
+    #expect(legacy?.messageID == 123)
+    #expect(legacy?.focusMessageID == nil)
+    for kind in ["send_message", "send_message_encrypted"] {
+      let pushed = MessageNotificationTarget(userInfo: ["kind": kind, "userId": 42, "messageId": "123"])
+      #expect(pushed?.focusMessageID == nil)
+    }
+    let alert = MessageNotificationTarget(userInfo: ["kind": "alert", "userId": 42, "messageId": "123"])
+    #expect(alert?.focusMessageID == 123)
+    let failed = MessageNotificationTarget(userInfo: ["type": "messageFailed", "userId": 42, "messageId": "123"])
+    #expect(failed?.focusMessageID == 123)
+  }
+
   @Test func encryptedFallbackDoesNotInventPeer() {
     let target = MessageNotificationTarget(userInfo: ["kind": "send_message_encrypted", "messageId": "9"], threadIdentifier: "chat_20")
     #expect(target?.chatID == 20)

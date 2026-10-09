@@ -115,6 +115,8 @@ class MessageListAppKit: NSViewController {
   private var lastRemoteNewerAttempt: (messageID: Int64, date: Date)?
   private var targetScrollTask: Task<Void, Never>?
   private var targetScrollRevision: UInt64 = 0
+  /// Focus target that is newer than the loaded live end and has not synced yet.
+  private var pendingArrivalMessageID: Int64?
   private var loadBatchTask: Task<Void, Never>?
   private var heightPrecalcTask: Task<Void, Never>?
   private var mediaWarmupTask: Task<Void, Never>?
@@ -1896,6 +1898,7 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelBegan() {
     log.trace("scroll wheel began")
     isUserScrolling = true
+    pendingArrivalMessageID = nil
     scrollState = .scrolling
     clearHoveredMessage()
   }
@@ -2752,6 +2755,14 @@ class MessageListAppKit: NSViewController {
             reloadAll(animated: true)
         }
         handleIncomingMessages(newMessages)
+        if let pendingID = pendingArrivalMessageID,
+           newMessages.contains(where: { $0.message.messageId == pendingID })
+        {
+          pendingArrivalMessageID = nil
+          DispatchQueue.main.async { [weak self] in
+            self?.scrollToMessage(pendingID, shouldHighlight: true)
+          }
+        }
 
       case .deleted:
         switch rowUpdate {
@@ -4035,6 +4046,7 @@ extension MessageListAppKit {
     isProgrammaticScroll = false
     targetScrollTask?.cancel()
     targetScrollTask = nil
+    pendingArrivalMessageID = nil
     guard request.messageId > 0, !isDisposed else { return }
     if messages.contains(where: { $0.message.messageId == request.messageId }),
        chatRows.historyCoverage.isCertifiedMessage(request.messageId)
@@ -4053,6 +4065,14 @@ extension MessageListAppKit {
           limit: limit
         )
         guard let self, !Task.isCancelled, !isDisposed else { return }
+        let newestLoadedID = messages.lazy.map(\.message.messageId).max() ?? 0
+        if chatRows.historyCoverage.isAtCertifiedLiveEnd, request.messageId > newestLoadedID {
+          // A pushed message can precede sync. Stay on the live end and focus
+          // the row when the update that delivers it is applied.
+          pendingArrivalMessageID = request.messageId
+          scrollToBottom(animated: true)
+          return
+        }
         loadBatchTask?.cancel()
         loadBatchTask = nil
         remoteNewerTask?.cancel()
@@ -4078,7 +4098,11 @@ extension MessageListAppKit {
           displayedMessageID,
           shouldHighlight: displayedMessageID == request.messageId
         )
-        if displayedMessageID != request.messageId {
+        // Landing on the newest row below the target is the ordinary latest
+        // view, not a detour worth announcing.
+        if displayedMessageID != request.messageId,
+           !(displayedMessageID < request.messageId && displayedMessageID == messages.lazy.map(\.message.messageId).max())
+        {
           ToastCenter.shared.showInfo("Message unavailable. Showing nearby history.")
         }
       } catch is CancellationError {

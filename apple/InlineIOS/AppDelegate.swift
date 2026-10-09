@@ -391,7 +391,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     if let peer = target.peer {
       navigateFromNotification(
-        peerId: peer, messageID: target.messageID, account: account,
+        peerId: peer, messageID: target.focusMessageID, account: account,
         waitsForSceneActivation: waitsForSceneActivation, navigationReservation: navigationReservation,
         completionHandler: completionHandler
       )
@@ -402,7 +402,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       Task { @MainActor in
         guard let peer = await target.resolvePeer(fetchIfMissingFor: account) else { return }
         navigateFromNotification(
-          peerId: peer, messageID: target.messageID, account: account,
+          peerId: peer, messageID: target.focusMessageID, account: account,
           waitsForSceneActivation: waitsForSceneActivation, navigationReservation: navigationReservation,
           completionHandler: {}
         )

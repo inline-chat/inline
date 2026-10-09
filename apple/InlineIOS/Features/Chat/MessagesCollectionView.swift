@@ -436,6 +436,13 @@ final class MessagesCollectionView: UICollectionView {
           limit: limit
         )
         guard let self, !Task.isCancelled, pendingScrollMessageID == messageID else { return }
+        if !requiresExactMessage, isAheadOfLoadedLiveEnd(messageID) {
+          // A pushed message can precede sync. Stay on the live end and keep
+          // the focus pending; the snapshot that delivers the row resolves it.
+          pendingScrollLoadTask = nil
+          scrollToLoadedWindowBottom()
+          return
+        }
         guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID),
               outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID)
         else {
@@ -464,7 +471,11 @@ final class MessagesCollectionView: UICollectionView {
           )
           return
         }
-        if displayedMessageID != messageID {
+        // Landing on the newest row below the target is the ordinary latest
+        // view, not a detour worth announcing.
+        if displayedMessageID != messageID,
+           !(displayedMessageID < messageID && displayedMessageID == coordinator.highestPositiveMessageId)
+        {
           ToastManager.shared.showToast("Message unavailable. Showing nearby history.", type: .info)
         }
       } catch is CancellationError {
@@ -487,6 +498,18 @@ final class MessagesCollectionView: UICollectionView {
   private func isHiddenByCollapsedHistory(_ messageID: Int64) -> Bool {
     guard let boundary = coordinator.viewModel.collapsedMaxId else { return false }
     return messageID > 0 && messageID <= boundary
+  }
+
+  private func isAheadOfLoadedLiveEnd(_ messageID: Int64) -> Bool {
+    coordinator.viewModel.historyCoverage.isAtCertifiedLiveEnd
+      && messageID > (coordinator.highestPositiveMessageId ?? 0)
+  }
+
+  /// A focus still waiting for its row to sync must not move the list after
+  /// the user has started scrolling elsewhere.
+  fileprivate func cancelMessageFocusAwaitingArrival() {
+    guard pendingScrollLoadTask == nil else { return }
+    pendingScrollMessageID = nil
   }
 
   func cancelPendingMessageFocus() {
@@ -5209,6 +5232,7 @@ private extension MessagesCollectionView {
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       (scrollView as? MessagesCollectionView)?.cancelContextMenuKeyboardRestoration()
+      (scrollView as? MessagesCollectionView)?.cancelMessageFocusAwaitingArrival()
       olderHistoryPagination.beginGesture()
       isUserDragging = true
       isUserScrollInEffect = true
