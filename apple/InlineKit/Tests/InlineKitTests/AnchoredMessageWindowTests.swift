@@ -3,22 +3,12 @@ import GRDB
 @testable import InlineKit
 import Testing
 
-@Suite("Opt-in anchored message windows")
+@Suite("Anchored message windows")
 struct AnchoredMessageWindowTests {
   @Test @MainActor
-  func historicalWindowDoesNotAppendTheLiveTail() async throws {
+  func liveWindowAppendsNewMessages() async throws {
     let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: 60)
-    defer { model.dispose() }
-    model.setHistoryAnchor(15)
-    fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
-    #expect(model.messages.map(\.message.messageId) == Array(Int64(10) ... 20))
-  }
-
-  @Test @MainActor
-  func legacyConsumerKeepsItsExistingAppendBehavior() async throws {
-    let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: nil)
+    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]))
     defer { model.dispose() }
     fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
     #expect(model.messages.last?.message.messageId == 100)
@@ -26,9 +16,9 @@ struct AnchoredMessageWindowTests {
   }
 
   @Test @MainActor
-  func unboundedHistoricalWindowDoesNotAppendTheLiveTail() async throws {
+  func historicalWindowDoesNotAppendTheLiveTail() async throws {
     let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: nil)
+    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]))
     defer { model.dispose() }
     model.setHistoryAnchor(15)
     fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
@@ -39,11 +29,10 @@ struct AnchoredMessageWindowTests {
   func aroundAndLatestReplacementKeepPreparedThreadContext() async throws {
     let fixture = try await Fixture()
     let parent = fixture.messages[0]
-    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: 60, parent: parent)
+    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), parent: parent)
     defer { model.dispose() }
-    #expect(try await model.loadLocalWindowAroundMessageAsync(messageId: 50))
+    #expect(model.loadLocalWindowAroundMessage(messageId: 50))
     #expect(model.messages.contains { $0.message.messageId == 50 })
-    #expect(model.messages.count <= 60)
     #expect(model.threadAnchor == parent.withoutAcknowledgements)
     #expect(try await model.loadLatestWindowAsync())
     #expect(model.messages.last?.message.messageId == 100)
@@ -54,7 +43,7 @@ struct AnchoredMessageWindowTests {
   @Test @MainActor
   func historyRepairReloadStaysAroundTheVisibleCoordinate() async throws {
     let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]), limit: 60)
+    let model = fixture.model(rows: Array(fixture.messages[9 ... 19]))
     defer { model.dispose() }
     model.setHistoryAnchor(15)
     var reloaded = false
@@ -66,54 +55,29 @@ struct AnchoredMessageWindowTests {
     #expect(reloaded)
     #expect(model.messages.contains { $0.message.messageId == 15 })
     #expect(model.messages.last?.message.messageId != 100)
-    #expect(model.messages.count <= 60)
-  }
-
-  @Test @MainActor
-  func liveWindowRetainsABoundedTail() async throws {
-    let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[39 ... 98]), limit: 60)
-    defer { model.dispose() }
-    model.setAtBottom(true)
-    fixture.publisher.publisher.send(.add(.init(messages: [fixture.messages[99]], peer: .thread(id: 1))))
-    #expect(model.messages.count == 60)
-    #expect(model.messages.first?.message.messageId == 41)
-    #expect(model.messages.last?.message.messageId == 100)
   }
 
   @Test @MainActor
   func latestReplacementSupersedesAnOlderPage() async throws {
     let fixture = try await Fixture()
-    let model = fixture.model(rows: Array(fixture.messages[39 ... 49]), limit: 60)
+    let model = fixture.model(rows: Array(fixture.messages[39 ... 49]))
     defer { model.dispose() }
     model.setHistoryAnchor(45)
     let older = Task { await model.loadBatchAsync(at: .older, allowUnavailableLocal: true) }
     await Task.yield()
     #expect(try await model.loadLatestWindowAsync())
+    let latestIDs = model.messages.map(\.message.messageId)
     _ = await older.value
-    #expect(model.messages.count <= 60)
+    #expect(model.messages.map(\.message.messageId) == latestIDs)
     #expect(model.messages.last?.message.messageId == 100)
-    #expect(model.messages.first?.message.messageId == 41)
-  }
-
-  @Test @MainActor
-  func switchingToLiveBottomInvalidatesPendingHistoricalReload() async throws {
-    let fixture = try await Fixture()
-    let rows = Array(fixture.messages[79 ... 99])
-    let model = fixture.model(rows: rows, limit: 60)
-    defer { model.dispose() }
-    model.setHistoryAnchor(80)
-    fixture.publisher.messagesReload(peer: .thread(id: 1), animated: false)
-    model.setAtBottom(true)
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(model.messages == rows)
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd)
   }
 
   @Test @MainActor
   func confirmingAnUnloadedSendRefreshesTheHistoricalTail() async throws {
     let fixture = try await Fixture()
     let rows = Array(fixture.messages[79 ... 99])
-    let model = fixture.model(rows: rows, limit: 60)
+    let model = fixture.model(rows: rows)
     defer { model.dispose() }
     model.setHistoryAnchor(80)
     #expect(model.historyCoverage.isAtCertifiedLiveEnd)
@@ -126,15 +90,9 @@ struct AnchoredMessageWindowTests {
       return try FullMessage.queryRequest(currentUserId: 1)
         .filter(Column("messageId") == 101).fetchOne(db)
     }
-    var metadataDelivered = false
-    model.observe { if case .reload = $0 { metadataDelivered = true } }
     try fixture.publisher.publisher.send(.update(.init(
       message: #require(confirmed), animated: false, peer: .thread(id: 1)
     )))
-    for _ in 0 ..< 100 where !metadataDelivered {
-      try await Task.sleep(for: .milliseconds(10))
-    }
-    #expect(metadataDelivered)
     #expect(model.messages == rows)
     #expect(model.canLoadNewerFromLocal)
     #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
@@ -145,12 +103,11 @@ struct AnchoredMessageWindowTests {
   @Test @MainActor
   func distantCoordinateSupportsBothPageDirections() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
-    let model = fixture.model(rows: Array(fixture.messages.suffix(60)), limit: 400)
+    let model = fixture.model(rows: Array(fixture.messages.suffix(60)))
     defer { model.dispose() }
     model.setHistoryAnchor(1_200)
-    #expect(try await model.loadLocalWindowAroundMessageAsync(messageId: 1_200, limit: 60))
+    #expect(model.loadLocalWindowAroundMessage(messageId: 1_200))
     let initialIDs = model.messages.map(\.message.messageId)
-    #expect(initialIDs.count == 60)
     #expect(initialIDs.contains(1_200))
     #expect(!initialIDs.contains(2_400))
     #expect(await model.loadBatchAsync(at: .older, publish: false))
@@ -163,9 +120,6 @@ struct AnchoredMessageWindowTests {
     #expect(Set(initialIDs).isSubset(of: Set(expandedIDs)))
     #expect(Set(expandedIDs).count == expandedIDs.count)
     #expect(expandedIDs == expandedIDs.sorted())
-    #expect(try await model.loadLocalWindowAroundMessageAsync(messageId: 1_200, limit: 400))
-    #expect(model.messages.count == 400)
-    #expect(model.messages.contains { $0.message.messageId == 1_200 })
   }
 }
 
@@ -205,11 +159,11 @@ private struct Fixture {
     }
   }
 
-  @MainActor func model(rows: [FullMessage], limit: Int?, parent: FullMessage? = nil) -> MessagesProgressiveViewModel {
+  @MainActor func model(rows: [FullMessage], parent: FullMessage? = nil) -> MessagesProgressiveViewModel {
     MessagesProgressiveViewModel(
       peer: .thread(id: 1),
       initialState: .init(messages: rows, threadAnchor: parent, loadedWindowMetadata: .init(messages: rows, holes: [])),
-      maximumWindowCount: limit, database: database, publisher: publisher, currentUserId: 1
+      database: database, publisher: publisher, currentUserId: 1
     )
   }
 }

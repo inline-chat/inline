@@ -159,9 +159,6 @@ struct MessagesProgressiveViewModelOrderingTests {
       newerCandidateMessageID: nil
     )
 
-    #expect(projection.unknownAdjacencyBoundaries.count == 1)
-    #expect(projection.unknownAdjacencyBoundaries.first?.lowerMessageID == 20)
-    #expect(projection.unknownAdjacencyBoundaries.first?.upperMessageID == 30)
     #expect(projection.isCertifiedContinuation(between: 10, and: 20))
     #expect(!projection.isCertifiedContinuation(between: 20, and: 30))
     #expect(!projection.hasCertifiedOlderEdge)
@@ -195,7 +192,6 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(projection.hasCertifiedOlderEdge)
     #expect(projection.hasCertifiedNewerEdge)
     #expect(!projection.isAtCertifiedLiveEnd)
-    #expect(projection.unknownAdjacencyBoundaries.isEmpty)
   }
 
   @Test("a hole-free empty snapshot is a certified live end")

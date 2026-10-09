@@ -21,8 +21,6 @@ struct ExperimentalSettingsDetailView: View {
   private var quickForwardEnabled = false
   @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
   private var richMessageCopyEditingEnabled = false
-  @AppStorage(ExperimentalMessageListFeature.key)
-  private var messageListV2Enabled = false
 
   var body: some View {
     Form {
@@ -30,9 +28,6 @@ struct ExperimentalSettingsDetailView: View {
       agentsSection
       messagesSection
       filesSection
-      if ExperimentalMessageListFeature.isAvailable {
-        developerToolsSection
-      }
     }
     .settingsFormStyle()
     .onAppear { _ = ExperimentalFeatureFlags.agentActivityEnabled }
@@ -137,19 +132,6 @@ struct ExperimentalSettingsDetailView: View {
   private var nativeFileDownloadsAvailable: Bool {
     // Observe the existing auth owner so the control updates after a session change.
     auth.getInlineProtocolCredentials() != nil
-  }
-
-  private var developerToolsSection: some View {
-    Section {
-      Toggle(isOn: $messageListV2Enabled) {
-        SettingsRowLabel(
-          "Message List V2 (WIP)",
-          description: "Unfinished Debug experiment with known scrolling and performance issues. Applies to newly opened chats."
-        )
-      }
-    } header: {
-      SettingsSectionHeader("Developer Tools")
-    }
   }
 }
 

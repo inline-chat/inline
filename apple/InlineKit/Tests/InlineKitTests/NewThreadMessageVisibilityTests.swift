@@ -6,13 +6,13 @@ import Testing
 
 @Suite("New-thread message visibility")
 struct NewThreadMessageVisibilityTests {
-  @Test("The video's alternating live and optimistic sequence keeps the whole transcript", arguments: [false, true])
+  @Test("The video's alternating live and optimistic sequence keeps the whole transcript")
   @MainActor
-  func alternatingConfirmationSequence(bounded: Bool) async throws {
+  func alternatingConfirmationSequence() async throws {
     let fixture = try await Fixture()
     let first = try await fixture.confirmFirst()
     try await fixture.invalidateCoverage()
-    let model = fixture.model(rows: [first], unknownHistory: true, bounded: bounded)
+    let model = fixture.model(rows: [first], unknownHistory: true)
     defer { model.dispose() }
 
     let bot = try await fixture.insert(messageID: 2)
@@ -60,53 +60,15 @@ struct NewThreadMessageVisibilityTests {
     try await fixture.reload(model, expecting: partial ? [3] : [])
   }
 
-  @Test("An unanchored live window stays bounded even while history is unknown")
+  @Test("Live messages retain earlier rendered messages while history is unknown")
   @MainActor
-  func unknownLiveWindowStaysBounded() async throws {
-    let fixture = try await Fixture()
-    let first = try await fixture.confirmFirst()
-    try await fixture.invalidateCoverage()
-    let model = fixture.model(rows: [first], unknownHistory: true, bounded: true)
-    defer { model.dispose() }
-    let rows = try await fixture.database.dbWriter.write { db in
-      for id in Int64(2) ... 402 {
-        var message = Message(
-          messageId: id, fromId: 1, date: first.message.date.addingTimeInterval(Double(id)),
-          text: "Live message", peerUserId: nil, peerThreadId: 1, chatId: 1, out: true
-        )
-        try message.saveMessage(db)
-      }
-      return try FullMessage.queryRequest(currentUserId: 1)
-        .filter(Column("messageId") > 1).order(Column("messageId").asc).fetchAll(db)
-    }
-    fixture.publisher.publisher.send(.add(.init(messages: rows, peer: .thread(id: 1))))
-    #expect(model.messages.count == 400)
-    #expect(model.messages.map(\.message.messageId) == Array(Int64(3) ... 402))
-    _ = try await fixture.insert(messageID: 403)
-    try await fixture.reload(model, expecting: Array(Int64(4) ... 403))
-    #expect(model.messages.count == 400)
-    try await fixture.database.dbWriter.write { db in
-      for id in Int64(404) ... 463 {
-        var message = Message(
-          messageId: id, fromId: 1, date: first.message.date.addingTimeInterval(Double(id)),
-          text: "Cached message", peerUserId: nil, peerThreadId: 1, chatId: 1, out: true
-        )
-        try message.saveMessage(db)
-      }
-    }
-    let expected = Array(Int64(5) ... 403) + [463]
-    try await fixture.reload(model, expecting: expected)
-  }
-
-  @Test("Live messages retain earlier rendered messages while history is unknown", arguments: [false, true])
-  @MainActor
-  func liveSequenceSurvivesUnknownCoverage(bounded: Bool) async throws {
+  func liveSequenceSurvivesUnknownCoverage() async throws {
     let fixture = try await Fixture()
     let first = try await fixture.confirmFirst()
     try await fixture.database.dbWriter.write { db in
       try MessageHistoryCoverageStore.invalidate(db, chatId: 1)
     }
-    let model = fixture.model(rows: [first], unknownHistory: true, bounded: bounded)
+    let model = fixture.model(rows: [first], unknownHistory: true)
     defer { model.dispose() }
 
     for id in Int64(2) ... 4 {
@@ -122,11 +84,110 @@ struct NewThreadMessageVisibilityTests {
       try await waitUntil { model.newestLoadedMessageId == id }
       #expect(model.messages.map(\.message.messageId) == Array(Int64(1) ... id))
       #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
-      #expect(model.historyCoverage.unknownAdjacencyBoundaries.count == Int(id - 1))
+      #expect(!model.historyCoverage.isCertifiedContinuation(between: id - 1, and: id))
       #expect(model.historyCoverage.certifiedReadMaxID(after: 0, through: id) == nil)
     }
     try await fixture.reload(model)
     #expect(model.messages.map(\.message.messageId) == [1, 2, 3, 4])
+  }
+
+  @Test("An admitted latest page replaces the far side of a gap and preserves an explicit anchor",
+        arguments: [false, true], [false, true])
+  @MainActor
+  func certifiedTailReplacesRowsAcrossAGap(reversed: Bool, anchored: Bool) async throws {
+    let fixture = try await Fixture()
+    let first = try await fixture.confirmFirst()
+    let model = fixture.model(rows: [first], reversed: reversed)
+    defer { model.dispose() }
+    model.setAtBottom(true)
+    try await fixture.database.dbWriter.write { db in
+      try MessageHistoryCoverageStore.invalidateAll(db, chatId: 1)
+    }
+    for id in Int64(100) ... 102 { _ = try await fixture.insert(messageID: id) }
+    try await fixture.reload(model, expecting: [1, 102])
+    if anchored { model.setHistoryAnchor(1) }
+    let pending = try await fixture.insert(messageID: -456, dateOffset: 103)
+    fixture.publisher.publisher.send(.add(.init(messages: [pending], peer: .thread(id: 1))))
+
+    // A full latest page proves only its returned tail. It neither deletes the
+    // old row outside that proof nor makes the intervening hole continuous.
+    try await fixture.database.dbWriter.write { db in
+      var transaction = GetChatHistoryTransaction(peer: .thread(id: 1), mode: .historyModeLatest, limit: 3)
+      transaction.context.admissionToken = try HistoryPageAdmissionToken.capture(db, chatId: 1)
+      let page = InlineProtocol.GetChatHistoryResult.with {
+        $0.seq = 0
+        $0.messages = [Int64(102), 101, 100].map { id in
+          .with {
+            $0.id = id
+            $0.chatID = 1
+            $0.fromID = 1
+            $0.peerID = .with { $0.chat.chatID = 1 }
+            $0.date = 1_000 + id
+            $0.message = "Authoritative tail"
+          }
+        }
+      }
+      try GetChatHistoryTransaction.apply(page, context: transaction.context, db: db)
+      #expect(try Message.fetchOne(db, key: ["chatId": 1, "messageId": 1])?.globalId == first.id)
+      #expect(try MessageHistoryCoverageStore.intersects(db, chatId: 1, lowerId: 2, upperId: 99))
+      #expect(try MessageHistoryCoverageStore.intersects(db, chatId: 1, lowerId: 100,
+                                                      upperId: MessageHistoryHole.positiveMessageIDMax) == false)
+    }
+    try await fixture.reload(model, expecting: anchored ? [1] : [100, 101, 102, -456])
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd == !anchored)
+    #expect(!model.historyCoverage.isCertifiedContinuation(between: 1, and: 100))
+    #expect(model.historyCoverage.certifiedReadMaxID(after: 0, through: 102) == nil)
+    if !anchored {
+      #expect(!model.canLoadOlderFromLocal)
+      #expect(model.oldestLoadedMessageId == 100)
+      #expect(model.messages.first(where: { $0.message.messageId == -456 })?.id == pending.id)
+    }
+  }
+
+  @Test("A live publication behind a reload reconciles deletion, edit and optimistic ID confirmation",
+        arguments: [false, true])
+  @MainActor
+  func liveMessageKeepsPendingReload(reversed: Bool) async throws {
+    let fixture = try await Fixture()
+    let first = try await fixture.confirmFirst()
+    let second = try await fixture.insert(messageID: 2)
+    let pending = try await fixture.insert(messageID: -456, dateOffset: 4)
+    let model = fixture.model(rows: [first, second, pending], reversed: reversed)
+    defer { model.dispose() }
+    model.setAtBottom(true)
+    let third = try await fixture.insert(messageID: 3)
+    let confirmed = try await fixture.database.dbWriter.write { db in
+      try Message.deleteMessages(db, messageIds: [1], chatId: 1)
+      var edited = second.message
+      edited.text = "Edited before the pending reload"
+      try edited.saveMessage(db)
+      var confirmed = pending.message
+      confirmed.messageId = 4
+      confirmed.randomId = nil
+      confirmed.status = .sent
+      try confirmed.saveMessage(db)
+      let confirmedRow = try FullMessage.queryRequest(currentUserId: 1)
+        .filter(Column("globalId") == pending.id).fetchOne(db)
+      return try #require(confirmedRow)
+    }
+    fixture.publisher.messagesReload(peer: .thread(id: 1), animated: false)
+    // Another peer cannot cancel our reconciliation or insert its payload.
+    fixture.publisher.publisher.send(.add(.init(messages: [third], peer: .thread(id: 2))))
+    #expect(model.messages.map(\.message.messageId) == (reversed ? [-456, 2, 1] : [1, 2, -456]))
+    // Both matching-peer live events supersede a read, but its canonical work
+    // still has to be reconciled after this MainActor publication burst.
+    fixture.publisher.publisher.send(.add(.init(messages: [third], peer: .thread(id: 1))))
+    fixture.publisher.publisher.send(.update(.init(message: confirmed, animated: false, peer: .thread(id: 1))))
+    let expectedIDs: [Int64] = reversed ? [4, 3, 2] : [2, 3, 4]
+    try await waitUntil {
+      model.messages.map(\.message.messageId) == expectedIDs
+        && model.messages.first(where: { $0.message.messageId == 2 })?.message.text == "Edited before the pending reload"
+    }
+    #expect(model.messages.map(\.message.messageId) == expectedIDs)
+    #expect(model.messages.first(where: { $0.message.messageId == 2 })?.message.text == "Edited before the pending reload")
+    #expect(model.messages.first(where: { $0.message.messageId == 4 })?.id == pending.id)
+    #expect(model.messages.first(where: { $0.message.messageId == 4 })?.message.status == .sent)
+    #expect(Set(model.messages.map(\.id)).count == model.messages.count)
   }
 
   @Test("Unpublished cached rows still require a continuous history component")
@@ -231,15 +292,14 @@ private struct Fixture {
   }
 
   @MainActor
-  func model(rows: [FullMessage]? = nil, unknownHistory: Bool = false, bounded: Bool = false) -> MessagesProgressiveViewModel {
+  func model(rows: [FullMessage]? = nil, unknownHistory: Bool = false, reversed: Bool = false) -> MessagesProgressiveViewModel {
     let rows = rows ?? [first]
     return MessagesProgressiveViewModel(
-      peer: .thread(id: 1),
+      peer: .thread(id: 1), reversed: reversed,
       initialState: .init(messages: rows, loadedWindowMetadata: .init(
         messages: rows,
         holes: unknownHistory ? [.init(chatId: 1, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax)] : []
       )),
-      maximumWindowCount: bounded ? 400 : nil,
       database: database, publisher: publisher, currentUserId: 1
     )
   }
@@ -278,13 +338,14 @@ private struct Fixture {
 
   @MainActor
   func reload(_ model: MessagesProgressiveViewModel, expecting messageIDs: [Int64]? = nil) async throws {
+    let expectedIDs = messageIDs.map { model.reversed ? Array($0.reversed()) : $0 }
     var didReload = false
     model.observe { if case .reload = $0 { didReload = true } }
     publisher.messagesReload(peer: .thread(id: 1), animated: false)
     try await waitUntil {
-      didReload && (messageIDs == nil || model.messages.map(\.message.messageId) == messageIDs)
+      didReload && (expectedIDs == nil || model.messages.map(\.message.messageId) == expectedIDs)
     }
     #expect(didReload)
-    if let messageIDs { #expect(model.messages.map(\.message.messageId) == messageIDs) }
+    if let expectedIDs { #expect(model.messages.map(\.message.messageId) == expectedIDs) }
   }
 }

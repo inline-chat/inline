@@ -652,7 +652,6 @@ final class Nav3ChatOpenPreloadBridge {
       String(describing: peer)
     )
 
-    let usesExperimentalList = ExperimentalMessageListFeature.isEnabled
     pendingTask = Task(priority: .userInitiated) { @MainActor [weak self] in
       guard let self else { return }
 
@@ -660,8 +659,7 @@ final class Nav3ChatOpenPreloadBridge {
         let payload = try await ChatOpenPreloader.shared.prepare(
           peer: peer,
           targetMessageId: targetMessageId,
-          database: database,
-          experimentalMessageList: usesExperimentalList
+          database: database
         )
         guard self.requestID == id, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
@@ -741,10 +739,6 @@ final class Nav3ChatOpenPreloadBridge {
           "%{public}s",
           "error"
         )
-        if usesExperimentalList {
-          ToastCenter.shared.showError(targetMessageId == nil ? "Could not load this chat" : "Could not load that message")
-          return
-        }
         nav.open(.chat(peer: peer), tracksChatNavigation: false)
         if targetMessageId != nil {
           ToastCenter.shared.showError("Could not load that message")

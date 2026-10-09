@@ -1,12 +1,11 @@
 import AppKit
 import InlineKit
 
-/// The compose/route boundary shared by the stable and experimental lists.
+/// The compose/route boundary of the message list.
 @MainActor
 protocol ChatMessageListController: NSViewController {
   var viewModel: MessagesProgressiveViewModel { get }
   var highestPositiveMessageId: Int64? { get }
-  var preservesHistoryOnSend: Bool { get }
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)? { get set }
   var isMessageSelectionActive: Bool { get }
   var selectedMessagesInLoadedOrder: [FullMessage] { get }
@@ -33,24 +32,4 @@ extension ChatMessageListController {
   }
 }
 
-extension MessageListAppKit: ChatMessageListController {
-  var preservesHistoryOnSend: Bool {
-    false
-  }
-}
-
-enum ExperimentalMessageListFeature {
-  static let key = "experimental.macMessageListV2"
-  /// Parked research experiment. A saved preference must never activate it in a release build.
-  static var isAvailable: Bool {
-    #if DEBUG
-    true
-    #else
-    false
-    #endif
-  }
-
-  static var isEnabled: Bool {
-    isAvailable && UserDefaults.standard.bool(forKey: key)
-  }
-}
+extension MessageListAppKit: ChatMessageListController {}

@@ -2504,8 +2504,13 @@ extension InlineProtocol.UpdateNewMessageNotification {
 
 extension InlineProtocol.UpdateMessageId {
   func apply(_ db: Database) throws {
+    try apply(db, currentUserId: Auth.shared.getCurrentUserId())
+  }
+
+  /// Explicit account identity for deterministic reducer tests. The public path
+  /// still resolves the current account through the existing Auth wrapper.
+  func apply(_ db: Database, currentUserId: Int64?) throws {
     Log.shared.debug("update message id \(randomID) \(messageID)")
-    let currentUserId = Auth.shared.getCurrentUserId()
     // FIXME: optimize this to update in one go OR to make a faster fetch
     let message = try Message
       .fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID])

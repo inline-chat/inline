@@ -1457,7 +1457,7 @@ class GlassComposeAppKit: NSView {
       clear()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-        if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
+        self.state.scrollToBottom()
       }
     } catch {
       log.error("Failed to send voice recording", error: error)
@@ -2707,7 +2707,7 @@ class GlassComposeAppKit: NSView {
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
       // Scroll to new message
-      if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
+      self.state.scrollToBottom()
     }
 
     ignoreNextHeightChange = false
@@ -2986,7 +2986,7 @@ class GlassComposeAppKit: NSView {
     }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-      if self.messageList?.preservesHistoryOnSend != true { self.state.scrollToBottom() }
+      self.state.scrollToBottom()
     }
   }
 
