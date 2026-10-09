@@ -1195,7 +1195,8 @@ private struct ChatInfoMediaList: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
           ForEach(group.messages) { media in
             ChatInfoMediaCell(media: media)
-              .id(media.photo != nil)
+              // Preserve each occurrence while recreating the AppKit view when its media kind changes.
+              .id(ChatInfoMediaCell.Identity(messageId: media.id, isPhoto: media.photo != nil))
               .aspectRatio(1, contentMode: .fit)
               .clipShape(RoundedRectangle(cornerRadius: 8))
               .contextMenu { Button("Show in Chat") { onShowInChat(media.message) } }
@@ -1209,12 +1210,17 @@ private struct ChatInfoMediaList: View {
       )
     }
     .padding(.horizontal, 16)
-    .task { await mediaViewModel.loadInitial() }
+    .task(id: ObjectIdentifier(mediaViewModel)) { await mediaViewModel.loadInitial() }
     .onDisappear { mediaViewModel.deactivate() }
   }
 }
 
 private struct ChatInfoMediaCell: NSViewRepresentable {
+  struct Identity: Hashable {
+    let messageId: Int64
+    let isPhoto: Bool
+  }
+
   let media: MediaMessage
 
   func makeNSView(context: Context) -> NSView {
@@ -1255,13 +1261,7 @@ private struct ChatInfoFilesList: View {
       if !documentsViewModel.documentMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 8) {
           ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
-            VStack(alignment: .leading, spacing: 6) {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-
+            Section {
               ForEach(group.messages, id: \.id) { documentMessage in
                 ChatInfoDocumentRow(documentMessage: documentMessage)
                   .contextMenu { Button("Show in Chat") { onShowInChat(documentMessage.message) } }
@@ -1269,13 +1269,20 @@ private struct ChatInfoFilesList: View {
                   .padding(.vertical, 4)
                   .onAppear {
                     Task {
-                      await documentsViewModel.loadMoreIfNeeded(currentMessageId: documentMessage.message.id)
+                      await documentsViewModel.loadMoreIfNeeded(currentMessageId: documentMessage.message.messageId)
                     }
                   }
               }
+            } header: {
+              Text(chatInfoDateLabel(group.date))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            } footer: {
+              Divider()
+                .padding(.leading, 16)
             }
-            Divider()
-              .padding(.leading, 16)
           }
         }
       }
@@ -1285,7 +1292,7 @@ private struct ChatInfoFilesList: View {
         retry: documentsViewModel.retry
       )
     }
-    .task {
+    .task(id: ObjectIdentifier(documentsViewModel)) {
       await documentsViewModel.loadInitial()
     }
     .onDisappear { documentsViewModel.deactivate() }
@@ -1302,22 +1309,23 @@ private struct ChatInfoLinksList: View {
       if !linksViewModel.linkMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 12) {
           ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
-            VStack(alignment: .leading, spacing: 8) {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
+            Section {
               ForEach(group.messages, id: \.id) { linkMessage in
                 ChatInfoLinkRow(linkMessage: linkMessage)
                   .contextMenu { Button("Show in Chat") { onShowInChat(linkMessage.message) } }
+                  .padding(.horizontal, 16)
                   .onAppear {
                     Task {
                       await linksViewModel.loadMoreIfNeeded(currentMessageId: linkMessage.message.messageId)
                     }
                   }
               }
+            } header: {
+              Text(chatInfoDateLabel(group.date))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
           }
         }
       }
@@ -1326,7 +1334,7 @@ private struct ChatInfoLinksList: View {
         emptyMessage: "No links found in this chat.", loadMore: linksViewModel.loadMore, retry: linksViewModel.retry
       )
     }
-    .task {
+    .task(id: ObjectIdentifier(linksViewModel)) {
       await linksViewModel.loadInitial()
     }
     .onDisappear { linksViewModel.deactivate() }
@@ -1344,25 +1352,26 @@ private struct ChatInfoVoiceMemosList: View {
       if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
         LazyVStack(alignment: .leading, spacing: 12) {
           ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
-            VStack(alignment: .leading, spacing: 8) {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
+            Section {
               ForEach(group.messages) { voiceMemo in
                 ChatInfoVoiceMemoRow(
                   voiceMemo: voiceMemo,
                   accentColor: accentColor
                 )
                 .contextMenu { Button("Show in Chat") { onShowInChat(voiceMemo.message) } }
+                .padding(.horizontal, 16)
                 .onAppear {
                   Task {
                     await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
                   }
                 }
               }
+            } header: {
+              Text(chatInfoDateLabel(group.date))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
           }
         }
       }
@@ -1372,7 +1381,7 @@ private struct ChatInfoVoiceMemosList: View {
         retry: voiceMemosViewModel.retry
       )
     }
-    .task {
+    .task(id: ObjectIdentifier(voiceMemosViewModel)) {
       await voiceMemosViewModel.loadInitial()
     }
     .onDisappear { voiceMemosViewModel.deactivate() }
