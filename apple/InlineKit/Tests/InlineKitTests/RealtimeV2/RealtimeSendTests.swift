@@ -3764,6 +3764,11 @@ private actor ImmediateUpdateApplyRecorder: ApplyUpdates {
 private actor ImmediateOpenUpdateTransport: Transport {
   nonisolated let events = AsyncChannel<TransportEvent>()
   private var started = false
+  private var inboundTask: Task<Void, Never>?
+
+  deinit {
+    inboundTask?.cancel()
+  }
 
   func start() async {
     guard !started else { return }
@@ -3775,6 +3780,10 @@ private actor ImmediateOpenUpdateTransport: Transport {
   func stop() async {
     guard started else { return }
     started = false
+    let inbound = inboundTask
+    inboundTask = nil
+    inbound?.cancel()
+    await inbound?.value
     await events.send(.disconnected(errorDescription: "stopped"))
   }
 
@@ -3784,7 +3793,6 @@ private actor ImmediateOpenUpdateTransport: Transport {
     var open = ServerProtocolMessage()
     open.id = message.id
     open.body = .connectionOpen(.init())
-    await events.send(.message(open))
 
     var status = InlineProtocol.UpdateUserStatus()
     status.userID = 1
@@ -3799,7 +3807,18 @@ private actor ImmediateOpenUpdateTransport: Transport {
     serverMessage.payload = .update(payload)
     var updateEnvelope = ServerProtocolMessage()
     updateEnvelope.body = .message(serverMessage)
-    await events.send(.message(updateEnvelope))
+
+    // A real server's inbound messages outlive the outbound handshake task,
+    // which the manager cancels when protocolOpen is accepted.
+    let previous = inboundTask
+    previous?.cancel()
+    await previous?.value
+    let events = self.events
+    inboundTask = Task { [events, open, updateEnvelope] in
+      await events.send(.message(open))
+      guard !Task.isCancelled else { return }
+      await events.send(.message(updateEnvelope))
+    }
   }
 }
 

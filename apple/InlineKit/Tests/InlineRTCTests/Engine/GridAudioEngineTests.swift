@@ -1138,11 +1138,13 @@ struct GridAudioEngineTests {
 
   @Test("duplicate engine-stop callbacks coalesce into one recovery")
   func duplicateStopsCoalesce() async throws {
-    let driver = FakeGridAudioDriver()
+    let driver = FakeGridAudioDriver(blockRecovery: true)
     let engine = GridAudioEngine(
       driver: driver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
-      engineRecoveryDelay: .milliseconds(30)
+      engineRecoveryDelay: .zero,
+      engineHealthCheckDelay: .seconds(3_600),
+      lifetimeHealthCheckInterval: .seconds(3_600)
     )
     let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
 
@@ -1150,14 +1152,52 @@ struct GridAudioEngineTests {
     await engine.acquireCaptureLease(lease)
     try await eventually { await engine.currentSnapshot().isPrepared }
     await driver.emit(.engineStopped(playout: true, recording: true))
-    try await Task.sleep(for: .milliseconds(10))
-    await driver.emit(.engineStopped(playout: true, recording: true))
-    try await Task.sleep(for: .milliseconds(10))
-    await driver.emit(.engineDisabled(playout: true, recording: true))
-
     try await eventually { await driver.operations().contains("recover") }
-    try await Task.sleep(for: .milliseconds(30))
+
+    // Hold recovery open until the event consumer has observed each duplicate.
+    // Short sleeps could instead deliver a new stop after recovery had finished.
+    for event in [GridAudioDriverEvent.engineStopped(playout: true, recording: true),
+                  .engineDisabled(playout: true, recording: true)] {
+      let marker = await driver.emitCallbackWithObservationMarker(event)
+      try await eventually {
+        let snapshot = await engine.currentSnapshot()
+        return snapshot.route?.routeEpoch == marker && snapshot.currentMutationKind == "recover"
+      }
+    }
     #expect(await driver.operations().filter { $0 == "recover" }.count == 1)
+
+    await driver.releaseRecovery()
+    try await eventually {
+      let snapshot = await engine.currentSnapshot()
+      return snapshot.isPrepared && snapshot.currentMutationKind == nil
+    }
+    #expect(await driver.operations().filter { $0 == "recover" }.count == 1)
+    _ = await engine.shutdown()
+  }
+
+  @Test("a new engine stop after completed recovery starts another recovery")
+  func newStopAfterRecoveryRecoversAgain() async throws {
+    let driver = FakeGridAudioDriver()
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      engineRecoveryDelay: .zero
+    )
+    let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
+
+    await engine.setInput(.automatic)
+    await engine.acquireCaptureLease(lease)
+    try await eventually { await engine.currentSnapshot().isPrepared }
+    for expectedCount in 1 ... 2 {
+      await driver.emit(.engineStopped(playout: true, recording: true))
+      try await eventually {
+        let snapshot = await engine.currentSnapshot()
+        let recoveryCount = await driver.operations().filter { $0 == "recover" }.count
+        return recoveryCount == expectedCount && snapshot.isPrepared && snapshot.currentMutationKind == nil
+      }
+    }
+    #expect(await driver.operations().filter { $0 == "recover" }.count == 2)
+    _ = await engine.shutdown()
   }
 
   @Test("a route transaction stop callback never starts competing recovery")
@@ -2353,6 +2393,14 @@ private actor FakeGridAudioDriver: GridAudioDriver {
       break
     }
     eventContinuation.yield(event)
+  }
+
+  // With recovery blocked and periodic health reads disabled, the engine can
+  // publish this marker only after consuming the corresponding driver callback.
+  func emitCallbackWithObservationMarker(_ event: GridAudioDriverEvent) -> UInt64 {
+    routeEpoch &+= 1
+    emit(event)
+    return routeEpoch
   }
 
   func releaseConfigure() {
