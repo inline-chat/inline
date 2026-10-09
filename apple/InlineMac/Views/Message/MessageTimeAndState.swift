@@ -359,6 +359,9 @@ class MessageTimeAndState: NSView {
     }
 
     if fullMessage.message.status != oldStatus {
+      if (oldStatus == .failed) != isFailedMessage {
+        updateTimeContent()
+      }
       updateStatusContent()
     }
 
