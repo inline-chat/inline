@@ -77,6 +77,13 @@ public struct GetChatHistoryTransaction: Transaction2 {
     .chat(peer: context.peer.toHistoryProtocolPeer())
   }
 
+  public var blockers: [TransactionBlocker] {
+    // A reserved thread can be opened before its server creation finishes.
+    // Capture history admission only after the create reconciles that shell.
+    guard case let .thread(chatID) = context.peer, chatID > 0 else { return [] }
+    return [.chatCreated(chatId: chatID)]
+  }
+
   public func preparingForDispatch() async throws(TransactionExecutionError) -> any Transaction2 {
     do {
       var prepared = self

@@ -4,8 +4,46 @@ import InlineProtocol
 @testable import RealtimeV2
 import Testing
 
+private struct FailedHistoryCreationResolver: TransactionBlockerResolver {
+  func state(for blocker: TransactionBlocker) async -> TransactionBlockerState { .failed }
+}
+
 @Suite("RealtimeV2 transaction execution ordering", .serialized)
 struct TransactionExecutionOrderingTests {
+  @Test("Reserved thread history waits for creation while unrelated history drains")
+  func historyWaitsForReservedCreation() async throws {
+    let transactions = Transactions()
+    let historyID = await transactions.queue(transaction: GetChatHistoryTransaction(peer: .thread(id: 70)))
+    let create = CreateChatTransaction(
+      title: nil, emoji: nil, isPublic: false, spaceId: nil, participants: [1], reservedChatId: 70
+    )
+    let createID = await transactions.queue(transaction: create)
+    let unrelatedID = await transactions.queue(transaction: GetChatHistoryTransaction(peer: .user(id: 2)))
+
+    let creation = try #require(await readyWrapper(from: transactions.dequeue()))
+    #expect(creation.id == createID)
+    let unrelated = try #require(await readyWrapper(from: transactions.dequeue()))
+    #expect(unrelated.id == unrelatedID)
+    #expect(await transactions.dequeue() == nil)
+
+    await transactions.satisfy(blockers: create.satisfiedBlockersOnSuccess)
+    await transactions.finishExecution(for: creation)
+    let history = try #require(await readyWrapper(from: transactions.dequeue()))
+    #expect(history.id == historyID)
+  }
+
+  @Test("History cannot dispatch for a thread whose creation failed")
+  func historyFailsWithCreationDependency() async throws {
+    let transactions = Transactions(blockerResolver: FailedHistoryCreationResolver())
+    let historyID = await transactions.queue(transaction: GetChatHistoryTransaction(peer: .thread(id: 70)))
+    guard case let .failed(wrapper)? = await transactions.dequeue() else {
+      Issue.record("Expected history to fail its creation dependency")
+      return
+    }
+    #expect(wrapper.id == historyID)
+    #expect(!(await transactions.isInQueue(transactionId: historyID)))
+  }
+
   @Test("history invalidation can enter the existing owner while persisted work loads")
   func historySubmissionDuringActivation() async throws {
     let owner = TransactionOwner(accountID: 45, generation: 1)
@@ -34,6 +72,7 @@ struct TransactionExecutionOrderingTests {
     let owner = TransactionOwner(accountID: 46, generation: 1)
     let transactions = Transactions()
     await transactions.activate(owner: owner)
+    await transactions.satisfy(blockers: [.chatCreated(chatId: 70), .chatCreated(chatId: 71)])
     let historyID = try #require(await transactions.queue(
       transaction: GetChatHistoryTransaction(peer: .thread(id: 70)), owner: owner
     ))

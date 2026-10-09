@@ -688,7 +688,7 @@ public class MessagesProgressiveViewModel {
           } else {
             messages.append(contentsOf: newMessages)
           }
-          if let maximumWindowCount, atBottom, messages.count > maximumWindowCount {
+          if let maximumWindowCount, atBottom || historyAnchorID == nil, messages.count > maximumWindowCount {
             messages = reversed ? Array(messages.prefix(maximumWindowCount)) :
               Array(messages.suffix(maximumWindowCount))
           }
@@ -857,6 +857,7 @@ public class MessagesProgressiveViewModel {
     let currentUserId = currentUserId
     let reversed = reversed
     let existingMessages = messages
+    let windowLimit = historyAnchorID == nil ? maximumWindowCount : nil
 
     reloadTask = Task { [weak self] in
       do {
@@ -866,14 +867,17 @@ public class MessagesProgressiveViewModel {
           currentUserId: currentUserId,
           reversed: reversed,
           existingMessages: existingMessages,
-          mode: mode
+          mode: mode,
+          maximumWindowCount: windowLimit
         )
         guard !Task.isCancelled, let self, reloadGeneration == generation else { return }
 
         messages = reapplyingPendingAcknowledgements(to: snapshot.messages)
         updateRange()
         let metadataRequest = beginLoadedWindowMetadataRequest()
-        _ = applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest)
+        _ = applyLoadedWindowMetadata(
+          snapshot.metadata, for: metadataRequest, retainingMessageIDs: Set(existingMessages.map(\.id))
+        )
         reloadTask = nil
         callback?(.reload(animated: animated))
       } catch is CancellationError {
@@ -898,19 +902,24 @@ public class MessagesProgressiveViewModel {
     currentUserId: Int64?,
     reversed: Bool,
     existingMessages: [FullMessage],
-    mode: PublisherReloadMode
+    mode: PublisherReloadMode,
+    maximumWindowCount: Int? = nil
   ) async throws -> PublisherReloadSnapshot {
     try await database.reader.read { db in
+      let visibleIDs = Set(existingMessages.map(\.id))
       var query = baseQuery(for: peer, currentUserId: currentUserId)
         .filter(Column("messageId") > 0)
         .order(Column("messageId").desc)
       switch mode {
         case let .around(anchorID, limit):
           let rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ??
-            existingMessages
+            baseQuery(for: peer, currentUserId: currentUserId)
+              .filter(visibleIDs.contains(Column("globalId")))
+              .fetchAll(db)
+          let normalized = stableSortedMessages(rows, reversed: reversed)
           return try PublisherReloadSnapshot(
-            messages: rows,
-            metadata: loadedWindowMetadata(db, peer: peer, messages: rows)
+            messages: normalized,
+            metadata: loadedWindowMetadata(db, peer: peer, messages: normalized)
           )
         case let .replaceLatest(limit), let .mergeLatest(limit):
           query = query.limit(limit)
@@ -929,18 +938,46 @@ public class MessagesProgressiveViewModel {
             .order(Column("date").desc)
             .limit(60)
             .fetchAll(db)
-        case .around, .preserveRange: break
+        case .preserveRange:
+          // Pending sends have no positive history coordinate. Retain the
+          // pending rows already shown in this range, even after empty history
+          // certifies the new chat's tail.
+          fetched += try baseQuery(for: peer, currentUserId: currentUserId)
+            .filter(Column("messageId") <= 0)
+            .filter(visibleIDs.contains(Column("globalId")))
+            .fetchAll(db)
+        case .around: break
       }
       let normalized = stableSortedMessages(fetched, reversed: reversed)
       let messages = switch mode {
         case .replaceLatest, .preserveRange, .around:
           normalized
         case .mergeLatest:
-          mergingLatestMessages(existing: existingMessages, latest: normalized, reversed: reversed)
+          // Reloads also carry history clears and other database-only removals.
+          // Refresh the displayed rows in this same snapshot before merging so
+          // retaining a live window cannot resurrect deleted or stale rows.
+          try mergingLatestMessages(
+            existing: baseQuery(for: peer, currentUserId: currentUserId)
+              .filter(visibleIDs.contains(Column("globalId")))
+              .fetchAll(db),
+            latest: normalized, reversed: reversed
+          )
+      }
+      let window: [FullMessage]
+      if let maximumWindowCount {
+        // Admit the cached history component before evicting displayed rows.
+        // Sparse, uncertified cache rows must not consume the live window cap.
+        let metadata = try loadedWindowMetadata(db, peer: peer, messages: messages)
+        let projected = metadata.projecting(
+          messages, around: nil, retainingMessageIDs: visibleIDs
+        ).messages
+        window = reversed ? Array(projected.prefix(maximumWindowCount)) : Array(projected.suffix(maximumWindowCount))
+      } else {
+        window = messages
       }
       return try PublisherReloadSnapshot(
-        messages: messages,
-        metadata: loadedWindowMetadata(db, peer: peer, messages: messages)
+        messages: window,
+        metadata: loadedWindowMetadata(db, peer: peer, messages: window)
       )
     }
   }
@@ -1027,10 +1064,16 @@ public class MessagesProgressiveViewModel {
     }
 
     fileprivate func projecting(
-      _ messages: [FullMessage], around anchorID: Int64?
+      _ messages: [FullMessage], around anchorID: Int64?, retainingMessageIDs: Set<Int64> = []
     ) -> (messages: [FullMessage], metadata: LoadedWindowMetadata) {
-      let projected = historyCoverage.contiguousWindow(from: messages, around: anchorID)
-      guard projected.map(\.id) != messages.map(\.id) else { return (messages, self) }
+      if messages.allSatisfy({ retainingMessageIDs.contains($0.id) }) { return (messages, self) }
+      let component = historyCoverage.contiguousWindow(from: messages, around: anchorID)
+      let componentIDs = Set(component.map(\.id))
+      // Coverage decides which cached rows to load, not whether a row already
+      // rendered through a live publication still exists. Keep those rows and
+      // expose the unknown adjacency without certifying it from materialization.
+      let projected = messages.filter { componentIDs.contains($0.id) || retainingMessageIDs.contains($0.id) }
+      guard projected.count != messages.count else { return (messages, self) }
       let positiveIDs = projected.lazy.map(\.message.messageId).filter { $0 > 0 }
       let lower = positiveIDs.min()
       let upper = positiveIDs.max()
@@ -1209,12 +1252,13 @@ public class MessagesProgressiveViewModel {
     maxDate = range.maxDate
   }
 
-  private func updateLoadedWindowMetadata() {
+  private func updateLoadedWindowMetadata(retainingMessageIDs: Set<Int64>? = nil) {
+    let retainedIDs = retainingMessageIDs ?? Set(messages.map(\.id))
     if maximumWindowCount != nil {
       metadataTask?.cancel()
       metadataTask = Task { [weak self] in
         guard let self else { return }
-        await updateLoadedWindowMetadataAsync()
+        await updateLoadedWindowMetadataAsync(retainingMessageIDs: retainedIDs)
         guard !Task.isCancelled else { return }
         callback?(.reload(animated: false))
       }
@@ -1226,17 +1270,20 @@ public class MessagesProgressiveViewModel {
       let metadata = try db.reader.read { db in
         try Self.loadedWindowMetadata(db, peer: peer, messages: messages)
       }
-      _ = applyLoadedWindowMetadata(metadata, for: request)
+      _ = applyLoadedWindowMetadata(metadata, for: request, retainingMessageIDs: retainedIDs)
     } catch {
       guard isCurrentLoadedWindowMetadataRequest(request) else { return }
       Log.shared.error("Failed to update loaded window metadata", error: error)
-      _ = applyLoadedWindowMetadata(Self.unknownLoadedWindowMetadata(for: messages), for: request)
+      _ = applyLoadedWindowMetadata(
+        Self.unknownLoadedWindowMetadata(for: messages), for: request, retainingMessageIDs: retainedIDs
+      )
     }
   }
 
-  private func updateLoadedWindowMetadataAsync() async {
+  private func updateLoadedWindowMetadataAsync(retainingMessageIDs: Set<Int64>? = nil) async {
     let request = beginLoadedWindowMetadataRequest()
     let messages = messages
+    let retainedIDs = retainingMessageIDs ?? Set(messages.map(\.id))
 
     do {
       let metadata = try await Self.loadedWindowMetadata(
@@ -1245,13 +1292,15 @@ public class MessagesProgressiveViewModel {
         messages: messages
       )
       guard !Task.isCancelled else { return }
-      _ = applyLoadedWindowMetadata(metadata, for: request)
+      _ = applyLoadedWindowMetadata(metadata, for: request, retainingMessageIDs: retainedIDs)
     } catch is CancellationError {
       return
     } catch {
       guard !Task.isCancelled, isCurrentLoadedWindowMetadataRequest(request) else { return }
       Log.shared.error("Failed to update loaded window metadata", error: error)
-      _ = applyLoadedWindowMetadata(Self.unknownLoadedWindowMetadata(for: messages), for: request)
+      _ = applyLoadedWindowMetadata(
+        Self.unknownLoadedWindowMetadata(for: messages), for: request, retainingMessageIDs: retainedIDs
+      )
     }
   }
 
@@ -1271,10 +1320,11 @@ public class MessagesProgressiveViewModel {
   @discardableResult
   func applyLoadedWindowMetadata(
     _ metadata: LoadedWindowMetadata,
-    for request: LoadedWindowMetadataRequest
+    for request: LoadedWindowMetadataRequest,
+    retainingMessageIDs: Set<Int64> = []
   ) -> Bool {
     guard isCurrentLoadedWindowMetadataRequest(request) else { return false }
-    let projection = metadata.projecting(messages, around: historyAnchorID)
+    let projection = metadata.projecting(messages, around: historyAnchorID, retainingMessageIDs: retainingMessageIDs)
     // Coverage filters the existing order. Re-sorting here would move an
     // optimistic insertion after the view has received its incremental index.
     messages = projection.messages
@@ -1382,7 +1432,7 @@ public class MessagesProgressiveViewModel {
       historyAnchorID = messageId
       messages = reapplyingPendingAcknowledgements(to: aroundBatch)
       updateRange()
-      updateLoadedWindowMetadata()
+      updateLoadedWindowMetadata(retainingMessageIDs: [])
 
       return !messages.isEmpty
     } catch {
@@ -1675,7 +1725,7 @@ public class MessagesProgressiveViewModel {
       // sort()
 
       updateRange()
-      updateLoadedWindowMetadata()
+      updateLoadedWindowMetadata(retainingMessageIDs: [])
 
     } catch {
       Log.shared.error("Failed to get messages \(error)")
@@ -1684,6 +1734,7 @@ public class MessagesProgressiveViewModel {
 
   private func loadAdditionalMessages(request: AdditionalLoadRequest, publish: Bool) {
     let peer = peer
+    let retainedIDs = Set(messages.map(\.id))
 
     log
       .debug(
@@ -1713,7 +1764,7 @@ public class MessagesProgressiveViewModel {
 
         updateRange()
       }
-      updateLoadedWindowMetadata()
+      updateLoadedWindowMetadata(retainingMessageIDs: retainedIDs)
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
@@ -1742,7 +1793,9 @@ public class MessagesProgressiveViewModel {
         metadataTask?.cancel()
         messages = reapplyingPendingAcknowledgements(to: snapshot.messages)
         updateRange()
-        _ = applyLoadedWindowMetadata(snapshot.metadata, for: beginLoadedWindowMetadataRequest())
+        _ = applyLoadedWindowMetadata(
+          snapshot.metadata, for: beginLoadedWindowMetadataRequest(), retainingMessageIDs: existingIDs
+        )
         // No suspension after mutation: the caller can commit the matching rows
         // without cancellation leaving a half-applied page behind.
         return previousIDs != messages.map(\.id)
@@ -1787,7 +1840,7 @@ public class MessagesProgressiveViewModel {
       )
 
       updateRange()
-      await updateLoadedWindowMetadataAsync()
+      await updateLoadedWindowMetadataAsync(retainingMessageIDs: Set(previousIDs))
       guard !Task.isCancelled else { return false }
       return previousIDs != messages.map(\.id)
     } catch {

@@ -2027,7 +2027,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
         updateUnreadBadgeVisibility()
       }
     }
-    if !isAtBottom, let anchor = captureVisibleMessageAnchor() {
+    if isUserScrolling, !isAtBottom, let anchor = captureVisibleMessageAnchor() {
       chatRows.setHistoryAnchor(anchor.messageID)
     }
     requestVisibleHistoryGap()
@@ -2049,7 +2049,7 @@ final class ExperimentalMessageListAppKit: NSViewController, ChatMessageListCont
     guard !isDisposed, case let .historyHole(afterID, _) = gap, historyGapTask == nil else { return }
     attemptedHistoryGap = gap
     loadingHistoryGap = gap
-    if let anchor = captureVisibleMessageAnchor() { chatRows.setHistoryAnchor(anchor.messageID) }
+    if isUserScrolling, let anchor = captureVisibleMessageAnchor() { chatRows.setHistoryAnchor(anchor.messageID) }
     refreshHistoryGapViews()
     let peer = peerId
     historyGapTask = Task { @MainActor [weak self] in
