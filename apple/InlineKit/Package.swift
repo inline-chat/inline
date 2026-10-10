@@ -85,10 +85,10 @@ let package = Package(
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.1.5"),
     // LiveKit 2.15.2 plus Inline's custom RTCAudioDevice injection seam. This
-    // commit consumes LiveKit's official, unchanged M144 WebRTC binary.
+    // commit consumes LiveKit's official M144 WebRTC binary with platform TURN/TLS trust.
     .package(
       url: "https://github.com/inline-chat/client-sdk-swift.git",
-      revision: "a09dbeb2171463ccf1f4fb7c50f7ca04100ab93b"
+      revision: "46381d630c80c84ea1ebe672fb3e591b605d91ac"
     ),
     .package(
       url: "https://github.com/apple/swift-collections.git",

@@ -491,9 +491,7 @@ public final class GridRoomService {
     guard let accountToken = beginMembershipClaim() else { return }
     let expectedMembershipID = observedMembershipFence()
     let startedAt = Date()
-    #if os(iOS)
-    mediaCoordinator.setMicrophoneEnabled(false)
-    #endif
+    mediaCoordinator.prepareForExplicitJoin()
     let automaticMicrophoneChange = mediaCoordinator.applyAutoUnmuteOnJoin()
     #if os(macOS)
     mediaCoordinator.requestMicrophonePermission()
@@ -522,9 +520,7 @@ public final class GridRoomService {
     let startedAt = Date()
     mediaInteractionStartedAt = destination.rooms.first(where: { $0.id == roomID })?.avatars.isEmpty == false
       ? startedAt : nil
-    #if os(iOS)
-    mediaCoordinator.setMicrophoneEnabled(false)
-    #endif
+    mediaCoordinator.prepareForExplicitJoin()
     let automaticMicrophoneChange = mediaCoordinator.applyAutoUnmuteOnJoin()
     guard let mutation = optimisticallyJoin(roomID: roomID) else {
       membershipMutationInFlight = false
@@ -563,6 +559,7 @@ public final class GridRoomService {
     membershipMutationInFlight = true
     cancelPendingMembershipClaim = false
     membershipMutationRevision &+= 1
+    mediaCoordinator.prepareForExplicitJoin()
     mediaCoordinator.setMicrophoneEnabled(false)
     membershipSync.submit(GridMembershipOperation(
       kind: .move(callID: call.callID, roomID: call.roomID),
@@ -671,8 +668,12 @@ public final class GridRoomService {
           let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
           room.avatars.contains(where: \.ownedByCurrentSession)
     else { return }
-    let roomID = grid.currentRoomID
     let enabled = mediaCoordinator.toggleMicrophone()
+    publishOwnedMicrophoneState(spaceID: spaceID, roomID: grid.currentRoomID, enabled: enabled)
+    reconcileMediaDemand()
+  }
+
+  private func publishOwnedMicrophoneState(spaceID: Int64, roomID: Int64, enabled: Bool) {
     applyAvatarMicrophoneState(
       spaceID: spaceID,
       roomID: roomID,
@@ -680,7 +681,6 @@ public final class GridRoomService {
       enabled: enabled
     )
     avatarStateSync.submitMicrophoneState(roomID: roomID, enabled: enabled)
-    reconcileMediaDemand()
   }
 
   public func openRoomThread(roomID: Int64) async throws -> Int64 {
@@ -1021,7 +1021,7 @@ public final class GridRoomService {
   }
 
   private func reconcileAloneAutoMute() {
-    guard mediaCoordinator.shouldAutoMuteWhenAlone else {
+    guard hasLocalAdmission, mediaCoordinator.shouldAutoMuteWhenAlone else {
       cancelAloneAutoMute()
       return
     }
@@ -1058,7 +1058,8 @@ public final class GridRoomService {
     aloneAutoMuteTask = nil
     aloneAutoMuteTarget = nil
 
-    guard mediaCoordinator.shouldAutoMuteWhenAlone,
+    guard hasLocalAdmission,
+          mediaCoordinator.shouldAutoMuteWhenAlone,
           let grid = grids[target.spaceID],
           grid.hasCurrentRoomID,
           grid.currentRoomID == target.roomID,
@@ -1072,7 +1073,11 @@ public final class GridRoomService {
     else { return }
 
     log.debug("GRID_TRACE phase=alone_auto_mute room=\(target.roomID)")
-    toggleMicrophone(spaceID: target.spaceID)
+    // This is a one-way privacy action. Persist the mute, and only reopen
+    // through an explicit user action such as Toggle or Auto-Unmute on Join.
+    mediaCoordinator.setMicrophoneEnabled(false)
+    publishOwnedMicrophoneState(spaceID: target.spaceID, roomID: target.roomID, enabled: false)
+    reconcileMediaDemand()
   }
 
   private func cancelAloneAutoMute() {

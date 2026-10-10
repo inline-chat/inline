@@ -15,7 +15,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/client-sdk-swift.git",
       "state" : {
-        "revision" : "a09dbeb2171463ccf1f4fb7c50f7ca04100ab93b"
+        "revision" : "46381d630c80c84ea1ebe672fb3e591b605d91ac"
       }
     },
     {
@@ -140,8 +140,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/livekit/webrtc-xcframework.git",
       "state" : {
-        "revision" : "46f2af86f06b9a8a9158d37cadda5cb5a214e4c4",
-        "version" : "144.7559.11"
+        "revision" : "623e3e785c2479e3ea33bcd6abb66690f0d855db",
+        "version" : "144.7559.13"
       }
     },
     {

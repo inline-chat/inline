@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const liveKitRemoteURL = "https://github.com/inline-chat/client-sdk-swift.git";
+// This binary includes the platform trust fallback required by our TURN chain.
+export const gridWebRTCVersion = "144.7559.13";
 
 export const liveKitResolvedPaths = [
   "apple/InlineKit/Package.resolved",
@@ -35,6 +37,7 @@ export const retiredGridAudioSources = [
 export type GridLiveKitPinEvidence = {
   manifestRevision: string | null;
   resolvedRevisions: ReadonlyArray<{ path: string; revision: string | null; location: string | null }>;
+  resolvedWebRTCVersions: ReadonlyArray<{ path: string; version: string | null }>;
   mirrorPresent: boolean;
   remoteRevisionReachable: boolean;
   compiledInlineRTCSources: ReadonlyArray<string>;
@@ -44,7 +47,7 @@ type ResolvedFile = {
   pins?: Array<{
     identity?: string;
     location?: string;
-    state?: { revision?: string };
+    state?: { revision?: string; version?: string };
   }>;
 };
 
@@ -72,6 +75,11 @@ export function parseResolvedPin(source: string): { revision: string | null; loc
   };
 }
 
+export function parseResolvedWebRTCVersion(source: string): string | null {
+  const parsed = JSON.parse(source) as ResolvedFile;
+  return parsed.pins?.find((pin) => pin.identity === "webrtc-xcframework")?.state?.version ?? null;
+}
+
 export function parseInlineRTCSources(source: string): string[] {
   const description = JSON.parse(source) as PackageDescription;
   const target = description.targets?.find((candidate) => candidate.name === "InlineRTC");
@@ -97,6 +105,12 @@ export function validateGridAudioCutover(sources: ReadonlyArray<string>): string
 export function validateGridLiveKitPin(evidence: GridLiveKitPinEvidence): string[] {
   const failures: string[] = [];
   const revision = evidence.manifestRevision;
+
+  for (const pin of evidence.resolvedWebRTCVersions) {
+    if (pin.version !== gridWebRTCVersion) {
+      failures.push(`${pin.path} must pin WebRTC ${gridWebRTCVersion} for TURN/TLS platform trust; found ${pin.version ?? "no version"}.`);
+    }
+  }
 
   if (!revision) {
     failures.push("apple/InlineKit/Package.swift does not contain a 40-character LiveKit fork revision.");
@@ -220,6 +234,10 @@ export async function collectGridLiveKitPinEvidence(rootDir: string): Promise<Gr
   return {
     manifestRevision,
     resolvedRevisions,
+    resolvedWebRTCVersions: liveKitResolvedPaths.map((path) => ({
+      path,
+      version: parseResolvedWebRTCVersion(readFileSync(resolve(rootDir, path), "utf8")),
+    })),
     mirrorPresent: liveKitMirrorIsConfigured(rootDir),
     remoteRevisionReachable: manifestRevision
       ? await remoteRevisionIsReachable(manifestRevision)

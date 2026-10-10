@@ -132,14 +132,10 @@ final class GridMediaCoordinator {
   }
 
   func setTarget(_ target: GridMediaTarget?) {
-    #if os(iOS)
-    if target == nil || self.target?.callID != target?.callID
-      || self.target?.membershipID != target?.membershipID
-    {
-      microphoneCapturePrepared = false
-      setMicrophoneEnabled(false)
-    }
-    #endif
+    // A media generation can disappear while the admitted user remains alone.
+    // Capture demand already requires a target. Preserve microphone intent and
+    // preparation across this transport gap; explicit withdrawal and iOS safety
+    // interruptions own the paths that close the microphone.
     guard self.target != target else {
       submitDemand()
       return
@@ -224,6 +220,15 @@ final class GridMediaCoordinator {
     defaults.set(enabled, forKey: Self.microphoneEnabledKey)
     submitDemand()
     return enabled
+  }
+
+  /// iOS starts listen-only on a deliberate join;
+  /// transport replacement within that admission preserves intent.
+  func prepareForExplicitJoin() {
+    #if os(iOS)
+    microphoneCapturePrepared = false
+    setMicrophoneEnabled(false)
+    #endif
   }
 
   func applyAutoUnmuteOnJoin() -> GridAutomaticMicrophoneChange? {

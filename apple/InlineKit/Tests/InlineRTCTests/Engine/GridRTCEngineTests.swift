@@ -1459,6 +1459,7 @@ struct GridRTCEngineTests {
         let snapshot = await rtc.currentSnapshot()
         return snapshot.state == .connected(target)
           && snapshot.microphonePublicationState == .published
+          && !snapshot.microphoneMuted
       }
       #expect(await rtc.currentSnapshot().abandonedProviderOperationCount == 1)
       #expect(await driver.operations().filter { $0 == "publish:22:muted=true" }.count == 1)
@@ -2473,8 +2474,8 @@ struct GridRTCEngineTests {
     #expect(await rtc.currentSnapshot().reconnectCount == 1)
   }
 
-  @Test("a full reconnect waits for the muted microphone publication to return")
-  func fullReconnectWaitsForMicrophoneRepublish() async throws {
+  @Test("a full reconnect restores the user's microphone choice after republishing", arguments: [true, false])
+  func fullReconnectWaitsForMicrophoneRepublish(enabled: Bool) async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
       permissionDriver: TestGridMicrophonePermissionDriver()
@@ -2483,8 +2484,11 @@ struct GridRTCEngineTests {
     let rtc = GridRTCEngine(audio: audio, driver: driver)
     let target = InlineRTCSessionID("grid-test:1:43:1")
 
-    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
-    try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+    await rtc.setDemand(demand(target: target, microphoneEnabled: enabled))
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.microphonePublicationState == .published && snapshot.microphoneMuted == !enabled
+    }
     let initialPublishCount = await driver.operations().filter { $0 == "publish:43:muted=true" }.count
 
     await driver.emitToCurrentRoom(.reconnecting(mode: .full))
@@ -2501,7 +2505,7 @@ struct GridRTCEngineTests {
     try await eventuallyRTC {
       let rtcSnapshot = await rtc.currentSnapshot()
       return rtcSnapshot.microphonePublicationState == .published
-        && rtcSnapshot.microphoneMuted
+        && rtcSnapshot.microphoneMuted == !enabled
     }
     #expect(await rtc.currentSnapshot().reconnectCount == 1)
     #expect(await driver.operations().filter { $0 == "publish:43:muted=true" }.count == initialPublishCount)

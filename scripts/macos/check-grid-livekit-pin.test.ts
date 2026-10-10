@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   liveKitRemoteURL,
+  gridWebRTCVersion,
   parseInlineRTCSources,
   parseManifestRevision,
   parseResolvedPin,
+  parseResolvedWebRTCVersion,
   requiredGridAudioSources,
   retiredGridAudioSources,
   validateGridAudioCutover,
@@ -20,6 +22,7 @@ function evidence(overrides: Partial<GridLiveKitPinEvidence> = {}): GridLiveKitP
       { path: "one/Package.resolved", revision, location: liveKitRemoteURL },
       { path: "two/Package.resolved", revision, location: liveKitRemoteURL },
     ],
+    resolvedWebRTCVersions: [{ path: "one/Package.resolved", version: gridWebRTCVersion }],
     mirrorPresent: false,
     remoteRevisionReachable: true,
     compiledInlineRTCSources: [...requiredGridAudioSources],
@@ -28,6 +31,18 @@ function evidence(overrides: Partial<GridLiveKitPinEvidence> = {}): GridLiveKitP
 }
 
 describe("Grid LiveKit release pin", () => {
+  test("rejects a binary without the TURN platform trust fix or an absent binary pin", () => {
+    expect(validateGridLiveKitPin(evidence({
+      resolvedWebRTCVersions: [
+        { path: "old/Package.resolved", version: "144.7559.11" },
+        { path: "missing/Package.resolved", version: null },
+      ],
+    }))).toHaveLength(2);
+    expect(parseResolvedWebRTCVersion(JSON.stringify({ pins: [{
+      identity: "webrtc-xcframework", state: { version: gridWebRTCVersion },
+    }] }))).toBe(gridWebRTCVersion);
+    expect(parseResolvedWebRTCVersion(JSON.stringify({ pins: [] }))).toBeNull();
+  });
   test("parses the manifest revision adjacent to the canonical remote", () => {
     expect(
       parseManifestRevision(`

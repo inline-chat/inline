@@ -11,7 +11,7 @@ import Testing
 @MainActor
 final class GridAuthorityTestFixture {
   private let namespace = UUID().uuidString
-  private let defaults: UserDefaults
+  let defaults: UserDefaults
   let cache: AuthSnapshotCache
   let writes = GridAuthorityWriteProbe()
   let store: AuthStore
@@ -23,9 +23,16 @@ final class GridAuthorityTestFixture {
   let service: GridRoomService
   private let control: GridAuthorityMembershipControl?
 
-  init(configurationBlocked: Bool = false, control: GridAuthorityMembershipControl? = nil) {
+  init(
+    configurationBlocked: Bool = false,
+    control: GridAuthorityMembershipControl? = nil,
+    defaultsValues: [String: Bool] = [:]
+  ) {
     self.control = control
     defaults = UserDefaults(suiteName: "grid-authority-test-\(namespace)")!
+    for (key, value) in defaultsValues {
+      defaults.set(value, forKey: key)
+    }
     cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
     let writes = writes
     store = AuthStore(
@@ -148,6 +155,7 @@ final class GridAuthorityTestFixture {
     await audio.releaseShutdown(succeeded: true)
     await service.prepareForLogout()
     await realtime.loggedOut()
+    defaults.removePersistentDomain(forName: "grid-authority-test-\(namespace)")
     AuthKeychainConfig.mockDelete("token", namespace: namespace)
     AuthKeychainConfig.mockDelete("credentials_v2", namespace: namespace)
     AuthKeychainConfig.mockDelete("inline_protocol_credentials_v1", namespace: namespace)
@@ -168,6 +176,8 @@ final class GridAuthorityMembershipControl {
   }
 
   var setupHome: GetGridHomeResult?
+  var setupGrid: GetGridResult?
+  var setupConnection: GridConnectionCredentials?
   private(set) var submissions: [Submission] = []
   private(set) var completed = Set<Int>()
   private var pending: [Int: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
@@ -179,6 +189,14 @@ final class GridAuthorityMembershipControl {
       case .getGridHome:
         guard let setupHome else { throw GridRoomAPIError.invalidResponse }
         return .getGridHome(setupHome)
+      case .getGrid:
+        guard let setupGrid else { throw GridRoomAPIError.invalidResponse }
+        return .getGrid(setupGrid)
+      case .prepareGridConnection:
+        guard let setupConnection else { throw GridRoomAPIError.invalidResponse }
+        return .prepareGridConnection(.with { $0.connection = setupConnection })
+      case .setGridAvatarMicrophoneEnabled:
+        return .setGridAvatarMicrophoneEnabled(.init())
       case .createGridRoom, .joinGridRoom, .leaveGridRoom, .moveGridCallHere:
         let index = submissions.count
         submissions.append(Submission(method: transaction.method, account: account))
