@@ -495,6 +495,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private var lifecycleLedger = SidebarCollectionLifecycleLedger<UUID, IndexPath>()
   private var inFlightAuditReason = "initial"
   private var inFlightAuditAnimated = false
+  private var structuralApplyWithoutDisplayCount = 0
   private static var loggedSceneAnomalyKinds = Set<String>()
   private static var reportedSceneAnomalyKinds = Set<String>()
   private var escapeMonitor: Any?
@@ -1316,8 +1317,10 @@ final class SidebarCollectionBodyController: NSViewController {
     }
 
     let next = update.presentation
+    let canAnimate = canAnimateCollectionTransactions
     if hasAppliedInitialSnapshot,
        update.animatingDifferences,
+       canAnimate,
        !isSidebarLiveResizeActive,
        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false,
        reorderSession == nil,
@@ -1342,8 +1345,12 @@ final class SidebarCollectionBodyController: NSViewController {
     let previousRows = previousPresentation?.rowByID ?? [:]
     let animate = hasAppliedInitialSnapshot
       && update.animatingDifferences
+      && canAnimate
       && !isSidebarLiveResizeActive
       && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
+    if hasAppliedInitialSnapshot, update.animatingDifferences, canAnimate == false {
+      recordStructuralApplyWithoutDisplay(reason: update.reason)
+    }
     inFlightViewportAnchor = update.reason == "optimistic-drop"
       ? nil
       : captureViewportAnchor(survivingIn: Set(next.orderedIDs))
@@ -2117,6 +2124,33 @@ final class SidebarCollectionBodyController: NSViewController {
     return hasCompletedViewLayout && viewport.width > 1 && viewport.height > 1
   }
 
+  /// AppKit only runs an animated collection transaction for a collection it
+  /// can display. Without a window, or with an empty viewport, it finishes the
+  /// batch synchronously inside its own animation group and loses track of
+  /// item views: some stay attached and visible without an owning item, and
+  /// others keep presenting a row that moved. Those views then paint over the
+  /// live rows for the rest of the window's life. A non-animated apply is a
+  /// plain reload and stays consistent in the same states.
+  private var canAnimateCollectionTransactions: Bool {
+    let viewport = scrollView.contentView.bounds
+    return collectionView.window != nil && viewport.width > 1 && viewport.height > 1
+  }
+
+  private func recordStructuralApplyWithoutDisplay(reason: String) {
+    structuralApplyWithoutDisplayCount += 1
+    guard structuralApplyWithoutDisplayCount == 1 else { return }
+    let viewport = scrollView.contentView.bounds
+    os_log(
+      .default,
+      log: Self.diagnostics,
+      "component=collection event=apply-without-display reason=%{public}@ window=%{public}d viewport-w=%{public}d viewport-h=%{public}d",
+      reason as NSString,
+      collectionView.window == nil ? 0 : 1,
+      Int(viewport.width.rounded()),
+      Int(viewport.height.rounded())
+    )
+  }
+
   private func tracePresentation(
     event: String,
     presentation: SidebarBodyPresentation,
@@ -2471,6 +2505,7 @@ final class SidebarCollectionBodyController: NSViewController {
     let lifecycleSequence = lifecycleLedger.sequence
     let auditReason = inFlightAuditReason
     let auditTrigger = trigger
+    let applyWithoutDisplayCount = structuralApplyWithoutDisplayCount
     Task.detached(priority: .utility) {
       _ = SentrySDK.capture(message: "mac_sidebar_scene_anomaly") { scope in
         scope.setLevel(.warning)
@@ -2489,6 +2524,10 @@ final class SidebarCollectionBodyController: NSViewController {
         scope.setExtra(value: viewportWidth, key: "sidebar.viewport_width")
         scope.setExtra(value: viewportHeight, key: "sidebar.viewport_height")
         scope.setExtra(value: lifecycleSequence, key: "sidebar.lifecycle_sequence")
+        scope.setExtra(
+          value: applyWithoutDisplayCount,
+          key: "sidebar.apply_without_display_count"
+        )
       }
     }
   }
