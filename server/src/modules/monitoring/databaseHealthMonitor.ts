@@ -1,9 +1,9 @@
 import {
-  runHealthChecks,
+  makeHealthChecker,
   type HealthResponse,
 } from "@in/server/controllers/healthCheck"
 import { NODE_ENV } from "@in/server/env"
-import { sendBotEvent } from "@in/server/modules/bot-events"
+import { createTelegramAlertSender } from "./telegramAlerts"
 import { Log } from "@in/server/utils/log"
 import os from "node:os"
 
@@ -20,7 +20,7 @@ type HealthRunner = () => Promise<{
     readonly clock?: HealthResponse["checks"]["clock"]
   }
 }>
-type AlertSender = (message: string) => void
+type AlertSender = (message: string) => void | Promise<void>
 type NowFn = () => number
 type SetIntervalFn = (handler: () => void, timeout: number) => ReturnType<typeof setInterval>
 type ClearIntervalFn = (id: ReturnType<typeof setInterval>) => void
@@ -80,8 +80,8 @@ const createRuntimeOptions = (options: DatabaseHealthMonitorOptions = {}): Monit
   pollIntervalMs: sanitizePositiveInt(options.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
   alertCooldownMs: sanitizePositiveInt(options.alertCooldownMs, DEFAULT_ALERT_COOLDOWN_MS),
   failureThreshold: sanitizePositiveInt(options.failureThreshold, DEFAULT_FAILURE_THRESHOLD),
-  healthRunner: options.healthRunner ?? runHealthChecks,
-  alertSender: options.alertSender ?? sendBotEvent,
+  healthRunner: options.healthRunner ?? makeHealthChecker(),
+  alertSender: options.alertSender ?? createTelegramAlertSender(),
   now: options.now ?? Date.now,
   setIntervalFn: options.setIntervalFn ?? setInterval,
   clearIntervalFn: options.clearIntervalFn ?? clearInterval,
@@ -89,12 +89,16 @@ const createRuntimeOptions = (options: DatabaseHealthMonitorOptions = {}): Monit
 
 export class DatabaseHealthMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null
+  private generation = 0
   private inFlight = false
   private consecutiveFailures = 0
   private downSinceMs: number | null = null
   private downErrorCode: string | null = null
   private lastAlertAtMs: number | null = null
   private lastClockWarningAtMs: number | null = null
+  // Coalesce repeated recoveries while delivery is unavailable, retaining the
+  // latest recovery and count without an unbounded notification queue.
+  private pendingRecovery: { message: string; count: number } | null = null
   private readonly runtime: MonitorRuntimeOptions
 
   constructor(options: DatabaseHealthMonitorOptions = {}) {
@@ -106,6 +110,7 @@ export class DatabaseHealthMonitor {
       return
     }
 
+    this.generation += 1
     this.intervalId = this.runtime.setIntervalFn(() => {
       void this.pollOnce()
     }, this.runtime.pollIntervalMs)
@@ -114,6 +119,7 @@ export class DatabaseHealthMonitor {
   }
 
   stop(): void {
+    this.generation += 1
     if (!this.intervalId) {
       return
     }
@@ -128,19 +134,23 @@ export class DatabaseHealthMonitor {
     }
 
     this.inFlight = true
+    const generation = this.generation
 
     try {
       const result = await this.readHealth()
+      if (generation !== this.generation) return
       if (result.checks.clock?.status === "warning") {
-        this.handleClockWarning(result.checks.clock.warning ?? "clock_offset_warning")
+        await this.handleClockWarning(result.checks.clock.warning ?? "clock_offset_warning", generation)
       }
+      if (generation !== this.generation) return
       if (result.ok && result.checks.database.ok) {
-        this.handleHealthy()
+        await this.handleHealthy(generation)
       } else {
-        this.handleUnhealthy(
+        await this.handleUnhealthy(
           result.checks.database.error ??
           result.checks.clock?.error ??
           "database_unavailable",
+          generation,
         )
       }
     } finally {
@@ -166,7 +176,7 @@ export class DatabaseHealthMonitor {
     }
   }
 
-  private handleHealthy(): void {
+  private async handleHealthy(generation: number): Promise<void> {
     if (this.downSinceMs !== null) {
       const recoveredAt = this.runtime.now()
       const duration = formatDuration(recoveredAt - this.downSinceMs)
@@ -175,71 +185,91 @@ export class DatabaseHealthMonitor {
         consecutiveFailures: this.consecutiveFailures,
         downtimeMs: recoveredAt - this.downSinceMs,
       })
-      this.notify(
-        `${clockFailure ? "CLOCK RECOVERED" : "DB RECOVERED"} on ${NODE_ENV}@${os.hostname()} after ${duration}.`,
-      )
+      this.pendingRecovery = {
+        message: `${clockFailure ? "CLOCK RECOVERED" : "DB RECOVERED"} on ${NODE_ENV}@${os.hostname()} after ${duration}.`,
+        count: Math.min((this.pendingRecovery?.count ?? 0) + 1, Number.MAX_SAFE_INTEGER),
+      }
     }
 
     this.consecutiveFailures = 0
     this.downSinceMs = null
     this.downErrorCode = null
     this.lastAlertAtMs = null
+    await this.deliverPendingRecovery(generation)
   }
 
-  private handleClockWarning(warningCode: string): void {
+  private async handleClockWarning(warningCode: string, generation: number): Promise<void> {
     const now = this.runtime.now()
     if (
       this.lastClockWarningAtMs !== null &&
       now - this.lastClockWarningAtMs < this.runtime.alertCooldownMs
     ) return
 
-    this.lastClockWarningAtMs = now
     log.warn("Server clock warning", { warningCode })
-    this.notify(`CLOCK WARNING on ${NODE_ENV}@${os.hostname()} (${warningCode}).`)
+    if (await this.notify(`CLOCK WARNING on ${NODE_ENV}@${os.hostname()} (${warningCode}).`, generation)) {
+      this.lastClockWarningAtMs = this.runtime.now()
+    }
   }
 
-  private handleUnhealthy(errorCode: string): void {
+  private async handleUnhealthy(errorCode: string, generation: number): Promise<void> {
     this.consecutiveFailures += 1
-
-    if (this.consecutiveFailures < this.runtime.failureThreshold) {
-      return
-    }
-
     const now = this.runtime.now()
-    if (this.downSinceMs === null) {
+    if (this.downSinceMs === null && this.consecutiveFailures >= this.runtime.failureThreshold) {
       this.downSinceMs = now
       this.downErrorCode = errorCode
-      this.lastAlertAtMs = now
       const clockFailure = errorCode.startsWith("clock_")
       log.error(clockFailure ? "Server clock safety threshold reached" : "Database health threshold reached", {
         consecutiveFailures: this.consecutiveFailures,
         errorCode,
       })
-      this.notify(
+    }
+
+    // Deliver an earlier recovery before announcing a new outage. Keep reading
+    // health and recording thresholds even while that delivery is retried.
+    if (!await this.deliverPendingRecovery(generation) || this.downSinceMs === null) return
+
+    if (this.lastAlertAtMs === null) {
+      const clockFailure = this.downErrorCode?.startsWith("clock_") ?? false
+      if (await this.notify(
         `${clockFailure ? "CLOCK UNSAFE" : "DB DOWN"} on ${NODE_ENV}@${os.hostname()} (failures=${this.consecutiveFailures}, error=${errorCode}).`,
-      )
+        generation,
+      )) this.lastAlertAtMs = this.runtime.now()
       return
     }
 
-    if (this.lastAlertAtMs === null || now - this.lastAlertAtMs >= this.runtime.alertCooldownMs) {
-      this.lastAlertAtMs = now
+    if (now - this.lastAlertAtMs >= this.runtime.alertCooldownMs) {
       const duration = formatDuration(now - this.downSinceMs)
       log.warn(errorCode.startsWith("clock_") ? "Server clock remains unsafe" : "Database remains unhealthy", {
         consecutiveFailures: this.consecutiveFailures,
         downtimeMs: now - this.downSinceMs,
         errorCode,
       })
-      this.notify(
+      if (await this.notify(
         `${errorCode.startsWith("clock_") ? "CLOCK STILL UNSAFE" : "DB STILL DOWN"} on ${NODE_ENV}@${os.hostname()} for ${duration} (error=${errorCode}, failures=${this.consecutiveFailures}).`,
-      )
+        generation,
+      )) this.lastAlertAtMs = this.runtime.now()
     }
   }
 
-  private notify(message: string): void {
+  private async deliverPendingRecovery(generation: number): Promise<boolean> {
+    const pending = this.pendingRecovery
+    if (!pending) return true
+    const message = pending.count > 1
+      ? `${pending.message} (${pending.count} recoveries observed while alert delivery was unavailable.)`
+      : pending.message
+    if (!await this.notify(message, generation)) return false
+    this.pendingRecovery = null
+    return true
+  }
+
+  private async notify(message: string, generation: number): Promise<boolean> {
+    if (generation !== this.generation) return false
     try {
-      this.runtime.alertSender(message)
-    } catch (error) {
-      log.error("Failed to send DB health alert", { error })
+      await this.runtime.alertSender(message)
+      return true
+    } catch {
+      log.warn("DB health alert delivery failed; will retry on a later poll")
+      return false
     }
   }
 }
