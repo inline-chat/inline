@@ -888,13 +888,14 @@ public class MessagesProgressiveViewModel {
             .limit(60)
             .fetchAll(db)
         case .preserveRange:
-          // Pending sends have no positive history coordinate. Retain the
-          // pending rows already shown in this range, even after empty history
-          // certifies the new chat's tail.
+          // Authoritative history can change a shown row's date before its
+          // publication arrives. Re-read shown identities in this snapshot so
+          // stale date bounds cannot drop a row that still exists.
+          let fetchedIDs = Set(fetched.map(\.id))
           fetched += try baseQuery(for: peer, currentUserId: currentUserId)
-            .filter(Column("messageId") <= 0)
             .filter(visibleIDs.contains(Column("globalId")))
             .fetchAll(db)
+            .filter { !fetchedIDs.contains($0.id) }
         case .around: break
       }
       let normalized = stableSortedMessages(fetched, reversed: reversed)
