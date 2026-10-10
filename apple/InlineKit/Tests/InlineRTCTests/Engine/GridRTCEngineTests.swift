@@ -2380,10 +2380,14 @@ struct GridRTCEngineTests {
     let target = InlineRTCSessionID("grid-test:1:40:1")
     engine.setDemand(demand(target: target, microphoneEnabled: false))
 
+    // Reconnect exercises an established microphone publication. Transport
+    // connection alone is emitted before that initial publication completes.
     try await eventuallyRTC {
       let firstReceived = await recorder.containsRTCState(.connected(target))
       let secondReceived = await mirrorRecorder.containsRTCState(.connected(target))
-      return firstReceived && secondReceived
+      let firstPublished = await recorder.containsConnectedPublishedMicrophone(target)
+      let secondPublished = await mirrorRecorder.containsConnectedPublishedMicrophone(target)
+      return firstReceived && secondReceived && firstPublished && secondPublished
     }
     await rtcDriver.emitToCurrentRoom(.reconnecting(mode: .quick))
     try await eventuallyRTC {
@@ -3286,6 +3290,12 @@ private actor GridEngineSnapshotRecorder {
 
   func containsRTCState(_ state: InlineRTCConnectionState) -> Bool {
     snapshots.contains { $0.rtc.state == state }
+  }
+
+  func containsConnectedPublishedMicrophone(_ target: InlineRTCSessionID) -> Bool {
+    snapshots.contains {
+      $0.rtc.state == .connected(target) && $0.rtc.microphonePublicationState == .published
+    }
   }
 }
 
