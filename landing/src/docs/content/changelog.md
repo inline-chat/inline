@@ -7,11 +7,13 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
-## October 9, 2026
+## October 10, 2026
+
+[macOS 0.2, build 5957](https://public-assets.inline.chat/mac/beta/5957/Inline.dmg) · [macOS 0.2 tip, build 5959](https://public-assets.inline.chat/mac/tip/5959/Inline.dmg) · [iOS TestFlight build 1342](https://testflight.apple.com/join/FkC3f7fz)
 
 ### New
 
-- 🎧 Voice messages on iOS now **keep playing** when you switch chats or lock your phone. A playback bar lets you pause or jump back to the message.
+- 🎧 Voice messages on iOS now **keep playing** when you switch chats or lock your phone. A playback bar lets you pause, change speed, or jump back to the message.
 - 🗄️ Rebuilt **Chat Info** on iOS and macOS. Files, media, links, and voice messages now load reliably, including older ones from far back in the chat.
 - 📁 Send **folders** on macOS. Drop or attach one and Inline zips it for you.
 - Messages on iOS now follow your system **text size**.
@@ -28,8 +30,10 @@ Release notes for Inline apps, developer tools, and integrations.
 
 - Inline is now in the **ChatGPT plugin store**. See [Add Inline to Your Agent](/docs/add-inline).
 - [Hermes](/docs/hermes) now runs on **Umbrel**, and you can install Inline from the Hermes plugin catalog with `hermes plugins install inline-platform`.
+- Added the [`add-inline-integration` skill](/docs/developers#add-inline-to-a-product-or-bot). Give it to your coding agent to add Inline as a channel in a product or bot that already supports Slack, Telegram, Discord, or Teams.
 - Agent approvals now appear in the conversation where the agent is working, instead of your DM with it.
 - Local agents are no longer limited to four sessions at a time. Claude also keeps its permission mode, including plan mode, between turns.
+- Local agents on macOS now stay responsive in the background. After updating to CLI 0.7.16, run `inline bridge restart` once.
 - You can now create up to **30 bots** per account.
 - [MCP](/docs/mcp) can now read exact messages, forward messages, create reply threads, filter by sender, and ask teammates a question in a private thread.
 - The [CLI](/docs/cli) can now filter messages by sender with `--sender-id`, return forwarding receipts, and list reply threads you haven't opened with `inline chats list --include-subthreads`. JSON output also includes pagination details.
@@ -38,16 +42,20 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ### Fixes
 
+- Fixed messages disappearing from chats and new threads, including ones sent or received while you were scrolled up.
 - Improved reconnecting and catching up on missed messages on iOS and macOS.
+- Opening a chat from a notification now lands on the latest messages.
 - Fixed unexpected logouts on macOS after a temporary connection or sign-in failure.
 - Fixed iOS message menus leaving a blank gap when closing, and chats losing their scroll position while the reaction menu is open.
+- Fixed the iOS Search tab getting stuck in a keyboard loop.
 - Fixed canceling a message that is still sending on macOS.
+- Fixed chats vanishing from your list when deleting them failed.
 - Fixed chat links that could fail to open a DM, including DMs with bots.
 - Fixed archiving group chats you were invited to but hadn't opened.
 - Fixed profile photos that stayed blank after a failed download.
-- Fixed macOS message times keeping the wrong color after switching between light and dark mode.
+- Fixed macOS message times keeping the wrong color after switching between light and dark mode, or not updating after a failed send.
 - Fixed the message highlight, reply-preview layout, and swipe-to-reply avatars on iOS.
-- Improved macOS sidebar performance and preview contrast.
+- Fixed ghost rows lingering over chats in the macOS sidebar. Also improved sidebar performance and preview contrast.
 
 ---
 
