@@ -6,7 +6,7 @@ import Logger
 import RealtimeV2
 
 /// Immutable history-continuity evidence for one loaded transcript window.
-/// Message rows are materialization only; every certified edge or adjacency is
+/// Message rows are materialization only; certified continuity and edges are
 /// derived from the persisted history-hole intervals.
 public struct MessageHistoryCoverageProjection: Sendable, Equatable {
   public static let unknown = MessageHistoryCoverageProjection(
@@ -87,8 +87,9 @@ public struct MessageHistoryCoverageProjection: Sendable, Equatable {
     messageID > 0 && !Self.intersects(unknownRanges, lowerID: messageID, upperID: messageID)
   }
 
-  /// Selects one continuous materialized component. Unknown intervals stay at
-  /// its paging edges rather than being silently crossed by sparse cache rows.
+  /// Selects one continuous materialized component. Consecutive cached IDs can
+  /// stay visible without certifying history; sparse rows require coverage to
+  /// cross an unknown interval.
   public func contiguousWindow(
     from messages: [FullMessage],
     around anchorID: Int64? = nil
@@ -99,10 +100,16 @@ public struct MessageHistoryCoverageProjection: Sendable, Equatable {
     let anchorIndex = ids.firstIndex(where: { $0 >= coordinate }) ?? (ids.count - 1)
     var lower = anchorIndex
     var upper = anchorIndex
-    while lower > 0, isCertifiedContinuation(between: ids[lower - 1], and: ids[lower]) {
+    while lower > 0,
+          ids[lower] - ids[lower - 1] == 1
+            || isCertifiedContinuation(between: ids[lower - 1], and: ids[lower])
+    {
       lower -= 1
     }
-    while upper + 1 < ids.count, isCertifiedContinuation(between: ids[upper], and: ids[upper + 1]) {
+    while upper + 1 < ids.count,
+          ids[upper + 1] - ids[upper] == 1
+            || isCertifiedContinuation(between: ids[upper], and: ids[upper + 1])
+    {
       upper += 1
     }
     let includesLiveRows = upper == ids.count - 1 && anchorID == nil

@@ -104,7 +104,23 @@ struct NewThreadMessageVisibilityTests {
       try MessageHistoryCoverageStore.invalidateAll(db, chatId: 1)
     }
     for id in Int64(100) ... 102 { _ = try await fixture.insert(messageID: id) }
-    try await fixture.reload(model, expecting: [1, 102])
+    // Consecutive cached rows stay visible before admission, while the old
+    // rendered row remains retained across an uncertified gap.
+    try await fixture.reload(model, expecting: [1, 100, 101, 102])
+    #expect(!model.historyCoverage.isCertifiedContinuation(between: 1, and: 100))
+    #expect(!model.historyCoverage.isCertifiedContinuation(between: 100, and: 101))
+    #expect(!model.historyCoverage.isCertifiedMessage(100))
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+    #expect(model.historyCoverage.certifiedReadMaxID(after: 0, through: 102) == nil)
+    try await fixture.database.reader.read { db in
+      for scope in MessageHistoryScope.allCases {
+        let holes = try MessageHistoryCoverageStore.holes(db, chatId: 1, scope: scope)
+        #expect(holes == [
+          MessageHistoryHole(chatId: 1, scope: scope, lowerId: 1,
+                             upperId: MessageHistoryHole.positiveMessageIDMax),
+        ])
+      }
+    }
     if anchored { model.setHistoryAnchor(1) }
     let pending = try await fixture.insert(messageID: -456, dateOffset: 103)
     fixture.publisher.publisher.send(.add(.init(messages: [pending], peer: .thread(id: 1))))
