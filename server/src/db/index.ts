@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js"
 import { DATABASE_URL } from "@in/server/env"
-import { makeDatabaseClients } from "./connectionPolicy"
+import { combineHealthProbes, makeDatabaseClients } from "./connectionPolicy"
 import { installPostCommitHooks } from "./commitHooks"
 import { checkMigrationHead, MigrationStateError, validateAppliedMigrations } from "./migrationState"
 import * as schema from "./schema"
@@ -31,11 +31,7 @@ export const initDb = (databaseUrl: string) => {
 export const checkDatabaseHealth = () => {
   const database = clients.checkHealth()
   const migrations = checkMigrationHead(clients.healthClient)
-  return Object.assign(Promise.all([database, migrations]).then(([rows]) => rows), {
-    cancel: () => {
-      try { database.cancel?.() } finally { migrations.cancel() }
-    },
-  })
+  return combineHealthProbes(database, [migrations])
 }
 
 export const validateDatabaseStartup = async () => {

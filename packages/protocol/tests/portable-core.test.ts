@@ -551,6 +551,12 @@ describe("session counters", () => {
     expect(() => pending.retain({
       messageId: 4n, sequenceNumber: 13, body: Uint8Array.of(4),
     })).toThrow("cache is full")
+
+    pending.clear()
+    expect(pending.retainedBytes).toBe(0)
+    expect(pending.resend([1n, 2n, 3n])).toEqual([])
+    pending.retain({ messageId: 4n, sequenceNumber: 13, body: halfMiB })
+    expect(pending.retainedBytes).toBe(halfMiB.length)
   })
 })
 

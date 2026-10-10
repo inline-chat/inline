@@ -109,6 +109,34 @@ export const assertQueryTimeouts = (rows: readonly TimeoutRow[]): void => {
   }
 }
 
+type CancellableHealthProbe<T = unknown> = PromiseLike<T> & { readonly cancel?: () => void }
+
+/** Never release readiness admission while a child probe is still queued/running. */
+export const combineHealthProbes = <T>(
+  primary: CancellableHealthProbe<T>,
+  additional: readonly CancellableHealthProbe[],
+) => {
+  const probes = [primary, ...additional]
+  return Object.assign(Promise.allSettled(probes).then((results) => {
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason
+    }
+    return primary
+  }), {
+    cancel: () => {
+      let failed = false
+      let failure: unknown
+      for (const probe of probes) {
+        try { probe.cancel?.() } catch (error) {
+          if (!failed) failure = error
+          failed = true
+        }
+      }
+      if (failed) throw failure
+    },
+  })
+}
+
 export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEnvironment = {}) => {
   const queryPoolMax = environment.INLINE_DATABASE_QUERY_POOL_MAX ?? "10"
   if (!/^(?:[1-9]|10)$/.test(queryPoolMax) || queryPoolMax.trim() !== queryPoolMax) {
@@ -139,10 +167,12 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
     // A healthy direct endpoint must not hide a broken/queued pooled endpoint.
     // The health controller's existing deadline cancels both pending queries.
     const pooled = queryTimeoutSettings()
-    return Object.assign(Promise.all([direct, pooled]).then(([clock, rows]) => {
+    const probes = combineHealthProbes(direct, [pooled])
+    return Object.assign(probes.then(async (clock) => {
+      const rows = await pooled
       assertQueryTimeouts(rows)
       return clock
-    }), { cancel: () => { try { direct.cancel() } finally { pooled.cancel() } } })
+    }), { cancel: probes.cancel })
   }
   const validateStartup = async (): Promise<void> => {
     if (policy.mode === "direct") return

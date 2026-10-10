@@ -196,6 +196,11 @@ export class PendingMessageCache {
 
   get retainedBytes(): number { return this.#retainedBytes }
 
+  clear(): void {
+    this.#messages.clear()
+    this.#retainedBytes = 0
+  }
+
   retain(message: PendingMessage): void {
     if (this.#messages.size >= this.capacity && !this.#messages.has(message.messageId)) {
       throw new RangeError("Pending-message cache is full")

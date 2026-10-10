@@ -76,6 +76,7 @@ const BOOL_TRUE = 0x997275b5
 const MAX_SESSION_OUTPUTS = 2048
 const MAX_COMPLETED_INCOMING_MESSAGES = 8192
 const MAX_DEFERRED_INVOKE_AFTER = 1024
+const MAX_DEFERRED_INVOKE_AFTER_BYTES = 32 * 1024 * 1024
 const MAX_IN_FLIGHT_APPLICATIONS = 64
 const MAX_INVOKE_AFTER_NESTING = 16
 const DEFAULT_APPLICATION_TIMEOUT_MS = 30_000
@@ -295,12 +296,14 @@ export class InlineProtocolServerSession {
   readonly #pending = new PendingMessageCache()
   readonly #completedIncoming = new Map<bigint, true>()
   readonly #deferredInvokeAfter = new Map<bigint, PreparedLogicalMessage>()
+  #deferredInvokeAfterBytes = 0
   readonly #inFlightApplications = new Set<bigint>()
   readonly #droppedApplicationAnswers = new Set<bigint>()
   readonly #handshake: InlineHandshakeServer
   #authorization: LoadedServerAuthorizationKey | undefined
   #sessionId: bigint | undefined
   #destroyed = false
+  #transportClosed = false
 
   constructor(private readonly options: InlineProtocolServerSessionOptions) {
     const applicationTimeoutMs = options.applicationTimeoutMs ?? DEFAULT_APPLICATION_TIMEOUT_MS
@@ -320,6 +323,15 @@ export class InlineProtocolServerSession {
 
   get destroyed(): boolean { return this.#destroyed }
   get hasEstablishedAuthorization(): boolean { return this.#authorization !== undefined }
+  get retainedPendingMessageBytes(): number { return this.#pending.retainedBytes }
+  get retainedDeferredInvokeAfterBytes(): number { return this.#deferredInvokeAfterBytes }
+
+  /** Release resend copies while accepted applications still settle their durable replay outcome. */
+  disconnect(): void {
+    this.#transportClosed = true
+    this.#pending.clear()
+    this.#clearDeferred()
+  }
 
   async receive(
     payload: Uint8Array,
@@ -343,7 +355,7 @@ export class InlineProtocolServerSession {
     payload: Uint8Array,
     receiveOptions: InlineProtocolServerReceiveOptions = {},
   ): Promise<InlineProtocolServerReceiveResult> {
-    if (this.#destroyed) throw new InvalidEncryptedRecord()
+    if (this.#destroyed || this.#transportClosed) throw new InvalidEncryptedRecord()
     if (payload.length < 8 || payload.length > MAX_PACKET_BYTES) throw new InvalidEncryptedRecord()
     if (payload.slice(0, 8).every((byte) => byte === 0)) {
       return { responses: [await this.#receiveHandshake(payload)], applicationTasks: [] }
@@ -556,6 +568,7 @@ export class InlineProtocolServerSession {
   }
 
   #defer(item: PreparedLogicalMessage): void {
+    if (this.#transportClosed) return
     const existing = this.#deferredInvokeAfter.get(item.message.messageId)
     if (existing) {
       if (!equalBytes(
@@ -567,7 +580,23 @@ export class InlineProtocolServerSession {
     if (this.#deferredInvokeAfter.size >= MAX_DEFERRED_INVOKE_AFTER) {
       throw new RangeError("Too many deferred invoke-after queries")
     }
+    const bytes = this.#deferredBytes(item)
+    if (this.#deferredInvokeAfterBytes + bytes > MAX_DEFERRED_INVOKE_AFTER_BYTES) {
+      throw new RangeError("Deferred invoke-after byte capacity exceeded")
+    }
     this.#deferredInvokeAfter.set(item.message.messageId, item)
+    this.#deferredInvokeAfterBytes += bytes
+  }
+
+  #deferredBytes(item: PreparedLogicalMessage): number {
+    const { body, authenticatedBody } = item.message
+    // Unwrapping copies the query while preserving the authenticated wrapper for replay.
+    return body.length + (authenticatedBody && authenticatedBody !== body ? authenticatedBody.length : 0)
+  }
+
+  #clearDeferred(): void {
+    this.#deferredInvokeAfter.clear()
+    this.#deferredInvokeAfterBytes = 0
   }
 
   async #completePreparedConcurrent(
@@ -596,6 +625,7 @@ export class InlineProtocolServerSession {
       for (const [messageId, item] of this.#deferredInvokeAfter) {
         if (!this.#dependenciesComplete(item.dependencies)) continue
         this.#deferredInvokeAfter.delete(messageId)
+        this.#deferredInvokeAfterBytes -= this.#deferredBytes(item)
         const handled = await this.#completePreparedConcurrent(item)
         responses.push(...handled.responses)
         applicationTasks.push(...handled.applicationTasks)
@@ -902,10 +932,12 @@ export class InlineProtocolServerSession {
     message: LogicalMessage,
     completionMessageIds: readonly bigint[] = [message.messageId],
   ): Promise<LogicalHandlingResult> {
+    if (this.#transportClosed) return { result: { responses: [], applicationTasks: [] }, completed: false }
     const activeAuthorization = this.#authorization
     const sessionId = this.#sessionId
     if (!activeAuthorization || sessionId === undefined) throw new InvalidEncryptedRecord()
     const authorization = await this.options.authorizationKeys.load(activeAuthorization.keyId)
+    if (this.#transportClosed) return { result: { responses: [], applicationTasks: [] }, completed: false }
     if (!authorization) {
       this.#destroyed = true
       throw new InlineProtocolAuthorizationInvalidated()
@@ -1033,6 +1065,12 @@ export class InlineProtocolServerSession {
               })
             },
           }
+        }
+        if (this.#transportClosed) {
+          acceptingUpdates = false
+          return makeSettlement({
+            kind: "error", code: 503, message: "Realtime transport closed before execution",
+          }, true)
         }
         if (this.options.tryAcquireApplication) {
           applicationRelease = this.options.tryAcquireApplication(applicationAuthorization)
@@ -1183,7 +1221,7 @@ export class InlineProtocolServerSession {
           )]
           : []
         for (const messageId of new Set(input.completionMessageIds)) this.#markCompleted(messageId)
-        this.#deferredInvokeAfter.clear()
+        this.#clearDeferred()
         this.#destroyed = true
         return { responses, applicationTasks: [] }
       }
@@ -1318,7 +1356,9 @@ export class InlineProtocolServerSession {
       sequenceNumber,
       body,
     }, this.options.randomBytes(paddingLength))
-    if (contentRelated && fixedMessageId === undefined) this.#pending.retain({ messageId, sequenceNumber, body })
+    if (contentRelated && fixedMessageId === undefined && !this.#transportClosed) {
+      this.#pending.retain({ messageId, sequenceNumber, body })
+    }
     return record
   }
 

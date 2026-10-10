@@ -2,7 +2,7 @@ import { setup } from "@in/server/setup"
 import { Elysia } from "elysia"
 import {
   runLivenessCheck,
-  runHealthChecks,
+  makeHealthChecker,
   withLifecycleCheck,
   type HealthDeps,
   type HealthLifecycleDeps,
@@ -19,8 +19,9 @@ export {
 } from "./healthCheck"
 
 export const createHealthController = (deps?: HealthDeps, lifecycleDeps?: HealthLifecycleDeps) => {
+  const checkHealth = makeHealthChecker(deps)
   const readinessHandler = async ({ set }: { set: { status?: number | string } }) => {
-    const result = withLifecycleCheck(await runHealthChecks(deps), lifecycleDeps)
+    const result = withLifecycleCheck(await checkHealth(), lifecycleDeps)
     set.status = result.ok ? 200 : 503
     return result
   }

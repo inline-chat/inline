@@ -12,6 +12,7 @@ import {
 } from "@in/server/modules/inlineProtocol/clockHealth"
 
 const DEFAULT_DATABASE_HEALTH_TIMEOUT_MS = 2_000
+const DATABASE_HEALTH_FRESHNESS_MS = 1_000
 
 interface CancellableHealthCheck
   extends PromiseLike<unknown> {
@@ -24,6 +25,7 @@ export interface HealthDeps {
   readonly clock?: Pick<InlineProtocolClock, "sample">
   readonly checkBroker?: () => boolean
   readonly timeoutMs?: number
+  readonly monotonicClock?: () => number
 }
 
 export interface HealthLifecycleDeps {
@@ -119,10 +121,11 @@ const checkDatabase = async (
   readonly health: HealthResponse["checks"]["database"]
   readonly referenceTimeMillis?: number
 }> => {
-  const startedAt = performance.now()
+  const now = deps.monotonicClock ?? (() => performance.now())
+  const startedAt = now()
   try {
     const result = await runBoundedDatabaseCheck(deps)
-    const latencyMs = performance.now() - startedAt
+    const latencyMs = now() - startedAt
     const row = Array.isArray(result) ? result[0] : undefined
     const rawDatabaseTime = row && typeof row === "object"
       ? (row as Record<string, unknown>)["database_time_millis"]
@@ -145,7 +148,7 @@ const checkDatabase = async (
     return {
       health: {
         ok: false,
-        latencyMs: Math.round(performance.now() - startedAt),
+        latencyMs: Math.round(now() - startedAt),
         error: "database_unavailable",
       },
     }
@@ -164,6 +167,60 @@ export const runHealthChecks = async (
 ): Promise<HealthResponse> => {
   const resolved = resolveHealthDeps(deps)
   const databaseResult = await checkDatabase(resolved)
+  return healthResponse(resolved, databaseResult)
+}
+
+type DatabaseResult = Awaited<ReturnType<typeof checkDatabase>>
+
+/** Bound public readiness traffic to one database probe per freshness window. */
+export const makeHealthChecker = (
+  deps?: Partial<HealthDeps>,
+): ((responseDeps?: Pick<HealthDeps, "clock" | "checkBroker">) => Promise<HealthResponse>) => {
+  const resolved = resolveHealthDeps(deps)
+  const now = resolved.monotonicClock ?? (() => performance.now())
+  let cached: { result: DatabaseResult; sampledAt: number } | undefined
+  let inFlight: Promise<void> | undefined
+  let queryPending = false
+  const probeDeps: HealthDeps = {
+    ...resolved,
+    checkDatabase: () => {
+      const query = resolved.checkDatabase()
+      queryPending = true
+      void Promise.resolve(query).then(
+        () => { queryPending = false },
+        () => { queryPending = false },
+      )
+      return query
+    },
+  }
+
+  return async (responseDeps) => {
+    const age = cached ? now() - cached.sampledAt : Number.POSITIVE_INFINITY
+    if (!inFlight && (!cached || (!queryPending && (age < 0 || age >= DATABASE_HEALTH_FRESHNESS_MS)))) {
+      inFlight = checkDatabase(probeDeps).then((result) => {
+        cached = { result, sampledAt: now() }
+      }).finally(() => { inFlight = undefined })
+    }
+    if (inFlight) await inFlight
+    // A timed-out query can ignore cancellation. Keep its degraded result until
+    // it settles rather than accumulate replacement queries in the driver queue.
+    const sample = cached!
+    const elapsed = Math.max(0, now() - sample.sampledAt)
+    return healthResponse({ ...resolved, ...responseDeps }, {
+      ...sample.result,
+      ...(sample.result.referenceTimeMillis === undefined ? {} : {
+        // Advance the database UTC reference using monotonic time. Replaying
+        // the old timestamp would distort offset checks or latch a clock fault.
+        referenceTimeMillis: sample.result.referenceTimeMillis + elapsed,
+      }),
+    })
+  }
+}
+
+const healthResponse = (
+  resolved: HealthDeps,
+  databaseResult: DatabaseResult,
+): HealthResponse => {
   const database = databaseResult.health
   const clock = (resolved.clock ?? inlineProtocolClock).sample(
     databaseResult.referenceTimeMillis,

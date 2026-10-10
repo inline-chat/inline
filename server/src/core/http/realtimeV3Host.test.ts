@@ -1053,7 +1053,9 @@ describe("Inline Protocol WebSocket carrier", () => {
     await sendInvoke(thirdMessageId, 5, 3)
     expect(started).toEqual([1, 2, 3])
     drainBodies()
+    expect(data.state?.session.retainedPendingMessageBytes).toBeGreaterThan(0)
     transport.websocket.close?.(socket, 1000, "test close")
+    expect(data.state?.session.retainedPendingMessageBytes).toBe(0)
     const sentAfterClose = sent.length
     let shutdownFinished = false
     const shutdown = transport.shutdown().then(() => { shutdownFinished = true })
@@ -1065,6 +1067,7 @@ describe("Inline Protocol WebSocket carrier", () => {
     expect(shutdownFinished).toBeTrue()
     expect(runtimeClosed).toBeTrue()
     expect(sent).toHaveLength(sentAfterClose)
+    expect(data.state?.session.retainedPendingMessageBytes).toBe(0)
 
   })
 

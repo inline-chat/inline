@@ -209,6 +209,21 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 
     const lastRecord = candidateDatabaseUpdates.at(-1)
     const pageSeq = lastRecord?.seq ?? seqStart
+    const result: GetUpdatesResult = {
+      updates,
+      seq: BigInt(pageSeq),
+      date: encodeOptionalDate(lastRecord?.date),
+      final: latestSeq <= pageSeq,
+      resultType: updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE,
+      skippedSequences: candidateSkippedSequences,
+    }
+    // Sidecars can only add encoded bytes. Discard an already oversized
+    // multi-record prefix before repeating database-backed hydration for it.
+    // A single indivisible record must still receive its complete sidecars.
+    const minimumResponseBytes = GetUpdatesResultMessage.toBinary(result).length
+    if (databaseUpdateCount > 1 && minimumResponseBytes > GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES) {
+      return { databaseUpdateCount, responseBytes: minimumResponseBytes, result }
+    }
     const sidecars =
       descriptor.scope === "chat"
         ? await Sync.buildChatSidecarsForUpdates({
@@ -226,15 +241,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
               updates,
               userId: context.currentUserId,
             })
-    const result: GetUpdatesResult = {
-      updates,
-      seq: BigInt(pageSeq),
-      date: encodeOptionalDate(lastRecord?.date),
-      final: latestSeq <= pageSeq,
-      resultType: updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE,
-      sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
-      skippedSequences: candidateSkippedSequences,
-    }
+    result.sidecars = updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined
     return {
       databaseUpdateCount,
       responseBytes: GetUpdatesResultMessage.toBinary(result).length,

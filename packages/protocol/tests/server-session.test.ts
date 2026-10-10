@@ -179,6 +179,163 @@ const rsaFixture = () => {
 }
 
 describe("carrier-independent Inline Protocol server session", () => {
+  test("bounds deferred invoke-after bytes before account authorization and releases them when dependencies complete", async () => {
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 17n
+    const sessionId = 23n
+    // Possession of an established encryption key permits service traffic even before account login.
+    authorizationKeys.values.set(bytesToHex(keyId), { key, keyId, temporary: false, currentServerSalt: serverSalt })
+    let admissions = 0
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsaFixture().server],
+      authorizationKeys,
+      replay: new MemoryReplay(),
+      application: { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) },
+      tryAcquireApplication: () => { admissions += 1; return () => {} },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const ids = new MessageIdGenerator()
+    const dependencyId = ids.next(nowMilliseconds, 1, 0)
+    const record = (body: Uint8Array, sequenceNumber: number) => encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: ids.next(nowMilliseconds, sequenceNumber + 2, 0), sequenceNumber, body,
+    }, randomBytes(paddingFor(body.length)))
+    const firstBody = encodeInvokeAfterMsg(dependencyId, encodeInlineInvoke(new Uint8Array(8 * 1024 * 1024 - 16)))
+    const secondBody = encodeInvokeAfterMsg(dependencyId, encodeInlineInvoke(new Uint8Array(8 * 1024 * 1024 - 20)))
+    const firstRecord = record(firstBody, 1)
+    await server.receiveConcurrent(firstRecord)
+    await server.receiveConcurrent(record(secondBody, 3))
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(32 * 1024 * 1024)
+    await server.receiveConcurrent(firstRecord)
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(32 * 1024 * 1024)
+    const smallBody = encodeInvokeAfterMsg(dependencyId, encodeInlineInvoke(Uint8Array.of(2)))
+    await expect(server.receiveConcurrent(record(smallBody, 5))).rejects.toThrow("Deferred invoke-after byte capacity")
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(32 * 1024 * 1024)
+    expect(admissions).toBe(0)
+
+    const ping = encodePing(29n)
+    const drained = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: dependencyId, sequenceNumber: 0, body: ping,
+    }, randomBytes(paddingFor(ping.length))))
+    expect(drained.applicationTasks).toHaveLength(2)
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(0)
+    const missingDependency = ids.next(nowMilliseconds, 9, 0)
+    const nextBody = encodeInvokeAfterMsg(missingDependency, encodeInlineInvoke(Uint8Array.of(3)))
+    await server.receiveConcurrent(record(nextBody, 7))
+    expect(server.retainedDeferredInvokeAfterBytes).toBeGreaterThan(0)
+    for (const task of drained.applicationTasks) await (await task.dispatch()).finalize()
+    server.disconnect()
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(0)
+  }, 15_000)
+
+  test("disconnect releases resend copies while an accepted application persists its replay result", async () => {
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const replay = new MemoryReplay()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 31n
+    const sessionId = 37n
+    authorizationKeys.values.set(bytesToHex(keyId), { key, keyId, temporary: false, currentServerSalt: serverSalt })
+    const release = deferred()
+    let activeApplications = 0
+    let dispatches = 0
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsaFixture().server], authorizationKeys, replay,
+      application: { dispatch: async ({ markExecutionStarted, sendUpdate }) => {
+        dispatches += 1
+        markExecutionStarted()
+        await release.promise
+        sendUpdate(Uint8Array.of(7))
+        return { kind: "result", payload: Uint8Array.of(5) }
+      } },
+      tryAcquireApplication: () => { activeApplications += 1; return () => { activeApplications -= 1 } },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const ids = new MessageIdGenerator()
+    const messageId = ids.next(nowMilliseconds, 1, 0)
+    const body = encodeInlineInvoke(Uint8Array.of(1))
+    const accepted = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId, sequenceNumber: 1, body,
+    }, randomBytes(paddingFor(body.length))))
+    const execution = accepted.applicationTasks[0]!.dispatch()
+    expect(activeApplications).toBe(1)
+    const dependentBody = encodeInvokeAfterMsg(messageId, encodeInlineInvoke(Uint8Array.of(2)))
+    await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: ids.next(nowMilliseconds, 2, 0), sequenceNumber: 3, body: dependentBody,
+    }, randomBytes(paddingFor(dependentBody.length))))
+    expect(server.retainedDeferredInvokeAfterBytes).toBeGreaterThan(0)
+    const waitingMessageId = ids.next(nowMilliseconds, 3, 0)
+    const waitingBody = encodeInlineInvoke(Uint8Array.of(3))
+    const waiting = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: waitingMessageId, sequenceNumber: 5, body: waitingBody,
+    }, randomBytes(paddingFor(waitingBody.length))))
+    expect(waiting.applicationTasks).toHaveLength(1)
+    expect(server.retainedPendingMessageBytes).toBeGreaterThan(0)
+    server.disconnect()
+    server.disconnect()
+    expect(server.retainedPendingMessageBytes).toBe(0)
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(0)
+    expect(activeApplications).toBe(1)
+    await (await waiting.applicationTasks[0]!.dispatch()).finalize()
+    expect(dispatches).toBe(1)
+    const rejected = await replay.claim({
+      authKeyId: keyId, sessionId, messageId: waitingMessageId, authenticatedBody: waitingBody,
+    })
+    expect(rejected.kind).toBe("completed")
+    if (rejected.kind !== "completed") throw new Error("Unstarted application replay did not settle")
+    expect(decodeRpcError(decodeRpcResult(rejected.resultBody).result).code).toBe(503)
+    release.resolve()
+    const finalized = await (await execution).finalize()
+    expect(finalized.responses.length).toBeGreaterThan(0)
+    expect(finalized.applicationTasks).toHaveLength(0)
+    expect(activeApplications).toBe(0)
+    expect(server.retainedPendingMessageBytes).toBe(0)
+    const replayed = await replay.claim({ authKeyId: keyId, sessionId, messageId, authenticatedBody: body })
+    expect(replayed.kind).toBe("completed")
+    if (replayed.kind !== "completed") throw new Error("Application replay did not settle")
+    expect(decodeInlineApplicationObject(decodeRpcResult(replayed.resultBody).result)).toEqual({
+      kind: "result", payload: Uint8Array.of(5),
+    })
+  })
+
+  test("an in-progress receive cannot retain deferred payloads after disconnect", async () => {
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 41n
+    const sessionId = 43n
+    const loaded = deferred()
+    const keyLoadStarted = deferred()
+    authorizationKeys.load = async () => {
+      keyLoadStarted.resolve()
+      await loaded.promise
+      return { key, keyId, temporary: false, currentServerSalt: serverSalt }
+    }
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsaFixture().server], authorizationKeys, replay: new MemoryReplay(),
+      application: { dispatch: async () => { throw new Error("Disconnected request must not execute") } },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const ids = new MessageIdGenerator()
+    const body = encodeInvokeAfterMsg(ids.next(nowMilliseconds, 1, 0), encodeInlineInvoke(Uint8Array.of(1)))
+    const receive = server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: ids.next(nowMilliseconds, 2, 0), sequenceNumber: 1, body,
+    }, randomBytes(paddingFor(body.length))))
+    await keyLoadStarted.promise
+    server.disconnect()
+    loaded.resolve()
+    expect((await receive).applicationTasks).toHaveLength(0)
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(0)
+    expect(server.retainedPendingMessageBytes).toBe(0)
+  })
+
   test("classifies an authorization key forgotten across server restart as invalidated", async () => {
     const rsa = rsaFixture()
     const authorizationKeys = new MemoryAuthorizationKeys()
@@ -252,6 +409,14 @@ describe("carrier-independent Inline Protocol server session", () => {
     const messageId = new MessageIdGenerator().next(nowMilliseconds, 1, 0)
     const body = encodeInlineInvoke(Uint8Array.of(1))
 
+    const deferredBody = encodeInvokeAfterMsg(
+      new MessageIdGenerator().next(nowMilliseconds, 3, 0), encodeInlineInvoke(Uint8Array.of(2)),
+    )
+    await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId: new MessageIdGenerator().next(nowMilliseconds, 2, 0),
+      sequenceNumber: 3, body: deferredBody,
+    }, randomBytes(paddingFor(deferredBody.length))))
+    expect(server.retainedDeferredInvokeAfterBytes).toBeGreaterThan(0)
     const outputs = await server.receive(encryptRecord(key, "client-to-server", {
       serverSalt,
       sessionId,
@@ -274,6 +439,7 @@ describe("carrier-independent Inline Protocol server session", () => {
       payload: Uint8Array.of(7),
     })
     expect(server.destroyed).toBeTrue()
+    expect(server.retainedDeferredInvokeAfterBytes).toBe(0)
     await expect(server.receive(encryptRecord(key, "client-to-server", {
       serverSalt,
       sessionId,

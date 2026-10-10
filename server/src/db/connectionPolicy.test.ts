@@ -1,11 +1,30 @@
 import { describe, expect, test } from "bun:test"
-import { assertQueryTimeouts, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
+import { assertQueryTimeouts, combineHealthProbes, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
 
 const direct = "postgres://app:secret@db.example/test?sslmode=verify-full"
 const pooled = "postgres://app:secret@db.example:6432/test?sslmode=verify-full"
 const environment = { DATABASE_CONNECTION_MODE: "pgbouncer", DATABASE_DIRECT_URL: direct }
 
 describe("database connection safety", () => {
+  test("health aggregation returns its primary result after every child succeeds", async () => {
+    const rows = [{ database_time_millis: 1_000 }]
+    expect(await combineHealthProbes(Promise.resolve(rows), [Promise.resolve()])).toBe(rows)
+  })
+
+  test("health cancellation reaches every child even if an earlier cancellation throws", async () => {
+    const cancelled: string[] = []
+    const primary = Object.assign(Promise.resolve([]), {
+      cancel: () => { cancelled.push("direct"); throw new Error("cancel failed") },
+    })
+    const secondary = Object.assign(Promise.resolve(), {
+      cancel: () => { cancelled.push("pooled") },
+    })
+    const probe = combineHealthProbes(primary, [secondary])
+    expect(() => probe.cancel()).toThrow("cancel failed")
+    expect(cancelled).toEqual(["direct", "pooled"])
+    expect(await probe).toEqual([])
+  })
+
   test("direct mode preserves the existing query and health timeout profiles", async () => {
     const clients = makeDatabaseClients(direct)
     try {

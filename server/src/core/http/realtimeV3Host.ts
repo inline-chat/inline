@@ -739,6 +739,7 @@ export const makeInlineProtocolRealtimeTransport = (
     releaseHandshake(socket)
     sockets.delete(socket)
     if (socket.data.state) {
+      socket.data.state.session.disconnect()
       if (socket.data.state.registered) connectionManager.removeConnection(socket.data.id)
       trackClosedConnection(socket.data.state)
     }
@@ -831,7 +832,10 @@ export const makeInlineProtocolRealtimeTransport = (
       const active = [...sockets]
       const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
       for (const socket of active) {
-        if (socket.data.state) socket.data.state.overloaded = true
+        if (socket.data.state) {
+          socket.data.state.overloaded = true
+          socket.data.state.session.disconnect()
+        }
         socket.data.state?.resumeOutbound?.()
         socket.close(1001, "Server shutting down")
       }

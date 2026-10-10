@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, spyOn } from "bun:test"
 import {
   GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES,
   getUpdates,
@@ -33,6 +33,7 @@ import {
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { Sync } from "@in/server/modules/updates/sync"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
@@ -300,65 +301,73 @@ describe("getUpdates", () => {
     let final = false
     let pages = 0
 
-    while (!final && pages < 10) {
-      const page = await getUpdates({
-        bucket,
-        startSeq: BigInt(cursor),
-        seqEnd: 0n,
-        totalLimit: 1000,
-        limit: 100,
-      }, { currentUserId: viewer.id } as any)
-      expect(GetUpdatesResultMessage.toBinary(page).length)
-        .toBeLessThanOrEqual(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
-      const frame = realtimeV3WebSocketFrame(page)
-      expect(frame.length).toBeLessThanOrEqual(1_048_576)
-      const decodedPage = decodeGetUpdatesFrame(frame)
-      expect(decodedPage.seq).toBe(page.seq)
-      expect(decodedPage.updates.map((update) => update.seq))
-        .toEqual(page.updates.map((update) => update.seq))
-      expect(decodedPage.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
-      const expectedSenderIds = new Set<bigint>()
-      for (const update of decodedPage.updates) {
-        const seq = Number(update.seq)
-        const expected = expectedMessages.get(seq)
-        expect(expected).toBeDefined()
-        expect(update.update.oneofKind).toBe("newMessage")
-        if (!expected || update.update.oneofKind !== "newMessage") {
-          throw new Error(`Missing expected message for sequence ${seq}`)
+    const sidecars = spyOn(Sync, "buildChatSidecarsForUpdates")
+    try {
+      while (!final && pages < 10) {
+        const page = await getUpdates({
+          bucket,
+          startSeq: BigInt(cursor),
+          seqEnd: 0n,
+          totalLimit: 1000,
+          limit: 100,
+        }, { currentUserId: viewer.id } as any)
+        expect(GetUpdatesResultMessage.toBinary(page).length)
+          .toBeLessThanOrEqual(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+        const frame = realtimeV3WebSocketFrame(page)
+        expect(frame.length).toBeLessThanOrEqual(1_048_576)
+        const decodedPage = decodeGetUpdatesFrame(frame)
+        expect(decodedPage.seq).toBe(page.seq)
+        expect(decodedPage.updates.map((update) => update.seq))
+          .toEqual(page.updates.map((update) => update.seq))
+        expect(decodedPage.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
+        const expectedSenderIds = new Set<bigint>()
+        for (const update of decodedPage.updates) {
+          const seq = Number(update.seq)
+          const expected = expectedMessages.get(seq)
+          expect(expected).toBeDefined()
+          expect(update.update.oneofKind).toBe("newMessage")
+          if (!expected || update.update.oneofKind !== "newMessage") {
+            throw new Error(`Missing expected message for sequence ${seq}`)
+          }
+          const message = update.update.newMessage.message
+          expect(message).toBeDefined()
+          if (!message) throw new Error(`Missing decoded message for sequence ${seq}`)
+          expect({
+            chatId: message.chatId,
+            fromId: message.fromId,
+            id: message.id,
+            message: message.message,
+            out: message.out,
+          }).toEqual(expected)
+          expect(message.peerId?.type.oneofKind).toBe("chat")
+          if (message.peerId?.type.oneofKind === "chat") {
+            expect(message.peerId.type.chat.chatId).toBe(BigInt(chat.id))
+          }
+          expectedSenderIds.add(expected.fromId)
         }
-        const message = update.update.newMessage.message
-        expect(message).toBeDefined()
-        if (!message) throw new Error(`Missing decoded message for sequence ${seq}`)
-        expect({
-          chatId: message.chatId,
-          fromId: message.fromId,
-          id: message.id,
-          message: message.message,
-          out: message.out,
-        }).toEqual(expected)
-        expect(message.peerId?.type.oneofKind).toBe("chat")
-        if (message.peerId?.type.oneofKind === "chat") {
-          expect(message.peerId.type.chat.chatId).toBe(BigInt(chat.id))
+        const sortIds = (left: bigint, right: bigint) => Number(left - right)
+        const sidecarUserIds = decodedPage.sidecars?.users.map((user) => user.id).sort(sortIds) ?? []
+        expect(sidecarUserIds).toEqual(Array.from(expectedSenderIds).sort(sortIds))
+        for (const senderId of [BigInt(earlySender.id), BigInt(lateSender.id)]) {
+          expect(sidecarUserIds.includes(senderId)).toBe(expectedSenderIds.has(senderId))
         }
-        expectedSenderIds.add(expected.fromId)
+        expect(Number(page.seq)).toBeGreaterThan(cursor)
+        deliveredSequences.push(...decodedPage.updates.map((update) => Number(update.seq)))
+        cursor = Number(page.seq)
+        final = page.final === true
+        pages += 1
       }
-      const sortIds = (left: bigint, right: bigint) => Number(left - right)
-      const sidecarUserIds = decodedPage.sidecars?.users.map((user) => user.id).sort(sortIds) ?? []
-      expect(sidecarUserIds).toEqual(Array.from(expectedSenderIds).sort(sortIds))
-      for (const senderId of [BigInt(earlySender.id), BigInt(lateSender.id)]) {
-        expect(sidecarUserIds.includes(senderId)).toBe(expectedSenderIds.has(senderId))
-      }
-      expect(Number(page.seq)).toBeGreaterThan(cursor)
-      deliveredSequences.push(...decodedPage.updates.map((update) => Number(update.seq)))
-      cursor = Number(page.seq)
-      final = page.final === true
-      pages += 1
-    }
 
-    expect(final).toBe(true)
-    expect(pages).toBeGreaterThan(1)
-    expect(cursor).toBe(16)
-    expect(deliveredSequences).toEqual(Array.from({ length: 16 }, (_, index) => index + 1))
+      expect(final).toBe(true)
+      expect(pages).toBeGreaterThan(1)
+      expect(cursor).toBe(16)
+      expect(deliveredSequences).toEqual(Array.from({ length: 16 }, (_, index) => index + 1))
+      // Oversized message prefixes must be discarded before repeating their
+      // authorization, unread counts, and profile hydration.
+      expect(sidecars).toHaveBeenCalledTimes(pages)
+    } finally {
+      sidecars.mockRestore()
+    }
   })
 
   test("byte-slices mixed delivered and skipped user sequences without losing either", async () => {
@@ -458,6 +467,53 @@ describe("getUpdates", () => {
       Array.from({ length: 100 }, (_, index) => index + 1).filter((seq) => seq % 10 !== 0),
     )
     expect(skippedSequences).toEqual(Array.from({ length: 10 }, (_, index) => (index + 1) * 10))
+  })
+
+  test("still byte-slices when sidecars alone exceed the compatibility target", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Oversized Sidecars", [
+      "oversized-sidecars@example.test",
+    ])
+    const user = users[0]
+    if (!user || !space) throw new Error("Fixture creation failed")
+    const chat = await testUtils.createChat(space.id, "Oversized Sidecar Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+    const description = "d".repeat(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES + 1)
+    await db.update(chats).set({ description }).where(eq(chats.id, chat.id))
+    for (let seq = 1; seq <= 2; seq += 1) {
+      await db.insert(messages).values({ chatId: chat.id, messageId: seq, fromId: user.id, text: `message ${seq}` })
+      await insertServerUpdate({
+        bucket: UpdateBucket.Chat,
+        entityId: chat.id,
+        seq,
+        payload: { oneofKind: "newMessage", newMessage: { chatId: BigInt(chat.id), msgId: BigInt(seq) } },
+      })
+    }
+    const sidecars = spyOn(Sync, "buildChatSidecarsForUpdates")
+    try {
+      const result = await getUpdates({
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: { peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } } },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 100,
+      }, testUtils.functionContext({ userId: user.id }))
+      expect(result.updates).toHaveLength(1)
+      expect(result.seq).toBe(1n)
+      expect(result.final).toBe(false)
+      expect(result.sidecars?.chats.find((sidecar) => sidecar.id === BigInt(chat.id))?.description).toBe(description)
+      expect(GetUpdatesResultMessage.toBinary({ ...result, sidecars: undefined }).length)
+        .toBeLessThan(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+      expect(GetUpdatesResultMessage.toBinary(result).length)
+        .toBeGreaterThan(GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES)
+      expect(sidecars).toHaveBeenCalledTimes(2)
+    } finally {
+      sidecars.mockRestore()
+    }
   })
 
   test("returns one indivisible update intact above the compatibility byte target", async () => {
