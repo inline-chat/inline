@@ -17,6 +17,10 @@ type Output = {
   seq: bigint
 }
 
+// Preserve the CLI's maximum exact-message selection. Bound the raw array so
+// repeated IDs cannot bypass the input-work budget through deduplication.
+export const MAX_GET_MESSAGES_IDS = 1_000
+
 export const getMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
   validateMessageIds(input.messageIds)
 
@@ -54,6 +58,9 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
 }
 
 function validateMessageIds(messageIds: bigint[]): void {
+  if (messageIds.length > MAX_GET_MESSAGES_IDS) {
+    throw RealtimeRpcError.BadRequest()
+  }
   for (const messageId of messageIds) {
     if (messageId <= 0n || messageId > MAX_HISTORY_ID) {
       throw RealtimeRpcError.MessageIdInvalid()

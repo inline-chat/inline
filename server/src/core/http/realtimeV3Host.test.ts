@@ -652,9 +652,127 @@ describe("Inline Protocol WebSocket carrier", () => {
       else established = result.established
     }
     expect(established?.temporary).toBe(false)
+    expect(data.handshakeAdmissionIp).toBe("127.0.0.1")
     expect(sent).toHaveLength(0)
     await transport.shutdown()
   }, 20_000)
+
+  test("expires established service-only sockets without extending the pending-login deadline", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x1122_3344n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key, keyId, temporary: false, currentServerSalt: serverSalt,
+    })
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const data = upgrade(transport)
+    const closes: Array<{ code: number; reason: string }> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => {
+        closes.push({ code, reason })
+        transport.websocket.close?.(socket, code, reason)
+      },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+
+    try {
+      transport.websocket.open?.(socket)
+      for (let count = 1; count < 8; count += 1) upgrade(transport)
+      let headerBytes: Uint8Array
+      do headerBytes = Uint8Array.from(randomBytes(64))
+      while (!isValidObfuscatedHeader(headerBytes))
+      const carrier = createObfuscatedClientHeader(headerBytes, 1)
+      await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state?.queue
+      const ids = new MessageIdGenerator()
+      for (let count = 0; count < 3; count += 1) {
+        const body = encodePing(BigInt(count))
+        const packet = encryptRecord(key, "client-to-server", {
+          serverSalt, sessionId,
+          messageId: ids.next(Date.now(), 1, 0), sequenceNumber: 0,
+          body,
+        }, paddingFor(body.length))
+        await transport.websocket.message(socket, Buffer.from(carrier.outbound.process(encodeAbridgedPacket(packet))))
+        await data.state?.queue
+      }
+      expect(data.state?.session.hasEstablishedAuthorization).toBeTrue()
+      expect(data.handshakeAdmissionIp).toBe("127.0.0.1")
+      const deadlines = timerSpy.mock.calls.filter(([, delay]) => delay === 15 * 60 * 1_000)
+      expect(deadlines).toHaveLength(1)
+      const expire = deadlines[0]?.[0]
+      if (typeof expire !== "function") throw new Error("Expected pending-login deadline")
+      expire()
+
+      expect(closes).toEqual([{ code: 1001, reason: "Account authentication deadline exceeded" }])
+      expect(data.closed).toBeTrue()
+      expect(data.handshakeAdmissionIp).toBeUndefined()
+      expect(data.state?.session.retainedPendingMessageBytes).toBe(0)
+      upgrade(transport)
+      // A duplicate native close callback must not release another socket's lease.
+      transport.websocket.close?.(socket, 1001, "duplicate close")
+      const rejectingServer = {
+        requestIP: () => ({ address: "127.0.0.1" }),
+        upgrade: () => { throw new Error("Capacity-exhausted upgrade must not run") },
+      } as unknown as Server<InlineProtocolWebSocketData>
+      expect(transport.tryUpgrade(new Request("http://inline.test/realtime/v3"), rejectingServer)).toBeFalse()
+      expire()
+      expect(closes).toHaveLength(1)
+    } finally {
+      timerSpy.mockRestore()
+      await transport.shutdown()
+    }
+  })
+
+  test("releases pending-login capacity immediately after authenticated reconnect registration", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const clearTimerSpy = spyOn(globalThis, "clearTimeout")
+    const hydrate = spyOn(connectionManager, "hydrateAuthenticatedClientType").mockImplementation(() => {})
+    const opened: InlineProtocolWebSocketData[] = []
+    const closes: number[] = []
+    try {
+      for (let count = 0; count < 10; count += 1) {
+        const data = upgrade(transport)
+        opened.push(data)
+        const socket = {
+          data, close: (code: number) => { closes.push(code) },
+          sendBinary: (bytes: Uint8Array) => bytes.length,
+        } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+        transport.websocket.open?.(socket)
+        const timerIndex = timerSpy.mock.calls.findLastIndex(([, delay]) => delay === 15 * 60 * 1_000)
+        const deadline = timerSpy.mock.calls[timerIndex]?.[0]
+        const handle = timerSpy.mock.results[timerIndex]?.value
+        if (typeof deadline !== "function" || !authorize) throw new Error("Expected pending-login deadline and authorization callback")
+        expect(authorize({
+          authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+          permanent: false, temporaryBound: true, userId: 42, accountSessionId: 84,
+        })).toBeTrue()
+        expect(data.state?.registered).toBeTrue()
+        expect(data.handshakeAdmissionIp).toBeUndefined()
+        expect(clearTimerSpy).toHaveBeenCalledWith(handle)
+        deadline()
+      }
+      expect(closes).toHaveLength(0)
+      for (let count = 0; count < 8; count += 1) upgrade(transport)
+    } finally {
+      for (const data of opened) connectionManager.removeConnection(data.id)
+      sessionAuthority.stop()
+      timerSpy.mockRestore()
+      clearTimerSpy.mockRestore()
+      hydrate.mockRestore()
+      await transport.shutdown()
+    }
+  })
 
   test("carries an authenticated native-login application request after the handshake", async () => {
     const runtime = fixture({
@@ -1126,6 +1244,8 @@ describe("Inline Protocol WebSocket carrier", () => {
       },
     })
     const data = upgrade(transport)
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const clearTimerSpy = spyOn(globalThis, "clearTimeout")
     let closeCount = 0
     const socket = {
       data,
@@ -1140,9 +1260,16 @@ describe("Inline Protocol WebSocket carrier", () => {
 
     let shutdown: Promise<void> | undefined
     try {
+      const timerIndex = timerSpy.mock.calls.findIndex(([, delay]) => delay === 15 * 60 * 1_000)
+      const deadline = timerSpy.mock.calls[timerIndex]?.[0]
+      const handle = timerSpy.mock.results[timerIndex]?.value
+      if (typeof deadline !== "function") throw new Error("Expected pending-login deadline")
       shutdown = transport.shutdown()
       expect(closeCount).toBe(1)
       expect(data.closed).toBeFalse()
+      expect(clearTimerSpy).toHaveBeenCalledWith(handle)
+      deadline()
+      expect(closeCount).toBe(1)
       expect(register({
         authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
         permanent: false,
@@ -1156,9 +1283,11 @@ describe("Inline Protocol WebSocket carrier", () => {
       expect(connectionManager.getConnection(data.id)).toBeUndefined()
       expect(data.state?.registered).toBeFalse()
     } finally {
-      await shutdown
+      await (shutdown ?? transport.shutdown())
       addConnection.mockRestore()
       authenticateConnection.mockRestore()
+      timerSpy.mockRestore()
+      clearTimerSpy.mockRestore()
       connectionManager.removeConnection(data.id)
     }
   })
@@ -1172,6 +1301,8 @@ describe("Inline Protocol WebSocket carrier", () => {
       },
     })
     const data = upgrade(transport)
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const clearTimerSpy = spyOn(globalThis, "clearTimeout")
     const closes: Array<{ code: number; reason: string }> = []
     const socket = {
       data,
@@ -1195,9 +1326,28 @@ describe("Inline Protocol WebSocket carrier", () => {
       expect(closes).toEqual([{ code: 4401, reason: "session_revoked_confirmed" }])
       expect(connectionManager.getConnection(data.id)).toBeUndefined()
       expect(data.state?.registered).toBeFalse()
+      expect(data.handshakeAdmissionIp).toBe("127.0.0.1")
+      for (let count = 1; count < 8; count += 1) upgrade(transport)
+      const rejectingServer = {
+        requestIP: () => ({ address: "127.0.0.1" }),
+        upgrade: () => { throw new Error("Failed registration must retain pending-login capacity") },
+      } as unknown as Server<InlineProtocolWebSocketData>
+      expect(transport.tryUpgrade(new Request("http://inline.test/realtime/v3"), rejectingServer)).toBeFalse()
+      const timerIndex = timerSpy.mock.calls.findIndex(([, delay]) => delay === 15 * 60 * 1_000)
+      const deadline = timerSpy.mock.calls[timerIndex]?.[0]
+      const handle = timerSpy.mock.results[timerIndex]?.value
+      if (typeof deadline !== "function") throw new Error("Expected pending-login deadline")
+      transport.websocket.close?.(socket, 4401, "session_revoked_confirmed")
+      expect(clearTimerSpy).toHaveBeenCalledWith(handle)
+      expect(data.handshakeAdmissionIp).toBeUndefined()
+      upgrade(transport)
+      deadline()
+      expect(closes).toHaveLength(1)
     } finally {
       sessionAuthority.stop()
       connectionManager.removeConnection(data.id)
+      timerSpy.mockRestore()
+      clearTimerSpy.mockRestore()
       await transport.shutdown()
     }
   })

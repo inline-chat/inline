@@ -64,8 +64,15 @@ const MAX_QUEUED_INBOUND_FRAMES = 256
 const MAX_QUEUED_INBOUND_BYTES = 32 * 1024 * 1024
 const MAX_QUEUED_OUTBOUND_RECORDS = 4096
 const MAX_QUEUED_OUTBOUND_BYTES = 32 * 1024 * 1024
+// Key establishment alone does not authenticate an account. Keep the admission
+// lease through login, including permanent-key service traffic. Shared NATs can
+// therefore have at most eight simultaneous pending logins; registered account
+// connections release this lease immediately.
 const MAX_CONCURRENT_HANDSHAKES = 256
 const MAX_CONCURRENT_HANDSHAKES_PER_IP = 8
+// Native and hosted login challenges last ten minutes. This absolute lifetime
+// leaves time for handshake/provider work without letting pings renew admission.
+const ACCOUNT_AUTHENTICATION_TIMEOUT_MS = 15 * 60 * 1_000
 const HANDSHAKE_RATE_WINDOW_MS = 60_000
 const MAX_HANDSHAKE_STARTS_PER_WINDOW = 4_096
 const MAX_HANDSHAKE_STARTS_PER_IP_PER_WINDOW = 60
@@ -107,6 +114,7 @@ type InlineProtocolConnectionState = {
   compatibilityQueuedUpdates: number
   overloaded: boolean
   registered: boolean
+  authenticationTimeout?: ReturnType<typeof setTimeout>
 }
 
 export interface InlineProtocolRealtimeTransport {
@@ -332,6 +340,12 @@ export const makeInlineProtocolRealtimeTransport = (
     else handshakesByIp.set(ip, current - 1)
     activeHandshakes = Math.max(0, activeHandshakes - 1)
     socket.data.handshakeAdmissionIp = undefined
+  }
+
+  const clearAuthenticationTimeout = (state: InlineProtocolConnectionState | undefined): void => {
+    if (state?.authenticationTimeout === undefined) return
+    clearTimeout(state.authenticationTimeout)
+    state.authenticationTimeout = undefined
   }
 
   const clockHealthy = (): boolean => {
@@ -630,6 +644,8 @@ export const makeInlineProtocolRealtimeTransport = (
       return false
     }
     state.registered = true
+    clearAuthenticationTimeout(state)
+    releaseHandshake(socket)
     // V3 authorization carries the account session but not its client type.
     // The manager coalesces this lookup across reconnecting sockets and tracks
     // it for controlled teardown.
@@ -675,6 +691,13 @@ export const makeInlineProtocolRealtimeTransport = (
     }
     socket.data.state = state
     sockets.add(socket)
+    state.authenticationTimeout = setTimeout(() => {
+      if (!accepting || socket.data.closed || state.registered) return
+      // Retire the transport synchronously, even if Bun's close callback arrives
+      // later. Already dispatched applications still finish durable settlement.
+      close(socket)
+      socket.close(1001, "Account authentication deadline exceeded")
+    }, ACCOUNT_AUTHENTICATION_TIMEOUT_MS)
   }
 
   const receive = (socket: ServerWebSocket<InlineProtocolWebSocketData>, message: string | Buffer<ArrayBuffer>): void => {
@@ -719,7 +742,6 @@ export const makeInlineProtocolRealtimeTransport = (
         const accepted = await state.session.receiveConcurrent(decoded.payload, decoded.quickAckRequested
           ? { onQuickAck: (quickAckId) => { void sendQuickAck(socket, quickAckId) } }
         : undefined)
-        if (state.session.hasEstablishedAuthorization) releaseHandshake(socket)
         // This only records local activity; the presence owner persists it in
         // coarse batches, never as a session query or write per V3 frame.
         if (state.registered) connectionManager.markConnectionActivity(socket.data.id)
@@ -734,7 +756,9 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   const close = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
+    if (socket.data.closed) return
     socket.data.closed = true
+    clearAuthenticationTimeout(socket.data.state)
     socket.data.state?.resumeOutbound?.()
     releaseHandshake(socket)
     sockets.delete(socket)
@@ -832,6 +856,7 @@ export const makeInlineProtocolRealtimeTransport = (
       const active = [...sockets]
       const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
       for (const socket of active) {
+        clearAuthenticationTimeout(socket.data.state)
         if (socket.data.state) {
           socket.data.state.overloaded = true
           socket.data.state.session.disconnect()

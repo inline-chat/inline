@@ -79,7 +79,7 @@ import { deleteMessage as deleteMessageFn } from "@in/server/functions/messages.
 import { editMessage as editMessageFn } from "@in/server/functions/messages.editMessage"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
 import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
-import { getMessages as getMessagesFn } from "@in/server/functions/messages.getMessages"
+import { getMessages as getMessagesFn, MAX_GET_MESSAGES_IDS } from "@in/server/functions/messages.getMessages"
 import { searchMessages as searchMessagesFn } from "@in/server/functions/messages.searchMessages"
 import { createChat as createChatFn } from "@in/server/functions/messages.createChat"
 import { createSubthread as createSubthreadFn } from "@in/server/functions/messages.createSubthread"
@@ -1318,6 +1318,9 @@ const getMessages = async (
   input: GetMessagesParams,
   context: BotOperationContext,
 ) => {
+  if (input.message_ids.length > MAX_GET_MESSAGES_IDS) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
   const peerId = await makeInputPeerFromBotTarget(input, context.currentUserId)
   const messageIds = normalizeInputIds(input.message_ids)
   const [result, chatResult] = await Promise.all([
