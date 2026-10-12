@@ -471,7 +471,7 @@ extension MacNotifications {
     chatId: Int64,
     peerId: Peer
   ) async {
-    let chat = await ObjectCache.shared.getChat(id: chatId)
+    let chat = await ObjectCache.shared.loadChat(id: chatId)
     let projectedChatName = MessageNotificationPreview.singleLine(chat?.title ?? "Chat")
     let chatName = projectedChatName.isEmpty ? "Chat" : projectedChatName
 
@@ -502,10 +502,11 @@ extension MacNotifications {
     guard protocolMsg.out == false else { return }
     guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
 
-    let user = await ObjectCache.shared.getUser(id: protocolMsg.fromID)
-    let chat = await ObjectCache.shared.getChat(id: protocolMsg.chatID)
+    let sender = await ObjectCache.shared.load([.user(protocolMsg.fromID), .chat(protocolMsg.chatID)])
+    let user = sender.user(protocolMsg.fromID)
+    let chat = sender.chat(protocolMsg.chatID)
     let space: Space? = if let spaceId = chat?.spaceId {
-      await ObjectCache.shared.getSpace(id: spaceId)
+      await ObjectCache.shared.loadSpace(id: spaceId)
     } else {
       nil
     }
