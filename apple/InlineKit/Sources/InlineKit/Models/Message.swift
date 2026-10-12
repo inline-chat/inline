@@ -1869,6 +1869,46 @@ public struct MessageThreadCard: Equatable, Sendable {
 }
 
 public extension Message {
+  enum AdjacentMessageSide: Sendable {
+    case older
+    case newer
+  }
+
+  /// The nearest server message ID on one side of `messageId` in a peer's timeline,
+  /// or nil when no saved message lies there.
+  ///
+  /// This is one seek in the `(chatId, messageId)` index. The peer check is
+  /// deliberately unindexed (`+column`) so SQLite keeps that seek instead of
+  /// scanning and sorting the peer's whole timeline.
+  static func adjacentMessageId(
+    _ db: Database,
+    chatId: Int64,
+    peer: Peer,
+    _ side: AdjacentMessageSide,
+    of messageId: Int64
+  ) throws -> Int64? {
+    let (peerColumn, peerValue): (String, Int64) = switch peer {
+      case let .thread(id): ("peerThreadId", id)
+      case let .user(id): ("peerUserId", id)
+    }
+    let (comparison, order) = switch side {
+      case .older: ("<", "DESC")
+      case .newer: (">", "ASC")
+    }
+    return try Int64.fetchOne(
+      db,
+      sql: """
+      SELECT messageId FROM message
+      WHERE chatId = ? AND messageId > 0 AND messageId \(comparison) ? AND +\(peerColumn) = ?
+      ORDER BY messageId \(order)
+      LIMIT 1
+      """,
+      arguments: [chatId, messageId, peerValue]
+    )
+  }
+}
+
+public extension Message {
   /// Deletes the given messages from the database and makes sure the parent chat's
   /// `lastMsgId` stays consistent after the deletion.
   ///

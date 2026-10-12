@@ -1587,11 +1587,7 @@ public class MessagesProgressiveViewModel {
 
     let holes = try MessageHistoryCoverageStore.holes(db, chatId: chatID)
     guard let bounds else {
-      let localCandidate = try baseQuery(for: peer)
-        .filter(Column("messageId") > 0)
-        .limit(1)
-        .fetchOne(db)?
-        .message.messageId
+      let localCandidate = try Message.adjacentMessageId(db, chatId: chatID, peer: peer, .newer, of: 0)
       return LoadedWindowMetadata(
         messages: messages,
         holes: holes,
@@ -1600,24 +1596,15 @@ public class MessagesProgressiveViewModel {
       )
     }
 
-    let olderCandidate = try baseQuery(for: peer)
-      .filter(Column("messageId") > 0)
-      .filter(Column("messageId") < bounds.oldestMessageId)
-      .order(Column("messageId").desc)
-      .limit(1)
-      .fetchOne(db)
-    let newerCandidate = try baseQuery(for: peer)
-      .filter(Column("messageId") > 0)
-      .filter(Column("messageId") > bounds.newestMessageId)
-      .order(Column("messageId").asc)
-      .limit(1)
-      .fetchOne(db)
-
-    return LoadedWindowMetadata(
+    return try LoadedWindowMetadata(
       messages: messages,
       holes: holes,
-      olderCandidateMessageID: olderCandidate?.message.messageId,
-      newerCandidateMessageID: newerCandidate?.message.messageId
+      olderCandidateMessageID: Message.adjacentMessageId(
+        db, chatId: chatID, peer: peer, .older, of: bounds.oldestMessageId
+      ),
+      newerCandidateMessageID: Message.adjacentMessageId(
+        db, chatId: chatID, peer: peer, .newer, of: bounds.newestMessageId
+      )
     )
   }
 
