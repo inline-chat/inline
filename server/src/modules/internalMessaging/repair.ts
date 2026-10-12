@@ -667,7 +667,7 @@ export async function deliverTargetedBucketHint(event: DurableUpdatesAvailableEv
     const candidates = candidateUserIds.slice(offset, offset + MAX_TARGETED_RECIPIENTS_PER_QUERY)
       .filter((userId) => controls?.shouldDeliver?.(userId) !== false)
     if (candidates.length === 0) continue
-    const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: candidates })
+    const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: candidates, source: "repair.chat" })
     const recipients = access.get(chat.id) ?? new Set<number>()
     await deliverChatHintBatch(chat, recipients, event, controls)
   }

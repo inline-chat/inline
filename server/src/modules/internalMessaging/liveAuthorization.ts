@@ -156,7 +156,7 @@ export async function authorizeLiveDeliveries<T extends LiveDelivery>(
     where u.id in (${sql.join(personal, sql`, `)}) and u.deleted is distinct from true
   `
   const rows = await db.execute<{ kind: string; resourceId: number; userId: number }>(sql`
-    with chat_access as (${effectiveChatAccessSql(chatIds, userIds)})
+    with chat_access as (${effectiveChatAccessSql(chatIds, userIds, "realtime.delivery")})
     select 'chat'::text as kind, "chatId" as "resourceId", "userId" from chat_access
     union all ${spaceAuthority}
     union all ${personalAuthority}

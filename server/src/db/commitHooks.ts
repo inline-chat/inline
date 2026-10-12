@@ -1,5 +1,6 @@
 import type { Transaction } from "./types"
 import { Log } from "@in/server/utils/log"
+import { databaseDiagnostics } from "./databaseDiagnostics"
 
 const log = new Log("db.commitHooks")
 
@@ -153,7 +154,11 @@ export const installPostCommitHooks = <TDatabase extends object>(database: TData
     configurable: true,
     value: async <T>(callback: TransactionCallback<T>, config?: unknown): Promise<T> => {
       let rootState: HookState | undefined
-      const result = await original(async (tx) => {
+      const admittedAt = performance.now()
+      const result = await databaseDiagnostics.observe("transaction.total", 0, () => original(async (tx) => {
+        // Includes pool admission, BEGIN and Drizzle's transaction settings.
+        // It is not a pure pool-wait or server-execution measurement.
+        databaseDiagnostics.record("transaction.admission", performance.now() - admittedAt)
         rootState = { hooks: new Map() }
         hookStates.set(tx, rootState)
         wrapNestedTransaction(tx, rootState)
@@ -162,7 +167,7 @@ export const installPostCommitHooks = <TDatabase extends object>(database: TData
         } finally {
           hookStates.delete(tx)
         }
-      }, config)
+      }, config))
 
       // `original` resolves only after the outer database COMMIT. Start the
       // non-critical notifications afterwards and never extend mutation

@@ -19,6 +19,7 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { Log } from "@in/server/utils/log"
+import { databaseDiagnostics } from "@in/server/db/databaseDiagnostics"
 
 const PAGE_LIMIT = 100
 const REPLAY_LIMIT = 10_000
@@ -384,6 +385,13 @@ type GetUpdatesTiming = {
 }
 
 const logGetUpdatesTiming = (timing: GetUpdatesTiming): void => {
+  // Fast, frequent pages otherwise disappear at the production WARN log level.
+  // Aggregate all completions without recording user IDs, cursors or payloads.
+  databaseDiagnostics.record(`replay.${timing.scope}.total`, timing.totalMs, timing.dbUpdates)
+  databaseDiagnostics.record(`replay.${timing.scope}.resolve`, timing.resolveMs)
+  databaseDiagnostics.record(`replay.${timing.scope}.fetch`, timing.fetchMs)
+  databaseDiagnostics.record(`replay.${timing.scope}.inflate`, timing.inflateMs)
+  databaseDiagnostics.record(`replay.${timing.scope}.sidecars`, timing.sidecarsMs)
   const message = "getUpdates timing"
   if (timing.totalMs >= 500 || timing.singleRecordExceedsCompatibilityTarget) {
     log.warn(message, timing)

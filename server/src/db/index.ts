@@ -5,17 +5,17 @@ import { installPostCommitHooks } from "./commitHooks"
 import { checkMigrationHead, MigrationStateError, validateAppliedMigrations } from "./migrationState"
 import * as schema from "./schema"
 import { relations } from "./relations"
+import { startDatabaseDiagnostics } from "./databaseDiagnostics"
+import { Log, LogLevel } from "@in/server/utils/log"
+
+const diagnosticsLog = new Log("db.diagnostics", LogLevel.INFO)
+let stopDiagnostics: (() => void) | undefined
 
 let clients = makeDatabaseClients(DATABASE_URL, process.env)
 
 const createDatabase = (queryClient: typeof clients.queryClient) => installPostCommitHooks(drizzle(queryClient, {
   relations,
   schema,
-  // logger: {
-  //   logQuery(query, params) {
-  //     console.log(query, params)
-  //   },
-  // },
 }))
 
 export let db = createDatabase(clients.queryClient)
@@ -23,6 +23,8 @@ export let db = createDatabase(clients.queryClient)
 export const initDb = (databaseUrl: string) => {
   // Best-effort close of existing connections (especially useful for tests that recreate DBs).
   const next = makeDatabaseClients(databaseUrl, process.env)
+  stopDiagnostics?.()
+  stopDiagnostics = undefined
   void clients.close().catch(() => {})
   clients = next
   db = createDatabase(clients.queryClient)
@@ -46,7 +48,16 @@ export const validateDatabaseStartup = async () => {
       : "Database migration ledger could not be checked.")
     throw error
   }
+  if (!stopDiagnostics) {
+    try { diagnosticsLog.info("Database connection configuration", clients.diagnosticsConfiguration) } catch { /* Best-effort. */ }
+    stopDiagnostics = startDatabaseDiagnostics((row) => diagnosticsLog.info("Database operation window", row))
+  }
 }
-export const closeDb = () => clients.close()
+export const closeDb = async () => {
+  try { await clients.close() } finally {
+    stopDiagnostics?.()
+    stopDiagnostics = undefined
+  }
+}
 
 export { schema }

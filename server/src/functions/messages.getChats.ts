@@ -365,6 +365,7 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number): Promi
     candidates.map((chat) => chat.id),
     {
       userIds: [currentUserId],
+      source: "chats.list",
     },
   )
   const missing = candidates.filter((chat) => access.get(chat.id)?.has(currentUserId))
@@ -496,6 +497,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       candidates.map((chat) => chat.id),
       {
         userIds: [currentUserId],
+        source: "chats.list",
       },
     )
     const chats = candidates.filter((chat) => chatAccess.get(chat.id)?.has(currentUserId) === true)

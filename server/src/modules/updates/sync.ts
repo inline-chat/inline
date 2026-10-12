@@ -43,6 +43,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import type { AccessQuerySource } from "@in/server/db/databaseDiagnostics"
 
 const log = new Log("Sync", LogLevel.DEBUG)
 const missingMessageLogs = new BoundedLogAggregator(15 * 60 * 1000, 1_024)
@@ -965,6 +966,7 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   const accessibleChatIds = await getAccessibleReplayChatIds(
     candidateChatRows.map((chat) => chat.id),
     input.userId,
+    "sync.sidecars",
   )
   const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
   // Parent and payload references are dependencies, not authority. Rebuild
@@ -1155,7 +1157,7 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
   }
 
   const candidateChatRows = await getSidecarChats(undefined, chatIds)
-  const accessibleChatIds = await getAccessibleReplayChatIds(candidateChatRows.map((chat) => chat.id), input.userId)
+  const accessibleChatIds = await getAccessibleReplayChatIds(candidateChatRows.map((chat) => chat.id), input.userId, "sync.sidecars")
   const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
   // Historical chatOpen payloads are not authority to enrich their old Space
   // with current metadata; rebuild Space references from admitted chats only.
@@ -1469,10 +1471,10 @@ function inflateUserUpdatesPage(dbUpdates: DbUpdate[]): InflatedUpdatesPage {
   )
 }
 
-async function getAccessibleReplayChatIds(chatIds: number[], userId: number): Promise<Set<number>> {
+async function getAccessibleReplayChatIds(chatIds: number[], userId: number, source: AccessQuerySource = "sync.replay"): Promise<Set<number>> {
   if (chatIds.length === 0) return new Set()
   const access = await db.transaction(
-    (tx) => getEffectiveChatAccessUserIds(tx, chatIds, { userIds: [userId] }),
+    (tx) => getEffectiveChatAccessUserIds(tx, chatIds, { userIds: [userId], source }),
     { accessMode: "read only" },
   )
   return new Set(Array.from(access).flatMap(([chatId, users]) => users.has(userId) ? [chatId] : []))

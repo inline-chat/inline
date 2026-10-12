@@ -198,5 +198,13 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
       clearTimeout(timer)
     }
   }
-  return { queryClient, healthClient, validateStartup, checkHealth, close }
+  const diagnosticsConfiguration = {
+    mode: policy.mode,
+    queryPoolMax: queryClient.options.max,
+    healthPoolMax: healthClient.options.max,
+    statementTimeoutMs: QUERY_TIMEOUTS.statement_timeout,
+    lockTimeoutMs: QUERY_TIMEOUTS.lock_timeout,
+    idleTransactionTimeoutMs: QUERY_TIMEOUTS.idle_in_transaction_session_timeout,
+  }
+  return { queryClient, healthClient, validateStartup, checkHealth, close, diagnosticsConfiguration }
 }

@@ -1,6 +1,7 @@
 import type { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { sql, type SQL } from "drizzle-orm"
+import { accessQueryTag, databaseDiagnostics, type AccessQuerySource } from "@in/server/db/databaseDiagnostics"
 
 type ChatAccessRow = {
   chatId: number
@@ -62,7 +63,7 @@ export async function getSpaceRootChatIdsForAccessEvents(
 export async function getEffectiveChatAccessUserIds(
   tx: ChatAccessQuery,
   chatIds: number[],
-  options?: { userIds?: number[] },
+  options?: { userIds?: number[]; source?: AccessQuerySource },
 ): Promise<ChatAccessMap> {
   const ids = uniquePositiveIds(chatIds)
   const result: ChatAccessMap = new Map(ids.map((chatId) => [chatId, new Set<number>()]))
@@ -71,7 +72,9 @@ export async function getEffectiveChatAccessUserIds(
   const constrainedUserIds = options?.userIds === undefined ? undefined : uniquePositiveIds(options.userIds)
   if (constrainedUserIds?.length === 0) return result
 
-  const rows = await tx.execute<ChatAccessRow>(effectiveChatAccessSql(ids, constrainedUserIds))
+  const source = options?.source ?? "authorization"
+  const rows = await databaseDiagnostics.observe(`access.${source}`, ids.length, () =>
+    tx.execute<ChatAccessRow>(effectiveChatAccessSql(ids, constrainedUserIds, source)))
   for (const row of rows) {
     result.get(row.chatId)?.add(row.userId)
   }
@@ -79,7 +82,7 @@ export async function getEffectiveChatAccessUserIds(
 }
 
 /** Reuses the canonical projection within a larger, single-snapshot admission query. */
-export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: readonly number[]): SQL {
+export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: readonly number[], source: AccessQuerySource = "authorization"): SQL {
   const ids = uniquePositiveIds(chatIds)
   const constrainedUserIds = userIds === undefined ? undefined : uniquePositiveIds(userIds)
   if (ids.length === 0 || constrainedUserIds?.length === 0) {
@@ -90,6 +93,7 @@ export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: rea
     ? sql``
     : sql`and access."userId" in (${sql.join(constrainedUserIds, sql`, `)})`
   return sql`
+    ${accessQueryTag(source)}
     with recursive ancestors as (
       select
         c.id as "chatId",
