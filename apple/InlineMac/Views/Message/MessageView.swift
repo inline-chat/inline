@@ -817,8 +817,10 @@ class MessageViewAppKit: NSView {
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
-    message.replyThreadRecentReplierUserIds.map { userId in
-      ObjectCache.shared.getUser(id: userId) ?? UserInfo(
+    let userIds = message.replyThreadRecentReplierUserIds
+    let users = ObjectCache.shared.get(userIds.map(ObjectID.user))
+    return userIds.map { userId in
+      users.user(userId) ?? UserInfo(
         user: User(id: userId, email: nil, firstName: nil)
       )
     }

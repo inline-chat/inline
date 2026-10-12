@@ -238,7 +238,7 @@ final class ReactionChipButton: NSButton {
         return user.displayName
       }
 
-      return ObjectCache.shared.getUser(id: reaction.reaction.userId)?.user.displayName
+      return ObjectCache.shared.getCachedUser(id: reaction.reaction.userId)?.user.displayName
     }.joined(separator: ", ")
 
     let shouldShowAvatars = ReactionChipMetrics.showsAvatars(for: group.reactions.count)
@@ -255,7 +255,12 @@ final class ReactionChipButton: NSButton {
       countLabel.isHidden = true
 
       for fullReaction in group.reactions.prefix(ReactionChipMetrics.maxAvatars) {
-        let userInfo = fullReaction.userInfo ?? ObjectCache.shared.getUser(id: fullReaction.reaction.userId)
+        // Reactions normally carry their user. When one does not, show what is in
+        // memory and load the rest for the next rebuild rather than read here.
+        let userInfo = fullReaction.userInfo ?? ObjectCache.shared.getCachedUser(id: fullReaction.reaction.userId)
+        if userInfo == nil {
+          ObjectCache.shared.warm(.user(fullReaction.reaction.userId))
+        }
         let avatarView = UserAvatarView(userInfo: userInfo ?? .deleted, size: ReactionChipMetrics.avatarSize)
         avatarView.translatesAutoresizingMaskIntoConstraints = true
         avatarView.acceptsMouseInteraction = false

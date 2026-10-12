@@ -1215,9 +1215,19 @@ public class MessagesProgressiveViewModel {
     historyCoverage = metadata.historyCoverage
   }
 
+  /// Rows render as they scroll into view. Loading the users their reply-thread
+  /// summaries name now lets those rows find them in memory.
+  private func warmReplyThreadAuthors() {
+    // The shared cache describes the shared database only.
+    guard db === AppDatabase.shared else { return }
+    let userIds = Set(messages.flatMap(\.message.replyThreadRecentReplierUserIds))
+    ObjectCache.shared.warm(userIds.map(ObjectID.user))
+  }
+
   /// Loads, pages and jumps admit cached rows through coverage. Rows named in
   /// `retainingMessageIDs` were already shown and stay.
   private func updateLoadedWindowMetadata(retainingMessageIDs: Set<Int64>) {
+    warmReplyThreadAuthors()
     let request = beginLoadedWindowMetadataRequest()
     do {
       let metadata = try db.reader.read { db in
