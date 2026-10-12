@@ -6,6 +6,7 @@ import postgres from "postgres"
 import { drizzle } from "drizzle-orm/postgres-js"
 import { sql } from "drizzle-orm"
 import { makeDatabaseClients } from "./connectionPolicy"
+import { accessQueryTag } from "./databaseDiagnostics"
 
 // Opt-in infrastructure by availability, not by credentials: these tests create
 // their own loopback-only database and never consume a configured DATABASE_URL.
@@ -109,6 +110,23 @@ suite("real transaction pooling safety (requires local PostgreSQL and PgBouncer 
       await tx`select pg_sleep(1)`
     })).rejects.toMatchObject({ code: "57014" })
     await clients!.validateStartup()
+  })
+
+  test("tagged Drizzle reads reuse prepared plans through PgBouncer with changing array bindings", async () => {
+    const db = drizzle(clients!.queryClient)
+    for (let value = 0; value < 24; value++) {
+      const ids = Array.from({ length: value % 4 + 1 }, (_, index) => value + index)
+      const rows = await db.execute<{ value: number; ids: number[] }>(sql`
+        select ${value}::integer as value, ${sql.param(ids)}::integer[] as ids
+        ${accessQueryTag("sync.replay")}
+      `)
+      expect(rows[0]).toEqual({ value, ids })
+    }
+    // Inspect counters, not timing: this proves the driver actually prepared
+    // the Drizzle query and PostgreSQL reused a generic plan behind the pool.
+    const plans = await clients!.queryClient`select generic_plans from pg_prepared_statements
+      where statement like '%as ids%' and statement not like '%pg_prepared_statements%'`
+    expect(plans.some((row) => Number(row["generic_plans"]) > 0)).toBe(true)
   })
 
   test("direct health connection retains its stricter timeout and recovers", async () => {

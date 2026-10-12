@@ -93,7 +93,6 @@ export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: rea
     ? sql``
     : sql`and access."userId" in (${sql.join(constrainedUserIds, sql`, `)})`
   return sql`
-    ${accessQueryTag(source)}
     with recursive ancestors as (
       select
         c.id as "chatId",
@@ -209,6 +208,7 @@ export function effectiveChatAccessSql(chatIds: readonly number[], userIds?: rea
       )
       ${userFilter}
     order by access."chatId", access."userId"
+    ${accessQueryTag(source)}
   `
 }
 

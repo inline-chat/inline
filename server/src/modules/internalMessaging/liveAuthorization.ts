@@ -160,6 +160,7 @@ export async function authorizeLiveDeliveries<T extends LiveDelivery>(
     select 'chat'::text as kind, "chatId" as "resourceId", "userId" from chat_access
     union all ${spaceAuthority}
     union all ${personalAuthority}
+    /*application='inline-server',operation='live_delivery',source='realtime.delivery'*/
   `)
   const access = new Set<string>()
   const membership = new Set<string>()

@@ -53,7 +53,7 @@ describe("database diagnostics", () => {
   test("attribution adds only a fixed comment and preserves query bindings", () => {
     const dialect = new PgDialect()
     const query = dialect.sqlToQuery(effectiveChatAccessSql([125, 250], [375], "sync.replay"))
-    expect(query.sql).toContain("/*application='inline-server',operation='chat_access',source='sync.replay'*/")
+    expect(query.sql.trimEnd()).toEndWith("/*application='inline-server',operation='chat_access',source='sync.replay'*/")
     expect(query.sql).not.toContain("125")
     expect(query.sql).not.toContain("250")
     expect(query.sql).not.toContain("375")

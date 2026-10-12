@@ -1,17 +1,15 @@
 import { sql, type SQL } from "drizzle-orm"
+import { ReplayProgress, type ReplayProgressOperation } from "./replayProgress"
 
-export type AccessQuerySource =
-  | "authorization"
-  | "sync.replay"
-  | "sync.sidecars"
-  | "repair.chat"
-  | "chats.list"
-  | "messages.send"
-  | "realtime.delivery"
+export const accessQuerySources = [
+  "authorization", "sync.replay", "sync.sidecars", "repair.chat",
+  "chats.list", "messages.send", "realtime.delivery",
+] as const
+export type AccessQuerySource = typeof accessQuerySources[number]
 
 type ReplayScope = "user" | "space" | "chat"
 type ReplayPhase = "total" | "resolve" | "fetch" | "inflate" | "sidecars"
-type Operation = `access.${AccessQuerySource}` | `replay.${ReplayScope}.${ReplayPhase}` | "transaction.total" | "transaction.admission"
+type Operation = `access.${AccessQuerySource}` | `replay.${ReplayScope}.${ReplayPhase}` | ReplayProgressOperation | "transaction.total" | "transaction.admission"
 type Sample = {
   completed: number
   failed: number
@@ -81,6 +79,7 @@ export class DatabaseDiagnostics {
 }
 
 export const databaseDiagnostics = new DatabaseDiagnostics()
+export const replayProgress = new ReplayProgress((operation, workItems) => databaseDiagnostics.record(operation, 0, workItems))
 
 /** One process-owned reporter; reporting failures never affect database work. */
 export const startDatabaseDiagnostics = (
@@ -104,4 +103,7 @@ export const startDatabaseDiagnostics = (
 
 // Source is a code-owned finite union. Do not accept route paths or caller input.
 export const accessQueryTag = (source: AccessQuerySource): SQL =>
-  sql.raw(`/*application='inline-server',operation='chat_access',source='${source}'*/`)
+  sql.raw(accessQueryComment(source))
+
+export const accessQueryComment = (source: AccessQuerySource): string =>
+  `/*application='inline-server',operation='chat_access',source='${source}'*/`

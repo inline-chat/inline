@@ -3,9 +3,31 @@ import { db, schema } from "@in/server/db"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { and, eq } from "drizzle-orm"
 
 describe("batched chat access projection", () => {
   setupTestLifecycle()
+
+  test("prepared access plans preserve fresh membership and transaction visibility", async () => {
+    const reader = await testUtils.createUser("projection-prepared@example.test")
+    const space = await testUtils.createSpace("Prepared access")
+    if (!space) throw new Error("Expected Space")
+    const chat = await testUtils.createChat(space.id, "Public chat", "thread", true)
+    if (!chat) throw new Error("Expected chat")
+    const membership = and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id))
+    await db.insert(schema.members).values({ spaceId: space.id, userId: reader.id })
+    for (let i = 0; i < 12; i++) {
+      const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: [reader.id], source: "sync.replay" })
+      expect([...access.get(chat.id) ?? []]).toEqual([reader.id])
+    }
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.members).where(membership)
+      const access = await getEffectiveChatAccessUserIds(tx, [chat.id], { userIds: [reader.id], source: "sync.replay" })
+      expect([...access.get(chat.id) ?? []]).toEqual([])
+    })
+    const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: [reader.id], source: "sync.replay" })
+    expect([...access.get(chat.id) ?? []]).toEqual([])
+  })
 
   test("matches legacy nullable public access and fences direct child grants by owning Space membership", async () => {
     const allowed = await testUtils.createUser("projection-null-access@example.com")

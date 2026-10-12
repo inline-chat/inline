@@ -19,7 +19,8 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { Log } from "@in/server/utils/log"
-import { databaseDiagnostics } from "@in/server/db/databaseDiagnostics"
+import { databaseDiagnostics, replayProgress } from "@in/server/db/databaseDiagnostics"
+import { connectionManager } from "@in/server/ws/connections"
 
 const PAGE_LIMIT = 100
 const REPLAY_LIMIT = 10_000
@@ -90,6 +91,19 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const requestedPageLimit = rawPageLimit > 0 ? rawPageLimit : PAGE_LIMIT
   const pageLimit = Math.min(requestedPageLimit, PAGE_LIMIT)
+  const connection = context.currentConnectionId
+    ? connectionManager.getConnection(context.currentConnectionId)
+    : connectionManager.getConnectionBySession(context.currentUserId, context.currentSessionId)
+  const entityId = descriptor.scope === "user" ? context.currentUserId
+    : descriptor.scope === "chat" ? descriptor.chatId : descriptor.spaceId
+  const recordProgress = replayProgress.start(
+    `${context.currentUserId}:${context.currentSessionId}:${descriptor.scope}:${entityId}`,
+    descriptor.scope, connection?.clientType, seqStart,
+  )
+  const logTiming = (timing: GetUpdatesTiming) => {
+    recordProgress(timing.dbUpdates)
+    logGetUpdatesTiming(timing)
+  }
 
   const fetchTiming = await timed(async () =>
     Sync.getUpdates({
@@ -116,7 +130,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
       replayLimit: REPLAY_LIMIT,
       repairReason: "replay_limit",
     })
-    logGetUpdatesTiming({
+    logTiming({
       scope: descriptor.scope,
       result: "too_long",
       repairReason: "replay_limit",
@@ -147,7 +161,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
       repairReason: "journal_gap",
       dbUpdates: dbUpdates.length,
     })
-    logGetUpdatesTiming({
+    logTiming({
       scope: descriptor.scope,
       result: "too_long",
       repairReason: "journal_gap",
@@ -266,7 +280,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     candidate.databaseUpdateCount === 1 &&
     candidate.responseBytes > GET_UPDATES_COMPATIBILITY_PAGE_TARGET_BYTES
 
-  logGetUpdatesTiming({
+  logTiming({
     scope: descriptor.scope,
     result: candidate.result.updates.length === 0 ? "empty" : "slice",
     totalMs: elapsedMs(startedAt),

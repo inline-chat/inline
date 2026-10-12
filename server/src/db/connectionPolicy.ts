@@ -1,4 +1,5 @@
 import postgres from "postgres"
+import { prepareAccessQueries } from "./preparedAccessQueries"
 
 export const QUERY_TIMEOUTS = {
   statement_timeout: 30_000,
@@ -154,6 +155,7 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
     max: 1, connect_timeout: 2, idle_timeout: 30,
     connection: { application_name: "inline-health", ...HEALTH_TIMEOUTS },
   })
+  prepareAccessQueries(queryClient)
   const close = () => Promise.all([queryClient.end({ timeout: 5 }), healthClient.end({ timeout: 5 })]).then(() => {})
   const queryTimeoutSettings = () => queryClient<TimeoutRow[]>`
     select name, setting, unit from pg_settings
