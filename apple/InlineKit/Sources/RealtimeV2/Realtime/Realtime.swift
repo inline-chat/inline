@@ -948,11 +948,20 @@ public actor RealtimeV2 {
       "Transaction completed transaction_id=\(transactionId) method=\(transaction.method) total_ms=\(totalDurationMilliseconds)"
     )
 
+    var historyUnavailableReason = HistoryUnavailableReason.admission
     do {
       if let bucket = transaction.historyReadBucket {
-        guard let seq = historySnapshotSequence(rpcResult) else { throw TransactionExecutionError.historyUnavailable }
+        guard let seq = historySnapshotSequence(rpcResult) else {
+          historyUnavailableReason = .missingSequence
+          throw TransactionExecutionError.historyUnavailable
+        }
         let snapshotBucket = try historySnapshotBucket(rpcResult, requestedKey: bucket)
-        try await sync.reachHistorySnapshot(snapshotBucket, seq: seq)
+        do {
+          try await sync.reachHistorySnapshot(snapshotBucket, seq: seq)
+        } catch let reason as HistoryUnavailableReason {
+          historyUnavailableReason = reason
+          throw TransactionExecutionError.historyUnavailable
+        }
         try Task.checkCancellation()
         guard isCurrentTransactionOwner(completingOwner) else { throw CancellationError() }
         guard await transactions.canAdmitHistory(keys: transaction.historyReadExecutionKeys) else {
@@ -976,7 +985,10 @@ public actor RealtimeV2 {
         await transactions.finishExecution(for: transactionWrapper)
         return
       }
-      await transaction.failed(error: TransactionError.invalid)
+      switch TransactionCompletionFailure(error, historyUnavailable: historyUnavailableReason) {
+        case .superseded: await transaction.cancelled()
+        case let .failed(reported): await transaction.failed(error: reported)
+      }
       await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
       await transactions.signalQueue()

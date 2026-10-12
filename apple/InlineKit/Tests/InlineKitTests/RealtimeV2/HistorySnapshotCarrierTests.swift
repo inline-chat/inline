@@ -98,6 +98,42 @@ struct HistorySnapshotCarrierTests {
   }
 }
 
+@Suite("RealtimeV2.TransactionCompletionFailure")
+struct TransactionCompletionFailureTests {
+  private func category(_ error: any Error, _ reason: HistoryUnavailableReason = .admission) -> String? {
+    switch TransactionCompletionFailure(error, historyUnavailable: reason) {
+      case .superseded: nil
+      case let .failed(reported): reported.privacySafeErrorCategory
+    }
+  }
+
+  @Test("superseded history completions are not reported as failures")
+  func supersededIsQuiet() {
+    #expect(category(TransactionExecutionError.staleHistory) == nil)
+    #expect(category(CancellationError()) == nil)
+  }
+
+  @Test("unavailable history reports the reason it was unavailable")
+  func unavailableCarriesReason() {
+    #expect(category(TransactionExecutionError.historyUnavailable) == "transaction:history_unavailable:admission")
+    #expect(
+      category(TransactionExecutionError.historyUnavailable, .snapshotTimeout)
+        == "transaction:history_unavailable:snapshot_timeout"
+    )
+    #expect(
+      category(TransactionExecutionError.historyUnavailable, .missingSequence)
+        == "transaction:history_unavailable:missing_sequence"
+    )
+  }
+
+  @Test("other completion errors keep the invalid category")
+  func otherErrorsStayInvalid() {
+    struct StorageFailure: Error {}
+    #expect(category(TransactionExecutionError.invalid) == "transaction:invalid")
+    #expect(category(StorageFailure()) == "transaction:invalid")
+  }
+}
+
 private let historyCarrierBucket = BucketKey.chat(peer: .with { $0.chat = .with { $0.chatID = 77 } })
 
 private func historyQuery(_ realtime: RealtimeV2, id: UUID) -> Task<Void, Never> {

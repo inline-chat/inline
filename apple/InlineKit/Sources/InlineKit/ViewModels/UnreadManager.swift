@@ -176,7 +176,7 @@ enum AutomaticReadRetryPolicy {
         || error.errorCode == .unknown
         || error.code == 429
         || error.code >= 500
-    case .invalid, .dependencyFailed:
+    case .invalid, .historyUnavailable, .dependencyFailed:
       false
     }
   }

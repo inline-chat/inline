@@ -456,11 +456,11 @@ actor Sync {
   /// Existing bucket commits wake the caller; no polling observer is installed.
   func reachHistorySnapshot(_ requestedKey: BucketKey, seq target: Int64) async throws {
     guard target >= 0, let expectedGeneration = beginOperation() else {
-      throw TransactionExecutionError.historyUnavailable
+      throw HistoryUnavailableReason.syncInactive
     }
     defer { endOperation() }
     guard let key = await canonicalBucketKey(requestedKey, generation: expectedGeneration) else {
-      throw TransactionExecutionError.historyUnavailable
+      throw HistoryUnavailableReason.bucketUnresolved
     }
     let state = try await syncStorage.getBucketState(for: key)
     guard isCurrent(expectedGeneration) else { throw CancellationError() }
@@ -474,7 +474,7 @@ actor Sync {
         let timeout = Task { [weak self] in
           do { try await Task.sleep(for: .seconds(20)) }
           catch { return }
-          await self?.finishHistorySnapshotWaiter(id, error: TransactionExecutionError.historyUnavailable)
+          await self?.finishHistorySnapshotWaiter(id, error: HistoryUnavailableReason.snapshotTimeout)
         }
         historySnapshotWaiters[id] = HistorySnapshotWaiter(
           key: key, seq: target, generation: expectedGeneration,

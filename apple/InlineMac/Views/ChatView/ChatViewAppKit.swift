@@ -512,7 +512,8 @@ class ChatViewAppKit: NSViewController {
         }
       case .invalid, .persistenceFailed:
         return true
-      case .timeout, .commitOutcomeUnknownAfterReconnect, .rejectedBeforeExecution, .dependencyFailed:
+      case .timeout, .historyUnavailable, .commitOutcomeUnknownAfterReconnect, .rejectedBeforeExecution,
+           .dependencyFailed:
         return false
     }
   }

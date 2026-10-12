@@ -181,6 +181,8 @@ enum ExperimentalHomeLoadDiagnostics {
         return "transaction_timeout"
       case .invalid:
         return "transaction_invalid"
+      case .historyUnavailable:
+        return "transaction_history_unavailable"
       case .persistenceFailed:
         return "transaction_persistence_failed"
       case .commitOutcomeUnknownAfterReconnect:
