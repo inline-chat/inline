@@ -40,13 +40,14 @@ bindings, user/chat IDs, cursors, connection URLs or error messages are recorded
   pending transactions remain visible in `inFlight` across reporting windows.
 - `replay.{scope}.{clientType}.{first,advance,repeat,rewind}` counts completed
   replay requests by cursor movement relative to the previous request for that
-  session/bucket. `workItems` counts fetched records; repeated empty polls have
+  connection/bucket (session fallback for callers without a connection ID).
+  `workItems` counts fetched records; repeated empty polls have
   zero work. Duration is zero for these counters. Coordinates stay in a bounded
   4,096-entry process-local LRU with a ten-minute idle expiry and are never logged.
   Missing connection metadata becomes `unknown`. A repeat or rewind is evidence
-  to investigate, not proof of a defective client; sessions can have multiple
-  connections, and retries can be legitimate. Failures before completion are
-  excluded. Restart/eviction/expiry resets classification to `first`.
+  to investigate, not proof of a defective client; retries can be legitimate.
+  Separate sockets sharing a session are tracked independently. Failures before
+  completion are excluded. Restart/eviction/expiry resets classification to `first`.
 
 Durations overlap: never add replay, access and transaction totals as if they
 were independent CPU measurements. Completion latency is charged to the window
@@ -83,6 +84,12 @@ actual Drizzle prepared reads through PgBouncer, and authorization tests cover
 revocation after warm repeated reads. Array-binding alternatives were rejected
 after live probes showed PostgreSQL kept replanning them instead of selecting
 the much faster generic plan for the existing query shape.
+
+Replay access checks execute the canonical SELECT directly on the shared
+client. The former single-query explicit transaction added BEGIN/SET/COMMIT
+round trips and used an unprepared transaction client. Removing that wrapper
+retains PostgreSQL's single-statement snapshot across all CTEs; journal page
+reads still use their existing multi-query repeatable-read transaction.
 
 Inspect `pginsights.raw_queries` for the effective raw-query collection state;
 the database API's separate boolean is not authoritative for Postgres. Raw

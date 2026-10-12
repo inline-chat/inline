@@ -97,7 +97,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   const entityId = descriptor.scope === "user" ? context.currentUserId
     : descriptor.scope === "chat" ? descriptor.chatId : descriptor.spaceId
   const recordProgress = replayProgress.start(
-    `${context.currentUserId}:${context.currentSessionId}:${descriptor.scope}:${entityId}`,
+    `${context.currentUserId}:${context.currentSessionId}:${context.currentConnectionId ?? "session"}:${descriptor.scope}:${entityId}`,
     descriptor.scope, connection?.clientType, seqStart,
   )
   const logTiming = (timing: GetUpdatesTiming) => {

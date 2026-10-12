@@ -1473,10 +1473,10 @@ function inflateUserUpdatesPage(dbUpdates: DbUpdate[]): InflatedUpdatesPage {
 
 async function getAccessibleReplayChatIds(chatIds: number[], userId: number, source: AccessQuerySource = "sync.replay"): Promise<Set<number>> {
   if (chatIds.length === 0) return new Set()
-  const access = await db.transaction(
-    (tx) => getEffectiveChatAccessUserIds(tx, chatIds, { userIds: [userId], source }),
-    { accessMode: "read only" },
-  )
+  // The canonical projection is one SELECT, so PostgreSQL already gives all
+  // its CTEs one statement snapshot. An explicit transaction adds BEGIN/SET/
+  // COMMIT round trips and bypasses the shared client's prepared replay plans.
+  const access = await getEffectiveChatAccessUserIds(db, chatIds, { userIds: [userId], source })
   return new Set(Array.from(access).flatMap(([chatId, users]) => users.has(userId) ? [chatId] : []))
 }
 
