@@ -529,6 +529,20 @@ public class DataManager: ObservableObject {
     }
   }
 
+  /// Fetches public profiles by ID and saves them. Returns the IDs the server had.
+  public func getUsers(ids: [Int64]) async throws -> Set<Int64> {
+    let mutationToken = try beginAccountMutation()
+    let result = try await InlineRPCClient.shared.getUsers(ids: ids, accountToken: mutationToken)
+    let requested = Set(ids)
+    let users = result.users.filter { requested.contains($0.id) }
+    try await writeAccountProjection(token: mutationToken) { db in
+      for user in users {
+        _ = try User.save(db, user: user)
+      }
+    }
+    return Set(users.map(\.id))
+  }
+
   public func getSpace(spaceId: Int64) async throws {
     let mutationToken = try beginAccountMutation()
     let result = try await InlineRPCClient.shared.getSpace(spaceID: spaceId)

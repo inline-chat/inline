@@ -133,7 +133,15 @@ let package = Package(
         "Auth",
         "RealtimeV2",
         "InlineAvatarCore",
+        "InlineObjectCache",
       ],
+      swiftSettings: swiftSettings
+    ),
+
+    // Storage-agnostic record cache and remote loader. No dependencies, so it
+    // can be tested without a database or a network.
+    .target(
+      name: "InlineObjectCache",
       swiftSettings: swiftSettings
     ),
 
@@ -265,6 +273,12 @@ let package = Package(
         "InlineProtocol",
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
       ],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineObjectCacheTests",
+      dependencies: ["InlineObjectCache"],
       swiftSettings: swiftSettings
     ),
 

@@ -50,8 +50,11 @@ struct ObjectCacheTests {
       }
       try Space(id: 2, name: "Workspace", date: Date()).insert(db)
       try Chat(id: 3, date: Date(), type: .thread, title: "Thread", spaceId: 2).insert(db)
+      try Message(
+        messageId: 10, fromId: 1, date: Date(), text: "First", peerUserId: nil, peerThreadId: 3, chatId: 3
+      ).insert(db)
     }
-    let cache = ObjectCache(database: database, trackedLimit: trackedLimit, memoryLimit: memoryLimit)
+    let cache = ObjectCache(database: database, trackedLimit: { _ in trackedLimit }, memoryLimit: memoryLimit)
     log.reset()
     return Fixture(cache: cache, queue: queue, log: log)
   }
@@ -175,7 +178,7 @@ struct ObjectCacheTests {
     let fixture = try await makeFixture(users: 60)
     let ids = (1 ... 60).map { ObjectID.user(Int64($0)) }
     #expect(await loadAndSettle(fixture, ids + [.chat(3), .space(2)]))
-    #expect(fixture.cache.trackerCount == 3)
+    #expect(fixture.cache.trackerCount == 4)
 
     fixture.log.reset()
     try await rename(fixture, user: 7, to: "Seven")
@@ -214,6 +217,54 @@ struct ObjectCacheTests {
     #expect(fixture.log.mainThreadCount == 0)
   }
 
+  @Test("messages are cached by chat and message id and follow edits")
+  func messagesAreCached() async throws {
+    let fixture = try await makeFixture()
+    let id = ObjectID.message(chatId: 3, messageId: 10)
+    let absent = ObjectID.message(chatId: 3, messageId: 11)
+    #expect(await loadAndSettle(fixture, [id, absent]))
+    let snapshot = fixture.cache.cached([id, absent])
+    #expect(snapshot.message(chatId: 3, messageId: 10)?.text == "First")
+    #expect(snapshot.state(of: absent) == .missing)
+
+    try await fixture.queue.write { db in
+      try db.execute(sql: "UPDATE message SET text = 'Edited' WHERE chatId = 3 AND messageId = 10")
+    }
+    #expect(await eventually {
+      fixture.cache.cached(id).message(chatId: 3, messageId: 10)?.text == "Edited"
+    })
+    #expect(fixture.log.mainThreadCount == 0)
+  }
+
+  @Test("ensure asks the remote loader only for missing rows and placeholder users")
+  func ensureUsesRemoteLoader() async throws {
+    let fixture = try await makeFixture()
+    try await fixture.queue.write { db in
+      try User(id: 70, email: nil, firstName: nil).insert(db)
+    }
+    let asked = Mutex<[ObjectID]>([])
+    let queue = fixture.queue
+    fixture.cache.remoteLoader = ObjectRemoteLoader(policy: .init(coalesceWindow: .zero)) { ids in
+      asked.withLock { $0.append(contentsOf: ids) }
+      // Stands in for an RPC whose result is saved to the database.
+      try await queue.write { db in
+        try db.execute(sql: "UPDATE user SET firstName = 'Repaired' WHERE id = 70")
+        try User(id: 71, email: nil, firstName: "Fetched").insert(db)
+      }
+      return ObjectFetchOutcome(resolved: [.user(70), .user(71)])
+    }
+
+    let snapshot = await fixture.cache.ensure([.user(1), .user(70), .user(71), .chat(3)])
+    #expect(Set(asked.withLock { $0 }) == [.user(70), .user(71)])
+    #expect(snapshot.user(1)?.user.firstName == "User 1")
+    #expect(snapshot.user(70)?.user.firstName == "Repaired")
+    #expect(snapshot.user(71)?.user.firstName == "Fetched")
+
+    // Complete records are never sent to the remote.
+    await fixture.cache.ensure([.user(70), .user(71)])
+    #expect(asked.withLock { $0.count } == 2)
+  }
+
   @Test("memory is bounded by evicting the least recently used records")
   func memoryIsBounded() async throws {
     let fixture = try await makeFixture(users: 12, trackedLimit: 2, memoryLimit: 4)
@@ -248,7 +299,7 @@ struct ObjectCacheTests {
 
     // The cache works again after a clear, with trackers re-attached.
     #expect(await loadAndSettle(fixture, [.user(1)]))
-    #expect(fixture.cache.trackerCount == 3)
+    #expect(fixture.cache.trackerCount == 4)
     #expect(fixture.cache.getUser(id: 1)?.user.firstName == "Renamed")
   }
 }

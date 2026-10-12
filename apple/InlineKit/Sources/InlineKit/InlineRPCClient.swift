@@ -64,6 +64,19 @@ public actor InlineRPCClient {
     return result
   }
 
+  /// Public profiles by ID. The server accepts up to 50 IDs and omits users it does not have.
+  public func getUsers(
+    ids: [Int64], accountToken: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocol.GetUsersResult {
+    let response = try await Api.realtime.callRpcDirect(
+      method: .getUsers,
+      input: .getUsers(.with { $0.userIds = ids }),
+      accountToken: accountToken
+    )
+    guard case let .getUsers(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
+    return result
+  }
+
   public func getSpaceMembers(spaceID: Int64) async throws -> InlineProtocol.GetSpaceMembersResult {
     let response = try await Api.realtime.callRpcDirect(
       method: .getSpaceMembers,
