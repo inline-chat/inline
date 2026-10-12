@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 
 final class ReactionChipButton: NSButton {
@@ -224,6 +225,8 @@ final class ReactionChipButton: NSButton {
   }
 
   private func updateContent() {
+    awaitedUsers.removeAll()
+    defer { observeAwaitedUsers() }
     guard let group else {
       toolTip = nil
       return
@@ -234,17 +237,36 @@ final class ReactionChipButton: NSButton {
         return "You"
       }
 
-      if let user = reaction.userInfo?.user {
-        return user.displayName
-      }
-
-      return ObjectCache.shared.getCachedUser(id: reaction.reaction.userId)?.user.displayName
+      return userInfo(for: reaction)?.user.displayName
     }.joined(separator: ", ")
 
     let shouldShowAvatars = ReactionChipMetrics.showsAvatars(for: group.reactions.count)
     rebuildContent(shouldShowAvatars: shouldShowAvatars, group: group)
     updateColors()
     needsLayout = true
+  }
+
+  /// Users this chip is showing a placeholder for. When one loads, the chip rebuilds.
+  private var awaitedUsers: Set<ObjectID> = []
+  private var awaitedUsersSubscription: AnyCancellable?
+
+  /// Reactions normally carry their user. When one does not, this answers from
+  /// memory and records the user as awaited rather than reading here.
+  private func userInfo(for reaction: FullReaction) -> UserInfo? {
+    if let userInfo = reaction.userInfo { return userInfo }
+    let userId = reaction.reaction.userId
+    if let cached = ObjectCache.shared.getCachedUser(id: userId) { return cached }
+    awaitedUsers.insert(.user(userId))
+    return nil
+  }
+
+  private func observeAwaitedUsers() {
+    awaitedUsersSubscription = nil
+    guard !awaitedUsers.isEmpty else { return }
+    ObjectCache.shared.warm(Array(awaitedUsers))
+    awaitedUsersSubscription = ObjectCache.shared.changes
+      .filter { [awaitedUsers] in !$0.isDisjoint(with: awaitedUsers) }
+      .sink { [weak self] _ in self?.updateContent() }
   }
 
   private func rebuildContent(shouldShowAvatars: Bool, group: GroupedReaction) {
@@ -255,13 +277,9 @@ final class ReactionChipButton: NSButton {
       countLabel.isHidden = true
 
       for fullReaction in group.reactions.prefix(ReactionChipMetrics.maxAvatars) {
-        // Reactions normally carry their user. When one does not, show what is in
-        // memory and load the rest for the next rebuild rather than read here.
-        let userInfo = fullReaction.userInfo ?? ObjectCache.shared.getCachedUser(id: fullReaction.reaction.userId)
-        if userInfo == nil {
-          ObjectCache.shared.warm(.user(fullReaction.reaction.userId))
-        }
-        let avatarView = UserAvatarView(userInfo: userInfo ?? .deleted, size: ReactionChipMetrics.avatarSize)
+        let avatarView = UserAvatarView(
+          userInfo: userInfo(for: fullReaction) ?? .deleted, size: ReactionChipMetrics.avatarSize
+        )
         avatarView.translatesAutoresizingMaskIntoConstraints = true
         avatarView.acceptsMouseInteraction = false
         addSubview(avatarView)

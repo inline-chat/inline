@@ -208,7 +208,10 @@ struct ObjectCacheTests {
     #expect(fixture.cache.cached([.user(1)]).state(of: .user(1)) == .fresh)
     #expect(fixture.log.mainThreadCount == 0)
 
-    #expect(await fixture.cache.loadUser(id: 2)?.user.firstName == "New 2")
+    // Reading from memory alone also brings a stale record back up to date.
+    #expect(fixture.cache.cached(.user(2)).user(2)?.user.firstName == "User 2")
+    #expect(await eventually { fixture.cache.cached(.user(2)).user(2)?.user.firstName == "New 2" })
+    #expect(fixture.log.mainThreadCount == 0)
   }
 
   @Test("memory is bounded by evicting the least recently used records")
@@ -230,6 +233,9 @@ struct ObjectCacheTests {
     var names: [String?] = []
     let subscription = fixture.cache.getUserPublisher(id: 1).sink { names.append($0?.user.firstName) }
     defer { subscription.cancel() }
+    // Subscribing loads in the background and delivers the first value itself.
+    #expect(fixture.log.mainThreadCount == 0)
+    #expect(await eventually { names.last == "User 1" })
     #expect(await loadAndSettle(fixture, [.user(1), .chat(3)]))
 
     try await rename(fixture, user: 1, to: "Renamed")

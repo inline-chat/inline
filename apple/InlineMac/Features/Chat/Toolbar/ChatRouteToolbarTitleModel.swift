@@ -389,7 +389,8 @@ final class ChatRouteToolbarTitleModel {
 
   private func resolvedUserInfo() -> UserInfo? {
     if let userId = peer.asUserId() {
-      return ObjectCache.shared.getUser(id: userId) ?? loadedUserInfo
+      // The snapshot loaded at init covers the first frame; the cache takes over once loaded.
+      return ObjectCache.shared.getCachedUser(id: userId) ?? loadedUserInfo
     }
 
     return loadedUserInfo
@@ -397,7 +398,7 @@ final class ChatRouteToolbarTitleModel {
 
   private func resolvedChat() -> Chat? {
     if let chatId = peer.asThreadId() {
-      return ObjectCache.shared.getChat(id: chatId) ?? loadedChat
+      return ObjectCache.shared.getCachedChat(id: chatId) ?? loadedChat
     }
 
     return loadedChat
@@ -405,7 +406,7 @@ final class ChatRouteToolbarTitleModel {
 
   private func resolvedParentThread() -> ParentThread? {
     guard let chat = resolvedChat(), chat.isReplyThread, let parentChatId = chat.parentChatId else { return nil }
-    let parent = ObjectCache.shared.getChat(id: parentChatId) ?? loadedParentChat
+    let parent = ObjectCache.shared.getCachedChat(id: parentChatId) ?? loadedParentChat
     let peer = parentPeer(for: parent, parentChatId: parentChatId)
     let title = parent.map(parentTitle) ?? "Thread"
     return ParentThread(peer: peer, title: title)
@@ -455,7 +456,8 @@ final class ChatRouteToolbarTitleModel {
     }
 
     guard let userId = loadedParentPeerUserId ?? chat.peerUserId else { return nil }
-    return ObjectCache.shared.getUser(id: userId)
+    ObjectCache.shared.warm(.user(userId))
+    return ObjectCache.shared.getCachedUser(id: userId)
   }
 
   private func resolvedLocalTime(for user: User? = nil) -> String? {

@@ -155,9 +155,11 @@ public final class ObjectCache {
 
   // MARK: - Uniform API
 
-  /// What is in memory right now. Never touches the database.
+  /// What is in memory right now. Never reads synchronously; stale values are
+  /// returned as they are and revalidated in the background.
   public func cached(_ ids: [ObjectID]) -> ObjectSnapshot {
-    snapshot(ids)
+    revalidate(ids.filter { entries[$0]?.isFresh == false })
+    return snapshot(ids)
   }
 
   /// Answers now. Unloaded IDs are read synchronously in one batch; stale values
@@ -503,21 +505,23 @@ public extension ObjectCache {
     await load(.space(id)).space(id)
   }
 
-  /// Emits the user whenever it changes. Subscribing reads it synchronously if unloaded.
+  /// Emits the user when it loads or changes. Subscribing starts a load if needed
+  /// and never reads synchronously; call `getUser` when the first frame needs a value.
   func getUserPublisher(id: Int64) -> PassthroughSubject<UserInfo?, Never> {
+    warm(.user(id))
     if let publisher = userPublishers[id] { return publisher }
     let publisher = PassthroughSubject<UserInfo?, Never>()
     userPublishers[id] = publisher
-    _ = getUser(id: id)
     return publisher
   }
 
-  /// Emits the chat whenever it changes. Subscribing reads it synchronously if unloaded.
+  /// Emits the chat when it loads or changes. Subscribing starts a load if needed
+  /// and never reads synchronously; call `getChat` when the first frame needs a value.
   func getChatPublisher(id: Int64) -> PassthroughSubject<Chat?, Never> {
+    warm(.chat(id))
     if let publisher = chatPublishers[id] { return publisher }
     let publisher = PassthroughSubject<Chat?, Never>()
     chatPublishers[id] = publisher
-    _ = getChat(id: id)
     return publisher
   }
 }
