@@ -48,6 +48,15 @@ bindings, user/chat IDs, cursors, connection URLs or error messages are recorded
   to investigate, not proof of a defective client; retries can be legitimate.
   Separate sockets sharing a session are tracked independently. Failures before
   completion are excluded. Restart/eviction/expiry resets classification to `first`.
+- `replay.user.throttled` counts requests stopped before journal fetching by
+  the replay-loop guard. On one connection, the first rewind of 1,000 or more
+  sequences is allowed; a second triggers 60 seconds of backoff, doubling up to
+  five minutes for further rewinds. Clients receive the existing RATE_LIMIT
+  error. Forward catch-up, small page retries and empty polling are unrestricted.
+  Progress beyond the previous high-water start bypasses a pending pause.
+  The guard is a bounded 4,096-entry process-local LRU with ten-minute idle
+  expiry, and never changes persisted cursors, access decisions or history.
+  Reconnects reset its protection; this is load containment, not client repair.
 
 Durations overlap: never add replay, access and transaction totals as if they
 were independent CPU measurements. Completion latency is charged to the window

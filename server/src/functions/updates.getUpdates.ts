@@ -21,6 +21,7 @@ import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { Log } from "@in/server/utils/log"
 import { databaseDiagnostics, replayProgress } from "@in/server/db/databaseDiagnostics"
 import { connectionManager } from "@in/server/ws/connections"
+import { replayLoopGuard } from "@in/server/modules/updates/replayLoopGuard"
 
 const PAGE_LIMIT = 100
 const REPLAY_LIMIT = 10_000
@@ -91,6 +92,11 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const requestedPageLimit = rawPageLimit > 0 ? rawPageLimit : PAGE_LIMIT
   const pageLimit = Math.min(requestedPageLimit, PAGE_LIMIT)
+  if (descriptor.scope === "user" && context.currentConnectionId &&
+    !replayLoopGuard.allow(`${context.currentUserId}:${context.currentSessionId}:${context.currentConnectionId}`, seqStart)) {
+    databaseDiagnostics.record("replay.user.throttled", 0)
+    throw RealtimeRpcError.RateLimit()
+  }
   const connection = context.currentConnectionId
     ? connectionManager.getConnection(context.currentConnectionId)
     : connectionManager.getConnectionBySession(context.currentUserId, context.currentSessionId)

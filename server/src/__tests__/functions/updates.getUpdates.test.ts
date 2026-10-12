@@ -34,6 +34,8 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { Sync } from "@in/server/modules/updates/sync"
+import { replayLoopGuard } from "@in/server/modules/updates/replayLoopGuard"
+import { getUpdates as handleGetUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
@@ -109,6 +111,31 @@ const decodeGetUpdatesFrame = (frame: Uint8Array) => {
 
 describe("getUpdates", () => {
   setupTestLifecycle()
+
+  test("rejects repeated full rewinds before database replay and isolates other sockets", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Replay backoff", ["replay-backoff@example.com"])
+    const user = users[0]!
+    const identity = `${user.id}:1:replay-loop-test`
+    for (const seq of [4000, 0, 4000]) expect(replayLoopGuard.allow(identity, seq)).toBe(true)
+    const input: GetUpdatesInput = {
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }
+    const context = {
+      userId: user.id, sessionId: 1, connectionId: "replay-loop-test",
+      sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    const fetch = spyOn(Sync, "getUpdates")
+    try {
+      await expect(handleGetUpdates(input, context)).rejects.toMatchObject({ codeNumber: 429 })
+      expect(fetch).not.toHaveBeenCalled()
+      const result = await handleGetUpdates(input, { ...context, connectionId: "recovered-socket" })
+      expect(result.final).toBe(true)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
 
   test("uses an exclusive 10,000-update authoritative-repair boundary", () => {
     expect(replayRequiresAuthoritativeRepair(0, 9_999)).toBe(false)

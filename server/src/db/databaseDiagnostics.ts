@@ -9,7 +9,7 @@ export type AccessQuerySource = typeof accessQuerySources[number]
 
 type ReplayScope = "user" | "space" | "chat"
 type ReplayPhase = "total" | "resolve" | "fetch" | "inflate" | "sidecars"
-type Operation = `access.${AccessQuerySource}` | `replay.${ReplayScope}.${ReplayPhase}` | ReplayProgressOperation | "transaction.total" | "transaction.admission"
+type Operation = `access.${AccessQuerySource}` | `replay.${ReplayScope}.${ReplayPhase}` | ReplayProgressOperation | "replay.user.throttled" | "transaction.total" | "transaction.admission"
 type Sample = {
   completed: number
   failed: number
