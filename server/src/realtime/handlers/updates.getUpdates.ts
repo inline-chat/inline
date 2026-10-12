@@ -19,6 +19,7 @@ export const getUpdates = async (input: GetUpdatesInput, handlerContext: Handler
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,
+      currentConnectionId: handlerContext.connectionId,
     },
   )
 }

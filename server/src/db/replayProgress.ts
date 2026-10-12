@@ -4,7 +4,7 @@ type ClientType = typeof clientTypes[number]
 type Progress = "first" | "advance" | "repeat" | "rewind"
 export type ReplayProgressOperation = `replay.${ReplayScope}.${ClientType}.${Progress}`
 
-/** Session/bucket coordinates stay only in bounded process memory. Only fixed
+/** Connection/bucket coordinates stay only in bounded process memory. Only fixed
  * cohort names and aggregate counts leave this class. Retries are observations,
  * not errors: empty polls and overlapping clients may legitimately repeat. */
 export class ReplayProgress {
