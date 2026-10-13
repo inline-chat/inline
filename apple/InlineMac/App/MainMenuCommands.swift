@@ -134,13 +134,10 @@ enum ChatMenuActions {
     ToastCenter.shared.showSuccess("Copied message link")
   }
 
-  static func openInSidebar(peer: Peer, isHidden: Bool, dependencies: AppDependencies) {
+  static func openInSidebar(peer: Peer) {
     Task(priority: .userInitiated) {
       do {
-        if peer.isThread, isHidden {
-          _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peer))
-        }
-        _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+        try await InboxMembershipService.shared.open(peer: peer)
         await MainActor.run { ToastCenter.shared.showSuccess("Kept in sidebar") }
       } catch {
         await MainActor.run { ToastCenter.shared.showError("Failed to open chat in sidebar") }

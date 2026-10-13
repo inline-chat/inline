@@ -427,11 +427,7 @@ struct ChatRouteView: View {
         isFollowing: dialog?.isFollowingThread == true
       )
     case .openInSidebar:
-      ChatMenuActions.openInSidebar(
-        peer: peer,
-        isHidden: dialog?.chatListHidden == true,
-        dependencies: dependencies
-      )
+      ChatMenuActions.openInSidebar(peer: peer)
     case .togglePin:
       ChatMenuActions.togglePin(
         peer: peer,

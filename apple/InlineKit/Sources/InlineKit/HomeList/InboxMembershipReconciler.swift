@@ -3,6 +3,9 @@ import Foundation
 public enum InboxMembershipIntent: Equatable, Sendable {
   case open
   case close
+  /// Implicit membership from activity such as sending. Makes the chat an
+  /// Inbox member without changing its follow or archive state.
+  case keep
 }
 
 public struct InboxMembershipCanonicalState: Equatable, Sendable {
@@ -119,7 +122,12 @@ public actor InboxMembershipReconciler {
 
     nextRevision &+= 1
     let requestRevision = nextRevision
-    desiredByPeer[peer] = DesiredRecord(intent: intent, revision: requestRevision)
+    // An implicit keep must not strip the extra steps of an explicit Open
+    // that is still being reconciled.
+    let effectiveIntent: InboxMembershipIntent = intent == .keep && desiredByPeer[peer]?.intent == .open
+      ? .open
+      : intent
+    desiredByPeer[peer] = DesiredRecord(intent: effectiveIntent, revision: requestRevision)
     // Recording the desired state is the acceptance boundary. Start the
     // caller-independent worker before any cancellation-sensitive suspension
     // so post-acceptance cancellation can only detach this caller's waiter.
@@ -158,6 +166,11 @@ public actor InboxMembershipReconciler {
     case .close:
       if state.isOpen { return .setOpen(false) }
       if state.isPinned { return .setPinned(false) }
+    case .keep:
+      if state.isChatListHidden || state.needsReplyThreadReveal {
+        return .showInChatList
+      }
+      if !state.isOpen { return .setOpen(true) }
     }
 
     return nil

@@ -294,11 +294,7 @@ struct ChatToolbarMenuButton: View {
   }
 
   private func openInSidebar() {
-    ChatMenuActions.openInSidebar(
-      peer: peer,
-      isHidden: model.state.isChatListHidden,
-      dependencies: dependencies
-    )
+    ChatMenuActions.openInSidebar(peer: peer)
   }
 
   @MainActor

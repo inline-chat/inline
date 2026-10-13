@@ -27,6 +27,24 @@ struct InboxMembershipReconcilerTests {
     #expect(InboxMembershipReconciler.nextMutation(from: state, for: .open) == nil)
   }
 
+  @Test("Keep opens without changing follow or archive state")
+  func keepPlan() {
+    var state = InboxMembershipCanonicalState(
+      isOpen: false,
+      isPinned: false,
+      isArchived: true,
+      isChatListHidden: true,
+      isUnfollowed: true,
+      needsReplyThreadReveal: false
+    )
+
+    #expect(InboxMembershipReconciler.nextMutation(from: state, for: .keep) == .showInChatList)
+    state = state.applying(.showInChatList)
+    #expect(InboxMembershipReconciler.nextMutation(from: state, for: .keep) == .setOpen(true))
+    state = state.applying(.setOpen(true))
+    #expect(InboxMembershipReconciler.nextMutation(from: state, for: .keep) == nil)
+  }
+
   @Test("Rapid Open then Close converges to Close")
   func rapidOpenThenClose() async throws {
     let store = InboxTestStore(state: .closed, suspendFirstMutation: true)

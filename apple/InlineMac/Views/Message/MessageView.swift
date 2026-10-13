@@ -3537,8 +3537,7 @@ class MessageViewAppKit: NSView {
         ToastCenter.shared.showLoading("Opening in sidebar…")
 
         _ = try await dependencies.realtimeV2.send(.updateDialogFollowMode(peerId: peer, selection: .following))
-        _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peer))
-        _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+        try await InboxMembershipService.shared.open(peer: peer)
 
         ToastCenter.shared.dismiss()
         ToastCenter.shared.showSuccess("Opened in sidebar")

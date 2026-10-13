@@ -1453,15 +1453,11 @@ private struct ChatListRow: View {
   private func openInSidebar() {
     Task(priority: .userInitiated) {
       do {
-        guard let dependencies else { return }
         guard item.isOpen == false else {
           ToastCenter.shared.showInfo("Already open")
           return
         }
-        if peerId.isThread, item.chatListHidden {
-          _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peerId))
-        }
-        _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peerId, open: true))
+        try await InboxMembershipService.shared.open(peer: peerId)
         ToastCenter.shared.showSuccess("Opened in sidebar")
       } catch {
         ToastCenter.shared.showError("Couldn’t open in sidebar")
