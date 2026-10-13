@@ -245,7 +245,9 @@ impl AuthenticatedRealtime {
                     OsRng.fill_bytes(&mut client_upload_id);
                     input.client_upload_id = Some(client_upload_id);
                 }
-                match upload_file_v3(connection, input.clone(), |_| {}).await {
+                match upload_file_v3(connection, input.clone(), |progress| {
+                    log::debug!(target: "inline::upload", "upload accepted {}/{} bytes", progress.accepted_bytes, progress.total_bytes);
+                }).await {
                     Ok(upload) => Ok(upload),
                     Err(NativeUploadError::V3(error))
                         if owner_session::temporary_reconnect_can_regenerate(&error) =>
@@ -259,7 +261,9 @@ impl AuthenticatedRealtime {
                         *connection =
                             regenerate_inline_protocol_temporary(url, &permanent, auth_store)
                                 .await?;
-                        Ok(upload_file_v3(connection, input, |_| {}).await?)
+                        Ok(upload_file_v3(connection, input, |progress| {
+                            log::debug!(target: "inline::upload", "upload accepted {}/{} bytes", progress.accepted_bytes, progress.total_bytes);
+                        }).await?)
                     }
                     Err(error) => Err(error.into()),
                 }

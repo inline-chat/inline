@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
@@ -9,6 +11,7 @@ use inline_sdk::NativeUploadInput;
 use inline_sdk::api::{UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata};
 
 pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 500_000_000;
+const VIDEO_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub(crate) struct PreparedAttachment {
@@ -315,7 +318,8 @@ fn zip_directory(
 }
 
 fn probe_video_metadata(path: &Path) -> Option<UploadVideoMetadata> {
-    let output = std::process::Command::new("ffprobe")
+    let mut command = std::process::Command::new("ffprobe");
+    command
         .arg("-v")
         .arg("error")
         .arg("-select_streams")
@@ -324,13 +328,8 @@ fn probe_video_metadata(path: &Path) -> Option<UploadVideoMetadata> {
         .arg("stream=width,height,duration")
         .arg("-of")
         .arg("json")
-        .arg(path)
-        .output();
-
-    let output = match output {
-        Ok(output) if output.status.success() => output,
-        _ => return None,
-    };
+        .arg(path);
+    let output = bounded_video_probe(&mut command, VIDEO_PROBE_TIMEOUT)?;
 
     let parsed: FfprobeOutput = serde_json::from_slice(&output.stdout).ok()?;
     let stream = parsed.streams.into_iter().next()?;
@@ -352,6 +351,36 @@ fn probe_video_metadata(path: &Path) -> Option<UploadVideoMetadata> {
         height,
         duration,
     })
+}
+
+fn bounded_video_probe(
+    command: &mut std::process::Command,
+    timeout: Duration,
+) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return child.wait_with_output().ok(),
+            Ok(Some(_)) => return None,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => {}
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn current_epoch_seconds() -> u64 {
@@ -377,6 +406,15 @@ struct FfprobeStream {
 mod tests {
     use super::*;
     use inline_sdk::api::UploadFileResult;
+
+    #[test]
+    fn metadata_probe_kills_a_stalled_child_within_its_own_deadline() {
+        let mut command = std::process::Command::new("sleep");
+        command.arg("5");
+        let started = Instant::now();
+        assert!(bounded_video_probe(&mut command, Duration::from_millis(30)).is_none());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 
     #[test]
     fn upload_response_without_media_id_is_structured() {

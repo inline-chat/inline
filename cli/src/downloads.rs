@@ -1,6 +1,7 @@
 use chrono::{TimeZone, Utc};
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 use crate::errors::{CliError, HttpStatusCliError};
@@ -52,6 +53,13 @@ pub(crate) async fn download_message_media(
     message: &proto::Message,
     output_path: &Path,
 ) -> Result<u64, Box<dyn std::error::Error>> {
+    if output_path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Download destination already exists",
+        )
+        .into());
+    }
     let Some(media) = message.media.as_ref() else {
         return Err(CliError::invalid_args("Message has no downloadable media.").into());
     };
@@ -88,11 +96,18 @@ pub(crate) async fn download_message_media(
         }
     };
 
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    tokio::fs::create_dir_all(parent).await?;
 
-    let client = client_info::http_client_builder().build()?;
+    // Healthy large downloads have no whole-file deadline. A stalled connect
+    // or body read still has a bound, independently of the file's size.
+    let client = client_info::http_client_builder()
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(60))
+        .build()?;
     let response = client.get(url).send().await?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
@@ -104,7 +119,10 @@ pub(crate) async fn download_message_media(
         return Err(HttpStatusCliError::download_failed(status, body).into());
     }
 
-    let mut file = tokio::fs::File::create(output_path).await?;
+    let staged = tempfile::Builder::new()
+        .prefix(".inline-download-")
+        .tempfile_in(parent)?;
+    let mut file = tokio::fs::File::from_std(staged.reopen()?);
     let mut total = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -113,7 +131,24 @@ pub(crate) async fn download_message_media(
         total += chunk.len() as u64;
     }
     file.flush().await?;
+    file.sync_all().await?;
+    drop(file);
+    if let Some(expected) = media_stored_size(media)
+        && expected != total
+    {
+        log::warn!(target: "inline::download", "CDN file size differs from stored metadata: expected {expected}, downloaded {total} bytes; keeping the completed file");
+    }
+    staged.persist_noclobber(output_path)?;
     Ok(total)
+}
+
+fn media_stored_size(media: &proto::MessageMedia) -> Option<u64> {
+    let size = match &media.media {
+        Some(proto::message_media::Media::Document(media)) => media.document.as_ref()?.size,
+        Some(proto::message_media::Media::Video(media)) => media.video.as_ref()?.size,
+        _ => return None,
+    };
+    (size > 0).then_some(size as u64)
 }
 
 fn http_body_preview(body: &str) -> Option<String> {
@@ -303,6 +338,82 @@ fn sanitize_file_name(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn http_download_fixture(
+        response: &'static [u8],
+        stored_size: i32,
+    ) -> (proto::Message, tokio::task::JoinHandle<()>) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            stream.write_all(response).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let message = proto::Message {
+            media: Some(proto::MessageMedia {
+                media: Some(proto::message_media::Media::Document(
+                    proto::MessageDocument {
+                        document: Some(proto::Document {
+                            size: stored_size,
+                            cdn_url: Some(url),
+                            ..Default::default()
+                        }),
+                    },
+                )),
+            }),
+            ..Default::default()
+        };
+        (message, server)
+    }
+
+    #[tokio::test]
+    async fn cdn_download_accepts_legacy_metadata_mismatch_and_publishes_atomically() {
+        let (message, server) = http_download_fixture(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc",
+            500,
+        )
+        .await;
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("file.bin");
+        assert_eq!(download_message_media(&message, &output).await.unwrap(), 3);
+        assert_eq!(tokio::fs::read(&output).await.unwrap(), b"abc");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn incomplete_cdn_body_never_publishes_a_partial_file() {
+        let (message, server) = http_download_fixture(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc",
+            10,
+        )
+        .await;
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("file.bin");
+        assert!(download_message_media(&message, &output).await.is_err());
+        assert!(!output.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn http_error_body_is_not_saved_as_media() {
+        let (message, server) = http_download_fixture(
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndenied",
+            6,
+        )
+        .await;
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("file.bin");
+        assert!(download_message_media(&message, &output).await.is_err());
+        assert!(!output.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        server.await.unwrap();
+    }
 
     #[test]
     fn http_body_preview_trims_empty_and_caps_long_bodies() {

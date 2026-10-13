@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use inline_protocol::secure::handshake::RsaPublicKey;
 use inline_sdk::{
@@ -11,6 +12,7 @@ use serde::Deserialize;
 pub const CLIENT_TYPE: &str = "cli";
 pub const CLIENT_TYPE_HEADER: &str = client_info::CLIENT_TYPE_HEADER;
 pub const CLIENT_VERSION_HEADER: &str = client_info::CLIENT_VERSION_HEADER;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn client_identity() -> ClientIdentity {
     ClientIdentity::new(CLIENT_TYPE, env!("CARGO_PKG_VERSION"))
@@ -49,10 +51,29 @@ pub fn current_os_version() -> Option<String> {
 }
 
 pub async fn connect_realtime(url: &str, token: &str) -> Result<RealtimeClient, RealtimeError> {
-    RealtimeClient::builder(url, token)
-        .identity(client_identity())
-        .connect()
-        .await
+    connect_realtime_with_timeout(url, token, CONNECT_TIMEOUT).await
+}
+
+async fn connect_realtime_with_timeout(
+    url: &str,
+    token: &str,
+    timeout: Duration,
+) -> Result<RealtimeClient, RealtimeError> {
+    // The SDK bounds each handshake step separately. Bound the entire
+    // connection as well so a replacement carrier cannot multiply that wait.
+    tokio::time::timeout(
+        timeout,
+        RealtimeClient::builder(url, token)
+            .identity(client_identity())
+            .connect(),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(RealtimeError::Timeout {
+            operation: "realtime connection",
+            timeout,
+        })
+    })
 }
 
 #[derive(Deserialize)]
@@ -121,5 +142,29 @@ mod tests {
         assert_eq!(ring.len(), 2);
         assert_eq!(ring[0].fingerprint, "-8339382514522710386");
         assert_eq!(ring[1].fingerprint, "-3957383261870667958");
+    }
+
+    #[tokio::test]
+    async fn connection_deadline_includes_a_peer_that_stalls_the_handshake() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/realtime", listener.local_addr().unwrap());
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            drop(stream);
+        });
+        let error =
+            connect_realtime_with_timeout(&url, "test-only-token", Duration::from_millis(30))
+                .await
+                .err()
+                .expect("stalled connection must time out");
+        assert!(matches!(
+            error,
+            RealtimeError::Timeout {
+                operation: "realtime connection",
+                ..
+            }
+        ));
+        peer.abort();
     }
 }

@@ -1,5 +1,5 @@
-//! Explicit single-document range downloads. Healthy V2 and V3 carriers are
-//! supported; replacement-carrier recovery currently applies to V2 only.
+//! Explicit single-document range downloads with verified, sequential ranges
+//! and bounded replacement-carrier recovery on V2 and V3.
 
 use crate::errors::CliError;
 use crate::{
@@ -67,67 +67,110 @@ impl FilePartFetching for AuthenticatedRealtime {
                     timeout: RPC_TIMEOUT,
                 }),
             };
-            if server_range_timed_out(error.as_ref()) {
+            if server_range_retryable(error.as_ref()) {
                 if failures >= 3 {
                     return Err(error);
                 }
                 failures += 1;
-                // The server bounded its storage read; this carrier remains
-                // healthy. Retry the read with a fresh RPC ID at the same offset.
+                // A storage deadline or admission limit leaves this carrier
+                // healthy. Retry with a fresh RPC ID at the same offset.
                 tokio::time::sleep(Duration::from_millis(250 * (1 << (failures - 1)))).await;
                 continue;
             }
-            let retryable = error
-                .downcast_ref::<RealtimeError>()
-                .is_some_and(resumable_v2_upload_error);
-            if !retryable || failures >= 3 {
+            if !retryable_transport_failure(error.as_ref()) || failures >= 3 {
                 return Err(error);
             }
-            let Self::V2 {
-                connection,
-                authority_owner,
-                url,
-                token,
-            } = self
-            else {
-                return Err(error);
-            };
             loop {
                 failures += 1;
                 tokio::time::sleep(Duration::from_millis(250 * (1 << (failures - 1)))).await;
-                let reconnected = tokio::time::timeout(RPC_TIMEOUT, connect_realtime(url, token))
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(RealtimeError::Timeout {
-                            operation: "native download reconnect",
-                            timeout: RPC_TIMEOUT,
-                        })
-                    });
-                match reconnected {
-                    Ok(reconnected) => {
-                        *connection = reconnected;
-                        break;
-                    }
-                    Err(error) if resumable_v2_upload_error(&error) && failures < 3 => {}
-                    Err(error) => {
-                        clear_owned_authority_if_invalidated(
-                            authority_owner.as_ref(),
-                            matches!(error, RealtimeError::AuthenticationInvalidated),
-                        )?;
-                        return Err(error.into());
-                    }
+                match reconnect_native_download(self).await {
+                    Ok(()) => break,
+                    Err(error) if retryable_transport_failure(error.as_ref()) && failures < 3 => {}
+                    Err(error) => return Err(error),
                 }
             }
         }
     }
 }
 
-fn server_range_timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
+async fn reconnect_native_download(
+    realtime: &mut AuthenticatedRealtime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match realtime {
+        AuthenticatedRealtime::V2 {
+            connection,
+            authority_owner,
+            url,
+            token,
+        } => {
+            if let Some(owner) = authority_owner
+                && owner.load_token()?.as_deref() != Some(token.as_str())
+            {
+                return Err(CliError::not_authenticated().into());
+            }
+            match connect_realtime(url, token).await {
+                Ok(reconnected) => *connection = reconnected,
+                Err(error) => {
+                    clear_owned_authority_if_invalidated(
+                        authority_owner.as_ref(),
+                        matches!(error, RealtimeError::AuthenticationInvalidated),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+        }
+        AuthenticatedRealtime::V3 {
+            connection,
+            auth_store,
+            ..
+        } => {
+            let Some((_, temporary)) = auth_store.load_inline_protocol_authorizations()? else {
+                return Err(CliError::not_authenticated().into());
+            };
+            if temporary.key_id != connection.authorization().key_id {
+                return Err(CliError::not_authenticated().into());
+            }
+            let result = tokio::time::timeout(RPC_TIMEOUT, connection.reconnect())
+                .await
+                .unwrap_or(Err(inline_sdk::InlineProtocolV3Error::Timeout));
+            match result {
+                Ok(reconnected) => *connection = reconnected,
+                Err(error) => {
+                    if error.is_authorization_invalidated() {
+                        auth_store.clear_account_authority()?;
+                    }
+                    return Err(error.into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn retryable_transport_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<RealtimeError>()
+        .is_some_and(resumable_v2_upload_error)
+        || matches!(
+            error.downcast_ref::<inline_sdk::InlineProtocolV3Error>(),
+            Some(
+                inline_sdk::InlineProtocolV3Error::Closed
+                    | inline_sdk::InlineProtocolV3Error::WebSocket(_)
+                    | inline_sdk::InlineProtocolV3Error::Timeout
+                    | inline_sdk::InlineProtocolV3Error::CommitOutcomeUnknown
+            )
+        )
+}
+
+fn server_range_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
     let internal_error = proto::rpc_error::Code::InternalError as i32;
+    let rate_limit = proto::rpc_error::Code::RateLimit as i32;
     matches!(error.downcast_ref::<RealtimeError>(),
-        Some(RealtimeError::RpcError { code: 408, error_code, .. }) if *error_code == internal_error)
+        Some(RealtimeError::RpcError { code, error_code, .. })
+            if (*code == 408 && *error_code == internal_error) || (*code == 429 && *error_code == rate_limit))
         || matches!(error.downcast_ref::<inline_sdk::InlineProtocolV3Error>(),
-            Some(inline_sdk::InlineProtocolV3Error::Rpc { status: 408, error_code, .. }) if *error_code == internal_error)
+            Some(inline_sdk::InlineProtocolV3Error::Rpc { status, error_code, .. })
+                if (*status == 408 && *error_code == internal_error) || (*status == 429 && *error_code == rate_limit))
 }
 
 pub(crate) async fn download_message_document(
@@ -538,7 +581,11 @@ mod tests {
         exercise_reconnect(true).await;
     }
 
-    async fn exercise_server_timeout(failures: usize) {
+    async fn exercise_server_timeout(
+        failures: usize,
+        code: i32,
+        error_code: proto::rpc_error::Code,
+    ) {
         tokio::time::timeout(Duration::from_secs(10), async {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("ws://{}/realtime", listener.local_addr().unwrap());
@@ -574,8 +621,8 @@ mod tests {
                             &mut ws,
                             proto::server_protocol_message::Body::RpcError(proto::RpcError {
                                 req_msg_id: message.id,
-                                error_code: proto::rpc_error::Code::InternalError as i32,
-                                code: 408,
+                                error_code: error_code as i32,
+                                code,
                                 message: "File download part timed out".into(),
                             }),
                         )
@@ -621,12 +668,22 @@ mod tests {
 
     #[tokio::test]
     async fn server_range_deadlines_retry_on_the_healthy_carrier() {
-        exercise_server_timeout(2).await;
+        exercise_server_timeout(2, 408, proto::rpc_error::Code::InternalError).await;
     }
 
     #[tokio::test]
     async fn repeated_server_range_deadlines_stop_after_three_retries() {
-        exercise_server_timeout(4).await;
+        exercise_server_timeout(4, 408, proto::rpc_error::Code::InternalError).await;
+    }
+
+    #[tokio::test]
+    async fn range_admission_limits_retry_on_the_healthy_carrier() {
+        exercise_server_timeout(2, 429, proto::rpc_error::Code::RateLimit).await;
+    }
+
+    #[tokio::test]
+    async fn repeated_range_admission_limits_stop_after_three_retries() {
+        exercise_server_timeout(4, 429, proto::rpc_error::Code::RateLimit).await;
     }
 
     #[test]
@@ -635,6 +692,7 @@ mod tests {
             (408, proto::rpc_error::Code::Unauthenticated),
             (403, proto::rpc_error::Code::Unauthenticated),
             (500, proto::rpc_error::Code::InternalError),
+            (429, proto::rpc_error::Code::InternalError),
         ] {
             let error = RealtimeError::RpcError {
                 code,
@@ -643,7 +701,218 @@ mod tests {
                 message: "test".into(),
                 friendly: "test".into(),
             };
-            assert!(!server_range_timed_out(&error));
+            assert!(!server_range_retryable(&error));
         }
+    }
+
+    #[test]
+    fn v3_retry_policy_keeps_authorization_and_integrity_failures_terminal() {
+        use inline_sdk::InlineProtocolV3Error;
+        for error in [
+            InlineProtocolV3Error::Closed,
+            InlineProtocolV3Error::Timeout,
+            InlineProtocolV3Error::CommitOutcomeUnknown,
+        ] {
+            assert!(retryable_transport_failure(&error));
+        }
+        for error in [
+            InlineProtocolV3Error::AuthorizationInvalidated,
+            InlineProtocolV3Error::Protocol,
+            InlineProtocolV3Error::UnexpectedResponse,
+        ] {
+            assert!(!retryable_transport_failure(&error));
+        }
+        for (status, error_code) in [
+            (408, proto::rpc_error::Code::InternalError),
+            (429, proto::rpc_error::Code::RateLimit),
+        ] {
+            assert!(server_range_retryable(&InlineProtocolV3Error::Rpc {
+                status,
+                error_code: error_code as i32,
+                message: "test".into(),
+            }));
+        }
+    }
+
+    async fn exercise_v3_reconnect(always_lose: bool) {
+        use crate::auth::AuthStore;
+        use inline_protocol::secure::carrier::create_obfuscated_client_header;
+        use inline_protocol::secure::{
+            AbridgedFrame, Direction, InlineApplicationObject, RecordFields, aes_ige_decrypt,
+            auth_key_id, decode_abridged_frame, decode_inline_application_object, decrypt_record,
+            derive_v2_aes, encode_abridged_packet, encode_inline_result, encrypt_record,
+        };
+        use inline_sdk::{
+            InlineProtocolAuthorization, InlineProtocolV3Connection, InlineProtocolV3Options,
+        };
+        use std::collections::BTreeSet;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}/realtime/v3", listener.local_addr().unwrap());
+            let authorization = InlineProtocolAuthorization {
+                key: [19; 256],
+                key_id: auth_key_id(&[19; 256]).unwrap(),
+                server_salt: 7,
+                temporary: true,
+                expires_at: Some(2_000_000_000),
+            };
+            let directory = tempfile::tempdir().unwrap();
+            let auth_store = AuthStore::new(
+                directory.path().join("auth.json"),
+                "http://test.invalid".into(),
+            );
+            let permanent = InlineProtocolAuthorization {
+                temporary: false,
+                expires_at: None,
+                ..authorization.clone()
+            };
+            auth_store
+                .store_inline_protocol_authorizations(&permanent, &authorization)
+                .unwrap();
+            let source = vec![19; PART_SIZE as usize + 17];
+            let bytes = source.clone();
+            let key = authorization.clone();
+            let server = tokio::spawn(async move {
+                let mut offsets = vec![];
+                for carrier in 0..if always_lose { 4 } else { 2 } {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut ws = accept_async(stream).await.unwrap();
+                    let WsMessage::Binary(header) = ws.next().await.unwrap().unwrap() else {
+                        panic!("missing V3 header")
+                    };
+                    let mut streams = create_obfuscated_client_header(&header, 1).unwrap();
+                    let mut response_index = 0_i64;
+                    loop {
+                        let wire = loop {
+                            match ws.next().await.unwrap().unwrap() {
+                                WsMessage::Binary(wire) => break wire,
+                                WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+                                frame => panic!("unexpected V3 frame: {frame:?}"),
+                            }
+                        };
+                        let clear = streams.outbound.process(&wire);
+                        let AbridgedFrame::Packet { payload, .. } =
+                            decode_abridged_frame(&clear).unwrap()
+                        else {
+                            panic!("missing packet")
+                        };
+                        // Learn the randomly selected session ID, then use the
+                        // production validator for every authenticated record.
+                        let (aes_key, iv) =
+                            derive_v2_aes(&key.key, &payload[8..24], Direction::ClientToServer)
+                                .unwrap();
+                        let plain = aes_ige_decrypt(&payload[24..], &aes_key, &iv).unwrap();
+                        let session = i64::from_le_bytes(plain[8..16].try_into().unwrap());
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64;
+                        let fields = decrypt_record(
+                            &payload,
+                            &key.key,
+                            Direction::ClientToServer,
+                            session,
+                            &BTreeSet::from([key.server_salt]),
+                            now,
+                        )
+                        .unwrap();
+                        let InlineApplicationObject::Invoke { payload, .. } =
+                            decode_inline_application_object(&fields.body).unwrap()
+                        else {
+                            panic!("missing invocation")
+                        };
+                        let request = proto::RealtimeV3Request::decode(payload.as_slice()).unwrap();
+                        let Some(proto::realtime_v3_request::Body::Rpc(call)) = request.body else {
+                            panic!("missing RPC")
+                        };
+                        let Some(proto::rpc_call::Input::GetFilePart(input)) = call.input else {
+                            panic!("missing range")
+                        };
+                        assert_eq!(input.file_unique_id, super::tests::request().file_unique_id);
+                        offsets.push(input.offset);
+                        if always_lose || (carrier == 0 && input.offset > 0) {
+                            ws.close(None).await.unwrap();
+                            break;
+                        }
+                        let part = range(&bytes, &input);
+                        let last = part.offset + part.data.len() as u64 == part.total_size;
+                        let response = proto::RealtimeV3Response {
+                            body: Some(proto::realtime_v3_response::Body::RpcResult(
+                                proto::RpcResult {
+                                    req_msg_id: fields.message_id as u64,
+                                    result: Some(proto::rpc_result::Result::GetFilePart(part)),
+                                },
+                            )),
+                        };
+                        let mut body = 0xf35c_6d01_u32.to_le_bytes().to_vec();
+                        body.extend_from_slice(&fields.message_id.to_le_bytes());
+                        body.extend_from_slice(
+                            &encode_inline_result(&response.encode_to_vec()).unwrap(),
+                        );
+                        let padding = vec![31; 12 + ((16 - ((32 + body.len() + 12) % 16)) % 16)];
+                        response_index += 4;
+                        let reply = encrypt_record(
+                            &key.key,
+                            Direction::ServerToClient,
+                            &RecordFields {
+                                server_salt: key.server_salt,
+                                session_id: session,
+                                message_id: (now << 32) | (response_index + 1),
+                                sequence_number: 0,
+                                body,
+                            },
+                            &padding,
+                        )
+                        .unwrap();
+                        let wire = streams
+                            .inbound
+                            .process(&encode_abridged_packet(&reply).unwrap());
+                        ws.send(WsMessage::Binary(wire.into())).await.unwrap();
+                        if last {
+                            break;
+                        }
+                    }
+                }
+                offsets
+            });
+            let connection = InlineProtocolV3Connection::connect(
+                InlineProtocolV3Options::reconnect(&url, authorization),
+            )
+            .await
+            .unwrap();
+            let mut realtime = AuthenticatedRealtime::V3 {
+                connection,
+                auth_store,
+                url,
+            };
+            let output_dir = tempfile::tempdir().unwrap();
+            let output = output_dir.path().join("reconnected.bin");
+            let result =
+                download_ranges(&mut realtime, request(), source.len() as u64, &output).await;
+            let offsets = server.await.unwrap();
+            if always_lose {
+                assert!(result.is_err());
+                assert_eq!(offsets, vec![0, 0, 0, 0]);
+                assert_eq!(std::fs::read_dir(output_dir.path()).unwrap().count(), 0);
+            } else {
+                assert_eq!(result.unwrap(), source.len() as u64);
+                assert_eq!(offsets, vec![0, u64::from(PART_SIZE), u64::from(PART_SIZE)]);
+                assert_eq!(tokio::fs::read(output).await.unwrap(), source);
+            }
+        })
+        .await
+        .expect("V3 download recovery must stay bounded");
+    }
+
+    #[tokio::test]
+    async fn v3_carrier_loss_resumes_the_same_verified_range() {
+        exercise_v3_reconnect(false).await;
+    }
+
+    #[tokio::test]
+    async fn v3_repeated_carrier_loss_stops_and_cleans_partial_output() {
+        exercise_v3_reconnect(true).await;
     }
 }

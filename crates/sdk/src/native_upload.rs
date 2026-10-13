@@ -7,6 +7,7 @@ use crate::{
 use inline_protocol::proto;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const HASH_READ_SIZE: usize = 1024 * 1024;
@@ -15,6 +16,8 @@ const MAX_NEGOTIATED_PARTS: u32 = 1_000;
 const MAX_PROCESSING_RETRY_SECONDS: u64 = 30;
 const MAX_V3_RESUME_ATTEMPTS: u32 = 3;
 const MAX_PART_SAVE_ATTEMPTS: u32 = 3;
+const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const PROCESSING_TIMEOUT: Duration = Duration::from_secs(600);
 
 fn bounded_processing_retry_seconds(seconds: u32) -> u64 {
     u64::from(seconds.max(1)).min(MAX_PROCESSING_RETRY_SECONDS)
@@ -113,6 +116,10 @@ pub enum NativeUploadError {
     /// The server expired the upload before it completed.
     #[error("upload expired before completion")]
     Expired,
+    /// All bytes were accepted, but media processing did not finish in time.
+    /// Retrying with the same upload identity reconciles the existing upload.
+    #[error("upload processing timed out; retry with the same upload identity")]
+    ProcessingTimedOut,
 }
 
 enum Transport<'a> {
@@ -218,8 +225,21 @@ pub async fn upload_file_v3(
         .client_upload_id
         .get_or_insert_with(|| *uuid::Uuid::new_v4().as_bytes());
     let mut resume_attempts = 0;
+    let mut accepted_high_water = 0;
     loop {
-        match upload(Transport::V3(client), input.clone(), &mut progress).await {
+        let result = upload(
+            Transport::V3(client),
+            input.clone(),
+            &mut |accepted: NativeUploadProgress| {
+                if accepted.accepted_bytes > accepted_high_water {
+                    accepted_high_water = accepted.accepted_bytes;
+                    resume_attempts = 0;
+                }
+                progress(accepted);
+            },
+        )
+        .await;
+        match result {
             Ok(complete) => return Ok(complete),
             Err(error)
                 if resumable_v3_upload_error(&error)
@@ -228,7 +248,10 @@ pub async fn upload_file_v3(
                 loop {
                     resume_attempts += 1;
                     tokio::time::sleep(v3_resume_delay(resume_attempts)).await;
-                    match client.reconnect().await {
+                    match tokio::time::timeout(RECONNECT_TIMEOUT, client.reconnect())
+                        .await
+                        .unwrap_or(Err(InlineProtocolV3Error::Timeout))
+                    {
                         Ok(reconnected) => {
                             *client = reconnected;
                             break;
@@ -272,9 +295,18 @@ async fn upload(
 }
 
 async fn upload_with_transport(
+    transport: impl NativeUploadTransport,
+    input: NativeUploadInput,
+    progress: &mut impl FnMut(NativeUploadProgress),
+) -> Result<proto::UploadComplete, NativeUploadError> {
+    upload_with_processing_timeout(transport, input, progress, PROCESSING_TIMEOUT).await
+}
+
+async fn upload_with_processing_timeout(
     mut transport: impl NativeUploadTransport,
     input: NativeUploadInput,
     progress: &mut impl FnMut(NativeUploadProgress),
+    processing_timeout: Duration,
 ) -> Result<proto::UploadComplete, NativeUploadError> {
     let mut file = tokio::fs::File::open(&input.path).await?;
     let byte_count = file.metadata().await?.len();
@@ -323,12 +355,16 @@ async fn upload_with_transport(
         *slot = true;
     }
     report_progress(&accepted, created.part_size, byte_count, progress);
+    let mut processing_deadline = None;
 
     loop {
         for index in 0..created.part_count {
             if accepted[index as usize] {
                 continue;
             }
+            // Missing bytes return the upload to transfer. A previous
+            // processing deadline must never cancel a healthy retransmission.
+            processing_deadline = None;
             let offset = u64::from(index) * u64::from(created.part_size);
             let length = u64::from(created.part_size).min(byte_count - offset) as usize;
             let mut part = vec![0_u8; length];
@@ -385,50 +421,67 @@ async fn upload_with_transport(
             report_progress(&accepted, created.part_size, byte_count, progress);
         }
 
-        let finish = match transport.finish(created.upload_id.clone()).await {
-            Ok(finish) => finish,
-            Err(error) if is_ambiguous_finish_error(&error) => {
-                let state = match transport.state(created.upload_id.clone()).await {
-                    Ok(state) => state,
-                    Err(_) => return Err(error),
-                };
-                match proto::UploadStatus::try_from(state.status) {
-                    Ok(proto::UploadStatus::Uploading) => {
-                        accepted.fill(false);
-                        for index in state.accepted_parts {
-                            let Some(slot) = accepted.get_mut(index as usize) else {
-                                return Err(NativeUploadError::Protocol);
-                            };
-                            *slot = true;
+        let deadline = *processing_deadline
+            .get_or_insert_with(|| tokio::time::Instant::now() + processing_timeout);
+        let finish =
+            match tokio::time::timeout_at(deadline, transport.finish(created.upload_id.clone()))
+                .await
+                .map_err(|_| NativeUploadError::ProcessingTimedOut)?
+            {
+                Ok(finish) => finish,
+                Err(error) if is_ambiguous_finish_error(&error) => {
+                    let state = match tokio::time::timeout_at(
+                        deadline,
+                        transport.state(created.upload_id.clone()),
+                    )
+                    .await
+                    .map_err(|_| NativeUploadError::ProcessingTimedOut)?
+                    {
+                        Ok(state) => state,
+                        Err(_) => return Err(error),
+                    };
+                    match proto::UploadStatus::try_from(state.status) {
+                        Ok(proto::UploadStatus::Uploading) => {
+                            accepted.fill(false);
+                            for index in state.accepted_parts {
+                                let Some(slot) = accepted.get_mut(index as usize) else {
+                                    return Err(NativeUploadError::Protocol);
+                                };
+                                *slot = true;
+                            }
+                        }
+                        Ok(proto::UploadStatus::Processing) => {
+                            tokio::time::timeout_at(
+                                deadline,
+                                tokio::time::sleep(Duration::from_secs(1)),
+                            )
+                            .await
+                            .map_err(|_| NativeUploadError::ProcessingTimedOut)?;
+                        }
+                        Ok(proto::UploadStatus::Complete) => {
+                            return state.complete.ok_or(NativeUploadError::Protocol);
+                        }
+                        Ok(proto::UploadStatus::Failed) => {
+                            let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
+                            return Err(NativeUploadError::Rejected {
+                                code: failure.code,
+                                retryable: failure.retryable,
+                            });
+                        }
+                        Ok(proto::UploadStatus::Canceled) => {
+                            return Err(NativeUploadError::Canceled);
+                        }
+                        Ok(proto::UploadStatus::Expired) => {
+                            return Err(NativeUploadError::Expired);
+                        }
+                        Ok(proto::UploadStatus::Unspecified) | Err(_) => {
+                            return Err(NativeUploadError::Protocol);
                         }
                     }
-                    Ok(proto::UploadStatus::Processing) => {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    }
-                    Ok(proto::UploadStatus::Complete) => {
-                        return state.complete.ok_or(NativeUploadError::Protocol);
-                    }
-                    Ok(proto::UploadStatus::Failed) => {
-                        let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
-                        return Err(NativeUploadError::Rejected {
-                            code: failure.code,
-                            retryable: failure.retryable,
-                        });
-                    }
-                    Ok(proto::UploadStatus::Canceled) => {
-                        return Err(NativeUploadError::Canceled);
-                    }
-                    Ok(proto::UploadStatus::Expired) => {
-                        return Err(NativeUploadError::Expired);
-                    }
-                    Ok(proto::UploadStatus::Unspecified) | Err(_) => {
-                        return Err(NativeUploadError::Protocol);
-                    }
+                    continue;
                 }
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
+                Err(error) => return Err(error),
+            };
         match finish.state.ok_or(NativeUploadError::Protocol)? {
             proto::finish_upload_result::State::Complete(complete) => return Ok(complete),
             proto::finish_upload_result::State::Missing(missing) => {
@@ -443,10 +496,14 @@ async fn upload_with_transport(
                 }
             }
             proto::finish_upload_result::State::Processing(processing) => {
-                tokio::time::sleep(std::time::Duration::from_secs(
-                    bounded_processing_retry_seconds(processing.retry_after_seconds),
-                ))
-                .await;
+                tokio::time::timeout_at(
+                    deadline,
+                    tokio::time::sleep(Duration::from_secs(bounded_processing_retry_seconds(
+                        processing.retry_after_seconds,
+                    ))),
+                )
+                .await
+                .map_err(|_| NativeUploadError::ProcessingTimedOut)?;
             }
             proto::finish_upload_result::State::Failed(failure) => {
                 return Err(NativeUploadError::Rejected {
@@ -636,6 +693,71 @@ mod tests {
                 )),
             })
         }
+    }
+
+    struct StalledProcessing(LostResponseTransport);
+
+    impl NativeUploadTransport for StalledProcessing {
+        async fn create(
+            &mut self,
+            input: proto::CreateUploadInput,
+        ) -> Result<proto::CreateUploadResult, NativeUploadError> {
+            self.0.create(input).await
+        }
+
+        async fn save(
+            &mut self,
+            input: proto::SaveUploadPartInput,
+        ) -> Result<proto::SaveUploadPartResult, NativeUploadError> {
+            self.0.save(input).await
+        }
+
+        async fn state(
+            &mut self,
+            upload_id: Vec<u8>,
+        ) -> Result<proto::GetUploadStateResult, NativeUploadError> {
+            self.0.state(upload_id).await
+        }
+
+        async fn finish(
+            &mut self,
+            _: Vec<u8>,
+        ) -> Result<proto::FinishUploadResult, NativeUploadError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn stalled_finalization_expires_after_accepted_bytes_without_deleting_the_source() {
+        let path = std::env::temp_dir().join(format!(
+            "inline-processing-timeout-{}",
+            uuid::Uuid::new_v4()
+        ));
+        tokio::fs::write(&path, [1_u8, 2, 3]).await.unwrap();
+        let transport = StalledProcessing(LostResponseTransport {
+            accepted: false,
+            lose_response: false,
+            lose_finish_response: false,
+            finish_state: None,
+            calls: vec![],
+        });
+        let mut progress = vec![];
+        let result = upload_with_processing_timeout(
+            transport,
+            NativeUploadInput::new(
+                &path,
+                "proof.bin",
+                "application/octet-stream",
+                proto::UploadKind::Document,
+            ),
+            &mut |value| progress.push(value.accepted_bytes),
+            Duration::from_millis(10),
+        )
+        .await;
+        assert!(matches!(result, Err(NativeUploadError::ProcessingTimedOut)));
+        assert_eq!(progress, vec![0, 3]);
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), [1, 2, 3]);
+        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]
