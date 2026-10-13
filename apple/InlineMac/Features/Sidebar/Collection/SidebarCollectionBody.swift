@@ -497,7 +497,12 @@ final class SidebarCollectionBodyController: NSViewController {
   private var inFlightAuditAnimated = false
   private var structuralApplyWithoutDisplayCount = 0
   private static var loggedSceneAnomalyKinds = Set<String>()
-  private static var reportedSceneAnomalyKinds = Set<String>()
+  private static var reportedSceneAnomalyCounts: [String: Int] = [:]
+  private static let sceneAnomalyReportLimit = 3
+  private static let sceneOperationCapacity = 48
+  private var sceneOperations: [(tick: Int, uptime: TimeInterval, text: String)] = []
+  private var contentUpdatesSinceSceneOperation = 0
+  private var itemProviderDepth = 0
   private var escapeMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var autoscrollTimer: Timer?
@@ -622,6 +627,18 @@ final class SidebarCollectionBodyController: NSViewController {
             ) as? SidebarCollectionBodyItem
       else { return nil }
 
+      itemProviderDepth += 1
+      defer { itemProviderDepth -= 1 }
+      item.markProvided(
+        context: "gen=\(presentation?.generation ?? -1) index=\(indexPath.item) "
+          + "apply=\(snapshotApplyInFlight ? 1 : 0) "
+          + "animating=\(snapshotApplyOwnsAnimations ? 1 : 0) "
+          + "completing=\(isCompletingDisplayUpdate ? 1 : 0) "
+          + "disclosure=\(disclosureTransition == nil ? 0 : 1) "
+          + "reorder=\(reorderSession == nil ? 0 : 1) "
+          + "depth=\(itemProviderDepth) "
+          + "window=\(collectionView.window == nil ? 0 : 1)"
+      )
       item.configure(
         row: row,
         content: { hostState in
@@ -674,6 +691,7 @@ final class SidebarCollectionBodyController: NSViewController {
       queue: .main
     ) { [weak self] _ in
       MainActor.assumeIsolated {
+        self?.recordSceneOperation("live-scroll-end")
         self?.schedulePresentationVerification(trigger: "live-scroll-end")
       }
     }
@@ -685,6 +703,7 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   func prepareForRemoval() {
+    recordSceneOperation("prepare-for-removal")
     modeTransitionAnimationTask?.cancel()
     modeTransitionAnimationTask = nil
     suppressesModeTransitionAnimations = false
@@ -878,6 +897,11 @@ final class SidebarCollectionBodyController: NSViewController {
     // the window itself in AppKit's `inLiveResize` state. Finish any active
     // row-height transition before applying the new width so the collection
     // never interpolates disclosure geometry while the divider is moving.
+    let viewport = scrollView.contentView.bounds
+    recordSceneOperation(
+      "viewport-frame w=\(Int(viewport.width.rounded())) h=\(Int(viewport.height.rounded())) "
+        + "apply=\(snapshotApplyInFlight ? 1 : 0)"
+    )
     settleDisclosureForGeometryResizeIfNeeded()
     synchronizeCollectionWidthWithViewport()
     // A frame change is part of the same AppKit display transaction. Deferring
@@ -1410,6 +1434,13 @@ final class SidebarCollectionBodyController: NSViewController {
       reason: update.reason,
       animated: animate
     )
+    recordSceneOperation(
+      "apply gen=\(next.generation) reason=\(update.reason) animated=\(animate ? 1 : 0) "
+        + "initial=\(hasAppliedInitialSnapshot ? 0 : 1) "
+        + "rows=\(previousPresentation?.orderedIDs.count ?? 0)>\(next.orderedIDs.count) "
+        + "window=\(collectionView.window == nil ? 0 : 1) "
+        + "provider-depth=\(itemProviderDepth)"
+    )
     os_signpost(
       .event,
       log: Self.signposts,
@@ -1463,6 +1494,9 @@ final class SidebarCollectionBodyController: NSViewController {
     }
     inFlightAuditReason = update.reason
     inFlightAuditAnimated = true
+    recordSceneOperation(
+      "disclosure-begin gen=\(update.presentation.generation) reason=\(update.reason)"
+    )
 
     let previousPresentation = presentation
     let target = update.presentation
@@ -1737,6 +1771,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
     transition.phase = .committingCollapse
     disclosureTransition = transition
+    recordSceneOperation("disclosure-commit-collapse gen=\(target.generation)")
     var snapshot = NSDiffableDataSourceSnapshot<Section, SidebarCollectionRow.ID>()
     snapshot.appendSections([.main])
     snapshot.appendItems(target.orderedIDs, toSection: .main)
@@ -1793,6 +1828,7 @@ final class SidebarCollectionBodyController: NSViewController {
     target: SidebarBodyPresentation,
     transition: ActiveDisclosureTransition
   ) {
+    recordSceneOperation("disclosure-finish gen=\(target.generation)")
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     disclosureAnimator.reset()
@@ -1865,6 +1901,7 @@ final class SidebarCollectionBodyController: NSViewController {
       disclosureAnimator.reset()
       return
     }
+    recordSceneOperation("disclosure-cancel")
     disclosureAnimator.reset()
     disclosureTransition = nil
     if let presentation {
@@ -1967,6 +2004,7 @@ final class SidebarCollectionBodyController: NSViewController {
       : nil
     presentation = update.presentation
     transitionRowByID = update.presentation.rowByID
+    contentUpdatesSinceSceneOperation += 1
     if geometryChanged {
       configureLayout(for: update.presentation)
       collectionView.needsLayout = true
@@ -2025,6 +2063,10 @@ final class SidebarCollectionBodyController: NSViewController {
     )
     #endif
 
+    recordSceneOperation(
+      "complete gen=\(generation) pending=\(pendingDisplayUpdate == nil ? 0 : 1) "
+        + "provider-depth=\(itemProviderDepth)"
+    )
     snapshotApplyInFlight = false
     snapshotApplyOwnsAnimations = false
     inFlightGeneration = nil
@@ -2134,6 +2176,25 @@ final class SidebarCollectionBodyController: NSViewController {
   private var canAnimateCollectionTransactions: Bool {
     let viewport = scrollView.contentView.bounds
     return collectionView.window != nil && viewport.width > 1 && viewport.height > 1
+  }
+
+  /// A short history of what the controller asked AppKit to do. A scene
+  /// anomaly is only observed at the next audit, so the report needs the
+  /// operations that ran around the moment its root was last touched.
+  private func recordSceneOperation(_ text: String) {
+    var text = text
+    if contentUpdatesSinceSceneOperation > 0 {
+      text += " content-updates=\(contentUpdatesSinceSceneOperation)"
+      contentUpdatesSinceSceneOperation = 0
+    }
+    if sceneOperations.count == Self.sceneOperationCapacity {
+      sceneOperations.removeFirst()
+    }
+    sceneOperations.append((
+      tick: SidebarCollectionSceneClock.tick(),
+      uptime: ProcessInfo.processInfo.systemUptime,
+      text: text
+    ))
   }
 
   private func recordStructuralApplyWithoutDisplay(reason: String) {
@@ -2268,6 +2329,7 @@ final class SidebarCollectionBodyController: NSViewController {
     // `visibleItems()` is AppKit's ownership API. Immediate collection
     // subviews are only a sampled view topology, so a mismatch is recorded
     // for diagnosis and never used to hide or remove a collection-owned view.
+    // Only a settled, static root AppKit no longer owns is hidden.
     let scene = auditAttachedItemRoots()
     if scene.result.hasAnomaly {
       captureSceneEvidence(
@@ -2276,6 +2338,7 @@ final class SidebarCollectionBodyController: NSViewController {
         dataSource: dataSource,
         scene: scene
       )
+      retireUnownedStaticRoots(in: scene, generation: generation)
     }
     let snapshotCount = dataSource.snapshot().itemIdentifiers.count
     let expectedCount = presentation.orderedIDs.count
@@ -2361,9 +2424,12 @@ final class SidebarCollectionBodyController: NSViewController {
     let samples = roots.map { root in
       let presentationFrame = root.layer?.presentation()?.frame
       let opacity = root.layer?.presentation()?.opacity ?? root.layer?.opacity ?? 1
+      // A root AppKit does not own is reported wherever it paints, so it is
+      // caught at the audit after it appears and not at a later scroll.
       let attachedInViewport = !root.isHidden && root.alphaValue > 0.01
         && opacity > 0.01
-        && (root.frame.intersects(viewport)
+        && (ownedRootIDs.contains(root.sceneAuditID) == false
+          || root.frame.intersects(viewport)
           || presentationFrame?.intersects(viewport) == true)
       let nativeRow = root.subviews.first as? SidebarNativeRowView
       return SidebarCollectionSceneAudit.Root(
@@ -2382,6 +2448,52 @@ final class SidebarCollectionBodyController: NSViewController {
         attachedRoots: samples
       )
     )
+  }
+
+  /// A settled scene has no outgoing transition, so a visible, non-animating
+  /// root that AppKit does not list among its visible items can only paint a
+  /// stale row over a live one. Attached and hidden is the state AppKit keeps
+  /// its own recycled item views in, and `prepareForReuse` un-hides a view
+  /// when the collection dequeues it again, so hiding neither detaches the
+  /// view from AppKit nor blocks its reuse.
+  private func retireUnownedStaticRoots(
+    in scene: (
+      roots: [SidebarCollectionItemRootView],
+      result: SidebarCollectionSceneAudit.Result<UUID>
+    ),
+    generation: Int
+  ) {
+    let staleIDs = scene.result.unownedAttachedIDs
+      .subtracting(scene.result.animatingUnownedIDs)
+    guard staleIDs.isEmpty == false else { return }
+    for root in scene.roots where staleIDs.contains(root.sceneAuditID) {
+      root.allowsInteraction = false
+      root.setAccessibilityHidden(true)
+      root.isRetiringUnownedRoot = true
+      root.isHidden = true
+      root.isRetiringUnownedRoot = false
+    }
+    recordSceneOperation("retire-unowned-roots count=\(staleIDs.count)")
+    os_log(
+      .error,
+      log: Self.diagnostics,
+      "component=collection event=retire-unowned-roots generation=%{public}d count=%{public}d",
+      generation,
+      staleIDs.count
+    )
+  }
+
+  /// Symbol names for return addresses captured when a root was provided or
+  /// un-hidden. Resolved only when a report is built.
+  private static func symbolNames(_ addresses: [NSNumber]) -> String {
+    addresses.dropFirst().prefix(18).map { address in
+      var info = Dl_info()
+      guard dladdr(UnsafeRawPointer(bitPattern: address.uintValue), &info) != 0,
+            let name = info.dli_sname
+      else { return "?" }
+      let offset = address.uintValue - UInt(bitPattern: info.dli_saddr)
+      return "\(String(cString: name))+\(offset)"
+    }.joined(separator: " < ")
   }
 
   private func hasActiveAnimation(in layer: CALayer?) -> Bool {
@@ -2411,8 +2523,11 @@ final class SidebarCollectionBodyController: NSViewController {
     }
     let shouldLog = Self.loggedSceneAnomalyKinds.insert(kind).inserted
     let shouldReport = SentrySDK.isEnabled
-      && Self.reportedSceneAnomalyKinds.insert(kind).inserted
+      && Self.reportedSceneAnomalyCounts[kind, default: 0] < Self.sceneAnomalyReportLimit
     guard shouldLog || shouldReport else { return }
+    if shouldReport {
+      Self.reportedSceneAnomalyCounts[kind, default: 0] += 1
+    }
 
     let activeItems = collectionView.visibleItems().compactMap {
       $0 as? SidebarCollectionBodyItem
@@ -2506,6 +2621,55 @@ final class SidebarCollectionBodyController: NSViewController {
     let auditReason = inFlightAuditReason
     let auditTrigger = trigger
     let applyWithoutDisplayCount = structuralApplyWithoutDisplayCount
+    // Per-root facts that separate the possible AppKit mechanisms: a root
+    // dequeued and never adopted, a root released without being hidden, and
+    // a root un-hidden outside reuse. Ages are in scene-clock ticks before
+    // this report, -1 for a step that never ran. No identifiers or content.
+    let now = SidebarCollectionSceneClock.tick()
+    let uptime = ProcessInfo.processInfo.systemUptime
+    func age(_ tick: Int) -> Int { tick == 0 ? -1 : now - tick }
+    let ownedFrames = activeItems.compactMap { $0.viewIfLoaded?.frame }
+    let unownedRootViews = scene.roots.filter {
+      result.unownedAttachedIDs.contains($0.sceneAuditID)
+    }
+    let unownedRoots = unownedRootViews.prefix(8).map { root -> String in
+      let lifecycleEvent = lifecycleLedger.lastEvent(for: root.sceneAuditID)
+      let lifecycle = switch lifecycleEvent?.kind {
+      case .willDisplay: "displayed"
+      case .didEndDisplaying: "ended"
+      case nil: "never"
+      }
+      let trace = root.sceneTrace
+      let renderer = root.subviews.first
+      return [
+        "lifecycle=\(lifecycle)",
+        "index=\(lifecycleEvent?.position.item ?? -1)",
+        "will=\(age(trace.willDisplay))",
+        "end=\(age(trace.didEndDisplaying))",
+        "hidden=\(age(trace.hidden))",
+        "reuse=\(age(trace.prepareForReuse))",
+        "unhide-reuse=\(age(trace.unhiddenForReuse))",
+        "unhide-other=\(age(trace.unhiddenElsewhere))",
+        "provided=\(age(trace.provided))",
+        "attrs=\(age(trace.applyAttributes))",
+        "retired=\(age(trace.retired))",
+        "alpha=\(Int((root.alphaValue * 100).rounded()))",
+        "renderer-hidden=\(renderer.map { $0.isHidden ? 1 : 0 } ?? -1)",
+        "interactive=\(root.allowsInteraction ? 1 : 0)",
+        "in-viewport=\(root.frame.intersects(viewport) ? 1 : 0)",
+        "y=\(Int((root.frame.minY - viewport.minY).rounded()))",
+        "h=\(Int(root.frame.height.rounded()))",
+        "covers-owned=\(ownedFrames.contains { $0.intersects(root.frame) } ? 1 : 0)",
+        "provided-by[\(trace.providedContext)]",
+      ].joined(separator: " ")
+    }.joined(separator: "; ")
+    let firstTrace = unownedRootViews.first?.sceneTrace
+    let providedStack = Self.symbolNames(firstTrace?.providedStack ?? [])
+    let unhiddenElsewhereStack = Self.symbolNames(firstTrace?.unhiddenElsewhereStack ?? [])
+    let recentOperations = sceneOperations.map { operation in
+      "\(now - operation.tick) \(Int((uptime - operation.uptime) * 1_000))ms \(operation.text)"
+    }.joined(separator: "; ")
+    let reportOrdinal = Self.reportedSceneAnomalyCounts[kind, default: 0]
     Task.detached(priority: .utility) {
       _ = SentrySDK.capture(message: "mac_sidebar_scene_anomaly") { scope in
         scope.setLevel(.warning)
@@ -2528,6 +2692,11 @@ final class SidebarCollectionBodyController: NSViewController {
           value: applyWithoutDisplayCount,
           key: "sidebar.apply_without_display_count"
         )
+        scope.setExtra(value: unownedRoots, key: "sidebar.unowned_roots")
+        scope.setExtra(value: recentOperations, key: "sidebar.recent_operations")
+        scope.setExtra(value: providedStack, key: "sidebar.unowned_provided_stack")
+        scope.setExtra(value: unhiddenElsewhereStack, key: "sidebar.unowned_unhide_stack")
+        scope.setExtra(value: reportOrdinal, key: "sidebar.report_ordinal")
       }
     }
   }
@@ -2576,6 +2745,9 @@ final class SidebarCollectionBodyController: NSViewController {
     // example Grid moving from index 0 to 1). Cancel both the pre-reload and
     // rematerialized item layers so an atomic update cannot keep painting the
     // old slot after its snapshot is already authoritative.
+    recordSceneOperation(
+      "reload gen=\(generation) invalid=\(invalidItemCount) forced=\(forceReload ? 1 : 0)"
+    )
     for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
       item.clearDisclosurePresentation()
     }
@@ -3975,6 +4147,7 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func updateLayoutForReorder(animated: Bool) {
+    recordSceneOperation("reorder-layout animated=\(animated ? 1 : 0)")
     clearHoveredRow()
     guard let presentation else { return }
     let oldPresentations = visiblePresentations()
@@ -5442,6 +5615,7 @@ extension SidebarCollectionBodyController: NSCollectionViewDelegateFlowLayout {
   ) {
     guard let root = item.viewIfLoaded as? SidebarCollectionItemRootView else { return }
     lifecycleLedger.willDisplay(root.sceneAuditID, at: indexPath)
+    root.sceneTrace.willDisplay = SidebarCollectionSceneClock.tick()
   }
 
   func collectionView(
@@ -5451,6 +5625,7 @@ extension SidebarCollectionBodyController: NSCollectionViewDelegateFlowLayout {
   ) {
     guard let root = item.viewIfLoaded as? SidebarCollectionItemRootView else { return }
     lifecycleLedger.didEndDisplaying(root.sceneAuditID, at: indexPath)
+    root.sceneTrace.didEndDisplaying = SidebarCollectionSceneClock.tick()
   }
 
   func collectionView(

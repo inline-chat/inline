@@ -91,13 +91,67 @@ private struct SidebarHostedRow: View {
   }
 }
 
+/// One ordering for sidebar scene diagnostics across roots and the controller.
+@MainActor
+enum SidebarCollectionSceneClock {
+  private(set) static var sequence = 0
+
+  static func tick() -> Int {
+    sequence += 1
+    return sequence
+  }
+}
+
 /// The collection item's model frame can move to its destination before an
 /// outgoing presentation layer has finished fading. The controller explicitly
 /// disables only rows that leave the semantic snapshot; ordinary layout
 /// attributes never latch pointer ownership.
 final class SidebarCollectionItemRootView: NSView {
+  /// When each step of AppKit's reuse cycle last touched this root, on one
+  /// process-wide clock. A root that paints without an owning item is
+  /// explained by the order of these steps, so they are recorded as they
+  /// happen and reported only with a scene anomaly.
+  struct SceneTrace {
+    var hidden = 0
+    var unhiddenForReuse = 0
+    var unhiddenElsewhere = 0
+    var retired = 0
+    var prepareForReuse = 0
+    var provided = 0
+    var applyAttributes = 0
+    var willDisplay = 0
+    var didEndDisplaying = 0
+    var providedContext = ""
+    var providedStack: [NSNumber] = []
+    var unhiddenElsewhereStack: [NSNumber] = []
+  }
+
   let sceneAuditID = UUID()
   var allowsInteraction = false
+  var sceneTrace = SceneTrace()
+  fileprivate var isPreparingForReuse = false
+  var isRetiringUnownedRoot = false
+
+  override var isHidden: Bool {
+    didSet {
+      guard oldValue != isHidden else { return }
+      let tick = SidebarCollectionSceneClock.tick()
+      if isHidden {
+        if isRetiringUnownedRoot {
+          sceneTrace.retired = tick
+        } else {
+          sceneTrace.hidden = tick
+        }
+      } else if isPreparingForReuse {
+        sceneTrace.unhiddenForReuse = tick
+      } else {
+        // AppKit normally un-hides a recycled root inside `prepareForReuse`.
+        // Any other caller is the evidence this trace exists to capture.
+        sceneTrace.unhiddenElsewhere = tick
+        sceneTrace.unhiddenElsewhereStack = Thread.callStackReturnAddresses
+      }
+    }
+  }
 
   override func layout() {
     super.layout()
@@ -272,6 +326,8 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     traceTransitionState(event: "apply-before", layoutAttributes: layoutAttributes)
     #endif
     super.apply(layoutAttributes)
+    (view as? SidebarCollectionItemRootView)?.sceneTrace.applyAttributes =
+      SidebarCollectionSceneClock.tick()
     layoutHidesAccessibility = layoutAttributes.alpha <= 0.01
       || layoutAttributes.frame.height <= 0.5
     (view as? SidebarCollectionItemRootView)?.allowsInteraction = !layoutHidesAccessibility
@@ -300,7 +356,11 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     #if DEBUG
     traceTransitionState(event: "prepare-for-reuse")
     #endif
+    let root = view as? SidebarCollectionItemRootView
+    root?.isPreparingForReuse = true
     super.prepareForReuse()
+    root?.isPreparingForReuse = false
+    root?.sceneTrace.prepareForReuse = SidebarCollectionSceneClock.tick()
     representedRowID = nil
     representedRow = nil
     representedHostedRow = .empty
@@ -322,6 +382,16 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     if shouldResetLayerPresentationForReuse {
       resetLayerPresentation()
     }
+  }
+
+  /// Called by the data source right after dequeue. AppKit is expected to
+  /// adopt every item it asks for; the context and caller identify a request
+  /// whose item it then never displayed.
+  func markProvided(context: String) {
+    guard let root = view as? SidebarCollectionItemRootView else { return }
+    root.sceneTrace.provided = SidebarCollectionSceneClock.tick()
+    root.sceneTrace.providedContext = context
+    root.sceneTrace.providedStack = Thread.callStackReturnAddresses
   }
 
   func setHovered(_ hovered: Bool) {
