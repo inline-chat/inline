@@ -2347,8 +2347,11 @@ struct GridRTCEngineTests {
     #expect(operations.contains("disconnect:32") == false)
   }
 
-  @Test("process engine preserves command order and broadcasts coherent snapshots")
-  func processEngineMailbox() async throws {
+  @Test(
+    "process engine preserves command order and broadcasts coherent snapshots",
+    arguments: [Duration.zero, .milliseconds(1_100)]
+  )
+  func processEngineMailbox(mirrorStartDelay: Duration) async throws {
     let rtcDriver = FakeGridRTCDriver()
     let engine = InlineRTCSession(
       audioDriver: RTCFakeAudioDriver(),
@@ -2367,6 +2370,9 @@ struct GridRTCEngineTests {
       }
     }
     let mirrorEventsTask = Task {
+      // A watch subscriber may be suspended while the runtime starts. Its
+      // buffered latest projection must still reach it when consumption resumes.
+      try? await Task.sleep(for: mirrorStartDelay)
       for await snapshot in mirrorSnapshots {
         guard !Task.isCancelled else { return }
         await mirrorRecorder.append(snapshot)
@@ -2377,13 +2383,28 @@ struct GridRTCEngineTests {
       mirrorEventsTask.cancel()
     }
 
+    func waitForPhase(
+      _ phase: String,
+      condition: @escaping @Sendable () async -> Bool
+    ) async throws {
+      // This test checks ordering and independent watch projections, not a
+      // one-second observer scheduling guarantee. Keep failure bounded locally.
+      do { try await eventuallyRTC(timeout: .seconds(5), condition: condition) }
+      catch EventuallyRTCError.timedOut {
+        throw ProcessEngineMailboxWaitError(
+          phase: phase, first: await recorder.latestDescription(),
+          mirror: await mirrorRecorder.latestDescription(), operations: await rtcDriver.operations()
+        )
+      }
+    }
+
     await engine.start()
     let target = InlineRTCSessionID("grid-test:1:40:1")
     engine.setDemand(demand(target: target, microphoneEnabled: false))
 
     // Reconnect exercises an established microphone publication. Transport
     // connection alone is emitted before that initial publication completes.
-    try await eventuallyRTC {
+    try await waitForPhase("connected and microphone published on both subscribers") {
       let firstReceived = await recorder.containsRTCState(.connected(target))
       let secondReceived = await mirrorRecorder.containsRTCState(.connected(target))
       let firstPublished = await recorder.containsConnectedPublishedMicrophone(target)
@@ -2391,7 +2412,7 @@ struct GridRTCEngineTests {
       return firstReceived && secondReceived && firstPublished && secondPublished
     }
     await rtcDriver.emitToCurrentRoom(.reconnecting(mode: .quick))
-    try await eventuallyRTC {
+    try await waitForPhase("reconnecting on both subscribers") {
       let firstReceived = await recorder.containsRTCState(.reconnecting(target))
       let secondReceived = await mirrorRecorder.containsRTCState(.reconnecting(target))
       return firstReceived && secondReceived
@@ -2401,7 +2422,7 @@ struct GridRTCEngineTests {
     // to the last value without caller-owned Tasks racing each other.
     engine.setDemand(demand(target: target, microphoneEnabled: true))
     engine.setDemand(demand(target: target, microphoneEnabled: false))
-    try await eventuallyRTC {
+    try await waitForPhase("final microphone intent") {
       await rtcDriver.currentMutedState(roomID: 40) == true
     }
 
@@ -3292,6 +3313,11 @@ private actor GridEngineSnapshotRecorder {
     snapshots.append(snapshot)
   }
 
+  func latestDescription() -> String {
+    guard let snapshot = snapshots.last else { return "no snapshots" }
+    return "count=\(snapshots.count) revision=\(snapshot.revision) state=\(snapshot.rtc.state) microphone=\(snapshot.rtc.microphonePublicationState) muted=\(snapshot.rtc.microphoneMuted)"
+  }
+
   func containsRTCState(_ state: InlineRTCConnectionState) -> Bool {
     snapshots.contains { $0.rtc.state == state }
   }
@@ -3301,6 +3327,15 @@ private actor GridEngineSnapshotRecorder {
       $0.rtc.state == .connected(target) && $0.rtc.microphonePublicationState == .published
     }
   }
+}
+
+private struct ProcessEngineMailboxWaitError: Error, CustomStringConvertible {
+  let phase: String
+  let first: String
+  let mirror: String
+  let operations: [String]
+
+  var description: String { "Mailbox wait failed: \(phase); first=\(first); mirror=\(mirror); operations=\(operations)" }
 }
 
 private enum EventuallyRTCError: Error {
