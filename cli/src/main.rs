@@ -32,6 +32,8 @@ mod state;
 mod telemetry;
 mod text_input;
 mod update;
+#[cfg(test)]
+mod upload_resume_tests;
 mod validation;
 
 use chrono::Utc;
@@ -107,6 +109,8 @@ enum AuthenticatedRealtime {
     V2 {
         connection: RealtimeClient,
         authority_owner: Option<AuthStore>,
+        url: String,
+        token: String,
     },
     V3 {
         connection: InlineProtocolV3Connection,
@@ -124,6 +128,7 @@ impl AuthenticatedRealtime {
             Self::V2 {
                 connection,
                 authority_owner,
+                ..
             } => match connection.call(request).await {
                 Ok(response) => Ok(response),
                 Err(error) => {
@@ -158,21 +163,76 @@ impl AuthenticatedRealtime {
             Self::V2 {
                 connection,
                 authority_owner,
-            } => match upload_file_v2(connection, input, |_| {}).await {
-                Ok(upload) => Ok(upload),
-                Err(error) => {
-                    clear_owned_authority_if_invalidated(
-                        authority_owner.as_ref(),
-                        matches!(
-                            &error,
-                            NativeUploadError::V2(
-                                inline_sdk::RealtimeError::AuthenticationInvalidated
-                            )
-                        ),
-                    )?;
-                    Err(error.into())
+                url,
+                token,
+            } => {
+                // Keep the upload identity across carriers so create reconciles
+                // accepted parts and an ambiguous finish cannot duplicate a file.
+                let mut input = input;
+                input.client_upload_id.get_or_insert_with(|| {
+                    let mut id = [0; 16];
+                    OsRng.fill_bytes(&mut id);
+                    id
+                });
+                let mut resumes = 0;
+                let mut accepted_high_water = 0;
+                loop {
+                    match upload_file_v2(connection, input.clone(), |progress| {
+                        // Confirmed new parts replenish the retry budget. Keep
+                        // this watermark across carriers so replaying the same
+                        // accepted state cannot turn a stalled upload into an
+                        // unbounded reconnect loop.
+                        if progress.accepted_bytes > accepted_high_water {
+                            accepted_high_water = progress.accepted_bytes;
+                            resumes = 0;
+                        }
+                        log::debug!(target: "inline::upload",
+                            "upload accepted {}/{} bytes",
+                            progress.accepted_bytes,
+                            progress.total_bytes
+                        );
+                    })
+                    .await
+                    {
+                        Ok(upload) => return Ok(upload),
+                        Err(NativeUploadError::V2(error))
+                            if resumable_v2_upload_error(&error) && resumes < 3 =>
+                        {
+                            loop {
+                                resumes += 1;
+                                tokio::time::sleep(std::time::Duration::from_millis(
+                                    250 * (1 << (resumes - 1)),
+                                ))
+                                .await;
+                                match connect_realtime(url, token).await {
+                                    Ok(reconnected) => {
+                                        *connection = reconnected;
+                                        break;
+                                    }
+                                    Err(error)
+                                        if resumable_v2_upload_error(&error) && resumes < 3 => {}
+                                    Err(error) => {
+                                        clear_owned_authority_if_invalidated(authority_owner.as_ref(), matches!(error, inline_sdk::RealtimeError::AuthenticationInvalidated))?;
+                                        return Err(error.into());
+                                    }
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            clear_owned_authority_if_invalidated(
+                                authority_owner.as_ref(),
+                                matches!(
+                                    &error,
+                                    NativeUploadError::V2(
+                                        inline_sdk::RealtimeError::AuthenticationInvalidated
+                                    )
+                                ),
+                            )?;
+                            return Err(error.into());
+                        }
+                    }
                 }
-            },
+            }
             Self::V3 {
                 connection,
                 auth_store,
@@ -205,6 +265,16 @@ impl AuthenticatedRealtime {
             }
         }
     }
+}
+
+fn resumable_v2_upload_error(error: &inline_sdk::RealtimeError) -> bool {
+    matches!(
+        error,
+        inline_sdk::RealtimeError::WebSocket(_)
+            | inline_sdk::RealtimeError::ConnectionClosed
+            | inline_sdk::RealtimeError::CommitOutcomeUnknown
+            | inline_sdk::RealtimeError::Timeout { .. }
+    )
 }
 
 async fn regenerate_inline_protocol_temporary(
@@ -5315,6 +5385,8 @@ async fn connect_authenticated_realtime(
         return Ok(AuthenticatedRealtime::V2 {
             connection: connect_realtime(&config.realtime_url, &token).await?,
             authority_owner: None,
+            url: config.realtime_url.clone(),
+            token,
         });
     }
 
@@ -5371,6 +5443,8 @@ async fn connect_authenticated_realtime(
     Ok(AuthenticatedRealtime::V2 {
         connection: connect_realtime(&config.realtime_url, &token).await?,
         authority_owner: Some(auth_store.clone()),
+        url: config.realtime_url.clone(),
+        token,
     })
 }
 

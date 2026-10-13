@@ -61,6 +61,10 @@ url = { workspace = true }
 walkdir = "2.5.0"
 zip = "0.6.6"
 
+[dev-dependencies]
+prost.workspace = true
+tokio-tungstenite.workspace = true
+
 [[bin]]
 name = "inline"
 path = "src/main.rs"

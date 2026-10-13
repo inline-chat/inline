@@ -10,6 +10,47 @@ import UIKit
 import AppKit
 #endif
 
+enum FileDownloadValidationError: Error, LocalizedError, Equatable, Sendable {
+  case invalidHTTPResponse
+  case httpStatus(Int)
+  case byteCountMismatch(expected: Int64, actual: Int64)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidHTTPResponse:
+      "The server returned an invalid file response."
+    case let .httpStatus(status):
+      "The file download failed (HTTP \(status))."
+    case .byteCountMismatch:
+      "The downloaded file has an unexpected size. Please retry the download."
+    }
+  }
+}
+
+enum DownloadedFileValidation {
+  static func validateHTTPResponse(_ response: URLResponse?) throws {
+    guard let response = response as? HTTPURLResponse else {
+      throw FileDownloadValidationError.invalidHTTPResponse
+    }
+    guard (200 ... 299).contains(response.statusCode) else {
+      throw FileDownloadValidationError.httpStatus(response.statusCode)
+    }
+  }
+
+  static func validateDocumentFile(at url: URL, expectedByteCount: Int64) throws {
+    guard expectedByteCount > 0 else { return }
+    // Check the materialized file, not HTTP Content-Length: Foundation may
+    // decode compressed bodies or assemble a resumed 206 response.
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    guard let byteCount = (attributes[.size] as? NSNumber)?.int64Value else {
+      throw FileDownloadValidationError.byteCountMismatch(expected: expectedByteCount, actual: -1)
+    }
+    guard byteCount == expectedByteCount else {
+      throw FileDownloadValidationError.byteCountMismatch(expected: expectedByteCount, actual: byteCount)
+    }
+  }
+}
+
 final class DownloadProgressThrottler: @unchecked Sendable {
   private let minimumInterval: TimeInterval
   private let lock = NSLock()
@@ -268,6 +309,16 @@ public final class FileDownloader: NSObject, Sendable {
 
         switch result {
           case let .success(fileUrl):
+            do {
+              try DownloadedFileValidation.validateDocumentFile(
+                at: fileUrl, expectedByteCount: Int64(document.document.size ?? 0)
+              )
+            } catch {
+              try? FileManager.default.removeItem(at: fileUrl)
+              self.failDownload(id: downloadId, token: token, error: error)
+              completion(.failure(error))
+              return
+            }
             self.finalizeDocumentDownload(id: downloadId, token: token, fileURL: fileUrl, persist: {
               try await FileCache.shared.saveDocumentDownload(
                   document: document,
@@ -925,6 +976,7 @@ extension FileDownloader: URLSessionDownloadDelegate {
     // Important: We need to move the file immediately, before this method returns
     // Create a copy of the file in a more persistent temporary location
     do {
+      try DownloadedFileValidation.validateHTTPResponse(downloadTask.response)
       let tempDirectory = FileManager.default.temporaryDirectory
       let tempFilename = UUID().uuidString
       let persistentTempURL = tempDirectory.appendingPathComponent(tempFilename)
@@ -943,7 +995,7 @@ extension FileDownloader: URLSessionDownloadDelegate {
     } catch {
       let downloadError = error
       DispatchQueue.main.async {
-        self.log.error("Error copying temporary file", error: downloadError)
+        self.log.error("Error validating or copying downloaded file", error: downloadError)
         self.completeDownload(
           id: taskId,
           task: downloadTask,

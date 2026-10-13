@@ -20,6 +20,8 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
   private let createResponsesLost: Int
   private let finishFailure: UploadFailure?
   private let emptyMissing: Bool
+  private let processingForever: Bool
+  private let partDelay: Duration
   private var accepted = false
   private var createAttempts = 0
   private var createUploadIDs: [Data] = []
@@ -32,7 +34,9 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     partCount: UInt32 = 1,
     createResponsesLost: Int = 0,
     finishFailure: UploadFailure? = nil,
-    emptyMissing: Bool = false
+    emptyMissing: Bool = false,
+    processingForever: Bool = false,
+    partDelay: Duration = .zero
   ) {
     self.partFailureMode = partFailureMode
     self.partSize = partSize
@@ -40,6 +44,8 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     self.createResponsesLost = createResponsesLost
     self.finishFailure = finishFailure
     self.emptyMissing = emptyMissing
+    self.processingForever = processingForever
+    self.partDelay = partDelay
   }
 
   func callUploadRPC(
@@ -63,6 +69,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       result.partCount = partCount
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
+      if partDelay > .zero { try await Task.sleep(for: partDelay) }
       #expect(save.partIndex == 0)
       #expect(save.data == Data([1, 2, 3]))
       saveAttempts += 1
@@ -80,6 +87,13 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       state.acceptedParts = accepted ? [0] : []
       return .getUploadState(state)
     case (.finishUpload, .finishUpload):
+      if processingForever {
+        var processing = UploadProcessing()
+        processing.retryAfterSeconds = 30
+        var finish = FinishUploadResult()
+        finish.processing = processing
+        return .finishUpload(finish)
+      }
       if emptyMissing {
         var finish = FinishUploadResult()
         finish.missing = UploadMissingParts()
@@ -639,6 +653,76 @@ struct NativeUploadTests {
     #expect(boundedUploadProcessingRetrySeconds(0) == 1)
     #expect(boundedUploadProcessingRetrySeconds(2) == 2)
     #expect(boundedUploadProcessingRetrySeconds(UInt32.max) == 30)
+  }
+
+  @Test("successful processing replies cannot leave a send pending indefinitely")
+  func processingHasSeparateDeadline() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(processingForever: true)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: staging, processingTimeout: .milliseconds(20),
+      ownerScope: { "test-owner" }
+    )
+    do {
+      _ = try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:processing-timeout", fileURL: source, fileName: "photo.jpg",
+        mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+      Issue.record("Expected a processing timeout")
+    } catch NativeMediaUploadError.processingTimedOut {}
+    // Preserve the durable owner so a manual retry can reconcile late success.
+    #expect(!(await staging.wasDiscarded()))
+    #expect(!(await transport.calledMethods().contains(.cancelUpload)))
+    #expect(await transport.calledMethods().contains(.finishUpload))
+  }
+
+  @Test("the processing deadline starts after healthy part transfers finish")
+  func processingDeadlineDoesNotLimitTransfers() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(partDelay: .milliseconds(80))
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: PassthroughUploadStaging(), processingTimeout: .milliseconds(20),
+      ownerScope: { "test-owner" }
+    )
+    let result = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "photo:healthy-slow-transfer", fileURL: source, fileName: "photo.jpg",
+      mimeType: "image/jpeg", kind: .photo
+    ), progress: { _, _ in })
+    #expect(result.fileUniqueID == "INP_native")
+  }
+
+  @Test("canceling processing exits promptly and releases local staging")
+  func processingRemainsCancelable() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(processingForever: true)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:processing-cancel", fileURL: source, fileName: "photo.jpg",
+        mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    defer { upload.cancel() }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while !(await transport.calledMethods().contains(.finishUpload)) {
+      if ContinuousClock.now >= deadline {
+        Issue.record("Upload did not reach processing")
+        return
+      }
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    upload.cancel()
+    await #expect(throws: CancellationError.self) { try await upload.value }
+    #expect(await staging.wasDiscarded())
+    #expect(await transport.calledMethods().contains(.cancelUpload))
   }
 
   @Test("reconciles a response lost after the server accepts a part")

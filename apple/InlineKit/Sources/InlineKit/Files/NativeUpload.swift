@@ -176,6 +176,7 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable, PrivacySafe
   case invalidGeometry
   case unauthenticated
   case unexpectedResponse
+  case processingTimedOut
   case rejected(code: UploadFailure.Code, retryable: Bool)
   case sourceChanged
   case canceled
@@ -188,6 +189,7 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable, PrivacySafe
     case .invalidGeometry: "The server returned invalid upload geometry."
     case .unauthenticated: "An authenticated account is required to upload media."
     case .unexpectedResponse: "The server returned an unexpected upload response."
+    case .processingTimedOut: "The file transferred, but processing did not finish in time. Try sending again."
     case let .rejected(code, retryable):
       "Upload processing failed (\(code), retryable: \(retryable))."
     case .sourceChanged: "The upload source changed while it was being read."
@@ -203,6 +205,7 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable, PrivacySafe
     case .invalidGeometry: "native_upload:invalid_geometry"
     case .unauthenticated: "native_upload:unauthenticated"
     case .unexpectedResponse: "native_upload:unexpected_response"
+    case .processingTimedOut: "native_upload:processing_timeout"
     case let .rejected(code, retryable):
       "native_upload:rejected:\(code.rawValue):\(retryable ? "retryable" : "terminal")"
     case .sourceChanged: "native_upload:source_changed"
@@ -244,6 +247,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private let staging: any NativeUploadStaging
   private let ownerScope: @Sendable () -> String?
   private let accountFence: (any NativeUploadAccountFencing)?
+  private let processingTimeout: Duration
   private var activePartTransfers = 0
   private struct PartTransferWaiter {
     let id: UUID
@@ -255,6 +259,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     transport: any NativeUploadRPCTransport = Api.realtime,
     staging: any NativeUploadStaging = FileNativeUploadStagingStore.shared,
     accountFence: (any NativeUploadAccountFencing)? = nil,
+    processingTimeout: Duration = .seconds(600),
     ownerScope: @escaping @Sendable () -> String? = {
       Auth.shared.getCurrentUserId().map(String.init)
     }
@@ -262,6 +267,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     self.transport = transport
     self.staging = staging
     self.accountFence = accountFence
+    self.processingTimeout = processingTimeout
     self.ownerScope = ownerScope
   }
 
@@ -385,11 +391,14 @@ public actor DurableUploadCoordinator: MediaUploading {
       progress(durableAcceptedBytes, byteCount)
 
       var finishReconciliationAttempts = 0
+      let processingClock = ContinuousClock()
+      var processingDeadline: ContinuousClock.Instant?
       do {
         while true {
           try Task.checkCancellation()
           let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
           if !missingParts.isEmpty {
+            processingDeadline = nil
             try await withThrowingTaskGroup(of: UInt32.self) { group in
               var nextPart = 0
               for _ in 0 ..< min(Self.maximumConcurrentPartsPerUpload, missingParts.count) {
@@ -435,6 +444,15 @@ public actor DurableUploadCoordinator: MediaUploading {
               }
             }
             finishReconciliationAttempts = 0
+          }
+
+          // Healthy part transfers have no overall deadline. Once all bytes are
+          // accepted, bound processing separately so a stalled worker cannot
+          // keep a send pending forever through successful processing replies.
+          let deadline = processingDeadline ?? processingClock.now.advanced(by: processingTimeout)
+          processingDeadline = deadline
+          guard processingClock.now < deadline else {
+            throw NativeMediaUploadError.processingTimedOut
           }
 
           var finish = FinishUploadInput()
@@ -522,9 +540,10 @@ public actor DurableUploadCoordinator: MediaUploading {
             }
             accepted.subtract(missing.partIndices)
           case let .processing(processing):
-            try await Task.sleep(for: .seconds(boundedUploadProcessingRetrySeconds(
+            let nextPoll = processingClock.now.advanced(by: .seconds(boundedUploadProcessingRetrySeconds(
               processing.retryAfterSeconds
             )))
+            try await Task.sleep(until: min(nextPoll, deadline), clock: processingClock)
           case let .failed(failure):
             throw NativeMediaUploadError.rejected(
               code: failure.code,
@@ -558,6 +577,9 @@ public actor DurableUploadCoordinator: MediaUploading {
     switch error {
     case .invalidGeometry, .sourceChanged, .canceled, .expired, .emptySource, .fileTooLarge: return true
     case let .rejected(_, retryable): return !retryable
+    case .processingTimedOut:
+      // The server may still complete; retain the source for an explicit retry.
+      return false
     case .unauthenticated, .unexpectedResponse: return false
     }
   }

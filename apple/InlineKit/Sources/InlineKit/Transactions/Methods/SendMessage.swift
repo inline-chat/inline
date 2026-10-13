@@ -108,8 +108,9 @@ public struct TransactionSendMessage: Transaction {
       sendMode = nil
     }
     id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
-    config = try container.decodeIfPresent(TransactionConfig.self, forKey: .config)
+    let decodedConfig = try container.decodeIfPresent(TransactionConfig.self, forKey: .config)
       ?? TransactionConfig(maxRetries: 30, retryDelay: 4, executionTimeout: 600)
+    config = Self.sendConfiguration(decodedConfig, hasAttachments: !attachments.isEmpty)
     date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
     randomId = try container.decode(Int64.self, forKey: .randomId)
     peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
@@ -162,6 +163,7 @@ public struct TransactionSendMessage: Transaction {
     self.entities = entities
     self.sendMode = sendMode
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
+    config = Self.sendConfiguration(config, hasAttachments: !attachments.isEmpty)
     self.replyToMsgId = replyToMsgId
     randomId = Int64.random(in: 0 ... Int64.max)
     peerUserId = if case let .user(id) = peerId { id } else { nil }
@@ -179,6 +181,14 @@ public struct TransactionSendMessage: Transaction {
         }
       }
     }
+  }
+
+  private static func sendConfiguration(_ config: TransactionConfig, hasAttachments: Bool) -> TransactionConfig {
+    guard hasAttachments else { return config }
+    // Upload parts have bounded RPC stall timeouts, and final send has its own
+    // RPC timeout. An overall deadline would fail a healthy large transfer.
+    // Apply this on decode too so persisted sends do not retain the old deadline.
+    return TransactionConfig(maxRetries: config.maxRetries, retryDelay: config.retryDelay, executionTimeout: 0)
   }
 
   // Methods
@@ -409,7 +419,7 @@ public struct TransactionSendMessage: Transaction {
   public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? NativeMediaUploadError {
       switch error {
-      case .emptySource, .fileTooLarge, .invalidGeometry, .sourceChanged, .canceled, .expired:
+      case .emptySource, .fileTooLarge, .invalidGeometry, .sourceChanged, .canceled, .expired, .processingTimedOut:
         return false
       case let .rejected(_, retryable):
         return retryable

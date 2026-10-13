@@ -6,6 +6,45 @@ import Testing
 
 @Suite("Send Message Retry Policy")
 struct SendMessageRetryPolicyTests {
+  private func documentSend() -> TransactionSendMessage {
+    let document = Document(
+      id: 42, documentId: -42, date: Date(), fileName: "boundary.zip",
+      mimeType: "application/zip", size: 500_000_000, localPath: "boundary.zip"
+    )
+    return TransactionSendMessage(
+      text: nil, peerId: .user(id: 1), chatId: 1,
+      mediaItems: [.document(DocumentInfo(document: document))]
+    )
+  }
+
+  @Test("large attachment sends rely on RPC stall bounds rather than an overall deadline")
+  func attachmentSendHasNoOverallDeadline() {
+    #expect(documentSend().config.executionTimeout == 0)
+    let textSend = TransactionSendMessage(text: "hello", peerId: .user(id: 1), chatId: 1)
+    #expect(textSend.config.executionTimeout == 600)
+  }
+
+  @Test("restored attachment sends discard legacy overall deadlines and preserve retry settings")
+  func restoredAttachmentDiscardsLegacyDeadline() throws {
+    var legacy = documentSend()
+    legacy.config = TransactionConfig(maxRetries: 7, retryDelay: 3, executionTimeout: 600)
+    let restored = try JSONDecoder().decode(TransactionSendMessage.self, from: JSONEncoder().encode(legacy))
+    #expect(restored.config.executionTimeout == 0)
+    #expect(restored.config.maxRetries == 7)
+    #expect(restored.config.retryDelay == 3)
+  }
+
+  @Test("restored attachment sends without saved configuration also avoid an overall deadline")
+  func restoredAttachmentWithoutConfigHasNoDeadline() throws {
+    let encoded = try JSONEncoder().encode(documentSend())
+    var payload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    payload.removeValue(forKey: "config")
+    let restored = try JSONDecoder().decode(
+      TransactionSendMessage.self, from: JSONSerialization.data(withJSONObject: payload)
+    )
+    #expect(restored.config.executionTimeout == 0)
+  }
+
   @Test("optimistic send skips local message when current user id is missing")
   func optimisticSkipsMissingCurrentUserId() {
     #expect(Auth.getCurrentUserId() == nil)
@@ -43,7 +82,7 @@ struct SendMessageRetryPolicyTests {
   func nativeUploadPermanentFailures() {
     let transaction = TransactionSendMessage(text: nil, peerId: .user(id: 1), chatId: 1)
     let errors: [NativeMediaUploadError] = [
-      .fileTooLarge, .emptySource, .invalidGeometry, .sourceChanged, .canceled, .expired,
+      .fileTooLarge, .emptySource, .invalidGeometry, .sourceChanged, .canceled, .expired, .processingTimedOut,
       .rejected(code: .uploadFailureInvalidMedia, retryable: false),
     ]
     for error in errors {
