@@ -54,7 +54,9 @@ type SelectedInlineCredentials = {
   tokenFile: string
 }
 
-type SecretDefaults = NonNullable<Parameters<typeof resolveSecretInputString>[0]["defaults"]>
+// Only defined strings survive normalization. New hosts distinguish an
+// omitted default from a property explicitly containing undefined.
+type SecretDefaults = Partial<Record<"env" | "file" | "exec" | "store", string>>
 
 export function resolveInlineEnvToken(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const key of INLINE_ENV_TOKEN_KEYS) {

@@ -172,6 +172,7 @@ import {
   resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
   resolveMentionGatingWithBypass,
+  setOpenClawAgentDefaultModel,
   resolveUseAccessGroups,
 } from "../openclaw-compat.js"
 import {
@@ -7434,16 +7435,7 @@ export async function monitorInlineProvider(params: {
     const committed = await core.config.mutateConfigFile({
       afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
       mutate: (draft: OpenClawConfig) => {
-        const agents = draft.agents ?? {}
-        draft.agents = agents
-        const agent = agents.list?.find((candidate) => candidate.id === ingress.agentId)
-        if (agent) {
-          agent.model = selection
-        } else {
-          const defaults = agents.defaults ?? {}
-          agents.defaults = defaults
-          defaults.model = selection
-        }
+        setOpenClawAgentDefaultModel(draft, ingress.agentId, selection)
       },
     })
     cfg = committed.nextConfig as OpenClawConfig

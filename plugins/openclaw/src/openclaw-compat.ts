@@ -12,6 +12,32 @@ export const DEFAULT_ACCOUNT_ID = "default"
 export const PAIRING_APPROVED_MESSAGE =
   "\u2705 OpenClaw access approved. Send a message to start chatting."
 
+export function setOpenClawAgentDefaultModel(
+  cfg: OpenClawConfig,
+  agentId: string,
+  model: string,
+): void {
+  const agents = cfg.agents ?? {}
+  cfg.agents = agents
+  // October hosts use keyed entries; supported earlier hosts use a list.
+  // Mutate the existing entry so a per-agent choice never changes defaults
+  // for unrelated agents, and keep the host's current serialized shape.
+  const configured = agents as typeof agents & {
+    entries?: Record<string, { model?: unknown }>
+    list?: Array<{ id: string; model?: unknown }>
+  }
+  const entries = configured.entries
+  const agent = (entries && Object.hasOwn(entries, agentId) ? entries[agentId] : undefined)
+    ?? configured.list?.find((candidate) => candidate.id === agentId)
+  if (agent) {
+    agent.model = model
+  } else {
+    const defaults = agents.defaults ?? {}
+    agents.defaults = defaults
+    defaults.model = model
+  }
+}
+
 type ZodSchemaWithToJsonSchema = ZodTypeAny & {
   toJSONSchema?: (params?: Record<string, unknown>) => unknown
 }
