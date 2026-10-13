@@ -407,6 +407,17 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
+    if let error = error as? NativeMediaUploadError {
+      switch error {
+      case .emptySource, .fileTooLarge, .invalidGeometry, .sourceChanged, .canceled, .expired:
+        return false
+      case let .rejected(_, retryable):
+        return retryable
+      case .unauthenticated, .unexpectedResponse:
+        return true
+      }
+    }
+
     if let error = error as? APIError {
       switch error {
         case let .error(_, errorCode, _):

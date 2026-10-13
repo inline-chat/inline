@@ -143,6 +143,32 @@ describe("native upload coordinator", () => {
     expect(transport.accepted.size).toBe(0)
   })
 
+  test("uploads a 500 MB document with bounded parts and complete byte progress", async () => {
+    const transport = new MemoryUploadTransport()
+    let acceptedBytes = 0
+    await new NativeUploadClient(transport).upload({
+      ...virtualInput(61, 500_000_000),
+      onProgress(progress) {
+        expect(progress.acceptedBytes).toBeGreaterThanOrEqual(acceptedBytes)
+        acceptedBytes = progress.acceptedBytes
+        expect(progress.totalBytes).toBe(500_000_000)
+      },
+    })
+    expect(acceptedBytes).toBe(500_000_000)
+    expect(transport.partCalls.length).toBe(Math.ceil(500_000_000 / INLINE_TRANSFER_PART_SIZE))
+    expect(transport.maxPartBytes).toBeLessThanOrEqual(INLINE_TRANSFER_PART_SIZE)
+    expect(transport.finishCalls).toBe(1)
+  }, 30_000)
+
+  test("rejects documents above 500 MB without reading the source", async () => {
+    const transport = new MemoryUploadTransport()
+    await expect(new NativeUploadClient(transport).upload({
+      ...virtualInput(62, 500_000_001),
+      source: { byteCount: 500_000_001, read: async () => { throw new Error("must not read") } },
+    })).rejects.toThrow("size limit")
+    expect(transport.accepted.size).toBe(0)
+  })
+
   test("recovers a committed create whose first response was lost", async () => {
     const transport = new MemoryUploadTransport()
     const create = transport.create.bind(transport)

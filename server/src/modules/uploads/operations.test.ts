@@ -197,6 +197,21 @@ describe("native upload operations", () => {
     expect(ownerLookups).toBe(0)
   })
 
+  test("reserves a 500 MB document with valid multipart geometry", async () => {
+    const user = await testUtils.createUser("native-upload-500mb@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), new MemoryPartStore(), finalizer)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(83), fileName: "boundary.zip", mimeType: "application/zip",
+      byteCount: 500_000_000n, sha256: new Uint8Array(32).fill(83), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, context(user.id, account.session.id))
+    expect(created.partSize).toBe(524_288)
+    expect(created.partCount).toBe(954)
+    expect((await operations.state({ uploadId: created.uploadId }, context(user.id, account.session.id))).status)
+      .toBe(UploadStatus.UPLOADING)
+  })
+
   test("accepts only JPEG or PNG as native photos while preserving WebP documents", async () => {
     const user = await testUtils.createUser("native-upload-photo-formats@example.com")
     const account = await testUtils.createSessionForUser(user.id)

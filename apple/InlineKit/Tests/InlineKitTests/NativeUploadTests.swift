@@ -199,6 +199,15 @@ private actor PassthroughUploadStaging: NativeUploadStaging {
   func wasDiscarded() -> Bool { discarded }
 }
 
+private actor AdmissionProbeUploadStaging: NativeUploadStaging {
+  private(set) var admitted = false
+  func stage(logicalID _: String, sourceURL _: URL) throws -> URL {
+    admitted = true
+    throw SimulatedUploadFailure.responseLost
+  }
+  func discard(logicalID _: String) {}
+}
+
 private actor CancelingUploadStaging: NativeUploadStaging {
   private var discarded = false
 
@@ -438,6 +447,32 @@ struct NativeUploadTests {
     }
     #expect(await transport.calledMethods().isEmpty)
     #expect(!(await staging.wasDiscarded()))
+  }
+
+  @Test("document size admission includes 500 MB and rejects the next byte", arguments: [297_000_000, 500_000_000, 500_000_001])
+  func documentSizeBoundary(byteCount: Int) async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    FileManager.default.createFile(atPath: source.path, contents: Data())
+    let handle = try FileHandle(forWritingTo: source)
+    try handle.truncate(atOffset: UInt64(byteCount))
+    try handle.close()
+    defer { try? FileManager.default.removeItem(at: source) }
+    let staging = AdmissionProbeUploadStaging()
+    let transport = UploadRPCMock()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    do {
+      _ = try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "document:boundary", fileURL: source, fileName: "boundary.zip",
+        mimeType: "application/zip", kind: .document
+      ), progress: { _, _ in })
+      Issue.record("Expected the admission probe or size rejection")
+    } catch is SimulatedUploadFailure {
+      #expect(byteCount <= 500_000_000)
+    } catch NativeMediaUploadError.fileTooLarge {
+      #expect(byteCount > 500_000_000)
+    }
+    #expect(await staging.admitted == (byteCount <= 500_000_000))
+    #expect(await transport.calledMethods().isEmpty)
   }
 
   @Test("account switch while staging is blocked performs no replacement-account RPC")

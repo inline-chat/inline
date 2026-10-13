@@ -57,7 +57,7 @@ pub(crate) fn validate_attachment_inputs(
         })?;
         if metadata.is_file() {
             if metadata.len() > max_bytes {
-                return Err(CliError::invalid_args("Attachment exceeds 200MB limit").into());
+                return Err(CliError::invalid_args("Attachment exceeds 500MB limit").into());
             }
         } else if metadata.is_dir() {
             if !directory_has_uploadable_file(path) {

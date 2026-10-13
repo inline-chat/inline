@@ -16,6 +16,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   private static let log = Log.scoped("DocumentView", level: .info)
 
   enum DocumentState: Equatable {
+    case uploadFailed
     case locallyAvailable
     case needsDownload
     case downloading(bytesReceived: Int64, totalBytes: Int64)
@@ -365,6 +366,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   @objc func fileIconButtonTapped() {
     switch documentState {
+      case .uploadFailed:
+        break
       case .needsDownload:
         downloadFile()
       case .downloading:
@@ -381,6 +384,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     guard !isBeingRemoved else { return }
 
     switch documentState {
+      case .uploadFailed:
+        break
       case .locallyAvailable:
         openFile()
       case .uploading:
@@ -412,6 +417,9 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     let thumbnailOverlayColor: UIColor = hasDocumentThumbnail ? .white : (outgoing ? .white : .systemGray)
 
     switch documentState {
+      case .uploadFailed:
+        iconView.image = UIImage(systemName: "exclamationmark.circle")
+        iconView.tintColor = thumbnailOverlayColor
       case .needsDownload:
         iconView.image = UIImage(systemName: "arrow.down")
         iconView.tintColor = hasDocumentThumbnail ? .white : (outgoing ? .white : ThemeManager.shared.selected.accent)
@@ -445,6 +453,10 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     UIView.performWithoutAnimation {
       switch documentState {
+        case .uploadFailed:
+          hideUploadingSpinner()
+          updateProgressPath(progress: 0.0)
+          fileSizeLabel.text = "Failed to send"
         case .locallyAvailable:
           hideUploadingSpinner()
           updateProgressPath(progress: 0.0)
@@ -848,6 +860,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   private func determineDocumentState(_ document: Document) -> DocumentState {
     switch pendingUploadDisplayState(document) {
+      case .failed:
+        return .uploadFailed
       case .inactive:
         break
       case .processing:
@@ -889,6 +903,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     return DocumentPendingUploadDisplayState.resolve(
       isPendingMessage: isPendingOutgoingUploadMessage(),
+      isFailedMessage: fullMessage?.message.status == .failed,
       localDocumentId: document.id,
       progress: progress
     )

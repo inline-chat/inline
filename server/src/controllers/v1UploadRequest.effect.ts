@@ -35,6 +35,8 @@ const fileFields = new Set([
 // TODO(effect-cutover): Source this from a typed, environment-free upload
 // configuration service shared by the legacy compatibility adapter.
 const maxAcceptedMainFileSize =
+  500_000_000
+const maxAcceptedVideoFileSize =
   200_000_000
 const maxAcceptedPhotoFileSize =
   40_000_000
@@ -60,7 +62,7 @@ export const defaultV1UploadLimits: V1UploadLimits = {
     maxAcceptedThumbnailFileSize,
   maxParts:
     metadataFields.size + fileFields.size,
-  // No successful retained operation accepts more than a 200 MB main file or
+  // No successful retained operation accepts more than a 500 MB main file or
   // 40 MB thumbnail. The extra 1 MB covers multipart fields and boundaries.
   maxTotalSize:
     maxAcceptedMainFileSize +
@@ -316,6 +318,8 @@ const maxMainFileSizeForType = (
       return maxAcceptedPhotoFileSize
     case "voice":
       return maxAcceptedVoiceFileSize
+    case "video":
+      return maxAcceptedVideoFileSize
     default:
       return maxAcceptedMainFileSize
   }

@@ -8,7 +8,7 @@ use inline_protocol::proto;
 use inline_sdk::NativeUploadInput;
 use inline_sdk::api::{UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata};
 
-pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
+pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 500_000_000;
 
 #[derive(Clone)]
 pub(crate) struct PreparedAttachment {
@@ -251,9 +251,9 @@ fn ensure_attachment_size(
     if size > MAX_ATTACHMENT_BYTES {
         let size_label = format_bytes(size as i64);
         if !quiet {
-            eprintln!("Attachment {} is {} (limit 200MB).", label, size_label);
+            eprintln!("Attachment {} is {} (limit 500MB).", label, size_label);
         }
-        return Err(CliError::invalid_args("Attachment exceeds 200MB limit").into());
+        return Err(CliError::invalid_args("Attachment exceeds 500MB limit").into());
     }
     Ok(())
 }

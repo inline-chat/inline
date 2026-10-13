@@ -855,7 +855,8 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static func maximumByteCount(for kind: UploadKind) -> Int? {
     switch kind {
     case .photo: return 40_000_000
-    case .video, .document: return 200_000_000
+    case .video: return 200_000_000
+    case .document: return 500_000_000
     case .voice: return 20_000_000
     case .unspecified, .UNRECOGNIZED: return nil
     }

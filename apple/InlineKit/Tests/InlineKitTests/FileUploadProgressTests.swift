@@ -114,6 +114,16 @@ struct FileUploadProgressTests {
     #expect(state == .inactive)
   }
 
+  @Test("failed message stays failed even with a completed local upload")
+  func failedMessageDoesNotAppearComplete() {
+    let snapshots: [UploadProgressSnapshot?] = [nil, .completed(id: "document_42", totalBytes: 297_000_000)]
+    for progress in snapshots {
+      #expect(DocumentPendingUploadDisplayState.resolve(
+        isPendingMessage: false, isFailedMessage: true, localDocumentId: 42, progress: progress
+      ) == .failed)
+    }
+  }
+
   @Test("download progress clamps invalid totals without reporting completion")
   func testDownloadProgressClamp() {
     let snapshot = DownloadProgress(

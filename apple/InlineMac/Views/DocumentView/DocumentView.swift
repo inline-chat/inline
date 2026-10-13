@@ -97,6 +97,7 @@ class DocumentView: NSView {
     case needsDownload
     case downloading(bytesReceived: Int64, totalBytes: Int64)
     case uploadProcessing
+    case uploadFailed
     case uploading(bytesSent: Int64, totalBytes: Int64)
   }
 
@@ -427,7 +428,7 @@ class DocumentView: NSView {
     switch documentState {
     case .locallyAvailable, .needsDownload:
       true
-    case .downloading, .uploadProcessing, .uploading:
+    case .downloading, .uploadProcessing, .uploading, .uploadFailed:
       false
     }
   }
@@ -453,6 +454,8 @@ class DocumentView: NSView {
     iconView.contentTintColor = hasDocumentThumbnail ? .white : (white ? .white : .secondaryLabelColor)
 
     switch documentState {
+      case .uploadFailed:
+        iconView.image = NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: "Failed to send")
       case .needsDownload:
         iconView.image = NSImage(systemSymbolName: Symbol.download, accessibilityDescription: "Download")
       case .locallyAvailable:
@@ -522,6 +525,14 @@ class DocumentView: NSView {
         let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
         let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
         fileSizeLabel.stringValue = "\(downloadedStr) / \(totalStr)"
+
+      case .uploadFailed:
+        iconView.isHidden = false
+        cancelIcon.isHidden = true
+        uploadProgressRing.isHidden = true
+        uploadCancelButton.isHidden = true
+        fileSizeLabel.stringValue = "Failed to send"
+        updateIconForCurrentState()
 
       case .uploadProcessing:
         iconView.isHidden = true
@@ -655,6 +666,8 @@ class DocumentView: NSView {
 
     let state = determineDocumentState(documentInfo)
     switch state {
+    case .uploadFailed:
+      break
     case .locallyAvailable:
       menu.addItem(documentMenuItem(
         title: "Open Document",
@@ -768,7 +781,7 @@ class DocumentView: NSView {
       }
     case .needsDownload:
       downloadAction(saveToDownloadsWhenFinished: false)
-    case .downloading, .uploadProcessing, .uploading:
+    case .downloading, .uploadProcessing, .uploading, .uploadFailed:
       break
     }
   }
@@ -823,6 +836,8 @@ class DocumentView: NSView {
 
   private func determineDocumentState(_ documentInfo: DocumentInfo) -> DocumentState {
     switch pendingUploadDisplayState() {
+    case .failed:
+      return .uploadFailed
     case .inactive:
       break
     case .processing:
@@ -858,6 +873,7 @@ class DocumentView: NSView {
 
     return DocumentPendingUploadDisplayState.resolve(
       isPendingMessage: isPendingOutgoingUploadMessage(),
+      isFailedMessage: fullMessage?.message.status == .failed,
       localDocumentId: documentInfo.document.id,
       progress: progress
     )

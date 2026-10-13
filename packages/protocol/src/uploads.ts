@@ -26,7 +26,7 @@ const CANCEL_RPC_TIMEOUT_MS = 5_000
 const MAX_UPLOAD_BYTES_BY_KIND: Partial<Record<UploadKind, number>> = {
   [UploadKind.PHOTO]: 40_000_000,
   [UploadKind.VIDEO]: 200_000_000,
-  [UploadKind.DOCUMENT]: 200_000_000,
+  [UploadKind.DOCUMENT]: 500_000_000,
   [UploadKind.VOICE]: 20_000_000,
 }
 

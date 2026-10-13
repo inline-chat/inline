@@ -12,7 +12,7 @@ const validPhotoExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 export const MEDIA_UPLOAD_MAX_BYTES = {
   photo: 40_000_000,
   video: 200_000_000,
-  document: 200_000_000,
+  document: 500_000_000,
   voice: 20_000_000,
 } as const
 const maxFileSize = MEDIA_UPLOAD_MAX_BYTES.photo

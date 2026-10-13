@@ -216,7 +216,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline messages edit` uses the same Markdown parsing contract. Mentions are provided via `--mention` with UTF-16 offsets; because those offsets address literal input, any send or caption with `--mention` preserves Markdown syntax instead of parsing it.
   - `--stdin` reads message text from piped or redirected stdin; it fails fast if stdin is an interactive terminal.
   - `--attach` is repeatable. Each attachment is sent as its own message; `--text` is reused as the caption.
-  - Folders are zipped before upload. Attachments over 200MB are rejected.
+  - Folders are zipped before upload. Attachments over 500MB are rejected.
   - `--force-file` uploads photos/videos as files (documents).
   - `--mention` is repeatable and must match the message text (`user_id:offset:length` with UTF-16 units).
 - `inline messages forward [--from-chat-id 123 | --from-user-id 42] --message-id 456 [--message-id 789] [--to-chat-id 321 | --to-user-id 84] [--no-header]`

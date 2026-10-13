@@ -141,15 +141,18 @@ public enum UploadStatus {
 }
 
 public enum DocumentPendingUploadDisplayState: Equatable, Sendable {
+  case failed
   case inactive
   case processing
   case uploading(bytesSent: Int64, totalBytes: Int64)
 
   public static func resolve(
     isPendingMessage: Bool,
+    isFailedMessage: Bool = false,
     localDocumentId: Int64?,
     progress: UploadProgressSnapshot?
   ) -> DocumentPendingUploadDisplayState {
+    if isFailedMessage { return .failed }
     guard isPendingMessage, localDocumentId != nil else {
       return .inactive
     }

@@ -39,6 +39,20 @@ struct SendMessageRetryPolicyTests {
     #expect(shouldRetry == false)
   }
 
+  @Test("native upload permanent failures do not retry")
+  func nativeUploadPermanentFailures() {
+    let transaction = TransactionSendMessage(text: nil, peerId: .user(id: 1), chatId: 1)
+    let errors: [NativeMediaUploadError] = [
+      .fileTooLarge, .emptySource, .invalidGeometry, .sourceChanged, .canceled, .expired,
+      .rejected(code: .uploadFailureInvalidMedia, retryable: false),
+    ]
+    for error in errors {
+      #expect(!transaction.shouldRetryOnFail(error: error))
+    }
+    #expect(transaction.shouldRetryOnFail(error: NativeMediaUploadError.rejected(code: .uploadFailureInvalidMedia, retryable: true)))
+    #expect(transaction.shouldRetryOnFail(error: NativeMediaUploadError.unexpectedResponse))
+  }
+
   @Test("keeps retrying network upload failures")
   func retryForNetworkUploadFailures() {
     let transaction = TransactionSendMessage(
