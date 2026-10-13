@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import InlineProtocol
 
 enum DialogMutationKind: Hashable, Sendable {
@@ -7,8 +8,100 @@ enum DialogMutationKind: Hashable, Sendable {
   case read
 }
 
+/// Dialog columns an optimistic dialog mutation can own.
+enum DialogRollbackField: Hashable, Sendable {
+  case open
+  case openedDate
+  case order
+  case pinnedOrder
+  case folderId
+  case pinned
+  case archived
+  case chatListHidden
+  case unreadMark
+  case unreadCount
+
+  func isEqual(_ lhs: Dialog, _ rhs: Dialog) -> Bool {
+    switch self {
+    case .open: lhs.open == rhs.open
+    case .openedDate: lhs.openedDate == rhs.openedDate
+    case .order: lhs.order == rhs.order
+    case .pinnedOrder: lhs.pinnedOrder == rhs.pinnedOrder
+    case .folderId: lhs.folderId == rhs.folderId
+    case .pinned: lhs.pinned == rhs.pinned
+    case .archived: lhs.archived == rhs.archived
+    case .chatListHidden: lhs.chatListHidden == rhs.chatListHidden
+    case .unreadMark: lhs.unreadMark == rhs.unreadMark
+    case .unreadCount: lhs.unreadCount == rhs.unreadCount
+    }
+  }
+
+  func copy(from source: Dialog, to target: inout Dialog) {
+    switch self {
+    case .open: target.open = source.open
+    case .openedDate: target.openedDate = source.openedDate
+    case .order: target.order = source.order
+    case .pinnedOrder: target.pinnedOrder = source.pinnedOrder
+    case .folderId: target.folderId = source.folderId
+    case .pinned: target.pinned = source.pinned
+    case .archived: target.archived = source.archived
+    case .chatListHidden: target.chatListHidden = source.chatListHidden
+    case .unreadMark: target.unreadMark = source.unreadMark
+    case .unreadCount: target.unreadCount = source.unreadCount
+    }
+  }
+}
+
+/// The dialog row immediately before and after one optimistic write.
+struct DialogMutationSnapshot: Sendable {
+  let baseline: Dialog
+  /// Read back from the database so later comparisons see stored precision.
+  let optimistic: Dialog
+  /// True when the optimistic write inserted the row.
+  let createdRow: Bool
+}
+
+enum DialogMutationRollbackResolution: Equatable, Sendable {
+  case unchanged
+  case save(Dialog)
+  case delete
+}
+
 struct DialogMutationRollbackEntry: Sendable {
-  let original: Dialog?
+  let baseline: Dialog
+  let optimistic: Dialog
+  /// Fields no later pending intent has taken over.
+  let fields: [DialogRollbackField]
+  let deletesUntouchedRow: Bool
+
+  /// Reverts only what this intent still owns: a field that no longer holds
+  /// the optimistic value was written by the server or another intent.
+  func resolve(current: Dialog) -> DialogMutationRollbackResolution {
+    if deletesUntouchedRow {
+      // Sidebar cleanup refreshes openedDate on its own schedule.
+      var comparable = current
+      comparable.openedDate = optimistic.openedDate
+      if comparable == optimistic { return .delete }
+    }
+
+    var restored = current
+    for field in fields where field.isEqual(current, optimistic) {
+      field.copy(from: baseline, to: &restored)
+    }
+    return restored == current ? .unchanged : .save(restored)
+  }
+
+  func apply(_ db: Database) throws {
+    guard let current = try Dialog.fetchOne(db, id: optimistic.id) else { return }
+    switch resolve(current: current) {
+    case .unchanged:
+      return
+    case let .save(dialog):
+      try dialog.save(db, onConflict: .replace)
+    case .delete:
+      try Dialog.deleteOne(db, id: current.id)
+    }
+  }
 }
 
 struct DialogNotificationMutationResolution: Sendable {
@@ -23,12 +116,11 @@ actor DialogMutationRollbackTracker {
 
   private struct Pending: Sendable {
     let intentID: String
-    let original: Dialog?
-  }
-
-  private struct Key: Hashable, Sendable {
-    let peer: Peer
     let kind: DialogMutationKind
+    var baseline: Dialog
+    let optimistic: Dialog
+    let fields: [DialogRollbackField]
+    var createdRow: Bool
   }
 
   private enum NotificationIntentOutcome: Sendable, Equatable {
@@ -67,29 +159,76 @@ actor DialogMutationRollbackTracker {
     var intents: [NotificationIntent]
   }
 
-  private var pendingByKey: [Key: Pending] = [:]
+  /// Pending intents per peer, oldest first. Kinds share one chain because
+  /// open and order mutations write overlapping columns.
+  private var pendingByPeer: [Peer: [Pending]] = [:]
   private var notificationChainsByPeer: [Peer: NotificationChain] = [:]
   private var notificationReservationCountsByPeer: [Peer: [String: Int]] = [:]
   private var nextNotificationResolutionToken: UInt64 = 0
 
-  func record(intentID: String?, peer: Peer, kind: DialogMutationKind, original: Dialog?) {
+  func record(
+    intentID: String?,
+    peer: Peer,
+    kind: DialogMutationKind,
+    snapshot: DialogMutationSnapshot,
+    fields: [DialogRollbackField]
+  ) {
     guard let intentID else { return }
-    pendingByKey[Key(peer: peer, kind: kind)] = Pending(intentID: intentID, original: original)
+    pendingByPeer[peer, default: []].append(Pending(
+      intentID: intentID,
+      kind: kind,
+      baseline: snapshot.baseline,
+      optimistic: snapshot.optimistic,
+      fields: fields,
+      createdRow: snapshot.createdRow
+    ))
   }
 
   func complete(intentID: String?, peer: Peer, kind: DialogMutationKind) {
-    let key = Key(peer: peer, kind: kind)
-    guard let intentID, pendingByKey[key]?.intentID == intentID else { return }
-    pendingByKey[key] = nil
+    guard let intentID, var chain = pendingByPeer[peer],
+          let index = chain.firstIndex(where: { $0.intentID == intentID && $0.kind == kind })
+    else { return }
+    chain.remove(at: index)
+    pendingByPeer[peer] = chain.isEmpty ? nil : chain
   }
 
   func takeForRollback(intentID: String?, peer: Peer, kind: DialogMutationKind) -> DialogMutationRollbackEntry? {
-    let key = Key(peer: peer, kind: kind)
-    guard let intentID, let pending = pendingByKey[key], pending.intentID == intentID else {
-      return nil
+    guard let intentID, var chain = pendingByPeer[peer],
+          let index = chain.firstIndex(where: { $0.intentID == intentID && $0.kind == kind })
+    else { return nil }
+
+    let failed = chain.remove(at: index)
+    let hasLaterIntent = index < chain.count
+    if failed.createdRow, hasLaterIntent {
+      // A later intent that started from the untouched inserted row inherits
+      // responsibility for removing it.
+      var laterBaseline = chain[index].baseline
+      laterBaseline.openedDate = failed.optimistic.openedDate
+      if laterBaseline == failed.optimistic {
+        chain[index].createdRow = true
+      }
     }
-    pendingByKey[key] = nil
-    return DialogMutationRollbackEntry(original: pending.original)
+
+    var fields: [DialogRollbackField] = []
+    for field in failed.fields {
+      // A later intent that writes the same field now owns its value. Hand it
+      // this intent's baseline so its own failure restores the true original.
+      guard let later = chain[index...].firstIndex(where: { $0.fields.contains(field) }) else {
+        fields.append(field)
+        continue
+      }
+      if field.isEqual(chain[later].baseline, failed.optimistic) {
+        field.copy(from: failed.baseline, to: &chain[later].baseline)
+      }
+    }
+
+    pendingByPeer[peer] = chain.isEmpty ? nil : chain
+    return DialogMutationRollbackEntry(
+      baseline: failed.baseline,
+      optimistic: failed.optimistic,
+      fields: fields,
+      deletesUntouchedRow: failed.createdRow && !hasLaterIntent
+    )
   }
 
   func recordNotification(

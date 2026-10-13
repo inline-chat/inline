@@ -59,17 +59,10 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     await DialogOpenIntentTracker.shared.mark(context.intentId, peer: context.peerId)
 
     do {
-      let original = try await AppDatabase.shared.reader.read { db in
-        try Dialog.get(peerId: context.peerId).fetchOne(db)
-      }
-      await DialogMutationRollbackTracker.shared.record(
-        intentID: context.intentId,
-        peer: context.peerId,
-        kind: .open,
-        original: original
-      )
-      try await AppDatabase.shared.dbWriter.write { db in
-        guard var dialog = try optimisticDialog(db) else { return }
+      let snapshot = try await AppDatabase.shared.dbWriter.write { db -> DialogMutationSnapshot? in
+        let existing = try Dialog.get(peerId: context.peerId).fetchOne(db)
+        guard var dialog = try existing ?? newOptimisticDialog(db) else { return nil }
+        let baseline = dialog
         Self.applyLocalOpenState(
           &dialog,
           open: context.open,
@@ -77,13 +70,21 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
           folderId: context.folderId
         )
         try dialog.save(db, onConflict: .replace)
+        return DialogMutationSnapshot(
+          baseline: baseline,
+          optimistic: try Dialog.fetchOne(db, id: dialog.id) ?? dialog,
+          createdRow: existing == nil
+        )
       }
-    } catch {
-      await DialogMutationRollbackTracker.shared.complete(
+      guard let snapshot else { return }
+      await DialogMutationRollbackTracker.shared.record(
         intentID: context.intentId,
         peer: context.peerId,
-        kind: .open
+        kind: .open,
+        snapshot: snapshot,
+        fields: Self.rollbackFields
       )
+    } catch {
       log.error("Failed to optimistically update dialog open state", error: error)
     }
   }
@@ -150,6 +151,15 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     }
   }
 
+  // Neither outcome rolls back, so the intent must stop owning its fields.
+  public func commitOutcomeUnknown() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .open)
+  }
+
+  public func cancelled() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .open)
+  }
+
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogOpen transaction failed", error: error)
     guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
@@ -160,18 +170,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        guard let original = rollback.original else {
-          try Dialog.deleteOne(db, key: Dialog.getDialogId(peerId: context.peerId))
-          return
-        }
-        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
-        dialog.open = original.open
-        dialog.openedDate = original.openedDate
-        dialog.order = original.order
-        dialog.folderId = original.folderId
-        dialog.pinned = original.pinned
-        dialog.archived = original.archived
-        try dialog.save(db, onConflict: .replace)
+        try rollback.apply(db)
       }
     } catch {
       log.error("Failed to roll back dialog open state", error: error)
@@ -188,11 +187,11 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     return [.chatCreated(chatId: chatId)]
   }
 
-  private func optimisticDialog(_ db: Database) throws -> Dialog? {
-    if let dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) {
-      return dialog
-    }
+  private static let rollbackFields: [DialogRollbackField] = [
+    .open, .openedDate, .order, .folderId, .pinned, .archived,
+  ]
 
+  private func newOptimisticDialog(_ db: Database) throws -> Dialog? {
     guard context.open else { return nil }
 
     switch context.peerId {

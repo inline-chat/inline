@@ -75,26 +75,26 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
 
   public func optimistic() async {
     do {
-      let original = try await AppDatabase.shared.reader.read { db in
-        try Dialog.get(peerId: context.peerId).fetchOne(db)
+      let snapshot = try await AppDatabase.shared.dbWriter.write { db -> DialogMutationSnapshot? in
+        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return nil }
+        let baseline = dialog
+        try applyLocalOrder(&dialog, db: db)
+        try dialog.save(db, onConflict: .replace)
+        return DialogMutationSnapshot(
+          baseline: baseline,
+          optimistic: try Dialog.fetchOne(db, id: dialog.id) ?? dialog,
+          createdRow: false
+        )
       }
+      guard let snapshot else { return }
       await DialogMutationRollbackTracker.shared.record(
         intentID: context.intentId,
         peer: context.peerId,
         kind: .order,
-        original: original
+        snapshot: snapshot,
+        fields: Self.rollbackFields
       )
-      try await AppDatabase.shared.dbWriter.write { db in
-        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
-        try applyLocalOrder(&dialog, db: db)
-        try dialog.save(db, onConflict: .replace)
-      }
     } catch {
-      await DialogMutationRollbackTracker.shared.complete(
-        intentID: context.intentId,
-        peer: context.peerId,
-        kind: .order
-      )
       log.error("Failed to optimistically update dialog order", error: error)
     }
   }
@@ -129,31 +129,35 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     }
   }
 
+  // Neither outcome rolls back, so the intent must stop owning its fields.
+  public func commitOutcomeUnknown() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .order)
+  }
+
+  public func cancelled() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .order)
+  }
+
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogOrder transaction failed", error: error)
     guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
       intentID: context.intentId,
       peer: context.peerId,
       kind: .order
-    ), let original = rollback.original else { return }
+    ) else { return }
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
-        dialog.pinned = original.pinned
-        dialog.open = original.open
-        dialog.openedDate = original.openedDate
-        dialog.order = original.order
-        dialog.pinnedOrder = original.pinnedOrder
-        dialog.archived = original.archived
-        dialog.chatListHidden = original.chatListHidden
-        dialog.folderId = original.folderId
-        try dialog.save(db, onConflict: .replace)
+        try rollback.apply(db)
       }
     } catch {
       log.error("Failed to roll back dialog order state", error: error)
     }
   }
+
+  private static let rollbackFields: [DialogRollbackField] = [
+    .pinned, .open, .order, .pinnedOrder, .archived, .chatListHidden, .folderId,
+  ]
 
   public var blockers: [TransactionBlocker] {
     guard context.requiresChatCreated == true,

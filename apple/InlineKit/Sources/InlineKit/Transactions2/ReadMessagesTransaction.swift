@@ -48,27 +48,27 @@ public struct ReadMessagesTransaction: Transaction2 {
     // the existing optimistic interaction contract.
     guard context.maxId == nil, context.intentId != nil else { return }
     do {
-      let original = try await AppDatabase.shared.reader.read { db in
-        try Dialog.get(peerId: context.peerId).fetchOne(db)
+      let snapshot = try await AppDatabase.shared.dbWriter.write { db -> DialogMutationSnapshot? in
+        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return nil }
+        let baseline = dialog
+        dialog.unreadCount = 0
+        dialog.unreadMark = false
+        try dialog.save(db, onConflict: .replace)
+        return DialogMutationSnapshot(
+          baseline: baseline,
+          optimistic: try Dialog.fetchOne(db, id: dialog.id) ?? dialog,
+          createdRow: false
+        )
       }
+      guard let snapshot else { return }
       await DialogMutationRollbackTracker.shared.record(
         intentID: context.intentId,
         peer: context.peerId,
         kind: .read,
-        original: original
+        snapshot: snapshot,
+        fields: [.unreadCount, .unreadMark]
       )
-      try await AppDatabase.shared.dbWriter.write { db in
-        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
-        dialog.unreadCount = 0
-        dialog.unreadMark = false
-        try dialog.save(db, onConflict: .replace)
-      }
     } catch {
-      await DialogMutationRollbackTracker.shared.complete(
-        intentID: context.intentId,
-        peer: context.peerId,
-        kind: .read
-      )
       log.error("Failed to optimistically mark dialog as read", error: error)
     }
   }
@@ -87,20 +87,26 @@ public struct ReadMessagesTransaction: Transaction2 {
     )
   }
 
+  // Neither outcome rolls back, so the intent must stop owning its fields.
+  public func commitOutcomeUnknown() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .read)
+  }
+
+  public func cancelled() async {
+    await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .read)
+  }
+
   public func failed(error: TransactionError2) async {
     log.error("ReadMessages transaction failed", error: error)
     guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
       intentID: context.intentId,
       peer: context.peerId,
       kind: .read
-    ), let original = rollback.original else { return }
+    ) else { return }
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
-        dialog.unreadCount = original.unreadCount
-        dialog.unreadMark = original.unreadMark
-        try dialog.save(db, onConflict: .replace)
+        try rollback.apply(db)
       }
     } catch {
       log.error("Failed to roll back read state", error: error)
