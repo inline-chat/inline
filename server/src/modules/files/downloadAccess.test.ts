@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
+import { GetFilePartInput, RpcError_Code } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { blockContentImageJobs, blockContents, chatParticipants, documents, files, members, messages, messageAttachments, photos, photoSizes, spaces, urlPreview } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { resolveDownloadFile } from "./downloadAccess"
+import { NativeDownloadOperations } from "./downloads"
+import { encrypt } from "@in/server/modules/encryption/encryption"
+import type { HandlerContext } from "@in/server/realtime/types"
 
 describe("native download authorization", () => {
   setupTestLifecycle()
@@ -16,6 +20,47 @@ describe("native download authorization", () => {
     expect((await resolveDownloadFile("IND_private", owner.id))?.id).toBe(file!.id)
     expect(await resolveDownloadFile("IND_private", stranger.id)).toBeUndefined()
     expect(await resolveDownloadFile("IND_missing", stranger.id)).toBeUndefined()
+  })
+
+  test.each(["V2", "V3"] as const)("%s byte requests require the recipient's exact message and current access", async (carrier) => {
+    const owner = await testUtils.createUser("byte-download-owner@example.test")
+    const recipient = await testUtils.createUser("byte-download-recipient@example.test")
+    const stranger = await testUtils.createUser("byte-download-stranger@example.test")
+    const chat = await testUtils.createChat(null, "Byte download", "thread", false, owner.id)
+    await testUtils.addParticipant(chat!.id, recipient.id)
+    const path = encrypt("native-download-test.bin")
+    const [file] = await db.insert(files).values({
+      fileUniqueId: "IND_byte_authorization", userId: owner.id, fileSize: 4,
+      pathEncrypted: path.encrypted, pathIv: path.iv, pathTag: path.authTag,
+    }).returning()
+    const [document] = await db.insert(documents).values({ fileId: file!.id }).returning()
+    await db.insert(messages).values({ messageId: 1, chatId: chat!.id, fromId: owner.id, documentId: document!.id })
+    let reads = 0
+    const operations = new NativeDownloadOperations(resolveDownloadFile, async () => {
+      reads += 1
+      return new Uint8Array([1, 2, 3, 4])
+    })
+    const contextFor = (userId: number): HandlerContext => ({
+      userId, sessionId: 1, connectionId: "byte-authorization-test", sendRaw() {}, sendRpcReply() {},
+      ...(carrier === "V3" ? { inlineProtocol: { permanentAuthKeyId: new Uint8Array(8) } } : {}),
+    })
+    const request = GetFilePartInput.create({
+      fileUniqueId: file!.fileUniqueId, limit: 4, message: { chatId: BigInt(chat!.id), messageId: 1n },
+    })
+    expect((await operations.getPart(request, contextFor(owner.id))).data.length).toBe(4)
+    expect((await operations.getPart(request, contextFor(recipient.id))).data.length).toBe(4)
+    for (const [input, userId] of [
+      [request, stranger.id],
+      [{ ...request, message: undefined }, recipient.id],
+      [{ ...request, message: { ...request.message!, messageId: 2n } }, recipient.id],
+    ] as const) {
+      await expect(operations.getPart(input, contextFor(userId))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    }
+    expect(reads).toBe(2)
+    await db.delete(chatParticipants).where(eq(chatParticipants.chatId, chat!.id))
+    AccessGuardsCache.resetChatParticipant(chat!.id, recipient.id)
+    await expect(operations.getPart(request, contextFor(recipient.id))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(reads).toBe(2)
   })
 
   test("requires the exact message reference and current chat access for documents and thumbnails", async () => {

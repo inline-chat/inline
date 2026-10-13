@@ -7,6 +7,7 @@ import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { NativeDownloadOperations } from "./downloads"
 import { readFileBytes, FileByteLengthError } from "./readFileBytes"
+import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 
 const context: HandlerContext = {
   userId: 1, sessionId: 2, connectionId: "test", sendRaw() {}, sendRpcReply() {},
@@ -16,69 +17,83 @@ const bytes = new Uint8Array([1, 2, 3, 4, 5])
 const encrypted = encrypt("test-download")
 const file = { fileSize: 5, pathEncrypted: encrypted.encrypted, pathIv: encrypted.iv, pathTag: encrypted.authTag } as DbFile
 const request = (offset = 0n, limit = 4) => GetFilePartInput.create({ fileUniqueId: "IND_test", offset, limit })
+const carrierContext = (carrier: "V2" | "V3"): HandlerContext => ({
+  ...context,
+  inlineProtocol: carrier === "V3" ? context.inlineProtocol : undefined,
+})
 
 describe("native download ranges", () => {
-  test("does not serve file bytes on the legacy carrier", async () => {
+  test("requires an authenticated account and session before looking up files", async () => {
     let lookups = 0
     const operations = new NativeDownloadOperations(async () => { lookups += 1; return file })
-    await expect(operations.getPart(request(), { ...context, inlineProtocol: undefined })).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    for (const invalidContext of [
+      { ...carrierContext("V2"), userId: 0 },
+      { ...carrierContext("V2"), sessionId: 0 },
+      { ...context, userId: -1 },
+      { ...context, sessionId: 1.5 },
+    ]) {
+      await expect(operations.getPart(request(), invalidContext)).rejects.toMatchObject({ code: RpcError_Code.UNAUTHENTICATED })
+    }
     expect(lookups).toBe(0)
   })
 
-  test("reads only the requested range, returns exact tail/EOF and a digest", async () => {
+  test.each(["V2", "V3"] as const)("%s reads only the requested range, returns exact tail/EOF and a digest", async (carrier) => {
+    const currentContext = carrierContext(carrier)
     const calls: number[][] = []
     const operations = new NativeDownloadOperations(async () => file, async (_path, offset, length) => {
       calls.push([offset, length])
       return bytes.slice(offset, offset + length)
     })
-    expect(await operations.getPart(request(), context)).toEqual({
+    expect(await operations.getPart(request(), currentContext)).toEqual({
       offset: 0n, totalSize: 5n, data: bytes.slice(0, 4),
       sha256: createHash("sha256").update(bytes.slice(0, 4)).digest(),
     })
-    expect((await operations.getPart(request(4n), context)).data).toEqual(new Uint8Array([5]))
-    expect((await operations.getPart(request(5n), context)).data.length).toBe(0)
+    expect((await operations.getPart(request(4n), currentContext)).data).toEqual(new Uint8Array([5]))
+    expect((await operations.getPart(request(5n), currentContext)).data.length).toBe(0)
     expect(calls).toEqual([[0, 4], [4, 1]])
-    await expect(operations.getPart(request(6n), context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    await expect(operations.getPart(request(6n), currentContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
   })
 
-  test("rejects malformed ranges before authorization or storage I/O", async () => {
+  test.each(["V2", "V3"] as const)("%s rejects malformed ranges before authorization or storage I/O", async (carrier) => {
     let lookups = 0
     const operations = new NativeDownloadOperations(async () => { lookups += 1; return file })
     for (const input of [request(-1n), request(2n ** 63n), request(0n, 0), request(0n, 524289),
       request(0n, 1.5), { ...request(), message: { chatId: 1n, messageId: 0n } },
       { ...request(), message: { chatId: INLINE_TRANSFER_MAX_LOCATOR_ID + 1n, messageId: 1n } }]) {
-      await expect(operations.getPart(input, context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+      await expect(operations.getPart(input, carrierContext(carrier))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     }
     expect(lookups).toBe(0)
   })
 
-  test("does not read missing or unauthorized files", async () => {
+  test.each(["V2", "V3"] as const)("%s does not read missing or unauthorized files", async (carrier) => {
     let reads = 0
     const operations = new NativeDownloadOperations(async () => undefined, async () => { reads += 1; return bytes })
-    await expect(operations.getPart(request(), context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    await expect(operations.getPart(request(), carrierContext(carrier))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     expect(reads).toBe(0)
   })
 
-  test("holds per-session admission until reads settle and recovers after failure", async () => {
+  test.each(["V2", "V3"] as const)("%s holds per-session admission until reads settle and recovers after failure", async (carrier) => {
+    const currentContext = carrierContext(carrier)
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     const operations = new NativeDownloadOperations(async () => file, async () => { await gate; throw new Error("storage failed") })
-    const pending = Array.from({ length: 8 }, () => operations.getPart(request(), context).catch((error: unknown) => error))
-    await expect(operations.getPart(request(), context)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    const pending = Array.from({ length: 8 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
+    await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
     release()
     await Promise.all(pending)
-    await expect(operations.getPart(request(), context)).rejects.toThrow("storage failed")
+    await expect(operations.getPart(request(), currentContext)).rejects.toThrow("storage failed")
   })
 
-  test("bounds global reads across different account sessions", async () => {
+  test.each(["V2", "V3"] as const)("%s bounds global reads across different account sessions", async (carrier) => {
+    const currentContext = carrierContext(carrier)
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     const operations = new NativeDownloadOperations(async () => file, async () => { await gate; return bytes.slice(0, 4) })
-    const pending = Array.from({ length: 64 }, (_, sessionId) => operations.getPart(request(), { ...context, sessionId }))
-    await expect(operations.getPart(request(), { ...context, sessionId: 100 })).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    const pending = Array.from({ length: 64 }, (_, sessionId) => operations.getPart(request(), { ...currentContext, sessionId: sessionId + 1 }))
+    await expect(operations.getPart(request(), { ...currentContext, sessionId: 100 })).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
     release()
     await Promise.all(pending)
-    expect((await operations.getPart(request(), context)).data.length).toBe(4)
+    expect((await operations.getPart(request(), currentContext)).data.length).toBe(4)
   })
 
   test("fails closed on short or oversized storage responses", async () => {
@@ -106,5 +121,82 @@ describe("native download ranges", () => {
     const operations = new NativeDownloadOperations(async () => { abort.abort(); return file }, async () => { reads += 1; return bytes })
     await expect(operations.getPart(request(), { ...context, signal: abort.signal })).rejects.toMatchObject({ name: "AbortError" })
     expect(reads).toBe(0)
+  })
+
+  test("V2 deadlines cancel stalled storage reads and release every session slot", async () => {
+    let reads = 0
+    let canceled = 0
+    const operations = new NativeDownloadOperations(async () => file, async (_path, _offset, length, signal) => {
+      reads += 1
+      if (reads > 8) return bytes.slice(0, length)
+      return readFileBytes(new ReadableStream<Uint8Array>({ cancel() { canceled += 1 } }), length, signal)
+    }, 10)
+    const currentContext = carrierContext("V2")
+    const pending = Array.from({ length: 8 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
+    await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    for (const result of await Promise.all(pending)) {
+      expect(toRealtimeRpcError(result)).toMatchObject({
+        code: RpcError_Code.INTERNAL_ERROR, codeNumber: 408, message: "File download part timed out",
+      })
+    }
+    expect(canceled).toBe(8)
+    const recovered = await Promise.all(Array.from({ length: 8 }, () => operations.getPart(request(), currentContext)))
+    expect(recovered.every((part) => part.data.length === 4)).toBe(true)
+  })
+
+  test("V3 cancellation reaches the storage stream and releases admission before the local deadline", async () => {
+    const controller = new AbortController()
+    let started!: () => void
+    const entered = new Promise<void>((resolve) => { started = resolve })
+    let reads = 0
+    let canceled = false
+    const operations = new NativeDownloadOperations(async () => file, async (_path, _offset, length, signal) => {
+      reads += 1
+      if (reads > 1) return bytes.slice(0, length)
+      started()
+      return readFileBytes(new ReadableStream<Uint8Array>({ cancel() { canceled = true } }), length, signal)
+    })
+    const pending = operations.getPart(request(), { ...context, signal: controller.signal })
+    await entered
+    controller.abort(new DOMException("Carrier disconnected", "AbortError"))
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(canceled).toBe(true)
+    const recovered = await Promise.all(Array.from({ length: 8 }, () => operations.getPart(request(), context)))
+    expect(recovered.every((part) => part.data.length === 4)).toBe(true)
+  })
+
+  test("an external TimeoutError stays the cancellation reason even if the local deadline also expires", async () => {
+    const controller = new AbortController()
+    let started!: () => void
+    const entered = new Promise<void>((resolve) => { started = resolve })
+    const operations = new NativeDownloadOperations(async () => file, async (_path, _offset, length, signal) => {
+      started()
+      // Model a provider that settles after both cancellation sources fired.
+      await new Promise<void>((resolve) => { setTimeout(resolve, 20) })
+      signal?.throwIfAborted()
+      return bytes.slice(0, length)
+    }, 10)
+    const pending = operations.getPart(request(), { ...context, signal: controller.signal })
+    await entered
+    const reason = new DOMException("Carrier application deadline", "TimeoutError")
+    controller.abort(reason)
+    await expect(pending).rejects.toBe(reason)
+  })
+
+  test.each(["V2", "V3"] as const)("%s serves the first and final bounded ranges of a 500 MB document", async (carrier) => {
+    const size = 500_000_000
+    const rangeCalls: number[][] = []
+    const operations = new NativeDownloadOperations(async () => ({ ...file, fileSize: size }), async (_path, offset, length) => {
+      rangeCalls.push([offset, length])
+      return new Uint8Array(length).fill(83)
+    })
+    const first = await operations.getPart(request(0n, 524_288), carrierContext(carrier))
+    expect(first.totalSize).toBe(BigInt(size))
+    expect(first.data.length).toBe(524_288)
+    const lastOffset = Math.floor((size - 1) / 524_288) * 524_288
+    const last = await operations.getPart(request(BigInt(lastOffset), 524_288), carrierContext(carrier))
+    expect(last.data.length).toBe(size - lastOffset)
+    expect(last.sha256).toEqual(createHash("sha256").update(last.data).digest())
+    expect(rangeCalls).toEqual([[0, 524_288], [lastOffset, size - lastOffset]])
   })
 })
