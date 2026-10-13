@@ -619,7 +619,7 @@ class DocumentView: NSView {
     startMonitoringProgress()
 
     // Start the download
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
+    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: documentInfo.document.size)
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
       guard let self else { return }
 
@@ -638,7 +638,7 @@ class DocumentView: NSView {
           self.stopMonitoringProgress()
           if !FileDownloader.isCancellation(error), startedNativeDownload {
             ToastCenter.shared.showError(
-              "Native file download failed. Disable Native File Downloads to retry through CDN."
+              "File download failed. Please try again."
             )
           }
         }

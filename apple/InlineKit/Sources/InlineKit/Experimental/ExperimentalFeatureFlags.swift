@@ -61,12 +61,22 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
   }
 
-  /// A saved opt-in cannot enable the V3-only transport for a bearer session.
+  /// The opt-in also enables native downloads for smaller documents and videos.
   public static var nativeFileDownloadsEnabled: Bool {
     nativeFileDownloadsEnabled(auth: Auth.shared.handle)
   }
 
   static func nativeFileDownloadsEnabled(auth: AuthHandle) -> Bool {
-    UserDefaults.standard.bool(forKey: nativeFileDownloadsKey) && auth.inlineProtocolCredentials() != nil
+    nativeFileDownloadsEnabled(fileByteCount: nil, auth: auth)
+  }
+
+  /// Documents and videos over 100 MB use native downloads on either authenticated realtime transport.
+  public static func nativeFileDownloadsEnabled(fileByteCount: Int?) -> Bool {
+    nativeFileDownloadsEnabled(fileByteCount: fileByteCount, auth: Auth.shared.handle)
+  }
+
+  static func nativeFileDownloadsEnabled(fileByteCount: Int?, auth: AuthHandle) -> Bool {
+    guard (try? auth.beginAccountMutation()) != nil else { return false }
+    return (fileByteCount ?? 0) > 100_000_000 || UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
   }
 }

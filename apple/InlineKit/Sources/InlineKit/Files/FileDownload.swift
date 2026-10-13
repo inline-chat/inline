@@ -267,11 +267,11 @@ public final class FileDownloader: NSObject, Sendable {
     }
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth), let message {
-        let source = try NativeDocumentDownload(auth: auth)
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: document.document.size, auth: auth), let message {
+        let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
-            documentID: document.document.documentId, message: message, to: destination, progress: progress
+            media: .document(document.document.documentId), message: message, to: destination, progress: progress
           )
         }
       } else {
@@ -296,7 +296,7 @@ public final class FileDownloader: NSObject, Sendable {
     let downloadId = "doc_\(document.id)"
     let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
-    log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native-v3")")
+    log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native")")
 
     downloadFile(
       id: downloadId,
@@ -343,7 +343,30 @@ public final class FileDownloader: NSObject, Sendable {
     for message: Message,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
-    guard let urlString = video.video.cdnUrl, let url = URL(string: urlString) else {
+    do {
+      _ = try auth.beginAccountMutation()
+    } catch {
+      completion(.failure(URLError(.cancelled)))
+      return
+    }
+    let nativeDownload: NativeDownloadOperation?
+    do {
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: video.video.size, auth: auth) {
+        let source = try NativeMessageFileDownload(auth: auth)
+        nativeDownload = { destination, progress in
+          try await source.download(
+            media: .video(video.video.videoId), message: message, to: destination, progress: progress
+          )
+        }
+      } else {
+        nativeDownload = nil
+      }
+    } catch {
+      completion(.failure(error))
+      return
+    }
+    let url = video.video.cdnUrl.flatMap(URL.init(string:))
+    guard url != nil || nativeDownload != nil else {
       let error = NSError(
         domain: "FileDownloader",
         code: 404,
@@ -364,6 +387,7 @@ public final class FileDownloader: NSObject, Sendable {
       url: url,
       localUrl: localUrl,
       expectedBytes: Int64(video.video.size ?? 0),
+      nativeDownload: nativeDownload,
       completion: { [weak self] token, result in
         guard let self else { return }
 

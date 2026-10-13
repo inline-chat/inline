@@ -112,7 +112,7 @@ struct ExperimentalSettingsDetailView: View {
       Toggle(isOn: $nativeFileDownloadsEnabled) {
         SettingsRowLabel(
           "Native File Downloads",
-          description: "Download message documents over encrypted realtime. Other media still use CDN."
+          description: "Use native downloads for smaller documents and videos too."
         )
       }
       .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
@@ -120,18 +120,18 @@ struct ExperimentalSettingsDetailView: View {
       SettingsSectionHeader("Files")
     } footer: {
       if nativeFileDownloadsAvailable {
-        Text("Requires server support. Turn off to use standard file downloads.")
+        Text("Documents and videos larger than 100 MB always use native downloads. Other media use standard downloads.")
       } else if nativeFileDownloadsEnabled {
-        Text("Native File Downloads isn’t available for this session. Files use standard downloads. Turn off to clear the saved preference.")
+        Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
       } else {
-        Text("Native File Downloads isn’t available for this session. Files use standard downloads.")
+        Text("Sign in to use native file downloads.")
       }
     }
   }
 
   private var nativeFileDownloadsAvailable: Bool {
     // Observe the existing auth owner so the control updates after a session change.
-    auth.getInlineProtocolCredentials() != nil
+    auth.getIsLoggedIn()
   }
 }
 

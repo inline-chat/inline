@@ -70,11 +70,11 @@ struct ExperimentalView: View {
         Text("Files")
       } footer: {
         if nativeFileDownloadsAvailable {
-          Text("Download message documents over encrypted realtime. Requires server support. Other media still use CDN. Turn off to use standard file downloads.")
+          Text("Use native downloads for smaller documents and videos too. Documents and videos larger than 100 MB always use native downloads. Other media use standard downloads.")
         } else if nativeFileDownloadsEnabled {
-          Text("Native File Downloads isn’t available for this session. Files use standard downloads. Turn off to clear the saved preference.")
+          Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
         } else {
-          Text("Native File Downloads isn’t available for this session. Files use standard downloads.")
+          Text("Sign in to use native file downloads.")
         }
       }
 
@@ -113,7 +113,7 @@ struct ExperimentalView: View {
   }
 
   private var nativeFileDownloadsAvailable: Bool {
-    auth.getInlineProtocolCredentials() != nil
+    auth.getIsLoggedIn()
   }
 }
 

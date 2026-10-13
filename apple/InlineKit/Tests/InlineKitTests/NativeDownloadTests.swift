@@ -34,16 +34,26 @@ private actor DownloadPartMock: NativeFilePartFetching {
   let bytes: Data
   let corruption: Corruption
   let stallOffset: UInt64?
+  let failureOffset: UInt64?
+  let failure: any Error
+  private var failuresRemaining: Int
   let gate = AsyncStream<Void>.makeStream()
   private var requests: [GetFilePartInput] = []
   private var waiters: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
   private var active = 0
   private var maxActive = 0
 
-  init(bytes: Data, corruption: Corruption = .none, stallOffset: UInt64? = nil) {
+  init(
+    bytes: Data, corruption: Corruption = .none, stallOffset: UInt64? = nil,
+    failureOffset: UInt64? = nil, failuresRemaining: Int = 0,
+    failure: any Error = RealtimeDirectRpcError.timeout
+  ) {
     self.bytes = bytes
     self.corruption = corruption
     self.stallOffset = stallOffset
+    self.failureOffset = failureOffset
+    self.failuresRemaining = failuresRemaining
+    self.failure = failure
   }
 
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
@@ -53,6 +63,10 @@ private actor DownloadPartMock: NativeFilePartFetching {
     active += 1
     maxActive = max(maxActive, active)
     defer { active -= 1 }
+    if input.offset == failureOffset, failuresRemaining > 0 {
+      failuresRemaining -= 1
+      throw failure
+    }
     if input.offset == stallOffset {
       for await _ in gate.stream { break }
       try Task.checkCancellation()
@@ -86,15 +100,15 @@ private actor DownloadPartMock: NativeFilePartFetching {
 
 @Suite("Native download session ownership", .serialized)
 @MainActor private struct NativeDownloadSessionTests {
-  @Test(arguments: [false, true], [false, true])
-  func bearerDocumentsUseCDN(savedOptIn: Bool, includeMessage: Bool) async throws {
+  @Test(arguments: [false, true])
+  func smallBearerDocumentsUseCDNWithoutOptIn(includeMessage: Bool) async throws {
     let auth = Auth.mocked(authenticated: true)
     let owner = FileDownloader(auth: auth.handle)
     #expect(auth.getIsLoggedIn())
     #expect(auth.getInlineProtocolCredentials() == nil)
     let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
     let previousPreference = UserDefaults.standard.object(forKey: key)
-    UserDefaults.standard.set(savedOptIn, forKey: key)
+    UserDefaults.standard.set(false, forKey: key)
     defer { UserDefaults.standard.set(previousPreference, forKey: key) }
 
     let document = DocumentInfo(document: Document(
@@ -120,7 +134,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
     #expect(owner.isDocumentDownloadActive(documentId: document.id))
     #expect(owner.currentDocumentProgress(documentId: document.id) != nil)
     #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
-    #expect(UserDefaults.standard.bool(forKey: key) == savedOptIn)
+    #expect(!UserDefaults.standard.bool(forKey: key))
     await owner.resetSession()
     #expect(completions == 1)
     try await completeMockLogout(auth)
@@ -131,7 +145,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
     let owner = FileDownloader(auth: auth.handle)
     let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
     let previousPreference = UserDefaults.standard.object(forKey: key)
-    UserDefaults.standard.set(true, forKey: key)
+    UserDefaults.standard.set(false, forKey: key)
     defer { UserDefaults.standard.set(previousPreference, forKey: key) }
     let document = DocumentInfo(document: Document(documentId: 99006, date: Date()))
     let message = Message(
@@ -152,6 +166,43 @@ private actor DownloadPartMock: NativeFilePartFetching {
     try await completeMockLogout(auth)
   }
 
+  @Test(arguments: [false, true], [100_000_000, 100_000_001, 500_000_000])
+  func authenticatedSessionsRouteBySizeAndOptIn(savedOptIn: Bool, byteCount: Int) async throws {
+    let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
+    let previousPreference = UserDefaults.standard.object(forKey: key)
+    UserDefaults.standard.set(savedOptIn, forKey: key)
+    defer { UserDefaults.standard.set(previousPreference, forKey: key) }
+    for useV3 in [false, true] {
+      let auth = Auth.mocked(authenticated: !useV3)
+      if useV3 {
+        let bytes = [UInt8](repeating: 0x31, count: 256)
+        let authorization = try InlineProtocolAuthorization(
+          key: bytes, keyID: InlineSecureTransport.authKeyID(bytes), serverSalt: 7,
+          temporary: false, expiresAt: nil
+        )
+        try await auth.saveInlineProtocolCredentials(InlineProtocolSessionCredentials(
+          userId: 1, accountSessionId: 84, permanent: authorization
+        ))
+      }
+      #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: byteCount, auth: auth.handle)
+        == (savedOptIn || byteCount > 100_000_000))
+      #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle) == savedOptIn)
+      #expect(try NativeMessageFileDownload(auth: auth.handle).accountToken.userID == 1)
+      #expect(UserDefaults.standard.bool(forKey: key) == savedOptIn)
+      try await completeMockLogout(auth)
+    }
+  }
+
+  @Test func largeFilesCannotEnableDownloadsWithoutAuthentication() {
+    let auth = Auth.mocked(authenticated: false)
+    let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
+    let previousPreference = UserDefaults.standard.object(forKey: key)
+    UserDefaults.standard.set(true, forKey: key)
+    defer { UserDefaults.standard.set(previousPreference, forKey: key) }
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: 500_000_000, auth: auth.handle))
+    #expect(throws: AuthStorageError.self) { try NativeMessageFileDownload(auth: auth.handle) }
+  }
+
   @Test func publishedLogoutCannotAdmitCDNWhenV3Disappears() async throws {
     let auth = Auth.mocked(authenticated: false)
     let owner = FileDownloader(auth: auth.handle)
@@ -170,9 +221,10 @@ private actor DownloadPartMock: NativeFilePartFetching {
     #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
     UserDefaults.standard.set(true, forKey: key)
     #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
-    #expect(try NativeDocumentDownload(auth: auth.handle).accountToken.userID == 1)
+    #expect(try NativeMessageFileDownload(auth: auth.handle).accountToken.userID == 1)
 
     let fence = try auth.beginLogoutSynchronously()
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: 500_000_000, auth: auth.handle))
     await auth.publishLogoutInProgress()
     #expect(auth.getInlineProtocolCredentials() == nil)
     let document = DocumentInfo(document: Document(
@@ -382,7 +434,7 @@ private func downloadDestination() -> URL {
     message.media.document.document.fileUniqueID = "IND_wire"
     var result = GetMessagesResult()
     result.messages = [message]
-    #expect(try NativeDocumentDownload.fileID(in: result, documentID: 30, location: location) == "IND_wire")
+    #expect(try NativeMessageFileDownload.fileID(in: result, media: .document(30), location: location) == "IND_wire")
     for mutation in 0 ..< 4 {
       var changed = result
       switch mutation {
@@ -392,14 +444,35 @@ private func downloadDestination() -> URL {
       default: changed.messages[0].media.document.document.clearFileUniqueID()
       }
       #expect(throws: NativeFileDownloadError.self) {
-        try NativeDocumentDownload.fileID(in: changed, documentID: 30, location: location)
+        try NativeMessageFileDownload.fileID(in: changed, media: .document(30), location: location)
       }
     }
   }
 
+  @Test func videoLookupRequiresExactProvenanceAndRepresentation() throws {
+    var location = FileMessageLocation()
+    location.chatID = 10
+    location.messageID = 20
+    var message = InlineProtocol.Message()
+    message.chatID = 10
+    message.id = 20
+    message.media.video.video.id = 30
+    message.media.video.video.fileUniqueID = "INV_wire"
+    var result = GetMessagesResult()
+    result.messages = [message]
+    #expect(try NativeMessageFileDownload.fileID(in: result, media: .video(30), location: location) == "INV_wire")
+    #expect(throws: NativeFileDownloadError.self) {
+      try NativeMessageFileDownload.fileID(in: result, media: .document(30), location: location)
+    }
+    result.messages[0].media.video.video.id = 31
+    #expect(throws: NativeFileDownloadError.self) {
+      try NativeMessageFileDownload.fileID(in: result, media: .video(30), location: location)
+    }
+  }
+
   @Test func exactFreshRequestReplayTombstoneRetriesOnceAfterAccountValidation() async throws {
-    let probe = FilePartReplayProbe(message: NativeDocumentDownload.freshRequestReplayMessage)
-    let result = try await NativeDocumentDownload.callFilePartRPCWithReplay(
+    let probe = FilePartReplayProbe(message: NativeMessageFileDownload.freshRequestReplayMessage)
+    let result = try await NativeMessageFileDownload.callFilePartRPCWithReplay(
       call: { try await probe.call() },
       validateAccount: { probe.validate() }
     )
@@ -414,7 +487,7 @@ private func downloadDestination() -> URL {
   @Test func nearMatchFreshRequestErrorIsTerminal() async {
     let probe = FilePartReplayProbe(message: "Retry a different RPC")
     await #expect(throws: RealtimeDirectRpcError.self) {
-      _ = try await NativeDocumentDownload.callFilePartRPCWithReplay(
+      _ = try await NativeMessageFileDownload.callFilePartRPCWithReplay(
         call: { try await probe.call() },
         validateAccount: { probe.validate() }
       )
@@ -462,6 +535,92 @@ private func downloadDestination() -> URL {
     await #expect(throws: NativeFileDownloadError.self) {
       try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
     }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(await transport.snapshot().0.filter { $0.offset == 524_288 }.count == 1)
+  }
+
+  @Test func retriesOnlyTheFailedRangeAfterTransientDisconnects() async throws {
+    let bytes = Data(repeating: 3, count: 524_300)
+    let transport = DownloadPartMock(
+      bytes: bytes, failureOffset: 524_288, failuresRemaining: 2, failure: RealtimeDirectRpcError.notConnected
+    )
+    let destination = downloadDestination()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    _ = try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+    #expect(try Data(contentsOf: destination) == bytes)
+    let requests = await transport.snapshot().0
+    #expect(requests.filter { $0.offset == 0 }.count == 1)
+    #expect(requests.filter { $0.offset == 524_288 }.count == 3)
+  }
+
+  @Test func bridgedNetworkErrorsRemainRetryableAndCancellationDoesNot() {
+    #expect(NativeFileDownloader.isRetryableTransportFailure(
+      RealtimeDirectRpcError.unknown(NSError(domain: NSURLErrorDomain, code: URLError.Code.networkConnectionLost.rawValue))
+    ))
+    #expect(!NativeFileDownloader.isRetryableTransportFailure(URLError(.cancelled)))
+    #expect(!NativeFileDownloader.isRetryableTransportFailure(AuthStorageError.loginUnavailable))
+    #expect(!NativeFileDownloader.isRetryableTransportFailure(
+      RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: "failure", code: 500)
+    ))
+  }
+
+  @Test func serverRangeTimeoutRetriesTheCurrentRange() async throws {
+    let bytes = Data(repeating: 3, count: 524_300)
+    let transport = DownloadPartMock(
+      bytes: bytes, failureOffset: 524_288, failuresRemaining: 1,
+      failure: RealtimeDirectRpcError.rpcError(
+        errorCode: .internalError, message: "File download part timed out", code: 408
+      )
+    )
+    let destination = downloadDestination()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    _ = try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+    #expect(try Data(contentsOf: destination) == bytes)
+    let requests = await transport.snapshot().0
+    #expect(requests.filter { $0.offset == 0 }.count == 1)
+    #expect(requests.filter { $0.offset == 524_288 }.count == 2)
+  }
+
+  @Test func exhaustedRangeRetriesRemoveTheIncompleteFile() async throws {
+    let transport = DownloadPartMock(
+      bytes: Data(repeating: 3, count: 524_300), failureOffset: 524_288, failuresRemaining: 3
+    )
+    let destination = downloadDestination()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    await #expect(throws: RealtimeDirectRpcError.self) {
+      try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(await transport.snapshot().0.filter { $0.offset == 524_288 }.count == 3)
+  }
+
+  @Test func permissionFailureDoesNotRetryARange() async throws {
+    let transport = DownloadPartMock(
+      bytes: Data(repeating: 3, count: 524_300), failureOffset: 524_288, failuresRemaining: 3,
+      failure: RealtimeDirectRpcError.rpcError(errorCode: .unauthenticated, message: "denied", code: 403)
+    )
+    let destination = downloadDestination()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    await #expect(throws: RealtimeDirectRpcError.self) {
+      try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(await transport.snapshot().0.filter { $0.offset == 524_288 }.count == 1)
+  }
+
+  @Test func cancellationStopsRangeRetryBackoff() async throws {
+    let transport = DownloadPartMock(
+      bytes: Data([1, 2, 3]), failureOffset: 0, failuresRemaining: 3
+    )
+    let destination = downloadDestination()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let download = Task {
+      try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+    }
+    await transport.waitForRequest(0)
+    download.cancel()
+    await #expect(throws: CancellationError.self) { try await download.value }
+    #expect(await transport.snapshot().0.count == 1)
     #expect(!FileManager.default.fileExists(atPath: destination.path))
   }
 

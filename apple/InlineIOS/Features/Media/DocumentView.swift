@@ -512,7 +512,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     startMonitoringProgress()
 
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
+    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: document.size)
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
       guard let self else { return }
 
@@ -530,8 +530,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
             self.progressSubscription = nil
             if !FileDownloader.isCancellation(error), startedNativeDownload {
               ToastManager.shared.showToast(
-                "Native file download failed",
-                description: "Disable Native File Downloads to retry through CDN.",
+                "File download failed",
+                description: "Please try again.",
                 type: .error,
                 systemImage: "exclamationmark.triangle.fill"
               )

@@ -15,7 +15,6 @@ public enum NativeFileDownloadError: Error, LocalizedError, Sendable {
   case invalidResponse
   case integrity
   case fileTooLarge
-  case requiresV3
 
   public var errorDescription: String? {
     switch self {
@@ -23,16 +22,16 @@ public enum NativeFileDownloadError: Error, LocalizedError, Sendable {
     case .invalidResponse: "The server returned an invalid file response."
     case .integrity: "The downloaded file failed its integrity check."
     case .fileTooLarge: "The file exceeds the download size limit."
-    case .requiresV3: "Native downloads require a V3 session. Turn off Native File Downloads to use CDN."
     }
   }
 }
 
-/// Opt-in file materialization over encrypted V3. Existing CDN consumers are unchanged.
+/// File materialization over authenticated realtime V2 or V3.
 /// Uses at most two pending 512 KiB chunks and never overwrites an existing destination.
 public struct NativeFileDownloader: Sendable {
   private static let partSize: UInt32 = 524_288
   private static let concurrency = 2
+  private static let maximumRangeAttempts = 3
   private let transport: any NativeFilePartFetching
 
   public init(transport: any NativeFilePartFetching) {
@@ -42,13 +41,13 @@ public struct NativeFileDownloader: Sendable {
   /// The caller owns a successful file. Failure/cancellation removes only this
   /// invocation's incomplete destination; existing files are never truncated.
   /// The explicit fetcher must bind every request to one authenticated account
-  /// on a V3 transport. Legacy sessions cannot use this RPC.
+  /// on its realtime transport.
   @concurrent
   public func download(
     fileUniqueID: String,
     message: FileMessageLocation? = nil,
     to destination: URL,
-    maximumByteCount: UInt64 = 500 * 1_024 * 1_024,
+    maximumByteCount: UInt64 = 500_000_000,
     progress: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }
   ) async throws -> URL {
     guard destination.isFileURL, !destination.path.contains("\0"), maximumByteCount > 0,
@@ -143,7 +142,7 @@ public struct NativeFileDownloader: Sendable {
     maximumByteCount: UInt64
   ) async throws -> GetFilePartResult {
     try Task.checkCancellation()
-    let part = try await transport.fetchFilePart(request, timeout: .seconds(30))
+    let part = try await fetchRange(request)
     try Task.checkCancellation()
     guard part.offset == request.offset, part.totalSize > 0,
           part.totalSize <= UInt64(Int64.max), part.totalSize >= request.offset,
@@ -157,12 +156,59 @@ public struct NativeFileDownloader: Sendable {
     guard Data(SHA256.hash(data: part.data)) == part.sha256 else { throw NativeFileDownloadError.integrity }
     return part
   }
+
+  @concurrent
+  private func fetchRange(_ request: GetFilePartInput) async throws -> GetFilePartResult {
+    for attempt in 0 ..< Self.maximumRangeAttempts {
+      try Task.checkCancellation()
+      do {
+        return try await transport.fetchFilePart(request, timeout: .seconds(30))
+      } catch {
+        try Task.checkCancellation()
+        guard attempt + 1 < Self.maximumRangeAttempts, Self.isRetryableTransportFailure(error) else { throw error }
+        try await Task.sleep(for: .milliseconds(250 * (attempt + 1)))
+      }
+    }
+    throw NativeFileDownloadError.invalidResponse
+  }
+
+  static func isRetryableTransportFailure(_ error: any Error) -> Bool {
+    if let error = error as? RealtimeDirectRpcError {
+      switch error {
+      case .notConnected, .timeout, .commitOutcomeUnknown:
+        return true
+      case let .unknown(underlying):
+        return isRetryableNetworkFailure(underlying)
+      case let .rpcError(_, _, code):
+        return code == 408
+      case .notAuthorized, .capacityExceeded:
+        return false
+      }
+    }
+    return isRetryableNetworkFailure(error)
+  }
+
+  private static func isRetryableNetworkFailure(_ error: any Error) -> Bool {
+    let error = error as NSError
+    guard error.domain == NSURLErrorDomain else { return false }
+    switch URLError.Code(rawValue: error.code) {
+    case .timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+      return true
+    default:
+      return false
+    }
+  }
 }
 
 /// Fetch identity at explicit download admission, without adding persistent media
 /// fields for the experiment. Bind all RPCs to the account that started it.
-struct NativeDocumentDownload: NativeFilePartFetching {
+struct NativeMessageFileDownload: NativeFilePartFetching {
   static let freshRequestReplayMessage = "Retry getFilePart with a fresh request ID"
+
+  enum Media: Sendable {
+    case document(Int64)
+    case video(Int64)
+  }
 
   let auth: AuthHandle
   let accountToken: AuthAccountMutationToken
@@ -170,18 +216,23 @@ struct NativeDocumentDownload: NativeFilePartFetching {
   init(auth: AuthHandle = Auth.shared.handle) throws {
     self.auth = auth
     accountToken = try auth.beginAccountMutation()
-    guard auth.inlineProtocolCredentials() != nil else { throw NativeFileDownloadError.requiresV3 }
   }
 
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
     let result = try await Self.callFilePartRPCWithReplay(
       call: {
-        try await Api.realtime.callRpcDirect(
-          method: .getFilePart,
-          input: .getFilePart(input),
-          timeout: timeout,
-          accountToken: accountToken
-        )
+        // Give the existing connection owner time to reconnect before the
+        // range's own RPC stall timeout starts; no deadline spans the file.
+        try await Api.realtime.withUserInitiatedConnection(
+          accountToken: accountToken, timeout: timeout + .seconds(30)
+        ) { realtime in
+          try await realtime.callRpcDirect(
+            method: .getFilePart,
+            input: .getFilePart(input),
+            timeout: timeout,
+            accountToken: accountToken
+          )
+        }
       },
       validateAccount: { try auth.validateAccountMutation(accountToken) }
     )
@@ -218,33 +269,45 @@ struct NativeDocumentDownload: NativeFilePartFetching {
   }
 
   func download(
-    documentID: Int64, message: Message, to destination: URL,
+    media: Media, message: Message, to destination: URL,
     progress: @escaping @Sendable (Int64, Int64) -> Void
   ) async throws -> URL {
     var location = FileMessageLocation()
     location.chatID = message.chatId
     location.messageID = message.messageId
-    let response = try await Api.realtime.callRpcDirect(
-      method: .getMessages,
-      input: .getMessages(.with {
-        $0.peerID = message.peerId.toInputPeer()
-        $0.messageIds = [message.messageId]
-      }), timeout: .seconds(30), accountToken: accountToken
-    )
+    let response = try await Api.realtime.withUserInitiatedConnection(
+      accountToken: accountToken, timeout: .seconds(60)
+    ) { realtime in
+      try await realtime.callRpcDirect(
+        method: .getMessages,
+        input: .getMessages(.with {
+          $0.peerID = message.peerId.toInputPeer()
+          $0.messageIds = [message.messageId]
+        }), timeout: .seconds(30), accountToken: accountToken
+      )
+    }
     try auth.validateAccountMutation(accountToken)
     guard case let .getMessages(messages)? = response else { throw NativeFileDownloadError.invalidResponse }
-    let fileID = try Self.fileID(in: messages, documentID: documentID, location: location)
+    let fileID = try Self.fileID(in: messages, media: media, location: location)
     return try await NativeFileDownloader(transport: self).download(
       fileUniqueID: fileID, message: location, to: destination, progress: progress
     )
   }
 
-  static func fileID(in result: GetMessagesResult, documentID: Int64, location: FileMessageLocation) throws -> String {
-    guard location.chatID > 0, location.messageID > 0, documentID > 0,
-          let message = result.messages.first(where: { $0.chatID == location.chatID && $0.id == location.messageID }),
-          case let .document(media)? = message.media.media,
-          media.document.id == documentID, !media.document.fileUniqueID.isEmpty
+  static func fileID(in result: GetMessagesResult, media: Media, location: FileMessageLocation) throws -> String {
+    guard location.chatID > 0, location.messageID > 0,
+          let message = result.messages.first(where: { $0.chatID == location.chatID && $0.id == location.messageID })
     else { throw NativeFileDownloadError.invalidResponse }
-    return media.document.fileUniqueID
+    let fileID: String
+    switch (media, message.media.media) {
+    case let (.document(id), .document(value)?) where id > 0 && value.document.id == id:
+      fileID = value.document.fileUniqueID
+    case let (.video(id), .video(value)?) where id > 0 && value.video.id == id:
+      fileID = value.video.fileUniqueID
+    default:
+      throw NativeFileDownloadError.invalidResponse
+    }
+    guard !fileID.isEmpty else { throw NativeFileDownloadError.invalidResponse }
+    return fileID
   }
 }

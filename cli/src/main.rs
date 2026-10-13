@@ -21,6 +21,7 @@ mod message_export;
 mod message_output;
 mod message_page;
 mod message_selectors;
+mod native_download;
 mod notifications;
 mod output;
 mod owner_session;
@@ -2017,6 +2018,12 @@ impl From<MessagesTranscriptArgs> for MessagesExportArgs {
 
 #[derive(Args)]
 struct MessagesDownloadArgs {
+    #[arg(
+        long,
+        help = "Download one document through native authenticated file ranges"
+    )]
+    native: bool,
+
     #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
@@ -4129,6 +4136,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let parallel = validate_download_parallel(args.parallel)?;
                     let history_window_download = from_msg_id.is_some();
                     let batch_download = history_window_download || message_ids.len() > 1;
+                    if args.native && batch_download {
+                        return Err(CliError::invalid_args(
+                            "--native requires one --message-id; batch downloads use HTTP",
+                        ).into());
+                    }
                     if batch_download && args.output.is_some() {
                         return Err(CliError::invalid_args(
                             "--output can only be used with one --message-id; use --dir for batch or history-window downloads",
@@ -4164,7 +4176,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             CliError::invalid_args("Message not found for that peer.")
                         })?;
                         let output_path = resolve_download_path(&message, args.output, args.dir)?;
-                        let bytes = download_message_media(&message, &output_path).await?;
+                        let bytes = if args.native {
+                            native_download::download_message_document(&mut realtime, &message, &output_path).await?
+                        } else {
+                            download_message_media(&message, &output_path).await?
+                        };
                         if cli.json {
                             let output = DownloadOutput {
                                 path: output_path.display().to_string(),
