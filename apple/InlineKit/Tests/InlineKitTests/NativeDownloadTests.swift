@@ -166,8 +166,8 @@ private actor DownloadPartMock: NativeFilePartFetching {
     try await completeMockLogout(auth)
   }
 
-  @Test(arguments: [false, true], [100_000_000, 100_000_001, 500_000_000])
-  func authenticatedSessionsRouteBySizeAndOptIn(savedOptIn: Bool, byteCount: Int) async throws {
+  @Test(arguments: [false, true])
+  func authenticatedSessionsRouteByOptInOnly(savedOptIn: Bool) async throws {
     let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
     let previousPreference = UserDefaults.standard.object(forKey: key)
     UserDefaults.standard.set(savedOptIn, forKey: key)
@@ -184,8 +184,6 @@ private actor DownloadPartMock: NativeFilePartFetching {
           userId: 1, accountSessionId: 84, permanent: authorization
         ))
       }
-      #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: byteCount, auth: auth.handle)
-        == (savedOptIn || byteCount > 100_000_000))
       #expect(ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle) == savedOptIn)
       #expect(try NativeMessageFileDownload(auth: auth.handle).accountToken.userID == 1)
       #expect(UserDefaults.standard.bool(forKey: key) == savedOptIn)
@@ -193,13 +191,13 @@ private actor DownloadPartMock: NativeFilePartFetching {
     }
   }
 
-  @Test func largeFilesCannotEnableDownloadsWithoutAuthentication() {
+  @Test func optInCannotEnableDownloadsWithoutAuthentication() {
     let auth = Auth.mocked(authenticated: false)
     let key = ExperimentalFeatureFlags.nativeFileDownloadsKey
     let previousPreference = UserDefaults.standard.object(forKey: key)
     UserDefaults.standard.set(true, forKey: key)
     defer { UserDefaults.standard.set(previousPreference, forKey: key) }
-    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: 500_000_000, auth: auth.handle))
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
     #expect(throws: AuthStorageError.self) { try NativeMessageFileDownload(auth: auth.handle) }
   }
 
@@ -224,7 +222,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
     #expect(try NativeMessageFileDownload(auth: auth.handle).accountToken.userID == 1)
 
     let fence = try auth.beginLogoutSynchronously()
-    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: 500_000_000, auth: auth.handle))
+    #expect(!ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth.handle))
     await auth.publishLogoutInProgress()
     #expect(auth.getInlineProtocolCredentials() == nil)
     let document = DocumentInfo(document: Document(

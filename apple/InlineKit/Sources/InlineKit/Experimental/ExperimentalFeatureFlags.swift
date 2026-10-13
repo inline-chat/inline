@@ -61,22 +61,13 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
   }
 
-  /// The opt-in also enables native downloads for smaller documents and videos.
+  /// Native downloads stay opt-in at every size, on either authenticated realtime transport.
   public static var nativeFileDownloadsEnabled: Bool {
     nativeFileDownloadsEnabled(auth: Auth.shared.handle)
   }
 
   static func nativeFileDownloadsEnabled(auth: AuthHandle) -> Bool {
-    nativeFileDownloadsEnabled(fileByteCount: nil, auth: auth)
-  }
-
-  /// Documents and videos over 100 MB use native downloads on either authenticated realtime transport.
-  public static func nativeFileDownloadsEnabled(fileByteCount: Int?) -> Bool {
-    nativeFileDownloadsEnabled(fileByteCount: fileByteCount, auth: Auth.shared.handle)
-  }
-
-  static func nativeFileDownloadsEnabled(fileByteCount: Int?, auth: AuthHandle) -> Bool {
     guard (try? auth.beginAccountMutation()) != nil else { return false }
-    return (fileByteCount ?? 0) > 100_000_000 || UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
+    return UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
   }
 }

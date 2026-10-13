@@ -70,7 +70,7 @@ struct ExperimentalView: View {
         Text("Files")
       } footer: {
         if nativeFileDownloadsAvailable {
-          Text("Use native downloads for smaller documents and videos too. Documents and videos larger than 100 MB always use native downloads. Other media use standard downloads.")
+          Text("Download documents and videos over the realtime connection. Other media use standard downloads. Turn off to use standard downloads for everything.")
         } else if nativeFileDownloadsEnabled {
           Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
         } else {

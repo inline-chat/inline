@@ -512,7 +512,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     startMonitoringProgress()
 
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: document.size)
+    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
       guard let self else { return }
 

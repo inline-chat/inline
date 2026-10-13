@@ -619,7 +619,7 @@ class DocumentView: NSView {
     startMonitoringProgress()
 
     // Start the download
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: documentInfo.document.size)
+    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
       guard let self else { return }
 

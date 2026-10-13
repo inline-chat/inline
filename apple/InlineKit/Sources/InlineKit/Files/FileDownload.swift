@@ -267,7 +267,7 @@ public final class FileDownloader: NSObject, Sendable {
     }
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: document.document.size, auth: auth), let message {
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth), let message {
         let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
@@ -351,7 +351,7 @@ public final class FileDownloader: NSObject, Sendable {
     }
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(fileByteCount: video.video.size, auth: auth) {
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) {
         let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
