@@ -4,7 +4,7 @@ import ZIPFoundation
 /// Creates an owned ZIP archive. Call from an attachment worker, never from
 /// the UI thread. The caller must remove the returned URL's parent directory.
 public enum FolderArchive {
-  public static func createIfDirectory(at sourceURL: URL) throws -> URL? {
+  public static func createIfDirectory(at sourceURL: URL, preparationTimeout: TimeInterval = 600) throws -> URL? {
     try Task.checkCancellation()
     let hasSecurityScope = sourceURL.startAccessingSecurityScopedResource()
     defer {
@@ -21,6 +21,7 @@ public enum FolderArchive {
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let name = sourceURL.lastPathComponent.isEmpty ? "Folder" : sourceURL.lastPathComponent
     let destination = directory.appendingPathComponent(name + ".zip")
+    let deadline = ContinuousClock.now.advanced(by: .seconds(preparationTimeout))
 
     do {
       var coordinationError: NSError?
@@ -33,7 +34,7 @@ public enum FolderArchive {
       ) { coordinatedSource in
         do {
           try Task.checkCancellation()
-          try writeArchive(from: coordinatedSource, named: name, to: destination)
+          try writeArchive(from: coordinatedSource, named: name, to: destination, deadline: deadline)
           didArchive = true
         } catch {
           archiveError = error
@@ -50,7 +51,7 @@ public enum FolderArchive {
     }
   }
 
-  private static func writeArchive(from source: URL, named name: String, to destination: URL) throws {
+  private static func writeArchive(from source: URL, named name: String, to destination: URL, deadline: ContinuousClock.Instant) throws {
     let archive = try Archive(url: destination, accessMode: .create)
     let outputDirectory = destination.deletingLastPathComponent().resolvingSymlinksInPath()
     // Include the root even when the selected folder is completely empty.
@@ -67,6 +68,7 @@ public enum FolderArchive {
 
     for case let url as URL in entries {
       try Task.checkCancellation()
+      guard ContinuousClock.now < deadline else { throw TransferPreparationError.timedOut }
       // Selecting an ancestor of the temporary directory must not archive our own output.
       if url.resolvingSymlinksInPath() == outputDirectory {
         entries.skipDescendants()
@@ -80,7 +82,19 @@ public enum FolderArchive {
       // and enumerated URLs can spell the same root as /var or /private/var.
       let relativePath = url.pathComponents.suffix(entries.level).joined(separator: "/")
       // addEntry stores link text, rather than traversing links outside the selected folder.
-      try archive.addEntry(with: name + "/" + relativePath, fileURL: url, compressionMethod: .deflate)
+      let progress = Progress(totalUnitCount: 0)
+      let observation = progress.observe(\.completedUnitCount) { progress, _ in
+        if Task.isCancelled || ContinuousClock.now >= deadline { progress.cancel() }
+      }
+      defer { observation.invalidate() }
+      do {
+        try archive.addEntry(with: name + "/" + relativePath, fileURL: url, compressionMethod: .deflate, progress: progress)
+      } catch {
+        try Task.checkCancellation()
+        guard ContinuousClock.now < deadline else { throw TransferPreparationError.timedOut }
+        throw error
+      }
+      try MediaUploadLimits.validate(fileURL: destination, kind: .document)
     }
     if let enumerationError { throw enumerationError }
   }

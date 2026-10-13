@@ -199,7 +199,8 @@ actor TransactionsActor {
         }
 
         // Decide if we should retry
-        if transaction.shouldRetryOnFail(error: error), attempts + 1 < maxAttempts {
+        if transaction.shouldRetryOnFail(error: error),
+           attempts + 1 < min(maxAttempts, max(0, transaction.retryLimit(for: error)) + 1) {
           attempts += 1
           try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
           continue

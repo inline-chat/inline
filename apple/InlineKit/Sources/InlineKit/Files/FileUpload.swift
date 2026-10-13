@@ -5,6 +5,7 @@ import InlineProtocol
 import Logger
 import MultipartFormDataKit
 import AVFoundation
+import Auth
 
 #if canImport(AppKit)
 import AppKit
@@ -131,6 +132,8 @@ public struct UploadProgressSnapshot: Sendable, Equatable {
       errorDescription: error?.localizedDescription
     )
   }
+
+  public var pendingRetryDescription: String? { stage == .failed ? "Waiting to retry" : nil }
 }
 
 public enum UploadStatus {
@@ -192,6 +195,7 @@ public actor FileUploader {
   private var inactivePublisherKeys = BoundedTerminalStateKeys(limit: inactivePublisherRetentionLimit)
   private var activeUploadTokens: [String: UUID] = [:]
   private var uploadResetTask: Task<Void, Never>?
+  private var cancellationTasks: [String: Task<Void, Never>] = [:]
   private var uploadSessionGeneration: UInt64 = 0
 
   private init() {}
@@ -403,7 +407,7 @@ public actor FileUploader {
 
   public func uploadPhoto(
     photoInfo: PhotoInfo
-  ) throws -> Int64 {
+  ) async throws -> Int64 {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     let photoSize = photoInfo.bestPhotoSize()
     guard let photoSize,
@@ -423,7 +427,7 @@ public actor FileUploader {
 
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
 
-    try startUpload(
+    try await startUpload(
       media: .photo(photoInfo),
       localUrl: localUrl,
       mimeType: mimeType,
@@ -479,7 +483,7 @@ public actor FileUploader {
       hasAudio: resolvedVideoInfo.video.hasAudio
     )
 
-    try startUpload(
+    try await startUpload(
       media: .video(resolvedVideoInfo),
       localUrl: localUrl,
       mimeType: mimeType.text,
@@ -503,7 +507,7 @@ public actor FileUploader {
     )
     let fileName = documentInfo.document.fileName ?? "document"
     let mimeType = documentInfo.document.mimeType ?? "application/octet-stream"
-    try startUpload(
+    try await startUpload(
       media: .document(documentInfo),
       localUrl: localUrl,
       mimeType: mimeType,
@@ -541,7 +545,7 @@ public actor FileUploader {
     let uploadId = getUploadId(voiceId: localVoiceId)
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
 
-    try startUpload(
+    try await startUpload(
       media: .voice(voiceContent),
       localUrl: localURL,
       mimeType: mimeType,
@@ -560,7 +564,7 @@ public actor FileUploader {
     priority: TaskPriority = .userInitiated,
     videoMetadata: ApiClient.VideoUploadMetadata? = nil,
     voiceMetadata: ApiClient.VoiceUploadMetadata? = nil
-  ) throws {
+  ) async throws {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
 
     let type: MessageFileType
@@ -583,6 +587,12 @@ public actor FileUploader {
       case let .voice(voiceContent):
         uploadId = getUploadId(voiceId: voiceContent.voiceID)
         type = .voice
+    }
+
+    if let cancellation = cancellationTasks[uploadId] {
+      await cancellation.value
+      try Task.checkCancellation()
+      guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     }
 
     // Check if upload already exists
@@ -906,6 +916,11 @@ public actor FileUploader {
     if let taskInfo = uploadTasks[uploadId] {
       taskInfo.task.cancel()
       releaseCancelledUploadState(uploadId: uploadId)
+      let cancellation = Task {
+        _ = try? await taskInfo.task.value
+        self.cancellationTasks.removeValue(forKey: uploadId)
+      }
+      cancellationTasks[uploadId] = cancellation
     }
   }
 
@@ -921,6 +936,19 @@ public actor FileUploader {
     cancel(uploadId: getUploadId(voiceId: voiceLocalId))
   }
 
+  public func cancel(media: FileMediaItem, accountToken: AuthAccountMutationToken) throws {
+    try Auth.shared.handle.validateAccountMutation(accountToken)
+    switch media {
+    case let .photo(photo):
+      if let id = photo.photo.id { cancel(uploadId: getUploadId(photoId: id)) }
+    case let .video(video):
+      if let id = video.video.id { cancelVideoUpload(videoLocalId: id) }
+    case let .document(document):
+      if let id = document.document.id { cancelDocumentUpload(documentLocalId: id) }
+    case let .voice(voice): cancelVoiceUpload(voiceLocalId: voice.voiceID)
+    }
+  }
+
   public func cancelAll() async {
     if let uploadResetTask {
       await uploadResetTask.value
@@ -931,6 +959,7 @@ public actor FileUploader {
     Log.shared.debug("[FileUploader] Cancelling all uploads")
 
     let tasks = uploadTasks.values.map(\.task)
+    let pendingCancellations = Array(cancellationTasks.values)
     let cleanupMonitors = Array(cleanupTasks.values)
     for (uploadId, taskInfo) in uploadTasks {
       taskInfo.task.cancel()
@@ -951,6 +980,7 @@ public actor FileUploader {
     inactivePublisherKeys.removeAll()
 
     let reset = Task {
+      for cancellation in pendingCancellations { await cancellation.value }
       for task in tasks {
         _ = try? await task.value
       }
@@ -1077,6 +1107,38 @@ public actor FileUploader {
     metadata: ApiClient.VideoUploadMetadata?
   ) async throws -> PreparedVideoUploadPayload {
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    let owner = try Auth.shared.handle.beginAccountMutation()
+    let logicalID = "\(owner.userID):\(uploadId)"
+    if let (stagedURL, prepared) = try await FileNativeUploadStagingStore.shared.preparedVideo(logicalID: logicalID) {
+      try Auth.shared.handle.validateAccountMutation(owner)
+      return PreparedVideoUploadPayload(
+        url: stagedURL, fileName: prepared.fileName, mimeType: prepared.mimeType,
+        metadata: ApiClient.VideoUploadMetadata(
+          width: prepared.width, height: prepared.height, duration: prepared.duration,
+          thumbnail: metadata?.thumbnail, thumbnailMimeType: metadata?.thumbnailMimeType,
+          isAnimated: metadata?.isAnimated ?? false, hasAudio: metadata?.hasAudio
+        ), cleanupAfterUpload: false
+      )
+    }
+    let prepared = try await prepareVideoForUploadUnstaged(
+      uploadId: uploadId, localUrl: localUrl, inputMimeType: inputMimeType, metadata: metadata
+    )
+    do {
+      try Auth.shared.handle.validateAccountMutation(owner)
+      try await FileNativeUploadStagingStore.shared.recordPreparedVideo(.init(
+        fileName: prepared.fileName, mimeType: prepared.mimeType, width: prepared.metadata.width,
+        height: prepared.metadata.height, duration: prepared.metadata.duration
+      ), logicalID: logicalID)
+      return prepared
+    } catch {
+      if prepared.cleanupAfterUpload { try? FileManager.default.removeItem(at: prepared.url) }
+      throw error
+    }
+  }
+
+  private func prepareVideoForUploadUnstaged(
+    uploadId: String, localUrl: URL, inputMimeType: String, metadata: ApiClient.VideoUploadMetadata?
+  ) async throws -> PreparedVideoUploadPayload {
     let requiresMp4Output = inputMimeType.lowercased() != "video/mp4"
 
     let resolvedMetadata = try await resolveVideoUploadMetadata(
@@ -1098,9 +1160,10 @@ public actor FileUploader {
         isAnimated: resolvedMetadata.isAnimated,
         hasAudio: resolvedMetadata.hasAudio
       )
+      let preparedFileName = "\(uploadId).mp4"
       return PreparedVideoUploadPayload(
         url: result.url,
-        fileName: "\(UUID().uuidString).mp4",
+        fileName: preparedFileName,
         mimeType: "video/mp4",
         metadata: compressedMetadata,
         cleanupAfterUpload: true
@@ -1254,27 +1317,31 @@ public actor FileUploader {
   }
 
   private func readVideoMetadata(from localUrl: URL) async throws -> (Int, Int, Int) {
-    let asset = AVURLAsset(url: localUrl)
-    let tracks = try await asset.loadTracks(withMediaType: .video)
-    guard let track = tracks.first else {
-      throw FileUploadError.invalidVideoMetadata
+    let assetBox = PreparationAssetBox(AVURLAsset(url: localUrl))
+    return try await TransferPreparation.withDeadline(seconds: 30, cancel: { assetBox.asset.cancelLoading() }) {
+      let asset = assetBox.asset
+      let tracks = try await asset.loadTracks(withMediaType: .video)
+      guard let track = tracks.first else {
+        throw FileUploadError.invalidVideoMetadata
+      }
+
+      let naturalSize = try await track.load(.naturalSize)
+      let transform = try await track.load(.preferredTransform)
+      let transformedSize = naturalSize.applying(transform)
+      let width = Int(abs(transformedSize.width.rounded()))
+      let height = Int(abs(transformedSize.height.rounded()))
+
+      let durationTime = try await asset.load(.duration)
+      let seconds = CMTimeGetSeconds(durationTime)
+      guard seconds.isFinite, seconds > 0, seconds < Double(Int.max) else { throw FileUploadError.invalidVideoMetadata }
+      let duration = Int(seconds.rounded())
+
+      guard width > 0, height > 0, duration > 0 else {
+        throw FileUploadError.invalidVideoMetadata
+      }
+
+      return (width, height, duration)
     }
-
-    let naturalSize = try await track.load(.naturalSize)
-    let transform = try await track.load(.preferredTransform)
-    let transformedSize = naturalSize.applying(transform)
-    let width = Int(abs(transformedSize.width.rounded()))
-    let height = Int(abs(transformedSize.height.rounded()))
-
-    let durationTime = try await asset.load(.duration)
-    let seconds = CMTimeGetSeconds(durationTime)
-    let duration = Int(seconds.rounded())
-
-    guard width > 0, height > 0, duration > 0 else {
-      throw FileUploadError.invalidVideoMetadata
-    }
-
-    return (width, height, duration)
   }
 
   // MARK: - Wait for Upload

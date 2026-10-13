@@ -1,11 +1,27 @@
 import Foundation
 import InlineProtocol
 import Testing
+import RealtimeV2
 @testable import Auth
 @testable import InlineKit
 
 private enum SimulatedUploadFailure: Error {
   case responseLost
+}
+
+private actor PendingCancelRPCMock: NativeUploadRPCTransport {
+  private(set) var canceled: [Data] = []
+  func callUploadRPC(
+    method: InlineProtocol.Method, input: RpcCall.OneOf_Input?, timeout: Duration?
+  ) async throws -> RpcResult.OneOf_Result? {
+    guard method == .cancelUpload, case let .cancelUpload(cancel)? = input else { return nil }
+    canceled.append(cancel.uploadID)
+    if cancel.uploadID.first == 1 {
+      throw RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: "Expired upload", code: 400)
+    }
+    return .cancelUpload(CancelUploadResult())
+  }
+  func count() -> Int { canceled.count }
 }
 
 private actor UploadRPCMock: NativeUploadRPCTransport {
@@ -463,8 +479,8 @@ struct NativeUploadTests {
     #expect(!(await staging.wasDiscarded()))
   }
 
-  @Test("document size admission includes 500 MB and rejects the next byte", arguments: [297_000_000, 500_000_000, 500_000_001])
-  func documentSizeBoundary(byteCount: Int) async throws {
+  @Test("document and video admission include 500 MB and reject the next byte", arguments: [297_000_000, 500_000_000, 500_000_001], [UploadKind.document, .video])
+  func documentSizeBoundary(byteCount: Int, kind: UploadKind) async throws {
     let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     FileManager.default.createFile(atPath: source.path, contents: Data())
     let handle = try FileHandle(forWritingTo: source)
@@ -477,7 +493,7 @@ struct NativeUploadTests {
     do {
       _ = try await coordinator.upload(NativeMediaUploadRequest(
         logicalID: "document:boundary", fileURL: source, fileName: "boundary.zip",
-        mimeType: "application/zip", kind: .document
+        mimeType: "application/zip", kind: kind
       ), progress: { _, _ in })
       Issue.record("Expected the admission probe or size rejection")
     } catch is SimulatedUploadFailure {
@@ -677,6 +693,15 @@ struct NativeUploadTests {
     #expect(!(await staging.wasDiscarded()))
     #expect(!(await transport.calledMethods().contains(.cancelUpload)))
     #expect(await transport.calledMethods().contains(.finishUpload))
+    let previousID = try #require(await transport.createdUploadIDs().first)
+    do {
+      _ = try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:processing-timeout", fileURL: source, fileName: "photo.jpg",
+        mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+      Issue.record("Expected another processing timeout")
+    } catch NativeMediaUploadError.processingTimedOut {}
+    #expect(await transport.createdUploadIDs() == [previousID, previousID])
   }
 
   @Test("the processing deadline starts after healthy part transfers finish")
@@ -985,6 +1010,83 @@ struct NativeUploadTests {
       progress: { _, _ in }
     )
     #expect(FileManager.default.fileExists(atPath: staged.path) == false)
+  }
+
+  @Test("explicit cancel rotates the durable identity across a relaunch")
+  func cancellationRotatesIdentity() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let stagingRoot = root.appendingPathComponent("staged")
+    let transport = UploadRPCMock(processingForever: true)
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: FileNativeUploadStagingStore(root: stagingRoot), ownerScope: { "test-owner" }
+    )
+    let request = NativeMediaUploadRequest(
+      logicalID: "document:cancel-restart", fileURL: source, fileName: "source",
+      mimeType: "application/octet-stream", kind: .document
+    )
+    let task = Task { try await coordinator.upload(request, progress: { _, _ in }) }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while !(await transport.calledMethods().contains(.finishUpload)), ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+    let relaunched = DurableUploadCoordinator(
+      transport: transport, staging: FileNativeUploadStagingStore(root: stagingRoot),
+      processingTimeout: .milliseconds(20), ownerScope: { "test-owner" }
+    )
+    do { _ = try await relaunched.upload(request, progress: { _, _ in }) }
+    catch NativeMediaUploadError.processingTimedOut {}
+    let ids = await transport.createdUploadIDs()
+    #expect(ids.count == 2)
+    #expect(ids.first != ids.last)
+  }
+
+  @Test("prepared video metadata and pending cancels persist with their owner")
+  func durablePreparedVideoAndCancellation() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("video.mp4")
+    try Data([1, 2, 3]).write(to: source)
+    let store = FileNativeUploadStagingStore(root: root.appendingPathComponent("staged"))
+    let logicalID = "1600:video_1"
+    let staged = try await store.stage(logicalID: logicalID, sourceURL: source)
+    try await store.recordPreparedVideo(.init(
+      fileName: "video_1.mp4", mimeType: "video/mp4", width: 1280, height: 720, duration: 90
+    ), logicalID: logicalID)
+    let restored = FileNativeUploadStagingStore(root: root.appendingPathComponent("staged"))
+    let (restoredURL, metadata) = try #require(await restored.preparedVideo(logicalID: logicalID))
+    #expect(restoredURL == staged)
+    #expect(metadata.width == 1280)
+    #expect(metadata.duration == 90)
+    #expect(try await restored.preparedVideo(logicalID: "1700:video_1") == nil)
+    let uploadID = Data(repeating: 3, count: 16)
+    await store.recordPendingCancellation(uploadID: uploadID, owner: "1600")
+    #expect(await restored.pendingCancellationIDs(owner: "1600") == [uploadID])
+    #expect(await restored.pendingCancellationIDs(owner: "1700").isEmpty)
+    await restored.removePendingCancellation(uploadID: uploadID, owner: "1600")
+    #expect(await store.pendingCancellationIDs(owner: "1600").isEmpty)
+  }
+
+  @Test("stale cancellation records cannot block still-active owners")
+  func stalePendingCancellationDoesNotBlockBatch() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let staging = FileNativeUploadStagingStore(root: root)
+    await staging.recordPendingCancellation(uploadID: Data(repeating: 1, count: 16), owner: "1600")
+    await staging.recordPendingCancellation(uploadID: Data(repeating: 2, count: 16), owner: "1600")
+    await staging.recordPendingCancellation(uploadID: Data(repeating: 3, count: 16), owner: "1700")
+    let transport = PendingCancelRPCMock()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "1600" })
+    await coordinator.retryPendingCancellations()
+    #expect(await transport.count() == 2)
+    #expect(await staging.pendingCancellationIDs(owner: "1600").isEmpty)
+    #expect(await staging.pendingCancellationIDs(owner: "1700").count == 1)
   }
 
   @Test("discards unaddressable staging when canceled before create")

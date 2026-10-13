@@ -6,6 +6,17 @@ import ZIPFoundation
 
 @Suite("Folder ZIP attachments")
 struct FolderArchiveTests {
+  @Test("folder preparation has a deadline and preserves the source")
+  func boundedPreparation() throws {
+    let root = try fixtureDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("keep.txt")
+    try Data("keep".utf8).write(to: source)
+    #expect(throws: TransferPreparationError.self) {
+      try FolderArchive.createIfDirectory(at: root, preparationTimeout: 0)
+    }
+    #expect(try Data(contentsOf: source) == Data("keep".utf8))
+  }
   #if os(macOS)
   @Test("ZIP round-trip preserves nested files, Unicode names, and empty directories")
   func roundTrip() throws {

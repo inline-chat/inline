@@ -4644,28 +4644,7 @@ private extension MessagesCollectionView {
         }
 
         let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { _ in
-          if let transactionId = message.transactionId, !transactionId.isEmpty {
-            Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
-
-            Transactions.shared.cancel(transactionId: transactionId)
-            Task {
-              _ = try? await AppDatabase.shared.dbWriter.write { db in
-                try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
-              }
-
-              MessagesPublisher.shared
-                .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
-            }
-          } else {
-            let randomId = message.randomId
-            Task {
-              Api.realtime.cancelTransaction(where: {
-                guard $0.transaction.method == .sendMessage else { return false }
-                guard case let .sendMessage(input) = $0.transaction.input else { return false }
-                return input.randomID == randomId
-              })
-            }
-          }
+          PendingMessageCanceller.cancel(fullMessage)
         }
         actions.append(cancelAction)
 
@@ -4689,6 +4668,15 @@ private extension MessagesCollectionView {
             }
           }
           actions.append(copyPhotoAction)
+        }
+
+        if let document = fullMessage.documentInfo?.document, let localPath = document.localPath,
+           FileManager.default.fileExists(atPath: FileHelpers.getLocalCacheDirectory(for: .documents)
+             .appendingPathComponent(localPath).path) {
+          actions.append(UIAction(title: "Open Document", image: UIImage(systemName: "doc.text.magnifyingglass")) { [weak cell] _ in
+            guard let cell, cell.message?.id == fullMessage.id else { return }
+            cell.messageView?.documentView.openFile()
+          })
         }
 
         let resendAction = UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
@@ -5026,67 +5014,9 @@ private extension MessagesCollectionView {
     }
 
     func resendMessage(_ fullMessage: FullMessage) {
-      let message = fullMessage.message
-
-      Task {
-        // Reconstruct media items from the failed message
-        var mediaItems: [FileMediaItem] = []
-
-        // Handle photo
-        if let photoInfo = fullMessage.photoInfo {
-          let mediaItem = FileMediaItem.photo(photoInfo)
-          mediaItems.append(mediaItem)
-        }
-
-        // Handle video
-        if let videoInfo = fullMessage.videoInfo {
-          let mediaItem = FileMediaItem.video(videoInfo)
-          mediaItems.append(mediaItem)
-        }
-
-        // Handle document
-        if let documentInfo = fullMessage.documentInfo {
-          let mediaItem = FileMediaItem.document(documentInfo)
-          mediaItems.append(mediaItem)
-        }
-
-        // Delete the failed message first
-        _ = try? await AppDatabase.shared.dbWriter.write { db in
-          try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
-        }
-
-        await MainActor.run {
-          MessagesPublisher.shared
-            .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
-        }
-
-        // Send new message with reconstructed data
-        if mediaItems.isEmpty {
-          // Text-only message
-          try await Api.realtime.send(
-            .sendMessage(
-              text: message.text ?? "",
-              peerId: message.peerId,
-              chatId: message.chatId,
-              replyToMsgId: message.repliedToMessageId, // Preserve original reply
-              isSticker: message.isSticker,
-              entities: message.entities
-            )
-          )
-        } else {
-          // Message with media
-          await Transactions.shared.mutate(
-            transaction: .sendMessage(.init(
-              text: message.text,
-              peerId: message.peerId,
-              chatId: message.chatId,
-              mediaItems: mediaItems,
-              replyToMsgId: message.repliedToMessageId, // Preserve original reply
-              isSticker: message.isSticker,
-              entities: message.entities
-            ))
-          )
-        }
+      Task { @MainActor in
+        do { try await FailedMessageResender.resend(fullMessage) }
+        catch { ToastManager.shared.showToast(error.localizedDescription, type: .error) }
       }
     }
 

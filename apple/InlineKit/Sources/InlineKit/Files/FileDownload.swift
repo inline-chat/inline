@@ -49,6 +49,17 @@ enum DownloadedFileValidation {
       throw FileDownloadValidationError.byteCountMismatch(expected: expectedByteCount, actual: byteCount)
     }
   }
+  /// Legacy metadata may describe a different object size. Return its mismatch
+  /// for diagnostics while retaining a successfully materialized CDN object.
+  static func validateCDNFile(at url: URL, expectedByteCount: Int64) throws -> FileDownloadValidationError? {
+    do {
+      try validateDocumentFile(at: url, expectedByteCount: expectedByteCount)
+      return nil
+    } catch let mismatch as FileDownloadValidationError {
+      guard case .byteCountMismatch = mismatch else { throw mismatch }
+      return mismatch
+    }
+  }
 }
 
 final class DownloadProgressThrottler: @unchecked Sendable {
@@ -193,6 +204,12 @@ public final class FileDownloader: NSObject, Sendable {
   private var progressPublishers: [String: CurrentValueSubject<DownloadProgress, Never>] = [:]
   private var latestProgress: [String: DownloadProgress] = [:]
   private var activeTasks: [String: URLSessionDownloadTask] = [:]
+  private var joinedCompletions: [UUID: [(UUID, Result<URL, Error>) -> Void]] = [:]
+  private struct RequestCompletions {
+    let token: UUID
+    var handlers: [(Result<URL, Error>) -> Void]
+  }
+  private var requestCompletions: [String: RequestCompletions] = [:]
   // Keep canceled native work owned until it settles, including during logout.
   private var nativeTasks: [UUID: Task<Void, Never>] = [:]
   private var activeDownloadTokens: [String: UUID] = [:]
@@ -294,6 +311,11 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "doc_\(document.id)"
+    if joinRequest(id: downloadId, completion: completion) { return }
+    let requestToken = registerRequest(id: downloadId, completion: completion)
+    let completion: (Result<URL, Error>) -> Void = { [weak self] result in
+      self?.finishRequest(id: downloadId, token: requestToken, result: result)
+    }
     let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
     log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native")")
@@ -310,9 +332,15 @@ public final class FileDownloader: NSObject, Sendable {
         switch result {
           case let .success(fileUrl):
             do {
-              try DownloadedFileValidation.validateDocumentFile(
+              if nativeDownload != nil {
+                try DownloadedFileValidation.validateDocumentFile(
+                  at: fileUrl, expectedByteCount: Int64(document.document.size ?? 0)
+                )
+              } else if let mismatch = try DownloadedFileValidation.validateCDNFile(
                 at: fileUrl, expectedByteCount: Int64(document.document.size ?? 0)
-              )
+              ) {
+                self.log.warning("CDN file size mismatch for \(downloadId): \(mismatch); accepting legacy object")
+              }
             } catch {
               try? FileManager.default.removeItem(at: fileUrl)
               self.failDownload(id: downloadId, token: token, error: error)
@@ -378,6 +406,11 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "video_\(video.id)"
+    if joinRequest(id: downloadId, completion: completion) { return }
+    let requestToken = registerRequest(id: downloadId, completion: completion)
+    let completion: (Result<URL, Error>) -> Void = { [weak self] result in
+      self?.finishRequest(id: downloadId, token: requestToken, result: result)
+    }
     let fileExtension = "mp4"
     let localPath = "\(UUID().uuidString).\(fileExtension)"
     let localUrl = FileCache.getUrl(for: .videos, localPath: localPath)
@@ -393,6 +426,22 @@ public final class FileDownloader: NSObject, Sendable {
 
         switch result {
           case let .success(fileUrl):
+            do {
+              if nativeDownload != nil {
+                try DownloadedFileValidation.validateDocumentFile(
+                  at: fileUrl, expectedByteCount: Int64(video.video.size ?? 0)
+                )
+              } else if let mismatch = try DownloadedFileValidation.validateCDNFile(
+                at: fileUrl, expectedByteCount: Int64(video.video.size ?? 0)
+              ) {
+                self.log.warning("CDN file size mismatch for \(downloadId): \(mismatch); accepting legacy object")
+              }
+            } catch {
+              try? FileManager.default.removeItem(at: fileUrl)
+              self.failDownload(id: downloadId, token: token, error: error)
+              completion(.failure(error))
+              return
+            }
             // Notify FileCache to update database
             self.startFinalization(id: downloadId, token: token) { [weak self] in
               guard let self else { return }
@@ -552,6 +601,8 @@ public final class FileDownloader: NSObject, Sendable {
 
     let cancellation = URLError(.cancelled)
     let completions = Array(downloadCompletions.values)
+    let joined = joinedCompletions
+    joinedCompletions.removeAll()
     let finalizations = finalizationTasks.values.map(\.task)
     let nativeTransfers = Array(nativeTasks.values)
     let reset = Task {
@@ -597,6 +648,14 @@ public final class FileDownloader: NSObject, Sendable {
       completion.handler(.failure(cancellation))
     }
 
+    for (token, handlers) in joined {
+      for handler in handlers { handler(token, .failure(cancellation)) }
+    }
+    let requests = requestCompletions
+    requestCompletions.removeAll()
+    for request in requests.values {
+      for handler in request.handlers { handler(.failure(cancellation)) }
+    }
     await reset.value
     sessionResetTask = nil
   }
@@ -681,6 +740,36 @@ public final class FileDownloader: NSObject, Sendable {
     }
   }
 
+  private func joinRequest(id: String, completion: @escaping (Result<URL, Error>) -> Void) -> Bool {
+    guard var request = requestCompletions[id] else { return false }
+    request.handlers.append(completion)
+    requestCompletions[id] = request
+    return true
+  }
+
+  private func registerRequest(id: String, completion: @escaping (Result<URL, Error>) -> Void) -> UUID {
+    let token = UUID()
+    requestCompletions[id] = RequestCompletions(token: token, handlers: [completion])
+    return token
+  }
+
+  private func finishRequest(id: String, token: UUID, result: Result<URL, Error>) {
+    guard requestCompletions[id]?.token == token else { return }
+    let handlers = requestCompletions.removeValue(forKey: id)?.handlers ?? []
+    // Terminal handlers may synchronously request this file again. Release the
+    // old owner first so that admission cannot attach to an already-finished task.
+    if downloadCompletions[id] == nil, let transferToken = activeDownloadTokens[id] {
+      activeDownloadTokens[id] = nil
+      if finalizationTasks[id]?.token == transferToken { finalizationTasks[id] = nil }
+    }
+    for handler in handlers { handler(result) }
+  }
+
+  private func deliverJoinedResult(token: UUID, result: Result<URL, Error>) {
+    let handlers = joinedCompletions.removeValue(forKey: token) ?? []
+    for handler in handlers { handler(token, result) }
+  }
+
   private func cancelDownload(id: String) {
     // Once all bytes have arrived, let cache publication choose the outcome.
     // Canceling that commit could report cancellation for an already-saved file.
@@ -705,7 +794,9 @@ public final class FileDownloader: NSObject, Sendable {
     activeDownloadTokens[id] = nil
     clearRetainedProgress(id: id)
     if let completion = downloadCompletions.removeValue(forKey: id) {
+      let joined = joinedCompletions.removeValue(forKey: completion.token) ?? []
       completion.handler(.failure(URLError(.cancelled)))
+      for handler in joined { handler(completion.token, .failure(URLError(.cancelled))) }
     }
   }
 
@@ -726,13 +817,8 @@ public final class FileDownloader: NSObject, Sendable {
       completion(token, .failure(URLError(.cancelled)))
       return
     }
-    guard activeDownloadTokens[id] == nil else {
-      let error = NSError(
-        domain: "FileDownloader",
-        code: 409,
-        userInfo: [NSLocalizedDescriptionKey: "A download is already active for this file"]
-      )
-      completion(token, .failure(error))
+    if let activeToken = activeDownloadTokens[id] {
+      joinedCompletions[activeToken, default: []].append(completion)
       return
     }
 
@@ -774,14 +860,17 @@ public final class FileDownloader: NSObject, Sendable {
         do {
           try FileManager.default.moveItem(at: fileUrl, to: localUrl)
           completion(token, .success(localUrl))
+          self.deliverJoinedResult(token: token, result: .success(localUrl))
         } catch {
           try? FileManager.default.removeItem(at: fileUrl)
           log.error("Error moving downloaded file", error: error)
           self.failDownload(id: id, token: token, error: error)
           completion(token, .failure(error))
+          self.deliverJoinedResult(token: token, result: .failure(error))
         }
       } else {
         completion(token, result)
+        self.deliverJoinedResult(token: token, result: result)
       }
 
       // Clean up
@@ -826,11 +915,13 @@ public final class FileDownloader: NSObject, Sendable {
         }
         self.nativeTasks[token] = nil
         self.downloadCompletions.removeValue(forKey: id)?.handler(.success(file))
+        self.deliverJoinedResult(token: token, result: .success(file))
       } catch {
         guard self.isActiveDownload(id: id, token: token) else { return }
         self.nativeTasks[token] = nil
         self.failDownload(id: id, token: token, error: error)
         self.downloadCompletions.removeValue(forKey: id)?.handler(.failure(error))
+        self.deliverJoinedResult(token: token, result: .failure(error))
       }
     }
     // Install ownership/completion before an observer can synchronously cancel.

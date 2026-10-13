@@ -540,7 +540,7 @@ class DocumentView: NSView {
         uploadProgressRing.isHidden = false
         uploadCancelButton.isHidden = false
         uploadProgressRing.setProgress(0)
-        fileSizeLabel.stringValue = "Processing"
+        fileSizeLabel.stringValue = uploadProgressSnapshot?.pendingRetryDescription ?? "Processing"
 
       case let .uploading(bytesSent, totalBytes):
         iconView.isHidden = true
@@ -576,6 +576,10 @@ class DocumentView: NSView {
       // Cancel the download
       FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
 
+      // Once persistence owns the final bytes, cancellation is intentionally
+      // ignored. Keep observing its completion instead of showing a restart.
+      guard !FileDownloader.shared.isDocumentDownloadActive(documentId: documentInfo.id) else { return }
+
       // Reset state
       documentState = .needsDownload
 
@@ -601,7 +605,7 @@ class DocumentView: NSView {
       return
     }
 
-    if case .downloading = documentState {
+    if case .downloading = documentState, !saveToDownloadsWhenFinished {
       return
     }
 
@@ -609,7 +613,6 @@ class DocumentView: NSView {
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
       documentState = determineDocumentState(documentInfo)
       startMonitoringProgress()
-      return
     }
 
     // Set initial downloading state
@@ -667,7 +670,17 @@ class DocumentView: NSView {
     let state = determineDocumentState(documentInfo)
     switch state {
     case .uploadFailed:
-      break
+      menu.addItem(documentMenuItem(
+        title: "Resend", symbolName: "arrow.clockwise", action: #selector(resendFailedDocument)
+      ))
+      if currentLocalDocumentURL() != nil {
+        menu.addItem(documentMenuItem(
+          title: "Open Document", symbolName: "doc.text.magnifyingglass", action: #selector(openDocumentFromMenu)
+        ))
+        menu.addItem(documentMenuItem(
+          title: "Show in Finder", symbolName: "folder", action: #selector(showDocumentInFinderFromMenu)
+        ))
+      }
     case .locallyAvailable:
       menu.addItem(documentMenuItem(
         title: "Open Document",
@@ -714,6 +727,14 @@ class DocumentView: NSView {
 
   @objc private func openDocumentFromMenu() {
     openQuickLook()
+  }
+
+  @objc private func resendFailedDocument() {
+    guard let fullMessage else { return }
+    Task { @MainActor in
+      do { try await FailedMessageResender.resend(fullMessage) }
+      catch { ToastCenter.shared.showError(error.localizedDescription) }
+    }
   }
 
   @objc private func showDocumentInFinderFromMenu() {
@@ -781,7 +802,9 @@ class DocumentView: NSView {
       }
     case .needsDownload:
       downloadAction(saveToDownloadsWhenFinished: false)
-    case .downloading, .uploadProcessing, .uploading, .uploadFailed:
+    case .uploadFailed:
+      resendFailedDocument()
+    case .downloading, .uploadProcessing, .uploading:
       break
     }
   }
@@ -1039,44 +1062,8 @@ class DocumentView: NSView {
   }
 
   private func cancelPendingDocumentMessage() {
-    guard let fullMessage, let documentLocalId = documentInfo.document.id else { return }
-
+    guard let fullMessage, PendingMessageCanceller.cancel(fullMessage) else { return }
     clearUploadProgressBinding(resetState: false)
-
-    Task {
-      await FileUploader.shared.cancelDocumentUpload(documentLocalId: documentLocalId)
-    }
-
-    if let transactionId = fullMessage.message.transactionId, !transactionId.isEmpty {
-      Transactions.shared.cancel(transactionId: transactionId)
-    } else if let randomId = fullMessage.message.randomId {
-      Task {
-        Api.realtime.cancelTransaction(where: {
-          guard $0.transaction.method == .sendMessage else { return false }
-          guard case let .sendMessage(input) = $0.transaction.input else { return false }
-          return input.randomID == randomId
-        })
-      }
-    }
-
-    Task(priority: .userInitiated) { [message = fullMessage.message] in
-      let chatId = message.chatId
-      let messageId = message.messageId
-      let peerId = message.peerId
-
-      do {
-        try await AppDatabase.shared.dbWriter.write { db in
-          try Message
-            .filter(Column("chatId") == chatId)
-            .filter(Column("messageId") == messageId)
-            .deleteAll(db)
-        }
-
-        MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
-      } catch {
-        Log.shared.error("Failed to delete local message row for document cancel", error: error)
-      }
-    }
   }
 }
 

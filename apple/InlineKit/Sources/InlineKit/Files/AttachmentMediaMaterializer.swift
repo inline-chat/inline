@@ -47,7 +47,11 @@ public enum AttachmentMediaMaterializer {
   }
 
   public static func file(_ url: URL) async throws -> FileMediaItem {
-    if let archive = try FolderArchive.createIfDirectory(at: url) {
+    let worker = Task.detached(priority: .userInitiated) { try FolderArchive.createIfDirectory(at: url) }
+    let archive = try await withTaskCancellationHandler {
+      try await worker.value
+    } onCancel: { worker.cancel() }
+    if let archive {
       defer { try? FileManager.default.removeItem(at: archive.deletingLastPathComponent()) }
       return .document(try await FileCache.saveDocumentWithThumbnail(url: archive))
     }

@@ -67,6 +67,26 @@ struct FileDownloadValidationTests {
     try DownloadedFileValidation.validateDocumentFile(at: file, expectedByteCount: 0)
   }
 
+  @Test("CDN documents and videos retain objects when legacy metadata differs", arguments: [2, 4])
+  func acceptsCDNSizeMismatch(actualByteCount: Int) throws {
+    let file = temporaryFile()
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(repeating: 0x41, count: actualByteCount).write(to: file)
+    let mismatch = try DownloadedFileValidation.validateCDNFile(at: file, expectedByteCount: 3)
+    #expect(mismatch == .byteCountMismatch(expected: 3, actual: Int64(actualByteCount)))
+    #expect(FileManager.default.fileExists(atPath: file.path))
+    #expect(throws: FileDownloadValidationError.byteCountMismatch(expected: 3, actual: Int64(actualByteCount))) {
+      try DownloadedFileValidation.validateDocumentFile(at: file, expectedByteCount: 3)
+    }
+  }
+
+  @Test("CDN validation still rejects an unreadable materialized file")
+  func rejectsMissingCDNFile() {
+    #expect(throws: (any Error).self) {
+      try DownloadedFileValidation.validateCDNFile(at: temporaryFile(), expectedByteCount: 3)
+    }
+  }
+
   private func response(status: Int, headers: [String: String] = [:]) throws -> HTTPURLResponse {
     try #require(HTTPURLResponse(
       url: URL(string: "https://download.invalid/file")!,

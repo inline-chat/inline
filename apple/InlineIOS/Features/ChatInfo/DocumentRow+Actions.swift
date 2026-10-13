@@ -82,6 +82,7 @@ extension DocumentRow {
   func cancelDownload() {
     if case .downloading = documentState {
       FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
+      guard !FileDownloader.shared.isDocumentDownloadActive(documentId: documentInfo.id) else { return }
 
       documentState = .needsDownload
       progressSubscription?.cancel()

@@ -5,6 +5,28 @@ import InlineProtocol
 import Logger
 import RealtimeV2
 
+public enum MediaUploadLimits {
+  public static func maximumByteCount(for kind: UploadKind) -> Int? {
+    switch kind {
+    case .photo: 40_000_000
+    case .video, .document: 500_000_000
+    case .voice: 20_000_000
+    case .unspecified, .UNRECOGNIZED: nil
+    }
+  }
+
+  public static func validate(fileURL: URL, kind: UploadKind) throws {
+    guard let limit = maximumByteCount(for: kind) else { throw NativeMediaUploadError.fileTooLarge }
+    let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size <= limit else { throw AttachmentSizeLimitError(maximumBytes: limit) }
+  }
+}
+
+public struct AttachmentSizeLimitError: LocalizedError, Sendable {
+  public let maximumBytes: Int
+  public var errorDescription: String? { "This file is too large. The upload limit is \(maximumBytes / 1_000_000) MB." }
+}
+
 let maximumUploadProcessingRetrySeconds: UInt32 = 30
 
 func boundedUploadProcessingRetrySeconds(_ seconds: UInt32) -> UInt32 {
@@ -49,6 +71,19 @@ public protocol MediaUploading: Sendable {
 public protocol NativeUploadStaging: Sendable {
   func stage(logicalID: String, sourceURL: URL) async throws -> URL
   func discard(logicalID: String) async
+  func identitySalt(logicalID: String) async throws -> Data
+  func invalidateIdentity(logicalID: String) async
+  func pendingCancellationIDs(owner: String) async -> [Data]
+  func recordPendingCancellation(uploadID: Data, owner: String) async
+  func removePendingCancellation(uploadID: Data, owner: String) async
+}
+
+extension NativeUploadStaging {
+  public func identitySalt(logicalID: String) async throws -> Data { Data() }
+  public func invalidateIdentity(logicalID: String) async {}
+  public func pendingCancellationIDs(owner: String) async -> [Data] { [] }
+  public func recordPendingCancellation(uploadID: Data, owner: String) async {}
+  public func removePendingCancellation(uploadID: Data, owner: String) async {}
 }
 
 /// Owns immutable upload sources independently of picker URLs and preprocessing temporaries.
@@ -57,6 +92,69 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   public static let shared = FileNativeUploadStagingStore()
 
   private let root: URL
+
+  private struct PendingCancellation: Codable {
+    let owner: String
+    let uploadID: Data
+    let date: Date
+  }
+
+  private func cancellationURL(uploadID: Data, owner: String) -> URL {
+    let key = Self.fileName(for: "\(owner):\(uploadID.base64EncodedString())")
+    return root.appendingPathComponent("cancel-\(key).json")
+  }
+
+  public func pendingCancellationIDs(owner: String) async -> [Data] {
+    let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+    return urls.compactMap { url in
+      guard url.lastPathComponent.hasPrefix("cancel-"),
+            let data = try? Data(contentsOf: url),
+            let record = try? JSONDecoder().decode(PendingCancellation.self, from: data),
+            record.owner == owner, record.uploadID.count == 16 else { return nil }
+      guard Date().timeIntervalSince(record.date) < 7 * 24 * 3600 else {
+        try? FileManager.default.removeItem(at: url)
+        return nil
+      }
+      return record.uploadID
+    }
+  }
+
+  public func recordPendingCancellation(uploadID: Data, owner: String) async {
+    let url = cancellationURL(uploadID: uploadID, owner: owner)
+    guard !FileManager.default.fileExists(atPath: url.path) else { return }
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    if let data = try? JSONEncoder().encode(PendingCancellation(owner: owner, uploadID: uploadID, date: Date())) {
+      try? data.write(to: url, options: .atomic)
+    }
+  }
+
+  public func removePendingCancellation(uploadID: Data, owner: String) async {
+    try? FileManager.default.removeItem(at: cancellationURL(uploadID: uploadID, owner: owner))
+  }
+
+  struct PreparedVideo: Codable, Sendable {
+    let fileName: String
+    let mimeType: String
+    let width: Int
+    let height: Int
+    let duration: Int
+  }
+
+  func preparedVideo(logicalID: String) throws -> (URL, PreparedVideo)? {
+    let baseName = Self.fileName(for: logicalID)
+    let body = root.appendingPathComponent("\(baseName).body")
+    let descriptor = root.appendingPathComponent("\(baseName).video.json")
+    guard FileManager.default.fileExists(atPath: body.path),
+          FileManager.default.fileExists(atPath: descriptor.path) else { return nil }
+    return (body, try JSONDecoder().decode(PreparedVideo.self, from: Data(contentsOf: descriptor)))
+  }
+
+  func recordPreparedVideo(_ video: PreparedVideo, logicalID: String) throws {
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try JSONEncoder().encode(video).write(
+      to: root.appendingPathComponent("\(Self.fileName(for: logicalID)).video.json"), options: .atomic
+    )
+  }
 
   public init(root: URL? = nil) {
     self.root = root ?? Self.defaultRoot()
@@ -89,6 +187,24 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     let baseName = Self.fileName(for: logicalID)
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).body"))
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).json"))
+    try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).video.json"))
+  }
+
+  public func identitySalt(logicalID: String) async throws -> Data {
+    let url = root.appendingPathComponent("\(Self.fileName(for: logicalID)).identity")
+    guard FileManager.default.fileExists(atPath: url.path) else { return Data() }
+    let salt = try Data(contentsOf: url)
+    guard salt.count == 16 else { throw NativeMediaUploadError.sourceChanged }
+    return salt
+  }
+
+  public func invalidateIdentity(logicalID: String) async {
+    // A cancelled server owner is terminal. Persist the replacement identity
+    // across relaunches while retaining the old identity for recoverable errors.
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    var uuid = UUID().uuid
+    let salt = withUnsafeBytes(of: &uuid) { Data($0) }
+    try? salt.write(to: root.appendingPathComponent("\(Self.fileName(for: logicalID)).identity"), options: .atomic)
   }
 
   private static func fileName(for logicalID: String) -> String {
@@ -249,6 +365,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private let accountFence: (any NativeUploadAccountFencing)?
   private let processingTimeout: Duration
   private var activePartTransfers = 0
+  private var retryingPendingCancellations = false
   private struct PartTransferWaiter {
     let id: UUID
     let continuation: CheckedContinuation<Bool, Never>
@@ -278,7 +395,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     guard let owner = ownerScope() else { throw NativeMediaUploadError.unauthenticated }
     let accountToken = try accountFence?.beginUploadAccountFence()
     try validateAccount(accountToken)
-    guard let maximumByteCount = Self.maximumByteCount(for: request.kind) else {
+    guard let maximumByteCount = MediaUploadLimits.maximumByteCount(for: request.kind) else {
       throw NativeMediaUploadError.fileTooLarge
     }
     if let sourceValues = try? request.fileURL.resourceValues(forKeys: [.fileSizeKey]),
@@ -305,9 +422,11 @@ public actor DurableUploadCoordinator: MediaUploading {
       guard byteCount <= Int64(maximumByteCount) else { throw NativeMediaUploadError.fileTooLarge }
 
       var create = CreateUploadInput()
+      let identitySalt = try await staging.identitySalt(logicalID: ownerScopedLogicalID)
       create.clientUploadID = Self.clientUploadID(
         logicalID: ownerScopedLogicalID,
-        sourceDigest: digest
+        sourceDigest: digest,
+        identitySalt: identitySalt
       )
       create.fileName = request.fileName
       create.mimeType = request.mimeType
@@ -593,31 +712,72 @@ public actor DurableUploadCoordinator: MediaUploading {
     cancel.uploadID = uploadID
     let transport = transport
     let accountFence = accountFence
+    let owner = accountToken.map { String($0.userID) } ?? String(logicalID.split(separator: ":").first ?? "")
+    await staging.recordPendingCancellation(uploadID: uploadID, owner: owner)
+    await staging.invalidateIdentity(logicalID: logicalID)
     // The upload task is already cancelled, but cancellation has one terminal owner. Give that
     // owner a short, awaited, non-cancelled window to release server staging before its transport
     // is torn down. Failure remains best effort and server TTL is the safety net.
-    await Task.detached {
+    let canceled = await Task.detached { () -> Bool in
       if let accountToken {
-        guard let boundTransport = transport as? any AccountBoundNativeUploadRPCTransport else { return }
+        guard let boundTransport = transport as? any AccountBoundNativeUploadRPCTransport else { return false }
         do {
           try accountFence?.validateUploadAccountFence(accountToken)
-          _ = try await boundTransport.callUploadRPC(
+          let result = try await boundTransport.callUploadRPC(
             method: .cancelUpload,
             input: .cancelUpload(cancel),
             timeout: Self.cancellationCleanupTimeout,
             accountToken: accountToken
           )
           try accountFence?.validateUploadAccountFence(accountToken)
-        } catch { return }
+          guard case .cancelUpload? = result else { return false }
+          return true
+        } catch { return false }
       } else {
-        _ = try? await transport.callUploadRPC(
+        let result = try? await transport.callUploadRPC(
           method: .cancelUpload,
           input: .cancelUpload(cancel),
           timeout: Self.cancellationCleanupTimeout
         )
+        guard case .cancelUpload? = result else { return false }
+        return true
       }
     }.value
+    if canceled { await staging.removePendingCancellation(uploadID: uploadID, owner: owner) }
     await staging.discard(logicalID: logicalID)
+  }
+
+  public func retryPendingCancellations() async {
+    guard !retryingPendingCancellations, let owner = ownerScope() else { return }
+    let token: AuthAccountMutationToken?
+    do { token = try accountFence?.beginUploadAccountFence() } catch { return }
+    retryingPendingCancellations = true
+    defer { retryingPendingCancellations = false }
+    for uploadID in await staging.pendingCancellationIDs(owner: owner) {
+      do {
+        try Task.checkCancellation()
+        try validateAccount(token)
+        var input = CancelUploadInput()
+        input.uploadID = uploadID
+        let result = try await callUploadRPC(
+          method: .cancelUpload, input: .cancelUpload(input),
+          timeout: Self.cancellationCleanupTimeout, accountToken: token
+        )
+        try validateAccount(token)
+        guard case .cancelUpload? = result else { continue }
+        await staging.removePendingCancellation(uploadID: uploadID, owner: owner)
+      } catch {
+        guard isAccountCurrent(token), !Task.isCancelled else { return }
+        if let error = error as? RealtimeDirectRpcError,
+           case let .rpcError(_, _, code) = error, [400, 401, 403, 404, 410].contains(code) {
+          // This owner is no longer addressable (expired or belongs to an old
+          // session). It must not block later, still-active cancellations.
+          await staging.removePendingCancellation(uploadID: uploadID, owner: owner)
+          continue
+        }
+        return
+      }
+    }
   }
 
   private func uploadState(
@@ -867,21 +1027,12 @@ public actor DurableUploadCoordinator: MediaUploading {
     return data
   }
 
-  private static func clientUploadID(logicalID: String, sourceDigest: Data) -> Data {
+  private static func clientUploadID(logicalID: String, sourceDigest: Data, identitySalt: Data) -> Data {
     var hash = SHA256()
     hash.update(data: Data("inline-native-upload-v1:\(logicalID):".utf8))
     hash.update(data: sourceDigest)
+    hash.update(data: identitySalt)
     return Data(hash.finalize().prefix(16))
-  }
-
-  private static func maximumByteCount(for kind: UploadKind) -> Int? {
-    switch kind {
-    case .photo: return 40_000_000
-    case .video: return 200_000_000
-    case .document: return 500_000_000
-    case .voice: return 20_000_000
-    case .unspecified, .UNRECOGNIZED: return nil
-    }
   }
 
   private static func acceptedBytes(

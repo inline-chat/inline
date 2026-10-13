@@ -90,6 +90,8 @@ struct SendMessageRetryPolicyTests {
     }
     #expect(transaction.shouldRetryOnFail(error: NativeMediaUploadError.rejected(code: .uploadFailureInvalidMedia, retryable: true)))
     #expect(transaction.shouldRetryOnFail(error: NativeMediaUploadError.unexpectedResponse))
+    #expect(transaction.retryLimit(for: NativeMediaUploadError.unexpectedResponse) == 2)
+    #expect(transaction.retryLimit(for: NativeMediaUploadError.unauthenticated) == 30)
   }
 
   @Test("keeps retrying network upload failures")

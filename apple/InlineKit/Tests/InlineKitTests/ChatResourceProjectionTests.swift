@@ -7,6 +7,46 @@ import Testing
 @Suite("Chat info canonical resource projections")
 @MainActor
 struct ChatResourceProjectionTests {
+  @Test("the files tab includes published occurrences and preserves received nil-status rows")
+  func filesTabIncludesOnlyPublishedOccurrences() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    let fixtures: [(sourceID: Int64, storedID: Int64, status: MessageSendingStatus?)] = [
+      (101, 101, nil), (102, 102, .sent), (103, 103, .failed),
+      (104, 104, .sending), (105, -105, .sending), (106, -106, .sent),
+    ]
+    try await queue.write { db in
+      try User(id: 1, email: nil, firstName: "Resources").insert(db)
+      try Chat(id: 7, date: Date(), type: .thread, title: "Resources", spaceId: nil).insert(db)
+      for fixture in fixtures {
+        // Every row refers to the same actual GRDB document association. The
+        // visibility policy belongs to each sharing occurrence, not the file.
+        _ = try Message.save(
+          db, protocolMessage: ResourceKind.files.message(fixture.sourceID), materializeMissingReferences: true
+        )
+        try Message.filter(Message.Columns.chatId == 7)
+          .filter(Message.Columns.messageId == fixture.sourceID)
+          .updateAll(db, [
+            Message.Columns.messageId.set(to: fixture.storedID),
+            Message.Columns.status.set(to: fixture.status),
+            Message.Columns.out.set(to: fixture.status != nil),
+          ])
+      }
+    }
+    try await queue.read { db in
+      let published = try DocumentMessage.queryRequest().filter(Message.Columns.chatId == 7)
+        .order(Message.Columns.messageId.asc).fetchAll(db)
+      #expect(published.map(\.id) == [101, 102])
+      #expect(published.first?.message.status == nil)
+      #expect(published.first?.message.out == false)
+      #expect(published.allSatisfy { $0.document.document.documentId == 400 })
+      let retained = try Message.filter(Message.Columns.chatId == 7).fetchAll(db)
+      #expect(retained.count == fixtures.count)
+      #expect(retained.first(where: { $0.messageId == 103 })?.status == .failed)
+      #expect(retained.first(where: { $0.messageId == -105 })?.status == .sending)
+    }
+  }
+
   @Test(
     "each tab retains sharing occurrences across raw pages without leaking other chats",
     arguments: ResourceKind.allCases

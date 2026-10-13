@@ -37,6 +37,10 @@ public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, Pe
     Message
       .filter(sql: "resourceFlags & ? != 0", arguments: [MessageHistoryScope.files.resourceMask.rawValue])
       .filter(Message.Columns.documentId != nil)
+      // Files shared in this chat must belong to a published message. Keep
+      // received/legacy rows whose sending status was never populated.
+      .filter(Message.Columns.messageId > 0)
+      .filter(Message.Columns.status == nil || Message.Columns.status == MessageSendingStatus.sent)
       // Include document info with thumbnail
       .including(
         optional: Message.document.forKey(CodingKeys.document)

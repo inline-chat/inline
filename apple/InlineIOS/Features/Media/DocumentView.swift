@@ -367,7 +367,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   @objc func fileIconButtonTapped() {
     switch documentState {
       case .uploadFailed:
-        break
+        resendFailedDocument()
       case .needsDownload:
         downloadFile()
       case .downloading:
@@ -385,7 +385,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     switch documentState {
       case .uploadFailed:
-        break
+        resendFailedDocument()
       case .locallyAvailable:
         openFile()
       case .uploading:
@@ -478,7 +478,9 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
         case let .uploading(bytesSent, totalBytes):
           showUploadingSpinner()
-          if isUploadProcessing {
+          if let retryDescription = uploadProgressSnapshot?.pendingRetryDescription {
+            fileSizeLabel.text = retryDescription
+          } else if isUploadProcessing {
             fileSizeLabel.text = "processing..."
           } else if bytesSent == 0 {
             fileSizeLabel.text = "uploading..."
@@ -545,6 +547,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     if case .downloading = documentState {
       if let documentInfo {
         FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
+        guard !FileDownloader.shared.isDocumentDownloadActive(documentId: documentInfo.id) else { return }
       }
 
       documentState = .needsDownload
@@ -555,48 +558,11 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   }
 
   func cancelUpload() {
-    if case .uploading = documentState {
-      Self.log.trace("Upload cancellation requested - cancelling message transaction")
-
-      // Mark as being removed to prevent further interactions
-      isBeingRemoved = true
-
-      // Cancel the message transaction if it exists
-      if let message = fullMessage?.message,
-         let transactionId = message.transactionId,
-         !transactionId.isEmpty
-      {
-        Self.log.trace("Canceling message with transaction ID: \(transactionId)")
-        Transactions.shared.cancel(transactionId: transactionId)
-
-        // Delete the message from the database
-        let chatId = message.chatId
-        let messageId = message.messageId
-        let peerId = message.peerId
-
-        Task(priority: .userInitiated) {
-          let _ = try? await AppDatabase.shared.dbWriter.write { db in
-            try Message
-              .filter(Column("chatId") == chatId)
-              .filter(Column("messageId") == messageId)
-              .deleteAll(db)
-          }
-
-          MessagesPublisher.shared
-            .messagesDeleted(messageIds: [messageId], peer: peerId)
-        }
-
-        // Don't immediately remove the view - let MessagesPublisher handle the UI updates
-        // The message collection view will properly remove the entire message cell
-      } else {
-        Self.log.warning("No transaction ID found for message - cannot cancel upload")
-      }
-
-      hideUploadingSpinner()
-      progressSubscription?.cancel()
-      progressSubscription = nil
-      clearUploadProgressBinding(resetState: true)
-    }
+    guard case .uploading = documentState, let fullMessage,
+          PendingMessageCanceller.cancel(fullMessage) else { return }
+    isBeingRemoved = true
+    hideUploadingSpinner()
+    clearUploadProgressBinding(resetState: true)
   }
 
   func openFile() {
@@ -661,6 +627,14 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     } else {
       Self.log.trace("📄 QuickLook can't preview, using UIDocumentInteractionController")
       openWithDocumentInteraction(fileURL: fileURL)
+    }
+  }
+
+  func resendFailedDocument() {
+    guard let fullMessage else { return }
+    Task { @MainActor in
+      do { try await FailedMessageResender.resend(fullMessage) }
+      catch { ToastManager.shared.showToast(error.localizedDescription, type: .error) }
     }
   }
 
@@ -765,15 +739,15 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   func completeUpload() {
     isUploadProcessing = false
     hideUploadingSpinner()
-    documentState = .locallyAvailable
-    clearUploadProgressBinding(resetState: true)
+    if let document { documentState = determineDocumentState(document) }
+    clearUploadProgressBinding(resetState: false)
   }
 
   func failUpload() {
     isUploadProcessing = false
     hideUploadingSpinner()
-    documentState = .locallyAvailable
-    clearUploadProgressBinding(resetState: true)
+    if let document { documentState = determineDocumentState(document) }
+    clearUploadProgressBinding(resetState: false)
   }
 
   private func syncUploadProgressBinding() {

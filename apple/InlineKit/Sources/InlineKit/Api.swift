@@ -85,6 +85,7 @@ public enum Api {
           importTask?.cancel()
           importTask = nil
         case .connected:
+          Task(priority: .utility) { await DurableUploadCoordinator.shared.retryPendingCancellations() }
           guard importTask == nil else { continue }
           importTask = Task(priority: .utility) {
             await DialogTranslationMigration.importPending(realtime: realtime)

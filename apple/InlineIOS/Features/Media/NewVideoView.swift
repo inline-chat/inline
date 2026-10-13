@@ -845,42 +845,15 @@ final class NewVideoView: UIView {
     switch activeTransfer {
     case let .downloading(videoId):
       FileDownloader.shared.cancelVideoDownload(videoId: videoId)
+      guard !FileDownloader.shared.isVideoDownloadActive(videoId: videoId) else { return }
       clearDownloadProgressBinding(resetState: true)
       transferProgressView.setProgress(0)
       self.activeTransfer = nil
       updateDurationLabel()
       updateOverlay()
 
-    case let .uploading(videoLocalId, transactionId, randomId):
-      Task {
-        await FileUploader.shared.cancelVideoUpload(videoLocalId: videoLocalId)
-      }
-
-      if let transactionId, !transactionId.isEmpty {
-        Transactions.shared.cancel(transactionId: transactionId)
-      } else if let randomId {
-        Task {
-          Api.realtime.cancelTransaction(where: {
-            guard $0.transaction.method == .sendMessage else { return false }
-            guard case let .sendMessage(input) = $0.transaction.input else { return false }
-            return input.randomID == randomId
-          })
-        }
-      }
-
-      let message = fullMessage.message
-      Task(priority: .userInitiated) {
-        do {
-          try await AppDatabase.shared.dbWriter.write { db in
-            try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
-          }
-
-          MessagesPublisher.shared
-            .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
-        } catch {
-          Log.shared.error("Failed to delete local video message after cancellation", error: error)
-        }
-      }
+    case .uploading:
+      guard PendingMessageCanceller.cancel(fullMessage) else { return }
 
       clearUploadProgressBinding(resetState: true)
       transferProgressView.setProgress(0)

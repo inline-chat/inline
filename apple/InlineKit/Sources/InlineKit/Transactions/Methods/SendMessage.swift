@@ -18,6 +18,106 @@ public struct SendMessageAttachment: Codable, Sendable {
   fileprivate var randomId: Int64?
 }
 
+/// Resends using the original media rows so durable uploads reconcile their
+/// existing client identity after a lost response or processing timeout.
+@MainActor
+public enum FailedMessageResender {
+  private static var activeMessages: Set<String> = []
+
+  public static func mediaItems(for message: FullMessage) -> [FileMediaItem] {
+    var items: [FileMediaItem] = []
+    if let photo = message.photoInfo { items.append(.photo(photo)) }
+    if let video = message.videoInfo { items.append(.video(video)) }
+    if let document = message.documentInfo { items.append(.document(document)) }
+    if let voice = message.message.voiceContent { items.append(.voice(voice)) }
+    return items
+  }
+
+  public static func resend(_ fullMessage: FullMessage) async throws {
+    try await resend(fullMessage, database: .shared, auth: Auth.shared.handle) {
+      Transactions.shared.mutate(transaction: .sendMessage($0))
+    }
+  }
+
+  static func resend(
+    _ fullMessage: FullMessage, database: AppDatabase, auth: AuthHandle,
+    beforeAdmission: (@MainActor () async throws -> Void)? = nil,
+    admit: @MainActor (TransactionSendMessage) -> Bool
+  ) async throws {
+    let message = fullMessage.message
+    guard message.status == .failed, message.out == true else { return }
+    let account = try auth.beginAccountMutation()
+    guard message.fromId == account.userID else { return }
+    let key = "\(account.userID):\(message.chatId):\(message.messageId)"
+    guard activeMessages.insert(key).inserted else { return }
+    defer { activeMessages.remove(key) }
+    let stillFailed = try await database.dbWriter.read { db in
+      try auth.validateAccountMutation(account)
+      let stored = try Message.fetchOne(db, key: ["messageId": message.messageId, "chatId": message.chatId])
+      return stored?.status == .failed && stored?.fromId == account.userID
+    }
+    guard stillFailed else { return }
+    try await beforeAdmission?()
+    try auth.validateAccountMutation(account)
+    // Admit before deleting. An account transition or rejected admission leaves
+    // the recoverable failed row and its original media untouched.
+    guard admit(.init(
+      text: message.text, peerId: message.peerId, chatId: message.chatId,
+      mediaItems: mediaItems(for: fullMessage), replyToMsgId: message.repliedToMessageId,
+      isSticker: message.isSticker, entities: message.entities
+    )) else { return }
+    let deleted = try await database.dbWriter.write { db in
+      try auth.validateAccountMutation(account)
+      guard let stored = try Message.fetchOne(db, key: [
+        "messageId": message.messageId, "chatId": message.chatId,
+      ]), stored.status == .failed, stored.fromId == account.userID else { return false }
+      try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
+      return true
+    }
+    try auth.validateAccountMutation(account)
+    if deleted { MessagesPublisher.shared.messagesDeleted(messageIds: [message.messageId], peer: message.peerId) }
+  }
+}
+
+@MainActor
+public enum PendingMessageCanceller {
+  @discardableResult
+  public static func cancel(_ fullMessage: FullMessage) -> Bool {
+    let message = fullMessage.message
+    guard message.status == .sending, message.messageId < 0,
+          let account = try? Auth.shared.handle.beginAccountMutation(),
+          account.userID == message.fromId else { return false }
+    let transactionID = message.transactionId.flatMap { $0.isEmpty ? nil : $0 }
+    guard transactionID != nil || message.randomId != nil else { return false }
+    if let transactionID { Transactions.shared.cancel(transactionId: transactionID) }
+    let media = FailedMessageResender.mediaItems(for: fullMessage)
+    Task {
+      do {
+        try Auth.shared.handle.validateAccountMutation(account)
+        for item in media { try await FileUploader.shared.cancel(media: item, accountToken: account) }
+        if transactionID == nil, let randomID = message.randomId {
+          await Api.realtime.cancelTransaction(where: {
+            guard $0.transaction.method == .sendMessage,
+                  case let .sendMessage(input) = $0.transaction.input else { return false }
+            return input.randomID == randomID
+          })
+        }
+        let deleted = try await AppDatabase.shared.dbWriter.write { db in
+          try Auth.shared.handle.validateAccountMutation(account)
+          guard let stored = try Message.fetchOne(db, key: [
+            "messageId": message.messageId, "chatId": message.chatId,
+          ]), stored.status == .sending, stored.fromId == account.userID else { return false }
+          try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
+          return true
+        }
+        try Auth.shared.handle.validateAccountMutation(account)
+        if deleted { MessagesPublisher.shared.messagesDeleted(messageIds: [message.messageId], peer: message.peerId) }
+      } catch { Log.shared.error("Failed to cancel pending media message", error: error) }
+    }
+    return true
+  }
+}
+
 enum SendMessageUploadCoordinator {
   static func beginOrJoinUpload<T>(
     _ startUpload: () async throws -> T
@@ -474,6 +574,11 @@ public struct TransactionSendMessage: Transaction {
     }
 
     return true
+  }
+
+  public func retryLimit(for error: Error) -> Int {
+    if case .unexpectedResponse = error as? NativeMediaUploadError { return 2 }
+    return config.maxRetries
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {

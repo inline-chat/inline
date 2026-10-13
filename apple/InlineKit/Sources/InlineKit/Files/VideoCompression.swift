@@ -44,7 +44,13 @@ public actor VideoCompressor {
   private init() {}
 
   func normalizeToMP4(at sourceURL: URL) async throws -> VideoCompressionResult {
-    let asset = AVURLAsset(url: sourceURL)
+    let box = PreparationAssetBox(AVURLAsset(url: sourceURL))
+    return try await TransferPreparation.withDeadline(seconds: 600, cancel: { box.asset.cancelLoading() }) { [self] in
+      try await normalizeToMP4Unbounded(at: sourceURL, asset: box.asset)
+    }
+  }
+
+  private func normalizeToMP4Unbounded(at sourceURL: URL, asset: AVURLAsset) async throws -> VideoCompressionResult {
     let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("normalized_\(UUID().uuidString).mp4")
@@ -63,6 +69,8 @@ public actor VideoCompressor {
     if compatiblePresets.contains(AVAssetExportPresetPassthrough) {
       do {
         try await export(asset: asset, presetName: AVAssetExportPresetPassthrough, destinationURL: tempURL)
+      } catch is CancellationError {
+        throw CancellationError()
       } catch {
         log.debug("Passthrough MP4 normalization failed, falling back to highest-quality export")
       }
@@ -96,7 +104,13 @@ public actor VideoCompressor {
   }
 
   public func compressVideo(at sourceURL: URL, options: VideoCompressionOptions) async throws -> VideoCompressionResult {
-    let asset = AVURLAsset(url: sourceURL)
+    let box = PreparationAssetBox(AVURLAsset(url: sourceURL))
+    return try await TransferPreparation.withDeadline(seconds: 600, cancel: { box.asset.cancelLoading() }) { [self] in
+      try await compressVideoUnbounded(at: sourceURL, asset: box.asset, options: options)
+    }
+  }
+
+  private func compressVideoUnbounded(at sourceURL: URL, asset: AVURLAsset, options: VideoCompressionOptions) async throws -> VideoCompressionResult {
     let metadata = try await loadMetadata(for: asset)
     let sourceFileSize = fileSize(for: sourceURL)
     let maxDimension = max(metadata.width, metadata.height)
@@ -153,6 +167,8 @@ public actor VideoCompressor {
           duration: outputMetadata.duration,
           fileSize: outputSize
         )
+      } catch is CancellationError {
+        throw CancellationError()
       } catch {
         log.debug("Passthrough MP4 conversion failed, falling back to encoded export")
       }
@@ -396,6 +412,7 @@ public actor VideoCompressor {
         writer: writerBox,
         queue: DispatchQueue(label: "inline.video.compress.video"),
         failureState: failureState,
+        cancellation: cancellationBox,
         group: group
       )
 
@@ -407,11 +424,17 @@ public actor VideoCompressor {
           writer: writerBox,
           queue: DispatchQueue(label: "inline.video.compress.audio"),
           failureState: failureState,
+          cancellation: cancellationBox,
           group: group
         )
       }
 
-      await waitForGroup(group)
+      await withTaskCancellationHandler {
+        await waitForGroup(group)
+      } onCancel: {
+        cancellationBox.cancel()
+      }
+      try Task.checkCancellation()
 
       if let error = failureState.error {
         writerBox.writer.cancelWriting()
@@ -443,17 +466,22 @@ public actor VideoCompressor {
     writer: AssetWriterBox,
     queue: DispatchQueue,
     failureState: TranscodeFailureState,
+    cancellation: TranscodeCancellationBox,
     group: DispatchGroup
   ) {
     group.enter()
     let completionState = StreamCompletionState()
 
-    let complete: () -> Void = {
+    let complete: @Sendable () -> Void = {
       completionState.completeOnce {
         input.input.markAsFinished()
         group.leave()
       }
     }
+
+    // A writer that never asks for another sample must still release its group
+    // on cancellation. Complete on the same queue as sample processing.
+    cancellation.registerCompletion { queue.async(execute: complete) }
 
     input.input.requestMediaDataWhenReady(on: queue) {
       while input.input.isReadyForMoreMediaData {
@@ -616,6 +644,13 @@ public actor VideoCompressor {
   }
 
   private func loadMetadata(for asset: AVURLAsset) async throws -> (width: Int, height: Int, duration: Int) {
+    let box = PreparationAssetBox(asset)
+    return try await TransferPreparation.withDeadline(seconds: 30, cancel: { box.asset.cancelLoading() }) { [self] in
+      try await loadMetadataUnbounded(for: box.asset)
+    }
+  }
+
+  private func loadMetadataUnbounded(for asset: AVURLAsset) async throws -> (width: Int, height: Int, duration: Int) {
     let tracks = try await asset.loadTracks(withMediaType: .video)
     guard let track = tracks.first else { throw VideoCompressionError.invalidAsset }
 
@@ -682,6 +717,11 @@ public actor VideoCompressor {
   }
 }
 
+final class PreparationAssetBox: @unchecked Sendable {
+  let asset: AVURLAsset
+  init(_ asset: AVURLAsset) { self.asset = asset }
+}
+
 private final class ExportSessionBox: @unchecked Sendable {
   let session: AVAssetExportSession
 
@@ -726,6 +766,8 @@ private final class TranscodeCancellationBox: @unchecked Sendable {
   private let lock = NSLock()
   private let reader: AssetReaderBox
   private let writer: AssetWriterBox
+  private var cancelled = false
+  private var completions: [@Sendable () -> Void] = []
 
   init(reader: AssetReaderBox, writer: AssetWriterBox) {
     self.reader = reader
@@ -734,9 +776,25 @@ private final class TranscodeCancellationBox: @unchecked Sendable {
 
   func cancel() {
     lock.lock()
-    defer { lock.unlock() }
+    guard !cancelled else { lock.unlock(); return }
+    cancelled = true
+    let callbacks = completions
+    completions.removeAll()
+    lock.unlock()
     reader.reader.cancelReading()
     writer.writer.cancelWriting()
+    for callback in callbacks { callback() }
+  }
+
+  func registerCompletion(_ callback: @escaping @Sendable () -> Void) {
+    lock.lock()
+    if cancelled {
+      lock.unlock()
+      callback()
+    } else {
+      completions.append(callback)
+      lock.unlock()
+    }
   }
 }
 

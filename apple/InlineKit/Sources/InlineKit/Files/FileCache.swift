@@ -548,23 +548,34 @@ public actor FileCache: Sendable {
     let hasAccess = url.startAccessingSecurityScopedResource()
     defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
 
-    let asset = AVURLAsset(url: url)
+    try MediaUploadLimits.validate(fileURL: url, kind: .video)
 
-    // Dimensions
-    let tracks = try await asset.loadTracks(withMediaType: .video)
-    let track = tracks.first
-    let naturalSize = try await track?.load(.naturalSize)
-    let preferredTransform = try await track?.load(.preferredTransform) ?? .identity
-    let transformedSize = naturalSize?.applying(preferredTransform) ?? .zero
-    let width = Int(abs(transformedSize.width.rounded()))
-    let height = Int(abs(transformedSize.height.rounded()))
+    let assetBox = PreparationAssetBox(AVURLAsset(url: url))
+    let (width, height, durationSeconds, hasAudio) = try await TransferPreparation.withDeadline(
+      seconds: 30, cancel: { assetBox.asset.cancelLoading() }
+    ) {
+      let asset = assetBox.asset
+      // Dimensions
+      let tracks = try await asset.loadTracks(withMediaType: .video)
+      let track = tracks.first
+      let naturalSize = try await track?.load(.naturalSize)
+      let preferredTransform = try await track?.load(.preferredTransform) ?? .identity
+      let transformedSize = naturalSize?.applying(preferredTransform) ?? .zero
+      let width = Int(abs(transformedSize.width.rounded()))
+      let height = Int(abs(transformedSize.height.rounded()))
 
-    // Duration in seconds
-    let durationTime = try await asset.load(.duration)
-    guard durationTime.isValid else { throw FileCacheError.failedToSave }
-    let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
-    let audioTracks = try? await asset.loadTracks(withMediaType: .audio)
-    let hasAudio = audioTracks?.isEmpty == false
+      // Duration in seconds
+      let durationTime = try await asset.load(.duration)
+      let seconds = CMTimeGetSeconds(durationTime)
+      guard durationTime.isValid, seconds.isFinite, seconds > 0, seconds < Double(Int.max) else {
+        throw FileCacheError.failedToSave
+      }
+      let durationSeconds = Int(seconds.rounded())
+      let audioTracks = try? await asset.loadTracks(withMediaType: .audio)
+      return (width, height, durationSeconds, audioTracks?.isEmpty == false)
+    }
+    let asset = assetBox.asset
+    try Task.checkCancellation()
 
     // Persist the video to app cache.
     // Keep cache-time work minimal for a faster compose/send path.
@@ -579,6 +590,8 @@ public actor FileCache: Sendable {
       try fileManager.removeItem(at: localUrl)
     }
     try fileManager.copyItem(at: url, to: localUrl)
+    var retained = false
+    defer { if !retained { try? fileManager.removeItem(at: localUrl) } }
     let fileSize = FileHelpers.getFileSize(at: localUrl)
 
     // Generate or reuse thumbnail
@@ -587,6 +600,7 @@ public actor FileCache: Sendable {
     } else {
       try? await generateThumbnailImage(from: asset)
     }
+    try Task.checkCancellation()
 
     let thumbnailInfo: PhotoInfo? = if let image = thumbImage {
       try? savePhoto(image: image, preferredFormat: .jpeg)
@@ -602,6 +616,7 @@ public actor FileCache: Sendable {
       isAnimated: false,
       hasAudio: hasAudio
     )
+    retained = true
 
     return VideoInfo(video: video, photoInfo: thumbnailInfo)
   }
@@ -799,6 +814,8 @@ public actor FileCache: Sendable {
       }
     }
 
+    try MediaUploadLimits.validate(fileURL: url, kind: .document)
+
     try Task.checkCancellation()
     try fileManager.copyItem(at: url, to: localURL)
     do {
@@ -960,15 +977,30 @@ enum FileCacheError: Error {
 private func generateThumbnailImage(from asset: AVAsset) async throws -> PlatformImage {
   let imageGenerator = AVAssetImageGenerator(asset: asset)
   imageGenerator.appliesPreferredTrackTransform = true
-  let duration = try await asset.load(.duration)
-  let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
-  let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+  let box = PreparationThumbnailBox(imageGenerator, asset: asset)
+  let cgImage = try await TransferPreparation.withDeadline(seconds: 30, cancel: {
+    box.asset.cancelLoading()
+    box.generator.cancelAllCGImageGeneration()
+  }) {
+    let duration = try await box.asset.load(.duration)
+    let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
+    return try await box.generator.image(at: time).image
+  }
 
   #if os(iOS)
   return UIImage(cgImage: cgImage)
   #else
   return NSImage(cgImage: cgImage, size: .zero)
   #endif
+}
+
+private final class PreparationThumbnailBox: @unchecked Sendable {
+  let generator: AVAssetImageGenerator
+  let asset: AVAsset
+  init(_ generator: AVAssetImageGenerator, asset: AVAsset) {
+    self.generator = generator
+    self.asset = asset
+  }
 }
 
 private func exportVideoToMp4(asset: AVAsset, destinationURL: URL) async throws {

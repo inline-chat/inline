@@ -1429,47 +1429,14 @@ final class NewVideoView: NSView {
     switch activeTransfer {
     case let .downloading(videoId):
       FileDownloader.shared.cancelVideoDownload(videoId: videoId)
+      guard !FileDownloader.shared.isVideoDownloadActive(videoId: videoId) else { return }
       isDownloading = false
       clearDownloadProgressBinding(resetState: true)
       updateDurationLabel()
       updateOverlay()
 
-    case let .uploading(videoLocalId, transactionId, randomId):
-      Task { await FileUploader.shared.cancelVideoUpload(videoLocalId: videoLocalId) }
-
-      if let transactionId, !transactionId.isEmpty {
-        Transactions.shared.cancel(transactionId: transactionId)
-      } else if let randomId {
-        Task {
-          Api.realtime.cancelTransaction(where: {
-            guard $0.transaction.method == .sendMessage else { return false }
-            guard case let .sendMessage(input) = $0.transaction.input else { return false }
-            return input.randomID == randomId
-          })
-        }
-      }
-
-      // Delete the local message row to mirror cancel behavior elsewhere.
-      Task(priority: .userInitiated) {
-        let message = fullMessage.message
-        let chatId = message.chatId
-        let messageId = message.messageId
-        let peerId = message.peerId
-
-        do {
-          try await AppDatabase.shared.dbWriter.write { db in
-            try Message
-              .filter(Column("chatId") == chatId)
-              .filter(Column("messageId") == messageId)
-              .deleteAll(db)
-          }
-
-          MessagesPublisher.shared
-            .messagesDeleted(messageIds: [messageId], peer: peerId)
-        } catch {
-          Log.shared.error("Failed to delete local message row for cancel", error: error)
-        }
-      }
+    case .uploading:
+      guard PendingMessageCanceller.cancel(fullMessage) else { return }
 
       isDownloading = false
       clearDownloadProgressBinding(resetState: true)

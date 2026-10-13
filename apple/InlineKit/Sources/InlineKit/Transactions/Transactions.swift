@@ -395,6 +395,8 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 
   func shouldRetryOnFail(error: Error) -> Bool
 
+  func retryLimit(for error: Error) -> Int
+
   /// If execute fails, apply appropriate logic. By default it calls `rollback()` method
   func didFail(error: Error?) async
 
@@ -403,6 +405,7 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 }
 
 extension Transaction {
+  public func retryLimit(for error: Error) -> Int { config.maxRetries }
   // TODO: Figure out a way to provide a default impl
   //  func didFail() async {
   //    await rollback()
