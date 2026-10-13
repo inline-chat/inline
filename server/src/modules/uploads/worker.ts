@@ -38,6 +38,7 @@ const DEFAULT_LEASE_RENEW_TIMEOUT_MS = Math.min(5_000, INLINE_UPLOAD_PROCESSING_
 const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000
 const STAGING_READ_CONCURRENCY = 4
 const DEFAULT_EXPIRY_CLEANUP_INTERVAL_MS = 60_000
+const CANCELED_UPLOAD_CLEANUP_TIMEOUT_MS = 60_000
 const EXPIRY_CLEANUP_BATCH_SIZE = 100
 
 type WorkerOptions = {
@@ -137,6 +138,7 @@ export class NativeUploadWorker {
   readonly #random: () => number
   readonly #queued = new Set<number>()
   readonly #activeUploads = new Set<number>()
+  readonly #claimControllers = new Map<number, AbortController>()
   readonly #tasks = new Set<Promise<void>>()
   readonly #cleanupTasks = new Set<Promise<void>>()
   #abort = new AbortController()
@@ -222,6 +224,11 @@ export class NativeUploadWorker {
     if (!Number.isSafeInteger(uploadDbId) || uploadDbId < 1) return
     this.#queued.add(uploadDbId)
     if (this.#started) this.#pump()
+  }
+
+  cancel(uploadDbId: number): void {
+    this.#queued.delete(uploadDbId)
+    this.#claimControllers.get(uploadDbId)?.abort(new UploadOwnershipLostError())
   }
 
   async discardStorage(upload: InlineUploadRecord, signal?: AbortSignal): Promise<void> {
@@ -369,6 +376,7 @@ export class NativeUploadWorker {
 
   #claimLease(claim: InlineUploadProcessingClaim) {
     const controller = new AbortController()
+    this.#claimControllers.set(claim.upload.id, controller)
     const abortFromRoot = () => controller.abort(this.#abort.signal.reason)
     this.#abort.signal.addEventListener("abort", abortFromRoot, { once: true })
     if (this.#abort.signal.aborted) abortFromRoot()
@@ -406,6 +414,7 @@ export class NativeUploadWorker {
         clearInterval(heartbeat)
         await heartbeatRenewal?.catch(() => {})
         this.#abort.signal.removeEventListener("abort", abortFromRoot)
+        if (this.#claimControllers.get(claim.upload.id) === controller) this.#claimControllers.delete(claim.upload.id)
       },
     }
   }
@@ -416,9 +425,10 @@ export class NativeUploadWorker {
       await lease.assertOwnership()
       await this.#compact(claim, false, lease.controller.signal, claim.lockToken)
     } catch (error) {
+      await this.#discardCanceledWork(claim.upload.id)
       if (!(error instanceof MultipartUploadNotFoundError) &&
           !(error instanceof UploadOwnershipLostError) &&
-          !this.#abort.signal.aborted) {
+          !this.#abort.signal.aborted && !lease.controller.signal.aborted) {
         log.warn("Native upload opportunistic compaction failed", {
           error,
           uploadDbId: claim.upload.id,
@@ -541,6 +551,9 @@ export class NativeUploadWorker {
         this.#removeStaging(claim, this.#abort.signal),
       )
     } catch (error) {
+      // Cancellation may have happened on another process or just before
+      // shutdown. Clean a late object write before taking the shutdown path.
+      if (await this.#discardCanceledWork(claim.upload.id)) return
       if (controller.signal.aborted && this.#abort.signal.aborted) {
         await this.repository.releaseProcessingClaim({
           uploadDbId: claim.upload.id,
@@ -760,6 +773,15 @@ export class NativeUploadWorker {
       await this.multipartStore.remove(key, signal).catch(() => {})
     }
     await this.#removeStaging(work, signal).catch(() => {})
+  }
+
+  async #discardCanceledWork(uploadDbId: number): Promise<boolean> {
+    const work = await this.repository.getCanceledStorageWork(uploadDbId).catch(() => undefined)
+    if (work?.upload.status !== "canceled" || work.upload.resultMediaId !== null) return false
+    // Do not reuse the revoked claim's signal for cleanup. Permanent media
+    // from a committed publication is excluded by the durable state check.
+    await this.#discardTerminalStorage(work, AbortSignal.timeout(CANCELED_UPLOAD_CLEANUP_TIMEOUT_MS))
+    return true
   }
 
   async #removeStaging(work: InlineUploadStorageWork, signal: AbortSignal): Promise<void> {

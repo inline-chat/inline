@@ -41,8 +41,9 @@ import {
 import { R2MultipartObjectStore } from "./multipartStore"
 import { IDENTITY_STORAGE_FORMAT, storageCodecFor } from "./storageCodec"
 import { NativeUploadWorker } from "./worker"
+import { uploadTraceLogLevel } from "./trace"
 
-const log = new Log("modules/uploads")
+const log = new Log("modules/uploads", uploadTraceLogLevel())
 const RETRY_AFTER_SECONDS = 2
 const MAX_WAVEFORM_BYTES = 2_048
 // Deletes carry no file buffers; allow a wider bounded window so successful
@@ -153,6 +154,7 @@ export class NativeUploadOperations {
     private readonly finalizer: MediaUploadFinalizer,
     private readonly wakeWorker: (uploadDbId: number) => void = () => {},
     private readonly discardStorage: (upload: InlineUploadRecord) => Promise<void> = async () => {},
+    private readonly cancelWorker: (uploadDbId: number) => void = () => {},
   ) {}
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
@@ -361,6 +363,7 @@ export class NativeUploadOperations {
     const owner = await this.#owner(context)
     const canceled = requireValue(await this.repository.cancel(input.uploadId, owner))
     if (canceled.result.canceled) {
+      this.cancelWorker(canceled.upload.id)
       const parts = await this.repository.parts(canceled.upload.id)
       await this.#removeParts(parts.map(({ objectKey }) => objectKey))
       await this.discardStorage(canceled.upload).catch((error) => {
@@ -475,4 +478,5 @@ export const nativeUploadOperations = new NativeUploadOperations(
   finalizer,
   (uploadDbId) => nativeUploadWorker.wake(uploadDbId),
   (upload) => nativeUploadWorker.discardStorage(upload),
+  (uploadDbId) => nativeUploadWorker.cancel(uploadDbId),
 )

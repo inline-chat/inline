@@ -8,6 +8,7 @@ import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inline
 import {
   INLINE_UPLOAD_PART_SIZE,
   InlineUploadMetadataConflictError,
+  InlineUploadAdmissionCapacityError,
   InlineUploadPublicationConflictError,
   InlineUploadRepository,
   inlineUploadFileUniqueId,
@@ -484,7 +485,7 @@ describe("native upload repository", () => {
       .toEqual({ kind: "rejected" })
   })
 
-  test("processing finalization owns cancellation and expired cleanup through its fence", async () => {
+  test("processing finalization retains its expired cleanup fence", async () => {
     const user = await testUtils.createUser("native-upload-fence@example.com")
     const account = await testUtils.createSessionForUser(user.id)
     const permanentKey = new Uint8Array(256).fill(0x43)
@@ -517,8 +518,6 @@ describe("native upload repository", () => {
     const claim = await repository.claimProcessing(created.upload.id)
     if (!claim) throw new Error("Expected an upload finalization claim")
 
-    expect((await repository.cancel(created.upload.uploadId, owner))?.result)
-      .toEqual({ canceled: false, alreadyTerminal: false })
     expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
       .toBe(true)
     expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: new Uint8Array(32) }))
@@ -548,5 +547,53 @@ describe("native upload repository", () => {
       uploadDbId: claim.upload.id,
       lockToken: recovered!.lockToken,
     })).toBe(true)
+  })
+
+  test("cancel during processing revokes publication and releases reservation without resurrecting its identity", async () => {
+    const user = await testUtils.createUser("native-upload-processing-cancel@example.test")
+    const account = await testUtils.createSessionForUser(user.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const body = new Uint8Array([1, 2, 3])
+    const metadata = {
+      clientUploadId: new Uint8Array(16).fill(75), fileName: "cancel.bin", mimeType: "application/octet-stream",
+      byteCount: BigInt(body.length), sha256: createHash("sha256").update(body).digest(), kind: "document" as const,
+    }
+    const { upload } = await repository.create(owner, metadata)
+    await repository.acceptPart({ upload, partIndex: 0, ...partIntegrity(body), objectKey: "processing-cancel" })
+    await repository.requestFinish(upload.uploadId, owner)
+    const claim = await repository.claimProcessing(upload.id)
+    if (!claim) throw new Error("Expected processing claim")
+    expect(await repository.activeReservedBytes(owner)).toBe(BigInt(body.length))
+    expect((await repository.cancel(upload.uploadId, owner))?.result).toEqual({ canceled: true, alreadyTerminal: false })
+    expect(await repository.activeReservedBytes(owner)).toBe(0n)
+    expect(await repository.renew({ uploadDbId: upload.id, lockToken: claim.lockToken })).toBe(false)
+    expect(await repository.publishComplete({ uploadDbId: upload.id, lockToken: claim.lockToken, publication: publicationFor(claim.upload) })).toBeUndefined()
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, claim.upload.resultFileUniqueId!))).toHaveLength(0)
+    const repeated = await repository.create(owner, metadata)
+    expect(repeated.created).toBe(false)
+    expect(repeated.upload.status).toBe("canceled")
+    const fresh = await repository.create(owner, { ...metadata, clientUploadId: new Uint8Array(16).fill(76) })
+    expect(fresh.created).toBe(true)
+    expect(fresh.upload.uploadId).not.toEqual(upload.uploadId)
+  })
+
+  test("four unacknowledged 500 MB cancels reserve capacity until cancel is reconciled", async () => {
+    const user = await testUtils.createUser("native-upload-offline-cancel@example.test")
+    const account = await testUtils.createSessionForUser(user.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const admission = { maxActiveCount: 20, maxReservedBytes: 2n * 1024n ** 3n }
+    const metadata = (seed: number) => ({
+      clientUploadId: new Uint8Array(16).fill(seed), fileName: `offline-${seed}.bin`, mimeType: "application/octet-stream",
+      byteCount: 500_000_000n, sha256: new Uint8Array(32).fill(seed), kind: "document" as const,
+    })
+    const pending = []
+    for (let seed = 80; seed < 84; seed += 1) pending.push(await repository.create(owner, metadata(seed), admission))
+    expect(await repository.activeReservedBytes(owner)).toBe(2_000_000_000n)
+    await expect(repository.create(owner, metadata(84), admission)).rejects.toBeInstanceOf(InlineUploadAdmissionCapacityError)
+    expect((await repository.cancel(pending[0]!.upload.uploadId, owner))?.result.canceled).toBe(true)
+    expect(await repository.activeReservedBytes(owner)).toBe(1_500_000_000n)
+    expect((await repository.create(owner, metadata(84), admission)).created).toBe(true)
   })
 })

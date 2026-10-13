@@ -197,14 +197,15 @@ describe("native upload operations", () => {
     expect(ownerLookups).toBe(0)
   })
 
-  test("reserves a 500 MB document with valid multipart geometry", async () => {
+  test.each([UploadKind.DOCUMENT, UploadKind.VIDEO])("reserves a 500 MB media file (%s) with valid multipart geometry", async (kind) => {
     const user = await testUtils.createUser("native-upload-500mb@example.com")
     const account = await testUtils.createSessionForUser(user.id)
     const operations = new NativeUploadOperations(new InlineUploadRepository(), new MemoryPartStore(), finalizer)
     const created = await operations.create({
-      clientUploadId: new Uint8Array(16).fill(83), fileName: "boundary.zip", mimeType: "application/zip",
-      byteCount: 500_000_000n, sha256: new Uint8Array(32).fill(83), kind: UploadKind.DOCUMENT,
-      metadata: { oneofKind: undefined },
+      clientUploadId: new Uint8Array(16).fill(83), fileName: kind === UploadKind.VIDEO ? "boundary.mp4" : "boundary.zip",
+      mimeType: kind === UploadKind.VIDEO ? "video/mp4" : "application/zip",
+      byteCount: 500_000_000n, sha256: new Uint8Array(32).fill(83), kind,
+      metadata: kind === UploadKind.VIDEO ? { oneofKind: "video", video: { width: 1280, height: 720, duration: 10, isAnimated: false, hasAudio: true } } : { oneofKind: undefined },
     }, context(user.id, account.session.id))
     expect(created.partSize).toBe(524_288)
     expect(created.partCount).toBe(954)

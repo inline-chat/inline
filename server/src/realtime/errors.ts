@@ -64,6 +64,15 @@ export class RealtimeRpcError extends Error {
   public static RateLimit() {
     return RealtimeRpcError.create(RpcError_Code.RATE_LIMIT, "Too many requests", 429, RealtimeRpcError.RateLimit)
   }
+  public static RequestTimeout(message = "Request timed out") {
+    // Keep the existing wire pair until the protocol has a dedicated enum.
+    return RealtimeRpcError.create(
+      RpcError_Code.INTERNAL_ERROR,
+      message,
+      408,
+      (): RealtimeRpcError => RealtimeRpcError.RequestTimeout(message),
+    )
+  }
   public static PeerIdInvalid() {
     return RealtimeRpcError.create(
       RpcError_Code.PEER_ID_INVALID,

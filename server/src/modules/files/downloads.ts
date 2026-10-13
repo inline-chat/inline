@@ -14,7 +14,6 @@ const MAX_DOWNLOADS_PER_SESSION = 8
 const MAX_CONCURRENT_DOWNLOADS = 64
 // Leave time for a useful RPC error before the Apple client's 30-second deadline.
 const DEFAULT_DOWNLOAD_PART_TIMEOUT_MS = 25_000
-
 const checkAbort = (signal?: AbortSignal) => signal?.throwIfAborted()
 
 const readFromStorage = async (path: string, offset: number, length: number, signal?: AbortSignal) => {
@@ -88,8 +87,8 @@ export class NativeDownloadOperations {
     } catch (error) {
       // Only this operation's deadline is a retryable range timeout. A carrier
       // cancellation (including its own TimeoutError) keeps its original reason.
-      if (deadline.signal.aborted && signal.reason === deadline.signal.reason) {
-        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "File download part timed out", 408)
+      if (deadline.signal.aborted && signal.reason === deadline.signal.reason && error === deadline.signal.reason) {
+        throw RealtimeRpcError.RequestTimeout("File download part timed out")
       }
       throw error
     } finally {

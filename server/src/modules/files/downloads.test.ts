@@ -78,7 +78,7 @@ describe("native download ranges", () => {
     const gate = new Promise<void>((resolve) => { release = resolve })
     const operations = new NativeDownloadOperations(async () => file, async () => { await gate; throw new Error("storage failed") })
     const pending = Array.from({ length: 8 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
-    await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT, codeNumber: 429 })
     release()
     await Promise.all(pending)
     await expect(operations.getPart(request(), currentContext)).rejects.toThrow("storage failed")
@@ -182,6 +182,16 @@ describe("native download ranges", () => {
     controller.abort(reason)
     await expect(pending).rejects.toBe(reason)
   })
+
+  test.each([new Error("storage failed after deadline"), new FileByteLengthError()])(
+    "does not classify a provider failure after the local deadline as a timeout (%s)", async (failure) => {
+      const operations = new NativeDownloadOperations(async () => file, async () => {
+        await new Promise<void>((resolve) => { setTimeout(resolve, 20) })
+        throw failure
+      }, 10)
+      await expect(operations.getPart(request(), context)).rejects.toBe(failure)
+    },
+  )
 
   test.each(["V2", "V3"] as const)("%s serves the first and final bounded ranges of a 500 MB document", async (carrier) => {
     const size = 500_000_000

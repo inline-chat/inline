@@ -761,6 +761,16 @@ export class InlineUploadRepository {
     })
   }
 
+  async getCanceledStorageWork(uploadDbId: number): Promise<InlineUploadStorageWork | undefined> {
+    const [row] = await db.select().from(inlineUploads).where(and(
+      eq(inlineUploads.id, uploadDbId),
+      eq(inlineUploads.status, "canceled"),
+      isNull(inlineUploads.resultMediaId),
+    )).limit(1)
+    if (!row) return undefined
+    return { upload: { ...row, acceptedParts: [] }, parts: await this.parts(uploadDbId), storageParts: [] }
+  }
+
   async getStorageWork(uploadDbId: number): Promise<InlineUploadStorageWork | undefined> {
     const row = (await db.select().from(inlineUploads).where(and(
       eq(inlineUploads.id, uploadDbId),
@@ -1141,15 +1151,8 @@ export class InlineUploadRepository {
           upload: upload(),
         }
       }
-      // Finalization owns the terminal transition once it has claimed the row.
-      // Canceling here would revoke its fence and delete staging bytes while the
-      // finalizer may already be assembling or publishing permanent media.
-      if (row.status === "processing") {
-        return {
-          result: { canceled: false, alreadyTerminal: false },
-          upload: upload(),
-        }
-      }
+      // The row lock serializes cancel with publishComplete. If cancellation
+      // wins, clear the lease fence so a late finalizer cannot publish media.
       await tx.update(inlineUploads).set({
         status: "canceled",
         canceledAt: new Date(),
@@ -1158,7 +1161,7 @@ export class InlineUploadRepository {
       }).where(eq(inlineUploads.id, row.id))
       return {
         result: { canceled: true, alreadyTerminal: false },
-        upload: upload("canceled"),
+        upload: { ...upload("canceled"), lockToken: null, lockedAt: null },
       }
     })
   }

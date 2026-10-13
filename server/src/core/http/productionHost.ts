@@ -90,6 +90,8 @@ import {
 } from "../../modules/inlineProtocol/config"
 
 import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
+import { MAX_HTTP_UPLOAD_BYTES } from "../../modules/files/limits"
+import { isLegacyFileUploadRequest, limitHttpRequestBody } from "./requestBodyLimit"
 export type { CoreWebSocketData } from "./combinedWebsocket"
 
 export interface CoreHttpDrain {
@@ -506,6 +508,9 @@ export const startCoreProductionServer = async <
     >({
       hostname,
       port,
+      // The upload parser separately caps file/thumbnail/total bytes and keeps
+      // path-backed multipart files. Other routes retain the old cap.
+      maxRequestBodySize: MAX_HTTP_UPLOAD_BYTES,
       fetch: (request, bunServer) => {
         const ingressRejection = ingressPolicy?.(request)
         if (ingressRejection) return ingressRejection
@@ -545,11 +550,15 @@ export const startCoreProductionServer = async <
         if (realtimeUpgrade) return undefined
 
         if (isBotLongPollRequest(request)) bunServer.timeout(request, 65)
+        const upload = isLegacyFileUploadRequest(request)
+        if (upload) bunServer.timeout(request, 65)
+        const bounded = upload ? undefined : limitHttpRequestBody(request)
+        if (bounded instanceof Response) return bounded
 
         const completeRequest =
           httpDrain.enter()
-        return httpHandler(
-          request,
+        const response = httpHandler(
+          bounded?.request ?? request,
           bunServer.requestIP(request)
             ?.address,
           completeRequest,
@@ -557,6 +566,7 @@ export const startCoreProductionServer = async <
           completeRequest()
           throw cause
         })
+        return bounded ? Promise.race([response, bounded.limitReached]) : response
       },
       websocket,
     })

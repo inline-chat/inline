@@ -13,7 +13,7 @@ import {
   type UploadVideoMetadata,
   type UploadVoiceMetadata,
 } from "./core.js"
-import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "./transfers.js"
+import { INLINE_MEDIA_UPLOAD_MAX_BYTES, INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "./transfers.js"
 
 const HASH_READ_SIZE = 1024 * 1024
 const DEFAULT_GLOBAL_CONCURRENCY = 3
@@ -24,10 +24,10 @@ const FINISH_RECONCILIATION_DELAY_SECONDS = 1
 const MAX_PROCESSING_RETRY_SECONDS = 30
 const CANCEL_RPC_TIMEOUT_MS = 5_000
 const MAX_UPLOAD_BYTES_BY_KIND: Partial<Record<UploadKind, number>> = {
-  [UploadKind.PHOTO]: 40_000_000,
-  [UploadKind.VIDEO]: 200_000_000,
-  [UploadKind.DOCUMENT]: 500_000_000,
-  [UploadKind.VOICE]: 20_000_000,
+  [UploadKind.PHOTO]: INLINE_MEDIA_UPLOAD_MAX_BYTES.photo,
+  [UploadKind.VIDEO]: INLINE_MEDIA_UPLOAD_MAX_BYTES.video,
+  [UploadKind.DOCUMENT]: INLINE_MEDIA_UPLOAD_MAX_BYTES.document,
+  [UploadKind.VOICE]: INLINE_MEDIA_UPLOAD_MAX_BYTES.voice,
 }
 
 const boundedUploadProcessingRetrySeconds = (seconds: number): number =>

@@ -12,7 +12,7 @@ import {
   uploadByteSource,
   type NativeUploadRpcTransport,
 } from "../src/uploads.js"
-import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "../src/transfers.js"
+import { INLINE_MEDIA_UPLOAD_MAX_BYTES, INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "../src/transfers.js"
 
 class MemoryUploadTransport implements NativeUploadRpcTransport {
   readonly accepted = new Map<string, Set<number>>()
@@ -128,6 +128,14 @@ const deferred = () => {
 }
 
 describe("native upload coordinator", () => {
+  test("every media size limit fits the fixed transfer geometry", () => {
+    expect(INLINE_MEDIA_UPLOAD_MAX_BYTES.document).toBe(500_000_000)
+    expect(INLINE_MEDIA_UPLOAD_MAX_BYTES.video).toBe(500_000_000)
+    for (const limit of Object.values(INLINE_MEDIA_UPLOAD_MAX_BYTES)) {
+      expect(limit).toBeLessThanOrEqual(INLINE_TRANSFER_PART_SIZE * INLINE_UPLOAD_MAX_PARTS)
+    }
+    expect(Math.ceil(INLINE_MEDIA_UPLOAD_MAX_BYTES.document / INLINE_TRANSFER_PART_SIZE)).toBe(954)
+  })
   test("rejects an over-limit source before hashing or create", async () => {
     const transport = new MemoryUploadTransport()
     let reads = 0
@@ -143,11 +151,13 @@ describe("native upload coordinator", () => {
     expect(transport.accepted.size).toBe(0)
   })
 
-  test("uploads a 500 MB document with bounded parts and complete byte progress", async () => {
+  test.each([UploadKind.DOCUMENT, UploadKind.VIDEO])("uploads a 500 MB media file (%s) with bounded parts and complete byte progress", async (kind) => {
     const transport = new MemoryUploadTransport()
     let acceptedBytes = 0
     await new NativeUploadClient(transport).upload({
       ...virtualInput(61, 500_000_000),
+      kind,
+      metadata: kind === UploadKind.VIDEO ? { kind: "video", value: { width: 1280, height: 720, duration: 0, isAnimated: false } } : undefined,
       onProgress(progress) {
         expect(progress.acceptedBytes).toBeGreaterThanOrEqual(acceptedBytes)
         acceptedBytes = progress.acceptedBytes

@@ -7,6 +7,7 @@ import type {
 import { UploadIntegrityError, UploadMediaFinalizer } from "./finalizer"
 import type { UploadPartStore } from "./partStore"
 import { FileByteLengthError } from "@in/server/modules/files/readFileBytes"
+import { INLINE_MEDIA_UPLOAD_MAX_BYTES, INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 
 const bytes = new TextEncoder().encode("verified part")
 
@@ -29,6 +30,40 @@ const upload = {
 } as InlineUploadRecord
 
 describe("native upload finalizer integrity", () => {
+  test("prepares a 500 MB stored video without whole-file buffering or video transcoding", async () => {
+    const size = INLINE_MEDIA_UPLOAD_MAX_BYTES.video
+    const chunk = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(73)
+    const digest = createHash("sha256")
+    for (let offset = 0; offset < size; offset += chunk.length) digest.update(chunk.subarray(0, Math.min(chunk.length, size - offset)))
+    let emitted = 0
+    let largestChunk = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (emitted === size) { controller.close(); return }
+        const bytes = chunk.subarray(0, Math.min(chunk.length, size - emitted))
+        largestChunk = Math.max(largestChunk, bytes.length)
+        emitted += bytes.length
+        controller.enqueue(bytes)
+      },
+    })
+    const store: UploadPartStore = {
+      async put() { throw new Error("not used") },
+      async read() { throw new Error("not used") },
+      async remove() {},
+    }
+    const publication = await new UploadMediaFinalizer(store).prepareStoredPublication({
+      upload: {
+        ...upload, uploadId: Buffer.alloc(16), kind: "video", fileName: "proof.mp4", mimeType: "video/mp4",
+        byteCount: BigInt(size), sha256: digest.digest(), videoWidth: 1280, videoHeight: 720, duration: 100,
+      },
+      stream,
+      assertOwnership: async () => {},
+    })
+    expect(publication.file.record.fileSize).toBe(size)
+    expect(publication.media).toMatchObject({ kind: "video", width: 1280, height: 720, duration: 100 })
+    expect(emitted).toBe(size)
+    expect(largestChunk).toBeLessThanOrEqual(INLINE_TRANSFER_PART_SIZE)
+  }, 30_000)
   test("treats bounded storage length mismatch as terminal integrity failure", async () => {
     const store: UploadPartStore = {
       async put() { throw new Error("not used") },

@@ -13,6 +13,7 @@ import {
 } from "effect"
 import {
   HttpRouter,
+  HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http"
 import {
@@ -58,6 +59,41 @@ const deferred = <A>() => {
 }
 
 describe("production startup diagnostics", () => {
+  it("allows large upload streams while retaining the old cap for other HTTP bodies", async () => {
+    const consume = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const received = yield* request.stream.pipe(Stream.runFold(() => 0, (sum, bytes) => sum + bytes.byteLength))
+      return HttpServerResponse.jsonUnsafe({ received })
+    })
+    const application = Layer.effectDiscard(HttpRouter.HttpRouter.use((router) =>
+      Effect.forEach(["/v1/uploadFile", "/v1/other"] as const, (path) => router.add("POST", path, consume)),
+    )).pipe(Layer.provideMerge(makeHttpKernelMiddlewareLayer({ isProduction: false })))
+    const handle = await startCoreProductionServer({
+      application, hostname: "127.0.0.1", inlineProtocolConfiguration: { enabled: false },
+      markShuttingDown: () => {}, bindRealtimeServer: () => {},
+    })
+    const size = 129 * 1024 * 1024
+    const body = () => {
+      let emitted = 0
+      const chunk = new Uint8Array(1024 * 1024)
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (emitted === size) { controller.close(); return }
+          controller.enqueue(chunk)
+          emitted += chunk.length
+        },
+      })
+    }
+    try {
+      const accepted = await fetch(`http://127.0.0.1:${handle.port}/v1/uploadFile`, { method: "POST", body: body() })
+      expect(accepted.status).toBe(200)
+      expect(await accepted.json()).toEqual({ received: size })
+      const rejected = await fetch(`http://127.0.0.1:${handle.port}/v1/other`, { method: "POST", body: body() })
+      expect(rejected.status).toBe(413)
+      await rejected.text()
+    } finally { await handle.shutdown() }
+  }, 30_000)
+
   it("keeps readiness and application admission closed until startup completes", async () => {
     const bound = deferred<number>()
     const releaseStartup = deferred<void>()

@@ -11,7 +11,7 @@ import {
   type InlineUploadPublication,
   type InlineUploadRecord,
 } from "@in/server/db/models/inlineUploads"
-import { inlineUploads } from "@in/server/db/schema"
+import { files, inlineUploads } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { ApiError, InlineError } from "@in/server/types/errors"
@@ -298,6 +298,65 @@ const saveBody = async (
 
 describe("native upload multipart worker", () => {
   setupTestLifecycle()
+
+  test.each([[true, false], [false, false], [true, true]] as const)("processing cancellation fences late publication and cleans a provider that settles late (local abort %s, stop %s)", async (localAbort, stopDuringCancel) => {
+    const user = await testUtils.createUser(`native-upload-worker-cancel-${localAbort}-${stopDuringCancel}@example.test`)
+    const account = await testUtils.createSessionForUser(user.id)
+    const caller = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const staging = new MemoryPartStore()
+    const multipart = new MemoryMultipartStore()
+    const body = new Uint8Array([91, 92])
+    let enteredResolve!: () => void
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve })
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    let activeSignal: AbortSignal | undefined
+    let finalizerSettled = false
+    const finalizer: MediaUploadFinalizer = {
+      ...makeFinalizer(body),
+      async prepareStoredPublication({ upload, signal, stream }) {
+        activeSignal = signal
+        await new Response(stream).arrayBuffer()
+        enteredResolve()
+        // Model a provider write that ignores cancellation until settlement.
+        await blocked
+        const key = `files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`
+        multipart.objects.set(key, { bytes: body, etag: "late-write" })
+        finalizerSettled = true
+        return publicationFor(upload)
+      },
+      async discardPublication(upload) {
+        await multipart.remove(`files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`)
+      },
+    }
+    const worker = createWorker(repository, staging, multipart, finalizer, { concurrency: 1, pollIntervalMs: 20 })
+    const operations = new NativeUploadOperations(repository, staging, finalizer,
+      (id) => worker.wake(id), (upload) => worker.discardStorage(upload),
+      localAbort ? (id) => worker.cancel(id) : () => {})
+    const created = await saveBody(operations, caller, body, localAbort ? 90 : 91)
+    await operations.finish({ uploadId: created.uploadId }, caller)
+    worker.start()
+    try {
+      await entered
+      expect((await operations.cancel({ uploadId: created.uploadId }, caller)).canceled).toBe(true)
+      expect(activeSignal?.aborted).toBe(localAbort)
+      expect(await repository.activeReservedBytes(owner)).toBe(0n)
+      const stopping = stopDuringCancel ? worker.stop() : undefined
+      release()
+      await waitFor(() => finalizerSettled && multipart.objects.size === 0)
+      await worker.stop()
+      await stopping
+      const stored = await repository.get(created.uploadId, owner)
+      expect(stored?.status).toBe("canceled")
+      expect(stored?.resultMediaId).toBeNull()
+      expect(await db.select().from(files).where(eq(files.fileUniqueId, stored!.resultFileUniqueId!))).toHaveLength(0)
+      expect(staging.objects.size).toBe(0)
+      expect(multipart.sessions.size).toBe(0)
+      expect(multipart.objects.size).toBe(0)
+    } finally { release() }
+  })
 
   test("keeps 5 MiB provider geometry with only a short final tail", () => {
     expect(storagePartGeometry(1)).toEqual([{ partNumber: 1, firstFrameIndex: 0, frameCount: 1 }])

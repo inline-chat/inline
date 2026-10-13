@@ -15,6 +15,7 @@ import {
   V1MessagingProvidersPublicError,
   V1MessagingProvidersRequestFailure,
 } from "./v1MessagingProvidersErrors.effect"
+import { MAX_HTTP_UPLOAD_BYTES, MEDIA_UPLOAD_MAX_BYTES } from "../modules/files/limits"
 
 const metadataFields = new Set([
   "duration",
@@ -32,18 +33,16 @@ const fileFields = new Set([
   "file",
   "thumbnail",
 ])
-// TODO(effect-cutover): Source this from a typed, environment-free upload
-// configuration service shared by the legacy compatibility adapter.
 const maxAcceptedMainFileSize =
-  500_000_000
+  Math.max(...Object.values(MEDIA_UPLOAD_MAX_BYTES))
 const maxAcceptedVideoFileSize =
-  200_000_000
+  MEDIA_UPLOAD_MAX_BYTES.video
 const maxAcceptedPhotoFileSize =
-  40_000_000
+  MEDIA_UPLOAD_MAX_BYTES.photo
 const maxAcceptedThumbnailFileSize =
-  40_000_000
+  MEDIA_UPLOAD_MAX_BYTES.photo
 const maxAcceptedVoiceFileSize =
-  20_000_000
+  MEDIA_UPLOAD_MAX_BYTES.voice
 const multipartChunkSize =
   16 * 1024
 
@@ -53,6 +52,7 @@ export interface V1UploadLimits {
   readonly maxThumbnailFileSize: number
   readonly maxParts: number
   readonly maxTotalSize: number
+  readonly idleTimeoutMs?: number
 }
 
 export const defaultV1UploadLimits: V1UploadLimits = {
@@ -65,9 +65,8 @@ export const defaultV1UploadLimits: V1UploadLimits = {
   // No successful retained operation accepts more than a 500 MB main file or
   // 40 MB thumbnail. The extra 1 MB covers multipart fields and boundaries.
   maxTotalSize:
-    maxAcceptedMainFileSize +
-    maxAcceptedThumbnailFileSize +
-    1_000_000,
+    MAX_HTTP_UPLOAD_BYTES,
+  idleTimeoutMs: 60_000,
 }
 
 const uploadValidationError = () =>
@@ -204,6 +203,16 @@ const boundedMultipartStream = (
         cause,
       ),
     ),
+    // Time only a pending upstream read. A healthy, slow transfer has no
+    // whole-request deadline; scoped cancellation still removes partial files.
+    Stream.timeoutOrElse({
+      duration: limits.idleTimeoutMs ?? defaultV1UploadLimits.idleTimeoutMs!,
+      orElse: () => Stream.fail(new V1MessagingProvidersPublicError({
+        error: "REQUEST_TIMEOUT",
+        errorCode: 408,
+        description: "Upload stalled while waiting for file bytes",
+      })),
+    }),
     Stream.flatMap((bytes) =>
       Stream.fromIterable(
         rechunk(bytes),
