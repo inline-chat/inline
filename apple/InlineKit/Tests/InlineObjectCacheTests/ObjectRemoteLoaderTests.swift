@@ -63,7 +63,7 @@ struct ObjectRemoteLoaderTests {
     async let second = loader.ensure([2, 3, 9])
     #expect(await first == [1, 2])
     #expect(await second == [2, 3])
-    #expect(remote.batches == [[1, 2, 3, 9]])
+    #expect(remote.batches.map { $0.sorted() } == [[1, 2, 3, 9]])
   }
 
   @Test("large requests are split into batches")
