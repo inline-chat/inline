@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 import InlineProtocol
 import Testing
 import RealtimeV2
@@ -7,6 +9,15 @@ import RealtimeV2
 
 private enum SimulatedUploadFailure: Error {
   case responseLost
+}
+
+private actor StagedHashProbe {
+  private(set) var reads = 0
+  func read(at url: URL) throws -> (Int64, Data) {
+    reads += 1
+    let data = try Data(contentsOf: url)
+    return (Int64(data.count), Data(SHA256.hash(data: data)))
+  }
 }
 
 private actor PendingCancelRPCMock: NativeUploadRPCTransport {
@@ -1010,6 +1021,314 @@ struct NativeUploadTests {
       progress: { _, _ in }
     )
     #expect(FileManager.default.fileExists(atPath: staged.path) == false)
+  }
+
+  @Test("staged hashes survive relaunch and identity rotation without touching video or cancel records")
+  func cachedStagedHashSurvivesRelaunch() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let root = directory.appendingPathComponent("staged")
+    let logicalID = "1600:video_1"
+    let store = FileNativeUploadStagingStore(root: root)
+    let staged = try await store.stage(logicalID: logicalID, sourceURL: source)
+    let probe = StagedHashProbe()
+    let first = try await store.sourceHash(logicalID: logicalID, stagedURL: staged) {
+      try await probe.read(at: $0)
+    }
+    try await store.recordPreparedVideo(.init(
+      fileName: "video.mp4", mimeType: "video/mp4", width: 1280, height: 720, duration: 90
+    ), logicalID: logicalID)
+    let pendingID = Data(repeating: 3, count: 16)
+    await store.recordPendingCancellation(uploadID: pendingID, owner: "1600")
+
+    let restoredStore = FileNativeUploadStagingStore(root: root)
+    let restored: any NativeUploadStaging = restoredStore
+    await restored.invalidateIdentity(logicalID: logicalID)
+    let second = try await restored.sourceHash(logicalID: logicalID, stagedURL: staged) {
+      try await probe.read(at: $0)
+    }
+    #expect(first.0 == second.0 && first.1 == second.1)
+    #expect(await probe.reads == 1)
+    #expect(try await restored.identitySalt(logicalID: logicalID).count == 16)
+    #expect(try await restoredStore.preparedVideo(logicalID: logicalID)?.1.width == 1280)
+    #expect(await restored.pendingCancellationIDs(owner: "1600") == [pendingID])
+    let otherBody = try await restored.stage(logicalID: "1700:video_1", sourceURL: source)
+    _ = try await restored.sourceHash(logicalID: "1700:video_1", stagedURL: otherBody) {
+      try await probe.read(at: $0)
+    }
+    #expect(await probe.reads == 2)
+
+    await restored.discard(logicalID: logicalID)
+    #expect(!FileManager.default.fileExists(atPath: staged.path))
+    #expect(!FileManager.default.fileExists(atPath: staged.deletingPathExtension().appendingPathExtension("json").path))
+    #expect(try await restoredStore.preparedVideo(logicalID: logicalID) == nil)
+    #expect(try await restored.identitySalt(logicalID: logicalID).count == 16)
+    #expect(await restored.pendingCancellationIDs(owner: "1600") == [pendingID])
+  }
+
+  @Test("legacy, malformed, foreign, and changed staged hash entries are recomputed", arguments: [
+    "legacy", "malformed", "foreign-owner", "version", "short-digest", "size", "replacement", "same-size-restored-mtime",
+  ])
+  func invalidCachedStagedHashIsRecomputed(mode: String) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let store = FileNativeUploadStagingStore(root: directory.appendingPathComponent("staged"))
+    let logicalID = "1600:document_1"
+    let body = try await store.stage(logicalID: logicalID, sourceURL: source)
+    let descriptor = body.deletingPathExtension().appendingPathExtension("json")
+    let probe = StagedHashProbe()
+    _ = try await store.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+    switch mode {
+    case "legacy":
+      try Data("{\"byteCount\":3,\"sha256\":\"legacy\",\"stagedMtime\":0}".utf8).write(to: descriptor)
+    case "malformed":
+      try Data("broken".utf8).write(to: descriptor)
+    case "foreign-owner", "version", "short-digest":
+      var cached = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: descriptor)) as? [String: Any])
+      if mode == "foreign-owner" { cached["logicalKey"] = "other-account" }
+      if mode == "version" { cached["version"] = 0 }
+      if mode == "short-digest" { cached["sha256"] = Data([1]).base64EncodedString() }
+      try JSONSerialization.data(withJSONObject: cached).write(to: descriptor)
+    case "size":
+      try Data([4, 5, 6, 7]).write(to: body)
+    case "replacement":
+      try Data([4, 5, 6]).write(to: body, options: .atomic)
+    case "same-size-restored-mtime":
+      var original = stat()
+      let readResult = body.withUnsafeFileSystemRepresentation { lstat($0!, &original) }
+      #expect(readResult == 0)
+      let handle = try FileHandle(forWritingTo: body)
+      try handle.write(contentsOf: Data([4, 5, 6]))
+      let times = [original.st_atimespec, original.st_mtimespec]
+      let restoreResult = times.withUnsafeBufferPointer { futimens(handle.fileDescriptor, $0.baseAddress!) }
+      try handle.close()
+      #expect(restoreResult == 0)
+      var restored = stat()
+      _ = body.withUnsafeFileSystemRepresentation { lstat($0!, &restored) }
+      #expect(restored.st_size == original.st_size)
+      #expect(restored.st_mtimespec.tv_sec == original.st_mtimespec.tv_sec)
+      #expect(restored.st_mtimespec.tv_nsec == original.st_mtimespec.tv_nsec)
+    default: Issue.record("Unknown cache fixture")
+    }
+    let refreshed = try await store.sourceHash(logicalID: logicalID, stagedURL: body) {
+      try await probe.read(at: $0)
+    }
+    let current = try Data(contentsOf: body)
+    #expect(refreshed.0 == Int64(current.count))
+    #expect(refreshed.1 == Data(SHA256.hash(data: current)))
+    #expect(await probe.reads == 2)
+  }
+
+  @Test("staged hashes reject unowned paths and mutation during the first read")
+  func stagedHashRejectsUnownedOrChangingSource() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let store = FileNativeUploadStagingStore(root: directory.appendingPathComponent("staged"))
+    let logicalID = "1600:document_1"
+    let body = try await store.stage(logicalID: logicalID, sourceURL: source)
+    let probe = StagedHashProbe()
+    await #expect {
+      try await store.sourceHash(logicalID: "1700:document_1", stagedURL: body) { try await probe.read(at: $0) }
+    } throws: { error in
+      if case NativeMediaUploadError.sourceChanged = error { true } else { false }
+    }
+    #expect(await probe.reads == 0)
+    await #expect {
+      try await store.sourceHash(logicalID: logicalID, stagedURL: body) { url in
+        let original = try await probe.read(at: url)
+        try Data([4, 5, 6, 7]).write(to: url)
+        return original
+      }
+    } throws: { error in
+      if case NativeMediaUploadError.sourceChanged = error { true } else { false }
+    }
+    #expect(!FileManager.default.fileExists(atPath: body.deletingPathExtension().appendingPathExtension("json").path))
+    #expect(try Data(contentsOf: body) == Data([4, 5, 6, 7]))
+  }
+
+  @Test("cached byte counts still enforce the media limit before any RPC")
+  func cachedHashPreservesSizeLimit() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let store = FileNativeUploadStagingStore(root: directory.appendingPathComponent("staged"))
+    let body = try await store.stage(logicalID: "1600:document_1", sourceURL: source)
+    let handle = try FileHandle(forWritingTo: body)
+    try handle.truncate(atOffset: 500_000_001)
+    try handle.close()
+    _ = try await store.sourceHash(logicalID: "1600:document_1", stagedURL: body) { _ in
+      (500_000_001, Data(repeating: 1, count: 32))
+    }
+    let transport = UploadRPCMock()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: store, ownerScope: { "1600" })
+    await #expect {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "document_1", fileURL: source, fileName: "source", mimeType: "application/octet-stream", kind: .document
+      ), progress: { _, _ in })
+    } throws: { error in
+      if case NativeMediaUploadError.fileTooLarge = error { true } else { false }
+    }
+    #expect(await transport.calledMethods().isEmpty)
+  }
+
+  @Test("only known full-allocation copies refuse insufficient capacity", arguments: [
+    Int64?.some(0), .some(2), .some(3), .some(-1), .none,
+  ], [Bool?.some(true), .some(false), .none])
+  func stagingCapacityPreflight(capacity: Int64?, fullCopyRequired: Bool?) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let root = directory.appendingPathComponent("staged")
+    let store = FileNativeUploadStagingStore(
+      root: root, availableCapacity: { _ in capacity }, copyRequiresFullAllocation: { _, _ in fullCopyRequired }
+    )
+    let shouldRefuse = fullCopyRequired == true && (capacity.map { $0 >= 0 && $0 < 3 } ?? false)
+    do {
+      let body = try await store.stage(logicalID: "1600:document_1", sourceURL: source)
+      #expect(!shouldRefuse)
+      #expect(try Data(contentsOf: body) == Data([1, 2, 3]))
+    } catch let error as CocoaError {
+      #expect(shouldRefuse)
+      #expect(error.code == .fileWriteOutOfSpace)
+      #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).isEmpty)
+    }
+    #expect(try Data(contentsOf: source) == Data([1, 2, 3]))
+  }
+
+  @Test("low disk space cannot replace or remove an already-owned staged body")
+  func stagingCapacityPreservesDurableBody() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let root = directory.appendingPathComponent("staged")
+    let initial = FileNativeUploadStagingStore(root: root, availableCapacity: { _ in nil })
+    let body = try await initial.stage(logicalID: "1600:document_1", sourceURL: source)
+    try Data([4, 5, 6, 7]).write(to: source)
+    let lowDisk = FileNativeUploadStagingStore(
+      root: root, availableCapacity: { _ in 0 }, copyRequiresFullAllocation: { _, _ in true }
+    )
+    #expect(try await lowDisk.stage(logicalID: "1600:document_1", sourceURL: source) == body)
+    #expect(try Data(contentsOf: body) == Data([1, 2, 3]))
+  }
+
+  @Test("same-device staging can proceed at low capacity and materializes selected symlinks")
+  func stagingMaterializesSelectedSymlink() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let link = directory.appendingPathComponent("selected-link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+    let store = FileNativeUploadStagingStore(
+      root: directory.appendingPathComponent("staged"), availableCapacity: { _ in 0 }
+    )
+    let body = try await store.stage(logicalID: "1600:document_1", sourceURL: link)
+    try Data([4, 5, 6]).write(to: source)
+    let probe = StagedHashProbe()
+    let result = try await store.sourceHash(logicalID: "1600:document_1", stagedURL: body) {
+      try await probe.read(at: $0)
+    }
+    #expect(result.0 == 3)
+    #expect(result.1 == Data(SHA256.hash(data: Data([1, 2, 3]))))
+    #expect(try Data(contentsOf: body) == Data([1, 2, 3]))
+  }
+
+  @Test("legacy staged symlinks become independent bytes without changing durable sidecars")
+  func cachedHashMaterializesLegacyStagedSymlink() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let root = directory.appendingPathComponent("staged")
+    let store = FileNativeUploadStagingStore(root: root, availableCapacity: { _ in nil })
+    let logicalID = "1600:video_legacy"
+    let body = try await store.stage(logicalID: logicalID, sourceURL: source)
+    try FileManager.default.removeItem(at: body)
+    try FileManager.default.createSymbolicLink(at: body, withDestinationURL: source)
+    try await store.recordPreparedVideo(.init(
+      fileName: "video.mp4", mimeType: "video/mp4", width: 1280, height: 720, duration: 90
+    ), logicalID: logicalID)
+    await store.invalidateIdentity(logicalID: logicalID)
+    let identity = try await store.identitySalt(logicalID: logicalID)
+    let pendingID = Data(repeating: 3, count: 16)
+    await store.recordPendingCancellation(uploadID: pendingID, owner: "1600")
+    let probe = StagedHashProbe()
+    let first = try await store.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+    #expect(try body.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == false)
+    try Data([4, 5, 6]).write(to: source)
+    let restoredStore = FileNativeUploadStagingStore(root: root)
+    let restored: any NativeUploadStaging = restoredStore
+    let second = try await restored.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+    #expect(first.0 == second.0 && first.1 == second.1)
+    #expect(await probe.reads == 1)
+    #expect(try Data(contentsOf: body) == Data([1, 2, 3]))
+    #expect(try await restored.identitySalt(logicalID: logicalID) == identity)
+    #expect(try await restoredStore.preparedVideo(logicalID: logicalID)?.1.width == 1280)
+    #expect(await restored.pendingCancellationIDs(owner: "1600") == [pendingID])
+  }
+
+  @Test("low capacity and cancellation preserve a legacy staged symlink and its durable sidecars", arguments: ["low-disk", "cancelled"])
+  func failedLegacyMaterializationPreservesUpload(mode: String) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source")
+    try Data([1, 2, 3]).write(to: source)
+    let root = directory.appendingPathComponent("staged")
+    let store = FileNativeUploadStagingStore(
+      root: root, availableCapacity: { _ in 0 }, copyRequiresFullAllocation: { _, _ in true }
+    )
+    let initial = FileNativeUploadStagingStore(root: root, availableCapacity: { _ in nil })
+    let logicalID = "1600:video_legacy"
+    let body = try await initial.stage(logicalID: logicalID, sourceURL: source)
+    try FileManager.default.removeItem(at: body)
+    try FileManager.default.createSymbolicLink(at: body, withDestinationURL: source)
+    try await store.recordPreparedVideo(.init(
+      fileName: "video.mp4", mimeType: "video/mp4", width: 1280, height: 720, duration: 90
+    ), logicalID: logicalID)
+    await store.invalidateIdentity(logicalID: logicalID)
+    let identity = try await store.identitySalt(logicalID: logicalID)
+    let pendingID = Data(repeating: 3, count: 16)
+    await store.recordPendingCancellation(uploadID: pendingID, owner: "1600")
+    let probe = StagedHashProbe()
+    if mode == "cancelled" {
+      let task = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await store.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+      }
+      await #expect(throws: CancellationError.self) { try await task.value }
+      #expect(await probe.reads == 0)
+    } else {
+      _ = try await store.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+      try Data([4, 5, 6]).write(to: source)
+      let uncached = try await store.sourceHash(logicalID: logicalID, stagedURL: body) { try await probe.read(at: $0) }
+      #expect(uncached.1 == Data(SHA256.hash(data: Data([4, 5, 6]))))
+      #expect(await probe.reads == 2)
+    }
+    #expect(try body.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+    #expect(!FileManager.default.fileExists(atPath: body.deletingPathExtension().appendingPathExtension("json").path))
+    #expect(try await store.identitySalt(logicalID: logicalID) == identity)
+    #expect(try await store.preparedVideo(logicalID: logicalID)?.1.width == 1280)
+    #expect(await store.pendingCancellationIDs(owner: "1600") == [pendingID])
+    #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+      .allSatisfy { !$0.lastPathComponent.hasPrefix("staging-") })
   }
 
   @Test("explicit cancel rotates the durable identity across a relaunch")

@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Auth
 import InlineProtocol
@@ -70,6 +71,11 @@ public protocol MediaUploading: Sendable {
 
 public protocol NativeUploadStaging: Sendable {
   func stage(logicalID: String, sourceURL: URL) async throws -> URL
+  func sourceHash(
+    logicalID: String,
+    stagedURL: URL,
+    compute: @escaping @Sendable (URL) async throws -> (Int64, Data)
+  ) async throws -> (Int64, Data)
   func discard(logicalID: String) async
   func identitySalt(logicalID: String) async throws -> Data
   func invalidateIdentity(logicalID: String) async
@@ -79,6 +85,13 @@ public protocol NativeUploadStaging: Sendable {
 }
 
 extension NativeUploadStaging {
+  public func sourceHash(
+    logicalID: String,
+    stagedURL: URL,
+    compute: @escaping @Sendable (URL) async throws -> (Int64, Data)
+  ) async throws -> (Int64, Data) {
+    try await compute(stagedURL)
+  }
   public func identitySalt(logicalID: String) async throws -> Data { Data() }
   public func invalidateIdentity(logicalID: String) async {}
   public func pendingCancellationIDs(owner: String) async -> [Data] { [] }
@@ -92,6 +105,41 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   public static let shared = FileNativeUploadStagingStore()
 
   private let root: URL
+  private let availableCapacity: @Sendable (URL) -> Int64?
+  private let copyRequiresFullAllocation: @Sendable (URL, URL) -> Bool?
+
+  private struct SourceSignature: Codable, Equatable {
+    let device: Int64
+    let inode: UInt64
+    let byteCount: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let changedSeconds: Int64
+    let changedNanoseconds: Int64
+
+    static func read(at url: URL, requireRegularFile: Bool = true) throws -> Self {
+      var info = stat()
+      let result = url.withUnsafeFileSystemRepresentation { path in
+        path.map { lstat($0, &info) } ?? -1
+      }
+      guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+      guard !requireRegularFile || info.st_mode & S_IFMT == S_IFREG else {
+        throw NativeMediaUploadError.sourceChanged
+      }
+      return Self(
+        device: Int64(info.st_dev), inode: UInt64(info.st_ino), byteCount: Int64(info.st_size),
+        modifiedSeconds: Int64(info.st_mtimespec.tv_sec), modifiedNanoseconds: Int64(info.st_mtimespec.tv_nsec),
+        changedSeconds: Int64(info.st_ctimespec.tv_sec), changedNanoseconds: Int64(info.st_ctimespec.tv_nsec)
+      )
+    }
+  }
+
+  private struct CachedSourceHash: Codable {
+    let version: Int
+    let logicalKey: String
+    let signature: SourceSignature
+    let sha256: Data
+  }
 
   private struct PendingCancellation: Codable {
     let owner: String
@@ -158,6 +206,18 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
 
   public init(root: URL? = nil) {
     self.root = root ?? Self.defaultRoot()
+    availableCapacity = Self.availableCapacityForCopy
+    copyRequiresFullAllocation = Self.fullCopyRequirement
+  }
+
+  init(
+    root: URL,
+    availableCapacity: @escaping @Sendable (URL) -> Int64?,
+    copyRequiresFullAllocation: @escaping @Sendable (URL, URL) -> Bool? = FileNativeUploadStagingStore.fullCopyRequirement
+  ) {
+    self.root = root
+    self.availableCapacity = availableCapacity
+    self.copyRequiresFullAllocation = copyRequiresFullAllocation
   }
 
   public func stage(logicalID: String, sourceURL: URL) throws -> URL {
@@ -172,9 +232,14 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
       return destination
     }
 
+    // Materialize a selected symlink's target so the staged body remains
+    // immutable when the original path or target subsequently changes.
+    let copySource = sourceURL.resolvingSymlinksInPath()
+    try requireCopyCapacity(for: copySource)
+
     let temporary = root.appendingPathComponent("staging-\(UUID().uuidString)")
     do {
-      try fileManager.copyItem(at: sourceURL, to: temporary)
+      try fileManager.copyItem(at: copySource, to: temporary)
       try fileManager.moveItem(at: temporary, to: destination)
       return destination
     } catch {
@@ -188,6 +253,94 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).body"))
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).json"))
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).video.json"))
+  }
+
+  public func sourceHash(
+    logicalID: String,
+    stagedURL: URL,
+    compute: @escaping @Sendable (URL) async throws -> (Int64, Data)
+  ) async throws -> (Int64, Data) {
+    let logicalKey = Self.fileName(for: logicalID)
+    let body = root.appendingPathComponent("\(logicalKey).body")
+    guard stagedURL.standardizedFileURL == body.standardizedFileURL else {
+      throw NativeMediaUploadError.sourceChanged
+    }
+    try Task.checkCancellation()
+    if Self.isSymbolicLink(at: body) {
+      do {
+        try materializeLegacyBody(at: body)
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        // Optional caching must not break a previously supported durable
+        // symlink. Keep its body/sidecars and the prior uncached reader when
+        // atomic materialization cannot proceed (for example, low disk space).
+        try Task.checkCancellation()
+        return try await compute(body)
+      }
+    }
+    let signature = try SourceSignature.read(at: body)
+    let descriptor = root.appendingPathComponent("\(logicalKey).json")
+    if let descriptorSignature = try? SourceSignature.read(at: descriptor),
+       descriptorSignature.byteCount <= 4_096,
+       let data = try? Data(contentsOf: descriptor),
+       let cached = try? JSONDecoder().decode(CachedSourceHash.self, from: data),
+       cached.version == 1, cached.logicalKey == logicalKey,
+       cached.signature == signature, cached.sha256.count == 32 {
+      return (signature.byteCount, cached.sha256)
+    }
+
+    let (byteCount, digest) = try await compute(body)
+    try Task.checkCancellation()
+    guard signature == (try SourceSignature.read(at: body)),
+          byteCount == signature.byteCount, digest.count == 32 else {
+      throw NativeMediaUploadError.sourceChanged
+    }
+    let cached = CachedSourceHash(version: 1, logicalKey: logicalKey, signature: signature, sha256: digest)
+    // Hash caching is an optimization. Failure to write this small sidecar must
+    // not discard a valid durable body or prevent an otherwise healthy upload.
+    if let data = try? JSONEncoder().encode(cached) { try? data.write(to: descriptor, options: .atomic) }
+    return (byteCount, digest)
+  }
+
+  private func materializeLegacyBody(at body: URL) throws {
+    let entrySignature = try SourceSignature.read(at: body, requireRegularFile: false)
+    let source = body.resolvingSymlinksInPath()
+    let sourceSignature = try SourceSignature.read(at: source)
+    try requireCopyCapacity(for: source)
+    try Task.checkCancellation()
+    let temporary = root.appendingPathComponent("staging-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try FileManager.default.copyItem(at: source, to: temporary)
+    guard sourceSignature == (try SourceSignature.read(at: source)),
+          entrySignature == (try SourceSignature.read(at: body, requireRegularFile: false)) else {
+      throw NativeMediaUploadError.sourceChanged
+    }
+    try Task.checkCancellation()
+    // Both paths are in the staging directory. POSIX rename atomically replaces
+    // only the symlink after the independent copy succeeds; sidecars stay put.
+    let result = temporary.withUnsafeFileSystemRepresentation { from in
+      body.withUnsafeFileSystemRepresentation { to in rename(from!, to!) }
+    }
+    guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+  }
+
+  private static func isSymbolicLink(at url: URL) -> Bool {
+    var info = stat()
+    let result = url.withUnsafeFileSystemRepresentation { path in path.map { lstat($0, &info) } ?? -1 }
+    return result == 0 && info.st_mode & S_IFMT == S_IFLNK
+  }
+
+  private func requireCopyCapacity(for source: URL) throws {
+    // Only a known cross-device copy justifies a full-allocation refusal.
+    // Same-device copies may clone; unknown devices/capacity use copy errors.
+    guard copyRequiresFullAllocation(source, root) == true else { return }
+    if let sourceSize = (try? source.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+       let capacity = availableCapacity(root), capacity >= 0, Int64(sourceSize) > capacity {
+      throw CocoaError(.fileWriteOutOfSpace, userInfo: [
+        NSLocalizedDescriptionKey: "There isn't enough free space to prepare this upload."
+      ])
+    }
   }
 
   public func identitySalt(logicalID: String) async throws -> Data {
@@ -209,6 +362,20 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
 
   private static func fileName(for logicalID: String) -> String {
     SHA256.hash(data: Data(logicalID.utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func fullCopyRequirement(source: URL, destinationRoot: URL) -> Bool? {
+    guard let sourceSignature = try? SourceSignature.read(at: source.resolvingSymlinksInPath(), requireRegularFile: false),
+          let destinationSignature = try? SourceSignature.read(at: destinationRoot.resolvingSymlinksInPath(), requireRegularFile: false)
+    else { return nil }
+    return sourceSignature.device != destinationSignature.device
+  }
+
+  private static func availableCapacityForCopy(at url: URL) -> Int64? {
+    let values = try? url.resourceValues(forKeys: [
+      .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+    ])
+    return values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init)
   }
 
   private static func defaultRoot() -> URL {
@@ -415,7 +582,9 @@ public actor DurableUploadCoordinator: MediaUploading {
       try validateAccount(accountToken)
       let byteCount: Int64
       let digest: Data
-      (byteCount, digest) = try await Self.hashFile(at: stagedURL)
+      (byteCount, digest) = try await staging.sourceHash(
+        logicalID: ownerScopedLogicalID, stagedURL: stagedURL, compute: Self.hashFile
+      )
       try Task.checkCancellation()
       try validateAccount(accountToken)
       guard byteCount > 0 else { throw NativeMediaUploadError.emptySource }
