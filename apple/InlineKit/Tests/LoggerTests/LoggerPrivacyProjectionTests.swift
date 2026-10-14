@@ -14,41 +14,37 @@ struct LoggerPrivacyProjectionTests {
     let privacySafeErrorCategory: String
   }
 
-  @Test("release projection contains only fixed metadata")
-  func releaseProjectionRedactsRuntimeContent() throws {
+  @Test("scrubbed projection keeps the message and error but drops sensitive values")
+  func scrubbedProjectionKeepsUsefulDetails() throws {
     let entry = Log.makeEntry(
       level: .error,
       scope: "scope/user@example.com",
-      message: "message-token-sentinel",
+      message: "sync failed for chat 42 user=person@example.com token=abc123secret",
       error: SentinelError(),
       source: LogSourceLocation(
-        file: "/private/user-path-sentinel/Feature.swift",
+        file: "/Users/someone/dev/Feature.swift",
         function: "performRequest()",
         line: 42
       ),
-      includeSensitiveDetails: false
+      detail: .scrubbed
     )
     let encoded = try JSONEncoder().encode(entry)
     let text = try #require(String(data: encoded, encoding: .utf8))
 
-    for sentinel in [
-      "scope/user@example.com",
-      "message-token-sentinel",
-      "localized-error-sentinel",
-      "user-path-sentinel",
-      "/private/",
-    ] {
+    for sentinel in ["person@example.com", "abc123secret", "someone", "scope/user"] {
       #expect(!text.contains(sentinel))
     }
+    #expect(entry.message.contains("sync failed for chat 42"))
+    #expect(entry.message.contains("[Feature.swift:42 performRequest()]"))
+    #expect(entry.message.contains("localized-error-sentinel"))
+    #expect(try #require(entry.error).contains("SentinelError"))
     #expect(entry.scope == "app")
     #expect(entry.file == "Feature.swift")
-    #expect(entry.fileName == "Feature.swift")
-    #expect(entry.line == 42)
-    #expect(entry.error == "other")
+    #expect(entry.detail == .scrubbed)
   }
 
-  @Test("release projection retains only bounded static scopes")
-  func releaseProjectionSanitizesScope() {
+  @Test("scrubbed projection retains only bounded static scopes")
+  func scrubbedProjectionSanitizesScope() {
     for scope in ["ApiClient", "FullChat", "realtime.v2", "file_upload"] {
       let entry = Log.makeEntry(
         level: .error,
@@ -56,7 +52,7 @@ struct LoggerPrivacyProjectionTests {
         message: "request failed",
         error: nil,
         source: LogSourceLocation(file: "Feature.swift", function: "work()", line: 1),
-        includeSensitiveDetails: false
+        detail: .scrubbed
       )
       #expect(entry.scope == scope)
     }
@@ -68,96 +64,93 @@ struct LoggerPrivacyProjectionTests {
         message: "request failed",
         error: nil,
         source: LogSourceLocation(file: "Feature.swift", function: "work()", line: 1),
-        includeSensitiveDetails: false
+        detail: .scrubbed
       )
       #expect(entry.scope == "app")
     }
   }
 
-  @Test("release projection retains finite URL error grouping")
-  func releaseProjectionGroupsURLErrors() {
-    let entry = Log.makeEntry(
-      level: .error,
-      scope: "network",
-      message: "request failed",
-      error: URLError(.timedOut),
-      source: LogSourceLocation(file: "ApiClient.swift", function: "request()", line: 12),
-      includeSensitiveDetails: false
+  @Test("scrubber removes common secrets and keeps identifiers")
+  func scrubberRemovesSecrets() {
+    let uuid = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+    let scrubbed = LogScrubber.scrub(
+      "GET https://user:pw@api.inline.chat/v1/getChat?token=xyz&q=hi id=\(uuid) "
+        + "Authorization: Bearer abc.def.ghi call +1 (415) 555-0100 "
+        + "key \(String(repeating: "a1", count: 20)) path /Users/jane/Library/x chat 12345"
     )
 
-    #expect(entry.error == "url:\(URLError(.timedOut).errorCode)")
+    #expect(scrubbed.contains("https://api.inline.chat/v1/getChat"))
+    #expect(!scrubbed.contains("token=xyz"))
+    #expect(!scrubbed.contains("user:pw"))
+    #expect(!scrubbed.contains("abc.def.ghi"))
+    #expect(!scrubbed.contains("555-0100"))
+    #expect(!scrubbed.contains("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"))
+    #expect(!scrubbed.contains("jane"))
+    #expect(scrubbed.contains(uuid))
+    #expect(scrubbed.contains("chat 12345"))
   }
 
-  @Test("release projection retains only explicit bounded error categories")
-  func releaseProjectionRetainsExplicitErrorCategories() {
-    let source = LogSourceLocation(file: "Upload.swift", function: "upload()", line: 17)
-    let categorized = Log.makeEntry(
-      level: .error,
-      scope: "NativeUpload",
-      message: "runtime-message-sentinel",
-      error: CategorizedError(privacySafeErrorCategory: "realtime_rpc:application:2:401"),
-      source: source,
-      includeSensitiveDetails: false
-    )
-    #expect(categorized.error == "realtime_rpc:application:2:401")
-
-    let unsafe = Log.makeEntry(
-      level: .error,
-      scope: "NativeUpload",
-      message: "runtime-message-sentinel",
-      error: CategorizedError(privacySafeErrorCategory: "person@example.com"),
-      source: source,
-      includeSensitiveDetails: false
-    )
-    #expect(unsafe.error == "other")
-
-    let unbounded = Log.makeEntry(
-      level: .error,
-      scope: "NativeUpload",
-      message: "runtime-message-sentinel",
-      error: CategorizedError(privacySafeErrorCategory: String(repeating: "a", count: 97)),
-      source: source,
-      includeSensitiveDetails: false
-    )
-    #expect(unbounded.error == "other")
+  @Test("scrubber bounds message length")
+  func scrubberBoundsLength() {
+    let scrubbed = LogScrubber.scrub(String(repeating: "word ", count: 1_000))
+    #expect(scrubbed.count <= LogScrubber.maxLength + 1)
   }
 
-  @Test("debug projection retains local diagnostics")
-  func debugProjectionRetainsDetails() {
+  @Test("error category keeps finite URL error grouping")
+  func errorCategoryGroupsURLErrors() {
+    #expect(Log.errorCategory(URLError(.timedOut)) == "url:\(URLError(.timedOut).errorCode)")
+    #expect(Log.errorCategory(SentinelError()) == "other")
+    #expect(Log.errorCategory(nil) == nil)
+  }
+
+  @Test("error category retains only explicit bounded categories")
+  func errorCategoryRetainsExplicitCategories() {
+    #expect(
+      Log.errorCategory(CategorizedError(privacySafeErrorCategory: "realtime_rpc:application:2:401"))
+        == "realtime_rpc:application:2:401"
+    )
+    #expect(Log.errorCategory(CategorizedError(privacySafeErrorCategory: "person@example.com")) == "other")
+    #expect(Log.errorCategory(CategorizedError(privacySafeErrorCategory: String(repeating: "a", count: 97))) == "other")
+  }
+
+  @Test("full projection retains local diagnostics")
+  func fullProjectionRetainsDetails() {
     let entry = Log.makeEntry(
       level: .info,
       scope: "local-scope",
-      message: "local-message",
+      message: "local-message person@example.com",
       error: nil,
       source: LogSourceLocation(file: "/tmp/Feature.swift", function: "work()", line: 9),
-      includeSensitiveDetails: true
+      detail: .full
     )
 
     #expect(entry.scope == "local-scope")
-    #expect(entry.message.contains("local-message"))
+    #expect(entry.message.contains("local-message person@example.com"))
     #expect(entry.file == "/tmp/Feature.swift")
   }
 
-  @Test("build flavor chooses the matching log projection")
-  func buildFlavorChoosesProjection() {
-    #expect(Log.includeSensitiveDetails(isDebugBuild: true))
-    #expect(!Log.includeSensitiveDetails(isDebugBuild: false))
-    #if DEBUG || DEBUG_BUILD
-    #expect(Log.includeSensitiveDetails)
-    #else
-    #expect(!Log.includeSensitiveDetails)
-    #endif
+  @Test("full entries are scrubbed before leaving the device")
+  func fullEntryScrubsForSentry() {
+    let entry = Log.makeEntry(
+      level: .error,
+      scope: "user/person@example.com",
+      message: "failed for person@example.com",
+      error: nil,
+      source: LogSourceLocation(file: "/Users/someone/Feature.swift", function: "work()", line: 3),
+      detail: .full
+    ).scrubbed()
+
+    #expect(entry.detail == .scrubbed)
+    #expect(entry.scope == "app")
+    #expect(entry.file == "Feature.swift")
+    #expect(entry.message.contains("failed for <email>"))
   }
 
-  @Test("debug console exposes the already-detailed local projection")
-  func debugConsoleExposesDetails() {
-    #expect(ConsoleLogSink.detailVisibility(isDebugBuild: true) == .publicDetails)
-    #expect(ConsoleLogSink.detailVisibility(isDebugBuild: false) == .privateDetails)
-    #if DEBUG || DEBUG_BUILD
-    #expect(ConsoleLogSink.detailVisibility == .publicDetails)
-    #else
-    #expect(ConsoleLogSink.detailVisibility == .privateDetails)
-    #endif
+  @Test("build flavor and override choose the local projection")
+  func buildFlavorChoosesProjection() {
+    #expect(Log.localDetail(isDebugBuild: true, unredactedLocalLogs: false) == .full)
+    #expect(Log.localDetail(isDebugBuild: false, unredactedLocalLogs: false) == .scrubbed)
+    #expect(Log.localDetail(isDebugBuild: false, unredactedLocalLogs: true) == .full)
   }
 
   @Test("HTTP diagnostics allow only templates and finite metadata")
@@ -203,9 +196,9 @@ struct LoggerPrivacyProjectionTests {
       message: "request failed",
       error: nil,
       source: LogSourceLocation(file: "ApiClient.swift", function: "request()", line: 221),
-      includeSensitiveDetails: false
+      detail: .scrubbed
     )
-    #expect(SentryLogPolicy.fingerprint(entry: entry, http: failure) == [
+    #expect(SentryLogPolicy.fingerprint(entry: entry, errorCategory: nil, http: failure) == [
       "app-error", "ApiClient.swift", "221", "none", "GET", "/v1/getMe", "500",
     ])
   }

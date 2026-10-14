@@ -1,5 +1,6 @@
 import InlineIntents
 import InlineKit
+import Logger
 import SwiftUI
 
 struct DebugView: View {
@@ -7,6 +8,7 @@ struct DebugView: View {
   @State private var showClearAlert = false
   @State private var clearError: Error?
   @State private var showClearError = false
+  @State private var unredactedLogs = Log.unredactedLocalLogs
 
   var body: some View {
     List {
@@ -48,6 +50,20 @@ struct DebugView: View {
           }
         }
         .disabled(isClearing)
+      }
+
+      Section {
+        Toggle("Full Log Details", isOn: Binding(
+          get: { unredactedLogs },
+          set: { enabled in
+            Log.setUnredactedLocalLogs(enabled)
+            unredactedLogs = enabled
+          }
+        ))
+      } header: {
+        Text("Logging")
+      } footer: {
+        Text("Logs are readable by default, with emails, tokens, and similar values scrubbed. Turn this on to also write raw messages and debug-level logs to the system log and devtools on this device. Sentry reports stay scrubbed.")
       }
 
       ClearCacheSettingsSection()

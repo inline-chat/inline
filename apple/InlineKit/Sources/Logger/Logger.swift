@@ -2,6 +2,7 @@ import Foundation
 import OSLog
 import Sentry
 import Darwin
+import Synchronization
 
 /// Supplies a bounded, non-sensitive error discriminator for release telemetry.
 /// Values must describe only static program state (for example, an enum case or
@@ -38,6 +39,13 @@ public enum LogLevel: String, Codable, Sendable {
   }
 }
 
+public enum LogDetail: String, Codable, Sendable {
+  /// Caller-provided text, unmodified. Debug builds or the local unredacted-logs override.
+  case full
+  /// Text passed through `LogScrubber`. Default for release builds and always for Sentry.
+  case scrubbed
+}
+
 public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
   public let id: UUID
   public let timestamp: Date
@@ -51,6 +59,26 @@ public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
   public let line: Int
   public let processIdentifier: Int32
   public let threadIdentifier: UInt64
+  /// Whether `message` and `error` hold full or scrubbed text.
+  public let detail: LogDetail
+
+  // Entries persisted before `detail` existed decode as scrubbed.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    timestamp = try container.decode(Date.self, forKey: .timestamp)
+    level = try container.decode(LogLevel.self, forKey: .level)
+    scope = try container.decode(String.self, forKey: .scope)
+    message = try container.decode(String.self, forKey: .message)
+    error = try container.decodeIfPresent(String.self, forKey: .error)
+    file = try container.decode(String.self, forKey: .file)
+    fileName = try container.decode(String.self, forKey: .fileName)
+    function = try container.decode(String.self, forKey: .function)
+    line = try container.decode(Int.self, forKey: .line)
+    processIdentifier = try container.decode(Int32.self, forKey: .processIdentifier)
+    threadIdentifier = try container.decode(UInt64.self, forKey: .threadIdentifier)
+    detail = try container.decodeIfPresent(LogDetail.self, forKey: .detail) ?? .scrubbed
+  }
 
   public init(
     id: UUID = UUID(),
@@ -64,7 +92,8 @@ public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
     function: String,
     line: Int,
     processIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
-    threadIdentifier: UInt64? = nil
+    threadIdentifier: UInt64? = nil,
+    detail: LogDetail = .full
   ) {
     self.id = id
     self.timestamp = timestamp
@@ -78,6 +107,27 @@ public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
     self.line = line
     self.processIdentifier = processIdentifier
     self.threadIdentifier = threadIdentifier ?? Self.currentThreadIdentifier()
+    self.detail = detail
+  }
+
+  /// The same entry with free-form text scrubbed; returns `self` if already scrubbed.
+  func scrubbed() -> LogEntry {
+    guard detail == .full else { return self }
+    return LogEntry(
+      id: id,
+      timestamp: timestamp,
+      level: level,
+      scope: Log.safeScope(scope),
+      message: LogScrubber.scrub(message),
+      error: error.map(LogScrubber.scrub),
+      file: fileName,
+      fileName: fileName,
+      function: function,
+      line: line,
+      processIdentifier: processIdentifier,
+      threadIdentifier: threadIdentifier,
+      detail: .scrubbed
+    )
   }
 
   public var consoleMessage: String {
@@ -186,8 +236,8 @@ enum SentryLogPolicy {
     http?.statusCode != 429
   }
 
-  static func fingerprint(entry: LogEntry, http: HTTPLogMetadata?) -> [String] {
-    var components = ["app-error", entry.fileName, String(entry.line), entry.error ?? "none"]
+  static func fingerprint(entry: LogEntry, errorCategory: String?, http: HTTPLogMetadata?) -> [String] {
+    var components = ["app-error", entry.fileName, String(entry.line), errorCategory ?? "none"]
     if let http {
       components.append(contentsOf: [
         http.method,
@@ -217,11 +267,6 @@ public protocol Logging {
 }
 
 public final class ConsoleLogSink: LogSink, @unchecked Sendable {
-  enum DetailVisibility: Equatable {
-    case publicDetails
-    case privateDetails
-  }
-
   private let subsystem: String
   private let lock = NSLock()
   private var loggers: [String: Logger] = [:]
@@ -233,28 +278,13 @@ public final class ConsoleLogSink: LogSink, @unchecked Sendable {
   public func write(_ event: LogEvent) {
     let entry = event.entry
     let logger = logger(for: entry.scope)
+    // Entries are already scrubbed unless full local details were requested, so they
+    // are public in the unified log and readable via Console or `log stream`.
     if let http = event.http {
-      logger.log(level: entry.level.osLogType, "\(http.consoleMessage, privacy: .public)")
+      logger.log(level: entry.level.osLogType, "\(http.consoleMessage, privacy: .public) \(entry.consoleMessage, privacy: .public)")
     } else {
-      switch Self.detailVisibility {
-      case .publicDetails:
-        logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .public)")
-      case .privateDetails:
-        logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .private)")
-      }
+      logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .public)")
     }
-  }
-
-  static var detailVisibility: DetailVisibility {
-    #if DEBUG || DEBUG_BUILD
-    detailVisibility(isDebugBuild: true)
-    #else
-    detailVisibility(isDebugBuild: false)
-    #endif
-  }
-
-  static func detailVisibility(isDebugBuild: Bool) -> DetailVisibility {
-    isDebugBuild ? .publicDetails : .privateDetails
   }
 
   private func logger(for scope: String) -> Logger {
@@ -279,23 +309,26 @@ public final class SentryLogSink: LogSink, @unchecked Sendable {
 
     let entry = event.entry
 
-    guard entry.level == .error else { return }
+    // Sentry always receives the scrubbed projection, even when local logs are unredacted.
+    let projection = entry.scrubbed()
 
-    let projection = Log.makeEntry(
-      level: entry.level,
-      scope: entry.scope,
-      message: entry.message,
-      error: event.error,
-      source: LogSourceLocation(file: entry.fileName, function: entry.function, line: entry.line),
-      includeSensitiveDetails: false
-    )
-
-    Task {
-      await SentryReporter.shared.report(
-        projection,
-        originalError: event.error,
-        http: event.http
-      )
+    switch entry.level {
+    case .error:
+      let errorCategory = Log.errorCategory(event.error)
+      Task {
+        await SentryReporter.shared.report(
+          projection,
+          errorCategory: errorCategory,
+          originalError: event.error,
+          http: event.http
+        )
+      }
+    case .warning, .info:
+      Task {
+        await SentryReporter.shared.addBreadcrumb(projection)
+      }
+    case .debug, .trace:
+      break
     }
   }
 }
@@ -354,6 +387,25 @@ public final class Log: @unchecked Sendable {
     registry.set(nil, id: id)
   }
 
+  /// UserDefaults key backing the local unredacted-logs override.
+  public static let unredactedLocalLogsDefaultsKey = "logger.unredactedLocalLogs"
+
+  private static let unredactedLocalLogsFlag = Atomic<Bool>(
+    UserDefaults.standard.bool(forKey: unredactedLocalLogsDefaultsKey)
+  )
+
+  /// When enabled, release builds write unscrubbed log messages (including debug and trace
+  /// logs) to local sinks: the unified log and in-process sinks such as MacDevtools.
+  /// Sentry always receives the scrubbed projection regardless of this flag.
+  public static var unredactedLocalLogs: Bool {
+    unredactedLocalLogsFlag.load(ordering: .relaxed)
+  }
+
+  public static func setUnredactedLocalLogs(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: unredactedLocalLogsDefaultsKey)
+    unredactedLocalLogsFlag.store(enabled, ordering: .relaxed)
+  }
+
   private func log(
     _ message: String,
     level: LogLevel,
@@ -372,7 +424,7 @@ public final class Log: @unchecked Sendable {
       message: message,
       error: error,
       source: LogSourceLocation(file: file, function: function, line: line),
-      includeSensitiveDetails: Self.includeSensitiveDetails
+      detail: Self.localDetail
     )
 
     let event = LogEvent(entry: entry, error: error, http: http)
@@ -405,54 +457,63 @@ public final class Log: @unchecked Sendable {
     message: String,
     error: Error?,
     source: LogSourceLocation,
-    includeSensitiveDetails: Bool
+    detail: LogDetail
   ) -> LogEntry {
     let fileName = (source.file as NSString).lastPathComponent
-    let errorDescription = error?.localizedDescription ?? ""
+    let errorDescription = errorDetail(error)
 
-    if includeSensitiveDetails {
-      let detailedMessage = if scope == "shared" || level == .error {
-        "[\(fileName):\(source.line) \(source.function)] \(message) \(errorDescription)"
-      } else {
-        "\(message) \(errorDescription)"
-      }
-      return LogEntry(
-        level: level,
-        scope: scope,
-        message: detailedMessage,
-        error: errorDescription.isEmpty ? nil : errorDescription,
-        file: source.file,
-        fileName: fileName,
-        function: source.function,
-        line: source.line
-      )
+    func render(_ value: String) -> String {
+      detail == .full ? value : LogScrubber.scrub(value)
     }
+    let renderedMessage = render(message)
+    let renderedError = errorDescription.map(render)
+    let location = if scope == "shared" || level == .error {
+      "[\(fileName):\(source.line) \(source.function)] "
+    } else {
+      ""
+    }
+    let fullMessage = [location + renderedMessage, renderedError]
+      .compactMap { $0 }
+      .joined(separator: " | ")
 
     return LogEntry(
       level: level,
-      scope: safeScope(scope),
-      message: "\(level.rawValue) at \(fileName):\(source.line)",
-      error: errorCategory(error),
-      file: fileName,
+      scope: detail == .full ? scope : safeScope(scope),
+      message: fullMessage,
+      error: renderedError,
+      file: detail == .full ? source.file : fileName,
       fileName: fileName,
       function: source.function,
-      line: source.line
+      line: source.line,
+      detail: detail
     )
   }
 
-  static var includeSensitiveDetails: Bool {
+  static var localDetail: LogDetail {
     #if DEBUG || DEBUG_BUILD
-    includeSensitiveDetails(isDebugBuild: true)
+    localDetail(isDebugBuild: true, unredactedLocalLogs: unredactedLocalLogs)
     #else
-    includeSensitiveDetails(isDebugBuild: false)
+    localDetail(isDebugBuild: false, unredactedLocalLogs: unredactedLocalLogs)
     #endif
   }
 
-  static func includeSensitiveDetails(isDebugBuild: Bool) -> Bool {
-    isDebugBuild
+  static func localDetail(isDebugBuild: Bool, unredactedLocalLogs: Bool) -> LogDetail {
+    isDebugBuild || unredactedLocalLogs ? .full : .scrubbed
   }
 
-  private static func safeScope(_ scope: String) -> String {
+  /// Type, domain, code, and description: enough to tell errors apart without a debugger.
+  static func errorDetail(_ error: Error?) -> String? {
+    guard let error else { return nil }
+    let nsError = error as NSError
+    let described = String(describing: error)
+    var parts = ["\(String(reflecting: type(of: error))) (\(nsError.domain):\(nsError.code))"]
+    if !described.isEmpty { parts.append(described) }
+    let localized = nsError.localizedDescription
+    if !localized.isEmpty, !described.contains(localized) { parts.append(localized) }
+    return parts.joined(separator: " ")
+  }
+
+  static func safeScope(_ scope: String) -> String {
     guard !scope.isEmpty, scope.utf8.count <= 64 else { return "app" }
     let isSafe = scope.utf8.allSatisfy { byte in
       switch byte {
@@ -465,7 +526,7 @@ public final class Log: @unchecked Sendable {
     return isSafe ? scope : "app"
   }
 
-  private static func errorCategory(_ error: Error?) -> String? {
+  static func errorCategory(_ error: Error?) -> String? {
     guard let error else { return nil }
     if error is CancellationError { return "cancelled" }
     if let urlError = error as? URLError {
@@ -529,6 +590,9 @@ extension Log: Logging {
   ) {
     #if DEBUG || DEBUG_BUILD
     log(message(), level: .debug, file: file, function: function, line: line)
+    #else
+    guard Self.unredactedLocalLogs else { return }
+    log(message(), level: .debug, file: file, function: function, line: line)
     #endif
   }
 
@@ -540,6 +604,9 @@ extension Log: Logging {
   ) {
     guard level == .trace else { return }
     #if DEBUG || DEBUG_BUILD
+    log(message(), level: .trace, file: file, function: function, line: line)
+    #else
+    guard Self.unredactedLocalLogs else { return }
     log(message(), level: .trace, file: file, function: function, line: line)
     #endif
   }
@@ -569,8 +636,18 @@ private actor SentryReporter {
     }
   }
 
+  func addBreadcrumb(_ entry: LogEntry) {
+    guard SentrySDK.isEnabled else { return }
+    let crumb = Breadcrumb(level: entry.level == .warning ? .warning : .info, category: entry.scope)
+    crumb.type = "debug"
+    crumb.message = entry.message
+    crumb.timestamp = entry.timestamp
+    SentrySDK.addBreadcrumb(crumb)
+  }
+
   func report(
     _ entry: LogEntry,
+    errorCategory: String?,
     originalError: Error?,
     http: HTTPLogMetadata?
   ) async {
@@ -580,14 +657,19 @@ private actor SentryReporter {
 
     // Scope copying and capture are synchronous in sentry-cocoa. Keep that work on
     // this serial reporter actor so an ordinary handled error cannot stall the UI.
-    _ = SentrySDK.capture(message: "app_error") { sentryScope in
+    // Grouping uses the bounded fingerprint, so the scrubbed message can vary freely.
+    _ = SentrySDK.capture(message: entry.message) { sentryScope in
       sentryScope.setLevel(.error)
-      sentryScope.setFingerprint(SentryLogPolicy.fingerprint(entry: entry, http: http))
+      sentryScope.setFingerprint(SentryLogPolicy.fingerprint(entry: entry, errorCategory: errorCategory, http: http))
       sentryScope.setTag(value: entry.scope, key: "scope")
       sentryScope.setTag(value: entry.fileName, key: "source_file")
-      sentryScope.setExtra(value: entry.error ?? "none", key: "error_category")
-      if let errorCategory = entry.error {
+      sentryScope.setTag(value: entry.function, key: "source_function")
+      sentryScope.setExtra(value: errorCategory ?? "none", key: "error_category")
+      if let errorCategory {
         sentryScope.setTag(value: errorCategory, key: "error_category")
+      }
+      if let errorDetail = entry.error {
+        sentryScope.setExtra(value: errorDetail, key: "error_detail")
       }
       sentryScope.setExtra(value: entry.line, key: "line")
       if let http {

@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import Logger
 import MacDevtools
 import SwiftUI
 
@@ -12,6 +13,7 @@ struct DebugSettingsDetailView: View {
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
   @State private var showDatabaseError = false
+  @State private var unredactedLogs = Log.unredactedLocalLogs
 #if DEBUG || DEBUG_BUILD
   @State private var showThemeWorkshop = false
   @State private var messageGestureTracing = MessageGestureTrace.isEnabled
@@ -134,6 +136,26 @@ struct DebugSettingsDetailView: View {
         }
       } header: {
         SettingsSectionHeader("Recovery")
+      }
+
+      Section {
+        Toggle(isOn: Binding(
+          get: { unredactedLogs },
+          set: { enabled in
+            Log.setUnredactedLocalLogs(enabled)
+            unredactedLogs = enabled
+          }
+        )) {
+          SettingsRowLabel(
+            "Full Log Details",
+            description: "Write raw, unscrubbed messages and debug-level logs on this device."
+          )
+        }
+        .toggleStyle(.switch)
+      } header: {
+        SettingsSectionHeader("Logging")
+      } footer: {
+        Text("Logs are readable by default, with emails, tokens, and similar values scrubbed. Turn this on to also write raw messages and debug-level logs to the system log and devtools on this device. Sentry reports stay scrubbed.")
       }
 #if DEBUG || DEBUG_BUILD
       Section {
