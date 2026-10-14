@@ -292,7 +292,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // Keep macOS autofill heuristics enabled so email login codes can be offered from Mail.
 
       "showSidebarMessagePreview": false,
-      "includeSpaceChatsInHomeSidebar": true,
       AppSettings.sidebarItemSizeKey: SidebarItemSize.compact.rawValue,
       AppSettings.sidebarModeKey: SidebarMode.inbox.rawValue,
       AppSettings.sidebarSortKey: SidebarSortMode.openedOrder.rawValue,

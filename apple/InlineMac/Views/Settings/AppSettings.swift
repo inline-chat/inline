@@ -132,7 +132,6 @@ final class AppSettings: ObservableObject {
   static let showGridInSidebarKey = "showGridInSidebar"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
-  static let legacyRichTextNativeMathEnabledKey = "experimental.richTextNativeMathEnabled"
   static let richTextMultiSurfaceSelectionEnabledKey = "experimental.richTextMultiSurfaceSelectionEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
@@ -329,10 +328,6 @@ final class AppSettings: ObservableObject {
     set { sidebarItemSize = newValue ? .standard : .compact }
   }
 
-  /// Kept as an app-level scope flag so existing consumers retain one source
-  /// of truth. Product no longer exposes a narrower Home scope.
-  @Published private(set) var includeSpaceChatsInHomeSidebar = true
-
   @Published var sidebarSort: SidebarSortMode {
     didSet {
       UserDefaults.standard.set(sidebarSort.rawValue, forKey: Self.sidebarSortKey)
@@ -349,7 +344,6 @@ final class AppSettings: ObservableObject {
     didSet {
       sidebarModeNeedsAccountMigration = false
       UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
-      UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     }
   }
 
@@ -431,12 +425,6 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var showMainTabStrip: Bool {
-    didSet {
-      UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
-    }
-  }
-
   private init() {
     let persistentDefaults = Bundle.main.bundleIdentifier.flatMap {
       UserDefaults.standard.persistentDomain(forName: $0)
@@ -491,9 +479,6 @@ final class AppSettings: ObservableObject {
       sidebarItemSize = itemSize
       UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
     }
-    // Migrate earlier opt-outs back to the product-wide scope while retaining
-    // the flag for the sidebar, unread-count, and temporary-chat pipelines.
-    UserDefaults.standard.set(true, forKey: "includeSpaceChatsInHomeSidebar")
     if let storedSidebarSort = UserDefaults.standard.string(forKey: Self.sidebarSortKey),
        let sort = SidebarSortMode(rawValue: storedSidebarSort) {
       sidebarSort = sort
@@ -514,14 +499,11 @@ final class AppSettings: ObservableObject {
     } else {
       unreadBadgeStyle = .defaultValue
     }
-    showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? true
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
-    ) as? Bool ?? UserDefaults.standard.object(
-      forKey: Self.legacyRichTextNativeMathEnabledKey
     ) as? Bool ?? false
     richTextMultiSurfaceSelectionEnabled = UserDefaults.standard.object(
       forKey: Self.richTextMultiSurfaceSelectionEnabledKey
@@ -542,7 +524,6 @@ final class AppSettings: ObservableObject {
     showGridInSidebar = persistentDefaults?[Self.showGridInSidebarKey] as? Bool ?? true
     if sidebarModeNeedsAccountMigration == false {
       UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
-      UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     }
   }
 

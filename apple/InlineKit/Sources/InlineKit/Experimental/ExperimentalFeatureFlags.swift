@@ -27,6 +27,7 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.bool(forKey: newThreadAgentPickerKey)
   }
 
+  /// Read only to migrate pre-`sidebarMode` installs; never written.
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
   public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
   public static let macMessageSelectionKey = "experimental.macMessageSelection"
@@ -53,19 +54,6 @@ public enum ExperimentalFeatureFlags {
 
   public static var fileBrowserEnabled: Bool {
     UserDefaults.standard.bool(forKey: fileBrowserKey)
-  }
-
-  public static var sidebarAsInboxEnabled: Bool {
-    get { isSidebarAsInboxEnabled }
-    set { setSidebarAsInboxEnabled(newValue) }
-  }
-
-  public static var isSidebarAsInboxEnabled: Bool {
-    UserDefaults.standard.bool(forKey: sidebarAsInboxKey)
-  }
-
-  public static func setSidebarAsInboxEnabled(_ isEnabled: Bool) {
-    UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
   }
 
   /// Native downloads stay opt-in at every size, on either authenticated realtime transport.

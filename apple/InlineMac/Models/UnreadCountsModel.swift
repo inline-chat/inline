@@ -64,7 +64,6 @@ struct UnreadCountsSnapshot: Equatable, Sendable {
 
 private struct UnreadCountsSidebarScope: Equatable, Sendable {
   var spaceId: Int64?
-  var includeSpaceChatsInHome: Bool
   var nonProminentUnreadTimeFrame: UnreadCountsTimeFrame
 }
 
@@ -92,7 +91,6 @@ final class UnreadCountsModel {
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var sidebarScope = UnreadCountsSidebarScope(
     spaceId: nil,
-    includeSpaceChatsInHome: true,
     nonProminentUnreadTimeFrame: .today
   )
 
@@ -114,12 +112,10 @@ final class UnreadCountsModel {
 
   func setSidebarScope(
     spaceId: Int64?,
-    includeSpaceChatsInHome: Bool,
     nonProminentUnreadTimeFrame: UnreadCountsTimeFrame = .today
   ) {
     let scope = UnreadCountsSidebarScope(
       spaceId: spaceId,
-      includeSpaceChatsInHome: includeSpaceChatsInHome,
       nonProminentUnreadTimeFrame: nonProminentUnreadTimeFrame
     )
     guard sidebarScope != scope else { return }
@@ -353,16 +349,7 @@ final class UnreadCountsModel {
       )
     }
 
-    if scope.includeSpaceChatsInHome {
-      return ("1 = 1", [])
-    }
-
-    return (
-      """
-      COALESCE("dialog"."spaceId", "chat"."spaceId") IS NULL
-      """,
-      []
-    )
+    return ("1 = 1", [])
   }
 
   private nonisolated static func prominentOutsideSelectedSpaceSQL(

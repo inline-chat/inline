@@ -43,24 +43,6 @@ struct ExperimentalView: View {
       }
 
       Section {
-        LabeledContent {
-          Text("Enabled")
-            .foregroundStyle(.secondary)
-        } label: {
-          VStack(alignment: .leading, spacing: 3) {
-            Text("New Home")
-            Text("Use the Open, All Chats, and Search tabs.")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-          }
-        }
-      } header: {
-        Text("Appearance & Navigation")
-      } footer: {
-        Text("New Home is now the standard experience for everyone.")
-      }
-
-      Section {
         SettingsItem(icon: "arrow.down.document", iconColor: .blue, title: "Native File Downloads") {
           Toggle("Native File Downloads", isOn: $nativeFileDownloadsEnabled)
             .labelsHidden()

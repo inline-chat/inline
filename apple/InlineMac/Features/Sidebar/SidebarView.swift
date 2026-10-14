@@ -229,10 +229,6 @@ struct SidebarView: View {
         cancelSidebarDropImports()
       }
     }
-    .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
-      syncUnreadCountsScope(spaceId: nav.selectedSpaceId, includeSpaceChatsInHome: includeSpaceChats)
-      viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
-    }
     .onChange(of: effectiveSidebarSort, initial: true) { _, sortMode in
       viewModel.setSortMode(sortMode)
     }
@@ -3375,17 +3371,7 @@ struct SidebarView: View {
   }
 
   private func syncUnreadCountsScope(spaceId: Int64?) {
-    syncUnreadCountsScope(
-      spaceId: spaceId,
-      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
-    )
-  }
-
-  private func syncUnreadCountsScope(spaceId: Int64?, includeSpaceChatsInHome: Bool) {
-    unreadCounts.setSidebarScope(
-      spaceId: spaceId,
-      includeSpaceChatsInHome: includeSpaceChatsInHome
-    )
+    unreadCounts.setSidebarScope(spaceId: spaceId)
   }
 
   private func validateSelectedSpace() {

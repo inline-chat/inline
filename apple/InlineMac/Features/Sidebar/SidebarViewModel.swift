@@ -128,7 +128,6 @@ final class SidebarViewModel {
   @ObservationIgnored private var chatsRetryAttempt = 0
   @ObservationIgnored private var spacesRetryTask: Task<Void, Never>?
   @ObservationIgnored private var spacesRetryAttempt = 0
-  @ObservationIgnored private var includeSpaceChatsInHome = true
   @ObservationIgnored private var sortMode = SidebarSortMode.openedOrder
   @ObservationIgnored private var started = false
   @ObservationIgnored private var chatsObservationGeneration = 0
@@ -241,12 +240,6 @@ final class SidebarViewModel {
       return source == .space(selectedSpaceId, mode)
     }
     return source == .home(mode)
-  }
-
-  func setIncludeSpaceChatsInHome(_ include: Bool) {
-    guard includeSpaceChatsInHome != include else { return }
-    includeSpaceChatsInHome = include
-    refreshItems()
   }
 
   func setSortMode(_ sortMode: SidebarSortMode) {
@@ -580,7 +573,7 @@ final class SidebarViewModel {
   }
 
   private func refreshItems() {
-    let items = sortItems(filterHomeItems(snapshots))
+    let items = sortItems(snapshots)
     let kind: ChatListItem.Kind = isHomeSource ? .thread : .contact
     let projectedItems = items.map {
       Item(snapshot: $0, kind: isUserPeer($0.peer) ? kind : .thread)
@@ -638,12 +631,6 @@ final class SidebarViewModel {
       result.append(selected)
     }
     return result
-  }
-
-  private func filterHomeItems(_ items: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
-    guard includeSpaceChatsInHome == false else { return items }
-    guard isHomeSource else { return items }
-    return items.filter { $0.spaceID == nil }
   }
 
   private func sortItems(_ items: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
