@@ -657,6 +657,79 @@ describe("Inline Protocol WebSocket carrier", () => {
     await transport.shutdown()
   }, 20_000)
 
+  test("releases exhausted pending-login admission without releasing other sockets", async () => {
+    let now = Date.now()
+    const runtime = fixture({}, { assertHealthy: () => {}, nowMilliseconds: () => now })
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key, keyId, temporary: false, currentServerSalt: serverSalt,
+    })
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+    const sockets: Array<ServerWebSocket<InlineProtocolWebSocketData>> = []
+    const closed: string[] = []
+    const establish = async () => {
+      const data = upgrade(transport)
+      const socket = {
+        data,
+        close: (code: number, reason: string) => {
+          expect(code).toBe(1013)
+          expect(reason).toBe("Realtime V3 overloaded")
+          closed.push(data.id)
+          transport.websocket.close?.(socket, code, reason)
+        },
+        sendBinary: (bytes: Uint8Array) => bytes.length,
+      } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      sockets.push(socket)
+      transport.websocket.open?.(socket)
+      let header: Uint8Array
+      do header = Uint8Array.from(randomBytes(64))
+      while (!isValidObfuscatedHeader(header))
+      const carrier = createObfuscatedClientHeader(header, 1)
+      await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state?.queue
+      const body = encodePing(1n)
+      const packet = encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId: BigInt(sockets.length),
+        messageId: new MessageIdGenerator().next(Date.now(), 1, 0),
+        sequenceNumber: 0, body,
+      }, paddingFor(body.length))
+      await transport.websocket.message(socket, Buffer.from(carrier.outbound.process(encodeAbridgedPacket(packet))))
+      await data.state?.queue
+      await data.state?.outboundQueue
+      return socket
+    }
+
+    try {
+      for (let count = 0; count < 64; count += 1) {
+        // Pending-login capacity exceeds the per-minute handshake start budget.
+        // Advance the admission clock instead of sleeping or relaxing that guard.
+        if (count === 60) now += 60_000
+        const socket = await establish()
+        expect(socket.data.pendingLoginAdmission).toBeTrue()
+        expect(socket.data.closed).toBeFalse()
+      }
+      const rejected = await establish()
+      expect(closed).toEqual([rejected.data.id])
+      expect(rejected.data.handshakeAdmissionIp).toBeUndefined()
+      expect(rejected.data.pendingLoginAdmission).toBeUndefined()
+      expect(rejected.data.closed).toBeTrue()
+
+      const released = sockets[0]!
+      transport.websocket.close?.(released, 1000, "done")
+      const replacement = await establish()
+      expect(replacement.data.pendingLoginAdmission).toBeTrue()
+      expect(replacement.data.closed).toBeFalse()
+      transport.websocket.close?.(released, 1000, "duplicate close")
+      const stillRejected = await establish()
+      expect(closed).toEqual([rejected.data.id, stillRejected.data.id])
+    } finally {
+      for (const socket of sockets) transport.websocket.close?.(socket, 1000, "cleanup")
+      await transport.shutdown()
+    }
+  })
+
   test("expires established service-only sockets without extending the pending-login deadline", async () => {
     const runtime = fixture()
     const key = Uint8Array.from(randomBytes(256))
@@ -701,6 +774,12 @@ describe("Inline Protocol WebSocket carrier", () => {
       }
       expect(data.state?.session.hasEstablishedAuthorization).toBeTrue()
       expect(data.handshakeAdmissionIp).toBe("127.0.0.1")
+      // An established pending login leaves the per-IP handshake budget, so a
+      // ninth socket from the same address is admitted while it waits.
+      expect(data.pendingLoginAdmission).toBeTrue()
+      const ninth = upgrade(transport)
+      const ninthSocket = { data: ninth, close: () => {} } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      transport.websocket.close?.(ninthSocket, 1000, "done")
       const deadlines = timerSpy.mock.calls.filter(([, delay]) => delay === 15 * 60 * 1_000)
       expect(deadlines).toHaveLength(1)
       const expire = deadlines[0]?.[0]

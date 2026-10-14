@@ -64,12 +64,16 @@ const MAX_QUEUED_INBOUND_FRAMES = 256
 const MAX_QUEUED_INBOUND_BYTES = 32 * 1024 * 1024
 const MAX_QUEUED_OUTBOUND_RECORDS = 4096
 const MAX_QUEUED_OUTBOUND_BYTES = 32 * 1024 * 1024
-// Key establishment alone does not authenticate an account. Keep the admission
-// lease through login, including permanent-key service traffic. Shared NATs can
-// therefore have at most eight simultaneous pending logins; registered account
-// connections release this lease immediately.
+// Key establishment alone does not authenticate an account. Keep an admission
+// lease through login, including permanent-key service traffic, in two phases.
+// Key exchange stays tightly bounded. An established socket then moves to the
+// wider pending-login budget, so people waiting on a login challenge behind one
+// NAT do not block each other's handshakes or authenticated reconnects.
+// Registered account connections release the lease immediately.
 const MAX_CONCURRENT_HANDSHAKES = 256
 const MAX_CONCURRENT_HANDSHAKES_PER_IP = 8
+const MAX_PENDING_LOGINS = 2_048
+const MAX_PENDING_LOGINS_PER_IP = 64
 // Native and hosted login challenges last ten minutes. This absolute lifetime
 // leaves time for handshake/provider work without letting pings renew admission.
 const ACCOUNT_AUTHENTICATION_TIMEOUT_MS = 15 * 60 * 1_000
@@ -96,6 +100,7 @@ export type InlineProtocolWebSocketData = {
   readonly id: string
   readonly metadata?: RealtimeRequestMetadata
   handshakeAdmissionIp?: string
+  pendingLoginAdmission?: boolean
   closed: boolean
   state?: InlineProtocolConnectionState
 }
@@ -238,7 +243,9 @@ export const makeInlineProtocolRealtimeTransport = (
   const handshakeCapacityRejectedRequests = new WeakSet<Request>()
   const handshakesByIp = new Map<string, number>()
   const handshakeStartsByIp = new Map<string, number>()
+  const pendingLoginsByIp = new Map<string, number>()
   let activeHandshakes = 0
+  let activePendingLogins = 0
   let handshakeStarts = 0
   let handshakeRateWindow = -1
   let activeApplications = 0
@@ -332,14 +339,38 @@ export const makeInlineProtocolRealtimeTransport = (
     handshakeStartsByIp.set(ip, (handshakeStartsByIp.get(ip) ?? 0) + 1)
   }
 
+  const releaseAdmissionForIp = (byIp: Map<string, number>, ip: string): void => {
+    const current = byIp.get(ip) ?? 0
+    if (current <= 1) byIp.delete(ip)
+    else byIp.set(ip, current - 1)
+  }
+
   const releaseHandshake = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
     const ip = socket.data.handshakeAdmissionIp
     if (!ip) return
-    const current = handshakesByIp.get(ip) ?? 0
-    if (current <= 1) handshakesByIp.delete(ip)
-    else handshakesByIp.set(ip, current - 1)
-    activeHandshakes = Math.max(0, activeHandshakes - 1)
+    if (socket.data.pendingLoginAdmission) {
+      releaseAdmissionForIp(pendingLoginsByIp, ip)
+      activePendingLogins = Math.max(0, activePendingLogins - 1)
+    } else {
+      releaseAdmissionForIp(handshakesByIp, ip)
+      activeHandshakes = Math.max(0, activeHandshakes - 1)
+    }
     socket.data.handshakeAdmissionIp = undefined
+    socket.data.pendingLoginAdmission = undefined
+  }
+
+  // Moves an established, not yet registered socket out of the handshake budget.
+  const tryRetainPendingLogin = (socket: ServerWebSocket<InlineProtocolWebSocketData>): boolean => {
+    const ip = socket.data.handshakeAdmissionIp
+    if (!ip || socket.data.pendingLoginAdmission) return true
+    if (activePendingLogins >= MAX_PENDING_LOGINS ||
+        (pendingLoginsByIp.get(ip) ?? 0) >= MAX_PENDING_LOGINS_PER_IP) return false
+    releaseAdmissionForIp(handshakesByIp, ip)
+    activeHandshakes = Math.max(0, activeHandshakes - 1)
+    pendingLoginsByIp.set(ip, (pendingLoginsByIp.get(ip) ?? 0) + 1)
+    activePendingLogins += 1
+    socket.data.pendingLoginAdmission = true
+    return true
   }
 
   const clearAuthenticationTimeout = (state: InlineProtocolConnectionState | undefined): void => {
@@ -742,6 +773,15 @@ export const makeInlineProtocolRealtimeTransport = (
         const accepted = await state.session.receiveConcurrent(decoded.payload, decoded.quickAckRequested
           ? { onQuickAck: (quickAckId) => { void sendQuickAck(socket, quickAckId) } }
         : undefined)
+        if (state.session.hasEstablishedAuthorization && !tryRetainPendingLogin(socket)) {
+          warnOverload("pending-login", "Inline Protocol V3 pending-login admission overloaded", {
+            activePendingLogins,
+            globalCapacity: MAX_PENDING_LOGINS,
+            perIpCapacity: MAX_PENDING_LOGINS_PER_IP,
+          })
+          closeOverloaded(socket)
+          return
+        }
         // This only records local activity; the presence owner persists it in
         // coarse batches, never as a session query or write per V3 frame.
         if (state.registered) connectionManager.markConnectionActivity(socket.data.id)
