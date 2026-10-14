@@ -209,10 +209,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         self?.discardVoiceRecordingTapped()
       },
       onSend: { [weak self] in
-        self?.sendVoiceRecording(sendMode: nil)
+        self?.voiceSendTapped(sendMode: nil)
       },
       onSendSilently: { [weak self] in
-        self?.sendVoiceRecording(sendMode: .modeSilent)
+        self?.voiceSendTapped(sendMode: .modeSilent)
       }
     ))
     controller.safeAreaRegions = []
@@ -915,9 +915,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func discardVoiceRecordingTapped() {
-    guard voiceViewModel.phase == .review else { return }
+    guard voiceViewModel.isActive, !voiceViewModel.isSending else { return }
 
-    if voiceViewModel.shouldConfirmCancel {
+    let canLoseRecording = voiceViewModel.phase == .recording || voiceViewModel.phase == .review
+    if canLoseRecording, voiceViewModel.shouldConfirmCancel {
       presentVoiceDiscardConfirmation()
       return
     }
@@ -963,10 +964,23 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   private func handleVoiceSendTapped(sendMode: MessageSendMode?) -> Bool {
     guard voiceViewModel.isActive else { return false }
-    guard voiceViewModel.canSend else { return true }
 
-    sendVoiceRecording(sendMode: sendMode)
+    voiceSendTapped(sendMode: sendMode)
     return true
+  }
+
+  /// Sends from review directly, or finalizes an in-progress recording first.
+  private func voiceSendTapped(sendMode: MessageSendMode?) {
+    if voiceViewModel.canSend {
+      sendVoiceRecording(sendMode: sendMode)
+      return
+    }
+
+    guard voiceViewModel.phase == .recording || voiceViewModel.phase == .finishing else { return }
+    Task { @MainActor [weak self] in
+      guard let self, await voiceViewModel.finalizeRecordingForSend() else { return }
+      sendVoiceRecording(sendMode: sendMode)
+    }
   }
 
   private func sendVoiceRecording(sendMode: MessageSendMode?) {

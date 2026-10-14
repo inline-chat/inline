@@ -18,36 +18,43 @@ struct ComposeVoiceInputView: View {
       .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
       .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
       .animation(.easeInOut(duration: 0.14), value: viewModel.isSending)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isFinalizingForSend)
   }
 
   private var controls: some View {
     HStack(spacing: 8) {
       switch viewModel.phase {
       case .starting:
+        discardButton
         progressIndicator
         waveform(progress: 0)
         durationLabel.hidden()
-        reservedIconSpace
+        iconButton("stop.fill", title: "Stop recording", isEnabled: false, action: onStop)
+        iconButton("arrow.up", title: "Send voice message", isPrimary: true, isEnabled: false, action: onSend)
 
       case .recording:
+        discardButton
         recordingIndicator
         waveform(progress: 1)
         durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onStop)
+        sendButton
 
       case .finishing:
+        discardButton
         progressIndicator
         waveform(progress: 1)
         durationLabel
         reservedIconSpace
+        if viewModel.isFinalizingForSend {
+          sendProgressIndicator
+        } else {
+          reservedIconSpace
+        }
 
       case .review:
         if !viewModel.isSending {
-          iconButton(
-            "xmark",
-            title: "Discard voice message",
-            action: onDiscard
-          )
+          discardButton
         }
         waveform(progress: viewModel.playbackProgress) { progress in
           viewModel.seekPlayback(to: progress)
@@ -86,17 +93,26 @@ struct ComposeVoiceInputView: View {
       .lineLimit(1)
   }
 
+  private var discardButton: some View {
+    iconButton("xmark", title: "Discard voice message", action: onDiscard)
+  }
+
+  private var sendProgressIndicator: some View {
+    progressIndicator
+      .frame(width: 30, height: 30)
+      .transition(.opacity.combined(with: .scale(scale: 0.9)))
+  }
+
   private var sendButton: some View {
     Group {
       if viewModel.isSending {
-        progressIndicator
-          .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        sendProgressIndicator
       } else {
         iconButton(
           "arrow.up",
           title: "Send voice message",
           isPrimary: true,
-          isEnabled: viewModel.canSend,
+          isEnabled: viewModel.canSend || viewModel.phase == .recording,
           action: onSend
         )
           .contextMenu {

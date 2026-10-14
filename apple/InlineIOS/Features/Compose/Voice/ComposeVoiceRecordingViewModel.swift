@@ -21,6 +21,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
   @Published private(set) var isPlaying = false
   @Published private(set) var playbackProgress: Double = 0
   @Published private(set) var isSending = false
+  @Published private(set) var isFinalizingForSend = false
 
   let inputController: VoiceInputController
 
@@ -33,6 +34,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
   private var playbackSessionToken: InlineAudioSession.Token?
   private var isPreparingPlayback = false
   private var stopRecordingAction: (@Sendable () -> Void)?
+  private var finishTask: Task<Void, Never>?
   private var operationId = UUID()
   private var isPreparingStart = false
   private var cancellables: Set<AnyCancellable> = []
@@ -153,9 +155,27 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
 
   func stopRecording() {
     guard phase == .recording else { return }
-    Task { @MainActor in
+    finishTask = Task { @MainActor in
       await finishRecording(showTooShortToast: true)
     }
+  }
+
+  /// Stops an in-progress recording (or waits for one already finishing) so it can be sent directly.
+  func finalizeRecordingForSend() async -> Bool {
+    guard !isFinalizingForSend else { return false }
+    if phase == .recording {
+      stopRecording()
+    }
+    guard finishTask != nil || phase == .review else { return false }
+
+    let operationId = self.operationId
+    isFinalizingForSend = true
+    if let finishTask {
+      await finishTask.value
+    }
+    guard self.operationId == operationId else { return false }
+    isFinalizingForSend = false
+    return canSend
   }
 
   func selectInputDevice(_ deviceId: VoiceInputDevice.ID) {
@@ -693,6 +713,8 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
     playbackProgress = 0
     isPlaying = false
     isSending = false
+    isFinalizingForSend = false
+    finishTask = nil
     phase = .idle
   }
 
@@ -712,7 +734,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
     ToastManager.shared.showToast(message, type: .error, systemImage: "exclamationmark.triangle.fill")
   }
 
-  private static let discardConfirmationDuration: TimeInterval = 10
+  private static let discardConfirmationDuration: TimeInterval = 20
   private static let microphonePermissionSettleDelay: UInt64 = 120_000_000
   private static let applicationActivationPollInterval: UInt64 = 50_000_000
   private static let applicationActivationWaitAttempts = 40
