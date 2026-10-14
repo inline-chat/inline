@@ -22,7 +22,7 @@ describe("native download authorization", () => {
     expect(await resolveDownloadFile("IND_missing", stranger.id)).toBeUndefined()
   })
 
-  test.each(["V2", "V3"] as const)("%s byte requests require the recipient's exact message and current access", async (carrier) => {
+  test.each(["V2", "V3"] as const)("%s byte requests require the recipient's exact message and recheck revoked access within 60 seconds", async (carrier) => {
     const owner = await testUtils.createUser("byte-download-owner@example.test")
     const recipient = await testUtils.createUser("byte-download-recipient@example.test")
     const stranger = await testUtils.createUser("byte-download-stranger@example.test")
@@ -36,10 +36,11 @@ describe("native download authorization", () => {
     const [document] = await db.insert(documents).values({ fileId: file!.id }).returning()
     await db.insert(messages).values({ messageId: 1, chatId: chat!.id, fromId: owner.id, documentId: document!.id })
     let reads = 0
+    let now = 0
     const operations = new NativeDownloadOperations(resolveDownloadFile, async () => {
       reads += 1
       return new Uint8Array([1, 2, 3, 4])
-    })
+    }, 25_000, { now: () => now })
     const contextFor = (userId: number): HandlerContext => ({
       userId, sessionId: 1, connectionId: "byte-authorization-test", sendRaw() {}, sendRpcReply() {},
       ...(carrier === "V3" ? { inlineProtocol: { permanentAuthKeyId: new Uint8Array(8) } } : {}),
@@ -59,8 +60,60 @@ describe("native download authorization", () => {
     expect(reads).toBe(2)
     await db.delete(chatParticipants).where(eq(chatParticipants.chatId, chat!.id))
     AccessGuardsCache.resetChatParticipant(chat!.id, recipient.id)
+    now = 59_999
+    expect((await operations.getPart(request, contextFor(recipient.id))).data.length).toBe(4)
+    now = 60_000
     await expect(operations.getPart(request, contextFor(recipient.id))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
-    expect(reads).toBe(2)
+    expect(reads).toBe(3)
+  })
+
+  test.each(["message", "space"] as const)("cached bytes recheck a deleted %s within the nonsliding lifetime", async (revocation) => {
+    const owner = await testUtils.createUser("expired-download-owner@example.test")
+    const recipient = await testUtils.createUser("expired-download-recipient@example.test")
+    const space = revocation === "space" ? await testUtils.createSpace("Expired download space") : undefined
+    const chat = await testUtils.createChat(space?.id ?? null, "Expired download", "thread", Boolean(space), owner.id)
+    if (space) {
+      await db.insert(members).values([
+        { spaceId: space.id, userId: owner.id, role: "owner" },
+        { spaceId: space.id, userId: recipient.id, role: "member" },
+      ])
+    } else await testUtils.addParticipant(chat!.id, recipient.id)
+    const path = encrypt("expired-download-test.bin")
+    const [file] = await db.insert(files).values({
+      fileUniqueId: "IND_expired_reference", userId: owner.id, fileSize: 4,
+      pathEncrypted: path.encrypted, pathIv: path.iv, pathTag: path.authTag,
+    }).returning()
+    const [document] = await db.insert(documents).values({ fileId: file!.id }).returning()
+    const [message] = await db.insert(messages).values({
+      messageId: 1, chatId: chat!.id, fromId: owner.id, documentId: document!.id,
+    }).returning()
+    let now = 0
+    let lookups = 0
+    let reads = 0
+    const operations = new NativeDownloadOperations(async (...args) => {
+      lookups += 1
+      return resolveDownloadFile(...args)
+    }, async (_path, _offset, length) => { reads += 1; return new Uint8Array(length).fill(7) },
+    25_000, { now: () => now })
+    const context: HandlerContext = {
+      userId: recipient.id, sessionId: 1, connectionId: "expired-byte-authorization", sendRaw() {}, sendRpcReply() {},
+    }
+    const request = GetFilePartInput.create({
+      fileUniqueId: file!.fileUniqueId, limit: 4, message: { chatId: BigInt(chat!.id), messageId: 1n },
+    })
+    await operations.getPart(request, context)
+    await operations.getPart({ ...request, limit: 2 }, context)
+    expect(lookups).toBe(1)
+    if (space) await db.update(spaces).set({ deleted: new Date() }).where(eq(spaces.id, space.id))
+    else await db.delete(messages).where(eq(messages.globalId, message!.globalId))
+    now = 59_999
+    await operations.getPart(request, context)
+    await expect(operations.getPart(request, { ...context, sessionId: 2 })).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(lookups).toBe(2)
+    now = 60_000
+    await expect(operations.getPart(request, context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(lookups).toBe(3)
+    expect(reads).toBe(3)
   })
 
   test("requires the exact message reference and current chat access for documents and thumbnails", async () => {
