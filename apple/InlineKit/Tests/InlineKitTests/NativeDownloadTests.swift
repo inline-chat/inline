@@ -686,6 +686,10 @@ private final class DownloadAdmissionProbe: @unchecked Sendable {
     lock.unlock()
     ready.forEach { $0.resume() }
   }
+  func wasMarked(_ name: String) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    return seen.contains(name)
+  }
   func wait(for name: String) async {
     await withCheckedContinuation { continuation in
       lock.lock()
@@ -753,17 +757,26 @@ private actor HeldDownloadTransport: NativeFilePartFetching {
 }
 
 private actor ProgressBudgetTransport: NativeFilePartFetching {
-  let bytes = Data(repeating: 4, count: 524_288 * 9)
-  private var attempts: [UInt64: Int] = [:]
+  struct Call: Sendable, CustomStringConvertible {
+    let offset: UInt64
+    let timeout: Duration
+    let afterFirstWrite: Bool
+    var description: String { "offset=\(offset), timeout=\(timeout), afterFirstWrite=\(afterFirstWrite)" }
+  }
+  let bytes = Data(repeating: 4, count: 524_288 * 2)
+  let progress: DownloadAdmissionProbe
+  private var calls: [Call] = []
+  init(progress: DownloadAdmissionProbe) { self.progress = progress }
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
-    attempts[input.offset, default: 0] += 1
-    if attempts[input.offset, default: 0] <= 3 { throw RealtimeDirectRpcError.timeout }
+    calls.append(Call(offset: input.offset, timeout: timeout, afterFirstWrite: progress.wasMarked("first-write")))
+    if input.offset == 0, calls.count == 1 { throw RealtimeDirectRpcError.timeout }
     var part = GetFilePartResult()
     part.offset = input.offset; part.totalSize = UInt64(bytes.count)
     part.data = bytes.subdata(in: Int(input.offset) ..< min(bytes.count, Int(input.offset) + Int(input.limit)))
     part.sha256 = Data(SHA256.hash(data: part.data))
     return part
   }
+  func snapshot() -> [Call] { calls }
 }
 
 private final class FinalByteCancellation: @unchecked Sendable {
@@ -913,12 +926,31 @@ private struct NativeDownloadManagerTests {
   @Test func byteProgressRenewsTheRetryBudget() async throws {
     let directory = try nativeCacheDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let transport = ProgressBudgetTransport()
-    let manager = NativeDownloadManager(retryBudget: .milliseconds(500), retryBaseDelay: .milliseconds(20))
+    let progress = DownloadAdmissionProbe()
+    let transport = ProgressBudgetTransport(progress: progress)
+    // Observe the lease directly within the 30-second RPC cap. One maximum
+    // backoff leaves a clear deadline difference without a short expiry race.
+    // This uses a finite real clock; a sufficiently long host stall can expire it.
+    let manager = NativeDownloadManager(retryBudget: .seconds(30), retryBaseDelay: .seconds(8))
     let destination = directory.appendingPathComponent("finished")
-    let start = ContinuousClock.now
-    _ = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
-    #expect(start.duration(to: .now) > .milliseconds(500))
+    do {
+      _ = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport),
+        progress: { received, total in
+          if received == 524_288, total == 1_048_576 { progress.mark("first-write") }
+        })
+    } catch {
+      let calls = await transport.snapshot()
+      Issue.record("Budget renewal failed: \(error); \(calls.count) calls: \(Array(calls.prefix(8)))")
+      return
+    }
+    let calls = await transport.snapshot()
+    try #require(calls.count == 3, "Captured calls: \(Array(calls.prefix(8)))")
+    #expect(calls.map(\.offset) == [0, 0, 524_288], "Captured calls: \(calls)")
+    #expect(calls[1].timeout < calls[0].timeout, "Initial retry must consume its lease: \(calls)")
+    #expect(calls[2].afterFirstWrite, "The next range must follow contiguous byte progress: \(calls)")
+    // Without lastProgress renewal, causally later remaining() calls can only
+    // decrease. A larger post-write timeout proves the lease was renewed.
+    #expect(calls[2].timeout > calls[1].timeout, "Contiguous progress must renew the lease: \(calls)")
     #expect(try Data(contentsOf: destination) == transport.bytes)
   }
 
