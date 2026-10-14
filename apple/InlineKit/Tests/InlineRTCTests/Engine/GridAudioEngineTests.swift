@@ -1936,27 +1936,61 @@ struct GridAudioEngineTests {
     _ = await engine.shutdown()
   }
 
-  @Test("a reconnected preferred output resumes after both it and Auto failed")
-  func reconnectedOutputResumesAfterFallbackFailure() async throws {
+  @Test(
+    "a reconnected preferred output resumes after both it and Auto failed",
+    arguments: [Duration.milliseconds(1), .milliseconds(80)]
+  )
+  func reconnectedOutputResumesAfterFallbackFailure(deviceChangeSettleDelay: Duration) async throws {
     let preferred = AudioOutputSelection.device(id: "airpods", rememberedName: "airpods")
     let driver = FakeGridAudioDriver(outputFailures: ["airpods": 1, "automatic": 1])
     let engine = GridAudioEngine(
       driver: driver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
-      deviceChangeSettleDelay: .milliseconds(1)
+      deviceChangeSettleDelay: deviceChangeSettleDelay
     )
+    let catalog = PreferredOutputCatalogRecorder()
+    let outputSnapshots = engine.outputDeviceSnapshots
+    let catalogTask = Task {
+      for await snapshot in outputSnapshots {
+        guard !Task.isCancelled else { return }
+        await catalog.append(snapshot)
+      }
+    }
+    defer { catalogTask.cancel() }
+
+    func waitForPhase(
+      _ phase: String,
+      condition: @escaping @Sendable () async -> Bool
+    ) async throws {
+      // Route evidence crosses the settled catalog stream before recovery can
+      // proceed. Bound this test's phases without assuming observer scheduling.
+      do { try await eventually(timeout: .seconds(5), condition: condition) }
+      catch EventuallyError.timedOut {
+        throw ReconnectedOutputWaitError(
+          phase: phase, snapshot: await engine.currentSnapshot(),
+          catalog: await catalog.latest(), operations: await driver.operations()
+        )
+      }
+    }
+
     await engine.start()
     await engine.setOutput(preferred)
-    try await eventually { await engine.currentSnapshot().state == .failed("device unavailable") }
+    try await waitForPhase("preferred and automatic routes failed") {
+      await engine.currentSnapshot().state == .failed("device unavailable")
+    }
 
     await driver.setAvailableOutputDeviceIDs(["built-in-output"])
     await driver.emit(.devicesChanged)
-    try await Task.sleep(for: .milliseconds(40))
+    // Returning hardware clears quarantine only after its absence was observed.
+    // Let the event settle before restoring it, including the delayed case.
+    try await waitForPhase("preferred output removal observed") {
+      await catalog.observedAbsence(of: "airpods")
+    }
     #expect(await driver.operations().filter { $0 == "output:automatic" }.count == 1)
 
     await driver.setAvailableOutputDeviceIDs(["built-in-output", "airpods"])
     await driver.emit(.devicesChanged)
-    try await eventually {
+    try await waitForPhase("preferred output restored") {
       let snapshot = await engine.currentSnapshot()
       return snapshot.output?.selection == preferred
         && snapshot.output?.activeDeviceID == "airpods"
@@ -2502,6 +2536,33 @@ private enum FakeGridAudioDriverError: LocalizedError {
     case .deviceUnavailable: "device unavailable"
     case .prepareFailed: "prepare failed"
     }
+  }
+}
+
+private actor PreferredOutputCatalogRecorder {
+  private var snapshot: AudioOutputDeviceSnapshot?
+
+  func append(_ snapshot: AudioOutputDeviceSnapshot) {
+    self.snapshot = snapshot
+  }
+
+  func latest() -> AudioOutputDeviceSnapshot? { snapshot }
+
+  func observedAbsence(of deviceID: String) -> Bool {
+    guard let snapshot else { return false }
+    return snapshot.devices.contains { $0.id == "built-in-output" }
+      && !snapshot.devices.contains { $0.id == deviceID }
+  }
+}
+
+private struct ReconnectedOutputWaitError: Error, CustomStringConvertible {
+  let phase: String
+  let snapshot: InlineRTCAudioSnapshot
+  let catalog: AudioOutputDeviceSnapshot?
+  let operations: [String]
+
+  var description: String {
+    "Preferred output wait failed: \(phase); state=\(snapshot.state) mutation=\(snapshot.currentMutationKind ?? "none") output=\(String(describing: snapshot.output)) route=\(String(describing: snapshot.route)) catalog=\(catalog?.devices.map(\.id) ?? []) operations=\(operations)"
   }
 }
 
