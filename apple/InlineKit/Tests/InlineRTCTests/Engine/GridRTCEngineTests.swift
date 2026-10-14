@@ -2353,8 +2353,11 @@ struct GridRTCEngineTests {
   )
   func processEngineMailbox(mirrorStartDelay: Duration) async throws {
     let rtcDriver = FakeGridRTCDriver()
+    // This fixture must acknowledge stop/preparation, rather than the legacy
+    // nil recording state that reports recording even after setPrepared(false).
+    let audioDriver = RTCFakeAudioDriver(initiallyRecordingActive: false)
     let engine = InlineRTCSession(
-      audioDriver: RTCFakeAudioDriver(),
+      audioDriver: audioDriver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
       rtcDriver: rtcDriver,
       captureCooldown: .milliseconds(20)
@@ -2393,7 +2396,8 @@ struct GridRTCEngineTests {
       catch EventuallyRTCError.timedOut {
         throw ProcessEngineMailboxWaitError(
           phase: phase, first: await recorder.latestDescription(),
-          mirror: await mirrorRecorder.latestDescription(), operations: await rtcDriver.operations()
+          mirror: await mirrorRecorder.latestDescription(), operations: await rtcDriver.operations(),
+          audioOperations: await audioDriver.operationDiagnostics()
         )
       }
     }
@@ -2897,6 +2901,12 @@ private actor RTCFakeAudioDriver: GridAudioDriver {
     log
   }
 
+  func operationDiagnostics() -> String {
+    let counts = log.reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+    let summary = counts.keys.sorted().prefix(12).map { "\($0)=\(counts[$0] ?? 0)" }.joined(separator: ",")
+    return "count=\(log.count) kinds=\(counts.count) counts=[\(summary)] suffix=\(Array(log.suffix(12)))"
+  }
+
   func setPlayingActive(_ active: Bool) {
     playingActive = active
   }
@@ -3315,7 +3325,8 @@ private actor GridEngineSnapshotRecorder {
 
   func latestDescription() -> String {
     guard let snapshot = snapshots.last else { return "no snapshots" }
-    return "count=\(snapshots.count) revision=\(snapshot.revision) state=\(snapshot.rtc.state) microphone=\(snapshot.rtc.microphonePublicationState) muted=\(snapshot.rtc.microphoneMuted)"
+    let audio = snapshot.audio
+    return "count=\(snapshots.count) revision=\(snapshot.revision) state=\(snapshot.rtc.state) microphone=\(snapshot.rtc.microphonePublicationState) muted=\(snapshot.rtc.microphoneMuted) audio_state=\(audio.state) configured=\(audio.isConfigured) prepared=\(audio.isPrepared) recording=\(audio.isRecording) capture_healthy=\(audio.isCaptureHealthy) playing=\(audio.isPlaying) leases=\(audio.captureLeaseCount) mutation=\(audio.currentMutationKind ?? "none")"
   }
 
   func containsRTCState(_ state: InlineRTCConnectionState) -> Bool {
@@ -3334,8 +3345,9 @@ private struct ProcessEngineMailboxWaitError: Error, CustomStringConvertible {
   let first: String
   let mirror: String
   let operations: [String]
+  let audioOperations: String
 
-  var description: String { "Mailbox wait failed: \(phase); first=\(first); mirror=\(mirror); operations=\(operations)" }
+  var description: String { "Mailbox wait failed: \(phase); first=\(first); mirror=\(mirror); operations=\(operations); audio_operations=\(audioOperations)" }
 }
 
 private enum EventuallyRTCError: Error {
