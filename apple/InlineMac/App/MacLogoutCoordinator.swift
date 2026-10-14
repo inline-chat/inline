@@ -243,7 +243,7 @@ extension AppDelegate {
       await FileCache.shared.cancelAllDownloads()
     }) else { return }
     guard await runLogoutPhase(.downloads, attempt: attempt, operation: {
-      await FileDownloader.shared.resetSession()
+      await FileDownloader.shared.resetSession(accountID: logoutAccountID)
     }) else { return }
     NotionTaskService.shared.resetSession()
     guard await runLogoutPhase(.drafts, attempt: attempt, operation: {

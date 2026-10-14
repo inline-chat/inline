@@ -67,6 +67,10 @@ public enum Api {
       storageIsReady: { AppDatabase.shared.isPersistent }
     )
 
+    Task(priority: .utility) { @MainActor in
+      await FileDownloader.shared.prepareForLaunch()
+    }
+
     Task(priority: .utility) {
       guard Auth.shared.handle.isLoggedIn(), AppDatabase.shared.isPersistent else { return }
       await ReservedChatIDPool.shared.scheduleRefill(realtimeV2: realtime)

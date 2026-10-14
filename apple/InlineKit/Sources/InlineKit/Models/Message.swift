@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -1960,6 +1961,18 @@ public extension Message {
     }
     // A delete of an uncached coordinate still fences every dispatched page.
     try HistoryPageAdmissionToken.advanceRevision(db, chatId: chatId)
+    if let account = try? Auth.shared.handle.beginAccountMutation() {
+      let nativeMessageIDs = messageIds.filter { $0 > 0 }
+      if !nativeMessageIDs.isEmpty {
+        db.afterNextTransaction { _ in
+          Task { @MainActor in
+            await FileDownloader.shared.discardMessageDownloads(
+              accountToken: account, chatID: chatId, messageIDs: nativeMessageIDs
+            )
+          }
+        }
+      }
+    }
   }
 
   /// Generated transcript rows are history, never sidebar activity. The

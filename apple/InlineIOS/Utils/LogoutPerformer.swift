@@ -19,6 +19,7 @@ enum LogoutPerformer {
     isRunning = true
     defer { isRunning = false }
 
+    let logoutAccountID = Auth.shared.getCurrentUserId()
     let logoutFence: AuthLogoutFence
     do {
       // Exact first-suspension invariant shared with macOS.
@@ -65,7 +66,7 @@ enum LogoutPerformer {
     await Realtime.shared.loggedOut()
     await FileUploader.shared.cancelAll()
     await FileCache.shared.cancelAllDownloads()
-    await FileDownloader.shared.resetSession()
+    await FileDownloader.shared.resetSession(accountID: logoutAccountID)
     NotionTaskService.shared.resetSession()
     await Transactions.shared.clearAllAndWait()
     await AgentConfigurationCatalogStore.shared.clear()

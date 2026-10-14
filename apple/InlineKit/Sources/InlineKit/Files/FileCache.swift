@@ -1,4 +1,5 @@
 import AnimatedMedia
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -426,34 +427,48 @@ public actor FileCache: Sendable {
   // MARK: - Download Helpers
 
   /// Save a downloaded document to the cache and update the database
-  public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message? = nil) async throws {
+  public func saveDocumentDownload(
+    document: DocumentInfo, localPath: String, message: Message? = nil,
+    auth: AuthHandle? = nil, accountToken: AuthAccountMutationToken? = nil
+  ) async throws {
     try await database.dbWriter.write { db in
+      if let auth, let accountToken { try auth.validateAccountMutation(accountToken) }
       let updated = try Document.filter(id: document.id)
         .updateAll(db, [Document.Columns.localPath.set(to: localPath)])
       guard updated == 1 else { throw FileCacheError.failedToSave }
       self.log.debug("Updated document \(document.id) with local path \(localPath)")
     }
 
+    if let auth, let accountToken, (try? auth.validateAccountMutation(accountToken)) == nil { return }
     if let message {
       await triggerMessageReload(message: message)
     }
   }
 
   /// Save a downloaded video to the cache and update the database
-  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message) async throws {
+  public func saveVideoDownload(
+    video: VideoInfo, localPath: String, message: Message,
+    auth: AuthHandle? = nil, accountToken: AuthAccountMutationToken? = nil
+  ) async throws {
     try await database.dbWriter.write { db in
+      if let auth, let accountToken { try auth.validateAccountMutation(accountToken) }
       let updated = try Video.filter(id: video.id)
         .updateAll(db, [Video.Columns.localPath.set(to: localPath)])
       guard updated == 1 else { throw FileCacheError.failedToSave }
       self.log.debug("Updated video \(video.id) with local path \(localPath)")
     }
 
+    if let auth, let accountToken, (try? auth.validateAccountMutation(accountToken)) == nil { return }
     await triggerMessageReload(message: message)
   }
 
   /// Save a downloaded voice message to the cache and update the message payload.
-  public func saveVoiceDownload(message: Message, localPath: String) async throws {
+  public func saveVoiceDownload(
+    message: Message, localPath: String,
+    auth: AuthHandle? = nil, accountToken: AuthAccountMutationToken? = nil
+  ) async throws {
     try await database.dbWriter.write { db in
+      if let auth, let accountToken { try auth.validateAccountMutation(accountToken) }
       guard var storedMessage = try Message.fetchOne(
         db,
         key: ["messageId": message.messageId, "chatId": message.chatId]
@@ -466,6 +481,7 @@ public actor FileCache: Sendable {
       self.log.debug("Updated voice message \(message.messageId) with local path \(localPath)")
     }
 
+    if let auth, let accountToken, (try? auth.validateAccountMutation(accountToken)) == nil { return }
     await triggerMessageReload(message: message)
   }
 
@@ -1046,8 +1062,13 @@ private final class ExportSessionBox: @unchecked Sendable {
 
 extension FileCache {
   public func clearCache() async throws {
+    try await clearCache(downloadCoordinator: FileDownloader.shared)
+  }
+
+  func clearCache(downloadCoordinator: FileDownloader) async throws {
     // Keep selection closed across every suspension, including nested local resets.
     await MainActor.run { SharedAudioPlayer.shared.beginLocalDataMaintenance() }
+    await downloadCoordinator.beginCacheMaintenance()
     log.debug("Clearing cache")
     do {
       try await clearPhotoCache()
@@ -1055,10 +1076,16 @@ extension FileCache {
       try await clearVideoCache()
       try await clearVoiceCache()
     } catch {
-      await MainActor.run { SharedAudioPlayer.shared.endLocalDataMaintenance() }
+      await MainActor.run {
+        downloadCoordinator.endCacheMaintenance()
+        SharedAudioPlayer.shared.endLocalDataMaintenance()
+      }
       throw error
     }
-    await MainActor.run { SharedAudioPlayer.shared.endLocalDataMaintenance() }
+    await MainActor.run {
+      downloadCoordinator.endCacheMaintenance()
+      SharedAudioPlayer.shared.endLocalDataMaintenance()
+    }
   }
 
   private func clearPhotoCache() async throws {
@@ -1250,6 +1277,10 @@ extension FileCache {
       var failedCount = 0
 
       for fileURL in fileURLs {
+        // Native partials and their sidecars are deleted only by the manager,
+        // which respects a file owner in another process through flock.
+        if fileURL.lastPathComponent.hasSuffix(".inline-partial") ||
+            fileURL.lastPathComponent.hasSuffix(".inline-partial.json") { continue }
         do {
           try fileManager.removeItem(at: fileURL)
           deletedCount += 1

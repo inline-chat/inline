@@ -1,6 +1,7 @@
 @_spi(LogoutCoordinator) import Auth
 import Combine
 import CryptoKit
+import Darwin
 import Foundation
 import InlineProtocol
 import RealtimeV2
@@ -57,7 +58,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
   }
 
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
-    #expect(timeout == .seconds(30))
+    #expect(timeout > .zero && timeout <= .seconds(30))
     requests.append(input)
     waiters.removeValue(forKey: input.offset)?.forEach { $0.resume() }
     active += 1
@@ -74,6 +75,9 @@ private actor DownloadPartMock: NativeFilePartFetching {
     var part = GetFilePartResult()
     part.offset = input.offset
     part.totalSize = UInt64(bytes.count)
+    guard input.offset <= UInt64(bytes.count) else {
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: "Range is beyond the file", code: 400)
+    }
     let end = min(bytes.count, Int(input.offset) + Int(input.limit))
     part.data = bytes.subdata(in: Int(input.offset) ..< end)
     part.sha256 = Data(SHA256.hash(data: part.data))
@@ -579,17 +583,19 @@ private func downloadDestination() -> URL {
     #expect(requests.filter { $0.offset == 524_288 }.count == 2)
   }
 
-  @Test func exhaustedRangeRetriesRemoveTheIncompleteFile() async throws {
+  @Test func exhaustedTimeBudgetRemovesAnonymousIncompleteFile() async throws {
+    let manager = NativeDownloadManager(retryBudget: .milliseconds(500), retryBaseDelay: .milliseconds(50))
     let transport = DownloadPartMock(
-      bytes: Data(repeating: 3, count: 524_300), failureOffset: 524_288, failuresRemaining: 3
+      bytes: Data(repeating: 3, count: 524_300), failureOffset: 524_288, failuresRemaining: 100
     )
     let destination = downloadDestination()
     defer { try? FileManager.default.removeItem(at: destination) }
     await #expect(throws: RealtimeDirectRpcError.self) {
-      try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
+      try await NativeFileDownloader(transport: transport, manager: manager).download(fileUniqueID: "INP_download", to: destination)
     }
     #expect(!FileManager.default.fileExists(atPath: destination.path))
-    #expect(await transport.snapshot().0.filter { $0.offset == 524_288 }.count == 3)
+    let attempts = await transport.snapshot().0.filter { $0.offset == 524_288 }.count
+    #expect(attempts >= 2 && attempts <= 4)
   }
 
   @Test func permissionFailureDoesNotRetryARange() async throws {
@@ -666,5 +672,520 @@ private func downloadDestination() -> URL {
     #expect(try Data(contentsOf: destination) == existing)
     let (after, _, _) = await transport.snapshot()
     #expect(after.count == before.count)
+  }
+}
+
+private final class DownloadAdmissionProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var seen: Set<String> = []
+  private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+  func mark(_ name: String) {
+    lock.lock()
+    seen.insert(name)
+    let ready = waiters.removeValue(forKey: name) ?? []
+    lock.unlock()
+    ready.forEach { $0.resume() }
+  }
+  func wait(for name: String) async {
+    await withCheckedContinuation { continuation in
+      lock.lock()
+      if seen.contains(name) { lock.unlock(); continuation.resume() }
+      else { waiters[name, default: []].append(continuation); lock.unlock() }
+    }
+  }
+}
+
+/// Deliberately delays cancellation completion: the manager must retain the file
+/// permit until every outstanding RPC has returned and closed its staging file.
+private actor HeldDownloadTransport: NativeFilePartFetching {
+  let bytes: Data
+  let holdAt: UInt64
+  private var released: Set<String> = []
+  private var pending: [(String, CheckedContinuation<Void, Never>)] = []
+  private var requests: [GetFilePartInput] = []
+  private var waiters: [(String, UInt64, CheckedContinuation<Void, Never>)] = []
+  private var active = 0
+  private var maximum = 0
+  private var canceled: Set<String> = []
+  private var cancellationWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+  init(bytes: Data, holdAt: UInt64 = 524_288) { self.bytes = bytes; self.holdAt = holdAt }
+  func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
+    #expect(timeout > .zero && timeout <= .seconds(30))
+    requests.append(input)
+    active += 1; maximum = max(maximum, active)
+    defer { active -= 1 }
+    let ready = waiters.filter { $0.0 == input.fileUniqueID && $0.1 == input.offset }
+    waiters.removeAll { $0.0 == input.fileUniqueID && $0.1 == input.offset }
+    ready.forEach { $0.2.resume() }
+    if input.offset >= holdAt, !released.contains(input.fileUniqueID) {
+      await withTaskCancellationHandler {
+        await withCheckedContinuation { pending.append((input.fileUniqueID, $0)) }
+      } onCancel: {
+        Task { await self.markCanceled(input.fileUniqueID) }
+      }
+    }
+    try Task.checkCancellation()
+    var result = GetFilePartResult()
+    result.offset = input.offset; result.totalSize = UInt64(bytes.count)
+    result.data = bytes.subdata(in: Int(input.offset) ..< min(bytes.count, Int(input.offset) + Int(input.limit)))
+    result.sha256 = Data(SHA256.hash(data: result.data))
+    return result
+  }
+  func waitForRequest(_ file: String, offset: UInt64) async {
+    if requests.contains(where: { $0.fileUniqueID == file && $0.offset == offset }) { return }
+    await withCheckedContinuation { waiters.append((file, offset, $0)) }
+  }
+  private func markCanceled(_ file: String) {
+    canceled.insert(file)
+    cancellationWaiters.removeValue(forKey: file)?.forEach { $0.resume() }
+  }
+  func waitForCancellation(_ file: String) async {
+    if canceled.contains(file) { return }
+    await withCheckedContinuation { cancellationWaiters[file, default: []].append($0) }
+  }
+  func release(_ file: String) {
+    released.insert(file)
+    let ready = pending.filter { $0.0 == file }
+    pending.removeAll { $0.0 == file }
+    ready.forEach { $0.1.resume() }
+  }
+  func snapshot() -> ([GetFilePartInput], Int, Int) { (requests, maximum, active) }
+}
+
+private actor ProgressBudgetTransport: NativeFilePartFetching {
+  let bytes = Data(repeating: 4, count: 524_288 * 9)
+  private var attempts: [UInt64: Int] = [:]
+  func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
+    attempts[input.offset, default: 0] += 1
+    if attempts[input.offset, default: 0] <= 3 { throw RealtimeDirectRpcError.timeout }
+    var part = GetFilePartResult()
+    part.offset = input.offset; part.totalSize = UInt64(bytes.count)
+    part.data = bytes.subdata(in: Int(input.offset) ..< min(bytes.count, Int(input.offset) + Int(input.limit)))
+    part.sha256 = Data(SHA256.hash(data: part.data))
+    return part
+  }
+}
+
+private final class FinalByteCancellation: @unchecked Sendable {
+  private let lock = NSLock()
+  private var task: Task<URL, any Error>?
+  func install(_ task: Task<URL, any Error>) { lock.lock(); self.task = task; lock.unlock() }
+  func progress(_ count: Int64, _ total: Int64) {
+    guard count == total, total > 0 else { return }
+    lock.lock(); let task = task; lock.unlock()
+    task?.cancel()
+  }
+}
+
+private func nativeCacheDirectory() throws -> URL {
+  let directory = downloadDestination()
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  return directory
+}
+private func nativePartial(_ directory: URL, file: String = "INP_resume") -> URL {
+  directory.appendingPathComponent("\(file).inline-partial")
+}
+private func nativeRecord(
+  directory: URL, file: String = "INP_resume", accountID: Int64 = 1,
+  total: Int, message: FileMessageLocation? = nil
+) throws {
+  var values: [String: Any] = ["v": 1, "accountID": accountID, "fileUniqueID": file, "totalSize": total]
+  if let message { values["chatID"] = message.chatID; values["messageID"] = message.messageID }
+  try JSONSerialization.data(withJSONObject: values).write(to: nativePartial(directory, file: file).appendingPathExtension("json"))
+}
+
+@Suite("Native download manager", .serialized)
+private struct NativeDownloadManagerTests {
+  @Test func duplicatesShareOneOwnerWithIndependentDestinations() async throws {
+    let manager = NativeDownloadManager()
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data([1, 2, 3, 4])
+    let transport = HeldDownloadTransport(bytes: bytes, holdAt: 0)
+    let admitted = DownloadAdmissionProbe()
+    let first = directory.appendingPathComponent("first")
+    let second = directory.appendingPathComponent("second")
+    let owner = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: first, transport: transport)) }
+    await transport.waitForRequest("INP_resume", offset: 0)
+    let duplicate = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: second,
+        validateAccount: { admitted.mark("duplicate") }, transport: transport))
+    }
+    await admitted.wait(for: "duplicate")
+    await transport.release("INP_resume")
+    #expect(try await owner.value == first)
+    #expect(try await duplicate.value == second)
+    #expect(try Data(contentsOf: first) == bytes)
+    #expect(try Data(contentsOf: second) == bytes)
+    #expect(await transport.snapshot().0.count == 1)
+    await manager.discard(fileUniqueID: "INP_resume", accountID: 1, cacheDirectory: directory)
+    #expect(try Data(contentsOf: first) == bytes)
+  }
+
+  @Test func duplicateRemainsExactWhenOriginalCallerImmediatelyRemovesItsResult() async throws {
+    let manager = NativeDownloadManager()
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 7, count: 524_300)
+    let transport = HeldDownloadTransport(bytes: bytes, holdAt: 0)
+    let admitted = DownloadAdmissionProbe()
+    let first = directory.appendingPathComponent("first")
+    let second = directory.appendingPathComponent("second")
+    let owner = Task {
+      let result = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: first, transport: transport))
+      try FileManager.default.removeItem(at: result)
+    }
+    await transport.waitForRequest("INP_resume", offset: 0)
+    let duplicate = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: second,
+        validateAccount: { admitted.mark("duplicate") }, transport: transport))
+    }
+    await admitted.wait(for: "duplicate")
+    await transport.release("INP_resume")
+    try await owner.value
+    #expect(!FileManager.default.fileExists(atPath: first.path))
+    #expect(try await duplicate.value == second)
+    #expect(try Data(contentsOf: second) == bytes)
+    #expect(await transport.snapshot().0.count == 2)
+  }
+
+  @Test func fifoAdmissionAndRepeatedCancellationNeverExceedSixRanges() async throws {
+    let manager = NativeDownloadManager()
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for cycle in 0 ..< 3 {
+      let transport = HeldDownloadTransport(bytes: Data(repeating: UInt8(cycle), count: 524_288 * 3))
+      let admitted = DownloadAdmissionProbe()
+      var tasks: [Task<URL, any Error>] = []
+      for index in 0 ..< 5 {
+        let file = "INP_\(cycle)_\(index)"
+        let destination = directory.appendingPathComponent(file)
+        tasks.append(Task {
+          try await manager.download(.init(accountID: 1, fileUniqueID: file, destination: destination,
+            validateAccount: { admitted.mark(file) }, transport: transport))
+        })
+        await admitted.wait(for: file)
+        if index < 3 { await transport.waitForRequest(file, offset: 1_048_576) }
+      }
+      #expect(await transport.snapshot().2 == 6)
+      #expect(await transport.snapshot().0.filter { $0.offset == 0 }.map(\.fileUniqueID) == (0 ..< 3).map { "INP_\(cycle)_\($0)" })
+      tasks[0].cancel()
+      await transport.waitForCancellation("INP_\(cycle)_0")
+      // A canceled task's uncooperative RPCs still hold its two range permits.
+      #expect(await transport.snapshot().2 == 6)
+      #expect(await transport.snapshot().0.filter { $0.offset == 0 }.count == 3)
+      await transport.release("INP_\(cycle)_0")
+      await #expect(throws: CancellationError.self) { try await tasks[0].value }
+      await transport.waitForRequest("INP_\(cycle)_3", offset: 1_048_576)
+      #expect(await transport.snapshot().0.filter { $0.offset == 0 }.map(\.fileUniqueID) == (0 ..< 4).map { "INP_\(cycle)_\($0)" })
+      tasks[1].cancel()
+      await transport.release("INP_\(cycle)_1")
+      await #expect(throws: CancellationError.self) { try await tasks[1].value }
+      await transport.waitForRequest("INP_\(cycle)_4", offset: 1_048_576)
+      for index in 2 ..< 5 { tasks[index].cancel(); await transport.release("INP_\(cycle)_\(index)") }
+      for index in 2 ..< 5 { await #expect(throws: CancellationError.self) { try await tasks[index].value } }
+      let (_, maximum, active) = await transport.snapshot()
+      #expect(maximum == 6 && active == 0)
+    }
+  }
+
+  @Test func stopThenNewManagerResumesOnlyContiguousPrefix() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data((0 ..< 524_288 * 4 + 17).map { UInt8($0 % 251) })
+    let transport = DownloadPartMock(bytes: bytes, stallOffset: 524_288)
+    let destination = directory.appendingPathComponent("finished")
+    let manager = NativeDownloadManager()
+    let task = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport)) }
+    await transport.waitForRequest(1_048_576)
+    await manager.stop(.init(accountID: 1, fileUniqueID: "INP_resume"))
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(try Data(contentsOf: nativePartial(directory)) == bytes.prefix(524_288))
+    #expect(await transport.snapshot().2 == 0)
+    let next = DownloadPartMock(bytes: bytes)
+    _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: next))
+    #expect(await next.snapshot().0.first?.offset == 524_288)
+    #expect(try Data(contentsOf: destination) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).appendingPathExtension("json").path))
+  }
+
+  @Test func byteProgressRenewsTheRetryBudget() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let transport = ProgressBudgetTransport()
+    let manager = NativeDownloadManager(retryBudget: .milliseconds(500), retryBaseDelay: .milliseconds(20))
+    let destination = directory.appendingPathComponent("finished")
+    let start = ContinuousClock.now
+    _ = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
+    #expect(start.duration(to: .now) > .milliseconds(500))
+    #expect(try Data(contentsOf: destination) == transport.bytes)
+  }
+
+  @Test func ordinaryRateLimitUsesBudgetBeyondThreeAttemptsAndRetainsPrefix() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 9, count: 524_300)
+    let rateLimit = RealtimeDirectRpcError.rpcError(errorCode: .rateLimit, message: "Slow down", code: 429)
+    let transport = DownloadPartMock(bytes: bytes, failureOffset: 524_288, failuresRemaining: 4, failure: rateLimit)
+    let manager = NativeDownloadManager(retryBudget: .seconds(2), retryBaseDelay: .milliseconds(10))
+    let destination = directory.appendingPathComponent("finished")
+    _ = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
+    #expect(await transport.snapshot().0.filter { $0.offset == 524_288 }.count == 5)
+    #expect(try Data(contentsOf: destination) == bytes)
+    try FileManager.default.removeItem(at: destination)
+    let failing = DownloadPartMock(bytes: bytes, failureOffset: 524_288, failuresRemaining: 100, failure: rateLimit)
+    let short = NativeDownloadManager(retryBudget: .milliseconds(150), retryBaseDelay: .milliseconds(20))
+    await #expect(throws: RealtimeDirectRpcError.self) {
+      try await short.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: failing))
+    }
+    #expect(try Data(contentsOf: nativePartial(directory)) == bytes.prefix(524_288))
+    #expect(await failing.snapshot().2 == 0)
+  }
+
+  @Test(arguments: ["badJSON", "oversizedJSON", "account", "identity", "oversize", "remoteTotal"])
+  func mismatchedRecordRestartsFromZero(_ mismatch: String) async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 6, count: 524_300)
+    try Data(repeating: 0xff, count: 524_288).write(to: nativePartial(directory))
+    try nativeRecord(directory: directory, accountID: mismatch == "account" ? 2 : 1,
+      total: mismatch == "oversize" ? 500_000_001 : mismatch == "remoteTotal" ? 524_400 : bytes.count)
+    let recordURL = nativePartial(directory).appendingPathExtension("json")
+    if mismatch == "badJSON" { try Data("{".utf8).write(to: recordURL) }
+    if mismatch == "oversizedJSON" { try Data(repeating: 0x20, count: 2_049).write(to: recordURL) }
+    if mismatch == "identity" {
+      var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any])
+      record["fileUniqueID"] = "INP_other"
+      try JSONSerialization.data(withJSONObject: record).write(to: recordURL)
+    }
+    let transport = DownloadPartMock(bytes: bytes)
+    let destination = directory.appendingPathComponent("finished")
+    _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
+    #expect(await transport.snapshot().0.contains(where: { $0.offset == 0 }))
+    #expect(try Data(contentsOf: destination) == bytes)
+  }
+
+  @Test func incompleteTailIsRoundedDownAndAlignedCompletePartialRecovers() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for complete in [false, true] {
+      let bytes = Data((0 ..< 524_288 * 2).map { UInt8($0 % 251) })
+      try bytes.prefix(complete ? bytes.count : 524_288 + 7).write(to: nativePartial(directory))
+      try nativeRecord(directory: directory, total: bytes.count)
+      let transport = DownloadPartMock(bytes: bytes)
+      let destination = directory.appendingPathComponent(complete ? "complete" : "tail")
+      _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
+      #expect(await transport.snapshot().0.map(\.offset) == [524_288])
+      #expect(try Data(contentsOf: destination) == bytes)
+    }
+  }
+
+  @Test func permissionAndIntegrityFailuresDiscardExistingPrefix() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for integrity in [false, true] {
+      let bytes = Data(repeating: 6, count: 524_300)
+      try bytes.prefix(524_288).write(to: nativePartial(directory))
+      try nativeRecord(directory: directory, total: bytes.count)
+      let transport = DownloadPartMock(bytes: bytes, corruption: integrity ? .digest : .none,
+        failureOffset: 524_288, failuresRemaining: integrity ? 0 : 1,
+        failure: RealtimeDirectRpcError.notAuthorized)
+      await #expect(throws: (any Error).self) {
+        try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: directory.appendingPathComponent("finished"), transport: transport))
+      }
+      #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+      #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).appendingPathExtension("json").path))
+      #expect(await transport.snapshot().0.count == 1)
+    }
+  }
+
+  @Test func logoutDrainsActiveRangesAndPurgesOnlyItsAccountAfterRelaunch() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 6, count: 524_288 * 3)
+    let transport = HeldDownloadTransport(bytes: bytes)
+    let manager = NativeDownloadManager()
+    let destination = directory.appendingPathComponent("finished")
+    let task = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport)) }
+    await transport.waitForRequest("INP_resume", offset: 1_048_576)
+    let stopping = Task { await manager.stopAll(accountID: 1, cacheDirectories: [directory]) }
+    await transport.waitForCancellation("INP_resume")
+    await transport.release("INP_resume")
+    await stopping.value
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(await transport.snapshot().2 == 0)
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+    for account in [Int64(1), 2] {
+      let file = "INP_account\(account)"
+      try bytes.prefix(524_288).write(to: nativePartial(directory, file: file))
+      try nativeRecord(directory: directory, file: file, accountID: account, total: bytes.count)
+    }
+    await NativeDownloadManager().stopAll(accountID: 1, cacheDirectories: [directory])
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_account1").path))
+    #expect(FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_account2").path))
+  }
+
+  @Test func messageDeletionDrainsDuplicateReferencesAndPurgesIdleProvenance() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var original = FileMessageLocation(); original.chatID = 10; original.messageID = 20
+    var other = original; other.messageID = 21
+    let originalLocation = original; let otherLocation = other
+    let transport = HeldDownloadTransport(bytes: Data(repeating: 7, count: 524_288 * 3))
+    let manager = NativeDownloadManager()
+    let first = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", message: originalLocation, destination: directory.appendingPathComponent("first"), transport: transport)) }
+    await transport.waitForRequest("INP_resume", offset: 1_048_576)
+    let probe = DownloadAdmissionProbe()
+    let duplicate = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", message: otherLocation, destination: directory.appendingPathComponent("second"), validateAccount: { probe.mark("duplicate") }, transport: transport)) }
+    await probe.wait(for: "duplicate")
+    let deleting = Task { await manager.discard(message: originalLocation, accountID: 1, cacheDirectories: [directory]) }
+    await transport.waitForCancellation("INP_resume")
+    await transport.release("INP_resume")
+    await deleting.value
+    await #expect(throws: CancellationError.self) { try await first.value }
+    await #expect(throws: CancellationError.self) { try await duplicate.value }
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+    try Data([1]).write(to: nativePartial(directory))
+    try nativeRecord(directory: directory, total: 3, message: originalLocation)
+    await NativeDownloadManager().discard(message: originalLocation, accountID: 1, cacheDirectories: [directory])
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+  }
+
+  @MainActor @Test func changedAccountGenerationDrainsOldOwnerBeforeRestart() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let auth = Auth.mocked(authenticated: true)
+    let handle = auth.handle
+    let oldToken = try handle.beginAccountMutation()
+    let bytes = Data(repeating: 7, count: 524_288 * 3)
+    let transport = HeldDownloadTransport(bytes: bytes)
+    let manager = NativeDownloadManager()
+    let first = Task {
+      try await manager.download(.init(accountID: oldToken.userID, fileUniqueID: "INP_resume", destination: directory.appendingPathComponent("old"),
+        accountToken: oldToken, validateAccount: { try handle.validateAccountMutation(oldToken) }, transport: transport))
+    }
+    await transport.waitForRequest("INP_resume", offset: 1_048_576)
+    // Same-account credential refresh intentionally preserves the generation.
+    // Switch away and back to exercise a real authority transition for this UID.
+    try await auth.saveCredentials(token: "native-download-other-account-test-fixture", userId: oldToken.userID + 1)
+    try await auth.saveCredentials(token: "native-download-generation-test-fixture", userId: oldToken.userID)
+    let newToken = try handle.beginAccountMutation()
+    do { try #require(oldToken != newToken) }
+    catch {
+      first.cancel()
+      await transport.release("INP_resume")
+      _ = await first.result
+      throw error
+    }
+    let next = Task {
+      try await manager.download(.init(accountID: newToken.userID, fileUniqueID: "INP_resume", destination: directory.appendingPathComponent("new"),
+        accountToken: newToken, validateAccount: { try handle.validateAccountMutation(newToken) }, transport: transport))
+    }
+    await transport.waitForCancellation("INP_resume")
+    await transport.release("INP_resume")
+    await #expect(throws: (any Error).self) { try await first.value }
+    let result = try await next.value
+    #expect(try Data(contentsOf: result) == bytes)
+    #expect(await transport.snapshot().0.filter { $0.offset == 0 }.count == 2)
+    #expect(await transport.snapshot().2 == 0)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("old").path))
+    let fence = try auth.beginLogoutSynchronously()
+    let proof = try #require(await auth.destroyCredentialsForPendingLogout(fence: fence))
+    #expect(await auth.completePendingLogout(fence: fence, databaseProof: AuthDatabaseCleanupProof(fence: fence),
+      credentialProof: proof, completionPermit: AuthLogoutCompletionPermit(fence: fence)))
+  }
+
+  @Test func cancellationAtFinalByteRetainsCompletePrefixForRecovery() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 7, count: 524_288 * 2)
+    let transport = HeldDownloadTransport(bytes: bytes)
+    let destination = directory.appendingPathComponent("finished")
+    let manager = NativeDownloadManager()
+    let cancellation = FinalByteCancellation()
+    let task = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport),
+        progress: { cancellation.progress($0, $1) })
+    }
+    cancellation.install(task)
+    await transport.waitForRequest("INP_resume", offset: 524_288)
+    await transport.release("INP_resume")
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(try Data(contentsOf: nativePartial(directory)) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    let retry = DownloadPartMock(bytes: bytes)
+    _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: retry))
+    #expect(await retry.snapshot().0.map(\.offset) == [524_288])
+    #expect(try Data(contentsOf: destination) == bytes)
+  }
+
+  @Test func finalPublicationNeverOverwritesAndCanRecoverCompletePartial() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 7, count: 524_288 * 2)
+    let transport = HeldDownloadTransport(bytes: bytes)
+    let manager = NativeDownloadManager()
+    let destination = directory.appendingPathComponent("finished")
+    let task = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport)) }
+    await transport.waitForRequest("INP_resume", offset: 524_288)
+    let sentinel = Data([9, 8, 7]); try sentinel.write(to: destination)
+    await transport.release("INP_resume")
+    await #expect(throws: POSIXError.self) { try await task.value }
+    #expect(try Data(contentsOf: destination) == sentinel)
+    #expect(try Data(contentsOf: nativePartial(directory)) == bytes)
+    try FileManager.default.removeItem(at: destination)
+    let retry = DownloadPartMock(bytes: bytes)
+    _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: retry))
+    #expect(await retry.snapshot().0.map(\.offset) == [524_288])
+    #expect(try Data(contentsOf: destination) == bytes)
+  }
+
+  @Test func sweepRemovesOldOrphanRecordsAndPreservesRecentFiles() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try nativeRecord(directory: directory, file: "INP_orphan", total: 3)
+    let oldRecord = nativePartial(directory, file: "INP_orphan").appendingPathExtension("json")
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-8 * 24 * 60 * 60)], ofItemAtPath: oldRecord.path)
+    try Data([1]).write(to: nativePartial(directory))
+    try nativeRecord(directory: directory, total: 3)
+    await NativeDownloadManager().sweep(directory: directory)
+    #expect(!FileManager.default.fileExists(atPath: oldRecord.path))
+    #expect(FileManager.default.fileExists(atPath: nativePartial(directory).path))
+  }
+
+  @Test func cleanupSkipsFilesLockedByAnotherOwnerAndUnknownAccountRecords() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let body = nativePartial(directory)
+    try Data([1, 2, 3]).write(to: body)
+    try nativeRecord(directory: directory, total: 3)
+    let descriptor = body.withUnsafeFileSystemRepresentation { Darwin.open($0!, O_RDWR | O_CLOEXEC | O_NOFOLLOW) }
+    #expect(descriptor >= 0)
+    defer { if descriptor >= 0 { Darwin.close(descriptor) } }
+    #expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+    let old = Date().addingTimeInterval(-8 * 24 * 60 * 60)
+    try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: body.path)
+    try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: body.appendingPathExtension("json").path)
+    let manager = NativeDownloadManager()
+    await manager.stopAll(accountID: 1, cacheDirectories: [directory])
+    await manager.discard(fileUniqueID: "INP_resume", accountID: 1, cacheDirectory: directory)
+    await manager.sweep(directory: directory)
+    #expect(try Data(contentsOf: body) == Data([1, 2, 3]))
+    #expect(flock(descriptor, LOCK_UN) == 0)
+    await manager.stopAll(accountID: 1, cacheDirectories: [directory])
+    #expect(!FileManager.default.fileExists(atPath: body.path))
+    try Data([4, 5, 6]).write(to: body)
+    await manager.stopAll(accountID: 1, cacheDirectories: [directory])
+    #expect(try Data(contentsOf: body) == Data([4, 5, 6]))
+  }
+
+  @Test func permissionClassifierCoversPrivacyPreservingMissingFiles() {
+    for status in [400, 401, 403, 404] {
+      #expect(NativeMessageFileDownload.isPermissionFailure(RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: "Unavailable", code: status)))
+    }
+    #expect(NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.inaccessible))
+    #expect(!NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.invalidResponse))
+    #expect(!NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.integrity))
   }
 }
