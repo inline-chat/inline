@@ -23,7 +23,7 @@ export function prepareQueries(client: postgres.Sql): void {
           query.length > MAX_QUERY_LENGTH || !/^\s*(select|insert|update|delete|with)\b/i.test(query)) {
         return unsafe(query, parameters, options)
       }
-      // Match the driver's ordinary scalar type categories. Custom typed/array
+      // Match the driver's ordinary scalar/array type categories. Custom typed
       // parameters retain their original execution path rather than admitting
       // unbounded type variants under one SQL-text entry.
       const types = parameters.map(parameterType)
@@ -59,6 +59,12 @@ export function prepareQueries(client: postgres.Sql): void {
 }
 
 function parameterType(value: unknown): number | undefined {
+  // postgres.js infers ordinary arrays from their first element. Bound the
+  // traversal so malformed/cyclic inputs do not recurse inside this policy.
+  for (let depth = 0; Array.isArray(value); depth++) {
+    if (depth >= 32) return undefined
+    value = value[0] ?? null
+  }
   if (value instanceof Date) return 1184
   if (value instanceof Uint8Array) return 17
   if (typeof value === "boolean") return 16

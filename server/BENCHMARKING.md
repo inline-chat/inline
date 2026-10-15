@@ -196,13 +196,13 @@ automatic correctness proof or a promise of production latency savings.
 
 ## Prepared query policy
 
-Ordinary Drizzle postgres-js calls now opt into preparation for bounded scalar
+Ordinary Drizzle postgres-js calls now opt into preparation for bounded scalar/ordinary-array
 SQL/type signatures, including transactions, nested savepoints and reserved
 clients. Warm prepared calls avoid the extra Describe/Flush exchange; result
 rows and authorization decisions are never cached. Explicit per-query choices
 are preserved. After 256 admitted signatures, previously seen shapes remain
 prepared and new shapes execute unprepared. Queries longer than 32 KiB, more
-than 301 parameters, and custom typed/array parameters retain their prior mode.
+than 301 parameters, and custom typed parameters retain their prior mode.
 PgBouncer must support protocol-level prepared statements. The pool's existing
 prepare setting remains authoritative, including an explicit global opt-out.
 
