@@ -50,23 +50,31 @@ export async function withHistorySnapshot<T>(
   read: (tx: Transaction, chat: DbChat) => Promise<T>,
 ): Promise<T> {
   validateHistoryPeer(peer)
-  let chat: DbChat
-  try {
-    chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
-  } catch (error) {
-    if (!(error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID)) throw error
-    if (peer.type.oneofKind !== "user" && peer.type.oneofKind !== "self") {
-      throw RealtimeRpcError.ChatIdInvalid()
+  let chatId: number
+  if (peer.type.oneofKind === "chat") {
+    // The validated ID is enough to enter the snapshot. Read the chat and
+    // authorize it there rather than loading the same row twice.
+    chatId = Number(peer.type.chat.chatId)
+  } else {
+    let chat: DbChat
+    try {
+      chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
+    } catch (error) {
+      if (!(error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID)) throw error
+      if (peer.type.oneofKind !== "user" && peer.type.oneofKind !== "self") {
+        throw RealtimeRpcError.ChatIdInvalid()
+      }
+      const peerUserId = peer.type.oneofKind === "self" ? currentUserId : Number(peer.type.user.userId)
+      const user = await UsersModel.getUserById(peerUserId)
+      if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
+      await ChatModel.createUserChatAndDialog({ peerUserId, currentUserId })
+      await ChatModel.createUserChatAndDialog({ peerUserId: currentUserId, currentUserId: peerUserId })
+      chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
     }
-    const peerUserId = peer.type.oneofKind === "self" ? currentUserId : Number(peer.type.user.userId)
-    const user = await UsersModel.getUserById(peerUserId)
-    if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
-    await ChatModel.createUserChatAndDialog({ peerUserId, currentUserId })
-    await ChatModel.createUserChatAndDialog({ peerUserId: currentUserId, currentUserId: peerUserId })
-    chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
+    chatId = chat.id
   }
   return withHistoryReadSnapshot(async (tx) => {
-    const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chatId)).limit(1)
     if (!snapshotChat) throw RealtimeRpcError.ChatIdInvalid()
     await AccessGuards.ensureChatAccess(snapshotChat, currentUserId, tx)
     return read(tx, snapshotChat)

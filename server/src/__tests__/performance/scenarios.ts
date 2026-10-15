@@ -18,6 +18,7 @@ import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/en
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { cleanDatabase, testUtils } from "../setup"
 import type { ScenarioSpec } from "./catalog"
+import { prepareUserReplayScenario } from "./userReplayScenario"
 
 export type PreparedOperation = { run(): Promise<void>; verify(): Promise<void> }
 
@@ -176,6 +177,7 @@ export async function prepareScenario(spec: ScenarioSpec): Promise<PreparedOpera
         }
       })
     }
+    case "userReplay": return prepareUserReplayScenario(spec.size, spec.variant === "revoked")
     case "checkpoint": {
       const a = await actors(1)
       return checked(() => getUpdatesState({}, a.context), async (result) => {

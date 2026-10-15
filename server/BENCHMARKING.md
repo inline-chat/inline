@@ -125,12 +125,14 @@ cardinality and multi-server delivery need separate experiments.
 
 ## Coverage and budgets
 
-The initial catalog has 24 scenarios:
+The catalog has 26 scenarios:
 
 - DM send with open/closed dialogs and an idempotent retry.
 - Public-thread and reply-thread sends with 1, 10 and 100 recipients.
 - Chat lists with 1, 10 and 100 DMs, and a 50-message history page.
 - Empty/nonempty chat replay and a fresh discovery checkpoint.
+- User-bucket replay of 100 private-chat snapshots, including a warmed-grant
+  revocation case with 99 visible chats and an accounted skipped sequence.
 - User update batches and unchanged dialog batches at 1, 10 and 100 users.
 - Read-position advancement and its unchanged case.
 
@@ -258,3 +260,40 @@ shapes; inspect `pg_prepared_statements` counters to verify prepared reuse and p
 Role-wide custom planning also applies to the previously tuned access queries.
 Qualify representative replay latency as well as simple point reads before
 enabling broad mode; faster protocol exchanges alone do not prove a net gain.
+
+
+## User replay planning comparison
+
+The older `updates.replay.empty` and `updates.replay.message` cases replay a
+**chat** bucket. They do not qualify the access planning policy for user replay.
+Use the dedicated 100-chat user-page cases to exercise both `sync.replay` and
+`sync.sidecars` with their existing parameterized recursive access projection:
+
+```sh
+bun run bench:backend --preparation access --scenario updates.user-replay.100 --scenario updates.user-replay.revoked.100 --rtt 0,6 --warmup 3 --samples 20 --output .test-results/user-access.json
+bun run bench:backend --preparation all-custom --scenario updates.user-replay.100 --scenario updates.user-replay.revoked.100 --rtt 0,6 --warmup 3 --samples 20 --compare .test-results/user-access.json --output .test-results/user-custom.json
+```
+
+Each iteration seeds a valid encrypted user journal, current Space membership,
+private-thread grants, and retained dialogs. The full case performs two 100-chat
+access batches (301 bindings each). The revocation case first reads the complete
+page, removes one direct grant, and measures replay with all 100 historical
+references; sidecar access receives the 99 surviving chats (298 bindings).
+Assertions cover the complete response, including the embedded snapshot title,
+sidecars, cursor, skipped sequence, and retained obsolete dialog. A separate
+regression removes Space membership after a warm read and checks that every
+historical snapshot is filtered while all 100 sequences remain accounted.
+
+These new scenario IDs retain fixture version 2 and do not change existing
+scenario meanings or baselines. They qualify this synthetic top-level private-
+thread distribution only. Production graph depth, grant skew, large membership
+sets, and planning/execution cost still need representative read-only evidence
+before changing a role-wide plan policy. The local fixture's database-specific
+custom-plan default does not change the provisioning role or production settings.
+
+
+Explicit-chat history requests read the chat once inside their existing
+repeatable-read authorization snapshot. The `history.50` fixture now costs ten
+SQL commands, down from eleven; user/self peer resolution and DM creation keep
+their existing path. Snapshot tests cover concurrent edits and deletion, current
+membership, outsider rejection, and unchanged missing-chat errors.
