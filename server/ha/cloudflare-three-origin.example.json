@@ -1,0 +1,196 @@
+{
+  "status": "local-proposal-only",
+  "warnings": [
+    "This document is not a Cloudflare API request and has no apply/network code.",
+    "Nested templates are incomplete; replace every sentinel from verified inventory.",
+    "Creating the production hostname load balancer is a routing cutover, even if existing DNS is unchanged.",
+    "Create Load Balancer has no enabled field; disabled pools do not make production staging safe.",
+    "Do not run templates or purchase resources without separate authorization."
+  ],
+  "hostProfile": "../deploy/ha-node-profile.json",
+  "release": {
+    "sourceCommit": null,
+    "successfulWorkflowRun": null,
+    "runtime_image": null,
+    "standby_image": null,
+    "requirements": [
+      "Both artifacts must be immutable registry references with @sha256 digests.",
+      "runtime_image is qualified linux/amd64; standby_image is qualified linux/arm64.",
+      "Both image revision labels must equal sourceCommit; digests are architecture-specific.",
+      "All CI jobs must pass; image publication alone is not qualification.",
+      "Retain compatible rollback artifacts and configuration for each architecture."
+    ]
+  },
+  "preferredOrder": [
+    "fly",
+    "nuremberg",
+    "finland"
+  ],
+  "origins": [
+    {
+      "name": "fly",
+      "architecture": "amd64",
+      "imageArtifact": "runtime_image",
+      "directAddress": null,
+      "poolId": null,
+      "qualificationReceipt": null
+    },
+    {
+      "name": "nuremberg",
+      "architecture": "arm64",
+      "imageArtifact": "standby_image",
+      "directAddress": null,
+      "poolId": null,
+      "qualificationReceipt": null
+    },
+    {
+      "name": "finland",
+      "architecture": "arm64",
+      "imageArtifact": "standby_image",
+      "directAddress": null,
+      "poolId": null,
+      "qualificationReceipt": null
+    }
+  ],
+  "cloudflareCreateTemplates": {
+    "monitor": {
+      "type": "https",
+      "method": "GET",
+      "port": 443,
+      "path": "/readyz",
+      "header": {
+        "Host": [
+          "api.inline.chat"
+        ]
+      },
+      "expected_codes": "200",
+      "allow_insecure": false,
+      "follow_redirects": false,
+      "interval": 60,
+      "timeout": 5,
+      "retries": 1,
+      "consecutive_down": 2,
+      "consecutive_up": 3
+    },
+    "pools": [
+      {
+        "name": "inline-api-fly",
+        "enabled": true,
+        "minimum_origins": 1,
+        "monitor": "REPLACE_WITH_QUALIFIED_MONITOR_ID",
+        "check_regions": [
+          "WEU"
+        ],
+        "origins": [
+          {
+            "name": "fly",
+            "address": "REPLACE_WITH_VERIFIED_FLY_DIRECT_ADDRESS",
+            "enabled": true,
+            "weight": 1,
+            "header": {
+              "Host": [
+                "api.inline.chat"
+              ]
+            },
+            "port": 443
+          }
+        ]
+      },
+      {
+        "name": "inline-api-nuremberg",
+        "enabled": true,
+        "minimum_origins": 1,
+        "monitor": "REPLACE_WITH_QUALIFIED_MONITOR_ID",
+        "check_regions": [
+          "WEU"
+        ],
+        "origins": [
+          {
+            "name": "nuremberg",
+            "address": "REPLACE_WITH_VERIFIED_NUREMBERG_DIRECT_ADDRESS",
+            "enabled": true,
+            "weight": 1,
+            "header": {
+              "Host": [
+                "api.inline.chat"
+              ]
+            },
+            "port": 443
+          }
+        ]
+      },
+      {
+        "name": "inline-api-finland",
+        "enabled": true,
+        "minimum_origins": 1,
+        "monitor": "REPLACE_WITH_QUALIFIED_MONITOR_ID",
+        "check_regions": [
+          "WEU"
+        ],
+        "origins": [
+          {
+            "name": "finland",
+            "address": "REPLACE_WITH_VERIFIED_FINLAND_DIRECT_ADDRESS",
+            "enabled": true,
+            "weight": 1,
+            "header": {
+              "Host": [
+                "api.inline.chat"
+              ]
+            },
+            "port": 443
+          }
+        ]
+      }
+    ],
+    "productionLoadBalancer": {
+      "name": "api.inline.chat",
+      "description": "Fly preferred; Nuremberg first fallback; Finland second fallback",
+      "proxied": true,
+      "steering_policy": "off",
+      "session_affinity": "none",
+      "default_pools": [
+        "REPLACE_WITH_FLY_POOL_ID",
+        "REPLACE_WITH_NUREMBERG_POOL_ID",
+        "REPLACE_WITH_FINLAND_POOL_ID"
+      ],
+      "fallback_pool": "REPLACE_WITH_FINLAND_POOL_ID",
+      "adaptive_routing": {
+        "failover_across_pools": false
+      },
+      "country_pools": {},
+      "region_pools": {},
+      "pop_pools": {},
+      "rules": []
+    }
+  },
+  "qualification": {
+    "status": "not-qualified",
+    "separateTestHostname": null,
+    "required": [
+      "Current source/image/config/key compatibility at every origin",
+      "Independent PostgreSQL/storage/provider access and host capacity",
+      "Canonical public TLS/SNI with sustainable renewal",
+      "Trusted proxy IP handling and unpublished backend port",
+      "Effective customer-origin Full(strict) certificate validation and matching rule overrides verified",
+      "Cross-node authorization and realtime recovery contract",
+      "Concurrent worker claims/fencing/provider effects contract",
+      "Nonproduction Fly-to-Nuremberg-to-Finland selection and failback rehearsal",
+      "Measured authenticated reconnect/catch-up and graceful drain",
+      "Account quote and monitor entitlement",
+      "Separate authorization before public hostname LB creation"
+    ]
+  },
+  "customerOriginTlsIntent": {
+    "qualificationStatus": "not-verified",
+    "scheme": "https",
+    "port": 443,
+    "requiredEffectivePolicy": "Full (strict), ssl=strict, or reviewed equivalent validating origin certificates for api.inline.chat",
+    "requiredRuleReview": [
+      "Origin Rules",
+      "Configuration Rules",
+      "legacy Page Rules"
+    ],
+    "warning": "Monitor allow_insecure=false validates probes only; inspect effective customer-origin mode, scheme, port, Host and SNI overrides. Do not change zone-wide SSL blindly."
+  }
+}

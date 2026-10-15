@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "purpose": "Preparation only. Bind qualified release digests before applying through the existing Coolify controller. This file contains no deployment action or credentials.",
+  "release": {
+    "arm64Image": null,
+    "sourceRevision": null,
+    "rollbackArm64Image": null,
+    "rollbackSourceRevision": null
+  },
+  "common": {
+    "architecture": "arm64",
+    "internalPort": 8000,
+    "publishedHostPorts": [],
+    "privateBackendNetwork": true,
+    "fixedContainerName": false,
+    "restartPolicy": "unless-stopped",
+    "stopGraceSeconds": 45,
+    "logMaxSize": "2m",
+    "logMaxFiles": 2,
+    "health": {
+      "path": "/readyz",
+      "intervalSeconds": 5,
+      "timeoutSeconds": 3,
+      "retries": 3,
+      "startPeriodSeconds": 15,
+      "expectedStatus": 200
+    },
+    "environment": {
+      "NODE_ENV": "production",
+      "PORT": "8000",
+      "INLINE_PROCESS_ROLE": "all",
+      "INLINE_REALTIME_DISTRIBUTED": "1",
+      "INLINE_DATABASE_QUERY_POOL_MAX": "3",
+      "INLINE_INGRESS_MODE": "cloudflare-optional",
+      "INLINE_INGRESS_HOST": "api.inline.chat",
+      "INLINE_TRUSTED_CLIENT_IP_HEADER": "cf-connecting-ip",
+      "INLINE_INGRESS_DIRECT_IP_SOURCE": "x-real-ip",
+      "SHUTDOWN_TIMEOUT_MS": "40000"
+    },
+    "canonicalTlsHost": "api.inline.chat",
+    "nativeProtocolEnabled": true,
+    "clusterServicesEnabled": true,
+    "migrationOnBoot": false
+  },
+  "nodes": {
+    "nbg": {
+      "priority": 2,
+      "cpuLimit": 2,
+      "memoryBytes": 1610612736,
+      "memoryPlusSwapBytes": 1610612736,
+      "description": "First fallback after Fly. Reserve memory for two containers during replacement on the existing 4 GB host."
+    },
+    "finland": {
+      "priority": 3,
+      "cpuLimit": 2,
+      "memoryBytes": 2147483648,
+      "memoryPlusSwapBytes": 2147483648,
+      "description": "Second fallback after Nuremberg. Preserve existing shared applications and backup jobs; reserve two containers for replacement."
+    }
+  },
+  "operation": {
+    "deploymentMethod": "Coolify Docker Image application on the existing controller",
+    "automaticGitDeploy": false,
+    "start": "Keep origin out of customer routing; pull the selected digest, verify source/architecture, start and qualify before enabling its pool.",
+    "stop": "Disable this origin in routing and verify another healthy origin; allow routing propagation, then SIGTERM and wait for completion within 45 seconds.",
+    "rollback": "Deploy the recorded compatible rollback digest through the same resource; no automatic database rollback.",
+    "fixtureQualification": "Use a separate synthetic database and no production credentials or public routes. The existing artifact smoke does not qualify native protocol, distributed delivery, or workers.",
+    "workerActivation": "The all-role expectation is conditional on the concurrent-worker review and isolated qualification. Do not start real workers merely to satisfy this profile.",
+    "databaseBudget": "Each process uses up to three query plus one health connections. Count every running origin and replacement; verify actual database capacity before starting overlap."
+  }
+}
