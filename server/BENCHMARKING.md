@@ -123,10 +123,12 @@ Do not disable domain jobs to make a path pass its budget.
 `catalog.ts` holds reviewed maximum command counts. They represent current costs,
 including costly linear fanout; they are not desired targets. Lower them with a
 proven optimization. Do not automatically regenerate budgets or loosen one to
-hide a regression. The 1/10/100 cases expose scaling: current public sends cost
-`32 + recipients`, reply sends `66 + 7 × recipients`, and user update batches
-`2 + 4 × updates` for these fixtures. Chat-list queries remain constant at 11
-while result volume grows. These are local fixture observations, not production
+hide a regression. The 1/10/100 cases expose scaling: the reviewed public-send budget is now constant at
+`32` after batching sidebar owner locks, reply sends retain a conservative
+`66 + 7 × recipients` bound, and user update batches
+`2 + 4 × updates` for these fixtures. Unchanged dialog batches cost 5 commands at 1/10/100 owners. Chat-list
+command budgets include their snapshot and admission overhead while remaining
+constant as result volume grows. These are local fixture observations, not production
 traffic statistics.
 
 `test:backend` also selects the existing send, chat-list, history, message integrity,
@@ -191,3 +193,18 @@ matrix, runtime/driver/database/platform/CPU/pool settings, warmups and sample
 counts. They report saved commands, exchanges and milliseconds separately, along
 with before/after RTT calibration. A comparison is evidence to inspect, not an
 automatic correctness proof or a promise of production latency savings.
+
+## Prepared query policy
+
+Ordinary Drizzle postgres-js calls now opt into preparation for bounded scalar
+SQL/type signatures, including transactions, nested savepoints and reserved
+clients. Warm prepared calls avoid the extra Describe/Flush exchange; result
+rows and authorization decisions are never cached. Explicit per-query choices
+are preserved. After 256 admitted signatures, previously seen shapes remain
+prepared and new shapes execute unprepared. Queries longer than 32 KiB, more
+than 301 parameters, and custom typed/array parameters retain their prior mode.
+PgBouncer must support protocol-level prepared statements. The pool's existing
+prepare setting remains authoritative, including an explicit global opt-out.
+
+The real-wire regression tests distinguish SQL submissions from protocol
+exchanges and cover new bind values, nested rollback and bounded admission.
