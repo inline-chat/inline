@@ -13,7 +13,7 @@ async function withClient(run: (client: postgres.Sql, proxy: Awaited<ReturnType<
   const proxy = await createWireProxy({ host: url.hostname, port: Number(url.port || 5432) }, 0)
   url.hostname = "127.0.0.1"
   url.port = String(proxy.port)
-  const client = postgres(url.toString(), { max: 1, ssl: false, fetch_types: false })
+  const client = postgres(url.toString(), { max: 1, ssl: false })
   prepareQueries(client)
   prepareQueries(client) // Installing twice must not stack wrappers or reset the shape budget.
   try {
@@ -117,5 +117,21 @@ test("nullable scalar type changes and custom typed parameters keep their origin
     proxy.reset()
     expect((await typed())[0]?.["typed"]).toBe(7)
     expect(proxy.snapshot().frames["H"]).toBe(1)
+  })
+})
+
+test("ordinary array bindings reuse plans with changed lengths and values", async () => {
+  await withClient(async (client, proxy) => {
+    // JSON readback avoids the driver's numeric-array NULL parser so this
+    // checks the bound database values, including NULL and an empty array.
+    const query = "select to_json($1::integer[]) as ids"
+    await client.unsafe(query, [[1, 2]])
+    for (const ids of [[3], [4, 5, 6], [], [null, 7]]) {
+      proxy.reset()
+      expect((await client.unsafe(query, [ids]))[0]?.["ids"]).toEqual(ids)
+      expect(proxy.snapshot().frames["P"] ?? 0).toBe(0)
+      expect(proxy.snapshot().frames["H"] ?? 0).toBe(0)
+      expect(proxy.snapshot().exchangeBoundaries).toBe(1)
+    }
   })
 })
