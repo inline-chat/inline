@@ -51,37 +51,52 @@ export async function createWireProxy(target: { host: string; port: number }, rt
   let counts: WireCounts
   const reset = () => { counts = { frames: {}, exchangeBoundaries: 0, clientBytes: 0, serverBytes: 0 } }
   reset()
-  const server = createServer((client) => {
-    const upstream = connect({ host: target.host, port: target.port })
+  const server = createServer({ allowHalfOpen: true }, (client) => {
+    const upstream = connect({ host: target.host, port: target.port, allowHalfOpen: true })
     for (const socket of [client, upstream]) { sockets.add(socket); socket.setNoDelay(true) }
     const frames = new FrontendFrames((kind) => {
       counts.frames[kind] = (counts.frames[kind] ?? 0) + 1
       if (kind === "Q" || kind === "H" || kind === "S") counts.exchangeBoundaries++
     })
-    const forward = (source: Socket, destination: Socket, bytes: Buffer) => {
-      source.pause()
-      const write = () => {
-        if (destination.destroyed) return
-        destination.write(bytes, () => { if (!source.destroyed) source.resume() })
+    const forward = (source: Socket, destination: Socket, observe: (bytes: Buffer) => void) => {
+      let pending = 0
+      let ended = false
+      const finish = () => {
+        // Reading EOF must not end the destination before its delayed writes.
+        if (ended && !pending && !destination.destroyed) destination.end()
       }
-      if (!delayMs) write()
-      else {
-        const timer = setTimeout(() => { timers.delete(timer); write() }, delayMs / 2)
-        timers.add(timer)
-      }
+      source.on("data", (bytes: Buffer) => {
+        try { observe(bytes) } catch (error) { failures.push(error as Error); source.destroy(); return }
+        source.pause()
+        pending++
+        const write = () => {
+          if (destination.destroyed) { pending--; return }
+          destination.write(bytes, () => {
+            pending--
+            finish()
+            if (!source.destroyed) source.resume()
+          })
+        }
+        if (!delayMs) write()
+        else {
+          const timer = setTimeout(() => { timers.delete(timer); write() }, delayMs / 2)
+          timers.add(timer)
+        }
+      })
+      source.on("end", () => { ended = true; finish() })
     }
-    client.on("data", (bytes: Buffer) => {
-      try { frames.accept(bytes) } catch (error) { failures.push(error as Error); client.destroy(); return }
-      counts.clientBytes += bytes.length
-      forward(client, upstream, bytes)
-    })
-    upstream.on("data", (bytes: Buffer) => { counts.serverBytes += bytes.length; forward(upstream, client, bytes) })
+    forward(client, upstream, (bytes) => { frames.accept(bytes); counts.clientBytes += bytes.length })
+    forward(upstream, client, (bytes) => { counts.serverBytes += bytes.length })
     client.on("error", (error) => { failures.push(error); upstream.destroy() })
     upstream.on("error", (error) => { failures.push(error); client.destroy() })
-    client.on("end", () => upstream.end())
-    upstream.on("end", () => client.end())
-    client.on("close", () => { sockets.delete(client); upstream.destroy() })
-    upstream.on("close", () => { sockets.delete(upstream); client.destroy() })
+    for (const [socket, peer] of [[client, upstream], [upstream, client]] as const) {
+      socket.on("close", () => {
+        sockets.delete(socket)
+        // A cleanly closed source can still have delayed bytes headed to its
+        // peer. Abort the pair only for an incomplete/failed connection.
+        if (!socket.readableEnded || !socket.writableFinished) peer.destroy()
+      })
+    }
   })
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject)
