@@ -128,5 +128,8 @@ export function subscribeClusterCaches(): () => void {
     }
   })
   const removeContinuity = internalMessaging.onContinuityLost(clearClusterCaches)
-  return () => { removeCache(); removeAccess(); removeContinuity() }
+  // Reads can refill a cache during an outage and then miss another process's
+  // invalidation. Clear again when subscriptions recover, fencing those fills.
+  const removeReady = internalMessaging.onReady(clearClusterCaches)
+  return () => { removeCache(); removeAccess(); removeContinuity(); removeReady() }
 }

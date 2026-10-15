@@ -85,6 +85,31 @@ const scan = async (repair: ConnectedUserRepair, userId = 71) => {
 }
 
 describe("ConnectedUserRepair", () => {
+  test("idle sweeps avoid database fences and a following admission still repairs", async () => {
+    const { runtime, hinted, requestedDates } = createRuntime({ states: [{ date: 1n, seq: 9 }] })
+    let connected = false
+    runtime.connectedUserIds = () => connected ? [71] : []
+    runtime.hasConnections = () => connected
+    const capture = spyOn(runtime.discovery, "captureWatermark")
+    const repair = new ConnectedUserRepair(runtime)
+    repairs.add(repair)
+    await repair.start()
+    expect(capture).toHaveBeenCalledTimes(1)
+
+    repair.observeConnectedUsers()
+    await repair.waitForIdle()
+    repair.observeConnectedUsers()
+    // Admission can arrive before the skipped sweep's completion is observed.
+    connected = true
+    repair.observeConnection(71)
+    await repair.waitForIdle()
+
+    expect(capture).toHaveBeenCalledTimes(2)
+    expect(requestedDates).toHaveLength(1)
+    expect(hinted).toEqual([9])
+    capture.mockRestore()
+  })
+
   test("joins preparation on stop and never discovers after it finishes", async () => {
     const started = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()

@@ -190,6 +190,13 @@ export class ConnectedUserRepair {
   }
 
   private async runPeriodicSweep(generation: number): Promise<void> {
+    // An idle standby has nothing to repair. Socket admissions independently
+    // capture a watermark, so a connection arriving after this check is covered.
+    this.pruneDisconnectedObservations()
+    if (this.repairRuntime.connectedUserIds().length === 0) {
+      this.connectedUserCursor = 0
+      return
+    }
     const watermark = await this.repairRuntime.discovery.captureWatermark()
     assertDiscoveryWatermark(watermark)
     if (!this.isActive(generation)) return
