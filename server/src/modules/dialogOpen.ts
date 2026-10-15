@@ -262,9 +262,10 @@ async function setDialogOpenForUsersInTransaction(
     // Acquire all user owners before touching any dialog rows. Projection
     // writers use the same users -> dialogs order, so overlapping batches do
     // not deadlock or derive a stale fractional order.
-    for (const userId of userIds) {
-      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update").limit(1)
-    }
+    await tx.select({ id: users.id }).from(users)
+      .where(inArray(users.id, userIds))
+      .orderBy(asc(users.id))
+      .for("no key update")
 
     const existingDialogs = await tx
       .select()
@@ -289,6 +290,9 @@ async function setDialogOpenForUsersInTransaction(
         return showInChatList && dialog.chatListHidden === true
       })
       const missingUserIds = userIds.filter((userId) => !existingUserIds.has(userId))
+      if (dialogsToOpen.length === 0 && missingUserIds.length === 0) {
+        return { dialogs: existingDialogs, changedDialogs: [] }
+      }
 
       for (const dialog of dialogsToOpen) {
         const placement = input.openPlacementByUserId?.get(dialog.userId) ?? defaultDialogOpenPlacement
@@ -346,6 +350,9 @@ async function setDialogOpenForUsersInTransaction(
         .filter((dialog) => effectiveDialogOpenForDialog(dialog) || dialog.folderId != null)
         .map((dialog) => dialog.userId)
       const missingUserIds = userIds.filter((userId) => !existingUserIds.has(userId))
+      if (persistCloseUserIds.length === 0 && missingUserIds.length === 0) {
+        return { dialogs: existingDialogs, changedDialogs: [] }
+      }
 
       if (persistCloseUserIds.length > 0) {
         await tx

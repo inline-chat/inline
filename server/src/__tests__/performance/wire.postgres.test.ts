@@ -23,11 +23,10 @@ test("real Drizzle queries expose protocol exchanges independently of SQL comman
     }, async () => {}, proxy)
     expect(sample.sql.commands).toBe(1)
     expect(sample.sql.catalogCommands).toBe(0)
-    // Drizzle currently calls unsafe() without per-query prepare:true. Its
-    // Describe/Flush and Bind/Execute/Sync produce two exchange boundaries.
-    // A future driver optimization may reduce this to one, never to zero.
-    expect(sample.wire!.exchangeBoundaries).toBeGreaterThanOrEqual(1)
-    expect(sample.wire!.exchangeBoundaries).toBeLessThanOrEqual(2)
+    // Warm parameterized Drizzle reads must skip Describe/Flush, not merely
+    // keep the SQL command count unchanged.
+    expect(sample.wire!.exchangeBoundaries).toBe(1)
+    expect(sample.wire!.frames["H"] ?? 0).toBe(0)
     expect(sample.wire!.frames["S"]).toBe(1)
     expect(sample.wire!.clientBytes).toBeGreaterThan(0)
     expect(sample.wire!.serverBytes).toBeGreaterThan(0)

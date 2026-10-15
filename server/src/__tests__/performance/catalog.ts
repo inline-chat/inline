@@ -18,10 +18,10 @@ const snapshotCommands = 3
 const catalogAdmissionCommands = 2
 const historySnapshotChatCommands = 1
 export const scenarios: readonly ScenarioSpec[] = [
-  { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 26 },
+  { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 25 },
   { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 },
   { id: "send.dm.retry", kind: "sendDm", size: 1, variant: "retry", maxCommands: 7 },
-  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 + size })),
+  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.reply.${size}`, kind: "sendThread", size, variant: "reply", maxCommands: 66 + 7 * size })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 + snapshotCommands + catalogAdmissionCommands })),
   { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands + historySnapshotChatCommands },
@@ -29,7 +29,7 @@ export const scenarios: readonly ScenarioSpec[] = [
   { id: "updates.replay.message", kind: "replay", size: 1, maxCommands: 23 },
   { id: "updates.checkpoint", kind: "checkpoint", size: 1, maxCommands: 6 },
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `updates.enqueue.${size}`, kind: "enqueue", size, maxCommands: 4 * size + 2 })),
-  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `dialogs.noop.${size}`, kind: "dialog", size, maxCommands: size + 5 })),
+  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `dialogs.noop.${size}`, kind: "dialog", size, maxCommands: 5 })),
   { id: "read.advance", kind: "read", size: 1, maxCommands: 12 },
   { id: "read.noop", kind: "read", size: 1, variant: "noop", maxCommands: 5 },
 ]
