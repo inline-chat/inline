@@ -1,8 +1,8 @@
 export type ScenarioSpec = {
   id: string
-  kind: "sendDm" | "sendThread" | "getChats" | "history" | "replay" | "checkpoint" | "enqueue" | "dialog" | "read"
+  kind: "sendDm" | "sendThread" | "getChats" | "history" | "replay" | "userReplay" | "checkpoint" | "enqueue" | "dialog" | "read"
   size: number
-  variant?: "closed" | "retry" | "reply" | "empty" | "noop"
+  variant?: "closed" | "retry" | "reply" | "empty" | "noop" | "revoked"
   maxCommands: number
 }
 
@@ -12,11 +12,10 @@ export type ScenarioSpec = {
 export const scenarioVersion = 2
 
 // Coherent reads submit BEGIN, SET TRANSACTION and COMMIT. Catalog discovery
-// additionally prepares missing dialogs and checks candidate access; history
-// rereads its chat inside the snapshot. These fixed costs do not scale with rows.
+// additionally prepares missing dialogs and checks candidate access. History
+// reads its explicit chat once inside the snapshot. Fixed costs do not scale with rows.
 const snapshotCommands = 3
 const catalogAdmissionCommands = 2
-const historySnapshotChatCommands = 1
 export const scenarios: readonly ScenarioSpec[] = [
   { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 25 },
   { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 },
@@ -24,9 +23,12 @@ export const scenarios: readonly ScenarioSpec[] = [
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.reply.${size}`, kind: "sendThread", size, variant: "reply", maxCommands: 66 + 7 * size })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 + snapshotCommands + catalogAdmissionCommands })),
-  { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands + historySnapshotChatCommands },
+  { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands },
   { id: "updates.replay.empty", kind: "replay", size: 0, variant: "empty", maxCommands: 7 },
   { id: "updates.replay.message", kind: "replay", size: 1, maxCommands: 23 },
+  // New IDs preserve the existing fixture version and prior scenario meanings.
+  { id: "updates.user-replay.100", kind: "userReplay", size: 100, maxCommands: 17 },
+  { id: "updates.user-replay.revoked.100", kind: "userReplay", size: 100, variant: "revoked", maxCommands: 17 },
   { id: "updates.checkpoint", kind: "checkpoint", size: 1, maxCommands: 6 },
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `updates.enqueue.${size}`, kind: "enqueue", size, maxCommands: 4 * size + 2 })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `dialogs.noop.${size}`, kind: "dialog", size, maxCommands: 5 })),

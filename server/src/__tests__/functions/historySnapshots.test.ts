@@ -29,7 +29,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import { MessageEntities, MessageEntity_Type, SearchMessagesFilter } from "@inline-chat/protocol/core"
+import { MessageEntities, MessageEntity_Type, SearchMessagesFilter, RpcError_Code } from "@inline-chat/protocol/core"
 import { and, asc, eq, sql } from "drizzle-orm"
 
 setupTestLifecycle()
@@ -112,6 +112,28 @@ for (const readKind of ["history", "resources", "lookup", "text", "chat"] as con
     }
   })
 }
+
+test("an explicit-chat history snapshot survives a concurrent chat deletion and the next read rejects", async () => {
+  const { user, chat, peerId, context } = await fixture()
+  await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 1, text: "snapshot before deletion" })
+  await db.update(chats).set({ updateSeq: 7, lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chat.id))
+  const ensureAccess = AccessGuards.ensureChatAccess
+  let deleted = false
+  const guard = spyOn(AccessGuards, "ensureChatAccess").mockImplementation(async (row, userId, tx) => {
+    await ensureAccess(row, userId, tx)
+    if (tx && row.id === chat.id && !deleted) {
+      deleted = true
+      await db.delete(chats).where(eq(chats.id, chat.id))
+    }
+  })
+  try {
+    const result = await getChatHistory({ peerId }, context)
+    expect(deleted).toBe(true)
+    expect(result.seq).toBe(7n)
+    expect(result.messages.map((row) => row.message)).toEqual(["snapshot before deletion"])
+    await expect(getChatHistory({ peerId }, context)).rejects.toMatchObject({ code: RpcError_Code.CHAT_ID_INVALID })
+  } finally { guard.mockRestore() }
+})
 
 test("unsupported historical file rows stay readable and are omitted before resource paging", async () => {
   const { user, chat, peerId, context } = await fixture()
