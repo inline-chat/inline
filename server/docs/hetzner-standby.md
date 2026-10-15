@@ -47,7 +47,7 @@ capacity. Qualify actual failover load within them; do not automatically raise
 them when the host is busy. Budget two containers on each host for its rolling
 overlap. The host qualifier consumes sanitized metadata; passing it does not
 establish application, TLS, broker or worker acceptance.
-Keep Docker log retention bounded for this resource. Capture the current API
+Retain verified bounded Docker logging: the Nuremberg canary uses 10 MiB × 3 files; the retained Finland resource uses 2 MiB × 2 files. The installed Coolify single-container path does not support per-app JSON log limits through custom Docker options. Do not change a shared Docker daemon or switch deployment methods merely to reduce these small caps. Capture the current API
 configuration and a baseline of the other public applications before starting,
 then check their availability during qualification. Roll back only the API
 resource if it harms host headroom or unrelated services.

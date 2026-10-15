@@ -15,8 +15,6 @@
     "fixedContainerName": false,
     "restartPolicy": "unless-stopped",
     "stopGraceSeconds": 45,
-    "logMaxSize": "2m",
-    "logMaxFiles": 2,
     "health": {
       "path": "/readyz",
       "intervalSeconds": 5,
@@ -48,14 +46,18 @@
       "cpuLimit": 2,
       "memoryBytes": 1610612736,
       "memoryPlusSwapBytes": 1610612736,
-      "description": "First fallback after Fly. Reserve memory for two containers during replacement on the existing 4 GB host."
+      "description": "First fallback after Fly. Reserve memory for two containers during replacement on the existing 4 GB host.",
+      "logMaxSize": "10m",
+      "logMaxFiles": 3
     },
     "finland": {
       "priority": 3,
       "cpuLimit": 2,
       "memoryBytes": 2147483648,
       "memoryPlusSwapBytes": 2147483648,
-      "description": "Second fallback after Nuremberg. Preserve existing shared applications and backup jobs; reserve two containers for replacement."
+      "description": "Second fallback after Nuremberg. Preserve existing shared applications and backup jobs; reserve two containers for replacement.",
+      "logMaxSize": "2m",
+      "logMaxFiles": 2
     }
   },
   "operation": {
@@ -66,6 +68,7 @@
     "rollback": "Deploy the recorded compatible rollback digest through the same resource; no automatic database rollback.",
     "fixtureQualification": "Use a separate synthetic database and no production credentials or public routes. The existing artifact smoke does not qualify native protocol, distributed delivery, or workers.",
     "workerActivation": "The all-role expectation is conditional on the concurrent-worker review and isolated qualification. Do not start real workers merely to satisfy this profile.",
-    "databaseBudget": "Each process uses up to three query plus one health connections. Count every running origin and replacement; verify actual database capacity before starting overlap."
+    "databaseBudget": "Each process uses up to three query plus one health connections. Count every running origin and replacement; verify actual database capacity before starting overlap.",
+    "logging": "Retain verified bounded per-node logs. The installed Coolify single-container path does not support per-app JSON log options; do not change the shared Docker daemon to force a smaller cap."
   }
 }

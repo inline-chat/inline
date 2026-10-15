@@ -297,3 +297,25 @@ repeatable-read authorization snapshot. The `history.50` fixture now costs ten
 SQL commands, down from eleven; user/self peer resolution and DM creation keep
 their existing path. Snapshot tests cover concurrent edits and deletion, current
 membership, outsider rejection, and unchanged missing-chat errors.
+
+
+### Recorded planning tradeoff
+
+A local PostgreSQL14.24/Bun1.4/M1 run on source `8e3adbd351` used three warmups,
+20 samples, and identical fixtures under access/auto and all-custom modes.
+At nominal added RTT6, measured SELECT1 calibration was7.2–7.7ms:
+
+| Scenario | SQL | Exchanges access/custom | Median ms access/custom |
+| --- | ---: | ---: | ---: |
+| history.50 |10|17/10|162.81/99.63|
+| updates.user-replay.100 |17|29/17|253.67/162.73|
+| updates.user-replay.revoked.100 |17|29/17|242.59/162.33|
+
+Separate ten-replay, single-connection probes observed5custom/5generic plans
+per access statement under auto, versus10custom/0generic under all-custom.
+EXPLAIN EXECUTE planning observations were0.05–0.08ms with generic reuse and
+2.3–2.6ms with custom planning. Those are planning observations, not execution
+latency distributions. Native-RTT full-handler differences were only0.65–1.20ms
+and do not establish a production improvement. Small tables, simple grants and
+sequential A/B sampling leave production cardinality/skew and tail behavior
+unqualified. Keep broad preparation opt-in despite the transport-sensitive gain.

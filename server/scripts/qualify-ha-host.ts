@@ -98,8 +98,8 @@ export const qualifyHaHost = (
     publishedHostPorts: profile.common.publishedHostPorts,
     privateBackendNetwork: profile.common.privateBackendNetwork,
     fixedContainerName: profile.common.fixedContainerName,
-    logMaxSize: profile.common.logMaxSize,
-    logMaxFiles: profile.common.logMaxFiles,
+    logMaxSize: profile.nodes[node].logMaxSize,
+    logMaxFiles: profile.nodes[node].logMaxFiles,
   }
   for (const [key, expected] of Object.entries(expectedContainer)) check("container", key, expected)
   for (const [key, expected] of Object.entries(profile.common.health)) {
