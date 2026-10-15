@@ -85,7 +85,10 @@ export async function getChatParticipants(
       groups: groups.map((group) => encodeUserGroup(group, context.currentUserId)),
     }
   } catch (error) {
-    Log.shared.error(`Failed to get participants for chat ${input.chatId}: ${error}`)
+    if (error instanceof RealtimeRpcError && error.codeNumber >= 400 && error.codeNumber < 500) {
+      throw error
+    }
+    Log.shared.error(`Failed to get participants for chat ${input.chatId}`, error)
     if (error instanceof RealtimeRpcError) {
       throw error
     }
