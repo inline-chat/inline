@@ -22,10 +22,12 @@ export class UsersModel {
       return []
     }
 
+    // One binding keeps the SQL shape stable across recipient counts. bigint
+    // also lets unknown protocol IDs beyond int4 simply miss the indexed key.
     const rows = await db
       .select({ id: users.id })
       .from(users)
-      .where(and(inArray(users.id, uniqueUserIds), userNotDeleted()))
+      .where(and(sql`${users.id} = any(${sql.param(uniqueUserIds)}::bigint[])`, userNotDeleted()))
 
     const activeUserIds = new Set(rows.map((row) => row.id))
     return uniqueUserIds.filter((id) => activeUserIds.has(id))

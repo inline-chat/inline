@@ -74,6 +74,11 @@ describe("database connection safety", () => {
     }
   })
 
+  test("invalid prepared modes fail without echoing their value", () => {
+    expect(() => makeDatabaseClients(direct, { INLINE_DATABASE_PREPARED_QUERIES: "private-secret" }))
+      .toThrow("INLINE_DATABASE_PREPARED_QUERIES must be access or all-custom.")
+  })
+
   test("pooled mode and a separate direct URL must be explicit", () => {
     expect(() => databaseConnectionPolicy(pooled)).toThrow("explicit PgBouncer mode")
     expect(() => databaseConnectionPolicy(pooled, { DATABASE_CONNECTION_MODE: "pgbouncer" })).toThrow("DATABASE_DIRECT_URL")

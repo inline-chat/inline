@@ -57,9 +57,14 @@ suite("real transaction pooling safety (requires local PostgreSQL and PgBouncer 
     await admin`alter role fixture_app set lock_timeout = '5s'`
     await admin`alter role fixture_app set idle_in_transaction_session_timeout = '15s'`
     await admin`create role fixture_unsafe login`
+    await admin`create role fixture_custom login`
+    await admin`alter role fixture_custom set statement_timeout = '30s'`
+    await admin`alter role fixture_custom set lock_timeout = '5s'`
+    await admin`alter role fixture_custom set idle_in_transaction_session_timeout = '15s'`
+    await admin`alter role fixture_custom set plan_cache_mode = force_custom_plan`
     await admin`create table public.pooling_fixture (id int primary key)`
-    await admin`grant select, insert on public.pooling_fixture to fixture_app`
-    await writeFile(join(directory, "users.txt"), '"fixture_app" ""\n"fixture_unsafe" ""\n')
+    await admin`grant select, insert on public.pooling_fixture to fixture_app, fixture_custom`
+    await writeFile(join(directory, "users.txt"), '"fixture_app" ""\n"fixture_unsafe" ""\n"fixture_custom" ""\n')
     await writeFile(join(directory, "pgbouncer.ini"), `[databases]\npostgres = host=127.0.0.1 port=${port} dbname=postgres\n[pgbouncer]\nlisten_addr = 127.0.0.1\nlisten_port = ${pooledPort}\nunix_socket_dir = ${directory}\nauth_type = trust\nauth_file = ${join(directory, "users.txt")}\npool_mode = transaction\ndefault_pool_size = 2\nmax_client_conn = 30\nmax_prepared_statements = 200\nlogfile = ${join(directory, "pgbouncer.log")}\npidfile = ${join(directory, "pgbouncer.pid")}\n`)
     bouncer = Bun.spawn([pgbouncer!, join(directory, "pgbouncer.ini")], { stdout: "ignore", stderr: "ignore" })
     const deadline = Date.now() + 5_000
@@ -91,6 +96,46 @@ suite("real transaction pooling safety (requires local PostgreSQL and PgBouncer 
     })
     try { await expect(unsafe.validateStartup()).rejects.toThrow("startup qualification failed") }
     finally { await unsafe.close() }
+  })
+
+  test("all-custom rejects the query role even when the direct health role is qualified", async () => {
+    const unqualified = makeDatabaseClients(pooledUrl, {
+      DATABASE_CONNECTION_MODE: "pgbouncer",
+      DATABASE_DIRECT_URL: directUrl.replace("fixture_app", "fixture_custom"),
+      INLINE_DATABASE_PREPARED_QUERIES: "all-custom",
+    })
+    try { await expect(unqualified.validateStartup()).rejects.toThrow("force_custom_plan") }
+    finally { await unqualified.close() }
+  })
+
+  test("all-custom validates role defaults through PgBouncer and keeps custom plans", async () => {
+    const qualified = makeDatabaseClients(pooledUrl.replace("fixture_app", "fixture_custom"), {
+      DATABASE_CONNECTION_MODE: "pgbouncer",
+      DATABASE_DIRECT_URL: directUrl,
+      INLINE_DATABASE_PREPARED_QUERIES: "all-custom",
+    })
+    try {
+      await qualified.validateStartup()
+      const db = drizzle(qualified.queryClient)
+      for (let value = 0; value < 24; value++) {
+        const rows = await db.execute(sql`select ${value}::int as qualified_value`)
+        expect(rows[0]?.["qualified_value"]).toBe(value)
+      }
+      const plans = await qualified.queryClient`select generic_plans, custom_plans from pg_prepared_statements
+        where statement like '%as qualified_value%' and statement not like '%pg_prepared_statements%'`
+      expect(plans.length).toBeGreaterThan(0)
+      expect(plans.every((row) => Number(row["generic_plans"]) === 0)).toBe(true)
+      expect(plans.some((row) => Number(row["custom_plans"]) > 5)).toBe(true)
+      await qualified.checkHealth()
+      // Deliberately change the isolated fixture backend to exercise readiness
+      // losing its qualification; application queries return to narrow mode.
+      await qualified.queryClient`set plan_cache_mode = auto`
+      try {
+        await expect(qualified.checkHealth()).rejects.toThrow("force_custom_plan")
+      } finally {
+        await qualified.queryClient`set plan_cache_mode = force_custom_plan`
+      }
+    } finally { await qualified.close() }
   })
 
   test("prepared queries reuse two server connections without losing role defaults", async () => {

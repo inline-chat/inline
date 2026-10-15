@@ -10,6 +10,15 @@ export type BenchmarkResult = {
   samples: Sample[]
 }
 
+export type BenchmarkPreparation = {
+  mode: "access" | "all-custom"
+  planCacheMode: "auto" | "force_custom_plan" | "force_generic_plan"
+  // pg_prepared_statements is local to one sampled backend, not a pool total.
+  sampledBackendStatements: number
+  sampledBackendCustomPlans: number
+  sampledBackendGenericPlans: number
+}
+
 export type BenchmarkReport = {
   schemaVersion: 1
   status: "passed"
@@ -20,6 +29,7 @@ export type BenchmarkReport = {
     platform: string; arch: string; cpu: string; poolMax: number
     clientPrepareDefault: boolean; concurrency: 1; cache: "cold-application-warm-pool"
   }
+  preparation?: BenchmarkPreparation
   warmup: number
   sampleCount: number
   results: BenchmarkResult[]
@@ -38,6 +48,9 @@ export function summarize(result: BenchmarkResult) {
 export function compareReports(before: BenchmarkReport, after: BenchmarkReport) {
   validateReport(before)
   validateReport(after)
+  if (Boolean(before.preparation) !== Boolean(after.preparation)) {
+    throw new Error("Preparation policy is unknown in one report; rerun the baseline with explicit preparation metadata")
+  }
   if (JSON.stringify(before.environment) !== JSON.stringify(after.environment) || before.warmup !== after.warmup || before.sampleCount !== after.sampleCount) {
     throw new Error("Incompatible benchmark environment, warmup, or sample count; rerun the baseline with matching settings")
   }
@@ -52,6 +65,10 @@ export function compareReports(before: BenchmarkReport, after: BenchmarkReport) 
     const a = summarize(previous), b = summarize(result)
     return {
       scenario: result.id, rttMs: result.rttMs,
+      preparationBefore: before.preparation?.mode ?? "legacy-unknown",
+      preparationAfter: after.preparation?.mode ?? "legacy-unknown",
+      planCacheModeBefore: before.preparation?.planCacheMode ?? "unknown",
+      planCacheModeAfter: after.preparation?.planCacheMode ?? "unknown",
       commandsSaved: a.commands.median - b.commands.median,
       exchangesSaved: a.exchanges.median - b.exchanges.median,
       operationMsSaved: a.operationMs.median - b.operationMs.median,
@@ -76,6 +93,15 @@ export function validateReport(value: unknown): asserts value is BenchmarkReport
       typeof report.environment.clientPrepareDefault !== "boolean" || report.environment.concurrency !== 1 ||
       report.environment.cache !== "cold-application-warm-pool") {
     throw new Error("Missing benchmark provenance or measurement settings")
+  }
+  const preparation = report.preparation
+  if (preparation !== undefined && (!preparation ||
+      !["access", "all-custom"].includes(preparation.mode) ||
+      !["auto", "force_custom_plan", "force_generic_plan"].includes(preparation.planCacheMode) ||
+      (preparation.mode === "all-custom" && preparation.planCacheMode !== "force_custom_plan") ||
+      [preparation.sampledBackendStatements, preparation.sampledBackendCustomPlans, preparation.sampledBackendGenericPlans]
+        .some((count) => !Number.isSafeInteger(count) || count < 0))) {
+    throw new Error("Invalid benchmark preparation policy or counters")
   }
   const keys = new Set<string>()
   for (const result of report.results) {
