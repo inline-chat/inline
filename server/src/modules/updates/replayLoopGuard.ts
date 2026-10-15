@@ -25,6 +25,7 @@ export class ReplayLoopGuard {
     // A recovered client may continue beyond the old failed pass immediately.
     if (startSeq > state.highWater) {
       state.highWater = startSeq
+      state.rewinds = 0
       state.blockedUntil = 0
     }
     if (now < state.blockedUntil) return false
