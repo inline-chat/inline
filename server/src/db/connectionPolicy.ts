@@ -1,5 +1,5 @@
 import postgres from "postgres"
-import { prepareQueries } from "./preparedQueries"
+import { prepareQueries, type PreparedQueryPolicy } from "./preparedQueries"
 
 export const QUERY_TIMEOUTS = {
   statement_timeout: 30_000,
@@ -19,6 +19,7 @@ type DatabaseEnvironment = {
   DATABASE_DIRECT_URL?: string
   DATABASE_CONNECTION_MODE?: string
   INLINE_DATABASE_QUERY_POOL_MAX?: string
+  INLINE_DATABASE_PREPARED_QUERIES?: string
 }
 
 const parseDatabaseUrl = (value: string): URL => {
@@ -143,6 +144,11 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
   if (!/^(?:[1-9]|10)$/.test(queryPoolMax) || queryPoolMax.trim() !== queryPoolMax) {
     throw new Error("INLINE_DATABASE_QUERY_POOL_MAX must be an integer from 1 through 10.")
   }
+  const preparedMode = environment.INLINE_DATABASE_PREPARED_QUERIES ?? "access"
+  if (preparedMode !== "access" && preparedMode !== "all-custom") {
+    throw new Error("INLINE_DATABASE_PREPARED_QUERIES must be access or all-custom.")
+  }
+  const preparation: PreparedQueryPolicy = { mode: "access" }
   const policy = databaseConnectionPolicy(databaseUrl, environment)
   const queryClient = postgres(policy.queryUrl, {
     max: Number(queryPoolMax), connect_timeout: 5, idle_timeout: 30,
@@ -155,29 +161,36 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
     max: 1, connect_timeout: 2, idle_timeout: 30,
     connection: { application_name: "inline-health", ...HEALTH_TIMEOUTS },
   })
-  prepareQueries(queryClient)
+  prepareQueries(queryClient, preparation)
   const close = () => Promise.all([queryClient.end({ timeout: 5 }), healthClient.end({ timeout: 5 })]).then(() => {})
   const queryTimeoutSettings = () => queryClient<TimeoutRow[]>`
     select name, setting, unit from pg_settings
-    where name in ('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout')
+    where name in ('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'plan_cache_mode')
   `.execute()
+  const assertPreparation = (rows: readonly TimeoutRow[]) => {
+    if (preparedMode === "all-custom" && rows.find((row) => row.name === "plan_cache_mode")?.setting !== "force_custom_plan") {
+      preparation.mode = "access"
+      throw new Error("all-custom preparation requires force_custom_plan on the query role.")
+    }
+  }
   const checkHealth = () => {
     const direct = healthClient.unsafe(
       "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::double precision AS database_time_millis",
     ).execute()
-    if (policy.mode === "direct") return direct
+    if (policy.mode === "direct" && preparedMode !== "all-custom") return direct
     // A healthy direct endpoint must not hide a broken/queued pooled endpoint.
     // The health controller's existing deadline cancels both pending queries.
     const pooled = queryTimeoutSettings()
     const probes = combineHealthProbes(direct, [pooled])
     return Object.assign(probes.then(async (clock) => {
       const rows = await pooled
-      assertQueryTimeouts(rows)
+      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
+      assertPreparation(rows)
       return clock
     }), { cancel: probes.cancel })
   }
   const validateStartup = async (): Promise<void> => {
-    if (policy.mode === "direct") return
+    if (policy.mode === "direct" && preparedMode === "access") return
     const query = queryTimeoutSettings()
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
@@ -185,23 +198,28 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
         query,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            reject(new Error("PgBouncer timeout qualification exceeded 5 seconds."))
+            reject(new Error("Database role qualification exceeded 5 seconds."))
             try { query.cancel() } catch { /* The startup deadline remains authoritative. */ }
           }, 5_000)
         }),
       ])
-      assertQueryTimeouts(rows)
-      await healthClient`select 1`
+      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
+      // The query path can use a different role from the direct health client.
+      // Operators must also recycle existing backends after setting role defaults.
+      assertPreparation(rows)
+      if (policy.mode === "pgbouncer") await healthClient`select 1`
+      preparation.mode = preparedMode
     } catch {
       await close()
       // Driver errors can include connection metadata; emit a stable safe error.
-      throw new Error("PgBouncer startup qualification failed; verify role timeout defaults and the direct health endpoint.")
+      throw new Error(`${policy.mode === "pgbouncer" ? "PgBouncer" : "Database"} startup qualification failed; verify role timeout defaults, the direct health endpoint, and force_custom_plan when all-custom preparation is enabled.`)
     } finally {
       clearTimeout(timer)
     }
   }
   const diagnosticsConfiguration = {
     mode: policy.mode,
+    preparedQueries: preparedMode,
     queryPoolMax: queryClient.options.max,
     healthPoolMax: healthClient.options.max,
     statementTimeoutMs: QUERY_TIMEOUTS.statement_timeout,

@@ -84,15 +84,26 @@ transactions and deployment overlap.
 The shared query client now prepares only tagged `sync.replay` and
 `sync.sidecars` access queries with at most 301 parameters (100 chat IDs used
 three times, plus one user). Their two sources yield at most 200 statement
-shapes per connection. Larger batches and transaction-local queries retain the
-existing driver behavior. Explicit `prepare: false` is respected. This caches
+shapes per connection. Larger batches retain the existing driver behavior. The same bounded policy
+also applies to transactions, savepoints and reserved clients. Explicit `prepare: false` is respected. This caches
 plans, never permissions or results. Production PgBouncer was verified to use
 transaction mode with `max_prepared_statements=200`; keep this capability when
 changing providers or pool configuration. Local integration tests exercise
 actual Drizzle prepared reads through PgBouncer, and authorization tests cover
 revocation after warm repeated reads. Array-binding alternatives were rejected
-after live probes showed PostgreSQL kept replanning them instead of selecting
-the much faster generic plan for the existing query shape.
+after historical live probes showed PostgreSQL kept replanning them instead of
+selecting the faster generic plan for that query shape. This is evidence for the
+narrow family, not for enabling generic plans across all queries.
+
+Broader preparation requires explicit `INLINE_DATABASE_PREPARED_QUERIES=all-custom`
+and an operator-established `force_custom_plan` default on the query role. The
+startup and readiness probes inspect `plan_cache_mode` through the query pool;
+startup rejects unqualified opt-ins, and readiness disables broad admission if
+the sampled backend loses qualification. Establish the role default and recycle
+existing PgBouncer backend sessions before enabling it: sampling one backend
+does not prove the setting on every backend. No role or session settings are
+changed by this code. See [the prepared-query policy](../BENCHMARKING.md#prepared-query-policy)
+for the bounded second-observation admission policy and benchmark limits.
 
 Replay access checks execute the canonical SELECT directly on the shared
 client. The former single-query explicit transaction added BEGIN/SET/COMMIT

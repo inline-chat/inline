@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { sql } from "drizzle-orm"
-import { db, closeDb, initDb } from "@in/server/db"
+import { makeDatabaseClients } from "@in/server/db/connectionPolicy"
+import { drizzle } from "drizzle-orm/postgres-js"
 import { setupTestLifecycle } from "../database"
 import { createWireProxy } from "./wire"
 import { measureOperation } from "./measure"
@@ -13,9 +14,14 @@ test("real Drizzle queries expose protocol exchanges independently of SQL comman
   const proxy = await createWireProxy({ host: url.hostname, port: Number(url.port || 5432) }, 0)
   url.hostname = "127.0.0.1"
   url.port = String(proxy.port)
-  await closeDb()
-  initDb(url.toString())
+  // This dedicated direct fixture qualifies the opt-in explicitly; production
+  // uses a role default because PgBouncer rejects this startup parameter.
+  url.searchParams.set("plan_cache_mode", "force_custom_plan")
+  const clients = makeDatabaseClients(url.toString(), { INLINE_DATABASE_PREPARED_QUERIES: "all-custom" })
+  const db = drizzle(clients.queryClient)
   try {
+    await clients.validateStartup()
+    await db.execute(sql`select ${0}::int as value`)
     await db.execute(sql`select ${1}::int as value`)
     const sample = await measureOperation(db.$client.options, async () => {
       const result = await db.execute(sql`select ${2}::int as value`)
@@ -36,8 +42,7 @@ test("real Drizzle queries expose protocol exchanges independently of SQL comman
     expect(delayed.wire!.exchangeBoundaries).toBe(1)
     expect(delayed.operationMs).toBeGreaterThan(0)
   } finally {
-    await closeDb()
+    await clients.close()
     await proxy.close()
-    initDb(direct)
   }
 })

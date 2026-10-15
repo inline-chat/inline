@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { asc, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { dialogs, users } from "@in/server/db/schema"
+import { UsersModel } from "@in/server/db/models/users"
 import { setupTestLifecycle, testUtils } from "../__tests__/setup"
 import { measureOperation } from "../__tests__/performance/measure"
 import { setDialogOpenForUsers } from "./dialogOpen"
@@ -23,7 +24,24 @@ test("one hundred unchanged dialogs use a constant query budget and preserve the
   }, async () => {})
   // Active owners, BEGIN, one sorted owner-lock batch, existing dialogs, COMMIT.
   expect(sample.sql.commands).toBe(5)
+  const smallBatch = await measureOperation(db.$client.options, async () => {
+    const result = await setDialogOpenForUsers({ chat, userIds: [actors[0]!.id], open: true })
+    expect(result.changedDialogs).toEqual([])
+    expect(result.dialogs).toHaveLength(1)
+  }, async () => {})
+  expect(smallBatch.sql.shapes).toEqual(sample.sql.shapes)
   expect(await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id)).orderBy(asc(dialogs.userId))).toEqual(before)
+})
+
+test("array-bound active owners preserve filtering and caller order", async () => {
+  const first = await testUtils.createUser("array-first@example.test")
+  const second = await testUtils.createUser("array-second@example.test")
+  const removed = await testUtils.createUser("array-removed@example.test")
+  await db.update(users).set({ deleted: true }).where(eq(users.id, removed.id))
+  expect(await UsersModel.getActiveUserIds([
+    second.id, removed.id, first.id, second.id, 2 ** 40, 0, -1, Number.NaN,
+  ])).toEqual([second.id, first.id])
+  expect(await UsersModel.getActiveUserIds([])).toEqual([])
 })
 
 test("overlapping reversed owner batches keep independent chat allocations ordered without deadlock", async () => {

@@ -11,16 +11,21 @@ const { values } = parseArgs({
   args: process.argv.slice(2), strict: true, allowPositionals: false,
   options: {
     scenario: { type: "string", multiple: true }, all: { type: "boolean" }, list: { type: "boolean" },
-    samples: { type: "string" }, warmup: { type: "string" }, rtt: { type: "string" },
+    samples: { type: "string" }, warmup: { type: "string" }, rtt: { type: "string" }, preparation: { type: "string" },
     output: { type: "string" }, compare: { type: "string" }, help: { type: "boolean", short: "h" },
   },
 })
+const preparation = values.preparation ?? "access"
+if (preparation !== "access" && preparation !== "all-custom") {
+  throw new Error("--preparation must be access or all-custom")
+}
 if (values.help) {
   console.info(`Usage: bun run bench:backend [--scenario ID ... | --all] [--rtt 0,3,5]
   --list             List scenarios and reviewed SQL command budgets; no DB needed
   --samples N        Measured, independently verified iterations (default 20, max 200)
   --warmup N         Unreported, verified iterations per case (default 3, max 20)
   --rtt MS,...       Requested additional loopback transport RTT (default 0, max 50)
+  --preparation MODE access (default) or all-custom; configures only disposable DB
   --output FILE.json Save a new report; never overwrite a baseline
   --compare FILE.json Compare a completed, compatible baseline with this run
 
@@ -68,7 +73,7 @@ const environment = createTestEnvironment(process.env, databaseUrl)
 // must not silently change the deployment mode or invalidate that baseline.
 environment["INLINE_REALTIME_DISTRIBUTED"] = "0"
 environment["REALTIME_DISTRIBUTED"] = "0"
-environment["INLINE_BACKEND_BENCH_CONFIG"] = JSON.stringify({ ids: selected.map((scenario) => scenario.id), samples, warmup, rtts, output: candidate })
+environment["INLINE_BACKEND_BENCH_CONFIG"] = JSON.stringify({ ids: selected.map((scenario) => scenario.id), samples, warmup, rtts, preparation, output: candidate })
 
 let template: Awaited<ReturnType<typeof prepareTestDatabaseTemplate>> | undefined
 let child: ReturnType<typeof Bun.spawn> | undefined

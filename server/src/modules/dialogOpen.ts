@@ -2,7 +2,7 @@ import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
 import { chats, dialogFolders, dialogs, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
+import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 
 export type DialogOpenPlacement = "top" | "bottom"
@@ -261,16 +261,17 @@ async function setDialogOpenForUsersInTransaction(
 
     // Acquire all user owners before touching any dialog rows. Projection
     // writers use the same users -> dialogs order, so overlapping batches do
-    // not deadlock or derive a stale fractional order.
+    // not deadlock or derive a stale fractional order. Bind each ID list as one
+    // array so varying recipient counts do not consume new prepared SQL shapes.
     await tx.select({ id: users.id }).from(users)
-      .where(inArray(users.id, userIds))
+      .where(sql`${users.id} = any(${sql.param(userIds)}::bigint[])`)
       .orderBy(asc(users.id))
       .for("no key update")
 
     const existingDialogs = await tx
       .select()
       .from(dialogs)
-      .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, userIds)))
+      .where(and(eq(dialogs.chatId, input.chat.id), sql`${dialogs.userId} = any(${sql.param(userIds)}::bigint[])`))
 
     const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
     const changedUserIds = new Set<number>()
@@ -363,7 +364,7 @@ async function setDialogOpenForUsersInTransaction(
             order: null,
             folderId: null,
           })
-          .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, persistCloseUserIds)))
+          .where(and(eq(dialogs.chatId, input.chat.id), sql`${dialogs.userId} = any(${sql.param(persistCloseUserIds)}::bigint[])`))
         changedCloseUserIds.forEach((userId) => changedUserIds.add(userId))
       }
 
@@ -388,7 +389,7 @@ async function setDialogOpenForUsersInTransaction(
     const finalDialogs = await tx
       .select()
       .from(dialogs)
-      .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, userIds)))
+      .where(and(eq(dialogs.chatId, input.chat.id), sql`${dialogs.userId} = any(${sql.param(userIds)}::bigint[])`))
 
     return {
       dialogs: finalDialogs,

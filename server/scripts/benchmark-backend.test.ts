@@ -25,6 +25,7 @@ test.each([
   ["--warmup", "NaN", "--warmup must"],
   ["--rtt", "0,,3", "Empty RTT"],
   ["--rtt", "-1", "RTT must"],
+  ["--preparation", "invalid", "--preparation must be access or all-custom"],
   ["--output", ".env.json", "never environment files"],
   ["--retry", "3", "Unknown option"],
 ])("invalid %s %s fails before provisioning: %s", async (flag, value, message) => {
@@ -37,6 +38,7 @@ function report(): BenchmarkReport {
   return {
     schemaVersion: 1, status: "passed", createdAt: "2026-01-01T00:00:00.000Z", revision: { commit: "fixture", dirty: false, sourceDigest: "a".repeat(64) },
     environment: { bun: "1.4.0", postgres: "15", postgresJs: "3.4.7", drizzle: "fixture", platform: "darwin", arch: "arm64", cpu: "fixture", poolMax: 10, clientPrepareDefault: true, concurrency: 1, cache: "cold-application-warm-pool" },
+    preparation: { mode: "access", planCacheMode: "auto", sampledBackendStatements: 2, sampledBackendCustomPlans: 5, sampledBackendGenericPlans: 0 },
     warmup: 1, sampleCount: 1,
     results: [{ id: "send.dm.open", version: 1, size: 1, rttMs: 3, maxCommands: 27, calibrationMs: [3], samples: [{
       operationMs: 10, settledMs: 12, commandsBeforeReturn: 2,
@@ -72,4 +74,37 @@ test("failed, empty, incomplete and incompatible runs cannot be compared as succ
     mutate(changed)
     expect(() => compareReports(report(), changed)).toThrow()
   }
+})
+
+
+test.each(["access", "all-custom"])("explicit %s preparation can list without provisioning", async (mode) => {
+  const result = await run(`--preparation=${mode}`, "--list")
+  expect(result.code).toBe(0)
+  expect(result.output).toContain("send.public.100")
+})
+
+test("preparation comparisons identify the treatment and its actual planning policy", () => {
+  const before = report(), after = report()
+  after.preparation = { mode: "all-custom", planCacheMode: "force_custom_plan", sampledBackendStatements: 10, sampledBackendCustomPlans: 20, sampledBackendGenericPlans: 0 }
+  expect(compareReports(before, after)[0]).toMatchObject({
+    preparationBefore: "access", preparationAfter: "all-custom",
+    planCacheModeBefore: "auto", planCacheModeAfter: "force_custom_plan",
+  })
+})
+
+test("preparation metadata rejects unqualified modes and malformed backend counters", () => {
+  for (const metadata of [
+    { mode: "unknown", planCacheMode: "auto", sampledBackendStatements: 0, sampledBackendCustomPlans: 0, sampledBackendGenericPlans: 0 },
+    { mode: "all-custom", planCacheMode: "auto", sampledBackendStatements: 0, sampledBackendCustomPlans: 0, sampledBackendGenericPlans: 0 },
+    { mode: "access", planCacheMode: "auto", sampledBackendStatements: -1, sampledBackendCustomPlans: 0, sampledBackendGenericPlans: 0 },
+    { mode: "access", planCacheMode: "auto", sampledBackendStatements: 0 },
+  ]) expect(() => validateReport({ ...report(), preparation: metadata })).toThrow("preparation")
+})
+
+test("legacy reports remain readable but cannot silently compare to a qualified mode", () => {
+  const legacy = report()
+  delete legacy.preparation
+  expect(() => validateReport(legacy)).not.toThrow()
+  expect(() => compareReports(legacy, report())).toThrow("Preparation policy is unknown")
+  expect(() => compareReports(legacy, structuredClone(legacy))).not.toThrow()
 })

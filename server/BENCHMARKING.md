@@ -36,6 +36,10 @@ bun run bench:backend --compare .test-results/before.json --output .test-results
 # Explore sensitivity to additional DB transport latency on one path.
 bun run bench:backend --scenario send.dm.open --rtt 0,3,5
 
+# Compare safe default preparation with qualified broad preparation.
+bun run bench:backend --preparation access --scenario send.dm.open --rtt 0,3,5 --output .test-results/access.json
+bun run bench:backend --preparation all-custom --scenario send.dm.open --rtt 0,3,5 --compare .test-results/access.json --output .test-results/all-custom.json
+
 # Check the entire benchmark workflow quickly; this is not a tail-latency study.
 bun run bench:backend --all --samples 1 --warmup 1
 ```
@@ -46,6 +50,20 @@ can take several minutes. Output paths must be new JSON files: baselines are
 never overwritten. Unknown selections, invalid arguments, failed assertions,
 background failures, failed cleanup and incomplete runs exit unsuccessfully.
 Interrupted worker artifacts are candidates, not accepted comparison baselines.
+
+`--preparation access` is the default; shell rollout flags are deliberately not
+inherited. `--preparation all-custom` sets `force_custom_plan` only as a database
+default on the lifecycle's disposable local database. It then recreates the
+application pools and validates startup before measuring. The provisioning
+database and role defaults are never changed. Use at least three warmups when
+studying retained broad statements, which require two observations for admission.
+
+Reports record the requested mode, the actual `plan_cache_mode`, and statement/
+execution counters from one sampled backend after the matrix. These counters
+include driver-owned statements and are not an admission count or pool total.
+Access-to-all-custom comparisons display both treatments and planning settings.
+Legacy reports without preparation metadata remain readable but cannot compare
+to new qualified reports; rerun those baselines with an explicit mode.
 
 Run timing experiments alone, on the same otherwise idle machine, database
 version and power configuration. Avoid concurrent builds and tests. Repeat A/B
@@ -77,6 +95,9 @@ Each iteration follows this sequence:
 | `commandsBeforeReturn` | Commands submitted by return time; background work can overlap, so this is **not** a foreground-only count |
 | `wire.exchangeBoundaries` | Frontend `Query`, `Flush`, and `Sync` frames observed at the proxy |
 | `calibrationMs` | Ten real `SELECT 1` timings at the requested delay, outside the operation samples |
+| `preparation.mode` / `planCacheMode` | Explicit benchmark treatment and actual backend planning policy |
+| `preparation.sampledBackendStatements` | Retained statements visible on one backend after the matrix; includes driver-owned queries |
+| `preparation.sampledBackendCustomPlans` / `sampledBackendGenericPlans` | Execution counters on that sampled backend, rather than pool-wide totals |
 
 One driver submission can contain several SQL statements, so `sql.commands` is
 not a SQL parser's statement count. A transaction does not make its statements
@@ -196,15 +217,44 @@ automatic correctness proof or a promise of production latency savings.
 
 ## Prepared query policy
 
-Ordinary Drizzle postgres-js calls now opt into preparation for bounded scalar/ordinary-array
-SQL/type signatures, including transactions, nested savepoints and reserved
-clients. Warm prepared calls avoid the extra Describe/Flush exchange; result
-rows and authorization decisions are never cached. Explicit per-query choices
-are preserved. After 256 admitted signatures, previously seen shapes remain
-prepared and new shapes execute unprepared. Queries longer than 32 KiB, more
-than 301 parameters, and custom typed parameters retain their prior mode.
-PgBouncer must support protocol-level prepared statements. The pool's existing
-prepare setting remains authoritative, including an explicit global opt-out.
+The default `INLINE_DATABASE_PREPARED_QUERIES=access` prepares only the existing
+`sync.replay` and `sync.sidecars` access family. Its 100 batch lengths per source
+fit a 200-signature budget. Other Drizzle queries retain unnamed execution and
+custom planning. Rows and authorization decisions are never cached.
 
-The real-wire regression tests distinguish SQL submissions from protocol
-exchanges and cover new bind values, nested rollback and bounded admission.
+`INLINE_DATABASE_PREPARED_QUERIES=all-custom` opts into broader scalar/ordinary-array
+preparation, including transactions, savepoints and reserved clients. Startup
+must first observe `plan_cache_mode=force_custom_plan` on the actual query path;
+readiness checks it again. This requires an operator-qualified application role
+default on every backend, with existing pooled sessions reestablished after the
+role change. PgBouncer does not accept this as an ordinary startup parameter.
+The application never changes roles or session settings. A sampled startup check
+cannot establish that every existing backend has inherited the role default.
+
+Broad admission requires a second observation, with at most 200 pending candidates.
+This avoids retaining one-off SQL shapes, such as transient `inArray` lengths.
+It admits at most 100 broad signatures and leaves 100 slots for access queries,
+within the same total cap of 200. Retained signatures live until pool shutdown;
+they are not an LRU. Once a partition or total budget fills, new shapes use the
+original unnamed path. Changing hot lists to a single array binding avoids a
+new signature for each list length. The default access mode keeps its full 200
+slots. Explicit per-query options and the pool-level preparation switch remain
+authoritative. Queries longer than 32 KiB, more than 301 parameters, and custom
+typed parameters retain their prior mode.
+
+Warm admitted calls skip Describe/Flush while PostgreSQL builds custom plans
+from current bindings. The wire fixture opts into `all-custom` using a dedicated
+direct connection with the setting established before startup. The benchmark
+launcher provides its own disposable-database qualification via `--preparation`. Database tests
+assert partial-index selection and zero generic plans after more than five
+executions, plus rollback, changed array bindings and admission pressure.
+
+Measurements from commit `5dc49a0f2` used unconditional broad preparation under
+the database's prior planning policy. They do not describe this safe default or
+qualify `all-custom` latency. New comparisons must record the preparation mode,
+role setting, admission limits and enough warmups (at least three) for repeated
+shapes; inspect `pg_prepared_statements` counters to verify prepared reuse and planning policy.
+
+Role-wide custom planning also applies to the previously tuned access queries.
+Qualify representative replay latency as well as simple point reads before
+enabling broad mode; faster protocol exchanges alone do not prove a net gain.
