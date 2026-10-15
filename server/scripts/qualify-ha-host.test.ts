@@ -19,7 +19,7 @@ const metadata = () => ({
   container: {
     cpuLimit: 2, memoryBytes: 1_610_612_736, memoryPlusSwapBytes: 1_610_612_736,
     restartPolicy: "unless-stopped", stopGraceSeconds: 45, publishedHostPorts: [],
-    privateBackendNetwork: true, fixedContainerName: false, logMaxSize: "2m", logMaxFiles: 2,
+    privateBackendNetwork: true, fixedContainerName: false, logMaxSize: "10m", logMaxFiles: 3,
   },
   health: { path: "/readyz", intervalSeconds: 5, timeoutSeconds: 3, retries: 3, startPeriodSeconds: 15 },
   tls: { host: "api.inline.chat", verified: true, expiresAt: "2030-01-01T00:00:00Z" },
@@ -58,6 +58,8 @@ test("unbound release placeholders and unknown observations stay incomplete", ()
 
 test("Finland caps, supervisor drain and certificate expiration are checked", () => {
   const input = metadata()
+  input.container.logMaxSize = "2m"
+  input.container.logMaxFiles = 2
   input.container.stopGraceSeconds = 30
   input.tls.expiresAt = "2026-10-15T00:00:00Z"
   const result = qualifyHaHost("finland", input, release, Date.parse("2026-10-15T01:00:00Z"))
