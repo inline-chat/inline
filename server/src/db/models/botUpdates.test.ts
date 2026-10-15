@@ -6,6 +6,7 @@ import { db } from "@in/server/db"
 import { botUpdates, botUpdateStreams, chatParticipants } from "@in/server/db/schema"
 import { markServerShuttingDown, resetServerShutdownStateForTests } from "@in/server/lifecycle/shutdownState"
 import { botUpdateWaiters } from "./botUpdateWaiters"
+import { makeBotWebhookTransport, runBotWebhookDeliveryOnce } from "@in/server/modules/botUpdates/delivery"
 import {
   BOT_UPDATE_QUEUE_LIMITS,
   BotUpdatesModel,
@@ -127,8 +128,10 @@ describe("BotUpdatesModel", () => {
     const update = await queueParticipation(botUserId, chatId, "replace")
     const [stale] = await BotUpdatesModel.claimWebhookDeliveries(1)
     expect(stale?.update.update_id).toBe(update?.update_id)
+    expect(await BotUpdatesModel.isCurrentWebhookClaim(stale!)).toBeTrue()
 
     await BotUpdatesModel.setWebhook(botUserId, { url: "https://example.com/replacement" })
+    expect(await BotUpdatesModel.isCurrentWebhookClaim(stale!)).toBeFalse()
     expect(await BotUpdatesModel.markWebhookDelivered(stale!)).toBeFalse()
 
     const [replacement] = await BotUpdatesModel.claimWebhookDeliveries(1)
@@ -149,6 +152,86 @@ describe("BotUpdatesModel", () => {
     const [recovered] = await BotUpdatesModel.claimWebhookDeliveries(1)
     expect(recovered?.update.update_id).toBe(update?.update_id)
     expect(recovered?.claimToken).not.toBe(abandoned?.claimToken)
+    expect(await BotUpdatesModel.isCurrentWebhookClaim(abandoned!)).toBeFalse()
+    expect(await BotUpdatesModel.isCurrentWebhookClaim(recovered!)).toBeTrue()
+  })
+
+  for (const change of ["replaced", "deleted", "expired lease", "reclaimed", "expired update", "access removed"] as const) {
+    test(`does not open a webhook POST when ${change} during DNS resolution`, async () => {
+      await BotUpdatesModel.setWebhook(botUserId, { url: "https://receiver.test/old", secret_token: "old-secret" })
+      const update = await queueParticipation(botUserId, chatId, "paused DNS")
+      const resolving = Promise.withResolvers<void>()
+      const releaseDns = Promise.withResolvers<void>()
+      let posts = 0
+      const delivery = runBotWebhookDeliveryOnce(1, makeBotWebhookTransport({
+        resolve: async (rawUrl) => {
+          resolving.resolve()
+          await releaseDns.promise
+          return { url: new URL(rawUrl), address: "8.8.8.8", family: 4 }
+        },
+        request: () => {
+          posts++
+          throw new Error("A stale webhook must not open a connection")
+        },
+      }))
+      try {
+        await resolving.promise
+        const [row] = await db.select().from(botUpdates).where(eq(botUpdates.botUserId, botUserId))
+        if (!row?.claimToken) throw new Error("Expected an active webhook claim before DNS")
+        if (change === "replaced") {
+          await BotUpdatesModel.setWebhook(botUserId, { url: "https://receiver.test/new", secret_token: "new-secret" })
+        } else if (change === "deleted") {
+          await BotUpdatesModel.deleteWebhook(botUserId)
+        } else if (change === "expired lease" || change === "reclaimed") {
+          await db.update(botUpdates).set({ claimExpiresAt: new Date(Date.now() - 1_000) }).where(eq(botUpdates.id, row.id))
+          if (change === "reclaimed") {
+            const [replacement] = await BotUpdatesModel.claimWebhookDeliveries(1)
+            expect(replacement?.claimToken).not.toBe(row.claimToken)
+          }
+        } else if (change === "expired update") {
+          await db.update(botUpdates).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(botUpdates.id, row.id))
+        } else {
+          await db.delete(chatParticipants).where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, botUserId)))
+        }
+        releaseDns.resolve()
+        expect(await delivery).toBe(1)
+        expect(posts).toBe(0)
+        const pending = await db.select().from(botUpdates).where(eq(botUpdates.botUserId, botUserId))
+        if (change === "access removed") {
+          expect(pending).toHaveLength(0)
+          expect((await streamFor(botUserId)).droppedUpdateCount).toBe(1)
+        } else {
+          expect(pending).toHaveLength(1)
+          expect(pending[0]?.updateId).toBe(update?.update_id)
+          expect(pending[0]?.attemptCount).toBe(0)
+          expect((await streamFor(botUserId)).pendingUpdateCount).toBe(1)
+        }
+      } finally {
+        releaseDns.resolve()
+        await delivery
+      }
+    })
+  }
+
+  test("delivers a current claim and fences its ACK if the webhook changes after connection", async () => {
+    await BotUpdatesModel.setWebhook(botUserId, { url: "https://receiver.test/old", secret_token: "old-secret" })
+    const update = await queueParticipation(botUserId, chatId, "in flight")
+    const posts: { url: string; updateId?: string; secret?: string }[] = []
+    expect(await runBotWebhookDeliveryOnce(1, async (input) => {
+      if (!await input.beforeConnect()) return undefined
+      posts.push({ url: input.rawUrl, updateId: input.headers["x-inline-update-id"], secret: input.headers["x-inline-bot-api-secret-token"] })
+      await BotUpdatesModel.setWebhook(botUserId, { url: "https://receiver.test/new", secret_token: "new-secret" })
+      return { status: 200 }
+    })).toBe(1)
+    expect(posts).toEqual([{ url: "https://receiver.test/old", updateId: String(update?.update_id), secret: "old-secret" }])
+    expect((await streamFor(botUserId)).pendingUpdateCount).toBe(1)
+    expect(await runBotWebhookDeliveryOnce(1, async (input) => {
+      if (!await input.beforeConnect()) return undefined
+      posts.push({ url: input.rawUrl, updateId: input.headers["x-inline-update-id"], secret: input.headers["x-inline-bot-api-secret-token"] })
+      return { status: 200 }
+    })).toBe(1)
+    expect(posts.at(-1)).toEqual({ url: "https://receiver.test/new", updateId: String(update?.update_id), secret: "new-secret" })
+    expect((await streamFor(botUserId)).pendingUpdateCount).toBe(0)
   })
 
   test("lets a replacement poll proceed and cancels the older long poll", async () => {

@@ -531,6 +531,31 @@ async function claimWebhookDeliveries(limit: number): Promise<WebhookDeliveryCla
   })
 }
 
+/** A pre-connect fence; completion still needs its separate token/generation check. */
+async function isCurrentWebhookClaim(claim: WebhookDeliveryClaim): Promise<boolean> {
+  if (!claim.stream.webhookUrl) return false
+  const [current] = await db
+    .select({ id: botUpdates.id })
+    .from(botUpdates)
+    .innerJoin(botUpdateStreams, eq(botUpdateStreams.botUserId, botUpdates.botUserId))
+    .where(and(
+      eq(botUpdates.id, claim.updateRowId),
+      eq(botUpdates.botUserId, claim.stream.botUserId),
+      eq(botUpdates.updateId, claim.update.update_id),
+      eq(botUpdates.claimToken, claim.claimToken),
+      eq(botUpdates.claimGeneration, claim.claimGeneration),
+      // These columns store UTC without a time zone; comparing directly to
+      // timestamptz would reinterpret them in the database session's zone.
+      gt(botUpdates.claimExpiresAt, sql`clock_timestamp() at time zone 'UTC'`),
+      gt(botUpdates.expiresAt, sql`clock_timestamp() at time zone 'UTC'`),
+      gt(botUpdates.updateId, botUpdateStreams.acknowledgedUpdateId),
+      eq(botUpdateStreams.configGeneration, claim.claimGeneration),
+      eq(botUpdateStreams.webhookUrl, claim.stream.webhookUrl),
+    ))
+    .limit(1)
+  return current !== undefined
+}
+
 async function finishWebhookDelivery(
   claim: WebhookDeliveryClaim,
   options: { dropped: boolean },
@@ -905,6 +930,7 @@ export const BotUpdatesModel = {
   getWebhookInfo,
   claimWebhookDeliveries,
   decryptWebhookSecret,
+  isCurrentWebhookClaim,
   markWebhookDelivered,
   markWebhookFailed,
   queue,

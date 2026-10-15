@@ -2,7 +2,8 @@ import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { isTest } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import { resolveWebhookUrl } from "./webhookSecurity"
-import { request as httpsRequest } from "node:https"
+import { request as httpsRequest, type RequestOptions } from "node:https"
+import type { ClientRequest, IncomingMessage } from "node:http"
 
 const log = new Log("botUpdates.delivery")
 const requestTimeoutMs = 10_000
@@ -21,35 +22,46 @@ const retryAfterMs = (status: number, header: string | string[] | undefined): nu
   return Math.min(3_600_000, Math.floor(seconds * 1_000))
 }
 
-const postPinned = async (input: {
+export type BotWebhookTransport = (input: {
   rawUrl: string
   body: string
   headers: Record<string, string>
-}): Promise<{ status: number; retryAfter?: string | string[] }> => {
-  const target = await resolveWebhookUrl(input.rawUrl)
-  return new Promise((resolve, reject) => {
-    const request = httpsRequest(target.url, {
-      method: "POST",
-      headers: { ...input.headers, "content-length": Buffer.byteLength(input.body).toString() },
-      servername: target.url.hostname,
-      lookup: ((_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) =>
-        callback(null, target.address, target.family)) as any,
-    }, (response) => {
-      let bytes = 0
-      response.on("data", (chunk: Buffer) => {
-        bytes += chunk.byteLength
-        if (bytes > 4_096) response.destroy()
+  beforeConnect: () => Promise<boolean>
+}) => Promise<{ status: number; retryAfter?: string | string[] } | undefined>
+
+export function makeBotWebhookTransport(dependencies: {
+  resolve?: typeof resolveWebhookUrl
+  request?: (url: URL, options: RequestOptions, callback: (response: IncomingMessage) => void) => ClientRequest
+} = {}): BotWebhookTransport {
+  return async (input) => {
+    const target = await (dependencies.resolve ?? resolveWebhookUrl)(input.rawUrl)
+    if (!await input.beforeConnect()) return undefined
+    return new Promise((resolve, reject) => {
+      const request = (dependencies.request ?? httpsRequest)(target.url, {
+        method: "POST",
+        headers: { ...input.headers, "content-length": Buffer.byteLength(input.body).toString() },
+        servername: target.url.hostname,
+        lookup: ((_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) =>
+          callback(null, target.address, target.family)) as NonNullable<RequestOptions["lookup"]>,
+      }, (response) => {
+        let bytes = 0
+        response.on("data", (chunk: Buffer) => {
+          bytes += chunk.byteLength
+          if (bytes > 4_096) response.destroy()
+        })
+        response.on("end", () => resolve({ status: response.statusCode ?? 0, retryAfter: response.headers["retry-after"] }))
+        response.on("error", reject)
       })
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, retryAfter: response.headers["retry-after"] }))
-      response.on("error", reject)
+      request.setTimeout(requestTimeoutMs, () => request.destroy(new Error("Webhook request timed out")))
+      request.on("error", reject)
+      request.end(input.body)
     })
-    request.setTimeout(requestTimeoutMs, () => request.destroy(new Error("Webhook request timed out")))
-    request.on("error", reject)
-    request.end(input.body)
-  })
+  }
 }
 
-async function deliver(claim: Awaited<ReturnType<typeof BotUpdatesModel.claimWebhookDeliveries>>[number]) {
+const postPinned = makeBotWebhookTransport()
+
+async function deliver(claim: Awaited<ReturnType<typeof BotUpdatesModel.claimWebhookDeliveries>>[number], transport: BotWebhookTransport) {
   const url = claim.stream.webhookUrl
   if (!url) return
   try {
@@ -70,7 +82,17 @@ async function deliver(claim: Awaited<ReturnType<typeof BotUpdatesModel.claimWeb
     }
     const secret = BotUpdatesModel.decryptWebhookSecret(claim.stream)
     if (secret) headers["x-inline-bot-api-secret-token"] = secret
-    const response = await postPinned({ rawUrl: url, body, headers })
+    const response = await transport({ rawUrl: url, body, headers, beforeConnect: async () => {
+      if (!await BotUpdatesModel.isCurrentWebhookClaim(claim)) return false
+      if (!await BotUpdatesModel.canBotAccessUpdate(claim.stream.botUserId, claim.update)) {
+        await BotUpdatesModel.discardWebhookDelivery(claim)
+        return false
+      }
+      // Access reads can cross replacement or lease expiry. Fence once more
+      // after those reads, immediately before opening the external connection.
+      return BotUpdatesModel.isCurrentWebhookClaim(claim)
+    } })
+    if (!response) return
     if (response.status >= 200 && response.status < 300) {
       await BotUpdatesModel.markWebhookDelivered(claim)
       return
@@ -90,13 +112,13 @@ async function deliver(claim: Awaited<ReturnType<typeof BotUpdatesModel.claimWeb
   }
 }
 
-export async function runBotWebhookDeliveryOnce(limit = 25): Promise<number> {
+export async function runBotWebhookDeliveryOnce(limit = 25, transport: BotWebhookTransport = postPinned): Promise<number> {
   await Promise.all([
     BotUpdatesModel.cleanupBotUpdateRows(),
     BotUpdatesModel.cleanupBotMessageRoutes(),
   ])
   const claims = await BotUpdatesModel.claimWebhookDeliveries(limit)
-  await Promise.all(claims.map(deliver))
+  await Promise.all(claims.map((claim) => deliver(claim, transport)))
   return claims.length
 }
 

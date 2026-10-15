@@ -1,10 +1,32 @@
 import { describe, expect, it } from "bun:test"
 import {
   BotWebhookDeliveryWorker,
+  makeBotWebhookTransport,
   webhookRetryDelayMs,
 } from "./delivery"
 
 describe("bot webhook delivery", () => {
+  it("checks delivery authority after DNS and before opening an HTTPS request", async () => {
+    const steps: string[] = []
+    const transport = makeBotWebhookTransport({
+      resolve: async (rawUrl) => {
+        steps.push("dns")
+        return { url: new URL(rawUrl), address: "8.8.8.8", family: 4 }
+      },
+      request: () => {
+        steps.push("request")
+        throw new Error("synthetic request boundary")
+      },
+    })
+    const input = { rawUrl: "https://receiver.test/webhook", body: "{}", headers: {} }
+    expect(await transport({ ...input, beforeConnect: async () => { steps.push("authority"); return false } })).toBeUndefined()
+    expect(steps).toEqual(["dns", "authority"])
+    steps.length = 0
+    await expect(transport({ ...input, beforeConnect: async () => { steps.push("authority"); return true } }))
+      .rejects.toThrow("synthetic request boundary")
+    expect(steps).toEqual(["dns", "authority", "request"])
+  })
+
   it("uses bounded increasing retry delays", () => {
     const original = Math.random
     Math.random = () => 0
