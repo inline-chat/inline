@@ -58,4 +58,23 @@ describe("replay loop guard", () => {
     expect(guard.allow("a", 4000)).toBe(true)
     expect(guard.allow("a", 0)).toBe(true)
   })
+
+  test("resets rewind backoff after passing the previous high-water mark on the same socket", () => {
+    let now = 0
+    const guard = new ReplayLoopGuard(() => now)
+    for (const seq of [4000, 0, 4000]) expect(guard.allow("a", seq)).toBe(true)
+    expect(guard.allow("a", 0)).toBe(false)
+
+    // Recovery is possible during backoff, without an idle expiry or reconnect.
+    expect(guard.allow("a", 4001)).toBe(true)
+    now += 1000
+    expect(guard.allow("a", 0)).toBe(true)
+    expect(guard.allow("a", 4001)).toBe(true)
+    expect(guard.allow("a", 0)).toBe(false)
+    // A new failure episode starts at 60 seconds, not the old 120-second step.
+    now += 59_999
+    expect(guard.allow("a", 0)).toBe(false)
+    now += 1
+    expect(guard.allow("a", 0)).toBe(true)
+  })
 })
