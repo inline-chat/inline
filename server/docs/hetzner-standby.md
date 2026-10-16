@@ -1,7 +1,10 @@
 # Hetzner standby and Cloudflare proxy bypass
 
-This is a prepared deployment option, not a statement that the origins or routing
-are active or qualified. Keep Cloudflare authoritative DNS. The preferred order is
+As of October 16, 2026, `api.inline.chat` has a running Nuremberg fallback behind
+Cloudflare load balancing, with Fly preferred. Verify current provider inventory
+and dated qualification receipts before a change. Finland remains a prepared
+third-origin option; this document's three-origin examples do not establish that
+it is active or qualified. Keep Cloudflare authoritative DNS. The preferred order is
 **Fly → Nuremberg → Finland**: Fly serves normally, Nuremberg is the first
 fallback, and the existing Finland host is the second fallback. A second Fly
 Machine can later join the same app without another Cloudflare pool.
@@ -185,7 +188,8 @@ and [Full](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/
 ### Rolling upgrades and removing a node
 
 Qualify the fallback candidates before changing the preferred Fly origin. For
-an existing three-origin fleet, update Finland, then Nuremberg, then Fly, one
+the current two-origin fleet, update Nuremberg, then Fly. If Finland is later
+qualified and enabled, update Finland, then Nuremberg, then Fly, one
 host at a time. On each host start the new immutable container on a separate
 private backend, qualify it, switch only that API's proxy upstream, then SIGTERM
 the old container and wait for its real exit/drain. Keep the other origins ready.
@@ -193,9 +197,22 @@ Source changes, image publication and local examples alone change no routing.
 
 For Fly, retain the existing exact-fleet preflight, migration and blue-green
 workflow; `--ha=false` preserves the selected public Machine count. It does not
-update either Hetzner origin. Record all three effective release identities
-before calling a fleet release complete. Mixed releases are acceptable only
-for deliberately qualified additive overlap, not indefinitely stale fallbacks.
+update either Hetzner origin. Before the next selected `main` release reaches
+Fly, require Nuremberg to pass direct authenticated HTTP/V2/V3, effective
+image/configuration and schema checks for that SHA's qualified ARM64 image.
+Record both architecture-specific digests, the compatible rollback release,
+and all enabled origins' effective identities before calling the fleet release
+complete. Keep the existing Cloudflare LB/pool identities and priority order;
+an application release does not authorize deleting or replacing fallback
+routing. Recheck routing and origin health after the rollout. Mixed releases
+are acceptable only for deliberately qualified additive overlap with a named
+owner and completion deadline, not indefinitely stale fallbacks.
+
+The checked-in Fly workflow currently has no Nuremberg deployment/readback or
+freshness gate. Until a reviewed release guard is added, the operator must
+complete and record the standby prerequisite before dispatching the Fly
+release. Automatic Git deployment remains disabled on the standby; enabling
+it would bypass exact-image qualification rather than solve release coordination.
 
 Before a planned node stop, verify a ready alternative, withdraw that node from
 new ingress (its pool/endpoint or scoped reverse-proxy routing), then send

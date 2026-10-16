@@ -19,7 +19,8 @@ kill_timeout = "45s"
 [env]
   NODE_ENV = "production"
   PORT = "8000"
-  # The only traffic-serving role. It owns the shared workers and schedulers.
+  # This Fly role participates in shared worker claims alongside qualified
+  # warm fallback origins; routing priority does not fence background workers.
   INLINE_PROCESS_ROLE = "all"
   # Deployment overlap and the warm standby share PostgreSQL. Redis supplies
   # optional wake-up hints; durable catch-up must remain enabled without it.

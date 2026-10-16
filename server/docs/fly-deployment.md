@@ -77,6 +77,30 @@ ingress mode, direct-IP source and query-pool cap match the qualified profile.
 Keep credential values out of receipts and logs; a list of secret names alone
 does not establish these effective settings.
 
+### Release contract with a warm fallback
+
+Since October 16, 2026, `api.inline.chat` uses Cloudflare load balancing with
+Fly preferred and a running Nuremberg fallback. The Fly workflow publishes both
+architecture-specific images but deploys and verifies only Fly. It does not
+refresh Nuremberg or prove that automatic fallback remains usable.
+
+Before releasing the next selected `main` SHA to Fly, qualify that same SHA's
+ARM64 image on Nuremberg against the intended schema and runtime configuration.
+Record the selected SHA, both immutable image digests, each origin's effective
+image/configuration, the compatible rollback release, and the unchanged
+Cloudflare pool identities/order. Apply DDL once through the existing migration
+gate only after old/new/rollback schema compatibility is established. Replace
+and qualify Nuremberg before replacing Fly, keeping another ready origin during
+each replacement. Verify direct HTTP/V2/V3 and cross-node recovery, then verify
+canonical routing and both effective release identities after the Fly rollout.
+
+The current workflow does not enforce this fleet gate. Until a reviewed guard
+is installed, it is an explicit operator prerequisite, and a green Fly-only
+workflow is not completion of the fleet release. Deliberate mixed-version
+overlap needs a recorded compatibility decision and an owner/deadline for
+finishing it; it must not leave an indefinitely stale standby. See
+[the standby release procedure](hetzner-standby.md#rolling-upgrades-and-removing-a-node).
+
 ### Prepare an image for rehearsal or initial bootstrap
 
 For an exact-image rehearsal, manually dispatch from the selected branch in
@@ -229,10 +253,13 @@ in the protected recovery capture. An image-only rollback is insufficient:
 binaries that predate optional ingress reject `cloudflare-optional`, so restore their strict
 `cloudflare` ingress configuration and preserve its origin-attribution secret
 alongside the old image. Those binaries also lack the query-pool cap and can use
-10 query plus one health connection each. Recalculate the whole fleet's budget
-and keep Hetzner stopped during the first rollback overlap; do not count the new
-cap as a limit on an old binary. Verify the resulting image, effective settings,
-schema compatibility and authenticated serving path before returning traffic.
+10 query plus one health connection each. Such a legacy rollback needs a
+separate ingress and whole-fleet connection-budget plan; do not count the new
+cap as a limit on an old binary. If that plan requires withdrawing an origin,
+first verify a ready alternative and its routing. This is not an instruction
+to stop the current warm Nuremberg fallback during an ordinary compatible
+rollback. Verify the selected image, effective settings, schema compatibility
+and authenticated serving path before returning traffic.
 
 Preserve public `0150_space-profiles` and forward `0151_insights-query-indexes`.
 The current migrator wraps pending DDL in one transaction: locks from 0150 can
@@ -243,10 +270,13 @@ rewrite historical migrations or place concurrent indexes in this transaction.
 
 Coolify fallback means deploying a compatible API image against the **current
 PlanetScale database**, with the same encryption keys, object storage and ingress
-contract. Keep the fallback stopped until the manual failover. A hostname/IP
-change does not stop its workers. Restoring a database backup is a separate
+contract. The current Nuremberg fallback stays running so Cloudflare can route
+new connections to it automatically when the preferred Fly pool is unhealthy.
+A stopped fallback supplies only manual recovery capacity. Existing WebSockets
+need reconnect/catch-up; a hostname or pool change neither moves their sockets
+nor stops their workers. Restoring a database backup is a separate
 disaster-recovery action, not application rollback. There is no automatic schema
-rollback or automatic cross-host traffic switch.
+rollback.
 
 ## Initial app setup and regional reliability
 
