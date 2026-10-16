@@ -1,12 +1,13 @@
 name: Deploy Server
 
-# Release only the SHA selected by dispatching main; no arbitrary ref input or
-# push trigger. Configure the production environment to allow main only.
+# Manual publication may select a branch in this repository. Production releases
+# remain main-only; no arbitrary ref input or push trigger. Restrict production
+# environments to main as an independent deployment fence.
 on:
   workflow_dispatch:
     inputs:
       publish_only:
-        description: Qualify and publish the image for rehearsal or initial bootstrap; do not deploy
+        description: Qualify and publish this branch's images for rehearsal; do not deploy
         type: boolean
         default: false
       bootstrap:
@@ -23,7 +24,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Require a manual main release
+    name: Validate manual publication or main release
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -31,8 +32,14 @@ jobs:
           BOOTSTRAP: ${{ inputs.bootstrap }}
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          test "$GITHUB_REF" = refs/heads/main
-          test "$PUBLISH_ONLY:$BOOTSTRAP" != true:true
+          test "$GITHUB_REPOSITORY" = inline-chat/inline
+          test "$GITHUB_REF_TYPE" = branch
+          [[ "$GITHUB_REF" == refs/heads/* ]] || exit 1
+          case "$PUBLISH_ONLY:$BOOTSTRAP" in
+            true:false) ;;
+            false:false|false:true) test "$GITHUB_REF" = refs/heads/main ;;
+            *) exit 1 ;;
+          esac
 
   qualify:
     name: Qualify and publish the exact release image
@@ -40,6 +47,7 @@ jobs:
     uses: ./.github/workflows/server-test.yml
     with:
       publish_image: true
+      publish_only: ${{ inputs.publish_only }}
     secrets:
       # Repository/org secret: environment secrets are unavailable to this call.
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -64,7 +72,7 @@ jobs:
   preflight:
     name: Record a healthy public Machine baseline before DDL
     needs: qualify
-    if: ${{ !inputs.publish_only }}
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
@@ -93,7 +101,7 @@ jobs:
   migrate:
     name: Migrate and verify with the qualified image
     needs: [qualify, preflight]
-    if: ${{ !inputs.publish_only }}
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -126,7 +134,7 @@ jobs:
   deploy:
     name: Replace the public Machines and verify readiness
     needs: [qualify, preflight, migrate]
-    if: ${{ !inputs.publish_only }}
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -197,7 +205,7 @@ jobs:
   activate:
     name: Enable workers on the same qualified bootstrap image
     needs: [qualify, deploy]
-    if: ${{ inputs.bootstrap }}
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only && inputs.bootstrap }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Required-reviewer protection must be configured before bootstrap dispatch.

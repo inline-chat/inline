@@ -63,23 +63,38 @@ test("an empty fleet fails, and changed IDs, count or image cannot match the rec
   expect(summary([{ ...machine(), image_ref: { ...machine().image_ref, digest: "sha256:" + "2".repeat(64) } }])).not.toEqual(before)
 })
 
-test("the reusable workflow publishing guard only accepts manual main dispatch", async () => {
+test("both image publishing guards require manual same-repository branches and explicit publish-only off main", async () => {
   const workflow = Bun.YAML.parse(await Bun.file(resolve(import.meta.dir, "../../.github/workflows/server-test.yml")).text()) as {
-    jobs: Record<string, { steps: { name?: string; run?: string }[] }>
+    on: { workflow_call: { inputs: Record<string, { type: string; default: boolean }> } }
+    jobs: Record<string, { steps: { name?: string; run?: string; if?: string; env?: Record<string, string> }[] }>
   }
+  expect(workflow.on.workflow_call.inputs.publish_only).toMatchObject({ type: "boolean", default: false })
   for (const job of ["container", "container-arm"]) {
-    const guard = workflow.jobs[job]?.steps.find((step) => step.name === "Require manual main context when publishing")
+    const steps = workflow.jobs[job]!.steps
+    const guard = steps.find((step) => step.name === "Require manual branch publication or main release")
     expect(guard?.run).toBeDefined()
-    for (const [event, ref, allowed] of [
-      ["workflow_dispatch", "refs/heads/main", true],
-      ["push", "refs/heads/main", false],
-      ["pull_request", "refs/heads/main", false],
-      ["workflow_dispatch", "refs/heads/other", false],
-    ] as const) {
-      const result = Bun.spawnSync(["bash", "-e", "-c", guard!.run!], {
-        env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
-      })
-      expect(result.exitCode === 0, `${job} ${event} ${ref}`).toBe(allowed)
+    expect(guard?.if).toBe("${{ inputs.publish_image }}")
+    expect(guard?.env?.PUBLISH_ONLY).toBe("${{ inputs.publish_only }}")
+    // Reject before checkout/build or registry authentication can expose secrets.
+    expect(steps.indexOf(guard!)).toBe(0)
+    for (const event of ["workflow_dispatch", "push", "pull_request", "pull_request_target"]) {
+      for (const repository of ["inline-chat/inline", "outsider/inline"]) {
+        for (const [ref, refType] of [
+          ["refs/heads/main", "branch"], ["refs/heads/codex/multi-node-ha", "branch"],
+          ["refs/tags/main", "tag"], ["refs/pull/124/merge", "branch"],
+        ] as const) {
+          for (const publishOnly of ["true", "false", ""]) {
+            const allowed = event === "workflow_dispatch" && repository === "inline-chat/inline"
+              && refType === "branch" && ref.startsWith("refs/heads/")
+              && (publishOnly === "true" || (publishOnly === "false" && ref === "refs/heads/main"))
+            const result = Bun.spawnSync(["bash", "-e", "-c", guard!.run!], {
+              env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref,
+                GITHUB_REF_TYPE: refType, GITHUB_REPOSITORY: repository, PUBLISH_ONLY: publishOnly },
+            })
+            expect(result.exitCode === 0, `${job} ${event} ${repository} ${ref} publish-only=${publishOnly}`).toBe(allowed)
+          }
+        }
+      }
     }
   }
 })
@@ -103,19 +118,33 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   const workflow = await releaseWorkflow()
   expect(workflow.on.workflow_dispatch.inputs.publish_only).toMatchObject({ type: "boolean", default: false })
   expect(workflow.on.workflow_dispatch.inputs.bootstrap).toMatchObject({ type: "boolean", default: false })
-  expect(workflow.jobs.qualify).toMatchObject({ needs: "validate", uses: "./.github/workflows/server-test.yml", with: { publish_image: true } })
+  expect(workflow.jobs.qualify).toMatchObject({ needs: "validate", uses: "./.github/workflows/server-test.yml",
+    with: { publish_image: true, publish_only: "${{ inputs.publish_only }}" } })
+  expect(workflow.jobs.validate?.steps?.[0]?.env).toEqual({
+    PUBLISH_ONLY: "${{ inputs.publish_only }}", BOOTSTRAP: "${{ inputs.bootstrap }}",
+  })
+  for (const id of ["preflight", "migrate", "deploy", "activate"]) {
+    expect(workflow.jobs[id]?.if).toContain("github.ref == 'refs/heads/main'")
+    expect(workflow.jobs[id]?.if).toContain("!inputs.publish_only")
+  }
   // Interpret the workflow's deliberately simple boolean guards and dependency
   // success requirements, so changing either changes the jobs exercised here.
-  const runnable = (id: string, publishOnly: boolean, failed?: string, bootstrap = false): boolean => {
+  const runnable = (id: string, publishOnly: boolean, failed?: string, bootstrap = false, ref = "refs/heads/main"): boolean => {
     const job = workflow.jobs[id]!
     if (job.if !== undefined) {
-      const guard = job.if.match(/^\$\{\{\s*(!?)inputs\.(publish_only|bootstrap)\s*\}\}$/)
-      if (!guard) throw new Error("Unexpected release job condition")
-      const input = guard[2] === "bootstrap" ? bootstrap : publishOnly
-      if (!(guard[1] ? !input : input)) return false
+      const expression = job.if.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1]
+      if (!expression) throw new Error("Unexpected release job condition")
+      const clauses: Record<string, boolean> = {
+        "github.ref == 'refs/heads/main'": ref === "refs/heads/main",
+        "inputs.publish_only": publishOnly, "!inputs.publish_only": !publishOnly, "inputs.bootstrap": bootstrap,
+      }
+      if (!expression.split(" && ").every((clause) => {
+        if (!(clause in clauses)) throw new Error(`Unexpected release condition: ${clause}`)
+        return clauses[clause]
+      })) return false
     }
     const needs = typeof job.needs === "string" ? [job.needs] : job.needs ?? []
-    return needs.every((dependency) => dependency !== failed && runnable(dependency, publishOnly, failed, bootstrap))
+    return needs.every((dependency) => dependency !== failed && runnable(dependency, publishOnly, failed, bootstrap, ref))
   }
   for (const [publishOnly, expected] of [
     [true, ["validate", "qualify", "prepared"]],
@@ -139,6 +168,18 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, true)).sort())
     .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "validate"])
   expect(runnable("activate", false, "deploy", true)).toBe(false)
+  for (const ref of ["refs/heads/main", "refs/heads/codex/multi-node-ha", "refs/tags/main"]) {
+    for (const publishOnly of [true, false]) {
+      for (const bootstrap of [true, false]) {
+        for (const id of ["preflight", "migrate", "deploy", "activate"]) {
+          // Test every production job's own fence even if upstream validation
+          // were to accept a branch or conflicting inputs accidentally.
+          expect(runnable(id, publishOnly, undefined, bootstrap, ref))
+            .toBe(ref === "refs/heads/main" && !publishOnly && (id !== "activate" || bootstrap))
+        }
+      }
+    }
+  }
   expect(workflow.jobs.activate?.environment).toBe("production-cutover")
   const steps = workflow.jobs.activate?.steps ?? []
   const fence = steps.findIndex((step) => step.name === "Verify the predecessor is durably stopped")
@@ -147,11 +188,27 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(steps[fence + 1]?.name).toBe("Activate the same qualified digest with workers")
   const validate = workflow.jobs.validate?.steps?.[0]?.run
   if (!validate) throw new Error("Missing dispatch guard")
-  for (const [publishOnly, bootstrap, permitted] of [[false, false, true], [true, false, true], [false, true, true], [true, true, false]]) {
-    expect(Bun.spawnSync(["bash", "-e", "-c", validate], { env: {
-      PATH: process.env.PATH, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main",
-      PUBLISH_ONLY: String(publishOnly), BOOTSTRAP: String(bootstrap),
-    } }).exitCode === 0).toBe(permitted)
+  for (const event of ["workflow_dispatch", "push", "pull_request", "pull_request_target"]) {
+    for (const repository of ["inline-chat/inline", "outsider/inline"]) {
+      for (const [ref, refType] of [
+        ["refs/heads/main", "branch"], ["refs/heads/codex/multi-node-ha", "branch"],
+        ["refs/tags/main", "tag"], ["refs/pull/124/merge", "branch"],
+      ] as const) {
+        for (const publishOnly of ["false", "true", ""]) {
+          for (const bootstrap of ["false", "true", ""]) {
+            const permitted = event === "workflow_dispatch" && repository === "inline-chat/inline"
+              && refType === "branch" && ref.startsWith("refs/heads/")
+              && ((publishOnly === "true" && bootstrap === "false")
+                || (publishOnly === "false" && ["true", "false"].includes(bootstrap) && ref === "refs/heads/main"))
+            expect(Bun.spawnSync(["bash", "-e", "-c", validate], { env: {
+              PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref,
+              GITHUB_REF_TYPE: refType, GITHUB_REPOSITORY: repository,
+              PUBLISH_ONLY: publishOnly, BOOTSTRAP: bootstrap,
+            } }).exitCode === 0, `${event} ${repository} ${ref} publish-only=${publishOnly} bootstrap=${bootstrap}`).toBe(permitted)
+          }
+        }
+      }
+    }
   }
 })
 
