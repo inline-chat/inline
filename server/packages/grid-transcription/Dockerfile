@@ -11,6 +11,9 @@ COPY scripts ./scripts
 RUN bun --no-env-file scripts/docker/prune-workspace.ts @inline-chat/grid-transcription out
 
 FROM node:24-bookworm-slim AS runtime
+# Native LiveKit uses the system trust store for secure signaling.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/out/json/ ./
 # Install with Bun using the exact workspace lock, but execute native RTC on Node.
