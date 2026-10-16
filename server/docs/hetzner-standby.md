@@ -278,7 +278,19 @@ address families so an old AAAA record cannot route clients to an unavailable
 origin. Verify DNS answers and a recovered authenticated client operation.
 Restore the captured records only after the normal path is healthy.
 
-If an optional load balancer exists, use the following LB-specific procedure.
+If an optional load balancer exists and **both the Cloudflare proxy and load
+balancing must be bypassed**, capture its configuration and the ordinary DNS
+records, disable the load balancer, then use ordinary DNS-only A/AAAA records
+(`proxied=false`) pointing to the verified direct origin. Prepare the fallback
+addresses first and require a valid public-trust certificate for
+`api.inline.chat` at that origin. Verify both address families, DNS propagation
+and an authenticated operation before considering the bypass complete. This
+requires the Cloudflare management API/dashboard and DNS updates to remain
+available; healthy authoritative DNS alone does not provide that control.
+
+A DNS-only **load balancer** still uses Cloudflare's health and steering logic.
+When only the proxy must be bypassed and the LB remains available, the following
+single-pool DNS-only LB procedure is an alternative.
 
 The load balancer takes precedence over an A/AAAA record with the same name.
 Editing only the old A record or its orange-cloud state does not bypass the LB.
