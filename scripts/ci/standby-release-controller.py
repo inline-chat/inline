@@ -38,7 +38,8 @@ def validate(value):
 
 def project(app):
     settings = app.get("settings", {})
-    server = app.get("server", {})
+    # Actual Docker-image application GET schema: server belongs to destination.
+    server = app.get("destination", {}).get("server", {})
     need(app.get("uuid") == APP and server.get("uuid") == SERVER and server.get("ip") == "91.107.255.57"
          and app.get("build_pack") == "dockerimage" and app.get("fqdn") == "https://api.inline.chat"
          and app.get("docker_registry_image_name") == "127.0.0.1:5000/inline-api" and not app.get("ports_mappings")
@@ -59,7 +60,7 @@ class Controller:
                 return None
         request = urllib.request.Request(ORIGIN + suffix, method=method,
             data=None if body is None else json.dumps(body).encode(),
-            headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json"})
+            headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json", "User-Agent": "coolify-cli"})
         with urllib.request.build_opener(NoRedirect).open(request, timeout=15) as response:
             data = response.read(2 * 1024 * 1024 + 1)
             need(len(data) <= 2 * 1024 * 1024, "provider_size")

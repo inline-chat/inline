@@ -393,6 +393,20 @@ class NativeProjectionTests(unittest.TestCase):
 
 
 class ControllerBoundaryTests(unittest.TestCase):
+    def test_controller_transport_matches_audited_user_agent_without_redirects(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+            def read(self, limit): return b"{}"
+        opener = unittest.mock.Mock()
+        opener.open.return_value = Response()
+        with patch.object(controller.urllib.request, "build_opener", return_value=opener) as build:
+            controller.Controller("synthetic-token").api("GET", "/applications/" + controller.APP)
+        req = opener.open.call_args.args[0]
+        self.assertEqual(req.get_header("User-agent"), "coolify-cli")
+        self.assertEqual(req.full_url, controller.ORIGIN + "/applications/" + controller.APP)
+        self.assertIsNone(build.call_args.args[0].redirect_request(None, None, 302, "redirect", {}, "https://foreign.invalid"))
+
     def test_nbg_relay_rejects_other_resources_and_never_loads_controller_token(self):
         with patch.object(host, "command", return_value=host.encoded({"ok": True, "app": {"uuid": host.APP}})) as command:
             host.Host().api("GET", "/applications/" + host.APP)
@@ -405,7 +419,7 @@ class ControllerBoundaryTests(unittest.TestCase):
         command.assert_not_called()
 
     def fixture(self):
-        return {"uuid": controller.APP, "server": {"uuid": controller.SERVER, "ip": "91.107.255.57"},
+        return {"uuid": controller.APP, "destination": {"server": {"uuid": controller.SERVER, "ip": "91.107.255.57"}},
                 "build_pack": "dockerimage", "fqdn": "https://api.inline.chat", "ports_mappings": None,
                 "docker_registry_image_name": "127.0.0.1:5000/inline-api", "docker_registry_image_tag": "previous",
                 "settings": {"is_auto_deploy_enabled": False, "is_preview_deployments_enabled": False},
@@ -426,6 +440,13 @@ class ControllerBoundaryTests(unittest.TestCase):
         app["uuid"] = "another-app"
         with self.assertRaises(controller.Refused):
             controller.perform({"version": 1, "operation": "start", "tag": host.tag(request())}, api)
+
+    def test_actual_destination_server_wins_over_misleading_top_level_metadata(self):
+        app = self.fixture()
+        app["server"] = app["destination"]["server"]
+        app["destination"] = {"server": {"uuid": "foreign-server", "ip": "192.0.2.1"}}
+        with self.assertRaisesRegex(controller.Refused, "resource_identity_or_intent"):
+            controller.project(app)
 
     def test_select_is_tag_only_idempotent_and_start_requires_exact_tag(self):
         app = self.fixture()
