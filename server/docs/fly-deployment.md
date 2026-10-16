@@ -80,9 +80,12 @@ does not establish these effective settings.
 ### Release contract with a warm fallback
 
 Since October 16, 2026, `api.inline.chat` uses Cloudflare load balancing with
-Fly preferred and a running Nuremberg fallback. The Fly workflow publishes both
-architecture-specific images but deploys and verifies only Fly. It does not
-refresh Nuremberg or prove that automatic fallback remains usable.
+Fly preferred and a running Nuremberg fallback. The manual workflow publishes both
+architecture-specific images. Ordinary releases now require the paired standby
+preflight, sync and exact readback described in
+[paired release operations](standby-release-sync.md). The required consumer/key
+installation and production environment activation are separate operations;
+missing activation fails before DDL. Source implementation is not live rollout.
 
 Before releasing the next selected `main` SHA to Fly, qualify that same SHA's
 ARM64 image on Nuremberg against the intended schema and runtime configuration.
@@ -94,9 +97,10 @@ and qualify Nuremberg before replacing Fly, keeping another ready origin during
 each replacement. Verify direct HTTP/V2/V3 and cross-node recovery, then verify
 canonical routing and both effective release identities after the Fly rollout.
 
-The current workflow does not enforce this fleet gate. Until a reviewed guard
-is installed, it is an explicit operator prerequisite, and a green Fly-only
-workflow is not completion of the fleet release. Deliberate mixed-version
+The automated gate covers exact image/runtime intent and direct readiness, while
+schema compatibility, authenticated acceptance, rollback and routing topology
+remain operator prerequisites. A green Fly job alone is not completion of the
+fleet release. Deliberate mixed-version
 overlap needs a recorded compatibility decision and an owner/deadline for
 finishing it; it must not leave an indefinitely stale standby. See
 [the standby release procedure](hetzner-standby.md#rolling-upgrades-and-removing-a-node).

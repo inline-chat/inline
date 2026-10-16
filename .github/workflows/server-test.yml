@@ -80,7 +80,12 @@ jobs:
         with:
           bun-version: "1.4.0"
       - name: Check server container and Fly configuration contracts
-        run: bun test scripts/docker/server-context.test.ts scripts/docker/prune-workspace.test.ts scripts/ci/fly-release-machines.test.ts
+        run: |
+          bun test scripts/docker/server-context.test.ts scripts/docker/prune-workspace.test.ts scripts/ci/fly-release-machines.test.ts
+          python3 scripts/ci/standby-release-test.py
+          bash -n scripts/ci/standby-release-export.sh
+          sh -n scripts/ci/standby-release-entrypoint.sh
+          sh -n scripts/ci/standby-release-controller-entrypoint.sh
       - name: Export committed server build context
         run: bun --no-env-file scripts/docker/server-context.ts "$GITHUB_SHA" "$RUNNER_TEMP/server-context"
       - name: Build runtime and Coolify targets
@@ -191,6 +196,26 @@ jobs:
           docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/verify-migrations.js
           docker run --rm inline-server:ci-coolify wget --version
           docker run --rm --network host -e DATABASE_URL inline-server:ci-coolify bun server/dist/core-production-smoke.js --artifact
+
+      - name: Qualify the daemonless ARM archive and bounded recovery reader
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+          archive="$RUNNER_TEMP/standby-transport-test.tar"
+          registry=inline-standby-ci-registry
+          trap 'docker stop "$registry" >/dev/null 2>&1 || true; rm -f "$archive"' EXIT
+          docker run --detach --rm --name "$registry" --publish 127.0.0.1:55000:5000 registry:2 >/dev/null
+          for attempt in {1..20}; do
+            if curl --silent --fail http://127.0.0.1:55000/v2/ >/dev/null; then break; fi
+            sleep 1
+          done
+          image=127.0.0.1:55000/inline-api:transport-test
+          docker tag inline-server:ci-coolify "$image"
+          docker push "$image" >/dev/null
+          immutable=$(docker image inspect --format '{{json .RepoDigests}}' "$image" | jq -er '.[] | select(startswith("127.0.0.1:55000/inline-api@sha256:"))')
+          skopeo copy --src-tls-verify=false --preserve-digests "docker://$immutable" "oci-archive:$archive:release" >/dev/null
+          digest="${immutable##*@}"
+          python3 scripts/ci/standby-release-test.py --oci-archive "$archive" "$GITHUB_SHA" "$digest"
 
       - name: Setup Fly registry client
         if: ${{ inputs.publish_image }}

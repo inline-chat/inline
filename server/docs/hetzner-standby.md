@@ -137,6 +137,11 @@ and [Full](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/
 
 ## Release and qualification
 
+The [paired manual release workflow](standby-release-sync.md) implements exact
+ARM standby synchronization before ordinary Fly replacement. Its restricted
+consumer installation and activation are separate; these must be qualified
+before enabling future releases. It does not change DNS/LB configuration.
+
 1. Qualify one committed source revision in the amd64 runtime and native ARM64
    Coolify CI lanes. After all jobs pass, retain the `runtime_image` and
    `standby_image` immutable digests, source revision and workflow run URL.
