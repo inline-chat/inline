@@ -210,6 +210,7 @@ jobs:
           docker run --detach --rm --name "$registry" --publish 127.0.0.1:55000:5000 registry:2 >/dev/null
           for attempt in {1..20}; do
             if curl --silent --fail http://127.0.0.1:55000/v2/ >/dev/null; then break; fi
+            if [[ "$attempt" = 20 ]]; then exit 1; fi
             sleep 1
           done
           image=127.0.0.1:55000/inline-api:transport-test
