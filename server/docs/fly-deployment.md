@@ -79,22 +79,27 @@ does not establish these effective settings.
 
 ### Prepare an image for rehearsal or initial bootstrap
 
-When no healthy public fleet exists yet, or an exact-image rehearsal is needed,
-dispatch from `main` with `publish_only` enabled:
+For an exact-image rehearsal, manually dispatch from the selected branch in
+`inline-chat/inline` with `publish_only` enabled. For example, to qualify the HA
+candidate without merging it or changing production:
 
 ```sh
-gh workflow run server-deploy.yml --ref main -f publish_only=true
+gh workflow run server-deploy.yml --ref codex/multi-node-ha -f publish_only=true
 ```
 
-This runs the entire reusable CI workflow and publishes its tested runtime image
-without rebuilding. After all CI succeeds, the run summary records the selected
-source SHA and immutable digest. It skips the production environment jobs,
-fleet preflight, migrations, and deployment; it never receives the production
+This runs the entire reusable CI workflow and publishes its tested amd64 runtime
+and native ARM64 Coolify images without rebuilding. After all CI succeeds, the
+run summary records the selected source SHA and both immutable digests.
+Tags, pull-request refs and fork repositories are rejected. It skips the
+production environment jobs, fleet preflight, migrations, and deployment; it
+never receives the production
 database credential. Registry publishing still requires the repository/org Fly
 token. Use the recorded digest for the separately authorized clone rehearsal
 and initial Machine bootstrap. This option does not bootstrap or migrate an app.
 
-`publish_only` defaults to `false`. Routine releases retain the healthy-fleet
+`publish_only` defaults to `false`; a branch dispatch without it fails before
+publication. Production and bootstrap dispatches still require `main` and cannot
+run in publish-only mode. Routine releases retain the healthy-fleet
 preflight before DDL and the immediate baseline recheck before replacement.
 
 ### Bootstrap the first API and finish cutover in the same run

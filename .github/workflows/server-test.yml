@@ -7,6 +7,10 @@ on:
         description: Publish the qualified runtime image for a manual release
         type: boolean
         default: false
+      publish_only:
+        description: Allow a manual same-repository branch publication without production release
+        type: boolean
+        default: false
     secrets:
       FLY_API_TOKEN:
         required: false
@@ -57,11 +61,20 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - name: Require manual main context when publishing
+      - name: Require manual branch publication or main release
         if: ${{ inputs.publish_image }}
+        env:
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REPOSITORY" = inline-chat/inline
+          test "$GITHUB_REF_TYPE" = branch
+          [[ "$GITHUB_REF" == refs/heads/* ]] || exit 1
+          case "$PUBLISH_ONLY" in
+            true) ;;
+            false) test "$GITHUB_REF" = refs/heads/main ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
@@ -141,11 +154,20 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - name: Require manual main context when publishing
+      - name: Require manual branch publication or main release
         if: ${{ inputs.publish_image }}
+        env:
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REPOSITORY" = inline-chat/inline
+          test "$GITHUB_REF_TYPE" = branch
+          [[ "$GITHUB_REF" == refs/heads/* ]] || exit 1
+          case "$PUBLISH_ONLY" in
+            true) ;;
+            false) test "$GITHUB_REF" = refs/heads/main ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
