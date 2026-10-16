@@ -6,6 +6,7 @@ import SwiftUI
 /// and presentation of a failed request.
 struct GridTranscriptionControls: View {
   let room: GridRoom
+  let allowsStarting: Bool
   let isBusy: Bool
   let onSetTranscription: (Bool, GridTranscriptionRequest.Destination) async throws -> Void
   let onOpenRoomThread: () async throws -> Void
@@ -28,7 +29,7 @@ struct GridTranscriptionControls: View {
         Text("Starting transcription…").font(.caption).foregroundStyle(.secondary)
       }
       HStack(spacing: 8) {
-        if room.transcriptionAvailable || room.transcriptionIsRunning {
+        if (allowsStarting && room.transcriptionAvailable) || room.transcriptionIsRunning {
           Button {
             setTranscription(enabled: !room.transcriptionIsRunning, destination: .last)
           } label: {
@@ -46,7 +47,7 @@ struct GridTranscriptionControls: View {
             .accessibilityLabel("Transcription is active")
         }
 
-        if room.transcriptionAvailable {
+        if allowsStarting && room.transcriptionAvailable {
           Menu {
             Button("Start a new transcript") {
               setTranscription(enabled: true, destination: .new)

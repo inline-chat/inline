@@ -8,6 +8,8 @@ struct GridView: View {
   @Environment(\.nav) private var nav
   @Environment(GridRoomService.self) private var store
   @Environment(SidebarViewModel.self) private var sidebar
+  @AppStorage(ExperimentalFeatureFlags.gridTranscriptionKey)
+  private var gridTranscriptionEnabled = false
   let spaceID: Int64
 
   var body: some View {
@@ -78,11 +80,14 @@ struct GridView: View {
     .safeAreaInset(edge: .bottom) {
       if let currentRoom, hasLocalAdmissionInSpace {
         VStack(spacing: 8) {
-          if currentRoom.transcriptionAvailable || currentRoom.hasTranscription || currentRoom.hasRoomThreadID {
+          if (gridTranscriptionEnabled || currentRoom.transcriptionIsRunning),
+             currentRoom.transcriptionAvailable || currentRoom.hasTranscription || currentRoom.hasRoomThreadID {
             GridTranscriptionControls(
               room: currentRoom,
+              allowsStarting: gridTranscriptionEnabled,
               isBusy: store.pendingTranscriptionRequestIDs[currentRoom.id] != nil,
               onSetTranscription: { enabled, destination in
+                guard !enabled || ExperimentalFeatureFlags.gridTranscriptionEnabled else { return }
                 try await store.setTranscription(room: currentRoom, enabled: enabled, destination: destination)
               },
               onOpenRoomThread: {
