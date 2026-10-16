@@ -14,10 +14,21 @@ public struct UpdateBotProfileTransaction: Transaction2 {
     public let botUserId: Int64
     public let name: String?
     public let photoFileUniqueId: String?
+    public let username: String?
   }
 
-  public init(botUserId: Int64, name: String? = nil, photoFileUniqueId: String? = nil) {
-    context = Context(botUserId: botUserId, name: name, photoFileUniqueId: photoFileUniqueId)
+  public init(
+    botUserId: Int64,
+    name: String? = nil,
+    photoFileUniqueId: String? = nil,
+    username: String? = nil
+  ) {
+    context = Context(
+      botUserId: botUserId,
+      name: name,
+      photoFileUniqueId: photoFileUniqueId,
+      username: username
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -28,6 +39,9 @@ public struct UpdateBotProfileTransaction: Transaction2 {
       }
       if let photoFileUniqueId = context.photoFileUniqueId {
         $0.photoFileUniqueID = photoFileUniqueId
+      }
+      if let username = context.username {
+        $0.username = username
       }
     })
   }
@@ -52,9 +66,15 @@ public extension Transaction2 where Self == UpdateBotProfileTransaction {
   static func updateBotProfile(
     botUserId: Int64,
     name: String? = nil,
-    photoFileUniqueId: String? = nil
+    photoFileUniqueId: String? = nil,
+    username: String? = nil
   ) -> UpdateBotProfileTransaction {
-    UpdateBotProfileTransaction(botUserId: botUserId, name: name, photoFileUniqueId: photoFileUniqueId)
+    UpdateBotProfileTransaction(
+      botUserId: botUserId,
+      name: name,
+      photoFileUniqueId: photoFileUniqueId,
+      username: username
+    )
   }
 }
 

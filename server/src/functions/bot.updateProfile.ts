@@ -7,6 +7,11 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import type { UpdateBotProfileInput, UpdateBotProfileResult } from "@inline-chat/protocol/core"
 import { encodeBotWithAvatar, parseBotUserId, requireManageableBot } from "./bot.avatarHelpers"
 import { publishCacheInvalidation } from "@in/server/modules/cache/cluster"
+import { isValidUsername, normalizeUsername } from "@in/server/utils/normalize"
+import {
+  getPublicHandleAvailability,
+  lockPublicHandleNamespace,
+} from "@in/server/modules/spaces/spaceHandle"
 
 export const updateBotProfile = async (
   input: UpdateBotProfileInput,
@@ -40,9 +45,26 @@ export const updateBotProfile = async (
     }
   }
 
+  if (input.username !== undefined) {
+    const username = normalizeUsername(input.username)
+    if (!isValidUsername(username) || !username.toLowerCase().endsWith("bot")) {
+      throw RealtimeRpcError.UsernameInvalid()
+    }
+    updates.username = username
+  }
+
   // No-op updates are allowed (e.g. user opens sheet and presses save).
   if (Object.keys(updates).length > 0) {
-    await db.update(users).set(updates).where(eq(users.id, botUserId))
+    await db.transaction(async (tx) => {
+      if (updates.username) {
+        await lockPublicHandleNamespace(tx, updates.username)
+        const availability = await getPublicHandleAvailability(tx, updates.username, { userId: botUserId })
+        if (availability === "taken" || availability === "reserved") {
+          throw RealtimeRpcError.UsernameTaken()
+        }
+      }
+      await tx.update(users).set(updates).where(eq(users.id, botUserId))
+    })
     publishCacheInvalidation({ kind: "userDisplay", userId: botUserId })
   }
 

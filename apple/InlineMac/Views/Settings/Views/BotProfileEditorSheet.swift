@@ -13,6 +13,8 @@ private enum BotProfileEditorError: LocalizedError {
   case permissionDenied(String)
   case invalidFile(String)
   case invalidName
+  case invalidUsername
+  case usernameTaken
   case uploadFailed
   case updateFailed
 
@@ -24,6 +26,10 @@ private enum BotProfileEditorError: LocalizedError {
       message
     case .invalidName:
       "Name cannot be empty."
+    case .invalidUsername:
+      "Username is invalid."
+    case .usernameTaken:
+      "That username is already taken."
     case .uploadFailed:
       "Failed to upload the new profile photo."
     case .updateFailed:
@@ -39,6 +45,10 @@ private enum BotProfileEditorError: LocalizedError {
       "Please select a valid image file under 10MB."
     case .invalidName:
       "Enter a name for this bot."
+    case .invalidUsername:
+      "Use letters, numbers, and underscores, ending with \"bot\"."
+    case .usernameTaken:
+      "Try a different username."
     case .uploadFailed:
       "Please try again or select a different image."
     case .updateFailed:
@@ -61,10 +71,10 @@ final class BotProfileEditorViewModel: ObservableObject {
     let suggestion: String?
   }
 
-  func saveName(
+  func saveProfile(
     bot: InlineProtocol.User,
-    originalName: String?,
     name: String,
+    username: String,
     realtimeV2: RealtimeV2
   ) async -> InlineProtocol.User? {
     guard !isSaving else { return nil }
@@ -78,8 +88,19 @@ final class BotProfileEditorViewModel: ObservableObject {
         throw BotProfileEditorError.invalidName
       }
 
+      var trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmedUsername.hasPrefix("@") {
+        trimmedUsername.removeFirst()
+      }
+      if !Self.isValidBotUsername(trimmedUsername) {
+        throw BotProfileEditorError.invalidUsername
+      }
+
+      let originalName = bot.hasFirstName ? bot.firstName : nil
+      let originalUsername = bot.hasUsername ? bot.username : nil
       let nameToSend: String? = (originalName == trimmedName) ? nil : trimmedName
-      if nameToSend == nil {
+      let usernameToSend: String? = (originalUsername == trimmedUsername) ? nil : trimmedUsername
+      if nameToSend == nil, usernameToSend == nil {
         return bot
       }
 
@@ -87,6 +108,7 @@ final class BotProfileEditorViewModel: ObservableObject {
         bot: bot,
         name: nameToSend,
         photoFileUniqueId: nil,
+        username: usernameToSend,
         realtimeV2: realtimeV2
       )
     } catch let error as BotProfileEditorError {
@@ -95,8 +117,24 @@ final class BotProfileEditorViewModel: ObservableObject {
       return nil
     } catch {
       Log.shared.error("Failed to save bot profile", error: error)
-      showError(BotProfileEditorError.updateFailed)
+      showError(Self.editorError(for: error))
       return nil
+    }
+  }
+
+  private static func isValidBotUsername(_ value: String) -> Bool {
+    value.count >= 2
+      && value.count <= 64
+      && value.lowercased().hasSuffix("bot")
+      && value.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_]*[a-zA-Z0-9]$", options: .regularExpression) != nil
+  }
+
+  private static func editorError(for error: Error) -> BotProfileEditorError {
+    guard case let TransactionError.rpcError(rpcError) = error else { return .updateFailed }
+    switch rpcError.errorCode {
+    case .usernameTaken: return .usernameTaken
+    case .usernameInvalid: return .invalidUsername
+    default: return .updateFailed
     }
   }
 
@@ -229,12 +267,14 @@ final class BotProfileEditorViewModel: ObservableObject {
     bot: InlineProtocol.User,
     name: String?,
     photoFileUniqueId: String?,
+    username: String? = nil,
     realtimeV2: RealtimeV2
   ) async throws -> InlineProtocol.User {
     let result = try await realtimeV2.send(.updateBotProfile(
       botUserId: bot.id,
       name: name,
-      photoFileUniqueId: photoFileUniqueId
+      photoFileUniqueId: photoFileUniqueId,
+      username: username
     ))
 
     guard case let .updateBotProfile(response) = result else {
@@ -266,6 +306,7 @@ struct BotProfileEditorSheet: View {
   @StateObject private var viewModel = BotProfileEditorViewModel()
   @State private var currentBot: InlineProtocol.User
   @State private var name: String
+  @State private var username: String
 
   private let memojiLog = Log.scoped("BotsSettings.Memoji")
 
@@ -275,6 +316,7 @@ struct BotProfileEditorSheet: View {
     let initial = bot.hasFirstName ? bot.firstName : ""
     _currentBot = State(initialValue: bot)
     _name = State(initialValue: initial)
+    _username = State(initialValue: bot.hasUsername ? bot.username : "")
   }
 
   var body: some View {
@@ -300,10 +342,13 @@ struct BotProfileEditorSheet: View {
             .textFieldStyle(.roundedBorder)
             .disabled(viewModel.isSaving)
 
-          if currentBot.hasUsername, !currentBot.username.isEmpty {
-            Text("@\(currentBot.username)")
-              .font(.caption)
+          HStack(spacing: 2) {
+            Text("@")
               .foregroundStyle(.secondary)
+            TextField("Username", text: $username)
+              .textFieldStyle(.roundedBorder)
+              .autocorrectionDisabled()
+              .disabled(viewModel.isSaving)
           }
         }
 
@@ -321,11 +366,10 @@ struct BotProfileEditorSheet: View {
 
         Button(viewModel.isSaving ? "Saving..." : "Save") {
           Task {
-            let originalName = currentBot.hasFirstName ? currentBot.firstName : nil
-            if let updated = await viewModel.saveName(
+            if let updated = await viewModel.saveProfile(
               bot: currentBot,
-              originalName: originalName,
               name: name,
+              username: username,
               realtimeV2: realtimeV2
             ) {
               currentBot = updated

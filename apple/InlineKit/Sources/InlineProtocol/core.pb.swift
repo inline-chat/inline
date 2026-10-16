@@ -13535,12 +13535,23 @@ public nonisolated struct UpdateBotProfileInput: Sendable {
   /// Clears the value of `photoFileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearPhotoFileUniqueID() {self._photoFileUniqueID = nil}
 
+  /// Public username for the bot. Must end with "bot".
+  public var username: String {
+    get {_username ?? String()}
+    set {_username = newValue}
+  }
+  /// Returns true if `username` has been explicitly set.
+  public var hasUsername: Bool {self._username != nil}
+  /// Clears the value of `username`. Subsequent reads from it will return its default value.
+  public mutating func clearUsername() {self._username = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _name: String? = nil
   fileprivate var _photoFileUniqueID: String? = nil
+  fileprivate var _username: String? = nil
 }
 
 public nonisolated struct UpdateBotProfileResult: Sendable {
@@ -41096,7 +41107,7 @@ nonisolated extension RotateBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBotProfileInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}name\0\u{3}photo_file_unique_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}name\0\u{3}photo_file_unique_id\0\u{1}username\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -41107,6 +41118,7 @@ nonisolated extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobu
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self._name) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._photoFileUniqueID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._username) }()
       default: break
       }
     }
@@ -41126,6 +41138,9 @@ nonisolated extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._photoFileUniqueID {
       try visitor.visitSingularStringField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._username {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -41133,6 +41148,7 @@ nonisolated extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobu
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs._name != rhs._name {return false}
     if lhs._photoFileUniqueID != rhs._photoFileUniqueID {return false}
+    if lhs._username != rhs._username {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

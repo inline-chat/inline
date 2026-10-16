@@ -2843,6 +2843,9 @@ message UpdateBotProfileInput {
 
   // Profile photo to use for the bot, from the /uploadFile REST API.
   optional string photo_file_unique_id = 3;
+
+  // Public username for the bot. Must end with "bot".
+  optional string username = 4;
 }
 
 message UpdateBotProfileResult { User bot = 1; }

@@ -7943,6 +7943,12 @@ export interface UpdateBotProfileInput {
      * @generated from protobuf field: optional string photo_file_unique_id = 3;
      */
     photoFileUniqueId?: string;
+    /**
+     * Public username for the bot. Must end with "bot".
+     *
+     * @generated from protobuf field: optional string username = 4;
+     */
+    username?: string;
 }
 /**
  * @generated from protobuf message UpdateBotProfileResult
@@ -35019,7 +35025,8 @@ class UpdateBotProfileInput$Type extends MessageType<UpdateBotProfileInput> {
         super("UpdateBotProfileInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "username", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateBotProfileInput>): UpdateBotProfileInput {
@@ -35043,6 +35050,9 @@ class UpdateBotProfileInput$Type extends MessageType<UpdateBotProfileInput> {
                 case /* optional string photo_file_unique_id */ 3:
                     message.photoFileUniqueId = reader.string();
                     break;
+                case /* optional string username */ 4:
+                    message.username = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35064,6 +35074,9 @@ class UpdateBotProfileInput$Type extends MessageType<UpdateBotProfileInput> {
         /* optional string photo_file_unique_id = 3; */
         if (message.photoFileUniqueId !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.photoFileUniqueId);
+        /* optional string username = 4; */
+        if (message.username !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.username);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -65,6 +65,41 @@ describe("bot profile", () => {
     expect(stored).toEqual({ firstName: "Mo's Codex", lastName: null })
   })
 
+  test("updateBotProfile updates bot username", async () => {
+    const created = await createBot({ name: "Rename Bot", username: "renamebot" }, creatorContext)
+
+    const updated = await updateBotProfile(
+      { botUserId: created.bot?.id ?? 0n, username: "@RenamedBot" },
+      creatorContext,
+    )
+
+    expect(updated.bot?.username).toBe("RenamedBot")
+  })
+
+  test("updateBotProfile allows keeping the current username", async () => {
+    const created = await createBot({ name: "Same Bot", username: "samebot" }, creatorContext)
+
+    const updated = await updateBotProfile(
+      { botUserId: created.bot?.id ?? 0n, username: "samebot" },
+      creatorContext,
+    )
+
+    expect(updated.bot?.username).toBe("samebot")
+  })
+
+  test("updateBotProfile rejects invalid or taken usernames", async () => {
+    const created = await createBot({ name: "Strict Bot", username: "strictbot" }, creatorContext)
+    await createBot({ name: "Taken Bot", username: "takenbot" }, creatorContext)
+    const botUserId = created.bot?.id ?? 0n
+
+    await expect(updateBotProfile({ botUserId, username: "notabotname" }, creatorContext)).rejects.toThrow()
+    await expect(updateBotProfile({ botUserId, username: "b" }, creatorContext)).rejects.toThrow()
+    await expect(updateBotProfile({ botUserId, username: "TAKENBOT" }, creatorContext)).rejects.toThrow()
+
+    const listed = await listBots({}, creatorContext)
+    expect(listed.bots.find((b) => b.id === botUserId)?.username).toBe("strictbot")
+  })
+
   test("updateBotProfile rejects non-creator", async () => {
     const created = await createBot({ name: "Private Bot", username: "privateprofilebot" }, creatorContext)
 
