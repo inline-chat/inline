@@ -42,14 +42,22 @@ describe("V3 migration RPCs", () => {
 
   test("updates only the current session metadata", async () => {
     const user = await testUtils.createUser("v3-session-update@example.com")
-    const account = await testUtils.createSessionForUser(user.id, { clientType: "macos" })
-    const result = await updateSessionV3({ timeZone: "Asia/Tehran", deviceName: "Inline Dev" }, context(
+    const account = await testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "5843" })
+    const other = await testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "5843" })
+    const result = await updateSessionV3({
+      timeZone: "Asia/Tehran", deviceName: "Inline Dev", clientVersion: "5999", osVersion: "27.0.1",
+    }, context(
       user.id,
       account.session.id,
     ))
     expect(result.session?.timezone).toBe("Asia/Tehran")
     expect(result.session?.deviceName).toBe("Inline Dev")
-    expect((await SessionsModel.getById(account.session.id)).personalData.timezone).toBe("Asia/Tehran")
+    const updated = await SessionsModel.getById(account.session.id)
+    expect(updated.personalData.timezone).toBe("Asia/Tehran")
+    expect(updated.clientVersion).toBe("5999")
+    expect(updated.osVersion).toBe("27.0.1")
+    expect(result.session?.clientVersion).toBe("5999")
+    expect((await SessionsModel.getById(other.session.id)).clientVersion).toBe("5843")
   })
 
   test("archives one dialog and returns the ordinary typed update", async () => {

@@ -686,7 +686,15 @@ public class DataManager: ObservableObject {
     do {
       // Update on server
       try auth.validateAccountMutation(mutationToken)
-      _ = try await InlineRPCClient.shared.updateSession(timeZone: timeZone)
+      // Refresh the running build after upgrades, including sessions that keep
+      // their authorization across launches and skip the legacy handshake.
+      let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+      let os = ProcessInfo.processInfo.operatingSystemVersion
+      _ = try await InlineRPCClient.shared.updateSession(
+        timeZone: timeZone,
+        clientVersion: build,
+        osVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+      )
     } catch {
       log.error("Failed to update timezone", error: error)
       throw error
