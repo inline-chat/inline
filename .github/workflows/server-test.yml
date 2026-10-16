@@ -1,6 +1,9 @@
 name: Server Tests
 
 on:
+  # Validation-only entry point for a stacked PR whose base is not main.
+  # No publication input exists here; only the guarded reusable call can publish.
+  workflow_dispatch:
   workflow_call:
     inputs:
       publish_image:

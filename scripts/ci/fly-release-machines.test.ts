@@ -99,6 +99,14 @@ test("both image publishing guards require manual same-repository branches and e
   }
 })
 
+test("manual Server Tests dispatch exposes no publication inputs", async () => {
+  const workflow = Bun.YAML.parse(await Bun.file(resolve(import.meta.dir, "../../.github/workflows/server-test.yml")).text()) as {
+    on: Record<string, { inputs?: Record<string, unknown> } | null>
+  }
+  expect(Object.hasOwn(workflow.on, "workflow_dispatch")).toBe(true)
+  expect(workflow.on.workflow_dispatch?.inputs).toBeUndefined()
+})
+
 type ReleaseJob = {
   if?: string
   needs?: string | string[]
