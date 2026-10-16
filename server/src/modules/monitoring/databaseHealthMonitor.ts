@@ -276,16 +276,14 @@ export class DatabaseHealthMonitor {
 
 let monitorInstance: DatabaseHealthMonitor | null = null
 
-const shouldStartDatabaseMonitor = (): boolean => {
-  if (NODE_ENV === "production") {
-    return true
-  }
-
-  return process.env["ENABLE_DATABASE_HEALTH_MONITOR"] === "1"
-}
+/** A secondary worker can opt out of process-local alerts without disabling queue workers. */
+export const isDatabaseHealthMonitorEnabled = (
+  isProduction: boolean,
+  setting: string | undefined,
+): boolean => setting !== "0" && (isProduction || setting === "1")
 
 export const startDatabaseHealthMonitor = (): DatabaseHealthMonitor | null => {
-  if (!shouldStartDatabaseMonitor()) {
+  if (!isDatabaseHealthMonitorEnabled(NODE_ENV === "production", process.env["ENABLE_DATABASE_HEALTH_MONITOR"])) {
     return null
   }
 

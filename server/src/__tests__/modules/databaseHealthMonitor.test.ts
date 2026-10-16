@@ -1,4 +1,4 @@
-import { DatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
+import { DatabaseHealthMonitor, isDatabaseHealthMonitorEnabled } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import type { InlineProtocolClockHealth } from "@in/server/modules/inlineProtocol/clockHealth"
 import { describe, expect, it, spyOn } from "bun:test"
 
@@ -36,6 +36,15 @@ const downSample = (): HealthSample => ({
 })
 
 describe("DatabaseHealthMonitor", () => {
+  it("lets a secondary production worker suppress alerts while retaining the primary default", () => {
+    expect(isDatabaseHealthMonitorEnabled(true, undefined)).toBe(true)
+    expect(isDatabaseHealthMonitorEnabled(true, "1")).toBe(true)
+    expect(isDatabaseHealthMonitorEnabled(true, "0")).toBe(false)
+    expect(isDatabaseHealthMonitorEnabled(false, undefined)).toBe(false)
+    expect(isDatabaseHealthMonitorEnabled(false, "1")).toBe(true)
+    expect(isDatabaseHealthMonitorEnabled(false, "0")).toBe(false)
+  })
+
   it("alerts only after reaching failure threshold", async () => {
     const alerts: string[] = []
     const samples = [downSample(), downSample()]
