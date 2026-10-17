@@ -98,9 +98,37 @@ jobs:
           baseline=$(jq -ce -f "$filter" "$RUNNER_TEMP/machines.json")
           printf 'baseline=%s\n' "$baseline" >> "$GITHUB_OUTPUT"
 
+  standby-preflight:
+    name: Record the healthy fixed standby before DDL
+    needs: qualify
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    env:
+      STANDBY_SYNC_ENABLED: ${{ vars.STANDBY_SYNC_ENABLED }}
+      STANDBY_RELEASE_SSH_KEY: ${{ secrets.STANDBY_RELEASE_SSH_KEY }}
+      STANDBY_RELEASE_KNOWN_HOSTS: ${{ vars.STANDBY_RELEASE_KNOWN_HOSTS }}
+      RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      STANDBY_IMAGE: ${{ needs.qualify.outputs.standby_image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Require the reviewed consumer and record exact predecessor
+        if: ${{ !inputs.bootstrap }}
+        run: python3 scripts/ci/standby-release-client.py preflight "$RUNNER_TEMP/standby-preflight.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standby-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standby-preflight.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   migrate:
     name: Migrate and verify with the qualified image
-    needs: [qualify, preflight]
+    needs: [qualify, preflight, standby-preflight]
     if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -131,9 +159,63 @@ jobs:
           docker run --rm -e DATABASE_DIRECT_URL -e DATABASE_CONNECTION_MODE \
             "$RUNTIME_IMAGE" bun server/dist/verify-migrations.js
 
+  standby:
+    name: Synchronize the qualified ARM standby before replacing Fly
+    needs: [qualify, preflight, migrate]
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      STANDBY_SYNC_ENABLED: ${{ vars.STANDBY_SYNC_ENABLED }}
+      STANDBY_RELEASE_SSH_KEY: ${{ secrets.STANDBY_RELEASE_SSH_KEY }}
+      STANDBY_RELEASE_KNOWN_HOSTS: ${{ vars.STANDBY_RELEASE_KNOWN_HOSTS }}
+      RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      STANDBY_IMAGE: ${{ needs.qualify.outputs.standby_image }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      BASELINE: ${{ needs.preflight.outputs.baseline }}
+      BOOTSTRAP: ${{ inputs.bootstrap }}
+    steps:
+      - uses: actions/checkout@v6
+        if: ${{ !inputs.bootstrap }}
+        with:
+          ref: ${{ github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        if: ${{ !inputs.bootstrap }}
+        with:
+          version: "0.4.107"
+      - name: Install the daemonless image transport on the ephemeral runner
+        if: ${{ !inputs.bootstrap }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+      - name: Export the exact tested ARM artifact without rebuilding
+        if: ${{ !inputs.bootstrap }}
+        run: bash scripts/ci/standby-release-export.sh "$RUNNER_TEMP/standby-image.tar"
+      - name: Keep a healthy unchanged Fly alternate while replacing Nuremberg
+        if: ${{ !inputs.bootstrap }}
+        run: |
+          test "$STANDBY_SYNC_ENABLED" = true
+          timeout --signal=KILL 10s flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/fly-before-standby.json"
+          current=$(jq -ce -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/fly-before-standby.json")
+          test "$current" = "$BASELINE"
+      - name: Stream and reconcile the fixed standby
+        if: ${{ !inputs.bootstrap }}
+        run: python3 scripts/ci/standby-release-client.py sync "$RUNNER_TEMP/standby-sync.json" "$RUNNER_TEMP/standby-image.tar"
+      - name: Remove the temporary image archive
+        if: ${{ always() && !inputs.bootstrap }}
+        run: rm -f "$RUNNER_TEMP/standby-image.tar"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !inputs.bootstrap }}
+        with:
+          name: standby-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standby-sync.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   deploy:
     name: Replace the public Machines and verify readiness
-    needs: [qualify, preflight, migrate]
+    needs: [qualify, preflight, migrate, standby]
     if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -141,8 +223,12 @@ jobs:
     outputs:
       bootstrap_baseline: ${{ steps.verify.outputs.bootstrap_baseline }}
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      STANDBY_SYNC_ENABLED: ${{ vars.STANDBY_SYNC_ENABLED }}
+      STANDBY_RELEASE_SSH_KEY: ${{ secrets.STANDBY_RELEASE_SSH_KEY }}
+      STANDBY_RELEASE_KNOWN_HOSTS: ${{ vars.STANDBY_RELEASE_KNOWN_HOSTS }}
       RUNTIME_IMAGE: ${{ needs.qualify.outputs.runtime_image }}
+      STANDBY_IMAGE: ${{ needs.qualify.outputs.standby_image }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       BASELINE: ${{ needs.preflight.outputs.baseline }}
       BOOTSTRAP: ${{ inputs.bootstrap }}
     steps:
@@ -152,6 +238,9 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
         with:
           version: "0.4.107"
+      - name: Require fresh exact standby identity and direct TLS readiness
+        if: ${{ !inputs.bootstrap }}
+        run: python3 scripts/ci/standby-release-client.py check "$RUNNER_TEMP/standby-before-fly.json"
       - name: Revalidate the recorded baseline and deploy the same digest
         run: |
           test -n "$FLY_API_TOKEN"
@@ -201,6 +290,18 @@ jobs:
           if [[ "$BOOTSTRAP" = true ]]; then
             printf 'API-only bootstrap is ready. Qualify authenticated paths, transfer routing, and stop the old all-role API before approving production-cutover.\n' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Verify both origins before completing the fleet release
+        if: ${{ !inputs.bootstrap }}
+        run: |
+          python3 scripts/ci/standby-release-client.py complete "$RUNNER_TEMP/standby-complete.json"
+          printf 'Nuremberg passed exact ARM source/digest/config readback and independent direct TLS readiness before and after Fly replacement.\n' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standby-final-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/standby-*.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   activate:
     name: Enable workers on the same qualified bootstrap image

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "roles": {
+    "nbg": [
+      {
+        "source": "standby-release-host.py",
+        "destination": "/usr/local/libexec/inline-standby-release",
+        "sha256": "3194ea775209a3b8750122cb1050a15f24ce59fd02188b22e52ad6ac5b1ffd4a",
+        "mode": 448
+      },
+      {
+        "source": "standby-release-entrypoint.sh",
+        "destination": "/usr/local/libexec/inline-standby-release-entrypoint",
+        "sha256": "128e1697d6c0ec3bc1e075c4f2f8c7967edb8a0839fe1a99279473fee339072d",
+        "mode": 448
+      }
+    ],
+    "controller": [
+      {
+        "source": "standby-release-controller.py",
+        "destination": "/usr/local/libexec/inline-standby-controller",
+        "sha256": "1028025925843eb960354e139582ed29030f51c22df4916a7a8e2e0eb4dbd039",
+        "mode": 448
+      },
+      {
+        "source": "standby-release-controller-entrypoint.sh",
+        "destination": "/usr/local/libexec/inline-standby-controller-entrypoint",
+        "sha256": "ab8227515d7bcafc6e18574a6aa93f8c53be25e8fe7cc92282fa0a73ad0381de",
+        "mode": 448
+      }
+    ]
+  }
+}

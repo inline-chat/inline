@@ -99,13 +99,21 @@ test("both image publishing guards require manual same-repository branches and e
   }
 })
 
+test("manual Server Tests dispatch exposes no publication inputs", async () => {
+  const workflow = Bun.YAML.parse(await Bun.file(resolve(import.meta.dir, "../../.github/workflows/server-test.yml")).text()) as {
+    on: Record<string, { inputs?: Record<string, unknown> } | null>
+  }
+  expect(Object.hasOwn(workflow.on, "workflow_dispatch")).toBe(true)
+  expect(workflow.on.workflow_dispatch?.inputs).toBeUndefined()
+})
+
 type ReleaseJob = {
   if?: string
   needs?: string | string[]
   environment?: string
   uses?: string
   with?: Record<string, unknown>
-  steps?: { name?: string; run?: string; env?: Record<string, string> }[]
+  steps?: { name?: string; run?: string; if?: string; env?: Record<string, string> }[]
 }
 const releaseWorkflow = async () => Bun.YAML.parse(await Bun.file(
   resolve(import.meta.dir, "../../.github/workflows/server-deploy.yml"),
@@ -113,6 +121,32 @@ const releaseWorkflow = async () => Bun.YAML.parse(await Bun.file(
   on: { workflow_dispatch: { inputs: { publish_only: { type: string; default: boolean }; bootstrap: { type: string; default: boolean } } } }
   jobs: Record<string, ReleaseJob>
 }
+
+test("ordinary releases synchronize and re-read Nuremberg before Fly without broad credentials", async () => {
+  const workflow = await releaseWorkflow()
+  expect(workflow.jobs.migrate?.needs).toContain("standby-preflight")
+  expect(workflow.jobs.standby?.needs).toEqual(["qualify", "preflight", "migrate"])
+  expect(workflow.jobs.deploy?.needs).toContain("standby")
+  for (const id of ["standby-preflight", "standby"]) {
+    expect(workflow.jobs[id]?.if).toBe("${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}")
+    expect(workflow.jobs[id]?.environment).toBe("production")
+    expect(JSON.stringify(workflow.jobs[id])).not.toMatch(/COOLIFY_TOKEN|CLOUDFLARE_TOKEN|ROOT_SSH_KEY/)
+  }
+  const standbySteps = workflow.jobs.standby?.steps ?? []
+  const alternate = standbySteps.findIndex((step) => step.name === "Keep a healthy unchanged Fly alternate while replacing Nuremberg")
+  const sync = standbySteps.findIndex((step) => step.run?.includes("standby-release-client.py sync"))
+  expect(alternate).toBe(sync - 1)
+  expect(standbySteps[alternate]?.run).toContain('test "$current" = "$BASELINE"')
+  expect(standbySteps[sync]?.if).toBe("${{ !inputs.bootstrap }}")
+  const steps = workflow.jobs.deploy?.steps ?? []
+  const check = steps.findIndex((step) => step.run?.includes("standby-release-client.py check"))
+  const deploy = steps.findIndex((step) => step.run?.includes("flyctl deploy"))
+  const flyReadback = steps.findIndex((step) => step.run?.includes("fly-release-wait.sh"))
+  const complete = steps.findIndex((step) => step.run?.includes("standby-release-client.py complete"))
+  expect(check).toBe(deploy - 1)
+  expect(complete).toBeGreaterThan(flyReadback)
+  for (const step of [steps[check], steps[complete]]) expect(step?.if).toBe("${{ !inputs.bootstrap }}")
+})
 
 test("publish-only keeps full CI and excludes every production job; normal and failed releases retain their gates", async () => {
   const workflow = await releaseWorkflow()
@@ -148,7 +182,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   }
   for (const [publishOnly, expected] of [
     [true, ["validate", "qualify", "prepared"]],
-    [false, ["validate", "qualify", "preflight", "migrate", "deploy"]],
+    [false, ["validate", "qualify", "preflight", "standby-preflight", "migrate", "standby", "deploy"]],
   ] as const) {
     expect(Object.keys(workflow.jobs).filter((id) => runnable(id, publishOnly)).sort()).toEqual([...expected].sort())
     for (const [id, job] of Object.entries(workflow.jobs)) {
@@ -163,10 +197,12 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(runnable("qualify", true, "validate")).toBe(false)
   expect(runnable("migrate", false, "preflight")).toBe(false)
   expect(runnable("deploy", false, "migrate")).toBe(false)
+  expect(runnable("migrate", false, "standby-preflight")).toBe(false)
+  expect(runnable("deploy", false, "standby")).toBe(false)
   expect(JSON.stringify(workflow.jobs.prepared)).not.toContain("secrets.")
   expect(workflow.jobs.prepared?.environment).toBeUndefined()
   expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, true)).sort())
-    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "validate"])
+    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "standby", "standby-preflight", "validate"])
   expect(runnable("activate", false, "deploy", true)).toBe(false)
   for (const ref of ["refs/heads/main", "refs/heads/codex/multi-node-ha", "refs/tags/main"]) {
     for (const publishOnly of [true, false]) {

@@ -300,6 +300,8 @@ jobs:
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
           cd scripts && bun --no-env-file test ci && cd ..
+          python3 scripts/ci/standby-release-test.py
+          python3 scripts/ci/standby-release-install-test.py
           python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
         run: |
