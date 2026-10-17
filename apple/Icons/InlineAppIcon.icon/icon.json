@@ -6,7 +6,7 @@
   "fill" : {
     "linear-gradient" : [
       "srgb:1.00000,1.00000,1.00000,1.00000",
-      "srgb:0.93037,0.93037,0.93037,1.00000"
+      "srgb:0.96200,0.96200,0.97000,1.00000"
     ]
   },
   "groups" : [
@@ -18,15 +18,15 @@
             {
               "value" : {
                 "linear-gradient" : [
-                  "srgb:0.18689,0.18689,0.18689,1.00000",
-                  "srgb:0.00000,0.00000,0.00000,1.00000"
+                  "srgb:0.07000,0.07000,0.07000,1.00000",
+                  "srgb:0.22000,0.22000,0.22000,1.00000"
                 ]
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "srgb:0.97646,1.00000,0.98958,1.00000"
+                "solid" : "srgb:0.97000,0.97000,0.97000,1.00000"
               }
             },
             {
@@ -36,16 +36,16 @@
               }
             }
           ],
-          "image-name" : "icon-square.png",
+          "image-name" : "icon-square.svg",
           "name" : "icon-square",
           "position-specializations" : [
             {
               "idiom" : "square",
               "value" : {
-                "scale" : 0.56,
+                "scale" : 0.538,
                 "translation-in-points" : [
                   0,
-                  0
+                  -3
                 ]
               }
             }
@@ -55,16 +55,16 @@
       "opacity" : 1,
       "refractivity" : {
         "depth" : 0,
-        "enabled" : true,
-        "strength" : 0.464140625
+        "enabled" : false,
+        "strength" : 0
       },
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 1.12
+        "opacity" : 0.75
       },
       "specular-specializations" : [
         {
-          "value" : "outside"
+          "value" : true
         },
         {
           "appearance" : "dark",
@@ -86,14 +86,14 @@
           "appearance" : "dark",
           "value" : {
             "enabled" : true,
-            "value" : 0.5
+            "value" : 0.2
           }
         },
         {
           "appearance" : "tinted",
           "value" : {
             "enabled" : true,
-            "value" : 0.6
+            "value" : 0.2
           }
         }
       ]
