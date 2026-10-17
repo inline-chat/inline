@@ -121,6 +121,7 @@ const healthy = (): HealthHttpResponse => ({
   ok: true,
   status: "ok",
   timestamp: 1_784_320_000,
+  revision: "0123456789abcdef0123456789abcdef01234567",
   draining: false,
   checks: {
     database: {
@@ -753,6 +754,7 @@ describe("AuxiliaryRouteGroup", () => {
       ok: false,
       status: "degraded",
       timestamp: 1_784_320_001,
+      revision: "0123456789abcdef0123456789abcdef01234567",
       draining: true,
       checks: {
         database: {

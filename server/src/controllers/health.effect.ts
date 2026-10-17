@@ -77,6 +77,7 @@ export const HealthHttpResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
   status: Schema.Literals(["ok", "degraded"]),
   timestamp: UnixSeconds,
+  revision: Schema.String,
   draining: Schema.Boolean,
   checks: Schema.Struct({
     database: DatabaseHealth,

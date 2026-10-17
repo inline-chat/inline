@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { gitCommitSha } from "@in/server/buildEnv"
 import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHealth"
 import { combineHealthProbes } from "@in/server/db/connectionPolicy"
 import { makeHealthChecker, runHealthChecks, withLifecycleCheck } from "./healthCheck"
@@ -238,11 +239,14 @@ describe("shared readiness database probe", () => {
       checkBroker: () => brokerReady,
     })
     const lifecycle = { getShutdownState: () => ({ shuttingDown, signal: "SIGTERM" as const, startedAtMs: wall }) }
-    expect(withLifecycleCheck(await check(), lifecycle).ok).toBe(true)
+    const ready = withLifecycleCheck(await check(), lifecycle)
+    expect(ready.ok).toBe(true)
+    // Monitors compare origins by the serving build's source commit.
+    expect(ready.revision).toBe(gitCommitSha)
     brokerReady = false
     shuttingDown = true
     const draining = withLifecycleCheck(await check(), lifecycle)
-    expect(draining).toMatchObject({ draining: true, ok: false, checks: { database: { ok: true }, broker: { ok: false } } })
+    expect(draining).toMatchObject({ draining: true, ok: false, revision: gitCommitSha, checks: { database: { ok: true }, broker: { ok: false } } })
     shuttingDown = false
     monotonic = 500
     wall += 21_000

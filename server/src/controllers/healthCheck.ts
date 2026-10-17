@@ -1,3 +1,4 @@
+import { gitCommitSha } from "@in/server/buildEnv"
 import {
   checkDatabaseHealth,
 } from "@in/server/db"
@@ -51,6 +52,8 @@ export interface HealthResponse {
 }
 
 export interface HealthHttpResponse extends HealthResponse {
+  /** Source commit of the serving build, so monitors can detect origin version drift. */
+  readonly revision: string
   readonly draining: boolean
   readonly checks: HealthResponse["checks"] & {
     readonly lifecycle: {
@@ -299,6 +302,7 @@ export const withLifecycleCheck = (
   if (liveness.ok) {
     return {
       ...result,
+      revision: gitCommitSha,
       draining: false,
       checks: {
         ...result.checks,
@@ -309,6 +313,7 @@ export const withLifecycleCheck = (
 
   return {
     ...result,
+    revision: gitCommitSha,
     ok: false,
     status: "degraded",
     draining: true,
