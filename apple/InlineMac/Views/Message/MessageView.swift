@@ -2261,6 +2261,7 @@ class MessageViewAppKit: NSView {
     }
 
     bubbleViewHeightConstraint = bubbleView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
+    bubbleTailView.bubbleSize = layout.bubble.size
     bubbleViewWidthConstraint = bubbleView.widthAnchor.constraint(
       equalToConstant: layout.bubble.size.width
     )
@@ -2296,7 +2297,7 @@ class MessageViewAppKit: NSView {
         bubbleViewSideAnchor,
         bubbleTailView.widthAnchor.constraint(equalToConstant: MessageBubbleTailView.size.width),
         bubbleTailView.heightAnchor.constraint(equalToConstant: MessageBubbleTailView.size.height),
-        bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOffset),
+        bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOverhang),
 
         contentViewHeightConstraint,
         contentViewWidthConstraint,
@@ -2905,6 +2906,7 @@ class MessageViewAppKit: NSView {
     {
       let bubble = props.layout.bubble
       log.trace("Updating bubble view constraints for message \(bubble.size)")
+      bubbleTailView.bubbleSize = bubble.size
       if bubbleViewWidthConstraint.constant != bubble.size.width {
         bubbleViewWidthConstraint.constant = bubble.size.width
       }

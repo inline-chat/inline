@@ -1,4 +1,5 @@
 import AppKit
+import InlineUI
 
 class BasicView: NSView {
   // MARK: - Properties
@@ -64,9 +65,14 @@ class BasicView: NSView {
     layer.borderWidth = borderWidth
   }
 
-  private func configureCornerRadius() {
+  /// The radius applied to the layer; subclasses can clamp it to their bounds.
+  var renderedCornerRadius: CGFloat {
+    cornerRadius
+  }
+
+  fileprivate func configureCornerRadius() {
     guard let layer else { return }
-    layer.cornerRadius = cornerRadius
+    layer.cornerRadius = renderedCornerRadius
   }
 }
 
@@ -142,12 +148,20 @@ final class MessageBubbleBackgroundView: BasicView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  // Core Animation does not clamp a corner radius larger than half the height; it draws
+  // overlapping arcs with spikes on the sides. Bubbles can be shorter than 2r with small
+  // fonts, so clamp the same way the tail geometry does.
+  override var renderedCornerRadius: CGFloat {
+    MessageBubbleTailGeometry.effectiveRadius(cornerRadius: cornerRadius, size: bounds.size)
+  }
+
   override func layout() {
     super.layout()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    configureCornerRadius()
     lightingLayer.frame = bounds
-    lightingLayer.cornerRadius = cornerRadius
+    lightingLayer.cornerRadius = renderedCornerRadius
     lightingLayer.masksToBounds = true
     CATransaction.commit()
   }
@@ -172,30 +186,37 @@ final class MessageBubbleTailView: NSView {
     case trailing
   }
 
-  // Cropped from the trailing-side full-bubble SVG. `sourceBubbleEdgeX` is the
-  // bubble edge the visible tail tucks under before mirroring for leading tails.
-  private static let sourceSize = CGSize(width: 37, height: 52.4)
-  private static let sourceBubbleEdgeX: CGFloat = 19.5183
-  private static let sourceTailBottomY: CGFloat = 51.2853
-  private static let tailDrawScale: CGFloat = 14 / sourceTailBottomY
+  /// The largest corner radius the tail is drawn for. The view is sized for it and
+  /// pinned to the bubble's bottom corner; smaller bubbles draw a proportionally
+  /// smaller tail inside the same frame.
+  static let maxCornerRadius: CGFloat = Theme.messageBubbleCornerRadius
 
-  private static var exposedTailWidth: CGFloat {
-    (sourceSize.width - sourceBubbleEdgeX) * tailDrawScale
-  }
+  /// Distance the view's frame extends past the bubble's bottom edge, so the
+  /// antialiased tip is never clipped.
+  static let bottomOverhang: CGFloat = 1
 
   static var size: CGSize {
     CGSize(
-      width: sourceSize.width * tailDrawScale,
-      height: sourceSize.height * tailDrawScale
+      width: maxCornerRadius + MessageBubbleTailGeometry.exposedWidth(radius: maxCornerRadius) + 1,
+      height: maxCornerRadius + bottomOverhang
     )
   }
 
+  /// How far the view's frame extends under the bubble from its side edge.
   static var bubbleOverlap: CGFloat {
-    size.width - exposedTailWidth
+    maxCornerRadius
   }
 
-  static var bottomOffset: CGFloat {
-    size.height - sourceTailBottomY * tailDrawScale
+  /// Bubble body size, used to match the radius Core Animation renders for the body.
+  var bubbleSize: CGSize = .zero {
+    didSet {
+      guard bubbleSize != oldValue else { return }
+      updateVisibility()
+    }
+  }
+
+  private var cornerRadius: CGFloat {
+    MessageBubbleTailGeometry.effectiveRadius(cornerRadius: Self.maxCornerRadius, size: bubbleSize)
   }
 
   private(set) var side: Side = .none
@@ -231,8 +252,9 @@ final class MessageBubbleTailView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     guard side != .none else { return }
 
+    guard let path = Self.path(for: side, radius: cornerRadius, in: bounds) else { return }
     resolvedFillColor.setFill()
-    Self.path(for: side, in: bounds).fill()
+    NSBezierPath(cgPath: path).fill()
   }
 
   override func viewDidChangeEffectiveAppearance() {
@@ -281,7 +303,7 @@ final class MessageBubbleTailView: NSView {
     CATransaction.setDisableActions(true)
     lightingLayer.frame = bounds
     lightingMaskLayer.frame = bounds
-    lightingMaskLayer.path = side == .none ? nil : Self.path(for: side, in: bounds).cgPath
+    lightingMaskLayer.path = Self.path(for: side, radius: cornerRadius, in: bounds)
     layer.masksToBounds = false
     CATransaction.commit()
   }
@@ -297,7 +319,7 @@ final class MessageBubbleTailView: NSView {
       return
     }
 
-    let fadeView = MessageBubbleTailFadeView(side: side, color: color)
+    let fadeView = MessageBubbleTailFadeView(side: side, radius: cornerRadius, color: color)
     fadeView.frame = frame
     fadeView.alphaValue = 1
     superview.addSubview(fadeView, positioned: .above, relativeTo: self)
@@ -311,68 +333,39 @@ final class MessageBubbleTailView: NSView {
     }
   }
 
-  fileprivate static func path(for side: Side, in rect: CGRect) -> NSBezierPath {
-    let scaleX = rect.width / Self.sourceSize.width
-    let scaleY = rect.height / Self.sourceSize.height
-
-    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-      let resolvedX: CGFloat = switch side {
-      case .leading:
-        rect.maxX - x * scaleX
-      case .none, .trailing:
-        rect.minX + x * scaleX
-      }
-      return CGPoint(x: resolvedX, y: rect.minY + y * scaleY)
+  /// Tail path in this view's flipped bounds. The bubble's bottom corner sits
+  /// `maxCornerRadius` in from the edge facing the bubble, `bottomOverhang` above the bottom.
+  fileprivate static func path(for side: Side, radius: CGFloat, in rect: CGRect) -> CGPath? {
+    let bottom = rect.maxY - bottomOverhang
+    switch side {
+    case .none:
+      return nil
+    case .leading:
+      return MessageBubbleTailGeometry.tailPath(
+        corner: CGPoint(x: rect.maxX - maxCornerRadius, y: bottom),
+        radius: radius,
+        side: .leading
+      )
+    case .trailing:
+      return MessageBubbleTailGeometry.tailPath(
+        corner: CGPoint(x: rect.minX + maxCornerRadius, y: bottom),
+        radius: radius,
+        side: .trailing
+      )
     }
-
-    let path = NSBezierPath()
-    path.move(to: point(19.4761, 6.9846))
-    path.curve(
-      to: point(19.5183, 0),
-      controlPoint1: point(19.5041, 6.3302),
-      controlPoint2: point(19.5183, 0.6611)
-    )
-    path.line(to: point(0, 0))
-    path.line(to: point(0, 39.8152))
-    path.curve(
-      to: point(36.1476, 50.9938),
-      controlPoint1: point(8.3867, 48.2023),
-      controlPoint2: point(22.1067, 52.3205)
-    )
-    path.curve(
-      to: point(36.5785, 50.7275),
-      controlPoint1: point(36.3267, 50.9769),
-      controlPoint2: point(36.4868, 50.878)
-    )
-    path.curve(
-      to: point(36.3805, 49.9764),
-      controlPoint1: point(36.7373, 50.4669),
-      controlPoint2: point(36.6487, 50.1307)
-    )
-    path.line(to: point(35.3668, 49.3821))
-    path.curve(
-      to: point(22.3321, 37.0489),
-      controlPoint1: point(28.7234, 45.413),
-      controlPoint2: point(24.3785, 41.3021)
-    )
-    path.curve(
-      to: point(19.4761, 6.9846),
-      controlPoint1: point(20.1278, 32.4675),
-      controlPoint2: point(19.1757, 22.4468)
-    )
-    path.close()
-    return path
   }
 }
 
 private final class MessageBubbleTailFadeView: NSView {
   private let side: MessageBubbleTailView.Side
+  private let radius: CGFloat
   private let fillColor: NSColor
 
   override var isFlipped: Bool { true }
 
-  init(side: MessageBubbleTailView.Side, color: NSColor) {
+  init(side: MessageBubbleTailView.Side, radius: CGFloat, color: NSColor) {
     self.side = side
+    self.radius = radius
     fillColor = color
     super.init(frame: .zero)
     wantsLayer = true
@@ -389,7 +382,8 @@ private final class MessageBubbleTailFadeView: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
+    guard let path = MessageBubbleTailView.path(for: side, radius: radius, in: bounds) else { return }
     fillColor.resolvedColor(with: effectiveAppearance).setFill()
-    MessageBubbleTailView.path(for: side, in: bounds).fill()
+    NSBezierPath(cgPath: path).fill()
   }
 }
