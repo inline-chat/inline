@@ -2,6 +2,7 @@ import InlineKit
 import InlineProtocol
 import InlineUI
 import Logger
+import MultipartFormDataKit
 import RealtimeV2
 import SwiftUI
 import UIKit
@@ -10,14 +11,9 @@ import UniformTypeIdentifiers
 struct BotsSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
-  @State private var bots: [InlineProtocol.User] = []
+  @State private var model = IOSBotsSettingsModel()
   @State private var name = ""
   @State private var username = ""
-  @State private var revealedTokens: [Int64: String] = [:]
-  @State private var busyBotIDs: Set<Int64> = []
-  @State private var isLoading = false
-  @State private var isCreating = false
-  @State private var errorMessage: String?
   @State private var botToDelete: InlineProtocol.User?
   @State private var copiedTokenPasteboardChangeCount: Int?
 
@@ -38,7 +34,7 @@ struct BotsSettingsView: View {
         Button {
           createBot()
         } label: {
-          if isCreating {
+          if model.isCreating {
             HStack {
               ProgressView()
               Text("Creating Bot…")
@@ -54,36 +50,31 @@ struct BotsSettingsView: View {
         Text("Bot usernames must end with “bot”.")
       }
 
-      if let errorMessage {
-        Section {
-          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.red)
-        }
+      if let errorMessage = model.errorMessage {
+        IOSBotErrorSection(message: errorMessage)
       }
 
       Section("Your Bots") {
-        if isLoading, bots.isEmpty {
+        if model.isLoading, model.bots.isEmpty {
           HStack {
             ProgressView()
             Text("Loading bots…")
               .foregroundStyle(.secondary)
           }
-        } else if bots.isEmpty {
+        } else if model.bots.isEmpty {
           ContentUnavailableView(
             "No Bots Yet",
             systemImage: "cpu",
             description: Text("Create a bot for integrations and automated workflows.")
           )
         } else {
-          ForEach(bots, id: \.id) { bot in
+          ForEach(model.bots, id: \.id) { bot in
             IOSBotSettingsRow(
               bot: bot,
-              token: revealedTokens[bot.id],
-              isBusy: busyBotIDs.contains(bot.id),
-              revealToken: { revealToken(for: bot.id) },
-              hideToken: { revealedTokens[bot.id] = nil },
+              token: model.revealedTokens[bot.id],
+              isBusy: model.busyBotIDs.contains(bot.id),
+              model: model,
               copyToken: copyToken,
-              rotateToken: { rotateToken(for: bot.id) },
               requestDelete: { botToDelete = bot }
             )
           }
@@ -94,16 +85,16 @@ struct BotsSettingsView: View {
     .navigationTitle("Bots")
     .navigationBarTitleDisplayMode(.inline)
     .refreshable {
-      await loadBots()
+      await model.load(realtimeV2)
     }
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {
-          Task { await loadBots() }
+          Task { await model.load(realtimeV2) }
         } label: {
           Label("Refresh Bots", systemImage: "arrow.clockwise")
         }
-        .disabled(isLoading)
+        .disabled(model.isLoading)
       }
     }
     .confirmationDialog(
@@ -117,55 +108,28 @@ struct BotsSettingsView: View {
       Button("Delete Bot", role: .destructive) {
         guard let bot = botToDelete else { return }
         botToDelete = nil
-        deleteBot(bot.id)
+        Task { await model.delete(bot.id, realtimeV2: realtimeV2) }
       }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("This revokes the bot token. Existing messages remain in history.")
     }
     .task {
-      await loadBots()
+      await model.load(realtimeV2)
     }
     .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-      clearSensitiveState(clearClipboard: true)
-    }
-    .onDisappear {
-      clearSensitiveState(clearClipboard: false)
+      clearSensitiveState()
     }
   }
 
   private var sanitizedUsername: String {
-    var value = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    while value.hasPrefix("@") {
-      value.removeFirst()
-    }
-    return value
+    IOSBotsSettingsModel.sanitizedUsername(username).lowercased()
   }
 
   private var canCreate: Bool {
-    !isCreating
+    !model.isCreating
       && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && sanitizedUsername.hasSuffix("bot")
-  }
-
-  private func loadBots() async {
-    guard !isLoading else { return }
-    isLoading = true
-    errorMessage = nil
-    defer { isLoading = false }
-
-    do {
-      let result = try await realtimeV2.send(.listBots())
-      guard case let .listBots(response) = result else {
-        throw TransactionExecutionError.invalid
-      }
-      bots = response.bots.sorted { $0.id < $1.id }
-      let validIDs = Set(bots.map(\.id))
-      revealedTokens = revealedTokens.filter { validIDs.contains($0.key) }
-    } catch {
-      Log.scoped("IOSSettings.Bots").error("Failed to load bots", error: error)
-      errorMessage = "Could not load bots. Pull to try again."
-    }
   }
 
   private func createBot() {
@@ -173,87 +137,11 @@ struct BotsSettingsView: View {
     let candidate = sanitizedUsername
     guard canCreate else { return }
 
-    isCreating = true
-    errorMessage = nil
     Task {
-      do {
-        let result = try await realtimeV2.send(.createBot(name: trimmedName, username: candidate))
-        guard case let .createBot(response) = result, response.hasBot else {
-          throw TransactionExecutionError.invalid
-        }
-        bots.append(response.bot)
-        bots.sort { $0.id < $1.id }
-        if !response.token.isEmpty {
-          revealedTokens[response.bot.id] = response.token
-        }
+      if await model.create(name: trimmedName, username: candidate, realtimeV2: realtimeV2) {
         name = ""
         username = ""
-      } catch {
-        Log.scoped("IOSSettings.Bots").error("Failed to create bot", error: error)
-        errorMessage = "Could not create the bot. Check the name and username, then try again."
       }
-      isCreating = false
-    }
-  }
-
-  private func revealToken(for botID: Int64) {
-    guard !busyBotIDs.contains(botID) else { return }
-    busyBotIDs.insert(botID)
-    errorMessage = nil
-
-    Task {
-      do {
-        let result = try await realtimeV2.send(.revealBotToken(botUserId: botID))
-        guard case let .revealBotToken(response) = result, !response.token.isEmpty else {
-          throw TransactionExecutionError.invalid
-        }
-        revealedTokens[botID] = response.token
-      } catch {
-        Log.scoped("IOSSettings.Bots").error("Failed to reveal bot token", error: error)
-        errorMessage = "Could not reveal the bot token."
-      }
-      busyBotIDs.remove(botID)
-    }
-  }
-
-  private func deleteBot(_ botID: Int64) {
-    guard !busyBotIDs.contains(botID) else { return }
-    busyBotIDs.insert(botID)
-    errorMessage = nil
-
-    Task {
-      do {
-        let result = try await realtimeV2.send(.deleteBot(botUserId: botID))
-        guard case .deleteBot = result else {
-          throw TransactionExecutionError.invalid
-        }
-        bots.removeAll { $0.id == botID }
-        revealedTokens[botID] = nil
-      } catch {
-        Log.scoped("IOSSettings.Bots").error("Failed to delete bot", error: error)
-        errorMessage = "Could not delete the bot."
-      }
-      busyBotIDs.remove(botID)
-    }
-  }
-
-  private func rotateToken(for botID: Int64) {
-    guard !busyBotIDs.contains(botID) else { return }
-    busyBotIDs.insert(botID)
-    errorMessage = nil
-
-    Task {
-      do {
-        let result = try await realtimeV2.send(.rotateBotToken(botUserId: botID))
-        guard case let .rotateBotToken(response) = result, !response.token.isEmpty else {
-          throw TransactionExecutionError.invalid
-        }
-        revealedTokens[botID] = response.token
-      } catch {
-        Log.scoped("IOSSettings.Bots").error("Failed to rotate bot token", error: error)
-        errorMessage = "Could not rotate the bot token."
-      }
-      busyBotIDs.remove(botID)
     }
   }
 
@@ -273,11 +161,10 @@ struct BotsSettingsView: View {
     )
   }
 
-  private func clearSensitiveState(clearClipboard: Bool) {
-    revealedTokens.removeAll(keepingCapacity: false)
+  private func clearSensitiveState() {
+    model.hideAllTokens()
 
-    if clearClipboard,
-       let copiedTokenPasteboardChangeCount,
+    if let copiedTokenPasteboardChangeCount,
        UIPasteboard.general.changeCount == copiedTokenPasteboardChangeCount {
       UIPasteboard.general.items = []
     }
@@ -285,29 +172,274 @@ struct BotsSettingsView: View {
   }
 }
 
+@MainActor
+@Observable
+final class IOSBotsSettingsModel {
+  private(set) var bots: [InlineProtocol.User] = []
+  private(set) var revealedTokens: [Int64: String] = [:]
+  private(set) var busyBotIDs: Set<Int64> = []
+  private(set) var isLoading = false
+  private(set) var isCreating = false
+  var errorMessage: String?
+
+  @ObservationIgnored private let log = Log.scoped("IOSSettings.Bots")
+
+  static func sanitizedUsername(_ value: String) -> String {
+    var value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    while value.hasPrefix("@") {
+      value.removeFirst()
+    }
+    return value
+  }
+
+  static func isValidBotUsername(_ value: String) -> Bool {
+    value.count >= 2
+      && value.count <= 64
+      && value.lowercased().hasSuffix("bot")
+      && value.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_]*[a-zA-Z0-9]$", options: .regularExpression) != nil
+  }
+
+  func bot(_ botID: Int64) -> InlineProtocol.User? {
+    bots.first { $0.id == botID }
+  }
+
+  func load(_ realtimeV2: RealtimeV2) async {
+    guard !isLoading else { return }
+    isLoading = true
+    errorMessage = nil
+    defer { isLoading = false }
+
+    do {
+      let result = try await realtimeV2.send(.listBots())
+      guard case let .listBots(response) = result else {
+        throw TransactionExecutionError.invalid
+      }
+      bots = response.bots.sorted { $0.id < $1.id }
+      let validIDs = Set(bots.map(\.id))
+      revealedTokens = revealedTokens.filter { validIDs.contains($0.key) }
+      await saveLocally(response.bots)
+    } catch {
+      log.error("Failed to load bots", error: error)
+      errorMessage = "Could not load bots. Pull to try again."
+    }
+  }
+
+  func create(name: String, username: String, realtimeV2: RealtimeV2) async -> Bool {
+    guard !isCreating else { return false }
+    isCreating = true
+    errorMessage = nil
+    defer { isCreating = false }
+
+    do {
+      let result = try await realtimeV2.send(.createBot(name: name, username: username))
+      guard case let .createBot(response) = result, response.hasBot else {
+        throw TransactionExecutionError.invalid
+      }
+      upsert(response.bot)
+      if !response.token.isEmpty {
+        revealedTokens[response.bot.id] = response.token
+      }
+      await saveLocally([response.bot])
+      return true
+    } catch {
+      log.error("Failed to create bot", error: error)
+      errorMessage = "Could not create the bot. Check the name and username, then try again."
+      return false
+    }
+  }
+
+  func revealToken(_ botID: Int64, realtimeV2: RealtimeV2) async {
+    await perform(botID, failure: "Could not reveal the bot token.") {
+      let result = try await realtimeV2.send(.revealBotToken(botUserId: botID))
+      guard case let .revealBotToken(response) = result, !response.token.isEmpty else {
+        throw TransactionExecutionError.invalid
+      }
+      revealedTokens[botID] = response.token
+    }
+  }
+
+  func hideToken(_ botID: Int64) {
+    revealedTokens[botID] = nil
+  }
+
+  func hideAllTokens() {
+    revealedTokens.removeAll(keepingCapacity: false)
+  }
+
+  func rotateToken(_ botID: Int64, realtimeV2: RealtimeV2) async {
+    await perform(botID, failure: "Could not rotate the bot token.") {
+      let result = try await realtimeV2.send(.rotateBotToken(botUserId: botID))
+      guard case let .rotateBotToken(response) = result, !response.token.isEmpty else {
+        revealedTokens[botID] = nil
+        throw TransactionExecutionError.invalid
+      }
+      revealedTokens[botID] = response.token
+    }
+  }
+
+  @discardableResult
+  func delete(_ botID: Int64, realtimeV2: RealtimeV2) async -> Bool {
+    await perform(botID, failure: "Could not delete the bot.") {
+      let result = try await realtimeV2.send(.deleteBot(botUserId: botID))
+      guard case .deleteBot = result else {
+        throw TransactionExecutionError.invalid
+      }
+      bots.removeAll { $0.id == botID }
+      revealedTokens[botID] = nil
+    }
+  }
+
+  /// Sends only the fields that changed. Returns false and sets `errorMessage` on failure.
+  func updateProfile(
+    _ botID: Int64,
+    name: String?,
+    username: String?,
+    realtimeV2: RealtimeV2
+  ) async -> Bool {
+    await perform(botID, failure: "Could not update the bot profile.") {
+      try await updateBotProfile(botID, name: name, username: username, realtimeV2: realtimeV2)
+    }
+  }
+
+  func uploadPhoto(_ botID: Int64, image: UIImage, realtimeV2: RealtimeV2) async {
+    await perform(botID, failure: "Could not update the bot photo. Try another image.") {
+      guard let data = image.jpegData(compressionQuality: 0.86) else {
+        throw TransactionExecutionError.invalid
+      }
+      let upload = try await ApiClient.shared.uploadFile(
+        type: .photo,
+        data: data,
+        filename: "bot-profile-photo.jpg",
+        mimeType: .imageJpeg,
+        progress: { _ in }
+      )
+      try await updateBotProfile(botID, photoFileUniqueId: upload.fileUniqueId, realtimeV2: realtimeV2)
+    }
+  }
+
+  func removePhoto(_ botID: Int64, realtimeV2: RealtimeV2) async {
+    await perform(botID, failure: "Could not remove the bot photo.") {
+      try await updateBotProfile(botID, photoFileUniqueId: "", realtimeV2: realtimeV2)
+    }
+  }
+
+  func clearBotAvatar(_ botID: Int64, realtimeV2: RealtimeV2) async {
+    await perform(botID, failure: "Could not clear the bot avatar.") {
+      let result = try await realtimeV2.send(.clearBotAvatar(botUserId: botID))
+      guard case let .clearBotAvatar_p(response) = result else {
+        throw TransactionExecutionError.invalid
+      }
+      upsert(response.bot)
+      await saveLocally([response.bot])
+    }
+  }
+
+  func prepareChat(_ botID: Int64, realtimeV2: RealtimeV2) async -> Bool {
+    await perform(botID, failure: "Could not open the bot chat.") {
+      let peer = Peer.user(id: botID)
+      _ = try await realtimeV2.send(.getChat(peer: peer))
+      _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+    }
+  }
+
+  private func updateBotProfile(
+    _ botID: Int64,
+    name: String? = nil,
+    photoFileUniqueId: String? = nil,
+    username: String? = nil,
+    realtimeV2: RealtimeV2
+  ) async throws {
+    let result = try await realtimeV2.send(.updateBotProfile(
+      botUserId: botID,
+      name: name,
+      photoFileUniqueId: photoFileUniqueId,
+      username: username
+    ))
+    guard case let .updateBotProfile(response) = result else {
+      throw TransactionExecutionError.invalid
+    }
+    upsert(response.bot)
+    await saveLocally([response.bot])
+  }
+
+  @discardableResult
+  private func perform(
+    _ botID: Int64,
+    failure: String,
+    _ operation: () async throws -> Void
+  ) async -> Bool {
+    guard !busyBotIDs.contains(botID) else { return false }
+    busyBotIDs.insert(botID)
+    errorMessage = nil
+    defer { busyBotIDs.remove(botID) }
+
+    do {
+      try await operation()
+      return true
+    } catch {
+      log.error(failure, error: error)
+      errorMessage = Self.message(for: error) ?? failure
+      return false
+    }
+  }
+
+  private static func message(for error: Error) -> String? {
+    guard case let TransactionError.rpcError(rpcError) = error else { return nil }
+    switch rpcError.errorCode {
+    case .usernameTaken: return "That username is already taken."
+    case .usernameInvalid: return "Usernames use letters, numbers, and underscores, and must end with “bot”."
+    default: return nil
+    }
+  }
+
+  private func upsert(_ bot: InlineProtocol.User) {
+    if let index = bots.firstIndex(where: { $0.id == bot.id }) {
+      bots[index] = bot
+    } else {
+      bots.append(bot)
+      bots.sort { $0.id < $1.id }
+    }
+  }
+
+  private func saveLocally(_ bots: [InlineProtocol.User]) async {
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        for bot in bots {
+          _ = try User.save(db, user: bot)
+        }
+      }
+    } catch {
+      log.error("Failed to save managed bots locally", error: error)
+    }
+  }
+}
+
+private struct IOSBotErrorSection: View {
+  let message: String
+
+  var body: some View {
+    Section {
+      Label(message, systemImage: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+    }
+  }
+}
+
 private struct IOSBotSettingsRow: View {
+  @Environment(\.realtimeV2) private var realtimeV2
+
   let bot: InlineProtocol.User
   let token: String?
   let isBusy: Bool
-  let revealToken: () -> Void
-  let hideToken: () -> Void
+  let model: IOSBotsSettingsModel
   let copyToken: (String) -> Void
-  let rotateToken: () -> Void
   let requestDelete: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 10) {
         NavigationLink {
-          IOSManagedBotSettingsView(
-            bot: bot,
-            token: token,
-            isBusy: isBusy,
-            revealToken: revealToken,
-            hideToken: hideToken,
-            copyToken: copyToken,
-            rotateToken: rotateToken
-          )
+          IOSManagedBotSettingsView(botID: bot.id, model: model, copyToken: copyToken)
         } label: {
           IOSManagedBotSummary(bot: bot)
         }
@@ -318,20 +450,22 @@ private struct IOSBotSettingsRow: View {
             .controlSize(.small)
         } else {
           Menu {
-            if token == nil {
-              Button("Reveal Token", action: revealToken)
+            if let token {
+              Button("Copy Token") { copyToken(token) }
+              Button("Hide Token") { model.hideToken(bot.id) }
             } else {
-              Button("Hide Token", action: hideToken)
+              Button("Reveal Token") {
+                Task { await model.revealToken(bot.id, realtimeV2: realtimeV2) }
+              }
             }
 
-            // TODO: Add profile and avatar editing after the second-pass
-            // information architecture is verified on device.
             Divider()
             Button("Delete Bot", role: .destructive, action: requestDelete)
           } label: {
             Image(systemName: "ellipsis.circle")
               .foregroundStyle(.secondary)
           }
+          .accessibilityLabel("Actions for \(User(from: bot).displayName)")
         }
       }
 
@@ -377,41 +511,279 @@ private struct IOSManagedBotSummary: View {
 }
 
 private struct IOSManagedBotSettingsView: View {
-  let bot: InlineProtocol.User
-  let token: String?
-  let isBusy: Bool
-  let revealToken: () -> Void
-  let hideToken: () -> Void
-  let copyToken: (String) -> Void
-  let rotateToken: () -> Void
+  @Environment(\.realtimeV2) private var realtimeV2
+  @Environment(Router.self) private var router
+  @Environment(\.dismiss) private var dismiss
 
+  let botID: Int64
+  let model: IOSBotsSettingsModel
+  let copyToken: (String) -> Void
+
+  @State private var name: String
+  @State private var username: String
   @State private var isConfirmingRotation = false
+  @State private var isConfirmingDelete = false
+  @State private var showsImagePicker = false
+  @State private var showsCropper = false
+  @State private var pickedImage: UIImage?
+
+  init(botID: Int64, model: IOSBotsSettingsModel, copyToken: @escaping (String) -> Void) {
+    self.botID = botID
+    self.model = model
+    self.copyToken = copyToken
+    let bot = model.bot(botID)
+    _name = State(initialValue: bot.map { User(from: $0).displayName } ?? "")
+    _username = State(initialValue: bot?.username ?? "")
+  }
 
   var body: some View {
+    Group {
+      if let bot = model.bot(botID) {
+        content(bot)
+      } else {
+        ContentUnavailableView("Bot Unavailable", systemImage: "cpu")
+      }
+    }
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var isBusy: Bool {
+    model.busyBotIDs.contains(botID)
+  }
+
+  private func content(_ bot: InlineProtocol.User) -> some View {
     List {
-      IOSManagedBotProfileSection(bot: bot)
+      Section {
+        IOSManagedBotPhotoEditor(
+          bot: bot,
+          isBusy: isBusy,
+          choosePhoto: { showsImagePicker = true },
+          removePhoto: {
+            Task { await model.removePhoto(botID, realtimeV2: realtimeV2) }
+          }
+        )
+      }
+
+      if let errorMessage = model.errorMessage {
+        IOSBotErrorSection(message: errorMessage)
+      }
+
+      Section {
+        TextField("Bot Name", text: $name)
+          .textContentType(.name)
+
+        HStack(spacing: 2) {
+          Text("@", comment: "Fixed prefix shown before an editable bot username.")
+            .foregroundStyle(.secondary)
+          TextField("username_bot", text: $username)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        }
+      } header: {
+        Text("Profile")
+      } footer: {
+        Text("Bot usernames must end with “bot”.")
+      }
+
+      if bot.hasBotAvatar {
+        IOSManagedBotAvatarSection(bot: bot, isBusy: isBusy) {
+          Task { await model.clearBotAvatar(botID, realtimeV2: realtimeV2) }
+        }
+      }
+
+      Section {
+        Button {
+          openChat()
+        } label: {
+          Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+        }
+        .disabled(isBusy)
+      }
+
       IOSManagedBotAccessSection(
-        token: token,
+        token: model.revealedTokens[botID],
         isBusy: isBusy,
-        revealToken: revealToken,
-        hideToken: hideToken,
+        revealToken: {
+          Task { await model.revealToken(botID, realtimeV2: realtimeV2) }
+        },
+        hideToken: { model.hideToken(botID) },
         copyToken: copyToken,
         requestRotation: { isConfirmingRotation = true }
       )
-      IOSBotAgentsSection(botUserId: bot.id)
+
+      IOSBotAgentsSection(botUserId: botID)
+
+      Section {
+        Button("Delete Bot…", role: .destructive) {
+          isConfirmingDelete = true
+        }
+        .disabled(isBusy)
+      }
     }
     .listStyle(.insetGrouped)
+    .scrollDismissesKeyboard(.interactively)
     .navigationTitle(User(from: bot).displayName)
-    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .confirmationAction) {
+        Button("Save") {
+          saveProfile(bot)
+        }
+        .disabled(!canSave(bot))
+      }
+    }
+    .sheet(isPresented: $showsImagePicker) {
+      ImagePicker(sourceType: .photoLibrary) { image in
+        pickedImage = image
+        showsCropper = true
+      }
+    }
+    .sheet(isPresented: $showsCropper, onDismiss: { pickedImage = nil }) {
+      if let pickedImage {
+        CircularCropView(image: pickedImage) { croppedImage in
+          Task { await model.uploadPhoto(botID, image: croppedImage, realtimeV2: realtimeV2) }
+        }
+      }
+    }
     .confirmationDialog(
       "Rotate Token?",
       isPresented: $isConfirmingRotation,
       titleVisibility: .visible
     ) {
-      Button("Rotate Token", role: .destructive, action: rotateToken)
+      Button("Rotate Token", role: .destructive) {
+        Task { await model.rotateToken(botID, realtimeV2: realtimeV2) }
+      }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("The current token will stop working immediately. Existing integrations must be updated with the new token.")
+    }
+    .confirmationDialog(
+      "Delete Bot?",
+      isPresented: $isConfirmingDelete,
+      titleVisibility: .visible
+    ) {
+      Button("Delete Bot", role: .destructive) {
+        Task {
+          if await model.delete(botID, realtimeV2: realtimeV2) {
+            dismiss()
+          }
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This revokes the bot token. Existing messages remain in history.")
+    }
+  }
+
+  private var trimmedName: String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var cleanUsername: String {
+    IOSBotsSettingsModel.sanitizedUsername(username)
+  }
+
+  private func canSave(_ bot: InlineProtocol.User) -> Bool {
+    guard !isBusy, !trimmedName.isEmpty, IOSBotsSettingsModel.isValidBotUsername(cleanUsername) else {
+      return false
+    }
+    return trimmedName != User(from: bot).displayName || cleanUsername != bot.username
+  }
+
+  private func saveProfile(_ bot: InlineProtocol.User) {
+    let nameToSend = trimmedName == User(from: bot).displayName ? nil : trimmedName
+    let usernameToSend = cleanUsername == bot.username ? nil : cleanUsername
+
+    Task {
+      guard await model.updateProfile(
+        botID,
+        name: nameToSend,
+        username: usernameToSend,
+        realtimeV2: realtimeV2
+      ), let updated = model.bot(botID) else { return }
+      name = User(from: updated).displayName
+      username = updated.username
+      ToastManager.shared.showToast(
+        "Bot profile updated",
+        type: .success,
+        systemImage: "checkmark.circle.fill"
+      )
+    }
+  }
+
+  private func openChat() {
+    Task {
+      guard await model.prepareChat(botID, realtimeV2: realtimeV2) else { return }
+      router.dismissSheet()
+      router.openPrimaryDestination(.chat(peer: .user(id: botID)))
+    }
+  }
+}
+
+private struct IOSManagedBotPhotoEditor: View {
+  let bot: InlineProtocol.User
+  let isBusy: Bool
+  let choosePhoto: () -> Void
+  let removePhoto: () -> Void
+
+  var body: some View {
+    Menu {
+      Button(action: choosePhoto) {
+        Label("Choose Photo", systemImage: "photo.on.rectangle")
+      }
+      if bot.hasProfilePhoto {
+        Button(role: .destructive, action: removePhoto) {
+          Label("Remove Photo", systemImage: "trash")
+        }
+      }
+    } label: {
+      ZStack(alignment: .bottomTrailing) {
+        UserAvatar(user: User(from: bot), size: 96)
+
+        Group {
+          if isBusy {
+            ProgressView()
+              .tint(.white)
+          } else {
+            Image(systemName: "camera.fill")
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundStyle(.white)
+          }
+        }
+        .frame(width: 30, height: 30)
+        .background(Color.accentColor, in: Circle())
+        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 3))
+      }
+    }
+    .disabled(isBusy)
+    .accessibilityLabel("Change Bot Photo")
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 8)
+    .listRowBackground(Color.clear)
+  }
+}
+
+private struct IOSManagedBotAvatarSection: View {
+  let bot: InlineProtocol.User
+  let isBusy: Bool
+  let clear: () -> Void
+
+  var body: some View {
+    Section {
+      LabeledContent(
+        "Avatar",
+        value: bot.botAvatar.displayName.isEmpty ? "Configured" : bot.botAvatar.displayName
+      )
+      if bot.botAvatar.hasDescription_p, !bot.botAvatar.description_p.isEmpty {
+        Text(bot.botAvatar.description_p)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Button("Clear Bot Avatar", role: .destructive, action: clear)
+        .disabled(isBusy)
+    } header: {
+      Text("Bot Avatar")
+    } footer: {
+      Text("Animated avatars are set by the bot’s integration.")
     }
   }
 }
@@ -661,19 +1033,6 @@ private struct IOSBotAgentEditor: View {
       }
     }
     .task { await onLoadSkills() }
-  }
-}
-
-private struct IOSManagedBotProfileSection: View {
-  let bot: InlineProtocol.User
-
-  var body: some View {
-    Section("Profile") {
-      LabeledContent("Name", value: User(from: bot).displayName)
-      if bot.hasUsername, !bot.username.isEmpty {
-        LabeledContent("Username", value: "@\(bot.username)")
-      }
-    }
   }
 }
 
