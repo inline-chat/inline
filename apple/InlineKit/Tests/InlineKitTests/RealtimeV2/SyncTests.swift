@@ -291,9 +291,17 @@ final class SyncTests {
       methodErrors: [.getUpdates: [ProtocolSessionError.timeout]]
     )
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    let failures = SyncDiagnosticsLogSink()
+    let sinkID = UUID().uuidString
+    Log.addSink(failures, id: sinkID)
+    defer { Log.removeSink(id: sinkID) }
 
     await sync.process(updates: [makeUserHasNewUpdatesSignal(updateSeq: 2)])
     #expect(await waitForCondition { await sync.getStats().bucketFetchFailures == 1 })
+    // A timeout is not a transport teardown and still reports on first failure.
+    #expect(await waitForCondition {
+      failures.errorCategories(prefix: "sync_recovery:") == ["sync_recovery:user:request_failed:timeout"]
+    })
     #expect(await storage.getBucketState(for: .user).seq == 0)
     #expect(await apply.appliedUpdates.isEmpty)
     #expect(await sync.getStats().activeBucketFetches == 1)
@@ -306,6 +314,126 @@ final class SyncTests {
     #expect(await (apply.appliedUpdates).map(\.seq) == [1, 2])
     #expect(await client.getUpdatesStartSequences() == [0, 0])
     #expect(await client.getUpdatesEndSequences() == [2, 2])
+    await sync.prepareForTermination()
+  }
+
+  @Test("transport teardowns are reported only once they recur across accepted sessions")
+  func teardownReportGateRequiresDistinctSessions() {
+    var gate = SyncTeardownReportGate()
+    let attempts: [(SyncRequestFailureReason, UInt64?)] = [
+      (.timeout, 1),
+      (.stopped, 1),
+      (.notConnected, 1),
+      (.stopped, 2),
+      (.stopped, nil),
+      (.notConnected, 3),
+      // One report per episode; other failures keep their existing reporting.
+      (.stopped, 4),
+      (.serverRejected, 4),
+    ]
+    let reported = attempts.map { gate.shouldReport($0.0, sessionID: $0.1) }
+    #expect(reported == [true, false, false, false, false, true, false, true])
+  }
+
+  @Test(
+    "one transport teardown before a successful state check is not an error",
+    arguments: [SyncRequestFailureReason.stopped, .notConnected]
+  )
+  func singleTeardownStateFailureIsNotReported(reason: SyncRequestFailureReason) async {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 120, updatesFound: false, seq: 0)],
+      ],
+      methodErrors: [.getUpdatesState: [teardownError(reason)]]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    let failures = SyncDiagnosticsLogSink()
+    let sinkID = UUID().uuidString
+    Log.addSink(failures, id: sinkID)
+    defer { Log.removeSink(id: sinkID) }
+
+    await sync.acceptedSessionOpened(sessionID: 1)
+    #expect(await waitForCondition(timeout: .seconds(4)) {
+      await storage.getState().lastSyncDate > 10
+    })
+    #expect(failures.errorCategories(prefix: "sync_state:").isEmpty)
+    await sync.prepareForTermination()
+  }
+
+  @Test("a teardown that persists across accepted sessions reports one state error")
+  func persistentTeardownStateFailureIsReportedOnce() async {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 120, updatesFound: false, seq: 0)],
+      ],
+      methodErrors: [.getUpdatesState: Array(repeating: ProtocolSessionError.stopped, count: 5)]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    let failures = SyncDiagnosticsLogSink()
+    let sinkID = UUID().uuidString
+    Log.addSink(failures, id: sinkID)
+    defer { Log.removeSink(id: sinkID) }
+    let stateCalls: @Sendable () async -> Int = {
+      await client.getCalledMethods().filter { $0 == .getUpdatesState }.count
+    }
+
+    // Repeated failures on one session (here its own retry) stay local.
+    await sync.acceptedSessionOpened(sessionID: 1)
+    #expect(await waitForCondition(timeout: .seconds(4)) { await stateCalls() >= 2 })
+    await sync.acceptedSessionOpened(sessionID: 2)
+    #expect(await waitForCondition { await stateCalls() >= 3 })
+    #expect(failures.errorCategories(prefix: "sync_state:").isEmpty)
+
+    await sync.acceptedSessionOpened(sessionID: 3)
+    #expect(await waitForCondition {
+      failures.errorCategories(prefix: "sync_state:") == ["sync_state:request_failed:stopped"]
+    })
+
+    // Later teardowns in the same episode do not add events; recovery still lands.
+    await sync.acceptedSessionOpened(sessionID: 4)
+    #expect(await waitForCondition { await stateCalls() >= 5 })
+    await sync.acceptedSessionOpened(sessionID: 5)
+    #expect(await waitForCondition(timeout: .seconds(8)) {
+      await storage.getState().lastSyncDate > 10
+    })
+    #expect(failures.errorCategories(prefix: "sync_state:") == ["sync_state:request_failed:stopped"])
+    await sync.prepareForTermination()
+  }
+
+  @Test(
+    "one transport teardown before a successful user page is not an error",
+    arguments: [SyncRequestFailureReason.stopped, .notConnected]
+  )
+  func singleTeardownBucketFailureIsNotReported(reason: SyncRequestFailureReason) async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [.getUpdates: [makeGetUpdatesResult(
+        seq: 1, date: 110,
+        updates: [makeUpdateReadMaxIdUpdate(seq: 1, date: 110, peer: peer, readMaxId: 1, unreadCount: 0)],
+        final: true, resultType: .slice
+      )]],
+      methodErrors: [.getUpdates: [teardownError(reason)]]
+    )
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    let failures = SyncDiagnosticsLogSink()
+    let sinkID = UUID().uuidString
+    Log.addSink(failures, id: sinkID)
+    defer { Log.removeSink(id: sinkID) }
+
+    await sync.process(updates: [makeUserHasNewUpdatesSignal(updateSeq: 1)])
+    #expect(await waitForCondition(timeout: .seconds(4)) {
+      await storage.getBucketState(for: .user).seq == 1
+    })
+    #expect(await sync.getStats().bucketFetchFailures == 1)
+    #expect(failures.errorCategories(prefix: "sync_recovery:").isEmpty)
     await sync.prepareForTermination()
   }
 
@@ -6799,4 +6927,30 @@ private func makeChatOpenUpdate(seq: Int64, date: Int64, chatId: Int64) -> Inlin
   update.date = date
   update.update = .chatOpen(payload)
   return update
+}
+
+private func teardownError(_ reason: SyncRequestFailureReason) -> ProtocolSessionError {
+  reason == .stopped ? .stopped : .notConnected
+}
+
+/// Records error-level sync diagnostics categories in emission order.
+private final class SyncDiagnosticsLogSink: LogSink, @unchecked Sendable {
+  private let lock = NSLock()
+  private var categories: [String] = []
+
+  func errorCategories(prefix: String) -> [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return categories.filter { $0.hasPrefix(prefix) }
+  }
+
+  func write(_ event: LogEvent) {
+    guard event.entry.level == .error,
+          let error = event.error as? any PrivacySafeErrorCategoryProviding,
+          error is SyncStateRequestFailure || error is SyncRecoveryFailure
+    else { return }
+    lock.lock()
+    defer { lock.unlock() }
+    categories.append(error.privacySafeErrorCategory)
+  }
 }

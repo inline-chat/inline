@@ -2093,10 +2093,12 @@ actor Sync {
     )
 
     var retryAttempt = 0
+    var teardownGate = SyncTeardownReportGate()
     while true {
       let attempt = retryAttempt + 1
       let attemptStartedAt = Date()
       var requestFailureReason: SyncRequestFailureReason?
+      var attemptSessionID: UInt64?
       let span = PerformanceTrace.begin(
         "SyncGetUpdatesState",
         category: .sync,
@@ -2127,6 +2129,7 @@ actor Sync {
         // Therefore all hints caused by this request are registered before the
         // result is allowed to stage its global checkpoint.
         let result: InlineProtocol.RpcResult.OneOf_Result?
+        attemptSessionID = lastAcceptedSessionID
         do {
           result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
             if !isFreshCheckpoint {
@@ -2414,6 +2417,11 @@ actor Sync {
           // The repair owner emitted one finite, phase-specific Sentry error.
           // Keep retries visible locally without creating a second issue group.
           log.warning("fresh account bootstrap will retry after repair failure")
+        } else if !teardownGate.shouldReport(requestFailureReason, sessionID: attemptSessionID) {
+          // The transport was torn down under this RPC. The next accepted
+          // session retries it; only a teardown that keeps recurring is an error.
+          let reason = requestFailureReason?.rawValue ?? "unknown"
+          log.warning("get updates state interrupted by transport teardown: \(reason)")
         } else {
           let reportedError: Error
           // Preserve Logger's existing cancellation and URL-error suppression.
@@ -2608,9 +2616,11 @@ actor Sync {
     Int64(Date().timeIntervalSince1970)
   }
 
-  func recordBucketFetchStart() {
+  /// Returns the accepted session the fetch attempt runs on.
+  func recordBucketFetchStart() -> UInt64? {
     stats.bucketFetchCount += 1
     stats.lastBucketFetchAt = nowSeconds()
+    return lastAcceptedSessionID
   }
 
   func recordBucketFetchFailure() {
@@ -3959,6 +3969,7 @@ actor BucketActor {
   /// update cannot race a page between its read and cursor commit.
   private func fetchNewUpdatesOnce() async -> Bool {
     lastFetchFailurePhase = "unavailable"
+    lastFetchFailureReason = nil
     retryUsesRateLimitDelay = false
     guard let client else {
       log.error("client is nil, cannot fetch updates")
@@ -3969,7 +3980,7 @@ actor BucketActor {
       return false
     }
 
-    await sync.recordBucketFetchStart()
+    lastFetchSessionID = await sync.recordBucketFetchStart()
     let startedAt = Date()
     let span = PerformanceTrace.begin(
       "SyncBucketFetchOnce",
@@ -4374,8 +4385,10 @@ actor BucketActor {
         retryUsesRateLimitDelay = true
       }
       await sync.recordBucketFetchFailure()
+      let reason = SyncRequestFailureReason(error)
+      lastFetchFailureReason = reason
       resultLabel = retryUsesRateLimitDelay
-        ? "rate_limited" : "request_failed:\(SyncRequestFailureReason(error).rawValue)"
+        ? "rate_limited" : "request_failed:\(reason.rawValue)"
       return false
     }
   }
@@ -4458,11 +4471,20 @@ actor BucketActor {
   }
 
   private var lastFetchFailurePhase = "unavailable"
+  private var lastFetchFailureReason: SyncRequestFailureReason?
+  private var lastFetchSessionID: UInt64?
   private var reportedRecoveryFailures = Set<String>()
+  private var teardownGate = SyncTeardownReportGate()
 
   private func reportRecoveryFailure() {
     guard !Task.isCancelled else { return }
     let failure = SyncRecoveryFailure(bucketKind: key.traceKind, phase: lastFetchFailurePhase)
+    // A transport teardown under the page is retried on the next accepted
+    // session. Report it only once it keeps recurring across sessions.
+    guard teardownGate.shouldReport(lastFetchFailureReason, sessionID: lastFetchSessionID) else {
+      log.warning("sync catch-up interrupted by transport teardown: \(failure.privacySafeErrorCategory)")
+      return
+    }
     // Report every distinct failure in an unresolved episode. Repeated retries
     // retain their existing breadcrumbs/counters without flooding Sentry.
     if reportedRecoveryFailures.insert(failure.privacySafeErrorCategory).inserted {
@@ -4472,6 +4494,7 @@ actor BucketActor {
 
   private func resetRetryState() {
     reportedRecoveryFailures.removeAll(keepingCapacity: true)
+    teardownGate = SyncTeardownReportGate()
     retryAttempt = 0
     retryUsesRateLimitDelay = false
     reportedInvalidEnvelopeFingerprints.removeAll(keepingCapacity: true)
