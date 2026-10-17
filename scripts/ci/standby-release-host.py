@@ -46,6 +46,9 @@ def encoded(value):
 
 
 def validate_request(value, now=None):
+    if value.get("action") == "probe":
+        need(value == {"version": 1, "action": "probe"}, "probe_fields")
+        return value
     fields = {"version", "action", "revision", "runtimeImage", "standbyImage", "runId", "attempt", "issuedAt"}
     if value.get("action") == "sync":
         fields |= {"archiveBytes", "archiveSha256"}
@@ -336,6 +339,19 @@ def save(path, value):
         os.close(fd)
 
 
+def probe(host):
+    app = host.app()
+    current = host.runtime()
+    host.ready()
+    host.alternate()
+    host.headroom()
+    return {"version": 1, "ok": True, "action": "probe", "resource": APP, "server": SERVER,
+            "checkedAt": int(time.time()), "container": current["container"], "revision": current["revision"],
+            "configuredTag": app["docker_registry_image_tag"], "directTlsReady": True,
+            "alternateTlsReady": True, "headroomReady": True, "releaseQualified": False,
+            "journalChanged": False, "deploymentDispatched": False}
+
+
 def perform(request, host, journal, write, archive=None):
     selected = identity(request)
     action = request["action"]
@@ -432,6 +448,9 @@ def main():
     line = sys.stdin.buffer.readline(16385)
     need(len(line) <= 16384 and line.endswith(b"\n"), "request_line")
     request = validate_request(json.loads(line))
+    if request["action"] == "probe":
+        need(sys.stdin.buffer.read(1) == b"", "unexpected_payload")
+        return probe(Host())
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (STATE / "lock").open("a") as lock:
         try:

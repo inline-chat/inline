@@ -134,6 +134,30 @@ class TransactionTests(unittest.TestCase):
         self.journal = copy.deepcopy(value)
         self.runtime.events.append("journal:" + value["phase"])
 
+    def test_probe_is_read_only_and_cannot_qualify_a_release(self):
+        result = host.probe(self.runtime)
+        self.assertFalse(result["releaseQualified"])
+        self.assertFalse(result["journalChanged"])
+        self.assertFalse(result["deploymentDispatched"])
+        self.assertEqual(self.runtime.events, [])
+        self.assertNotIn("secret-fingerprint", json.dumps(result))
+        host.validate_request({"version": 1, "action": "probe"})
+        with self.assertRaisesRegex(host.Refused, "probe_fields"):
+            host.validate_request({"version": 1, "action": "probe", "tag": "release-untrusted"})
+
+    def test_native_probe_does_not_create_state_directory_or_lock(self):
+        payload = io.BytesIO(b'{"version":1,"action":"probe"}\n')
+        fake_stdin = unittest.mock.Mock(buffer=payload)
+        missing = Path(self.directory.name) / "never-created"
+        with patch.object(host.os, "geteuid", return_value=0), patch.object(host.sys, "argv", ["helper", "--execute"]), \
+             patch.dict(host.os.environ, {"SSH_ORIGINAL_COMMAND": "inline-standby-release-v1"}, clear=True), \
+             patch.object(host.sys, "stdin", fake_stdin), patch.object(host, "STATE", missing), \
+             patch.object(host, "Host", return_value=self.runtime), patch.object(host.signal, "signal"), \
+             patch.object(host.signal, "alarm"):
+            self.assertEqual(host.main()["action"], "probe")
+        self.assertFalse(missing.exists())
+        self.assertEqual(self.runtime.events, [])
+
     def run_action(self, action):
         value = dict(self.value, action=action)
         if action != "sync":

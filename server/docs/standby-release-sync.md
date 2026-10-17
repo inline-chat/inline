@@ -105,6 +105,68 @@ rolling replacement/drain need an authorized rehearsal before activation. The
 ARM CI lane tests real daemonless OCI export/validation on its disposable image;
 local synthetic tests alone do not establish provider execution.
 
+### Install without deploying
+
+`scripts/ci/standby-release-install.json` pins the four reviewed helper hashes.
+The installer verifies all inputs and conflicts before writing anything, refuses
+symlinks/unsafe ownership or existing different files, and leaves exact matches
+untouched. It creates only the helpers and dedicated root-only NBG directories.
+It does not create keys, read/install tokens, change authorized keys, reload SSH,
+start/restart any service, or dispatch a deployment. A conflict requires an
+explicit reviewed upgrade; the installer never overwrites it.
+
+Prepare/review locally:
+
+```sh
+python3 scripts/ci/standby-release-install.py plan nbg
+python3 scripts/ci/standby-release-install.py plan controller
+```
+
+After approved existing root access has staged this exact installer, manifest,
+and the selected role's two source files together in a root-only directory:
+
+```sh
+# NBG only: installer checks that this host owns91.107.255.57.
+python3 -I standby-release-install.py install nbg
+python3 -I standby-release-install.py verify nbg
+# Existing Finland controller only: must own95.216.163.150.
+python3 -I standby-release-install.py install controller
+python3 -I standby-release-install.py verify controller
+```
+
+Credential/key authorization and pins remain separate reviewed operations.
+After those are installed, exercise the actual NBG forced lane using only:
+
+```sh
+printf '%s\n' '{"version":1,"action":"probe"}' |
+  ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile=VERIFIED_NBG_PUBLIC_HOST_PIN -i DEDICATED_FORCED_KEY \
+    root@91.107.255.57 inline-standby-release-v1
+```
+
+`probe` accepts no release/tag/archive fields. It branches before state-directory
+creation, journal/lock handling and release mutation code. It calls the actual
+controller read relay, inspects existing Docker runtime in memory and checks
+direct strict TLS/readiness/headroom for both origins. Its safe result includes
+`releaseQualified=false`, `journalChanged=false`, and
+`deploymentDispatched=false`. It neither repairs unhealthy state nor alters
+readiness. Do not use `preflight` as a smoke: that action reserves a release in
+the durable journal.
+
+On NBG, the actual controller forced lane can independently be tested with
+`{"version":1,"operation":"read"}` over the existing pinned dedicated relay
+key to `root@95.216.163.150:6642` and original command
+`inline-standby-controller-v1`. The installed controller entrypoint must load
+the host-encrypted credential; running a plain Python mock is not native proof.
+No token or provider response should be printed beyond the safe projection.
+
+These no-op probes can qualify helper hashes/permissions, forced-command and
+native credential transport, current raw provider shape, runtime intent and
+direct health without serving-container replacement. They **cannot** qualify
+mirror/pull/PATCH/start, rolling replacement/drain, final image identity or
+rollback. Keep `STANDBY_SYNC_ENABLED` unset until the separately authorized real
+rehearsal; a successful probe does not waive this gate.
+
 ## Uncertainty, recovery and independent deployment
 
 The root-only journal is fsynced before controller PATCH and start. A partial or
