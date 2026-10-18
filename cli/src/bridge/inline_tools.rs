@@ -1096,6 +1096,7 @@ impl InlineToolHost {
                 bot_user_id: self.route.bot_user_id,
                 name: Some(name),
                 photo_file_unique_id: None,
+                username: None,
             })
             .await
         {

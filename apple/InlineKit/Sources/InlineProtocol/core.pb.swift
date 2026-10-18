@@ -25,6 +25,44 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
+public nonisolated enum TransportPreference: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case v3 // = 1
+  case legacy // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .v3
+    case 2: self = .legacy
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .v3: return 1
+    case .legacy: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [TransportPreference] = [
+    .unspecified,
+    .v3,
+    .legacy,
+  ]
+
+}
+
 public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
 
@@ -2160,9 +2198,23 @@ public nonisolated struct ConnectionOpen: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Transport for sessions that retain a legacy bearer after a V3 upgrade.
+  /// Lets operators route upgraded sessions back to V2 without a client release;
+  /// sessions without a bearer always use V3. Absent or unspecified allows V3.
+  public var upgradedSessionTransport: TransportPreference {
+    get {_upgradedSessionTransport ?? .unspecified}
+    set {_upgradedSessionTransport = newValue}
+  }
+  /// Returns true if `upgradedSessionTransport` has been explicitly set.
+  public var hasUpgradedSessionTransport: Bool {self._upgradedSessionTransport != nil}
+  /// Clears the value of `upgradedSessionTransport`. Subsequent reads from it will return its default value.
+  public mutating func clearUpgradedSessionTransport() {self._upgradedSessionTransport = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _upgradedSessionTransport: TransportPreference? = nil
 }
 
 public nonisolated struct ConnectionError: Sendable {
@@ -21286,6 +21338,14 @@ public nonisolated struct RealtimeV3Request: Sendable {
     set {body = .authBrowserStatus(newValue)}
   }
 
+  public var authUpgradeSession: AuthUpgradeSessionRequest {
+    get {
+      if case .authUpgradeSession(let v)? = body {return v}
+      return AuthUpgradeSessionRequest()
+    }
+    set {body = .authUpgradeSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Body: Equatable, Sendable {
@@ -21299,6 +21359,7 @@ public nonisolated struct RealtimeV3Request: Sendable {
     case connectionInit(ConnectionInit)
     case authBeginBrowser(AuthBeginBrowserRequest)
     case authBrowserStatus(AuthBrowserStatusRequest)
+    case authUpgradeSession(AuthUpgradeSessionRequest)
 
   }
 
@@ -21386,6 +21447,14 @@ public nonisolated struct RealtimeV3Response: Sendable {
     set {body = .connectionOpen(newValue)}
   }
 
+  public var authUpgradeSession: AuthUpgradeSessionResult {
+    get {
+      if case .authUpgradeSession(let v)? = body {return v}
+      return AuthUpgradeSessionResult()
+    }
+    set {body = .authUpgradeSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Body: Equatable, Sendable {
@@ -21400,6 +21469,7 @@ public nonisolated struct RealtimeV3Response: Sendable {
     case authBeginBrowser(AuthBeginBrowserResult)
     case authBrowserStatus(AuthBrowserStatusResult)
     case connectionOpen(ConnectionOpen)
+    case authUpgradeSession(AuthUpgradeSessionResult)
 
   }
 
@@ -21645,6 +21715,138 @@ public nonisolated struct AuthAuthorized: Sendable {
   public init() {}
 
   fileprivate var _user: User? = nil
+}
+
+/// Adds V3 authority to an existing native session without replacing it or
+/// retiring its bearer during rollout. The encrypted permanent key is the
+/// destination; callers cannot select another key, user, or account session.
+public nonisolated struct AuthUpgradeSessionRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Omit to recover a binding after a lost reply using the same permanent key.
+  public var bearerToken: String {
+    get {_bearerToken ?? String()}
+    set {_bearerToken = newValue}
+  }
+  /// Returns true if `bearerToken` has been explicitly set.
+  public var hasBearerToken: Bool {self._bearerToken != nil}
+  /// Clears the value of `bearerToken`. Subsequent reads from it will return its default value.
+  public mutating func clearBearerToken() {self._bearerToken = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _bearerToken: String? = nil
+}
+
+public nonisolated struct AuthUpgradeSessionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var state: AuthUpgradeSessionResult.OneOf_State? = nil
+
+  public var authorized: AuthAuthorized {
+    get {
+      if case .authorized(let v)? = state {return v}
+      return AuthAuthorized()
+    }
+    set {state = .authorized(newValue)}
+  }
+
+  public var notBound: AuthUpgradeNotBound {
+    get {
+      if case .notBound(let v)? = state {return v}
+      return AuthUpgradeNotBound()
+    }
+    set {state = .notBound(newValue)}
+  }
+
+  public var declined: AuthUpgradeDeclined {
+    get {
+      if case .declined(let v)? = state {return v}
+      return AuthUpgradeDeclined()
+    }
+    set {state = .declined(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_State: Equatable, Sendable {
+    case authorized(AuthAuthorized)
+    case notBound(AuthUpgradeNotBound)
+    case declined(AuthUpgradeDeclined)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct AuthUpgradeNotBound: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AuthUpgradeDeclined: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var reason: AuthUpgradeDeclined.Reason = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case disabled // = 1
+    case ineligible // = 2
+    case sourceRejected // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .disabled
+      case 2: self = .ineligible
+      case 3: self = .sourceRejected
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .disabled: return 1
+      case .ineligible: return 2
+      case .sourceRejected: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [AuthUpgradeDeclined.Reason] = [
+      .unspecified,
+      .disabled,
+      .ineligible,
+      .sourceRejected,
+    ]
+
+  }
+
+  public init() {}
 }
 
 public nonisolated struct AuthInviteRequired: Sendable {
@@ -22832,6 +23034,10 @@ public nonisolated struct AnswerBotFilesystemResult: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
+nonisolated extension TransportPreference: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TRANSPORT_PREFERENCE_UNSPECIFIED\0\u{1}TRANSPORT_PREFERENCE_V3\0\u{1}TRANSPORT_PREFERENCE_LEGACY\0")
+}
+
 nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DIALOG_FOLLOW_MODE_UNSPECIFIED\0\u{1}FOLLOWING\0\u{1}UNFOLLOWED\0")
 }
@@ -23517,18 +23723,33 @@ nonisolated extension Ack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
 
 nonisolated extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionOpen"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upgraded_session_transport\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self._upgradedSessionTransport) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._upgradedSessionTransport {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 1)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ConnectionOpen, rhs: ConnectionOpen) -> Bool {
+    if lhs._upgradedSessionTransport != rhs._upgradedSessionTransport {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52294,7 +52515,7 @@ nonisolated extension BotChatSettingsItemInvoked: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RealtimeV3Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rpc\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}connection_init\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rpc\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}connection_init\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0\u{4}\u{2}auth_upgrade_session\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52406,6 +52627,19 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
           self.body = .authBrowserStatus(v)
         }
       }()
+      case 10: try {
+        var v: AuthUpgradeSessionRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authUpgradeSession(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authUpgradeSession(v)
+        }
+      }()
       default: break
       }
     }
@@ -52449,6 +52683,10 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
       guard case .authBrowserStatus(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     }()
+    case .authUpgradeSession?: try {
+      guard case .authUpgradeSession(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -52463,7 +52701,7 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RealtimeV3Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0\u{3}connection_open\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0\u{3}connection_open\0\u{3}auth_upgrade_session\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52588,6 +52826,19 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
           self.body = .connectionOpen(v)
         }
       }()
+      case 10: try {
+        var v: AuthUpgradeSessionResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authUpgradeSession(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authUpgradeSession(v)
+        }
+      }()
       default: break
       }
     }
@@ -52634,6 +52885,10 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
     case .connectionOpen?: try {
       guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .authUpgradeSession?: try {
+      guard case .authUpgradeSession(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
     }
@@ -52932,6 +53187,177 @@ nonisolated extension AuthAuthorized: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+nonisolated extension AuthUpgradeSessionRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthUpgradeSessionRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bearer_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._bearerToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._bearerToken {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthUpgradeSessionRequest, rhs: AuthUpgradeSessionRequest) -> Bool {
+    if lhs._bearerToken != rhs._bearerToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthUpgradeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthUpgradeSessionResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}authorized\0\u{3}not_bound\0\u{1}declined\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: AuthAuthorized?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .authorized(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .authorized(v)
+        }
+      }()
+      case 2: try {
+        var v: AuthUpgradeNotBound?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .notBound(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .notBound(v)
+        }
+      }()
+      case 3: try {
+        var v: AuthUpgradeDeclined?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .declined(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .declined(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.state {
+    case .authorized?: try {
+      guard case .authorized(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .notBound?: try {
+      guard case .notBound(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .declined?: try {
+      guard case .declined(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthUpgradeSessionResult, rhs: AuthUpgradeSessionResult) -> Bool {
+    if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthUpgradeNotBound: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthUpgradeNotBound"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthUpgradeNotBound, rhs: AuthUpgradeNotBound) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthUpgradeDeclined: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthUpgradeDeclined"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.reason) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.reason != .unspecified {
+      try visitor.visitSingularEnumField(value: self.reason, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthUpgradeDeclined, rhs: AuthUpgradeDeclined) -> Bool {
+    if lhs.reason != rhs.reason {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthUpgradeDeclined.Reason: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REASON_UNSPECIFIED\0\u{1}DISABLED\0\u{1}INELIGIBLE\0\u{1}SOURCE_REJECTED\0")
 }
 
 nonisolated extension AuthInviteRequired: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

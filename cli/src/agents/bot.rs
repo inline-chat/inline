@@ -165,6 +165,7 @@ pub(super) async fn ensure_gateway_bot(
                 bot_user_id: bot.id,
                 name: Some(name.to_string()),
                 photo_file_unique_id: None,
+                username: None,
             })
             .await?
             .bot

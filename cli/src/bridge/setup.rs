@@ -409,6 +409,7 @@ pub(super) async fn provision_dev_bot(
                 bot_user_id: bot.id,
                 name: Some(name.to_string()),
                 photo_file_unique_id: None,
+                username: None,
             })
             .await?
             .bot
@@ -465,6 +466,7 @@ pub(super) async fn provision_dev_bot(
                 bot_user_id: bot.id,
                 name: None,
                 photo_file_unique_id: Some(upload.file_unique_id.clone()),
+                username: None,
             })
             .await?
             .bot

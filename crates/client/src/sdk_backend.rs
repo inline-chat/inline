@@ -7306,7 +7306,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -7400,7 +7400,7 @@ mod tests {
                         proto::ServerProtocolMessage {
                             id: 1,
                             body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                                proto::ConnectionOpen {},
+                                proto::ConnectionOpen::default(),
                             )),
                         },
                     )
@@ -7518,7 +7518,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -7639,7 +7639,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -7735,7 +7735,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -7797,7 +7797,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -7877,7 +7877,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -8191,7 +8191,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -8366,7 +8366,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -8656,7 +8656,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )
@@ -9150,7 +9150,7 @@ mod tests {
                 proto::ServerProtocolMessage {
                     id: 1,
                     body: Some(proto::server_protocol_message::Body::ConnectionOpen(
-                        proto::ConnectionOpen {},
+                        proto::ConnectionOpen::default(),
                     )),
                 },
             )

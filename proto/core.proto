@@ -82,7 +82,18 @@ message UpdatesPayload { repeated Update updates = 1; }
 
 message Ack { uint64 msg_id = 1; }
 
-message ConnectionOpen {}
+message ConnectionOpen {
+  // Transport for sessions that retain a legacy bearer after a V3 upgrade.
+  // Lets operators route upgraded sessions back to V2 without a client release;
+  // sessions without a bearer always use V3. Absent or unspecified allows V3.
+  optional TransportPreference upgraded_session_transport = 1;
+}
+
+enum TransportPreference {
+  TRANSPORT_PREFERENCE_UNSPECIFIED = 0;
+  TRANSPORT_PREFERENCE_V3 = 1;
+  TRANSPORT_PREFERENCE_LEGACY = 2;
+}
 
 message ConnectionError {
   enum Reason {
@@ -4682,6 +4693,7 @@ message RealtimeV3Request {
     ConnectionInit connection_init = 6;
     AuthBeginBrowserRequest auth_begin_browser = 7;
     AuthBrowserStatusRequest auth_browser_status = 8;
+    AuthUpgradeSessionRequest auth_upgrade_session = 10;
   }
 }
 
@@ -4696,6 +4708,7 @@ message RealtimeV3Response {
     AuthBeginBrowserResult auth_begin_browser = 7;
     AuthBrowserStatusResult auth_browser_status = 8;
     ConnectionOpen connection_open = 9;
+    AuthUpgradeSessionResult auth_upgrade_session = 10;
   }
 }
 
@@ -4739,6 +4752,34 @@ message AuthCompleteRequest {
 message AuthAuthorized {
   User user = 1;
   int64 account_session_id = 2;
+}
+
+// Adds V3 authority to an existing native session without replacing it or
+// retiring its bearer during rollout. The encrypted permanent key is the
+// destination; callers cannot select another key, user, or account session.
+message AuthUpgradeSessionRequest {
+  // Omit to recover a binding after a lost reply using the same permanent key.
+  optional string bearer_token = 1;
+}
+
+message AuthUpgradeSessionResult {
+  oneof state {
+    AuthAuthorized authorized = 1;
+    AuthUpgradeNotBound not_bound = 2;
+    AuthUpgradeDeclined declined = 3;
+  }
+}
+
+message AuthUpgradeNotBound {}
+
+message AuthUpgradeDeclined {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    DISABLED = 1;
+    INELIGIBLE = 2;
+    SOURCE_REJECTED = 3;
+  }
+  Reason reason = 1;
 }
 
 message AuthInviteRequired {}

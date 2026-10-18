@@ -508,7 +508,7 @@ mod tests {
                     send(
                         &mut ws,
                         proto::server_protocol_message::Body::ConnectionOpen(
-                            proto::ConnectionOpen {},
+                            proto::ConnectionOpen::default(),
                         ),
                     )
                     .await;
@@ -598,7 +598,9 @@ mod tests {
                 ));
                 send(
                     &mut ws,
-                    proto::server_protocol_message::Body::ConnectionOpen(proto::ConnectionOpen {}),
+                    proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen::default(),
+                    ),
                 )
                 .await;
                 let mut previous_request_id = 0;

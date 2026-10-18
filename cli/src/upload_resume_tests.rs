@@ -112,7 +112,7 @@ async fn serve(listener: TcpListener, failure: Failure) -> Observed {
         ));
         server_message(
             &mut ws,
-            proto::server_protocol_message::Body::ConnectionOpen(proto::ConnectionOpen {}),
+            proto::server_protocol_message::Body::ConnectionOpen(proto::ConnectionOpen::default()),
         )
         .await;
 

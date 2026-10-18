@@ -253,6 +253,14 @@ export interface Ack {
  * @generated from protobuf message ConnectionOpen
  */
 export interface ConnectionOpen {
+    /**
+     * Transport for sessions that retain a legacy bearer after a V3 upgrade.
+     * Lets operators route upgraded sessions back to V2 without a client release;
+     * sessions without a bearer always use V3. Absent or unspecified allows V3.
+     *
+     * @generated from protobuf field: optional TransportPreference upgraded_session_transport = 1;
+     */
+    upgradedSessionTransport?: TransportPreference;
 }
 /**
  * @generated from protobuf message ConnectionError
@@ -12843,6 +12851,12 @@ export interface RealtimeV3Request {
          */
         authBrowserStatus: AuthBrowserStatusRequest;
     } | {
+        oneofKind: "authUpgradeSession";
+        /**
+         * @generated from protobuf field: AuthUpgradeSessionRequest auth_upgrade_session = 10;
+         */
+        authUpgradeSession: AuthUpgradeSessionRequest;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -12909,6 +12923,12 @@ export interface RealtimeV3Response {
          * @generated from protobuf field: ConnectionOpen connection_open = 9;
          */
         connectionOpen: ConnectionOpen;
+    } | {
+        oneofKind: "authUpgradeSession";
+        /**
+         * @generated from protobuf field: AuthUpgradeSessionResult auth_upgrade_session = 10;
+         */
+        authUpgradeSession: AuthUpgradeSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -13045,6 +13065,85 @@ export interface AuthAuthorized {
      * @generated from protobuf field: int64 account_session_id = 2;
      */
     accountSessionId: bigint;
+}
+/**
+ * Adds V3 authority to an existing native session without replacing it or
+ * retiring its bearer during rollout. The encrypted permanent key is the
+ * destination; callers cannot select another key, user, or account session.
+ *
+ * @generated from protobuf message AuthUpgradeSessionRequest
+ */
+export interface AuthUpgradeSessionRequest {
+    /**
+     * Omit to recover a binding after a lost reply using the same permanent key.
+     *
+     * @generated from protobuf field: optional string bearer_token = 1;
+     */
+    bearerToken?: string;
+}
+/**
+ * @generated from protobuf message AuthUpgradeSessionResult
+ */
+export interface AuthUpgradeSessionResult {
+    /**
+     * @generated from protobuf oneof: state
+     */
+    state: {
+        oneofKind: "authorized";
+        /**
+         * @generated from protobuf field: AuthAuthorized authorized = 1;
+         */
+        authorized: AuthAuthorized;
+    } | {
+        oneofKind: "notBound";
+        /**
+         * @generated from protobuf field: AuthUpgradeNotBound not_bound = 2;
+         */
+        notBound: AuthUpgradeNotBound;
+    } | {
+        oneofKind: "declined";
+        /**
+         * @generated from protobuf field: AuthUpgradeDeclined declined = 3;
+         */
+        declined: AuthUpgradeDeclined;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message AuthUpgradeNotBound
+ */
+export interface AuthUpgradeNotBound {
+}
+/**
+ * @generated from protobuf message AuthUpgradeDeclined
+ */
+export interface AuthUpgradeDeclined {
+    /**
+     * @generated from protobuf field: AuthUpgradeDeclined.Reason reason = 1;
+     */
+    reason: AuthUpgradeDeclined_Reason;
+}
+/**
+ * @generated from protobuf enum AuthUpgradeDeclined.Reason
+ */
+export enum AuthUpgradeDeclined_Reason {
+    /**
+     * @generated from protobuf enum value: REASON_UNSPECIFIED = 0;
+     */
+    REASON_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: DISABLED = 1;
+     */
+    DISABLED = 1,
+    /**
+     * @generated from protobuf enum value: INELIGIBLE = 2;
+     */
+    INELIGIBLE = 2,
+    /**
+     * @generated from protobuf enum value: SOURCE_REJECTED = 3;
+     */
+    SOURCE_REJECTED = 3
 }
 /**
  * @generated from protobuf message AuthInviteRequired
@@ -13952,6 +14051,23 @@ export interface AnswerBotFilesystemInput {
  * @generated from protobuf message AnswerBotFilesystemResult
  */
 export interface AnswerBotFilesystemResult {
+}
+/**
+ * @generated from protobuf enum TransportPreference
+ */
+export enum TransportPreference {
+    /**
+     * @generated from protobuf enum value: TRANSPORT_PREFERENCE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: TRANSPORT_PREFERENCE_V3 = 1;
+     */
+    V3 = 1,
+    /**
+     * @generated from protobuf enum value: TRANSPORT_PREFERENCE_LEGACY = 2;
+     */
+    LEGACY = 2
 }
 /**
  * @generated from protobuf enum DialogFollowMode
@@ -15722,7 +15838,9 @@ export const Ack = new Ack$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ConnectionOpen$Type extends MessageType<ConnectionOpen> {
     constructor() {
-        super("ConnectionOpen", []);
+        super("ConnectionOpen", [
+            { no: 1, name: "upgraded_session_transport", kind: "enum", opt: true, T: () => ["TransportPreference", TransportPreference, "TRANSPORT_PREFERENCE_"] }
+        ]);
     }
     create(value?: PartialMessage<ConnectionOpen>): ConnectionOpen {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -15731,9 +15849,28 @@ class ConnectionOpen$Type extends MessageType<ConnectionOpen> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionOpen): ConnectionOpen {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional TransportPreference upgraded_session_transport */ 1:
+                    message.upgradedSessionTransport = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: ConnectionOpen, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional TransportPreference upgraded_session_transport = 1; */
+        if (message.upgradedSessionTransport !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.upgradedSessionTransport);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -49655,7 +49792,8 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
             { no: 5, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadRequest },
             { no: 6, name: "connection_init", kind: "message", oneof: "body", T: () => ConnectionInit },
             { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserRequest },
-            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusRequest }
+            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusRequest },
+            { no: 10, name: "auth_upgrade_session", kind: "message", oneof: "body", T: () => AuthUpgradeSessionRequest }
         ]);
     }
     create(value?: PartialMessage<RealtimeV3Request>): RealtimeV3Request {
@@ -49718,6 +49856,12 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
                         authBrowserStatus: AuthBrowserStatusRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBrowserStatus)
                     };
                     break;
+                case /* AuthUpgradeSessionRequest auth_upgrade_session */ 10:
+                    message.body = {
+                        oneofKind: "authUpgradeSession",
+                        authUpgradeSession: AuthUpgradeSessionRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authUpgradeSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -49754,6 +49898,9 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
         /* AuthBrowserStatusRequest auth_browser_status = 8; */
         if (message.body.oneofKind === "authBrowserStatus")
             AuthBrowserStatusRequest.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* AuthUpgradeSessionRequest auth_upgrade_session = 10; */
+        if (message.body.oneofKind === "authUpgradeSession")
+            AuthUpgradeSessionRequest.internalBinaryWrite(message.body.authUpgradeSession, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -49776,7 +49923,8 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
             { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult },
             { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserResult },
             { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusResult },
-            { no: 9, name: "connection_open", kind: "message", oneof: "body", T: () => ConnectionOpen }
+            { no: 9, name: "connection_open", kind: "message", oneof: "body", T: () => ConnectionOpen },
+            { no: 10, name: "auth_upgrade_session", kind: "message", oneof: "body", T: () => AuthUpgradeSessionResult }
         ]);
     }
     create(value?: PartialMessage<RealtimeV3Response>): RealtimeV3Response {
@@ -49845,6 +49993,12 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
                         connectionOpen: ConnectionOpen.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).connectionOpen)
                     };
                     break;
+                case /* AuthUpgradeSessionResult auth_upgrade_session */ 10:
+                    message.body = {
+                        oneofKind: "authUpgradeSession",
+                        authUpgradeSession: AuthUpgradeSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authUpgradeSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -49884,6 +50038,9 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
         /* ConnectionOpen connection_open = 9; */
         if (message.body.oneofKind === "connectionOpen")
             ConnectionOpen.internalBinaryWrite(message.body.connectionOpen, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* AuthUpgradeSessionResult auth_upgrade_session = 10; */
+        if (message.body.oneofKind === "authUpgradeSession")
+            AuthUpgradeSessionResult.internalBinaryWrite(message.body.authUpgradeSession, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -50275,6 +50432,194 @@ class AuthAuthorized$Type extends MessageType<AuthAuthorized> {
  * @generated MessageType for protobuf message AuthAuthorized
  */
 export const AuthAuthorized = new AuthAuthorized$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthUpgradeSessionRequest$Type extends MessageType<AuthUpgradeSessionRequest> {
+    constructor() {
+        super("AuthUpgradeSessionRequest", [
+            { no: 1, name: "bearer_token", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthUpgradeSessionRequest>): AuthUpgradeSessionRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthUpgradeSessionRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthUpgradeSessionRequest): AuthUpgradeSessionRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string bearer_token */ 1:
+                    message.bearerToken = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthUpgradeSessionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string bearer_token = 1; */
+        if (message.bearerToken !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.bearerToken);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthUpgradeSessionRequest
+ */
+export const AuthUpgradeSessionRequest = new AuthUpgradeSessionRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthUpgradeSessionResult$Type extends MessageType<AuthUpgradeSessionResult> {
+    constructor() {
+        super("AuthUpgradeSessionResult", [
+            { no: 1, name: "authorized", kind: "message", oneof: "state", T: () => AuthAuthorized },
+            { no: 2, name: "not_bound", kind: "message", oneof: "state", T: () => AuthUpgradeNotBound },
+            { no: 3, name: "declined", kind: "message", oneof: "state", T: () => AuthUpgradeDeclined }
+        ]);
+    }
+    create(value?: PartialMessage<AuthUpgradeSessionResult>): AuthUpgradeSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AuthUpgradeSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthUpgradeSessionResult): AuthUpgradeSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AuthAuthorized authorized */ 1:
+                    message.state = {
+                        oneofKind: "authorized",
+                        authorized: AuthAuthorized.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).authorized)
+                    };
+                    break;
+                case /* AuthUpgradeNotBound not_bound */ 2:
+                    message.state = {
+                        oneofKind: "notBound",
+                        notBound: AuthUpgradeNotBound.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).notBound)
+                    };
+                    break;
+                case /* AuthUpgradeDeclined declined */ 3:
+                    message.state = {
+                        oneofKind: "declined",
+                        declined: AuthUpgradeDeclined.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).declined)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthUpgradeSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AuthAuthorized authorized = 1; */
+        if (message.state.oneofKind === "authorized")
+            AuthAuthorized.internalBinaryWrite(message.state.authorized, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* AuthUpgradeNotBound not_bound = 2; */
+        if (message.state.oneofKind === "notBound")
+            AuthUpgradeNotBound.internalBinaryWrite(message.state.notBound, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* AuthUpgradeDeclined declined = 3; */
+        if (message.state.oneofKind === "declined")
+            AuthUpgradeDeclined.internalBinaryWrite(message.state.declined, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthUpgradeSessionResult
+ */
+export const AuthUpgradeSessionResult = new AuthUpgradeSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthUpgradeNotBound$Type extends MessageType<AuthUpgradeNotBound> {
+    constructor() {
+        super("AuthUpgradeNotBound", []);
+    }
+    create(value?: PartialMessage<AuthUpgradeNotBound>): AuthUpgradeNotBound {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthUpgradeNotBound>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthUpgradeNotBound): AuthUpgradeNotBound {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: AuthUpgradeNotBound, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthUpgradeNotBound
+ */
+export const AuthUpgradeNotBound = new AuthUpgradeNotBound$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthUpgradeDeclined$Type extends MessageType<AuthUpgradeDeclined> {
+    constructor() {
+        super("AuthUpgradeDeclined", [
+            { no: 1, name: "reason", kind: "enum", T: () => ["AuthUpgradeDeclined.Reason", AuthUpgradeDeclined_Reason] }
+        ]);
+    }
+    create(value?: PartialMessage<AuthUpgradeDeclined>): AuthUpgradeDeclined {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.reason = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AuthUpgradeDeclined>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthUpgradeDeclined): AuthUpgradeDeclined {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AuthUpgradeDeclined.Reason reason */ 1:
+                    message.reason = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthUpgradeDeclined, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AuthUpgradeDeclined.Reason reason = 1; */
+        if (message.reason !== 0)
+            writer.tag(1, WireType.Varint).int32(message.reason);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthUpgradeDeclined
+ */
+export const AuthUpgradeDeclined = new AuthUpgradeDeclined$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class AuthInviteRequired$Type extends MessageType<AuthInviteRequired> {
     constructor() {
