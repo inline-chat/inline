@@ -470,31 +470,50 @@ struct ComposeInteractionStateTests {
     #expect(state.isAwaitingSend)
   }
 
-  @Test("pending media watchdog reaches timeout")
+  @Test("pending media watchdog reaches timeout", .timeLimit(.minutes(1)))
   @MainActor
   func pendingMediaWatchdogReachesTimeout() async {
     let probe = PendingMediaWatchdogProbe()
-    let watchdog = ComposePendingMediaSendWatchdog(timeout: .milliseconds(5))
+    let sleeper = ManualWatchdogSleeper()
+    let watchdog = ComposePendingMediaSendWatchdog(
+      timeout: .milliseconds(5),
+      sleep: { try await sleeper.sleep($0) }
+    )
 
     watchdog.schedule {
-      probe.fireCount += 1
+      probe.recordFire()
     }
-    try? await Task.sleep(for: .milliseconds(20))
+    let requestedTimeout = await sleeper.started.next()
+
+    #expect(requestedTimeout == .milliseconds(5))
+    #expect(probe.fireCount == 0)
+
+    sleeper.elapse()
+    await probe.fired.next()
+    // Give a duplicate fire the chance to show up before asserting "exactly once".
+    for _ in 0..<5 { await Task.yield() }
 
     #expect(probe.fireCount == 1)
   }
 
-  @Test("cancelled pending media watchdog does not fire")
+  @Test("cancelled pending media watchdog does not fire", .timeLimit(.minutes(1)))
   @MainActor
   func cancelledPendingMediaWatchdogDoesNotFire() async {
     let probe = PendingMediaWatchdogProbe()
-    let watchdog = ComposePendingMediaSendWatchdog(timeout: .milliseconds(5))
+    let sleeper = ManualWatchdogSleeper()
+    let watchdog = ComposePendingMediaSendWatchdog(
+      timeout: .milliseconds(5),
+      sleep: { try await sleeper.sleep($0) }
+    )
 
     watchdog.schedule {
-      probe.fireCount += 1
+      probe.recordFire()
     }
+    await sleeper.started.next()
     watchdog.cancel()
-    try? await Task.sleep(for: .milliseconds(20))
+    // The cancelled sleep throws, which ends the watchdog task without reaching the callback.
+    await sleeper.cancelled.next()
+    for _ in 0..<5 { await Task.yield() }
 
     #expect(probe.fireCount == 0)
   }
@@ -502,5 +521,55 @@ struct ComposeInteractionStateTests {
 
 @MainActor
 private final class PendingMediaWatchdogProbe {
-  var fireCount = 0
+  private(set) var fireCount = 0
+  let fired = TestSignal<Void>()
+
+  func recordFire() {
+    fireCount += 1
+    fired.send(())
+  }
+}
+
+/// Stands in for `Task.sleep` so a test decides when the watchdog timeout "elapses" instead of
+/// racing the real clock. Like `Task.sleep`, it throws when the sleeping task is cancelled.
+private final class ManualWatchdogSleeper: Sendable {
+  let started = TestSignal<Duration>()
+  let cancelled = TestSignal<Void>()
+  private let elapsed = TestSignal<Void>()
+
+  func sleep(_ duration: Duration) async throws {
+    started.send(duration)
+    await elapsed.next()
+    if Task.isCancelled {
+      cancelled.send(())
+      throw CancellationError()
+    }
+  }
+
+  func elapse() {
+    elapsed.send(())
+  }
+}
+
+/// A one-shot signal: `send` may happen before or after `next`. Wakes with nil if the waiting
+/// task is cancelled. Each signal supports a single `next()`.
+private struct TestSignal<Value: Sendable>: Sendable {
+  private let stream: AsyncStream<Value>
+  private let continuation: AsyncStream<Value>.Continuation
+
+  init() {
+    (stream, continuation) = AsyncStream.makeStream()
+  }
+
+  func send(_ value: Value) {
+    continuation.yield(value)
+  }
+
+  @discardableResult
+  func next() async -> Value? {
+    for await value in stream {
+      return value
+    }
+    return nil
+  }
 }

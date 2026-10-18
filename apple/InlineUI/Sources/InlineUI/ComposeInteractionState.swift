@@ -196,10 +196,15 @@ public struct ComposePendingMediaSendState: Equatable, Sendable {
 @MainActor
 public final class ComposePendingMediaSendWatchdog {
   private let timeout: Duration
+  private let sleep: @Sendable (Duration) async throws -> Void
   private var timeoutTask: Task<Void, Never>?
 
-  public init(timeout: Duration) {
+  public init(
+    timeout: Duration,
+    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+  ) {
     self.timeout = timeout
+    self.sleep = sleep
   }
 
   deinit {
@@ -211,9 +216,10 @@ public final class ComposePendingMediaSendWatchdog {
   ) {
     cancel()
     let timeout = timeout
+    let sleep = sleep
     timeoutTask = Task { @MainActor [weak self] in
       do {
-        try await Task.sleep(for: timeout)
+        try await sleep(timeout)
       } catch {
         return
       }
