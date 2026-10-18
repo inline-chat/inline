@@ -64,7 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor var isLoggingOut = false
   @MainActor private var isResettingLocalData = false
-  @MainActor private var pendingLogoutAfterLocalDataReset: (notifyServer: Bool, trigger: MacLogoutTrigger)?
+  @MainActor private var pendingLogoutAfterLocalDataReset: (
+    notifyServer: Bool, trigger: MacLogoutTrigger, invalidationReceipt: AuthInvalidationReceipt?
+  )?
   @MainActor var logoutAttempt: MacLogoutAttempt?
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
@@ -715,7 +717,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pendingLogoutAfterLocalDataReset = nil
         Task { @MainActor [weak self] in
           await self?.performLogOut(
-            notifyServer: pendingLogout.notifyServer, trigger: pendingLogout.trigger
+            notifyServer: pendingLogout.notifyServer, trigger: pendingLogout.trigger,
+            invalidationReceipt: pendingLogout.invalidationReceipt
           )
         }
       }
@@ -794,13 +797,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   /// through its realtime/database phases.
   @MainActor
   func deferLogoutUntilLocalDataResetFinishes(
-    notifyServer: Bool, trigger: MacLogoutTrigger
+    notifyServer: Bool, trigger: MacLogoutTrigger, invalidationReceipt: AuthInvalidationReceipt?
   ) -> Bool {
     guard isResettingLocalData else { return false }
     let pending = pendingLogoutAfterLocalDataReset
+    // An explicit/recovery logout remains unconditional; a delayed remote revocation must
+    // retain its original scope until the reset finishes and logout admission runs again.
+    if let pending, pending.invalidationReceipt == nil {
+      pendingLogoutAfterLocalDataReset = (
+        notifyServer: pending.notifyServer || notifyServer,
+        trigger: invalidationReceipt == nil && trigger.shouldReport ? trigger : pending.trigger,
+        invalidationReceipt: nil
+      )
+      return true
+    }
     pendingLogoutAfterLocalDataReset = (
       notifyServer: (pending?.notifyServer ?? false) || notifyServer,
-      trigger: trigger.shouldReport ? trigger : (pending?.trigger ?? trigger)
+      trigger: trigger,
+      invalidationReceipt: invalidationReceipt
     )
     return true
   }
@@ -858,9 +872,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  @objc private func handleRealtimeAuthInvalidatedNotification() {
+  @objc private func handleRealtimeAuthInvalidatedNotification(_ notification: Notification) {
+    guard let receipt = notification.object as? AuthInvalidationReceipt else { return }
     Task { [weak self] in
-      await self?.performLogOut(notifyServer: false, trigger: .realtimeAuthInvalidated)
+      await self?.performLogOut(
+        notifyServer: false, trigger: .realtimeAuthInvalidated, invalidationReceipt: receipt
+      )
     }
   }
 

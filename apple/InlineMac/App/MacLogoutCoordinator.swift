@@ -116,32 +116,33 @@ extension AppDelegate {
   @MainActor
   func performLogOut(
     notifyServer: Bool = true,
-    trigger: MacLogoutTrigger = .requested
+    trigger: MacLogoutTrigger = .requested,
+    invalidationReceipt: AuthInvalidationReceipt? = nil
   ) async {
     guard !isLoggingOut else { return }
-    guard !deferLogoutUntilLocalDataResetFinishes(notifyServer: notifyServer, trigger: trigger) else { return }
-    isLoggingOut = true
-    log.warning("LOGOUT_TRACE event=requested source=\(trigger.rawValue)")
-    let logoutAccountID = Auth.shared.getCurrentUserId()
-    if trigger.shouldReport {
-      Task.detached(priority: .utility) {
-        guard SentrySDK.isEnabled else { return }
-        _ = SentrySDK.capture(message: "mac_logout_trigger") { scope in
-          scope.setLevel(trigger == .pendingRecovery ? .warning : .error)
-          scope.setFingerprint(["mac-logout-trigger", trigger.rawValue])
-          scope.setTag(value: trigger.rawValue, key: "logout.source")
-          if let logoutAccountID {
-            scope.setTag(value: String(logoutAccountID), key: "account.user_id")
-          }
-        }
-      }
+    guard trigger != .realtimeAuthInvalidated || invalidationReceipt != nil else { return }
+    if let invalidationReceipt, !Auth.shared.handle.isCurrent(invalidationReceipt) {
+      log.info("LOGOUT_TRACE event=stale_account_revocation_ignored")
+      return
     }
-
+    guard !deferLogoutUntilLocalDataResetFinishes(
+      notifyServer: notifyServer, trigger: trigger, invalidationReceipt: invalidationReceipt
+    ) else { return }
+    isLoggingOut = true
     let logoutFence: AuthLogoutFence
     do {
       // Exact first-suspension invariant: close durable and in-memory credential admission before
       // UI routing, RPCs, actor hops, or destructive cleanup.
-      logoutFence = try Auth.shared.beginLogoutSynchronously()
+      if let invalidationReceipt {
+        guard let fence = try Auth.shared.beginLogoutSynchronously(ifCurrent: invalidationReceipt) else {
+          isLoggingOut = false
+          log.info("LOGOUT_TRACE event=stale_account_revocation_ignored")
+          return
+        }
+        logoutFence = fence
+      } else {
+        logoutFence = try Auth.shared.beginLogoutSynchronously()
+      }
     } catch {
       if Auth.shared.getHasPendingLogout() == false {
         if Auth.shared.getHasPendingAccountTransition() {
@@ -170,6 +171,22 @@ extension AppDelegate {
       log.error("LOGOUT_TRACE event=durable_fence_failed", error: error)
       failLogout(attempt, kind: .credentials)
       return
+    }
+
+    log.warning("LOGOUT_TRACE event=requested source=\(trigger.rawValue)")
+    let logoutAccountID = Auth.shared.getCurrentUserId()
+    if trigger.shouldReport {
+      Task.detached(priority: .utility) {
+        guard SentrySDK.isEnabled else { return }
+        _ = SentrySDK.capture(message: "mac_logout_trigger") { scope in
+          scope.setLevel(trigger == .pendingRecovery ? .warning : .error)
+          scope.setFingerprint(["mac-logout-trigger", trigger.rawValue])
+          scope.setTag(value: trigger.rawValue, key: "logout.source")
+          if let logoutAccountID {
+            scope.setTag(value: String(logoutAccountID), key: "account.user_id")
+          }
+        }
+      }
     }
 
     let attempt = MacLogoutAttempt(

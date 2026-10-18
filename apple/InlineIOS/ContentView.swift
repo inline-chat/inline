@@ -31,10 +31,12 @@ struct ContentView2: View {
     .environmentObject(mainViewRouter)
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
-    .onReceive(NotificationCenter.default.publisher(for: .realtimeV2AuthInvalidated)) { _ in
+    .onReceive(NotificationCenter.default.publisher(for: .realtimeV2AuthInvalidated)) { notification in
+      guard let receipt = notification.object as? AuthInvalidationReceipt else { return }
       Task {
         await LogoutPerformer.perform(
           notifyServer: false,
+          invalidationReceipt: receipt,
           mainRouter: mainViewRouter,
           navigation: navigation,
           onboardingNavigation: onboardingNav,

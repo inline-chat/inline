@@ -1731,7 +1731,8 @@ class ShareState: ObservableObject {
     let session = RealtimeDirectSession(
       transport: NegotiatingRealtimeTransport(
         auth: Auth.shared.handle,
-        rsaPublicKeys: InlineProtocolTrustRoots.production
+        rsaPublicKeys: InlineProtocolTrustRoots.production,
+        transportPreference: .stored(in: .shared)
       ),
       auth: Auth.shared.handle,
       connectionAdmissionTimeout: connectionAdmissionTimeout

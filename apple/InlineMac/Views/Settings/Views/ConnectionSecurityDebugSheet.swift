@@ -58,15 +58,18 @@ struct ConnectionSecurityDebugSheet: View {
   }
 
   private var applicationContract: String {
-    snapshot.inlineProtocol == nil ? "Realtime V2" : "Realtime V3"
+    if isUpgradedBearerSession { return "Realtime V3 ready; V2 fallback available" }
+    return snapshot.inlineProtocol == nil ? "Realtime V2" : "Realtime V3"
   }
 
   private var secureTransport: String {
-    snapshot.inlineProtocol == nil ? "Legacy WebSocket" : "Inline Protocol v1"
+    if isUpgradedBearerSession { return "Depends on the active connection" }
+    return snapshot.inlineProtocol == nil ? "Legacy WebSocket" : "Inline Protocol v1"
   }
 
   private var protectionStatus: String {
     guard snapshot.inlineProtocol != nil else { return "TLS transport security" }
+    if isUpgradedBearerSession { return "V3 credentials verified; active protocol not reported here" }
     return switch realtimeState.connectionState {
     case .connected: "Inline Protocol encryption active"
     case .connecting, .updating: "Inline Protocol credentials ready"
@@ -74,7 +77,8 @@ struct ConnectionSecurityDebugSheet: View {
   }
 
   private var sessionType: String {
-    switch snapshot.status {
+    if isUpgradedBearerSession { return "Legacy session with verified V3 credentials" }
+    return switch snapshot.status {
     case .authenticatedV3: "Native Inline Protocol"
     case .authenticated: "Legacy bearer session"
     case .hydrating: "Loading"
@@ -86,8 +90,8 @@ struct ConnectionSecurityDebugSheet: View {
   }
 
   private var authenticatedAt: Date? {
-    if let credentials = snapshot.inlineProtocol { return credentials.createdAt }
     if case let .authenticated(credentials) = snapshot.status { return credentials.createdAt }
+    if let credentials = snapshot.inlineProtocol { return credentials.createdAt }
     return nil
   }
 
@@ -97,11 +101,17 @@ struct ConnectionSecurityDebugSheet: View {
   }
 
   private var explanation: String {
-    if snapshot.inlineProtocol != nil {
+    if isUpgradedBearerSession {
+      "V3 is ready for the next connection. A working V2 connection continues until it reconnects, and V2 remains available if V3 cannot connect. Saved credentials alone do not identify which protocol is carrying current traffic."
+    } else if snapshot.inlineProtocol != nil {
       "Realtime V3 traffic is protected by Inline Protocol above WebSocket and TLS. The permanent authorization key stays in secure local storage; application connections use a bound temporary authorization."
     } else {
-      "This account currently uses the legacy Realtime V2 bearer session over WebSocket and TLS. Sign in with a V3-capable client to create Inline Protocol credentials."
+      "This account uses Realtime V2 over WebSocket and TLS. V3 preparation happens automatically in the background when available; signing in again is not required."
     }
+  }
+
+  private var isUpgradedBearerSession: Bool {
+    snapshot.token != nil && snapshot.inlineProtocol != nil
   }
 }
 

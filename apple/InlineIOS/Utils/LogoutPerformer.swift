@@ -10,6 +10,7 @@ enum LogoutPerformer {
   @MainActor
   static func perform(
     notifyServer: Bool,
+    invalidationReceipt: AuthInvalidationReceipt? = nil,
     mainRouter: MainViewRouter,
     navigation: Navigation,
     onboardingNavigation: OnboardingNavigation,
@@ -23,7 +24,15 @@ enum LogoutPerformer {
     let logoutFence: AuthLogoutFence
     do {
       // Exact first-suspension invariant shared with macOS.
-      logoutFence = try Auth.shared.beginLogoutSynchronously()
+      if let invalidationReceipt {
+        guard let fence = try Auth.shared.beginLogoutSynchronously(ifCurrent: invalidationReceipt) else {
+          Log.shared.info("iOS logout ignored stale account revocation")
+          return
+        }
+        logoutFence = fence
+      } else {
+        logoutFence = try Auth.shared.beginLogoutSynchronously()
+      }
     } catch {
       Log.shared.error("iOS logout durable fence failed", error: error)
       return
