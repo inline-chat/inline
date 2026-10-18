@@ -229,9 +229,11 @@ channels:
         tools:
           allow: ["message", "web.search"]
         toolsBySender:
-          "42":
+          "42": # numeric Inline user ID only
             allow: ["message"]
 ```
+
+`toolsBySender` keys must be the sender's numeric Inline user ID (`42`, `user:42` or `inline:42`), or `*` for every sender. Ask the user to send `/whoami` to see their ID. Display names, usernames and phone numbers never match, because a sender can change them; for example, user 99 renaming themself "42" does not get user 42's tools. The gateway logs a warning at startup for each key it ignores. A sender without an ID entry gets the group's `toolsBySender."*"`, then the group's `tools`, then the same two from the `"*"` group.
 
 Per-account override:
 

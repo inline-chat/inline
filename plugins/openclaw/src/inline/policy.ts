@@ -61,51 +61,61 @@ function resolveGroupConfig(groups: InlineGroups | undefined, groupId: string | 
   return matchedKey ? groups[matchedKey] : undefined
 }
 
-function normalizeSenderKey(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) return ""
-  const withoutAt = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed
-  return withoutAt.toLowerCase()
+/**
+ * Normalizes a sender ID or `toolsBySender` key to the immutable numeric Inline
+ * user ID it names (`42`, `user:42`, `inline:42`). Display names, usernames and
+ * phone numbers can be changed or claimed by the sender, so they never select
+ * a security policy and normalize to null.
+ */
+function normalizeSenderUserId(raw: string | null | undefined): string | null {
+  const id = (raw ?? "").trim().replace(/^inline:/i, "").trim().replace(/^user:/i, "").trim()
+  if (!/^[0-9]+$/.test(id)) return null
+  const value = BigInt(id)
+  return value > 0n ? value.toString() : null
 }
 
 function resolveToolsBySender(params: {
   toolsBySender: Record<string, InlineToolPolicy | undefined> | undefined
   senderId: string | null | undefined
-  senderName: string | null | undefined
-  senderUsername: string | null | undefined
-  senderE164: string | null | undefined
 }): InlineToolPolicy | undefined {
   const entries = Object.entries(params.toolsBySender ?? {})
   if (!entries.length) return undefined
 
-  const normalizedMap = new Map<string, InlineToolPolicy>()
+  const byUserId = new Map<string, InlineToolPolicy>()
   let wildcard: InlineToolPolicy | undefined
   for (const [rawKey, policy] of entries) {
     if (!policy) continue
-    const key = normalizeSenderKey(rawKey)
-    if (!key) continue
-    if (key === "*") {
+    if (rawKey.trim() === "*") {
       wildcard = policy
       continue
     }
-    if (!normalizedMap.has(key)) {
-      normalizedMap.set(key, policy)
+    const userId = normalizeSenderUserId(rawKey)
+    if (userId && !byUserId.has(userId)) {
+      byUserId.set(userId, policy)
     }
   }
 
-  const candidates = [
-    params.senderId,
-    params.senderE164,
-    params.senderUsername,
-    params.senderName,
-  ]
-  for (const candidate of candidates) {
-    const key = normalizeSenderKey(candidate ?? "")
-    if (!key) continue
-    const matched = normalizedMap.get(key)
-    if (matched) return matched
+  const senderUserId = normalizeSenderUserId(params.senderId)
+  return (senderUserId ? byUserId.get(senderUserId) : undefined) ?? wildcard
+}
+
+/**
+ * Lists `toolsBySender` keys that can never match because they are not numeric
+ * Inline user IDs, so startup can say which entries are ignored.
+ */
+export function listIgnoredInlineToolsBySenderKeys(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+}): string[] {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const ignored: string[] = []
+  for (const [groupKey, groupConfig] of Object.entries(groups ?? {})) {
+    for (const senderKey of Object.keys(groupConfig?.toolsBySender ?? {})) {
+      if (senderKey.trim() === "*" || normalizeSenderUserId(senderKey)) continue
+      ignored.push(`groups.${JSON.stringify(groupKey)}.toolsBySender.${JSON.stringify(senderKey)}`)
+    }
   }
-  return wildcard
+  return ignored
 }
 
 export function resolveInlineGroupRequireMention(params: {
@@ -205,14 +215,16 @@ export function resolveInlineGroupAccessPolicy(params: {
   }
 }
 
+/**
+ * Resolves the tool policy for a group turn. Sender-specific entries match the
+ * immutable numeric sender ID only; the host's sender name, username and phone
+ * are deliberately not accepted here.
+ */
 export function resolveInlineGroupToolPolicy(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
   groupId: string | null | undefined
   senderId: string | null | undefined
-  senderName: string | null | undefined
-  senderUsername: string | null | undefined
-  senderE164: string | null | undefined
 }): InlineToolPolicy | undefined {
   const groups = resolveInlineGroups(params.cfg, params.accountId)
   const groupConfig = resolveGroupConfig(groups, params.groupId)
@@ -221,9 +233,6 @@ export function resolveInlineGroupToolPolicy(params: {
   const groupSenderPolicy = resolveToolsBySender({
     toolsBySender: groupConfig?.toolsBySender,
     senderId: params.senderId,
-    senderName: params.senderName,
-    senderUsername: params.senderUsername,
-    senderE164: params.senderE164,
   })
   if (groupSenderPolicy) return groupSenderPolicy
   if (groupConfig?.tools) return groupConfig.tools
@@ -231,9 +240,6 @@ export function resolveInlineGroupToolPolicy(params: {
   const defaultSenderPolicy = resolveToolsBySender({
     toolsBySender: defaultConfig?.toolsBySender,
     senderId: params.senderId,
-    senderName: params.senderName,
-    senderUsername: params.senderUsername,
-    senderE164: params.senderE164,
   })
   if (defaultSenderPolicy) return defaultSenderPolicy
   return defaultConfig?.tools

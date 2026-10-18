@@ -2051,6 +2051,76 @@ describe("inline/channel", () => {
     expect(tools).toEqual({ allow: ["message"] })
   })
 
+  it("matches sender tool policies on the immutable sender ID, never a display name", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+    const { listIgnoredInlineToolsBySenderKeys } = await import("./policy")
+
+    const cfg = {
+      channels: {
+        inline: {
+          groups: {
+            "88": {
+              tools: { allow: ["message"] },
+              toolsBySender: {
+                "42": { allow: ["exec"] },
+                "user:43": { allow: ["web.search"] },
+                alice: { allow: ["exec"] },
+                "@alice": { allow: ["exec"] },
+              },
+            },
+            "*": {
+              tools: { allow: ["message.read"] },
+              toolsBySender: {
+                "*": { allow: ["message"] },
+              },
+            },
+          },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const resolve = (sender: Record<string, string>, groupId = "88") =>
+      inlineChannelPlugin.groups?.resolveToolPolicy?.({
+        cfg,
+        accountId: "default",
+        groupId,
+        ...sender,
+      } as any)
+
+    // Sender 99 renames themself "42" (or picks it as a username/phone).
+    expect(resolve({ senderId: "99", senderName: "42" })).toEqual({ allow: ["message"] })
+    expect(resolve({ senderId: "99", senderUsername: "42" })).toEqual({ allow: ["message"] })
+    expect(resolve({ senderId: "99", senderE164: "42" })).toEqual({ allow: ["message"] })
+    expect(resolve({ senderId: "99", senderName: "alice", senderUsername: "alice" })).toEqual({
+      allow: ["message"],
+    })
+    // A sender ID that is not numeric matches nothing but the fallbacks.
+    expect(resolve({ senderId: "alice" })).toEqual({ allow: ["message"] })
+
+    // The real sender 42 still gets their policy, in any accepted ID form.
+    expect(resolve({ senderId: "42", senderName: "Someone else" })).toEqual({ allow: ["exec"] })
+    expect(resolve({ senderId: "inline:42" })).toEqual({ allow: ["exec"] })
+    expect(resolve({ senderId: "43" })).toEqual({ allow: ["web.search"] })
+
+    // Wildcard and group fallback are unchanged.
+    expect(resolve({ senderId: "99", senderName: "42" }, "77")).toEqual({ allow: ["message"] })
+    expect(
+      inlineChannelPlugin.groups?.resolveToolPolicy?.({
+        cfg: { channels: { inline: { groups: { "*": { tools: { allow: ["message.read"] } } } } } },
+        accountId: "default",
+        groupId: "77",
+        senderId: "99",
+        senderName: "42",
+      } as any),
+    ).toEqual({ allow: ["message.read"] })
+
+    expect(listIgnoredInlineToolsBySenderKeys({ cfg, accountId: "default" })).toEqual([
+      'groups."88".toolsBySender."alice"',
+      'groups."88".toolsBySender."@alice"',
+    ])
+  })
+
   it("defaults group requireMention to true when unset", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")

@@ -62,7 +62,11 @@ import {
   sanitizeInlineOutgoingText,
 } from "./message-formatting.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
-import { resolveInlineGroupRequireMention, resolveInlineGroupToolPolicy } from "./policy.js"
+import {
+  listIgnoredInlineToolsBySenderKeys,
+  resolveInlineGroupRequireMention,
+  resolveInlineGroupToolPolicy,
+} from "./policy.js"
 import {
   inlineMessageActions,
   resolveInlineMessageActionsParam,
@@ -1795,15 +1799,14 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         requireMentionDefault: resolved.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION,
       })
     },
-    resolveToolPolicy: ({ cfg, accountId, groupId, senderId, senderName, senderUsername, senderE164 }) =>
+    // Only the immutable sender ID selects a policy. The host also passes the
+    // sender's name, username and phone, which the sender can change.
+    resolveToolPolicy: ({ cfg, accountId, groupId, senderId }) =>
       resolveInlineGroupToolPolicy({
         cfg,
         groupId,
         accountId,
         senderId,
-        senderName,
-        senderUsername,
-        senderE164,
       }),
   },
 
@@ -2207,6 +2210,17 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }
 
       ctx.log?.info(`[${account.accountId}] starting Inline realtime monitor`)
+      const ignoredSenderKeys = listIgnoredInlineToolsBySenderKeys({
+        cfg: ctx.cfg as OpenClawConfig,
+        accountId: account.accountId,
+      })
+      if (ignoredSenderKeys.length > 0) {
+        ctx.log?.warn?.(
+          `[${account.accountId}] Ignoring toolsBySender keys that are not numeric Inline user IDs: ${ignoredSenderKeys.join(", ")}. ` +
+            "Names, usernames and phone numbers can be changed by the sender, so they never select a tool policy. " +
+            "Key each entry by the sender's user ID (ask them to send /whoami).",
+        )
+      }
 
       // Best-effort stop if already running for this account.
       const existing = activeMonitors.get(account.accountId)
