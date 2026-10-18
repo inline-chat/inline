@@ -25,10 +25,24 @@ enum LegacyProtocolUpgradeDecline: Error, Sendable {
 
 /// Only bounded program categories reach logs. In particular, RPC messages and arbitrary
 /// errors may contain server-supplied or private text and must never be interpolated here.
-private struct LegacyProtocolUpgradeOutcome {
+struct LegacyProtocolUpgradeOutcome {
   let level: LogLevel
   let outcome: String
   let reason: String
+
+  /// Small fixed vocabulary for aggregated rollout health; `reason` keeps the finer category.
+  var reasonClass: String {
+    switch reason {
+    case "verified", "cancelled", "disabled", "ineligible", "source_rejected", "not_bound", "declined", "network",
+         "unexpected":
+      reason
+    case "realtime_v3:timeout": "timeout"
+    default:
+      if reason.hasPrefix("realtime_v3:rpc:") { "server_rejected" }
+      else if reason.hasPrefix("realtime_v3:") { "protocol" }
+      else { "storage" }
+    }
+  }
 
   init(error: (any Error)?) {
     guard let error else {
@@ -324,6 +338,9 @@ actor LegacyProtocolUpgradeCoordinator: LegacyProtocolUpgrading {
     retryAfter = ContinuousClock.now + retryDelay
     let result = LegacyProtocolUpgradeOutcome(error: error)
     let milliseconds = duration.components.seconds * 1_000 + duration.components.attoseconds / 1_000_000_000_000_000
+    PerformanceTrace.healthEvent("realtime.v3_upgrade", data: [
+      "outcome": result.outcome, "reason_class": result.reasonClass, "duration_ms": Int(milliseconds),
+    ])
     let message = "event=legacy_v3_upgrade outcome=\(result.outcome) reason=\(result.reason) duration_ms=\(milliseconds)"
     switch result.level {
     case .error: log.error(message, error: LegacyProtocolUpgradeFailure(reason: result.reason))

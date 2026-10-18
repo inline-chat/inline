@@ -988,6 +988,9 @@ public actor NegotiatingRealtimeTransport: Transport {
   private func applyLegacyPreference(generation: UInt64) async {
     guard generation == self.generation, state == .switching else { return }
     log.warning("event=legacy_v3_fallback protocol=v2 reason=operator_preference duration_ms=\(elapsedMilliseconds())")
+    PerformanceTrace.healthEvent("realtime.v3_fallback", data: [
+      "fallback_reason": "operator_preference", "duration_ms": Int(elapsedMilliseconds()),
+    ])
     guard await retireChild() else { return }
     guard state == .switching else { return }
     state = .disconnected
@@ -1007,6 +1010,9 @@ public actor NegotiatingRealtimeTransport: Transport {
     let cohort = hasLegacyCredentials()
       ? (hasInlineProtocolCredentials() ? "upgraded" : "legacy") : "native"
     log.info("event=legacy_v3_connected protocol=\(kind) cohort=\(cohort) duration_ms=\(elapsedMilliseconds())")
+    PerformanceTrace.healthEvent("realtime.connection.opened", data: [
+      "protocol": kind, "cohort": cohort, "duration_ms": Int(elapsedMilliseconds()),
+    ])
   }
 
   private func elapsedMilliseconds() -> Int64 {
@@ -1038,6 +1044,9 @@ public actor NegotiatingRealtimeTransport: Transport {
     deadlineTask = nil
     retryV3After = ContinuousClock.now + fallbackCooldown
     log.warning("event=legacy_v3_fallback protocol=v2 reason=\(reason) duration_ms=\(elapsedMilliseconds())")
+    PerformanceTrace.healthEvent("realtime.v3_fallback", data: [
+      "fallback_reason": reason, "duration_ms": Int(elapsedMilliseconds()),
+    ])
     guard await retireChild() else { return }
     guard state == .switching else { return }
     state = .starting

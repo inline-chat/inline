@@ -167,13 +167,22 @@ public enum PerformanceTrace {
     "reason": connectionReasonValues,
     "drop_reason": connectionReasonValues,
     "protocol": ["v2", "v3"],
+    "cohort": ["legacy", "upgraded", "native"],
+    "outcome": ["prepared", "deferred", "cancelled"],
+    "reason_class": [
+      "verified", "cancelled", "disabled", "ineligible", "source_rejected", "not_bound", "declined", "network",
+      "unexpected", "timeout", "server_rejected", "protocol", "storage",
+    ],
+    "fallback_reason": ["deadline", "startup_failure", "operator_preference"],
   ]
   private static let connectionReasonValues: Set<String> = [
     "none", "user_stop", "auth_lost", "auth_failed", "auth_timeout", "transport_error", "transport_disconnected",
     "ping_timeout", "network_unavailable", "network_route_changed", "application_resumed", "wake_probe_failed",
     "background_suspended", "constraint_unavailable",
   ]
-  private static let healthEventNames: Set<String> = ["realtime.connection.recovered"]
+  private static let healthEventNames: Set<String> = [
+    "realtime.connection.opened", "realtime.connection.recovered", "realtime.v3_fallback", "realtime.v3_upgrade",
+  ]
   private static let diagnosticTagValues: [String: Set<String>] = ["realtime.protocol": ["v2", "v3"]]
   private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
   private static let maxBreadcrumbMetricCount = 16

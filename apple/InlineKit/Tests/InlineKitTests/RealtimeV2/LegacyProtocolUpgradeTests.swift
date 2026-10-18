@@ -2,7 +2,7 @@ import AsyncAlgorithms
 @testable import Auth
 import Foundation
 import InlineProtocol
-import Logger
+@testable import Logger
 import Testing
 
 @testable import RealtimeV2
@@ -412,6 +412,36 @@ struct LegacyProtocolUpgradeTests {
       commit: { credentials, _ in await harness.commit(credentials) },
       validateSource: {}
     )
+  }
+
+  @Test("upgrade outcomes and fallbacks map to bounded rollout vocabularies")
+  func rolloutHealthVocabularyIsBounded() {
+    let cases: [((any Error)?, String)] = [
+      (nil, "verified"),
+      (CancellationError(), "cancelled"),
+      (LegacyProtocolUpgradeDecline.declined(.disabled), "disabled"),
+      (LegacyProtocolUpgradeDecline.declined(.ineligible), "ineligible"),
+      (LegacyProtocolUpgradeDecline.declined(.sourceRejected), "source_rejected"),
+      (LegacyProtocolUpgradeDecline.notBound, "not_bound"),
+      (AuthStorageError.keychainWriteFailed, "storage"),
+      (InlineProtocolV3ConnectionError.timeout, "timeout"),
+      (InlineProtocolV3ConnectionError.rpc(.with { $0.code = 400 }), "server_rejected"),
+      (InlineProtocolV3ConnectionError.protocolFailure, "protocol"),
+      (URLError(.notConnectedToInternet), "network"),
+      (UpgradeFixtureError.storage, "unexpected"),
+    ]
+    for (error, expected) in cases {
+      let outcome = LegacyProtocolUpgradeOutcome(error: error)
+      #expect(outcome.reasonClass == expected)
+      #expect(PerformanceTrace.isAllowedEnumValue(outcome.reasonClass, for: "reason_class"))
+      #expect(PerformanceTrace.isAllowedEnumValue(outcome.outcome, for: "outcome"))
+    }
+    for reason in ["deadline", "startup_failure", "operator_preference"] {
+      #expect(PerformanceTrace.isAllowedEnumValue(reason, for: "fallback_reason"))
+    }
+    for cohort in ["legacy", "upgraded", "native"] {
+      #expect(PerformanceTrace.isAllowedEnumValue(cohort, for: "cohort"))
+    }
   }
 
   @Test("operator V2 preference keeps upgraded sessions on V2 and never affects native V3")
