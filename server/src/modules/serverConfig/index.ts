@@ -251,6 +251,16 @@ export const getServerConfig = async <K extends ServerConfigKey>(
   key: K,
 ): Promise<ResolvedServerConfig<K>> => resolveEntry(key, await refreshRows())
 
+/**
+ * For hot paths such as connection admission, which must never wait on configuration storage.
+ * Resolves from the last loaded snapshot immediately and refreshes it in the background once it
+ * is stale; overrides apply at once and stored changes within the cache interval.
+ */
+export const peekServerConfig = <K extends ServerConfigKey>(key: K): ResolvedServerConfig<K> => {
+  void refreshRows()
+  return resolveEntry(key, cachedRows)
+}
+
 export const listServerConfig = async (): Promise<readonly ResolvedServerConfig[]> => {
   const rows = await refreshRows()
   return SERVER_CONFIG_KEYS.map((key) => resolveEntry(key, rows))

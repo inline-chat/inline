@@ -304,7 +304,7 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
             input.connectionId, authorization.userId, authorization.accountSessionId,
             request.body.connectionInit.supportsWorking === true,
           )
-          const upgradedSessionTransport = await upgradedSessionTransportPreference()
+          const upgradedSessionTransport = upgradedSessionTransportPreference()
           return { kind: "result", payload: RealtimeV3Response.toBinary({ body: {
             oneofKind: "connectionOpen", connectionOpen: { upgradedSessionTransport },
           } }) }

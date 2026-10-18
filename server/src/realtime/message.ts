@@ -186,7 +186,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         try {
           if (!conn?.userId) {
             let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
-            sendConnectionOpen(await upgradedSessionTransportPreference())
+            sendConnectionOpen(upgradedSessionTransportPreference())
           } else {
             log.error("connectionInit received after already authenticated")
           }
