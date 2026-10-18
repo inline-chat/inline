@@ -50,13 +50,15 @@ export const createMediaFileResponse = ({
 }) => {
   const contentType =
     mimeType?.trim() || "application/octet-stream"
+  // User bytes on the API origin never run as a same-origin document, even
+  // when opened directly. Plain `sandbox` keeps browser image/video viewers.
   const safetyHeaders: Record<string, string> = forceDownload
     ? {
         "content-disposition": "attachment",
         "content-security-policy":
           "sandbox; default-src 'none'",
       }
-    : {}
+    : { "content-security-policy": "sandbox" }
 
   if (
     fileSize === null ||

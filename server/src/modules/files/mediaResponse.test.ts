@@ -32,6 +32,10 @@ describe("createMediaFileResponse", () => {
     expect(response.headers.get("content-type")).toBe(
       "image/jpeg",
     )
+    expect(response.headers.get("content-security-policy")).toBe(
+      "sandbox",
+    )
+    expect(response.headers.get("content-disposition")).toBeNull()
     expect(Array.from(await response.bytes())).toEqual([
       1,
       2,
