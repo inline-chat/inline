@@ -357,6 +357,8 @@ export const AdminReservedUsernamesResult = Schema.Struct({
 export const AdminServerConfigKey = Schema.Literals([
   "auth.signup_mode",
   "auth.phone_code_mode",
+  "auth.session_upgrade_mode",
+  "realtime.upgraded_session_transport",
   "email.default_provider",
 ])
 export const AdminServerConfigValue = Schema.Literals([
@@ -365,6 +367,9 @@ export const AdminServerConfigValue = Schema.Literals([
   "disabled",
   "prelude",
   "custom",
+  "native",
+  "v3",
+  "v2",
   "ses",
   "resend",
 ])

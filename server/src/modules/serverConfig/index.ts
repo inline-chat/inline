@@ -6,16 +6,22 @@ import { Log } from "@in/server/utils/log"
 export const SERVER_CONFIG_KEYS = [
   "auth.signup_mode",
   "auth.phone_code_mode",
+  "auth.session_upgrade_mode",
+  "realtime.upgraded_session_transport",
   "email.default_provider",
 ] as const
 
 export type ServerConfigKey = (typeof SERVER_CONFIG_KEYS)[number]
 export type SignupMode = "open" | "invite_only" | "disabled"
 export type PhoneCodeMode = "prelude" | "custom"
+export type SessionUpgradeMode = "native" | "disabled"
+export type UpgradedSessionTransport = "v3" | "v2"
 export type EmailProvider = "ses" | "resend"
 export interface ServerConfigValueByKey {
   readonly "auth.signup_mode": SignupMode
   readonly "auth.phone_code_mode": PhoneCodeMode
+  readonly "auth.session_upgrade_mode": SessionUpgradeMode
+  readonly "realtime.upgraded_session_transport": UpgradedSessionTransport
   readonly "email.default_provider": EmailProvider
 }
 export type ServerConfigValue<K extends ServerConfigKey = ServerConfigKey> =
@@ -96,6 +102,24 @@ const definitions: { readonly [K in ServerConfigKey]: ServerConfigDefinition<K> 
     environmentName: "INLINE_CONFIG_AUTH_PHONE_CODE_MODE",
     allowedValues: phoneCodeModes,
     defaultValue: "prelude",
+    legacyEnvironmentValue: () => null,
+  },
+  "auth.session_upgrade_mode": {
+    key: "auth.session_upgrade_mode",
+    label: "Native V3 session upgrade",
+    description: "Allow native clients to add V3 authority to their existing session while retaining its bearer during rollout.",
+    environmentName: "INLINE_CONFIG_AUTH_SESSION_UPGRADE_MODE",
+    allowedValues: ["native", "disabled"],
+    defaultValue: "native",
+    legacyEnvironmentValue: () => null,
+  },
+  "realtime.upgraded_session_transport": {
+    key: "realtime.upgraded_session_transport",
+    label: "Upgraded session transport",
+    description: "Transport for native sessions that kept their bearer after a V3 upgrade. Set v2 to route them back to Realtime V2 at their next connection without a client release.",
+    environmentName: "INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT",
+    allowedValues: ["v3", "v2"],
+    defaultValue: "v3",
     legacyEnvironmentValue: () => null,
   },
   "email.default_provider": {

@@ -10,9 +10,11 @@ import {
   ServerProtocolMessage,
   UpdatesPayload,
   UpdateComposeAction_ComposeAction,
+  type TransportPreference,
 } from "@inline-chat/protocol/core"
 import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
+import { upgradedSessionTransportPreference } from "@in/server/modules/serverConfig/transportPreference"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
@@ -132,12 +134,12 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
     ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true)
   }
 
-  const sendConnectionOpen = () => {
+  const sendConnectionOpen = (upgradedSessionTransport: TransportPreference) => {
     sendRaw({
       id: genId(),
       body: {
         oneofKind: "connectionOpen",
-        connectionOpen: {},
+        connectionOpen: { upgradedSessionTransport },
       },
     })
   }
@@ -184,7 +186,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         try {
           if (!conn?.userId) {
             let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
-            sendConnectionOpen()
+            sendConnectionOpen(await upgradedSessionTransportPreference())
           } else {
             log.error("connectionInit received after already authenticated")
           }

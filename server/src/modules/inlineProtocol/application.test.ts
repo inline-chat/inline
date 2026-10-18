@@ -1,8 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { Method, RealtimeV3Request, RealtimeV3Response, RpcCall, RpcError_Code } from "@inline-chat/protocol/core"
+import { Method, RealtimeV3Request, RealtimeV3Response, RpcCall, RpcError_Code, TransportPreference } from "@inline-chat/protocol/core"
 import { InlineProtocolApplicationOutputOverloaded, type LoadedServerAuthorizationKey } from "@inline-chat/protocol/server"
 import * as rpcHandlers from "@in/server/realtime/handlers/_rpc"
 import { ConnVersion, connectionManager } from "@in/server/ws/connections"
+import { InlineError } from "@in/server/types/errors"
+import { Log } from "@in/server/utils/log"
 import {
   InlineProtocolApplicationLanes,
   inlineProtocolRpcExecutionLane,
@@ -16,6 +18,87 @@ const deferred = () => {
 }
 
 describe("Inline Protocol application ordering", () => {
+  test("reports actual V3 use once after successful ordinary RPCs, excluding preparation and rejected execution", async () => {
+    const authorization = {
+      authKeyId: new Uint8Array(8).fill(1), permanentAuthKeyId: new Uint8Array(8).fill(2),
+      permanent: false, temporaryBound: true, userId: 82_011, accountSessionId: 91_021,
+    }
+    const active: LoadedServerAuthorizationKey = {
+      key: new Uint8Array(256), keyId: authorization.authKeyId, temporary: true, currentServerSalt: 1n,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      binding: { permanentAuthKeyId: authorization.permanentAuthKeyId, temporarySessionId: 3n, nonce: 4n,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600, userId: authorization.userId,
+        accountSessionId: authorization.accountSessionId },
+    }
+    const events: unknown[] = []
+    const entered = deferred(), release = deferred()
+    let stale = false, admitted = true, failRpc = false, executions = 0
+    const logger = spyOn(Log.prototype, "info").mockImplementation((message, metadata) => {
+      if (message === "realtime_protocol_used") events.push(metadata)
+    })
+    const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async (rpc) => {
+      if (rpc.method === Method.GET_ME) return { oneofKind: "getMe", getMe: {} }
+      if (failRpc) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      entered.resolve()
+      await release.promise
+      return { oneofKind: "getUserSettings", getUserSettings: {} }
+    })
+    const dispatcher = makeInlineProtocolApplicationDispatcher({
+      connectionId: "migration-use-test",
+      authorizationKeys: { load: async () => stale ? undefined : active },
+      onAuthorized: () => admitted,
+      operations: {
+        authUpgradeSession: async () => { throw new Error("unexpected auth") },
+        authBegin: async () => { throw new Error("unexpected auth") },
+        authComplete: async () => { throw new Error("unexpected auth") },
+        authBeginBrowser: async () => { throw new Error("unexpected auth") },
+        authBrowserStatus: async () => { throw new Error("unexpected auth") },
+      },
+    })
+    const dispatch = async (method: Method = Method.GET_USER_SETTINGS) => {
+      const result = await dispatcher.dispatch({
+        payload: RealtimeV3Request.toBinary({ body: { oneofKind: "rpc", rpc: RpcCall.create({
+          method, input: method === Method.GET_ME
+            ? { oneofKind: "getMe", getMe: {} } : { oneofKind: "getUserSettings", getUserSettings: {} },
+        }) } }),
+        authorization, messageId: 1n, sessionId: 2n, signal: new AbortController().signal,
+        markExecutionStarted: () => { executions++ }, sendUpdate() {},
+      })
+      if (result.kind !== "result") throw new Error("Expected RPC result")
+      return RealtimeV3Response.fromBinary(result.payload)
+    }
+    const inFlight: Promise<unknown>[] = []
+    try {
+      expect((await dispatch(Method.GET_ME)).body.oneofKind).toBe("rpcResult")
+      expect(events).toEqual([])
+      stale = true
+      expect((await dispatch()).body.oneofKind).toBe("rpcError")
+      stale = false; admitted = false
+      expect((await dispatch()).body.oneofKind).toBe("rpcError")
+      expect(executions).toBe(1)
+      admitted = true; failRpc = true
+      expect((await dispatch()).body.oneofKind).toBe("rpcError")
+      failRpc = false
+      const first = dispatch(), second = dispatch()
+      inFlight.push(first, second)
+      await entered.promise
+      expect(events).toEqual([])
+      release.resolve()
+      expect((await first).body.oneofKind).toBe("rpcResult")
+      expect((await second).body.oneofKind).toBe("rpcResult")
+      expect(events).toEqual([{
+        protocol: "v3", outcome: "rpc_succeeded", userId: authorization.userId, sessionId: authorization.accountSessionId,
+      }])
+      expect(handler).toHaveBeenCalledTimes(4)
+      expect(executions).toBe(4)
+    } finally {
+      release.resolve()
+      await Promise.allSettled(inFlight)
+      handler.mockRestore()
+      logger.mockRestore()
+    }
+  })
+
   test("negotiates working only on the exact authorized V3 socket and rejects stale bindings", async () => {
     const authorization = {
       authKeyId: new Uint8Array(8).fill(1), permanentAuthKeyId: new Uint8Array(8).fill(2),
@@ -37,6 +120,7 @@ describe("Inline Protocol application ordering", () => {
       connectionId,
       authorizationKeys: { load: async () => stale ? undefined : active },
       operations: {
+        authUpgradeSession: async () => { throw new Error("unexpected auth") },
         authBegin: async () => { throw new Error("unexpected auth") },
         authComplete: async () => { throw new Error("unexpected auth") },
         authBeginBrowser: async () => { throw new Error("unexpected auth") },
@@ -58,11 +142,26 @@ describe("Inline Protocol application ordering", () => {
       return RealtimeV3Response.fromBinary(response.payload)
     }
     try {
-      expect((await dispatch(true)).body.oneofKind).toBe("connectionOpen")
+      const open = await dispatch(true)
+      expect(open.body.oneofKind).toBe("connectionOpen")
+      expect(open.body.oneofKind === "connectionOpen" && open.body.connectionOpen.upgradedSessionTransport)
+        .toBe(TransportPreference.V3)
       expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(true)
       expect((await dispatch(undefined)).body.oneofKind).toBe("connectionOpen")
       expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(false)
-      expect(executions).toBe(2)
+
+      // The operator rollback lever reaches every V3 open without a client release.
+      const previousTransport = process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"]
+      process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"] = "v2"
+      try {
+        const rolledBack = await dispatch(undefined)
+        expect(rolledBack.body.oneofKind === "connectionOpen" && rolledBack.body.connectionOpen.upgradedSessionTransport)
+          .toBe(TransportPreference.LEGACY)
+      } finally {
+        if (previousTransport === undefined) delete process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"]
+        else process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"] = previousTransport
+      }
+      expect(executions).toBe(3)
 
       stale = true
       expect((await dispatch(true)).body.oneofKind).toBe("rpcError")
@@ -71,7 +170,7 @@ describe("Inline Protocol application ordering", () => {
       allowAdmission = false
       expect((await dispatch(true)).body.oneofKind).toBe("rpcError")
       expect(connectionManager.getConnection(connectionId)?.supportsWorking).toBe(false)
-      expect(executions).toBe(2)
+      expect(executions).toBe(3)
     } finally {
       connectionManager.removeConnection(connectionId)
       await connectionManager.waitForBackgroundWork()
@@ -85,6 +184,7 @@ describe("Inline Protocol application ordering", () => {
       connectionId: "browser-status-after-auth-test",
       authorizationKeys: { load: async () => undefined },
       operations: {
+        authUpgradeSession: async () => { throw new Error("unexpected auth") },
         authBegin: async () => { throw new Error("unexpected auth") },
         authComplete: async () => { throw new Error("unexpected auth") },
         authBeginBrowser: async () => { throw new Error("unexpected auth") },
@@ -159,6 +259,7 @@ describe("Inline Protocol application ordering", () => {
         connectionId: "file-part-replay-test",
         authorizationKeys: { load: async () => active },
         operations: {
+          authUpgradeSession: async () => { throw new Error("unexpected auth") },
           authBegin: async () => { throw new Error("unexpected auth") },
           authComplete: async () => { throw new Error("unexpected auth") },
           authBeginBrowser: async () => { throw new Error("unexpected auth") },
@@ -237,6 +338,7 @@ describe("Inline Protocol application ordering", () => {
         authorizationKeys: { load: async () => current },
         onAuthorized: () => { registrations++; return true },
         operations: {
+          authUpgradeSession: async () => { throw new Error("unexpected auth") },
           authBegin: async () => { throw new Error("unexpected auth") },
           authComplete: async () => { throw new Error("unexpected auth") },
           authBeginBrowser: async () => { throw new Error("unexpected auth") },
@@ -325,6 +427,7 @@ describe("Inline Protocol application ordering", () => {
         // after temporary-key validation but before application execution.
         onAuthorized: () => false,
         operations: {
+          authUpgradeSession: async () => { throw new Error("unexpected auth") },
           authBegin: async () => { throw new Error("unexpected auth") },
           authComplete: async () => { throw new Error("unexpected auth") },
           authBeginBrowser: async () => { throw new Error("unexpected auth") },
@@ -361,6 +464,7 @@ describe("Inline Protocol application ordering", () => {
       connectionId: "test",
       authorizationKeys: { load: async () => undefined },
       operations: {
+        authUpgradeSession: async () => { throw new Error("unexpected auth") },
         authBegin: async () => { throw new InlineProtocolApplicationOutputOverloaded() },
         authComplete: async () => ({ state: { oneofKind: undefined } }),
         authBeginBrowser: async () => ({ loginTransactionId: "", browserUrl: "", verificationCode: "", expiresAt: 0n }),
@@ -398,6 +502,7 @@ describe("Inline Protocol application ordering", () => {
       connectionId: "test",
       authorizationKeys: { load: async () => undefined },
       operations: {
+        authUpgradeSession: async () => { throw new Error("unexpected auth") },
         authBegin: async () => {
           controller.abort(reason)
           throw reason

@@ -7,6 +7,8 @@ import type {
   AuthBrowserStatusResult,
   AuthCompleteRequest,
   AuthCompleteResult,
+  AuthUpgradeSessionRequest,
+  AuthUpgradeSessionResult,
 } from "@inline-chat/protocol/core"
 import type {
   InlineProtocolApplicationContext,
@@ -31,5 +33,9 @@ export class InlineProtocolOperations implements InlineProtocolApplicationOperat
 
   authBrowserStatus(input: AuthBrowserStatusRequest, context: InlineProtocolApplicationContext): Promise<AuthBrowserStatusResult> {
     return this.auth.browserStatus(input, context)
+  }
+
+  authUpgradeSession(input: AuthUpgradeSessionRequest, context: InlineProtocolApplicationContext): Promise<AuthUpgradeSessionResult> {
+    return this.auth.upgradeSession(input, context)
   }
 }

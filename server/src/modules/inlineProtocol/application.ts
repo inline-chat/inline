@@ -12,6 +12,8 @@ import {
   type AuthBrowserStatusResult,
   type AuthCompleteRequest,
   type AuthCompleteResult,
+  type AuthUpgradeSessionRequest,
+  type AuthUpgradeSessionResult,
   type InputPeer,
   type RpcCall,
   type ServerProtocolMessage,
@@ -29,11 +31,12 @@ import {
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { InlineError } from "@in/server/types/errors"
 import { connectionManager } from "@in/server/ws/connections"
+import { upgradedSessionTransportPreference } from "@in/server/modules/serverConfig/transportPreference"
 
-const log = new Log("InlineProtocol.V3.Application")
+const log = new Log("InlineProtocol.V3.Application", LogLevel.INFO)
 
 export type InlineProtocolApplicationContext = {
   authorization: ServerApplicationAuthorization
@@ -46,6 +49,7 @@ export interface InlineProtocolApplicationOperations {
   authComplete(input: AuthCompleteRequest, context: InlineProtocolApplicationContext): Promise<AuthCompleteResult>
   authBeginBrowser(input: AuthBeginBrowserRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginBrowserResult>
   authBrowserStatus(input: AuthBrowserStatusRequest, context: InlineProtocolApplicationContext): Promise<AuthBrowserStatusResult>
+  authUpgradeSession(input: AuthUpgradeSessionRequest, context: InlineProtocolApplicationContext): Promise<AuthUpgradeSessionResult>
 }
 
 const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
@@ -207,6 +211,7 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
   onAuthorized?: (authorization: ServerApplicationAuthorization) => boolean
 }): ServerApplicationDispatcher => {
   const lanes = new InlineProtocolApplicationLanes()
+  let recordedProtocolUse = false
   return {
     dispatch: async ({ payload, authorization, signal, markExecutionStarted, sendUpdate }) => {
       let request
@@ -223,6 +228,18 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
       }
       const context = { authorization, metadata: input.metadata, signal }
       try {
+        // A successful upgrade authorizes the permanent key. Its subsequent
+        // recovery requests must still reach the exact-key operation.
+        if (authorization.permanent && request.body.oneofKind === "authUpgradeSession") {
+          markExecutionStarted()
+          const result = await input.operations.authUpgradeSession(request.body.authUpgradeSession, context)
+          return {
+            kind: "result",
+            payload: RealtimeV3Response.toBinary({
+              body: { oneofKind: "authUpgradeSession", authUpgradeSession: result },
+            }),
+          }
+        }
         if (authorization.permanent && request.body.oneofKind === "authBrowserStatus") {
           const result = await input.operations.authBrowserStatus(request.body.authBrowserStatus, context)
           return {
@@ -287,8 +304,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
             input.connectionId, authorization.userId, authorization.accountSessionId,
             request.body.connectionInit.supportsWorking === true,
           )
+          const upgradedSessionTransport = await upgradedSessionTransportPreference()
           return { kind: "result", payload: RealtimeV3Response.toBinary({ body: {
-            oneofKind: "connectionOpen", connectionOpen: {},
+            oneofKind: "connectionOpen", connectionOpen: { upgradedSessionTransport },
           } }) }
         }
         if (request.body.oneofKind === "rpc") {
@@ -320,6 +338,20 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
                 : undefined,
             })
           })
+          if (!recordedProtocolUse && !signal.aborted && rpc.method !== Method.GET_ME) {
+            recordedProtocolUse = true
+            try {
+              // Preparation only calls getMe. A completed ordinary RPC proves
+              // actual application use, once per carrier, with IDs for cohort
+              // joins. This is not a claim of sustained connection health.
+              log.info("realtime_protocol_used", {
+                protocol: "v3", outcome: "rpc_succeeded",
+                userId: authorization.userId, sessionId: authorization.accountSessionId,
+              })
+            } catch {
+              // Telemetry is never part of the RPC result contract.
+            }
+          }
           return {
             kind: "result",
             terminateAuthorization: rpc.method === Method.LOG_OUT,

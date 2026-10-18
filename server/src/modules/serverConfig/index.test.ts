@@ -41,6 +41,25 @@ describe("server configuration precedence", () => {
       source: "default",
     })
 
+    expect(resolveServerConfigValue("auth.session_upgrade_mode", {})).toEqual({
+      value: "native",
+      source: "default",
+    })
+    expect(resolveServerConfigValue("auth.session_upgrade_mode", {
+      environmentOverride: "disabled",
+    })).toEqual({ value: "disabled", source: "environment" })
+
+    expect(resolveServerConfigValue("realtime.upgraded_session_transport", {})).toEqual({
+      value: "v3",
+      source: "default",
+    })
+    expect(resolveServerConfigValue("realtime.upgraded_session_transport", {
+      environmentOverride: "v2",
+    })).toEqual({ value: "v2", source: "environment" })
+    expect(resolveServerConfigValue("realtime.upgraded_session_transport", {
+      environmentOverride: "legacy",
+    })).toEqual({ value: "v3", source: "default" })
+
     expect(resolveServerConfigValue("auth.phone_code_mode", {
       environmentOverride: "custom",
       databaseValue: "prelude",

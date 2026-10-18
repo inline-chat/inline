@@ -15,6 +15,7 @@ import {
   Method,
   PushNotificationProvider,
   RpcError_Code,
+  TransportPreference,
   UsernameAvailability,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
@@ -78,7 +79,7 @@ describe("realtime protocol safety", () => {
 
     const openMessage = await wsServerProtocolMessage(ws)
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
-    return { ws, userId: user.id, sessionId: session.id, token }
+    return { ws, userId: user.id, sessionId: session.id, token, openMessage }
   }
 
   const authenticateExistingUserSocket = async (
@@ -371,8 +372,24 @@ describe("realtime protocol safety", () => {
   })
 
   it("returns connectionOpen for valid connectionInit token", async () => {
-    const { ws } = await authenticateSocket()
+    const { ws, openMessage } = await authenticateSocket()
+    expect(openMessage.body.oneofKind === "connectionOpen" && openMessage.body.connectionOpen.upgradedSessionTransport)
+      .toBe(TransportPreference.V3)
     await wsClosed(ws)
+  })
+
+  it("tells upgraded sessions to use V2 when the operator rolls back V3", async () => {
+    const previous = process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"]
+    process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"] = "v2"
+    try {
+      const { ws, openMessage } = await authenticateSocket()
+      expect(openMessage.body.oneofKind === "connectionOpen" && openMessage.body.connectionOpen.upgradedSessionTransport)
+        .toBe(TransportPreference.LEGACY)
+      await wsClosed(ws)
+    } finally {
+      if (previous === undefined) delete process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"]
+      else process.env["INLINE_CONFIG_REALTIME_UPGRADED_SESSION_TRANSPORT"] = previous
+    }
   })
 
   it("accepts client acknowledgements without reporting an error", async () => {

@@ -9,6 +9,8 @@ import {
   type AuthBrowserStatusResult,
   type AuthCompleteRequest,
   type AuthCompleteResult,
+  type AuthUpgradeSessionRequest,
+  type AuthUpgradeSessionResult,
 } from "@inline-chat/protocol/core"
 import { and, count, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { randomBytes, timingSafeEqual } from "node:crypto"
@@ -38,6 +40,7 @@ import type { InlineProtocolSecretKeyRing } from "./keyCipher"
 import { InlineProtocolChallengeCipher } from "./challengeCipher"
 import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 import { authorizeInlineProtocolKey, finishInlineProtocolSessionReplacement } from "./authorizeKey"
+import { upgradeInlineProtocolSession } from "./upgradeSession"
 import {
   beginInlineProtocolBrowserLogin,
   inlineProtocolBrowserLoginStatus,
@@ -148,6 +151,13 @@ export class InlineProtocolAuthOperations {
     const pepper = this.pepperRing.keys.get(this.pepperRing.activeId)
     if (!pepper) throw new RangeError("Inline Protocol active auth pepper is absent")
     return pepper
+  }
+
+  upgradeSession(
+    request: AuthUpgradeSessionRequest,
+    context: InlineProtocolApplicationContext,
+  ): Promise<AuthUpgradeSessionResult> {
+    return upgradeInlineProtocolSession(request, context)
   }
 
   async beginBrowser(
