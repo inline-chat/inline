@@ -81,6 +81,7 @@
 		E12407240000000100000001 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000000 /* InlineIntents */; };
 		E12407240000000100000003 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000002 /* InlineIntents */; };
 		E12407240000000100000005 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000004 /* InlineIntents */; };
+		E12407240000000100000007 /* InlineNotificationFence in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000006 /* InlineNotificationFence */; };
 		E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
@@ -353,6 +354,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E12407240000000100000005 /* InlineIntents in Frameworks */,
+				E12407240000000100000007 /* InlineNotificationFence in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -595,6 +597,7 @@
 			name = InlineNotificationExtension;
 			packageProductDependencies = (
 				E12407240000000100000004 /* InlineIntents */,
+				E12407240000000100000006 /* InlineNotificationFence */,
 			);
 			productName = InlineNotificationExtension;
 			productReference = CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */;
@@ -2349,6 +2352,10 @@
 		E12407240000000100000004 /* InlineIntents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIntents;
+		};
+		E12407240000000100000006 /* InlineNotificationFence */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineNotificationFence;
 		};
 		E5A100022FA0000100000001 /* InlineSyntaxHighlighting */ = {
 			isa = XCSwiftPackageProductDependency;

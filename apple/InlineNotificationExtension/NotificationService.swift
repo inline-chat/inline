@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import ImageIO
 import InlineIntents
+import InlineNotificationFence
 import OSLog
 import Security
 import UIKit
@@ -11,29 +12,62 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
   private let logger = Logger(subsystem: "chat.inline.InlineNotificationExtension", category: "NotificationService")
   private let deliveryLock = NSLock()
   private var currentDelivery: InlineNotificationDelivery?
+  private let accountFence: any NotificationAccountFenceStorage = KeychainNotificationAccountFenceStorage()
 
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
+    // The device key outlives accounts. Before any decryption, fetch or donation, the payload's
+    // recipient must be the account the app says is signed in now.
+    let accountFence = accountFence
+    let admission = NotificationAccountAdmission.evaluate(
+      userInfo: request.content.userInfo,
+      fence: accountFence.read()
+    )
+    let redacted = NotificationAccountRedaction.content(from: request.content)
+    // Recheck on every publication path, including expiry: logout can land mid-processing.
+    let publish: (UNNotificationContent) -> Void = { content in
+      contentHandler(admission.isCurrent(accountFence.read()) ? content : redacted)
+    }
+
     // Install a fallback synchronously: system expiry cannot depend on the main queue.
-    let delivery = InlineNotificationDelivery(content: request.content, handler: contentHandler)
+    let delivery = InlineNotificationDelivery(
+      content: admission.isAdmitted ? request.content : redacted,
+      handler: publish
+    )
     let previous = deliveryLock.withLock {
       let previous = currentDelivery
       currentDelivery = delivery
       return previous
     }
     previous?.finish()
+    guard admission.isAdmitted else {
+      if case let .rejected(reason) = admission {
+        logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
+      }
+      delivery.finish()
+      return
+    }
     let work = Task { @MainActor in
-      await process(request, delivery: delivery)
+      await process(request, delivery: delivery) {
+        admission.isCurrent(accountFence.read())
+      }
     }
     delivery.cancelOnFinish { work.cancel() }
   }
 
   @MainActor
-  private func process(_ request: UNNotificationRequest, delivery: InlineNotificationDelivery) async {
+  private func process(
+    _ request: UNNotificationRequest,
+    delivery: InlineNotificationDelivery,
+    isAccountCurrent: @escaping @Sendable () -> Bool
+  ) async {
     guard delivery.isPending else { return }
-    guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
+    // Finishing routes the fallback through the publication recheck, which redacts it.
+    guard isAccountCurrent(),
+          let content = request.content.mutableCopy() as? UNMutableNotificationContent
+    else {
       delivery.finish()
       return
     }
@@ -55,7 +89,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     }
 
     @MainActor func enrichAvatar() async {
-      guard !Task.isCancelled, delivery.isPending else { return }
+      guard !Task.isCancelled, delivery.isPending, isAccountCurrent() else { return }
       let avatarSource: InlineMessageIntentDonation.UserAvatar.Source
       if let avatarURL = sender.profilePhotoUrl {
         let data = await Self.loadAvatarImageData(from: avatarURL)
@@ -63,7 +97,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       } else {
         avatarSource = sender.fallbackAvatarSource
       }
-      guard !Task.isCancelled, delivery.isPending,
+      // Intent donation outlives this notification; never donate after the account changed.
+      guard !Task.isCancelled, delivery.isPending, isAccountCurrent(),
             let snapshot = bestContent.mutableCopy() as? UNMutableNotificationContent
       else { return }
       let styled = await applyingIntent(sender: sender, content: snapshot, avatarSource: avatarSource)
@@ -74,7 +109,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     }
 
     @MainActor func enrichPhoto() async {
-      guard !Task.isCancelled, delivery.isPending else { return }
+      guard !Task.isCancelled, delivery.isPending, isAccountCurrent() else { return }
       guard let photoURL, let fileURL = await InlineNotificationPhoto.file(from: photoURL) else { return }
       guard !Task.isCancelled, delivery.isPending,
             let updated = bestContent.mutableCopy() as? UNMutableNotificationContent

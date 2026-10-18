@@ -21,6 +21,10 @@ let package = Package(
       targets: ["InlineAvatarCore"]
     ),
     .library(
+      name: "InlineNotificationFence",
+      targets: ["InlineNotificationFence"]
+    ),
+    .library(
       name: "InlineKit",
       targets: ["InlineKit"]
     ),
@@ -101,6 +105,13 @@ let package = Package(
 
     .target(
       name: "InlineAvatarCore",
+      swiftSettings: swiftSettings
+    ),
+
+    // Account fence shared with the iOS notification service extension. Dependency-free so the
+    // extension can link it without the app's auth, database or network stack.
+    .target(
+      name: "InlineNotificationFence",
       swiftSettings: swiftSettings
     ),
 
@@ -191,6 +202,7 @@ let package = Package(
       name: "Auth",
       dependencies: [
         "InlineConfig",
+        "InlineNotificationFence",
         "InlineProtocol",
         "Logger",
       ],
@@ -250,6 +262,12 @@ let package = Package(
     ),
 
     .testTarget(
+      name: "InlineNotificationFenceTests",
+      dependencies: ["InlineNotificationFence"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
       name: "InlineProtocolTests",
       dependencies: ["InlineProtocol"],
       swiftSettings: swiftSettings
@@ -261,6 +279,7 @@ let package = Package(
         .product(name: "ZIPFoundation", package: "ZIPFoundation"),
         "InlineAvatarCore",
         "InlineKit",
+        "InlineNotificationFence",
         .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
       ],
       swiftSettings: swiftSettings

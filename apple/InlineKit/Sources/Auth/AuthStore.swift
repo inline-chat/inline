@@ -1,5 +1,6 @@
 import Foundation
 import InlineConfig
+import InlineNotificationFence
 import InlineProtocol
 import Logger
 
@@ -149,6 +150,8 @@ actor AuthStore {
   private let mocked: Bool
   private let namespace: String?
   private nonisolated let logoutMarkerLock = NSLock()
+  /// Tells the iOS notification extension which account may read private push content.
+  private nonisolated let notificationFence: NotificationAccountFencePublisher?
 
   private nonisolated let cache: AuthSnapshotCache
 
@@ -174,11 +177,13 @@ actor AuthStore {
     legacyUpgradeWriteOverride: (@Sendable () -> Bool)? = nil,
     logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
     credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
-    authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
+    authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil,
+    notificationFence: NotificationAccountFencePublisher? = nil
   ) {
     self.cache = cache
     self.mocked = mocked
     self.namespace = namespace
+    self.notificationFence = notificationFence
     primaryKeychain = AuthKeychainConfig.makePrimaryKeychain(mocked: mocked, namespace: namespace)
     fallbackKeychain = AuthKeychainConfig.makeFallbackKeychainIfNeeded(mocked: mocked, namespace: namespace)
 
@@ -248,6 +253,8 @@ actor AuthStore {
       UserDefaults.standard.set(recoveredFence.correlationID.uuidString, forKey: resolvedLogoutAttemptIDKey)
     }
     cache.update(initial)
+    // Launch also repairs the fence for installs that predate it or crashed mid-transition.
+    publishNotificationFence(for: initial.status)
 
     snapshotPipe.yield(initial)
 
@@ -562,6 +569,14 @@ actor AuthStore {
               UserDefaults.standard.string(forKey: logoutAttemptIDKey) == fence.correlationID.uuidString
         else { throw AuthStorageError.logoutFencePersistenceFailed }
       }
+      // Synchronous with the durable marker, so it lands before the best-effort logout RPC or
+      // any other suspension. Pushes already in flight for this account stop decrypting here.
+      if let notificationFence,
+         notificationFence.publishSignedOut(isCurrent: { cache.isLogoutFenceCurrent(fence) }) == false,
+         cache.isLogoutFenceCurrent(fence)
+      {
+        log.error("AUTH2_LOGOUT notification account fence could not be closed")
+      }
       return fence
     } catch {
       let durableMarkerIsAbsent = UserDefaults.standard.object(forKey: logoutPendingKey) == nil
@@ -717,6 +732,7 @@ actor AuthStore {
     guard let accountMutationToken else { throw credentialCommitFenceError(for: attempt) }
     stagedAuthorityBaseline = nil
     updateLockedRetryLoop(for: cache.snapshot().status)
+    publishNotificationFence(for: cache.snapshot().status)
     return accountMutationToken
   }
 
@@ -812,6 +828,7 @@ actor AuthStore {
     }
     updateLockedRetryLoop(for: snapshot.status)
     stagedAuthorityBaseline = nil
+    publishNotificationFence(for: snapshot.status)
     log.info("AUTH2_LOGOUT completed transition_id=\(fence.correlationID.uuidString)")
     return true
   }
@@ -1188,6 +1205,7 @@ actor AuthStore {
       )
     }
     updateLockedRetryLoop(for: snapshot.status)
+    publishNotificationFence(for: snapshot.status)
 
     switch (previousStatus.isAuthenticated, snapshot.status.isAuthenticated) {
     case (false, true):
@@ -1199,6 +1217,29 @@ actor AuthStore {
     case (true, false):
       eventBroadcaster.yield(.logout)
     default:
+      break
+    }
+  }
+
+  /// Mirrors committed auth state into the notification fence. Each write rechecks the cache under
+  /// the fence lock, so a stale publication can never overwrite a newer logout or login.
+  private nonisolated func publishNotificationFence(for status: AuthStatus) {
+    guard let notificationFence else { return }
+    let cache = cache
+    switch status {
+    case .authenticated, .authenticatedV3:
+      guard let userID = status.userId else { return }
+      notificationFence.publishSignedIn(userID: userID) {
+        let snapshot = cache.snapshot()
+        return snapshot.status.isAuthenticated && snapshot.currentUserId == userID
+          && cache.hasPendingAccountTransition() == false
+      }
+    case .unauthenticated, .reauthRequired, .loggingOut:
+      notificationFence.publishSignedOut {
+        cache.snapshot().status.isAuthenticated == false || cache.hasPendingLogout()
+      }
+    case .hydrating, .locked:
+      // Unknown, not signed out: keep the last published owner.
       break
     }
   }

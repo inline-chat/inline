@@ -3,6 +3,7 @@ import InlineGrid
 import InlineKit
 import Logger
 import UIKit
+import UserNotifications
 
 enum LogoutPerformer {
   @MainActor private static var isRunning = false
@@ -37,6 +38,13 @@ enum LogoutPerformer {
       Log.shared.error("iOS logout durable fence failed", error: error)
       return
     }
+
+    // The fence above already told the notification extension this account is signed out.
+    // Also retire the push key and the account's visible notifications before any suspension.
+    AppDelegate.retirePushContentKeyForLogout()
+    let notificationCenter = UNUserNotificationCenter.current()
+    notificationCenter.removeAllDeliveredNotifications()
+    notificationCenter.removeAllPendingNotificationRequests()
 
     // Fence playback and pending download intent before the first suspension.
     SharedAudioPlayer.shared.stop()

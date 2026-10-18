@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import InlineConfig
+import InlineNotificationFence
 import Logger
 
 public final class Auth: ObservableObject, @unchecked Sendable {
@@ -32,11 +33,22 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
   private init() {
     cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
-    store = AuthStore(cache: cache, mocked: false)
+    store = AuthStore(cache: cache, mocked: false, notificationFence: Self.platformNotificationFence())
     handle = AuthHandle(cache: cache, store: store)
 
     startListening()
     repairUserIdHintOnLaunch()
+  }
+
+  private static func platformNotificationFence() -> NotificationAccountFencePublisher? {
+    #if os(iOS)
+    // Only iOS has a notification service extension that decrypts push content. Only the app
+    // publishes: an extension cannot see the app's logout marker and could re-open the fence.
+    guard Bundle.main.bundleURL.pathExtension != "appex" else { return nil }
+    return NotificationAccountFencePublisher(storage: KeychainNotificationAccountFenceStorage())
+    #else
+    return nil
+    #endif
   }
 
   init(mockAuthenticated: Bool) {

@@ -494,6 +494,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 }
 
+extension AppDelegate {
+  /// Logout retires the device push key, so an alert still queued for the old session can no
+  /// longer be decrypted. The next sign-in registers a fresh key with its own session.
+  static func retirePushContentKeyForLogout() {
+    let status = SecItemDelete(basePushContentKeychainQuery() as CFDictionary)
+    if status != errSecSuccess, status != errSecItemNotFound {
+      Log.shared.error("Failed to delete push-content private key (status: \(status))")
+    }
+  }
+}
+
 private extension AppDelegate {
   static let pushContentVersion: UInt32 = 1
   static let pushContentKeychainService = "chat.inline.push-content"
