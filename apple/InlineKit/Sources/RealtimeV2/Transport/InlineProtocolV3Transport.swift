@@ -62,13 +62,19 @@ public actor InlineProtocolV3Transport: Transport {
   private let localDebugTrustHost: String?
   private let channel = AsyncChannel<TransportEvent>()
   private var connection: InlineProtocolV3Connection?
+  private var connectionAuthority: AuthInvalidationReceipt?
   private var updatesTask: Task<Void, Never>?
   private var pingTask: Task<Void, Never>?
   private var activePingNonce: UInt64?
   private var startTask: Task<Void, Never>?
   private var rotationTask: Task<Void, Never>?
+  private var preferenceTask: Task<Void, Never>?
   private var startGeneration: UInt64 = 0
   private var starting = false
+  private var startAuthority: AuthAccountMutationToken?
+  private var startCredentials: InlineProtocolSessionCredentials?
+  private var startBearerToken: String?
+  private var startInvalidationReceipt: AuthInvalidationReceipt?
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
@@ -91,7 +97,15 @@ public actor InlineProtocolV3Transport: Transport {
 
   public func start() async {
     guard connection == nil, !starting, auth.hasPendingAccountTransition() == false else { return }
+    let snapshot = auth.snapshot()
+    guard let credentials = snapshot.inlineProtocol else { return }
+    guard let authority = try? auth.beginAccountMutation() else { return }
+    guard let invalidationReceipt = try? auth.makeInvalidationReceipt() else { return }
     starting = true
+    startAuthority = authority
+    startCredentials = credentials
+    startBearerToken = snapshot.token
+    startInvalidationReceipt = invalidationReceipt
     startGeneration = startGeneration &+ 1
     let generation = startGeneration
     let task = Task { [weak self] in
@@ -107,14 +121,16 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   private func performStart(generation: UInt64) async {
+    guard let authority = startAuthority, let startingCredentials = startCredentials,
+          let invalidationReceipt = startInvalidationReceipt
+    else { return }
+    let bearerToken = startBearerToken
     log.debug("Inline Protocol transport start requested")
     await channel.send(.connecting)
     var candidate: InlineProtocolV3Connection?
     do {
       try requireCurrentStart(generation)
-      guard var credentials = auth.inlineProtocolCredentials() else {
-        throw InlineProtocolV3ConnectionError.invalidKey
-      }
+      var credentials = startingCredentials
       if let temporary = credentials.temporary, temporary.expiresAt != nil {
         log.debug("Reconnecting with stored temporary authorization")
         let cached = try await InlineProtocolV3Connection.connect(.reconnect(
@@ -153,11 +169,7 @@ public actor InlineProtocolV3Transport: Transport {
           candidate = replacement
           try requireCurrentStart(generation)
           credentials.temporary = await replacement.authorization
-          do {
-            try await auth.saveInlineProtocolCredentials(credentials)
-          } catch {
-            throw error
-          }
+          try await auth.saveInlineProtocolCredentials(credentials, authority: authority)
           try requireCurrentStart(generation)
           log.debug("Replacement temporary authorization verified and stored")
         }
@@ -171,11 +183,7 @@ public actor InlineProtocolV3Transport: Transport {
         candidate = replacement
         try requireCurrentStart(generation)
         credentials.temporary = await replacement.authorization
-        do {
-          try await auth.saveInlineProtocolCredentials(credentials)
-        } catch {
-          throw error
-        }
+        try await auth.saveInlineProtocolCredentials(credentials, authority: authority)
         try requireCurrentStart(generation)
         log.debug("Replacement temporary authorization verified and stored")
       } else if candidate == nil {
@@ -185,19 +193,22 @@ public actor InlineProtocolV3Transport: Transport {
       }
       try requireCurrentStart(generation)
       guard let candidate else { throw InlineProtocolV3ConnectionError.invalidKey }
+      var capabilities: RealtimeV3Response?
       if AgentActivityFeature.isEnabled {
         // V3 authenticates before the legacy handshake. Advertise per-socket
         // presentation support here, including on reconnect with a cached key.
-        let capabilities = try await candidate.invoke(.with {
+        let response = try await candidate.invoke(.with {
           $0.body = .connectionInit(.with { $0.supportsWorking = true })
         })
-        if case .rpcError = capabilities.body {
+        if case .rpcError = response.body {
           // Older servers do not handle this optional application message yet.
           // Authentication was independently verified above; keep the connection.
           log.debug("Server did not accept optional presentation capabilities")
         }
+        capabilities = response
       }
       try requireCurrentStart(generation)
+      connectionAuthority = invalidationReceipt
       connection = candidate
       startUpdates(candidate)
       startRotationMonitor(candidate)
@@ -205,15 +216,22 @@ public actor InlineProtocolV3Transport: Transport {
       await channel.send(.connected)
       try requireCurrentStart(generation)
       candidateStartDidFinish(generation: generation)
+      requestTransportPreference(from: candidate, initResponse: capabilities)
     } catch {
       if let candidate { await candidate.close() }
       guard generation == startGeneration else { return }
       candidateStartDidFinish(generation: generation)
-      if error is CancellationError || Task.isCancelled { return }
-      logStartFailure(error)
       connection = nil
+      connectionAuthority = nil
+      if error is CancellationError || Task.isCancelled { return }
+      // A retired account's late startup failure must not invalidate the replacement account.
+      guard (try? auth.validateAccountMutation(authority)) != nil,
+            !auth.hasPendingAccountTransition(),
+            Self.matchesAccount(auth.snapshot(), credentials: startingCredentials, bearerToken: bearerToken)
+      else { return }
+      logStartFailure(error)
       if Self.authenticationInvalidationReason(for: error) != nil {
-        await emitAuthenticationInvalidated(error)
+        await emitAuthenticationInvalidated(error, generation: generation, authority: invalidationReceipt)
         return
       }
       await channel.send(.disconnected(errorDescription: String(describing: error)))
@@ -224,6 +242,11 @@ public actor InlineProtocolV3Transport: Transport {
     log.debug("Inline Protocol transport stop requested")
     startGeneration = startGeneration &+ 1
     starting = false
+    startAuthority = nil
+    startCredentials = nil
+    startBearerToken = nil
+    startInvalidationReceipt = nil
+    connectionAuthority = nil
     let stoppingStartTask = startTask
     stoppingStartTask?.cancel()
     await stoppingStartTask?.value
@@ -235,6 +258,8 @@ public actor InlineProtocolV3Transport: Transport {
     activePingNonce = nil
     rotationTask?.cancel()
     rotationTask = nil
+    preferenceTask?.cancel()
+    preferenceTask = nil
     if let connection { await connection.close() }
     connection = nil
     await channel.send(.disconnected(errorDescription: "stopped"))
@@ -247,16 +272,41 @@ public actor InlineProtocolV3Transport: Transport {
     else {
       throw CancellationError()
     }
+    guard let startAuthority else { throw CancellationError() }
+    try auth.validateAccountMutation(startAuthority)
+    guard let startCredentials,
+          Self.matchesAccount(auth.snapshot(), credentials: startCredentials, bearerToken: startBearerToken),
+          let startInvalidationReceipt, auth.isCurrent(startInvalidationReceipt)
+    else { throw CancellationError() }
   }
 
   private func candidateStartDidFinish(generation: UInt64) {
     guard generation == startGeneration else { return }
     starting = false
+    startAuthority = nil
+    startCredentials = nil
+    startBearerToken = nil
+    startInvalidationReceipt = nil
     startTask = nil
   }
 
+  static func matchesAccount(
+    _ snapshot: AuthSnapshot,
+    credentials: InlineProtocolSessionCredentials,
+    bearerToken: String?
+  ) -> Bool {
+    // Ordinary same-user bearer replacement intentionally need not retire every account
+    // mutation lease. Transport authority is stricter: a late failure belongs to this exact
+    // session and source token, while temporary-key/salt refresh is still the same account.
+    guard snapshot.token == bearerToken, let current = snapshot.inlineProtocol else { return false }
+    return current.userId == credentials.userId && current.accountSessionId == credentials.accountSessionId &&
+      current.permanent.keyID == credentials.permanent.keyID && current.permanent.key == credentials.permanent.key
+  }
+
   public func send(_ message: ClientMessage) async throws {
-    guard let connection else { throw TransportError.notConnected }
+    guard let connection, let connectionAuthority, auth.isCurrent(connectionAuthority) else {
+      throw TransportError.notConnected
+    }
     switch message.body {
     case .connectionInit:
       log.debug("Ignoring redundant connection init on authenticated V3 transport")
@@ -527,15 +577,53 @@ public actor InlineProtocolV3Transport: Transport {
 
   private func startUpdates(_ connection: InlineProtocolV3Connection) {
     updatesTask?.cancel()
-    updatesTask = Task { [weak self, channel] in
+    updatesTask = Task { [weak self] in
       for await update in connection.updates {
         guard !Task.isCancelled else { return }
-        var server = ServerProtocolMessage()
-        server.body = .message(update.message)
-        await channel.send(.message(server))
+        await self?.forwardUpdate(update, source: connection)
       }
       await self?.connectionEnded(connection)
     }
+  }
+
+  private func forwardUpdate(_ update: RealtimeV3Update, source: InlineProtocolV3Connection) async {
+    guard connection === source, let connectionAuthority, auth.isCurrent(connectionAuthority) else { return }
+    var server = ServerProtocolMessage()
+    server.body = .message(update.message)
+    await channel.send(.message(server))
+  }
+
+  /// Every V3 open reports the operator's transport choice for upgraded bearer sessions. Unless
+  /// presentation support already required init before connecting, ask once connected so the
+  /// preference never delays startup.
+  private func requestTransportPreference(
+    from source: InlineProtocolV3Connection,
+    initResponse: RealtimeV3Response?
+  ) {
+    preferenceTask?.cancel()
+    preferenceTask = Task { [weak self] in
+      let response: RealtimeV3Response
+      if let initResponse {
+        response = initResponse
+      } else {
+        do {
+          response = try await source.invoke(.with { $0.body = .connectionInit(.init()) })
+        } catch {
+          // Optional: the stored preference stays in effect until a later open reports one.
+          return
+        }
+      }
+      await self?.reportTransportPreference(response, source: source)
+    }
+  }
+
+  private func reportTransportPreference(_ response: RealtimeV3Response, source: InlineProtocolV3Connection) async {
+    guard !Task.isCancelled, connection === source, let connectionAuthority, auth.isCurrent(connectionAuthority),
+          case let .connectionOpen(open) = response.body
+    else { return }
+    await channel.send(.transportPreference(
+      prefersLegacy: UpgradedSessionTransportPreference.prefersLegacy(open)
+    ))
   }
 
   private func startRotationMonitor(_ connection: InlineProtocolV3Connection) {
@@ -569,17 +657,36 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   private func connectionEnded(_ endedConnection: InlineProtocolV3Connection) async {
-    guard connection === endedConnection else { return }
+    guard connection === endedConnection, let authority = connectionAuthority else { return }
+    let generation = startGeneration
     rotationTask?.cancel()
     rotationTask = nil
+    preferenceTask?.cancel()
+    preferenceTask = nil
     pingTask?.cancel()
     pingTask = nil
     activePingNonce = nil
     log.debug("Inline Protocol transport receive loop ended")
     connection = nil
-    let terminationError = await endedConnection.terminationError
+    connectionAuthority = nil
+    await handleConnectionClosure(generation: generation, authority: authority) {
+      await endedConnection.terminationError
+    }
+  }
+
+  // Keep the asynchronous termination read inside this callback so account replacement and
+  // stop/restart must be revalidated after it completes, not just when the receive loop ends.
+  func handleConnectionClosure(
+    generation: UInt64,
+    authority: AuthInvalidationReceipt,
+    terminationError: @Sendable () async -> InlineProtocolV3ConnectionError?
+  ) async {
+    let terminationError = await terminationError()
+    guard generation == startGeneration, auth.isCurrent(authority) else { return }
     if terminationError == .sessionRevoked {
-      await emitAuthenticationInvalidated(InlineProtocolV3ConnectionError.sessionRevoked)
+      await emitAuthenticationInvalidated(
+        InlineProtocolV3ConnectionError.sessionRevoked, generation: generation, authority: authority
+      )
       return
     }
     if terminationError == .authorizationInvalidated {
@@ -606,14 +713,17 @@ public actor InlineProtocolV3Transport: Transport {
     return .sessionRevoked
   }
 
-  private func emitAuthenticationInvalidated(_ error: any Error) async {
-    guard let reason = Self.authenticationInvalidationReason(for: error) else { return }
+  private func emitAuthenticationInvalidated(
+    _ error: any Error,
+    generation: UInt64,
+    authority: AuthInvalidationReceipt
+  ) async {
+    guard generation == startGeneration, auth.isCurrent(authority),
+          let reason = Self.authenticationInvalidationReason(for: error)
+    else { return }
     log.warning("Inline Protocol authorization invalidated reason=\(reason)")
-    var connectionError = InlineProtocol.ConnectionError()
-    connectionError.reason = reason
-    var server = ServerProtocolMessage()
-    server.body = .connectionError(connectionError)
-    await channel.send(.message(server))
+    await channel.send(.authInvalidated(authority))
+    guard generation == startGeneration, auth.isCurrent(authority) else { return }
     await channel.send(.disconnected(errorDescription: "session_revoked"))
   }
 
@@ -669,68 +779,115 @@ public actor InlineProtocolV3Transport: Transport {
 public actor NegotiatingRealtimeTransport: Transport {
   typealias TransportFactory = @Sendable () -> any Transport
 
+  private enum Kind { case legacy, inlineProtocol }
+  private enum State { case idle, starting, connected, disconnected, switching, stopping }
+
   private let log = Log.scoped("Realtime.TransportSelection")
   private let hasInlineProtocolCredentials: @Sendable () -> Bool
+  private let hasLegacyCredentials: @Sendable () -> Bool
   private let makeLegacyTransport: TransportFactory
   private let makeInlineProtocolTransport: TransportFactory
+  private let upgrade: (any LegacyProtocolUpgrading)?
+  private let transportPreference: UpgradedSessionTransportPreference
+  private let fallbackDeadline: Duration
+  private let fallbackCooldown: Duration
   private let channel = AsyncChannel<TransportEvent>()
   private var active: (any Transport)?
+  private var activeKind: Kind?
+  private var state = State.idle
+  private var generation: UInt64 = 0
   private var eventTask: Task<Void, Never>?
+  private var deadlineTask: Task<Void, Never>?
+  private var retryV3After: ContinuousClock.Instant?
+  private var sessionRevoked = false
+  private var connectionStartedAt: ContinuousClock.Instant?
+  private var connectedWasLogged = false
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
-  public init(auth: AuthHandle, rsaPublicKeys: [InlineProtocolRSAPublicKey] = []) {
+  public init(
+    auth: AuthHandle,
+    rsaPublicKeys: [InlineProtocolRSAPublicKey] = [],
+    automaticallyUpgradeLegacySession: Bool = false,
+    transportPreference: UpgradedSessionTransportPreference = .stored(in: .standard)
+  ) {
+    self.transportPreference = transportPreference
     hasInlineProtocolCredentials = { auth.inlineProtocolCredentials() != nil }
+    hasLegacyCredentials = { auth.token() != nil }
     makeLegacyTransport = { WebSocketTransport() }
     makeInlineProtocolTransport = {
       InlineProtocolV3Transport(auth: auth, rsaPublicKeys: rsaPublicKeys)
     }
+    upgrade = automaticallyUpgradeLegacySession
+      ? LegacyProtocolUpgradeCoordinator(auth: auth, rsaPublicKeys: rsaPublicKeys) : nil
+    fallbackDeadline = .seconds(3)
+    fallbackCooldown = .seconds(300)
   }
 
   init(
     hasInlineProtocolCredentials: @escaping @Sendable () -> Bool,
+    hasLegacyCredentials: @escaping @Sendable () -> Bool = { false },
     makeLegacyTransport: @escaping TransportFactory,
-    makeInlineProtocolTransport: @escaping TransportFactory
+    makeInlineProtocolTransport: @escaping TransportFactory,
+    upgrade: (any LegacyProtocolUpgrading)? = nil,
+    transportPreference: UpgradedSessionTransportPreference = .init(prefersLegacy: { false }, record: { _ in }),
+    fallbackDeadline: Duration = .seconds(3),
+    fallbackCooldown: Duration = .seconds(300)
   ) {
+    self.transportPreference = transportPreference
     self.hasInlineProtocolCredentials = hasInlineProtocolCredentials
+    self.hasLegacyCredentials = hasLegacyCredentials
     self.makeLegacyTransport = makeLegacyTransport
     self.makeInlineProtocolTransport = makeInlineProtocolTransport
+    self.upgrade = upgrade
+    self.fallbackDeadline = fallbackDeadline
+    self.fallbackCooldown = fallbackCooldown
   }
 
   public func start() async {
-    if let active {
-      // A negotiated child remains the session owner after a transient disconnect. Both child
-      // transports are restartable, so drive that owner again instead of treating its presence as
-      // proof that it is still connected.
-      await active.start()
-      return
+    // Credentials may become available while a V2 connection is carrying requests. Preserve
+    // that owner until an actual disconnect; re-selecting here would lose uncertain writes.
+    guard state == .idle || state == .disconnected else { return }
+    state = .starting
+    connectionStartedAt = .now
+    connectedWasLogged = false
+    // Only a session that still holds a bearer can use V2, so the operator preference and the
+    // startup-failure cooldown never apply to native V3 logins.
+    let kind: Kind = hasInlineProtocolCredentials() && (
+      !hasLegacyCredentials() || (
+        !transportPreference.prefersLegacy() && (retryV3After.map { ContinuousClock.now >= $0 } ?? true)
+      )
+    ) ? .inlineProtocol : .legacy
+    if activeKind != kind {
+      guard await retireChild() else { return }
+      guard state == .starting else { return }
+      install(kind)
     }
-
-    let transport: any Transport
-    if hasInlineProtocolCredentials() {
-      log.debug("Selected Inline Protocol transport")
-      transport = makeInlineProtocolTransport()
-    } else {
-      log.debug("Selected legacy Realtime V2 transport")
-      transport = makeLegacyTransport()
-    }
-    active = transport
-    forward(transport.events)
-    await transport.start()
+    guard let active else { return }
+    sessionRevoked = false
+    armFallbackDeadline()
+    await active.start()
   }
 
   public func stop() async {
-    guard let active else { return }
-    // A child stop publishes its final disconnected event. Keep the forwarder alive until stop
-    // returns so AsyncChannel delivery cannot deadlock on a receiver we cancelled prematurely.
-    await active.stop()
+    guard state != .stopping else { return }
+    state = .stopping
+    deadlineTask?.cancel()
+    deadlineTask = nil
+    await upgrade?.stop()
+    // The final stop event is still part of this connection. Keep its receiver alive until
+    // child.stop returns; cancelling an AsyncChannel receiver first can strand the sender.
+    await active?.stop()
+    generation &+= 1
     eventTask?.cancel()
     eventTask = nil
-    self.active = nil
+    active = nil
+    activeKind = nil
+    state = .idle
   }
 
   public func send(_ message: ClientMessage) async throws {
-    guard let active else { throw TransportError.notConnected }
+    guard let active, state == .connected else { throw TransportError.notConnected }
     try await active.send(message)
   }
 
@@ -739,13 +896,151 @@ public actor NegotiatingRealtimeTransport: Transport {
     return await active.isApplicationAuthenticatedOnConnect()
   }
 
-  private func forward(_ events: AsyncChannel<TransportEvent>) {
-    eventTask?.cancel()
-    eventTask = Task { [channel] in
-      for await event in events {
+  private func install(_ kind: Kind) {
+    let transport: any Transport = kind == .inlineProtocol
+      ? makeInlineProtocolTransport() : makeLegacyTransport()
+    log.debug(kind == .inlineProtocol ? "Selected Inline Protocol transport" : "Selected legacy Realtime V2 transport")
+    active = transport
+    activeKind = kind
+    generation &+= 1
+    let current = generation
+    eventTask = Task { [weak self] in
+      for await event in transport.events {
         guard !Task.isCancelled else { return }
-        await channel.send(event)
+        await self?.receive(event, generation: current)
       }
     }
+  }
+
+  private func retireChild() async -> Bool {
+    // Invalidate first, then discard-drain final old-child events. Forwarding the old stop
+    // would clear ProtocolSession's newly allocated connection ID before the new connect.
+    generation &+= 1
+    let retiringGeneration = generation
+    let retiringChild = active
+    let retiringEvents = eventTask
+    await retiringChild?.stop()
+    retiringEvents?.cancel()
+    guard generation == retiringGeneration else { return false }
+    eventTask = nil
+    active = nil
+    activeKind = nil
+    return true
+  }
+
+  private func receive(_ event: TransportEvent, generation: UInt64) async {
+    guard generation == self.generation else { return }
+    guard state != .switching else { return }
+    switch event {
+    case .connected:
+      guard state == .starting else { return }
+      deadlineTask?.cancel()
+      deadlineTask = nil
+      state = .connected
+      if activeKind == .inlineProtocol { logAuthenticatedConnection() }
+    case .disconnected:
+      deadlineTask?.cancel()
+      deadlineTask = nil
+      if canFallback {
+        state = .switching
+        // Return to the forwarder before stop: it must drain the child's final event.
+        Task { [weak self] in await self?.fallback(generation: generation, reason: "startup_failure") }
+        return
+      }
+      if state != .stopping { state = .disconnected }
+    case let .message(message):
+      if case let .connectionOpen(open) = message.body, activeKind == .legacy, state == .connected {
+        transportPreference.record(UpgradedSessionTransportPreference.prefersLegacy(open))
+        logAuthenticatedConnection()
+      }
+      if case let .connectionError(error) = message.body, error.reason == .sessionRevoked {
+        sessionRevoked = true
+        deadlineTask?.cancel()
+        deadlineTask = nil
+      }
+    case .authInvalidated:
+      sessionRevoked = true
+      deadlineTask?.cancel()
+      deadlineTask = nil
+    case let .transportPreference(prefersLegacy):
+      transportPreference.record(prefersLegacy)
+      if prefersLegacy, activeKind == .inlineProtocol, state == .connected, hasLegacyCredentials() {
+        state = .switching
+        // Return to the forwarder before stop: it must drain the child's final event.
+        Task { [weak self] in await self?.applyLegacyPreference(generation: generation) }
+      }
+      return
+    default:
+      break
+    }
+    await channel.send(event)
+    // Wait for the legacy application handshake, so optional key work does not compete with
+    // obtaining the usable session and never runs merely because an unauthenticated socket opened.
+    if case let .message(message) = event,
+       case .connectionOpen = message.body,
+       state == .connected, activeKind == .legacy, generation == self.generation {
+      await upgrade?.start()
+    }
+  }
+
+  /// The operator routed upgraded sessions back to V2. The preference arrives with the V3 open,
+  /// so reconnect through the connection owner: its normal handshake and backoff then select V2.
+  private func applyLegacyPreference(generation: UInt64) async {
+    guard generation == self.generation, state == .switching else { return }
+    log.warning("event=legacy_v3_fallback protocol=v2 reason=operator_preference duration_ms=\(elapsedMilliseconds())")
+    guard await retireChild() else { return }
+    guard state == .switching else { return }
+    state = .disconnected
+    await channel.send(.disconnected(errorDescription: "transport_preference"))
+  }
+
+  private var canFallback: Bool {
+    (state == .starting || state == .switching) && activeKind == .inlineProtocol &&
+      hasLegacyCredentials() && !sessionRevoked
+  }
+
+  private func logAuthenticatedConnection() {
+    guard !connectedWasLogged else { return }
+    connectedWasLogged = true
+    let kind = activeKind == .inlineProtocol ? "v3" : "v2"
+    let cohort = hasLegacyCredentials()
+      ? (hasInlineProtocolCredentials() ? "upgraded" : "legacy") : "native"
+    log.info("event=legacy_v3_connected protocol=\(kind) cohort=\(cohort) duration_ms=\(elapsedMilliseconds())")
+  }
+
+  private func elapsedMilliseconds() -> Int64 {
+    let duration = connectionStartedAt?.duration(to: .now) ?? .zero
+    return duration.components.seconds * 1_000 + duration.components.attoseconds / 1_000_000_000_000_000
+  }
+
+  private func armFallbackDeadline() {
+    deadlineTask?.cancel()
+    guard canFallback else { return }
+    let current = generation
+    deadlineTask = Task { [weak self, fallbackDeadline] in
+      do { try await Task.sleep(for: fallbackDeadline) } catch { return }
+      await self?.fallbackDeadlineReached(generation: current)
+    }
+  }
+
+  private func fallbackDeadlineReached(generation: UInt64) async {
+    guard generation == self.generation else { return }
+    // Detach the deadline handle before fallback, so it cannot cancel its own child.start.
+    deadlineTask = nil
+    await fallback(generation: generation, reason: "deadline")
+  }
+
+  private func fallback(generation: UInt64, reason: String) async {
+    guard generation == self.generation, canFallback else { return }
+    state = .switching
+    deadlineTask?.cancel()
+    deadlineTask = nil
+    retryV3After = ContinuousClock.now + fallbackCooldown
+    log.warning("event=legacy_v3_fallback protocol=v2 reason=\(reason) duration_ms=\(elapsedMilliseconds())")
+    guard await retireChild() else { return }
+    guard state == .switching else { return }
+    state = .starting
+    install(.legacy)
+    await active?.start()
   }
 }

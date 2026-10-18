@@ -70,9 +70,11 @@ struct NegotiatingRealtimeTransportTests {
       makeLegacyTransport: { child },
       makeInlineProtocolTransport: { child }
     )
+    let disconnected = StopEventDelivery()
     let observer = Task {
-      for await _ in transport.events {
+      for await event in transport.events {
         guard !Task.isCancelled else { return }
+        if case .disconnected = event { await disconnected.markDelivered() }
       }
     }
 
@@ -81,6 +83,9 @@ struct NegotiatingRealtimeTransportTests {
     #expect(await transport.isApplicationAuthenticatedOnConnect())
 
     await child.disconnect()
+    // Child channel handoff precedes processing/forwarding the event. The real connection
+    // manager starts its retry only after this outer disconnected event has been delivered.
+    #expect(await waitForProbeCondition { await disconnected.delivered })
     await transport.start()
     #expect(await child.startCount == 2)
 

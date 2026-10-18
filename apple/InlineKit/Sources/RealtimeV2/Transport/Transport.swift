@@ -1,4 +1,5 @@
 import AsyncAlgorithms
+import Auth
 import Foundation
 import InlineProtocol
 
@@ -14,6 +15,13 @@ public enum TransportEvent: Sendable {
 
   /// A message was received from the server.
   case message(ServerProtocolMessage)
+
+  /// Terminal account revocation scoped to the authority used by this connection.
+  case authInvalidated(AuthInvalidationReceipt)
+
+  /// The server's current transport choice for sessions that kept a bearer after a V3 upgrade.
+  /// Transport selection consumes it; it never reaches the protocol session.
+  case transportPreference(prefersLegacy: Bool)
 
   /// The authenticated carrier returned an MTProto service-level deadline result
   /// for this request. The connection remains usable; only this request is uncertain.

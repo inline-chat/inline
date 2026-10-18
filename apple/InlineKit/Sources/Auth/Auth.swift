@@ -150,6 +150,14 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     try store.beginLogoutSynchronously()
   }
 
+  /// Returns nil for a delayed revocation from a previous login. Validation and in-process
+  /// logout admission are atomic, and durable persistence completes before this returns.
+  public func beginLogoutSynchronously(
+    ifCurrent receipt: AuthInvalidationReceipt
+  ) throws -> AuthLogoutFence? {
+    try store.beginLogoutSynchronously(ifCurrent: receipt)
+  }
+
   public func publishLogoutInProgress() async {
     await store.publishLogoutInProgress()
   }

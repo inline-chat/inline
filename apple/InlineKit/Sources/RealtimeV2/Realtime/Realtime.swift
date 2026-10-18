@@ -141,7 +141,7 @@ public actor RealtimeV2 {
   private var lastSnapshotState: ConnectionState = .stopped
   private var lastSnapshotSessionID: UInt64 = 0
   private var didNotifyConnectionInitFailure = false
-  private var didNotifyAuthInvalidated = false
+  private var notifiedAuthInvalidation: AuthInvalidationReceipt?
   private let authRecoveryDiagnostics = RealtimeAuthRecoveryDiagnostics()
   private let authObservationProbe = AuthObservationProbe()
   private var authRecoverySequence: UInt64 = 0
@@ -497,7 +497,7 @@ public actor RealtimeV2 {
           guard await self.isCurrentOpenSession(snapshot.sessionID, mutationToken: mutationToken)
           else { continue }
           self.didNotifyConnectionInitFailure = false
-          self.didNotifyAuthInvalidated = false
+          self.notifiedAuthInvalidation = nil
           // Register catch-up activity before showing the transport as ready,
           // so an accepted open cannot flash Connected before Updating.
           await self.updateTransportConnectionState(mapped)
@@ -571,6 +571,9 @@ public actor RealtimeV2 {
           case let .connectionError(reason):
             self.log.error("Received server connection error during handshake reason=\(reason)")
             await self.handleConnectionErrorDuringHandshake(reason: reason)
+
+          case let .authInvalidated(receipt):
+            self.handleAuthInvalidated(receipt)
 
           default:
             break
@@ -2341,8 +2344,8 @@ public actor RealtimeV2 {
 
   private func handleConnectionErrorDuringHandshake(reason: InlineProtocol.ConnectionError.Reason) async {
     if reason == .sessionRevoked {
-      log.error("Realtime handshake failed because the session was revoked")
-      await handleAuthInvalidated()
+      // Terminal revocation must arrive as authInvalidated with its original authority.
+      log.warning("Ignoring unscoped terminal connection error")
       return
     }
 
@@ -2360,12 +2363,17 @@ public actor RealtimeV2 {
     await handleMissingAuthTokenHandshakeFailure()
   }
 
-  private func handleAuthInvalidated() async {
-    guard !didNotifyAuthInvalidated else { return }
-    didNotifyAuthInvalidated = true
-    acceptsTransactions = false
-    await connectionManager.setAuthAvailable(false)
-    NotificationCenter.default.post(name: .realtimeV2AuthInvalidated, object: nil)
+  private func handleAuthInvalidated(_ receipt: AuthInvalidationReceipt) {
+    guard auth.isCurrent(receipt) else {
+      log.info("Realtime ignored stale account revocation")
+      return
+    }
+    guard notifiedAuthInvalidation != receipt else { return }
+    // Platform logout atomically revalidates this receipt before closing admission. Do not
+    // disable a replacement account while an asynchronous notification is still in flight.
+    if RealtimeAuthInvalidationNotification.post(receipt, auth: auth) {
+      notifiedAuthInvalidation = receipt
+    }
   }
 
   private func handleMissingAuthTokenHandshakeFailure() async {

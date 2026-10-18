@@ -197,16 +197,53 @@ final class AuthSnapshotCache: @unchecked Sendable {
     correlationID: UUID = UUID()
   ) -> AuthLogoutFence {
     lock.withLock {
-      if let logoutFence { return logoutFence }
-      loginGeneration &+= 1
-      accountMutationGeneration &+= 1
-      committedAuthorityOwner = nil
-      let fence = AuthLogoutFence(generation: loginGeneration, correlationID: correlationID)
-      // Close in-process admission immediately. Durable persistence happens synchronously after
-      // this short critical section and before the platform starts any destructive/awaited work.
-      logoutFence = fence
-      return fence
+      beginLogoutLocked(correlationID: correlationID)
     }
+  }
+
+  /// Checking the delivered authority and closing login admission must share one critical
+  /// section; a check followed by an actor hop can otherwise sign out a replacement login.
+  func beginLogout(
+    ifCurrent receipt: AuthInvalidationReceipt,
+    correlationID: UUID
+  ) -> AuthLogoutFence? {
+    lock.withLock {
+      guard invalidationReceiptIsCurrentLocked(receipt) else { return nil }
+      return beginLogoutLocked(correlationID: correlationID)
+    }
+  }
+
+  private func beginLogoutLocked(correlationID: UUID) -> AuthLogoutFence {
+    if let logoutFence { return logoutFence }
+    loginGeneration &+= 1
+    accountMutationGeneration &+= 1
+    committedAuthorityOwner = nil
+    let fence = AuthLogoutFence(generation: loginGeneration, correlationID: correlationID)
+    // Close in-process admission before durable persistence or any awaited platform cleanup.
+    logoutFence = fence
+    return fence
+  }
+
+  func makeInvalidationReceipt() throws -> AuthInvalidationReceipt {
+    try lock.withLock {
+      guard logoutFence == nil, loginCommitPending == false,
+            let userID = _snapshot.currentUserId,
+            let receipt = AuthInvalidationReceipt(
+              snapshot: _snapshot,
+              mutation: AuthAccountMutationToken(generation: accountMutationGeneration, userID: userID)
+            )
+      else { throw AuthStorageError.loginUnavailable }
+      return receipt
+    }
+  }
+
+  func isCurrent(_ receipt: AuthInvalidationReceipt) -> Bool {
+    lock.withLock { invalidationReceiptIsCurrentLocked(receipt) }
+  }
+
+  private func invalidationReceiptIsCurrentLocked(_ receipt: AuthInvalidationReceipt) -> Bool {
+    logoutFence == nil && loginCommitPending == false &&
+      receipt.matches(_snapshot, generation: accountMutationGeneration)
   }
 
   func currentLogoutFence() -> AuthLogoutFence? {

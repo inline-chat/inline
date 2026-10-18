@@ -1,5 +1,6 @@
 import Foundation
 import InlineConfig
+import InlineProtocol
 import Logger
 
 private struct VersionedAuthSnapshot: Sendable {
@@ -128,6 +129,7 @@ actor AuthStore {
   private static let legacyTokenKey = "token"
   private static let credentialsV2Key = "credentials_v2"
   private static let inlineProtocolCredentialsKey = "inline_protocol_credentials_v1"
+  static let legacyProtocolUpgradeKey = "legacy_v3_upgrade_v1"
 
   private let primaryKeychain: KeychainStore
   private let fallbackKeychain: KeychainStore?
@@ -140,6 +142,7 @@ actor AuthStore {
   private let authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)?
   private let authorityRestoreOverride: (@Sendable () -> Bool)?
   private let temporaryAuthorityWriteOverride: (@Sendable () -> Bool)?
+  private let legacyUpgradeWriteOverride: (@Sendable () -> Bool)?
   private let logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)?
   private let credentialWriteInterleavingHook: (@Sendable () -> Void)?
   private let authorityFinalizationInterleavingHook: (@Sendable () -> Void)?
@@ -168,6 +171,7 @@ actor AuthStore {
     authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)? = nil,
     authorityRestoreOverride: (@Sendable () -> Bool)? = nil,
     temporaryAuthorityWriteOverride: (@Sendable () -> Bool)? = nil,
+    legacyUpgradeWriteOverride: (@Sendable () -> Bool)? = nil,
     logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
     credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
     authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
@@ -191,6 +195,7 @@ actor AuthStore {
     self.authorityReplacementDeletionOverride = authorityReplacementDeletionOverride
     self.authorityRestoreOverride = authorityRestoreOverride
     self.temporaryAuthorityWriteOverride = temporaryAuthorityWriteOverride
+    self.legacyUpgradeWriteOverride = legacyUpgradeWriteOverride
     self.logoutFencePersistenceOverride = logoutFencePersistenceOverride
     self.credentialWriteInterleavingHook = credentialWriteInterleavingHook
     self.authorityFinalizationInterleavingHook = authorityFinalizationInterleavingHook
@@ -300,7 +305,7 @@ actor AuthStore {
           Self.legacyTokenKey: Data(token.utf8),
           Self.credentialsV2Key: encodedRecord,
         ],
-        replacing: [Self.inlineProtocolCredentialsKey],
+        replacing: [Self.inlineProtocolCredentialsKey, Self.legacyProtocolUpgradeKey],
         replacementLabel: "inline_protocol"
       )
     }
@@ -309,13 +314,40 @@ actor AuthStore {
 
   func saveInlineProtocolCredentials(
     _ credentials: InlineProtocolSessionCredentials,
-    loginAttempt: AuthLoginAttempt? = nil
+    loginAttempt: AuthLoginAttempt? = nil,
+    authority: AuthAccountMutationToken? = nil
   ) async throws {
+    if let authority {
+      try cache.validateAccountMutationToken(authority)
+      guard loginAttempt == nil,
+            let existing = cache.snapshot().inlineProtocol,
+            existing.userId == credentials.userId,
+            existing.accountSessionId == credentials.accountSessionId,
+            existing.permanent.keyID == credentials.permanent.keyID,
+            existing.permanent.key == credentials.permanent.key
+      else { throw AuthStorageError.loginSuperseded }
+      // A transport owns only temporary-key renewal. If its account was replaced while the
+      // request was queued on this actor, it must never enter the generic login replacement.
+    }
     if let loginAttempt {
       try validateLoginAttempt(loginAttempt)
     }
     guard !hasPendingLogout() else {
       throw AuthStorageError.logoutInProgress
+    }
+
+    if loginAttempt == nil,
+       case let .authenticated(source) = cache.snapshot().status,
+       let existing = cache.snapshot().inlineProtocol,
+       existing.userId == credentials.userId,
+       existing.accountSessionId == credentials.accountSessionId,
+       existing.permanent.keyID == credentials.permanent.keyID,
+       existing.permanent.key == credentials.permanent.key
+    {
+      // Temporary refresh belongs to the additive record. Never replace the retained bearer
+      // or create a staged-login marker for a transport-owned key rotation.
+      try commitLegacyProtocolUpgrade(credentials, for: source, authority: authority)
+      return
     }
 
     let data: Data
@@ -368,17 +400,149 @@ actor AuthStore {
     try await persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
       try self.replaceStoredAuthority(
         with: [Self.inlineProtocolCredentialsKey: data],
-        replacing: [Self.legacyTokenKey, Self.credentialsV2Key],
+        replacing: [Self.legacyTokenKey, Self.credentialsV2Key, Self.legacyProtocolUpgradeKey],
         replacementLabel: "bearer"
       )
     }
     log.info("AUTH2_SAVE inline protocol authority persisted staged=\(loginAttempt == nil ? 0 : 1)")
   }
 
+  func legacyProtocolUpgradeCandidate(
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) throws -> InlineProtocolAuthorization? {
+    try requireLegacyUpgradeSource(source, authority: authority)
+    return try readLegacyUpgrade()?.matching(source)?.permanent
+  }
+
+  @discardableResult
+  func stageLegacyProtocolUpgrade(
+    _ permanent: InlineProtocolAuthorization,
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) throws -> InlineProtocolAuthorization {
+    try requireLegacyUpgradeSource(source, authority: authority)
+    if let existing = try readLegacyUpgrade()?.matching(source) { return existing.permanent }
+    let upgrade = try LegacyProtocolUpgrade(source: source, permanent: permanent)
+    try persistLegacyUpgrade(upgrade, source: source, authority: authority)
+    return upgrade.permanent
+  }
+
+  func commitLegacyProtocolUpgrade(
+    _ credentials: InlineProtocolSessionCredentials,
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) throws {
+    try requireLegacyUpgradeSource(source, authority: authority)
+    guard var upgrade = try readLegacyUpgrade()?.matching(source),
+          upgrade.hasPermanent(credentials.permanent),
+          upgrade.credentials?.accountSessionId == nil ||
+            upgrade.credentials?.accountSessionId == credentials.accountSessionId
+    else { throw AuthStorageError.loginSuperseded }
+    upgrade.permanent = credentials.permanent
+    upgrade.credentials = credentials
+    try persistLegacyUpgrade(upgrade, source: source, authority: authority)
+    try requireLegacyUpgradeSource(source, authority: authority)
+    var snapshot = cache.snapshot()
+    snapshot.inlineProtocol = credentials
+    guard cache.update(snapshot) else { throw AuthStorageError.logoutInProgress }
+    publishAuthenticatedSnapshot(snapshot)
+    log.info("AUTH2_LEGACY_UPGRADE verified credentials persisted")
+  }
+
+  private func requireLegacyUpgradeSource(
+    _ source: AuthCredentials,
+    authority: AuthAccountMutationToken?
+  ) throws {
+    if let authority { try cache.validateAccountMutationToken(authority) }
+    guard !hasPendingAccountTransition() else { throw credentialCommitFenceError(for: nil) }
+    guard case let .authenticated(current) = cache.snapshot().status,
+          current.userId == source.userId, current.token == source.token
+    else { throw AuthStorageError.loginSuperseded }
+    // Older app/extension processes can change the bearer without publishing to this cache.
+    // Re-read durable authority before every write and after its synchronous commit.
+    let durable = readSnapshot(primaryKeychain, fallbackKeychain, userDefaultsKey)
+    guard case let .authenticated(stored) = durable.status,
+          stored.userId == source.userId, stored.token == source.token
+    else { throw AuthStorageError.loginSuperseded }
+  }
+
+  private func readLegacyUpgrade() throws -> LegacyProtocolUpgrade? {
+    let outcome: KeychainReadOutcome<Data> = if mocked {
+      if let data = AuthKeychainConfig.mockGetData(Self.legacyProtocolUpgradeKey, namespace: namespace) {
+        .success(data, usedFallback: false)
+      } else { .notFound(status: errSecItemNotFound) }
+    } else {
+      AuthKeychainConfig.readData(
+        Self.legacyProtocolUpgradeKey, primary: primaryKeychain, fallback: fallbackKeychain
+      )
+    }
+    switch outcome {
+    case let .success(data, _):
+      return Self.decodeLegacyUpgrade(data)
+    case .notFound:
+      return nil
+    case .interactionNotAllowed, .error:
+      // Do not replace an unreadable candidate: it may already have been authorized remotely.
+      throw AuthStorageError.loginUnavailable
+    }
+  }
+
+  private func persistLegacyUpgrade(
+    _ upgrade: LegacyProtocolUpgrade,
+    source: AuthCredentials,
+    authority: AuthAccountMutationToken?
+  ) throws {
+    try upgrade.validate()
+    let data = try JSONEncoder().encode(upgrade)
+    try requireLegacyUpgradeSource(source, authority: authority)
+    let saved: Bool
+    if legacyUpgradeWriteOverride?() == false {
+      saved = false
+    } else if mocked {
+      AuthKeychainConfig.mockSet(data, forKey: Self.legacyProtocolUpgradeKey, namespace: namespace)
+      saved = true
+    } else {
+      let primarySaved = primaryKeychain.set(
+        data, forKey: Self.legacyProtocolUpgradeKey, withAccess: .accessibleAfterFirstUnlock
+      )
+      saved = primarySaved || fallbackKeychain?.set(
+        data, forKey: Self.legacyProtocolUpgradeKey, withAccess: .accessibleAfterFirstUnlock
+      ) == true
+    }
+    guard saved else { throw AuthStorageError.keychainWriteFailed }
+    credentialWriteInterleavingHook?()
+    try requireLegacyUpgradeSource(source, authority: authority)
+    // Read back the exact record before claiming durability. The bearer is never edited on
+    // failure, including a crash after this write but before snapshot publication.
+    guard let stored = try readLegacyUpgrade(), stored.matches(source),
+          stored.hasPermanent(upgrade.permanent), stored.credentials == upgrade.credentials
+    else { throw AuthStorageError.keychainWriteFailed }
+  }
+
+  private static func decodeLegacyUpgrade(_ data: Data) -> LegacyProtocolUpgrade? {
+    guard let upgrade = try? JSONDecoder().decode(LegacyProtocolUpgrade.self, from: data),
+          (try? upgrade.validate()) != nil
+    else { return nil }
+    return upgrade
+  }
+
   nonisolated func beginLogoutSynchronously() throws -> AuthLogoutFence {
     let storedID = UserDefaults.standard.string(forKey: logoutAttemptIDKey)
       .flatMap(UUID.init(uuidString:))
     let fence = cache.beginLogout(correlationID: storedID ?? UUID())
+    return try persistLogoutFence(fence)
+  }
+
+  nonisolated func beginLogoutSynchronously(
+    ifCurrent receipt: AuthInvalidationReceipt
+  ) throws -> AuthLogoutFence? {
+    guard !hasPendingAccountTransition() else { return nil }
+    guard let fence = cache.beginLogout(ifCurrent: receipt, correlationID: UUID()) else { return nil }
+    return try persistLogoutFence(fence)
+  }
+
+  private nonisolated func persistLogoutFence(_ fence: AuthLogoutFence) throws -> AuthLogoutFence {
     do {
       try logoutMarkerLock.withLock {
         // Completion may have won after this caller observed an existing fence. Never recreate a
@@ -690,6 +854,7 @@ actor AuthStore {
     legacyTokenKey,
     credentialsV2Key,
     inlineProtocolCredentialsKey,
+    legacyProtocolUpgradeKey,
   ]
 
   private func persistCredentialAuthority(
@@ -1185,7 +1350,10 @@ actor AuthStore {
         guard creds.hasConsistentIdentity else {
           return AuthSnapshot(status: .reauthRequired(userIdHint: userIdHint), didHydrate: true)
         }
-        return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
+        return legacySnapshot(
+          credentials: creds, primaryKeychain: primaryKeychain, fallbackKeychain: fallbackKeychain,
+          mocked: mocked, namespace: namespace
+        )
       }
       // Corrupt record; fall back to legacy pieces.
 
@@ -1223,10 +1391,9 @@ actor AuthStore {
       guard credentials.hasConsistentIdentity else {
         return AuthSnapshot(status: .reauthRequired(userIdHint: userId), didHydrate: true)
       }
-      return AuthSnapshot(
-        status: .authenticated(credentials),
-        didHydrate: true,
-        inlineProtocol: nil
+      return legacySnapshot(
+        credentials: credentials, primaryKeychain: primaryKeychain, fallbackKeychain: fallbackKeychain,
+        mocked: mocked, namespace: namespace
       )
     }
 
@@ -1262,6 +1429,31 @@ actor AuthStore {
     }
 
     return AuthSnapshot(status: .unauthenticated, didHydrate: true)
+  }
+
+  private static func legacySnapshot(
+    credentials: AuthCredentials,
+    primaryKeychain: any KeychainClient,
+    fallbackKeychain: (any KeychainClient)?,
+    mocked: Bool,
+    namespace: String?
+  ) -> AuthSnapshot {
+    let data: Data?
+    if mocked {
+      data = AuthKeychainConfig.mockGetData(legacyProtocolUpgradeKey, namespace: namespace)
+    } else if case let .success(value, _) = AuthKeychainConfig.readData(
+      legacyProtocolUpgradeKey, primary: primaryKeychain, fallback: fallbackKeychain
+    ) {
+      data = value
+    } else {
+      data = nil
+    }
+    let upgrade = data.flatMap(decodeLegacyUpgrade)?.matching(credentials)
+    // Optional migration storage never invalidates a usable bearer. In particular, an older
+    // version's logout/account replacement makes this record an inert orphan, not a login.
+    return AuthSnapshot(
+      status: .authenticated(credentials), didHydrate: true, inlineProtocol: upgrade?.credentials
+    )
   }
 
   private static func readUserId(key: String) -> Int64? {

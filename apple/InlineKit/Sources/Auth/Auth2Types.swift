@@ -332,6 +332,16 @@ public struct AuthHandle: Sendable {
   }
 
   public func snapshot() -> AuthSnapshot { cache.snapshot() }
+
+  /// Capture before sending/using credentials so delayed revocation belongs to that authority.
+  public func makeInvalidationReceipt() throws -> AuthInvalidationReceipt {
+    guard !store.hasPendingAccountTransition() else { throw AuthStorageError.loginUnavailable }
+    return try cache.makeInvalidationReceipt()
+  }
+
+  public func isCurrent(_ receipt: AuthInvalidationReceipt) -> Bool {
+    !store.hasPendingAccountTransition() && cache.isCurrent(receipt)
+  }
   public var events: AsyncStream<AuthEvent> { store.events() }
   public var snapshots: AsyncStream<AuthSnapshot> { store.snapshots() }
   public func token() -> String? { cache.snapshot().token }
@@ -339,6 +349,36 @@ public struct AuthHandle: Sendable {
   public func isLoggedIn() -> Bool { cache.snapshot().isLoggedIn }
   public func inlineProtocolCredentials() -> InlineProtocolSessionCredentials? {
     cache.snapshot().inlineProtocol
+  }
+
+  /// Returns the durable permanent key from an interrupted legacy upgrade, if any.
+  /// The exact bearer must still own the current account and its durable storage.
+  public func legacyProtocolUpgradeCandidate(
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocolAuthorization? {
+    try await store.legacyProtocolUpgradeCandidate(for: source, authority: authority)
+  }
+
+  /// Persists before server authorization, allowing a lost response or process restart to
+  /// retry with the same permanent key. An existing candidate for this bearer wins.
+  @discardableResult
+  public func stageLegacyProtocolUpgrade(
+    _ permanent: InlineProtocolAuthorization,
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocolAuthorization {
+    try await store.stageLegacyProtocolUpgrade(permanent, for: source, authority: authority)
+  }
+
+  /// Publishes verified V3 credentials without replacing the bearer account authority.
+  /// The transport adopts them at its next ordinary connection boundary.
+  public func commitLegacyProtocolUpgrade(
+    _ credentials: InlineProtocolSessionCredentials,
+    for source: AuthCredentials,
+    authority: AuthAccountMutationToken? = nil
+  ) async throws {
+    try await store.commitLegacyProtocolUpgrade(credentials, for: source, authority: authority)
   }
 
   public func refreshFromStorage() async {
@@ -421,9 +461,10 @@ public struct AuthHandle: Sendable {
 
   public func saveInlineProtocolCredentials(
     _ credentials: InlineProtocolSessionCredentials,
-    loginAttempt: AuthLoginAttempt? = nil
+    loginAttempt: AuthLoginAttempt? = nil,
+    authority: AuthAccountMutationToken? = nil
   ) async throws {
-    try await store.saveInlineProtocolCredentials(credentials, loginAttempt: loginAttempt)
+    try await store.saveInlineProtocolCredentials(credentials, loginAttempt: loginAttempt, authority: authority)
   }
 
   public func rollbackCredentialsCommittedByLoginAttempt(_ attempt: AuthLoginAttempt) async {

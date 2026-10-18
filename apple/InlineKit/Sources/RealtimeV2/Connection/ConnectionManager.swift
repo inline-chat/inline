@@ -615,7 +615,7 @@ actor ConnectionManager {
       submit(.authLost)
       await forwardSessionEvent(envelope)
 
-    case .connectionError:
+    case .connectionError, .authInvalidated:
       guard envelope.originatingSessionID == sessionID else {
         log.warning(
           "Ignoring stale connection error event_session=\(String(describing: envelope.originatingSessionID)) " +

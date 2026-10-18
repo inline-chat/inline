@@ -57,7 +57,9 @@ public enum Api {
     let realtime = RealtimeV2(
       transport: NegotiatingRealtimeTransport(
         auth: Auth.shared.handle,
-        rsaPublicKeys: InlineProtocolTrustRoots.production
+        rsaPublicKeys: InlineProtocolTrustRoots.production,
+        automaticallyUpgradeLegacySession: true,
+        transportPreference: .stored(in: .shared)
       ),
       auth: Auth.shared.handle,
       applyUpdates: InlineApplyUpdates(),

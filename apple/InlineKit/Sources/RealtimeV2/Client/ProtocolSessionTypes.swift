@@ -1,4 +1,5 @@
 import AsyncAlgorithms
+import Auth
 import InlineProtocol
 
 enum ProtocolSessionEvent: Sendable {
@@ -9,6 +10,7 @@ enum ProtocolSessionEvent: Sendable {
   case protocolOpen(sessionID: UInt64)
   case authFailed
   case connectionError(reason: InlineProtocol.ConnectionError.Reason)
+  case authInvalidated(AuthInvalidationReceipt)
 
   case ack(msgId: UInt64)
   case rpcResult(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?)

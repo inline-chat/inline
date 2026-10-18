@@ -38,6 +38,7 @@ actor ProtocolSession: ProtocolSessionType {
   private var sequence: UInt32 = 0
   private var transportSessionID: UInt64?
   private var handshakeSessionID: UInt64?
+  private var handshakeInvalidationReceipt: AuthInvalidationReceipt?
   private var nextAccountEventID: UInt64 = 0
   private var pendingAccountEvents: [UInt64: ProtocolSessionEventEnvelope] = [:]
 
@@ -57,6 +58,7 @@ actor ProtocolSession: ProtocolSessionType {
     seq = 0
     cancelAllRpcContinuations()
     handshakeSessionID = nil
+    handshakeInvalidationReceipt = nil
     state = .connecting
     await releasePendingAccountEvents()
   }
@@ -115,6 +117,9 @@ actor ProtocolSession: ProtocolSessionType {
         }
         await handleTransportMessage(message)
 
+      case let .authInvalidated(receipt):
+        await emitAccountEvent(.authInvalidated(receipt))
+
       case let .rpcCommitOutcomeUnknown(msgId):
         await emitAccountEvent(.rpcCommitOutcomeUnknown(msgId: msgId))
         await failRpcContinuation(for: msgId, error: ProtocolSessionError.commitOutcomeUnknown)
@@ -124,6 +129,10 @@ actor ProtocolSession: ProtocolSessionType {
         // Direct callers have no durable transaction owner. Surface the existing
         // known-unsent/busy classification and let their operation owner retry.
         await failRpcContinuation(for: msgId, error: ProtocolSessionError.capacityExceeded)
+
+      case .transportPreference:
+        // Transport selection owns this; a direct child transport has no alternative to pick.
+        break
       }
     }
   }
@@ -199,6 +208,14 @@ actor ProtocolSession: ProtocolSessionType {
         log.warning("Ignoring connection error without an active transport session")
         return
       }
+      if error.reason == .sessionRevoked {
+        guard let receipt = handshakeInvalidationReceipt else {
+          log.warning("Ignoring unscoped session revocation without an authenticated handshake")
+          return
+        }
+        await emitAccountEvent(.authInvalidated(receipt), originatingSessionID: transportSessionID)
+        return
+      }
       await emitAccountEvent(
         .connectionError(reason: error.reason),
         originatingSessionID: transportSessionID
@@ -270,6 +287,14 @@ actor ProtocolSession: ProtocolSessionType {
       log.error("No token available for connection init")
       throw ProtocolSessionError.notAuthorized
     }
+
+    // The receipt must name the exact bearer sent on this handshake, not whichever login is
+    // current when a delayed server response reaches the account collector or platform UI.
+    let receipt = try auth.makeInvalidationReceipt()
+    guard auth.token() == token, auth.isCurrent(receipt) else {
+      throw ProtocolSessionError.notAuthorized
+    }
+    handshakeInvalidationReceipt = receipt
 
     let msg = wrapMessage(body: .connectionInit(.with {
       $0.token = token ?? ""
