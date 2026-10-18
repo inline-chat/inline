@@ -2,7 +2,7 @@
 
 ## Scope
 
-- `landing/` contains the website, web app, docs, legal pages, and download routes. It uses React, TanStack Router, Vite, and StyleX/Tailwind; keep server rendering safe.
+- `landing/` contains the website, docs, legal pages, download routes, and public join and share pages. The web app does not live here; it ships on its own origin (`app.inline.chat`). It uses React, TanStack Router, Vite, and StyleX/Tailwind; keep server rendering safe.
 
 ## Checks
 

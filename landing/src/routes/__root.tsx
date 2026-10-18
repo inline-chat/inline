@@ -2,18 +2,9 @@
 
 import stylesheet from "../styles/tailwind.css?url"
 import fontsStylesheet from "../styles/fonts.css?url"
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
-import {
-  AuthStore,
-  BrowserAuthSessionPersistence,
-  Db,
-  InlineClientProvider,
-  RealtimeClient,
-  useInlineClientProvider,
-} from "@inline/client"
-import { ClientRuntime } from "~/components/ClientRuntime"
-import { useImagePreload } from "~/lib/imageCache"
+import { clearRetiredWebClientStorage } from "~/lib/retiredWebClient"
 import {
   directionForLocale,
   localeForLandingPath,
@@ -57,44 +48,16 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const isAppRoute = pathname === "/app" || pathname.startsWith("/app/")
   const landingLocale = localeForLandingPath(pathname)
+
+  useEffect(() => {
+    void clearRetiredWebClientStorage()
+  }, [])
 
   return (
     <RootDocument locale={landingLocale ?? "en"}>
-      {isAppRoute ? <AppRoot /> : <Outlet />}
-    </RootDocument>
-  )
-}
-
-function AppRoot() {
-  const [client] = useState(() => {
-    const auth = new AuthStore(
-      typeof window === "undefined" ? undefined : {
-        storage: new BrowserAuthSessionPersistence("auth-store"),
-      },
-    )
-    const db = new Db()
-    return {
-      auth,
-      db,
-      realtime: new RealtimeClient({ auth, db }),
-    }
-  })
-  const { hasDbHydrated } = useInlineClientProvider({ value: client })
-  const hasImagesPreloaded = useImagePreload(client.db, hasDbHydrated)
-  console.log("hasDbHydrated", hasDbHydrated)
-  console.log("hasImagesPreloaded", hasImagesPreloaded)
-
-  if (!hasDbHydrated || !hasImagesPreloaded) {
-    return <div>Loading...</div>
-  }
-
-  return (
-    <InlineClientProvider value={client}>
-      <ClientRuntime />
       <Outlet />
-    </InlineClientProvider>
+    </RootDocument>
   )
 }
 

@@ -48,7 +48,7 @@ jobs:
       - name: Install Chromium for browser acceptance
         working-directory: landing
         run: bun x playwright install --with-deps chromium
-      - name: Test built browser login and persisted session
+      - name: Test built site security in the browser
         run: bun run --cwd landing test:e2e
       - name: Upload browser report and failure traces
         if: always()
