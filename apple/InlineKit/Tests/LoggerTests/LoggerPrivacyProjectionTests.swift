@@ -389,4 +389,35 @@ struct LoggerPrivacyProjectionTests {
 
     #expect(projection.data.isEmpty)
   }
+
+  @Test("connection breadcrumbs keep only bounded state, reason and protocol vocabulary")
+  func connectionBreadcrumbProjectionKeepsBoundedVocabulary() throws {
+    let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "state=open host=api.example.com",
+      category: "realtime.connection",
+      data: [
+        "state": "open",
+        "reason": "person@example.com",
+        "drop_reason": "network_route_changed",
+        "protocol": 3,
+        "session": 12,
+        "down_ms": 640,
+        "reconnect_ms": 410,
+        "host": "api.example.com",
+      ]
+    )
+
+    #expect(projection.message == "performance_event")
+    #expect(projection.category == "realtime.connection")
+    #expect(projection.data["state"] as? String == "open")
+    #expect(projection.data["drop_reason"] as? String == "network_route_changed")
+    #expect(projection.data["reason"] == nil)
+    #expect(projection.data["protocol"] == nil)
+    #expect(projection.data["host"] == nil)
+    #expect(try #require(projection.data["session"] as? Double) == 12)
+    #expect(try #require(projection.data["down_ms"] as? Double) == 640)
+    #expect(try #require(projection.data["reconnect_ms"] as? Double) == 410)
+    #expect(PerformanceTrace.isAllowedEnumValue("v3", for: "protocol"))
+    #expect(!PerformanceTrace.isAllowedEnumValue("v4", for: "protocol"))
+  }
 }

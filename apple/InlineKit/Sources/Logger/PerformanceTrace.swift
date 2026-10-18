@@ -84,6 +84,7 @@ public enum PerformanceTrace {
     "messages.mac",
     "messages.publisher",
     "messages.reload",
+    "realtime.connection",
     "realtime.protocol",
     "realtime.transaction",
     "realtime.transport",
@@ -109,6 +110,7 @@ public enum PerformanceTrace {
     "connect_ms",
     "deleted",
     "direct_capacity_rejections",
+    "down_ms",
     "duration_ms",
     "elapsed_ms",
     "ephemeral_expired",
@@ -135,6 +137,8 @@ public enum PerformanceTrace {
     "reconnect_count",
     "response_bytes",
     "retry_count",
+    "session",
+    "reconnect_ms",
     "rtc_connect_ms",
     "stabilized_height",
     "threshold_ms",
@@ -153,6 +157,24 @@ public enum PerformanceTrace {
     "success",
   ]
   private static let breadcrumbOpaqueIdentifierKeys: Set<String> = ["transition_id"]
+  /// Low-cardinality program vocabulary. Values outside each set are dropped, so free text,
+  /// identifiers and server-supplied strings can never pass through these keys.
+  private static let breadcrumbEnumValues: [String: Set<String>] = [
+    "state": [
+      "stopped", "waiting_for_constraints", "connecting_transport", "authenticating", "open", "backoff",
+      "background_suspended",
+    ],
+    "reason": connectionReasonValues,
+    "drop_reason": connectionReasonValues,
+    "protocol": ["v2", "v3"],
+  ]
+  private static let connectionReasonValues: Set<String> = [
+    "none", "user_stop", "auth_lost", "auth_failed", "auth_timeout", "transport_error", "transport_disconnected",
+    "ping_timeout", "network_unavailable", "network_route_changed", "application_resumed", "wake_probe_failed",
+    "background_suspended", "constraint_unavailable",
+  ]
+  private static let healthEventNames: Set<String> = ["realtime.connection.recovered"]
+  private static let diagnosticTagValues: [String: Set<String>] = ["realtime.protocol": ["v2", "v3"]]
   private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
   private static let maxBreadcrumbMetricCount = 16
 
@@ -204,6 +226,24 @@ public enum PerformanceTrace {
     SentrySDK.addBreadcrumb(crumb)
   }
 
+  /// Aggregatable health events, sent as Sentry structured logs. Event names are fixed and
+  /// attributes use the breadcrumb projection: allow-listed numbers, booleans and enum values only.
+  public static func healthEvent(_ name: String, data: [String: Any] = [:]) {
+    guard SentrySDK.isEnabled, healthEventNames.contains(name) else { return }
+    let projection = privacySafeBreadcrumbProjection(message: name, category: name, data: data)
+    SentrySDK.logger.info(name, attributes: projection.data)
+  }
+
+  /// Low-cardinality Sentry scope tags, so later errors can be filtered by connection context.
+  public static func setDiagnosticTag(_ key: String, value: String) {
+    guard SentrySDK.isEnabled, diagnosticTagValues[key]?.contains(value) == true else { return }
+    SentrySDK.configureScope { scope in scope.setTag(value: value, key: key) }
+  }
+
+  static func isAllowedEnumValue(_ value: String, for key: String) -> Bool {
+    breadcrumbEnumValues[key]?.contains(value) == true
+  }
+
   static func privacySafeBreadcrumbProjection(
     message _: String,
     category: String,
@@ -218,6 +258,11 @@ public enum PerformanceTrace {
          let number = value as? NSNumber,
          CFGetTypeID(number) == CFBooleanGetTypeID() {
         projectedData[key] = number.boolValue
+        continue
+      }
+
+      if let allowed = breadcrumbEnumValues[key] {
+        if let value = value as? String, allowed.contains(value) { projectedData[key] = value }
         continue
       }
 

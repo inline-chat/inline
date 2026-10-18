@@ -35,6 +35,7 @@ actor ConnectionManager {
   private let session: ProtocolSessionType
   private let policy: ConnectionPolicy
   private let timeProvider: ConnectionTimeProvider
+  private let telemetry: ConnectionTelemetry
 
   private let snapshotStream: AsyncStream<ConnectionSnapshot>
   private let snapshotContinuation: AsyncStream<ConnectionSnapshot>.Continuation
@@ -53,6 +54,11 @@ actor ConnectionManager {
   private var constraints: ConnectionConstraints
   private var networkQuality: ConnectionNetworkQuality = .good
   private var lastErrorDescription: String?
+  // Recovery measurement for the current outage, if the connection had been open before.
+  private var openEndedAt: Date?
+  private var dropReason: ConnectionReason = .none
+  private var reconnectStartedAt: Date?
+  private var attemptsAtOpen: UInt32 = 0
 
   private var commandTask: Task<Void, Never>?
   private var sessionTask: Task<Void, Never>?
@@ -80,11 +86,13 @@ actor ConnectionManager {
     session: ProtocolSessionType,
     policy: ConnectionPolicy = ConnectionPolicy(),
     timeProvider: ConnectionTimeProvider = SystemConnectionTimeProvider(),
-    constraints: ConnectionConstraints = .initial
+    constraints: ConnectionConstraints = .initial,
+    telemetry: ConnectionTelemetry = .sentry
   ) {
     self.session = session
     self.policy = policy
     self.timeProvider = timeProvider
+    self.telemetry = telemetry
     self.constraints = constraints
     stateSince = timeProvider.now()
     (commandStream, commandContinuation) = AsyncStream.create(
@@ -335,7 +343,7 @@ actor ConnectionManager {
       // replacing it repeatedly can prevent that attempt from ever opening.
       if routeChanged, state == .open, constraintsSatisfied() {
         log.info("Realtime network route changed; replacing transport session=\(sessionID)")
-        await forceReconnect(reason: .none)
+        await forceReconnect(reason: .networkRouteChanged)
       } else if constraintsSatisfied() {
         await evaluateConstraints(resetBackoff: true)
       }
@@ -356,7 +364,7 @@ actor ConnectionManager {
       backgroundConnectionRetained = false
       cancelBackoff()
       if !transportWasRetained, userInitiatedOperations == 0, !mediaConnectionRetained, state == .open {
-        await forceReconnect(reason: .none)
+        await forceReconnect(reason: .applicationResumed)
       } else {
         await evaluateConstraints(resetBackoff: true)
       }
@@ -395,7 +403,7 @@ actor ConnectionManager {
       }
       wakeProbeTask = nil
       if !isHealthy, state == .open {
-        await forceReconnect(reason: .none)
+        await forceReconnect(reason: .wakeProbeFailed)
       }
 
     case let .transportConnecting(eventSessionID):
@@ -449,6 +457,7 @@ actor ConnectionManager {
       cancelAuthTimeout()
       handshakeTask?.cancel()
       handshakeTask = nil
+      attemptsAtOpen = attempt
       attempt = 0
       lastErrorDescription = nil
       await transition(to: .open, reason: .none)
@@ -727,11 +736,63 @@ actor ConnectionManager {
 
   private func transition(to newState: ConnectionState, reason newReason: ConnectionReason) async {
     guard newState != state || newReason != reason else { return }
+    let previousState = state
     state = newState
     reason = newReason
     stateSince = timeProvider.now()
     snapshotContinuation.yield(currentSnapshot())
-    log.debug("Connection state changed state=\(newState) reason=\(newReason) attempt=\(attempt) session=\(sessionID)")
+    log.info(
+      "Connection state changed state=\(newState.telemetryName) reason=\(newReason.telemetryName) " +
+        "attempt=\(attempt) session=\(sessionID)"
+    )
+    if newState != previousState {
+      recordTransition(from: previousState, to: newState, reason: newReason, at: stateSince)
+    }
+  }
+
+  private func recordTransition(
+    from previous: ConnectionState,
+    to next: ConnectionState,
+    reason: ConnectionReason,
+    at now: Date
+  ) {
+    if previous == .open {
+      openEndedAt = now
+      dropReason = reason
+      reconnectStartedAt = nil
+    }
+    switch next {
+    case .connectingTransport:
+      if openEndedAt != nil, reconnectStartedAt == nil { reconnectStartedAt = now }
+    case .waitingForConstraints, .backgroundSuspended, .stopped:
+      // Waiting is not reconnect latency; the next attempt run starts a new measurement.
+      reconnectStartedAt = nil
+    case .authenticating, .open, .backoff:
+      break
+    }
+    var recovery: ConnectionRecovery?
+    if next == .open, let openEndedAt {
+      recovery = ConnectionRecovery(
+        downMilliseconds: Self.milliseconds(from: openEndedAt, to: now),
+        reconnectMilliseconds: Self.milliseconds(from: reconnectStartedAt ?? now, to: now),
+        dropReason: dropReason,
+        attempts: attemptsAtOpen,
+        protocolName: RealtimeTelemetryContext.protocolName
+      )
+      self.openEndedAt = nil
+      reconnectStartedAt = nil
+    }
+    telemetry.record(ConnectionTransitionRecord(
+      state: next,
+      reason: reason,
+      attempt: next == .open ? attemptsAtOpen : attempt,
+      session: sessionID,
+      recovery: recovery
+    ))
+  }
+
+  private static func milliseconds(from start: Date, to end: Date) -> Int {
+    Int((max(0, end.timeIntervalSince(start)) * 1_000).rounded())
   }
 
   private func stopTransportAndReset() async {

@@ -4,6 +4,7 @@ import InlineProtocol
 import Network
 import Testing
 
+@testable import Logger
 @testable import RealtimeV2
 
 @Suite("RealtimeV2.ConnectionManager", .serialized)
@@ -779,6 +780,80 @@ final class ConnectionManagerTests {
     await manager.shutdownForTesting()
   }
 
+  @Test("route change records its drop reason and measures recovery from the drop")
+  func routeChangeRecoveryTelemetry() async throws {
+    let clock = SteppedConnectionClock()
+    let telemetry = ConnectionTelemetryRecorder()
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(
+      session: session, timeProvider: clock, constraints: .initial, telemetry: telemetry.telemetry
+    )
+
+    _ = await openConnection(manager, session: session)
+    #expect(telemetry.records.last?.state == .open)
+    // The first open is not a recovery.
+    #expect(telemetry.records.allSatisfy { $0.recovery == nil })
+
+    clock.advance(by: 5)
+    await manager.networkPathChanged(isAvailable: true, routeChanged: true, quality: .good)
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    clock.advance(by: 0.3)
+    await session.emitTransportConnected()
+    #expect(await waitForCondition { await session.startHandshakeCount == 2 })
+    clock.advance(by: 0.2)
+    await session.emitProtocolOpen()
+    #expect(await waitForCondition { await manager.currentSnapshot().state == .open })
+
+    let recovery = try #require(telemetry.records.last?.recovery)
+    #expect(recovery.dropReason == .networkRouteChanged)
+    #expect(recovery.downMilliseconds == 500)
+    #expect(recovery.reconnectMilliseconds == 500)
+    let afterDrop = telemetry.records.drop { $0.reason != .networkRouteChanged }
+    #expect(afterDrop.map(\.state) == [.stopped, .connectingTransport, .authenticating, .open])
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("time suspended in the background is downtime, not reconnect latency")
+  func backgroundTimeIsNotReconnectLatency() async throws {
+    let clock = SteppedConnectionClock()
+    let telemetry = ConnectionTelemetryRecorder()
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(
+      session: session, timeProvider: clock, constraints: .initial, telemetry: telemetry.telemetry
+    )
+
+    _ = await openConnection(manager, session: session)
+    await manager.applicationBecameInactive(keepConnection: false)
+    #expect(await manager.currentSnapshot().state == .backgroundSuspended)
+    clock.advance(by: 60)
+    await manager.applicationBecameActive(transportWasRetained: false)
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    clock.advance(by: 0.4)
+    await session.emitTransportConnected()
+    #expect(await waitForCondition { await session.startHandshakeCount == 2 })
+    await session.emitProtocolOpen()
+    #expect(await waitForCondition { await manager.currentSnapshot().state == .open })
+
+    let recovery = try #require(telemetry.records.last?.recovery)
+    #expect(recovery.dropReason == .backgroundSuspended)
+    #expect(recovery.downMilliseconds == 60_400)
+    #expect(recovery.reconnectMilliseconds == 400)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("every connection state and reason passes the breadcrumb projection")
+  func connectionTelemetryVocabularyMatchesProjection() {
+    for state in ConnectionState.allCases {
+      #expect(PerformanceTrace.isAllowedEnumValue(state.telemetryName, for: "state"))
+    }
+    for reason in ConnectionReason.allCases {
+      #expect(PerformanceTrace.isAllowedEnumValue(reason.telemetryName, for: "reason"))
+      #expect(PerformanceTrace.isAllowedEnumValue(reason.telemetryName, for: "drop_reason"))
+    }
+  }
+
   private func openConnection(
     _ manager: ConnectionManager,
     session: FakeProtocolSession
@@ -952,5 +1027,25 @@ actor FakeProtocolSession: ProtocolSessionType {
       sessionID: sessionID,
       errorDescription: errorDescription
     )))
+  }
+}
+
+private final class SteppedConnectionClock: ConnectionTimeProvider, @unchecked Sendable {
+  private let lock = NSLock()
+  private var current = Date(timeIntervalSince1970: 1_800_000_000)
+  private let clock = ContinuousClock()
+
+  func now() -> Date { lock.withLock { current } }
+  func advance(by seconds: TimeInterval) { lock.withLock { current += seconds } }
+  // Timers still run on real time so ping and backoff loops do not spin.
+  func sleep(for duration: Duration) async { try? await clock.sleep(for: duration) }
+}
+
+private final class ConnectionTelemetryRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [ConnectionTransitionRecord] = []
+  var records: [ConnectionTransitionRecord] { lock.withLock { recorded } }
+  var telemetry: ConnectionTelemetry {
+    ConnectionTelemetry { [self] record in lock.withLock { recorded.append(record) } }
   }
 }

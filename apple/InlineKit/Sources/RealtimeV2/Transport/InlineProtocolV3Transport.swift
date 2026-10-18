@@ -1003,6 +1003,7 @@ public actor NegotiatingRealtimeTransport: Transport {
     guard !connectedWasLogged else { return }
     connectedWasLogged = true
     let kind = activeKind == .inlineProtocol ? "v3" : "v2"
+    RealtimeTelemetryContext.recordProtocol(kind)
     let cohort = hasLegacyCredentials()
       ? (hasInlineProtocolCredentials() ? "upgraded" : "legacy") : "native"
     log.info("event=legacy_v3_connected protocol=\(kind) cohort=\(cohort) duration_ms=\(elapsedMilliseconds())")

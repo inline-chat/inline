@@ -1,4 +1,4 @@
-public enum ConnectionState: Sendable {
+public enum ConnectionState: Sendable, CaseIterable {
   case stopped
   case waitingForConstraints
   case connectingTransport
