@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import Logger
 import MultipartFormDataKit
@@ -86,6 +87,8 @@ final class FileService {
   }
     
   private func uploadImageToServer(_ data: Data, fileType: UTType) async throws {
+    // The photo belongs to the account that picked it, even if logout lands mid-upload.
+    let accountToken = try Auth.shared.handle.beginAccountMutation()
     let mimeType = switch fileType {
       case .jpeg: MIMEType.imageJpeg
       case .png: MIMEType.imagePng
@@ -103,11 +106,7 @@ final class FileService {
         progress: { _ in }
       )
         
-    let result2 = try await InlineRPCClient.shared.setProfilePhoto(fileUniqueID: result.fileUniqueId)
-        
-    _ = try await AppDatabase.shared.dbWriter.write { db in
-      try result2.user.saveFull(db)
-    }
+    try await DataManager.shared.setProfilePhoto(fileUniqueID: result.fileUniqueId, accountToken: accountToken)
   }
 }
 

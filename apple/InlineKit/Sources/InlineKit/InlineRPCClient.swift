@@ -1,22 +1,69 @@
 import Auth
 import Foundation
 import InlineProtocol
+import RealtimeV2
 
 public enum InlineRPCClientError: Error {
   case unexpectedResponse
 }
 
+/// The realtime calls InlineRPCClient makes. Tests substitute it to hold a completed response
+/// while the account changes.
+protocol InlineRPCRealtime: Sendable {
+  func callRpcDirect(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration?,
+    accountToken: AuthAccountMutationToken?
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result?
+
+  func applyUpdatesAndWait(
+    _ updates: [InlineProtocol.Update], accountToken: AuthAccountMutationToken
+  ) async throws
+}
+
+extension RealtimeV2: InlineRPCRealtime {}
+
 /// Application-facing authenticated operations carried by the negotiated realtime session.
 /// Public authentication and CDN traffic intentionally remain outside this boundary.
+///
+/// Wrappers that project a result take the caller's `AuthAccountMutationToken`. The token binds
+/// the request and its projection to one account, so a response that completes just before
+/// logout or an account switch is rejected rather than applied under the next account.
 public actor InlineRPCClient {
   public static let shared = InlineRPCClient()
+
+  private let realtime: @Sendable () -> any InlineRPCRealtime
+
+  init() {
+    realtime = { Api.realtime }
+  }
+
+  init(realtime: @escaping @Sendable () -> any InlineRPCRealtime) {
+    self.realtime = realtime
+  }
+
+  private func callRpcDirect(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration? = .seconds(15),
+    accountToken: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    try await realtime().callRpcDirect(method: method, input: input, timeout: timeout, accountToken: accountToken)
+  }
+
+  private func applyUpdatesAndWait(
+    _ updates: [InlineProtocol.Update], accountToken: AuthAccountMutationToken
+  ) async throws {
+    try await realtime().applyUpdatesAndWait(updates, accountToken: accountToken)
+  }
 
   public func createSpace(
     name: String,
     photoFileUniqueID: String? = nil,
     accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.CreateSpaceResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .createSpace,
       input: .createSpace(.with {
         $0.name = name
@@ -31,7 +78,7 @@ public actor InlineRPCClient {
   public func setSpacePhoto(
     spaceID: Int64, fileUniqueID: String?, accountToken: AuthAccountMutationToken
   ) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .setSpacePhoto,
       input: .setSpacePhoto(.with {
         $0.spaceID = spaceID
@@ -40,23 +87,23 @@ public actor InlineRPCClient {
       accountToken: accountToken
     )
     guard case let .setSpacePhoto(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
-    try await Api.realtime.applyUpdatesAndWait(result.updates, accountToken: accountToken)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
   public func getMe() async throws -> InlineProtocol.GetMeResult {
-    let response = try await Api.realtime.callRpcDirect(method: .getMe, input: .getMe(.init()))
+    let response = try await callRpcDirect(method: .getMe, input: .getMe(.init()))
     guard case let .getMe(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
     return result
   }
 
   public func getChats() async throws -> InlineProtocol.GetChatsResult {
-    let response = try await Api.realtime.callRpcDirect(method: .getChats, input: .getChats(.init()))
+    let response = try await callRpcDirect(method: .getChats, input: .getChats(.init()))
     guard case let .getChats(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
     return result
   }
 
   public func getChat(peerID: Peer) async throws -> InlineProtocol.GetChatResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getChat,
       input: .getChat(.with { $0.peerID = peerID.toInputPeer() })
     )
@@ -68,7 +115,7 @@ public actor InlineRPCClient {
   public func getUsers(
     ids: [Int64], accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.GetUsersResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getUsers,
       input: .getUsers(.with { $0.userIds = ids }),
       accountToken: accountToken
@@ -78,7 +125,7 @@ public actor InlineRPCClient {
   }
 
   public func getSpaceMembers(spaceID: Int64) async throws -> InlineProtocol.GetSpaceMembersResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getSpaceMembers,
       input: .getSpaceMembers(.with { $0.spaceID = spaceID })
     )
@@ -89,7 +136,7 @@ public actor InlineRPCClient {
   }
 
   public func getSpace(spaceID: Int64) async throws -> InlineProtocol.GetSpaceResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getSpace,
       input: .getSpace(.with { $0.spaceID = spaceID })
     )
@@ -108,7 +155,7 @@ public actor InlineRPCClient {
   }
 
   public func searchUsers(query: String, limit: Int32 = 20) async throws -> [InlineProtocol.User] {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .searchUsers,
       input: .searchUsers(.with {
         $0.query = query
@@ -123,39 +170,45 @@ public actor InlineRPCClient {
     SearchContacts(users: try await searchUsers(query: query).map(ApiUser.init(from:)))
   }
 
-  public func setProfilePhoto(fileUniqueID: String) async throws -> UpdateProfile {
-    let response = try await Api.realtime.callRpcDirect(
+  /// The returned user belongs to `accountToken`; callers that save it must validate it again.
+  public func setProfilePhoto(
+    fileUniqueID: String, accountToken: AuthAccountMutationToken
+  ) async throws -> UpdateProfile {
+    let response = try await callRpcDirect(
       method: .setProfilePhoto,
-      input: .setProfilePhoto(.with { $0.fileUniqueID = fileUniqueID })
+      input: .setProfilePhoto(.with { $0.fileUniqueID = fileUniqueID }),
+      accountToken: accountToken
     )
     guard case let .setProfilePhoto(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    await Api.realtime.applyUpdatesAndWait(result.updates)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
     return UpdateProfile(user: ApiUser(from: result.user))
   }
 
   public func deleteMessageAttachment(
     peerID: Peer,
     messageID: Int64,
-    attachmentID: Int64
+    attachmentID: Int64,
+    accountToken: AuthAccountMutationToken
   ) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .deleteMessageAttachment,
       input: .deleteMessageAttachment(.with {
         $0.peerID = peerID.toInputPeer()
         $0.messageID = messageID
         $0.attachmentID = attachmentID
-      })
+      }),
+      accountToken: accountToken
     )
     guard case let .deleteMessageAttachment(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    await Api.realtime.applyUpdatesAndWait(result.updates)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
   public func getChatHistory(peerID: Peer, limit: Int32 = 100) async throws -> InlineProtocol.GetChatHistoryResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getChatHistory,
       input: .getChatHistory(.with {
         $0.peerID = peerID.toInputPeer()
@@ -170,7 +223,7 @@ public actor InlineRPCClient {
   }
 
   public func inviteToSpace(spaceID: Int64, userID: Int64) async throws -> InlineProtocol.InviteToSpaceResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .inviteToSpace,
       input: .inviteToSpace(.with {
         $0.spaceID = spaceID
@@ -184,37 +237,43 @@ public actor InlineRPCClient {
     return result
   }
 
-  public func deleteMessage(peerID: Peer, messageID: Int64) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+  public func deleteMessage(
+    peerID: Peer, messageID: Int64, accountToken: AuthAccountMutationToken
+  ) async throws {
+    let response = try await callRpcDirect(
       method: .deleteMessages,
       input: .deleteMessages(.with {
         $0.peerID = peerID.toInputPeer()
         $0.messageIds = [messageID]
-      })
+      }),
+      accountToken: accountToken
     )
     guard case let .deleteMessages(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    await Api.realtime.applyUpdatesAndWait(result.updates)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
-  public func addReaction(peerID: Peer, messageID: Int64, emoji: String) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+  public func addReaction(
+    peerID: Peer, messageID: Int64, emoji: String, accountToken: AuthAccountMutationToken
+  ) async throws {
+    let response = try await callRpcDirect(
       method: .addReaction,
       input: .addReaction(.with {
         $0.peerID = peerID.toInputPeer()
         $0.messageID = messageID
         $0.emoji = emoji
-      })
+      }),
+      accountToken: accountToken
     )
     guard case let .addReaction(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    await Api.realtime.applyUpdatesAndWait(result.updates)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
   public func deleteSpace(spaceID: Int64) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .deleteSpace,
       input: .deleteSpace(.with { $0.spaceID = spaceID })
     )
@@ -222,7 +281,7 @@ public actor InlineRPCClient {
   }
 
   public func leaveSpace(spaceID: Int64) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .leaveSpace,
       input: .leaveSpace(.with { $0.spaceID = spaceID })
     )
@@ -230,7 +289,7 @@ public actor InlineRPCClient {
   }
 
   public func logout(timeout: Duration? = .seconds(15)) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .logOut,
       input: .logOut(.init()),
       timeout: timeout
@@ -246,7 +305,7 @@ public actor InlineRPCClient {
     clientVersion: String? = nil,
     osVersion: String? = nil
   ) async throws -> InlineProtocol.AccountSession {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .updateSession,
       input: .updateSession(.with {
         if let timeZone { $0.timeZone = timeZone }
@@ -261,34 +320,39 @@ public actor InlineRPCClient {
     return result.session
   }
 
-  public func updateDialogArchived(peerID: Peer, archived: Bool) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+  public func updateDialogArchived(
+    peerID: Peer, archived: Bool, accountToken: AuthAccountMutationToken
+  ) async throws {
+    let response = try await callRpcDirect(
       method: .updateDialogArchived,
       input: .updateDialogArchived(.with {
         $0.peerID = peerID.toInputPeer()
         $0.archived = archived
-      })
+      }),
+      accountToken: accountToken
     )
     guard case let .updateDialogArchived(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    await Api.realtime.applyUpdatesAndWait(result.updates)
+    try await applyUpdatesAndWait(result.updates, accountToken: accountToken)
   }
 
   public func updateDialogOrder(
     peerID: Peer,
     pinned: Bool?,
     order: String?,
-    pinnedOrder: String?
+    pinnedOrder: String?,
+    accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.UpdateDialogOrderResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .updateDialogOrder,
       input: .updateDialogOrder(.with {
         $0.peerID = peerID.toInputPeer()
         if let pinned { $0.pinned = pinned }
         if let order { $0.order = order }
         if let pinnedOrder { $0.pinnedOrder = pinnedOrder }
-      })
+      }),
+      accountToken: accountToken
     )
     guard case let .updateDialogOrder(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
@@ -297,7 +361,7 @@ public actor InlineRPCClient {
   }
 
   public func integrations(userID: Int64, spaceID: Int64? = nil) async throws -> GetIntegrations {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .listConnectors,
       input: .listConnectors(.init())
     )
@@ -362,7 +426,7 @@ public actor InlineRPCClient {
 
   public func disconnect(provider: String, spaceID: Int64) async throws {
     guard let provider = ConnectorKind(rawValue: provider) else { throw InlineRPCClientError.unexpectedResponse }
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .disconnectConnector,
       input: .disconnectConnector(.with {
         $0.provider = provider.protocolValue
@@ -396,7 +460,7 @@ public actor InlineRPCClient {
     provider: InlineProtocol.ConnectorProvider,
     spaceID: Int64
   ) async throws -> InlineProtocol.GetConnectorConfigResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .getConnectorConfig,
       input: .getConnectorConfig(.with {
         $0.provider = provider
@@ -414,7 +478,7 @@ public actor InlineRPCClient {
     spaceID: Int64?,
     emoji: String?
   ) async throws -> InlineProtocol.CreateChatResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .createChat,
       input: .createChat(.with {
         if let title { $0.title = title }
@@ -432,7 +496,7 @@ public actor InlineRPCClient {
     spaceID: Int64,
     selectedID: String
   ) async throws {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .setConnectorConfig,
       input: .setConnectorConfig(.with {
         $0.provider = provider
@@ -449,7 +513,7 @@ public actor InlineRPCClient {
     messageID: Int64,
     peerID: Peer
   ) async throws -> InlineProtocol.CreateExternalTaskResult {
-    let response = try await Api.realtime.callRpcDirect(
+    let response = try await callRpcDirect(
       method: .createExternalTask,
       input: .createExternalTask(.with {
         $0.provider = provider

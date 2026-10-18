@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import MultipartFormDataKit
@@ -127,6 +128,8 @@ final class ProfilePhotoViewModel: ObservableObject {
   }
 
   private func uploadImageToServer(_ data: Data, fileType: UTType) async throws {
+    // The photo belongs to the account that picked it, even if logout lands mid-upload.
+    let accountToken = try Auth.shared.handle.beginAccountMutation()
     // TODO: ensure it's jpg or png
 
     let mimeType = switch fileType {
@@ -149,12 +152,7 @@ final class ProfilePhotoViewModel: ObservableObject {
         progress: { _ in }
       )
 
-    // call update profile photo method
-    let result2 = try await InlineRPCClient.shared.setProfilePhoto(fileUniqueID: result.fileUniqueId)
-
-    let _ = try await AppDatabase.shared.dbWriter.write { db in
-      try result2.user.saveFull(db)
-    }
+    try await DataManager.shared.setProfilePhoto(fileUniqueID: result.fileUniqueId, accountToken: accountToken)
   }
 
   private func showError(_ error: FileError) {

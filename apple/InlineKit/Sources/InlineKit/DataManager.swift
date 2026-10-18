@@ -19,11 +19,17 @@ enum DataManagerError: Error {
 public class DataManager: ObservableObject {
   private var database: AppDatabase
   private let auth: AuthHandle
+  private let rpc: InlineRPCClient
   private var log = Log.scoped("DataManager")
 
-  public init(database: AppDatabase, auth: AuthHandle = Auth.shared.handle) {
+  public convenience init(database: AppDatabase, auth: AuthHandle = Auth.shared.handle) {
+    self.init(database: database, auth: auth, rpc: .shared)
+  }
+
+  init(database: AppDatabase, auth: AuthHandle, rpc: InlineRPCClient) {
     self.database = database
     self.auth = auth
+    self.rpc = rpc
   }
 
   public static let shared = DataManager(database: AppDatabase.shared, auth: Auth.shared.handle)
@@ -47,7 +53,7 @@ public class DataManager: ObservableObject {
     log.trace("fetchMe")
     let mutationToken = try beginAccountMutation()
     do {
-      let result = try await InlineRPCClient.shared.getMe()
+      let result = try await rpc.getMe()
 
       return try await writeAccountProjection(token: mutationToken) { db in
         try User.save(db, user: result.user)
@@ -74,7 +80,7 @@ public class DataManager: ObservableObject {
       }
       try auth.validateAccountMutation(mutationToken)
       try Task.checkCancellation()
-      let result = try await InlineRPCClient.shared.createSpace(
+      let result = try await rpc.createSpace(
         name: name, photoFileUniqueID: photoID, accountToken: mutationToken
       )
       let space = Space(from: result.space)
@@ -108,7 +114,7 @@ public class DataManager: ObservableObject {
     log.trace("createThread")
     let mutationToken = try beginAccountMutation()
     do {
-      let result = try await InlineRPCClient.shared.createThread(title: title, spaceID: spaceId, emoji: emoji)
+      let result = try await rpc.createThread(title: title, spaceID: spaceId, emoji: emoji)
       // Create the chat
       let chat = Chat(from: result.chat)
       try await writeAccountProjection(token: mutationToken) { db in
@@ -160,7 +166,7 @@ public class DataManager: ObservableObject {
           .deleteAll(db)
       }
 
-      try await InlineRPCClient.shared.deleteSpace(spaceID: spaceId)
+      try await rpc.deleteSpace(spaceID: spaceId)
 
     } catch {
       log.error("Failed to delete space", error: error)
@@ -185,7 +191,7 @@ public class DataManager: ObservableObject {
           .deleteAll(db)
       }
 
-      try await InlineRPCClient.shared.leaveSpace(spaceID: spaceId)
+      try await rpc.leaveSpace(spaceID: spaceId)
     } catch {
       log.error("Failed to leave space", error: error)
       throw error
@@ -279,13 +285,15 @@ public class DataManager: ObservableObject {
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
+    // Bind the account before the local target lookup, not after the response.
+    let mutationToken = try beginAccountMutation()
     let peerID = try await database.reader.read { db -> Peer in
       guard let chat = try Chat.fetchOne(db, key: chatId) else {
         throw InlineRPCClientError.unexpectedResponse
       }
       return chat.peerId.toPeer()
     }
-    try await InlineRPCClient.shared.addReaction(peerID: peerID, messageID: messageId, emoji: emoji)
+    try await rpc.addReaction(peerID: peerID, messageID: messageId, emoji: emoji, accountToken: mutationToken)
   }
 
   @available(*, unavailable, message: "Presence is owned by the realtime connection lifecycle")
@@ -399,14 +407,15 @@ public class DataManager: ObservableObject {
 
     do {
       if let archived {
-        try await InlineRPCClient.shared.updateDialogArchived(peerID: peerId, archived: archived)
+        try await rpc.updateDialogArchived(peerID: peerId, archived: archived, accountToken: mutationToken)
       }
       if pinned != nil || requestOrder.order != nil || requestOrder.pinnedOrder != nil {
-        let response = try await InlineRPCClient.shared.updateDialogOrder(
+        let response = try await rpc.updateDialogOrder(
           peerID: peerId,
           pinned: pinned,
           order: requestOrder.order,
-          pinnedOrder: requestOrder.pinnedOrder
+          pinnedOrder: requestOrder.pinnedOrder,
+          accountToken: mutationToken
         )
         try await writeAccountProjection(token: mutationToken) { db in
           _ = try response.dialog.saveFull(db)
@@ -532,7 +541,7 @@ public class DataManager: ObservableObject {
   /// Fetches public profiles by ID and saves them. Returns the IDs the server had.
   public func getUsers(ids: [Int64]) async throws -> Set<Int64> {
     let mutationToken = try beginAccountMutation()
-    let result = try await InlineRPCClient.shared.getUsers(ids: ids, accountToken: mutationToken)
+    let result = try await rpc.getUsers(ids: ids, accountToken: mutationToken)
     let requested = Set(ids)
     let users = result.users.filter { requested.contains($0.id) }
     try await writeAccountProjection(token: mutationToken) { db in
@@ -545,7 +554,7 @@ public class DataManager: ObservableObject {
 
   public func getSpace(spaceId: Int64) async throws {
     let mutationToken = try beginAccountMutation()
-    let result = try await InlineRPCClient.shared.getSpace(spaceID: spaceId)
+    let result = try await rpc.getSpace(spaceID: spaceId)
     let imported = try await writeAccountProjection(token: mutationToken) { db in
       try Self.applyTargetedSpaceSnapshot(
         result,
@@ -637,7 +646,7 @@ public class DataManager: ObservableObject {
 
   public func addMember(spaceId: Int64, userId: Int64) async throws {
     let mutationToken = try beginAccountMutation()
-    let result = try await InlineRPCClient.shared.inviteToSpace(spaceID: spaceId, userID: userId)
+    let result = try await rpc.inviteToSpace(spaceID: spaceId, userID: userId)
     try await writeAccountProjection(token: mutationToken) { db in
       let member = Member(from: result.member)
       try member.reconcileProjection(db)
@@ -651,7 +660,7 @@ public class DataManager: ObservableObject {
     messageId: Int64, chatId: Int64, peerId: Peer
   ) async throws {
     let mutationToken = try beginAccountMutation()
-    try await InlineRPCClient.shared.deleteMessage(peerID: peerId, messageID: messageId)
+    try await rpc.deleteMessage(peerID: peerId, messageID: messageId, accountToken: mutationToken)
 
     try await writeAccountProjection(token: mutationToken) { db in
       if var chat = try Chat.fetchOne(db, id: chatId) {
@@ -690,7 +699,7 @@ public class DataManager: ObservableObject {
       // their authorization across launches and skip the legacy handshake.
       let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
       let os = ProcessInfo.processInfo.operatingSystemVersion
-      _ = try await InlineRPCClient.shared.updateSession(
+      _ = try await rpc.updateSession(
         timeZone: timeZone,
         clientVersion: build,
         osVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
@@ -716,6 +725,7 @@ public class DataManager: ObservableObject {
       "deleteAttachment requested (externalTaskId: \(externalTaskId), application: \(externalTask.application), messageId: \(messageId), chatId: \(chatId))"
     )
 
+    let mutationToken = try beginAccountMutation()
     let target = try await database.reader.read { db -> (Peer, Int64)? in
       guard let message = try Message
         .filter(Column("chatId") == chatId)
@@ -737,10 +747,20 @@ public class DataManager: ObservableObject {
       )
     }
 
-    try await InlineRPCClient.shared.deleteMessageAttachment(
+    try await rpc.deleteMessageAttachment(
       peerID: peerID,
       messageID: messageId,
-      attachmentID: attachmentID
+      attachmentID: attachmentID,
+      accountToken: mutationToken
     )
+  }
+
+  /// Sets an uploaded profile photo and saves the returned user. Capture `accountToken` before
+  /// the upload starts; a response that completes after logout or an account switch is dropped.
+  public func setProfilePhoto(fileUniqueID: String, accountToken: AuthAccountMutationToken) async throws {
+    let user = try await rpc.setProfilePhoto(fileUniqueID: fileUniqueID, accountToken: accountToken).user
+    try await writeAccountProjection(token: accountToken) { db in
+      _ = try user.saveFull(db)
+    }
   }
 }
