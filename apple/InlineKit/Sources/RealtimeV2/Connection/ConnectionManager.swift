@@ -741,7 +741,8 @@ actor ConnectionManager {
     reason = newReason
     stateSince = timeProvider.now()
     snapshotContinuation.yield(currentSnapshot())
-    log.info(
+    // Debug only: info would add a second Sentry breadcrumb beside the structured transition crumb.
+    log.debug(
       "Connection state changed state=\(newState.telemetryName) reason=\(newReason.telemetryName) " +
         "attempt=\(attempt) session=\(sessionID)"
     )
