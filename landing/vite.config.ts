@@ -73,23 +73,8 @@ function docsContentPlugin(): Plugin {
   }
 }
 
+// Document CSP is per request (nonce) and set by src/start.ts.
 const securityHeaders = {
-  "Content-Security-Policy": [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'self'",
-    "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
-    "script-src 'self' 'unsafe-inline'",
-    "frame-src https://www.youtube-nocookie.com",
-    "connect-src 'self' https://api.inline.chat wss://api.inline.chat https://public-assets.inline.chat",
-    "worker-src 'self' blob:",
-    "manifest-src 'self'",
-    "form-action 'self'",
-    "upgrade-insecure-requests",
-  ].join("; "),
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
   "Origin-Agent-Cluster": "?1",

@@ -16,6 +16,7 @@ import { Children, isValidElement, type ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { CheckIcon, CopyIcon } from "~/docs/lucide"
 import { emailFallback, emailParts } from "~/lib/email"
+import { trustedHighlightHTML } from "~/lib/trustedTypes"
 
 hljs.registerLanguage("applescript", applescript)
 hljs.registerLanguage("bash", bash)
@@ -459,7 +460,7 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false, me
             ignoreIllegals: true,
           }).value
 
-          return <code className={`${className} hljs`} dangerouslySetInnerHTML={{ __html: highlighted }} {...props} />
+          return <code className={`${className} hljs`} dangerouslySetInnerHTML={{ __html: trustedHighlightHTML(highlighted) }} {...props} />
         },
         div: ({ children, node: _node, className, ...props }) => {
           if (className === "docs-code-tabs") {
