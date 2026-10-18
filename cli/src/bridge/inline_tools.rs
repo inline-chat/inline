@@ -202,7 +202,12 @@ impl InlineToolHost {
         (provider_id == self.route.provider_id && session_id == call.session_id).then_some(record)
     }
 
-    async fn explicit_bot_turn_may_use_tools(&self, record: &InboundRecord) -> bool {
+    pub(super) async fn explicit_bot_turn_may_use_tools(&self, record: &InboundRecord) -> bool {
+        // Same sender gate as admission: only this bridge's own bots skip the
+        // allowlist, and a mention alone never grants another bot tool access.
+        if !self.route.admits_sender(record.sender_user_id) {
+            return false;
+        }
         let Ok(Some(message)) = self
             .route
             .bot_store

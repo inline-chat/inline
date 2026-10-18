@@ -6,8 +6,10 @@ Inline threads. All requests, including bot-authored requests, pass a strict
 stable-user-ID allowlist before routing, context lookup, workspace binding, or
 provider work; it contains only the owner by default. Unauthorized messages are
 ignored silently, including DMs and commands; they cause no denial reply or
-provider work. An allowlisted bot can activate it only with an exact structured
-mention of this bot. Bot DMs, replies, followed-thread traffic,
+provider work. Another bot can activate it only when it is one of this bridge's
+own provider bots or its user ID is on the allowlist, and only with an exact
+structured mention of this bot. A mention addresses a bot; it never authorizes
+one. Bot DMs, replies, followed-thread traffic,
 generic mention flags, and targeted commands without that mention stay inert.
 Bot authorship is disclosed to the coding harness, whose delivery guidance
 requires explicit handoff mentions and warns against reciprocal loops. The Rust
@@ -731,12 +733,22 @@ the local service-epoch probe fails.
   capability, exact host installation ID, and selected bot identity.
 - Workspace paths are canonicalized; filesystem root and the home directory are
   rejected as projects.
+- A chat without a project binding gets the default project (or home) only when
+  the owner sends the message, in the owner DM, or when this bridge's own bot
+  hands off work it already admitted. Other operators and allowlisted bots work
+  only in chats the owner has connected to a project; people get a notice with
+  a Retry button, bots are ignored.
 - Shared/public chats are treated as potentially internet-visible. Admission is
   based only on the strict stable-user-ID allowlist, never group membership.
   Non-allowlisted human messages are excluded from provider context; approval
   details, absolute local paths, and `file://` targets remain owner-DM-only.
 - Another bot must pass the same live user-ID allowlist and exactly mention this
-  bot. A targeted command or reply alone does not authorize or activate it.
+  bot. The only exemption is the other provider bots of this same local bridge,
+  which the owner provisioned on this host. Add any other bot with
+  `inline bridge operators add <bot_user_id>`; the in-chat `/allowlist` card
+  accepts people only. The check is repeated when queued work is replayed and
+  when a turn calls Inline tools, so removing an ID stops its queued work too.
+  A targeted command or reply alone does not authorize or activate it.
   Other bot messages are ignored silently. Ordinary responses to bots are sent
   without a structural reply or reciprocal mention; bridge-authored guidance
   permits a bot mention only for a necessary explicit handoff. Message metadata

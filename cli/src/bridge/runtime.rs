@@ -137,6 +137,9 @@ pub(super) struct InboundRoute {
     pub host_label: String,
     pub owner_dm_chat_id: i64,
     pub bot_user_id: i64,
+    /// Other provider bots of this same local bridge. The owner provisioned
+    /// them on this host, so their handoffs need no allowlist entry.
+    pub sibling_bot_user_ids: Arc<HashSet<i64>>,
     pub bot_username: String,
     pub bot_store: SqliteStore,
     pub attachment_cache_dir: PathBuf,
@@ -337,6 +340,19 @@ impl InboundRoute {
             .read()
             .expect("operator policy poisoned")
             .allows(user_id)
+    }
+
+    /// This bridge's own bot or another provider bot of the same bridge.
+    pub fn is_bridge_bot(&self, user_id: i64) -> bool {
+        user_id == self.bot_user_id || self.sibling_bot_user_ids.contains(&user_id)
+    }
+
+    /// The single sender gate for inbound work, replay, steering and tools.
+    /// Humans and foreign bots alike need an operator allowlist entry; only
+    /// this bridge's own bots are exempt. A mention addresses a bot, but it
+    /// never authorizes one.
+    pub fn admits_sender(&self, user_id: i64) -> bool {
+        self.is_bridge_bot(user_id) || self.allows(user_id)
     }
 
     pub fn replace_policy(&self, policy: OperatorPolicy) {
@@ -620,14 +636,11 @@ async fn inbound_from_message(
     if !retry && message.timestamp < route.accept_messages_after {
         return Ok(None);
     }
-    // Human access is provider-wide and owner-controlled. Bot deliveries have
-    // already passed the server's exact structured-mention gate, so admitting
-    // them here preserves the universal bot-to-bot mention-only rule without
-    // forcing bots into the human operator allowlist.
-    let sender_is_bot = message.is_outgoing
-        || message.sender_id.get() == route.bot_user_id
-        || message_sender_is_bot(&route.bot_store, message).await?;
-    if !sender_is_bot && !route.allows(message.sender_id.get()) {
+    // Access is owner-controlled for humans and bots alike. Any Inline user can
+    // create a bot and mention this one, so a bot delivery is only addressed,
+    // never authorized, by the server's mention gate. Outgoing messages are
+    // this bot's own.
+    if !message.is_outgoing && !route.admits_sender(message.sender_id.get()) {
         return Ok(None);
     }
     tokio::time::sleep_until(response_not_before).await;
@@ -757,6 +770,8 @@ async fn inbound_from_message(
             text: text.clone(),
             duplicate: false,
             bot_authored: message_route.bot_authored,
+            sender_is_bridge_bot: message.is_outgoing
+                || route.is_bridge_bot(message.sender_id.get()),
             addressing: message_route.addressing,
             command,
             action: None,
@@ -839,6 +854,19 @@ async fn inbound_from_message(
         .await?;
         return Ok(None);
     }
+    // A chat without a workspace gets the default project (or home) only when
+    // the owner asks, in the owner DM, or when this bridge's own bot hands off
+    // work it already admitted. Other operators and allowlisted bots need a
+    // chat the owner has already connected to a project.
+    let unbound = if message.sender_id.get() == route.owner_user_id
+        || message.chat_id.get() == route.owner_dm_chat_id
+        || message.is_outgoing
+        || route.is_bridge_bot(message.sender_id.get())
+    {
+        UnboundChat::UseDefault
+    } else {
+        UnboundChat::RequireOwner
+    };
     let resolved = if is_command
         && message.sender_id.get() == route.owner_user_id
         && (is_workspace_recovery_command(&direction.text, &route.bot_username)
@@ -851,12 +879,19 @@ async fn inbound_from_message(
             message.chat_id.get(),
             chat_agent_context.as_ref(),
             !is_command,
+            unbound,
         )
     };
     let conversation = match resolved {
         Ok(conversation) => conversation.snapshot(),
-        Err(ConversationResolutionError::MissingWorkspace) => {
-            send_workspace_recovery(bot, message, &event_id).await?;
+        Err(ConversationResolutionError::UnapprovedChat) if message_route.bot_authored => {
+            return Ok(None);
+        }
+        Err(
+            error @ (ConversationResolutionError::MissingWorkspace
+            | ConversationResolutionError::UnapprovedChat),
+        ) => {
+            send_workspace_recovery(bot, message, &event_id, &error).await?;
             return Ok(None);
         }
         Err(ConversationResolutionError::InvalidAgentContext(notice)) => {

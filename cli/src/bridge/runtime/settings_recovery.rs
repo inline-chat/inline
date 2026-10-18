@@ -8,17 +8,28 @@ pub(super) async fn send_workspace_recovery(
     bot: &InlineClient,
     source: &MessageRecord,
     event_id: &str,
+    error: &ConversationResolutionError,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let (text, external_suffix) = match error {
+        ConversationResolutionError::UnapprovedChat => (
+            "This chat has no project yet. The bot owner can choose one in Agent settings, then you can retry your request.",
+            "unapproved-chat",
+        ),
+        _ => (
+            "This project folder isn’t available. Choose a project or No project in Agent settings, then retry your request.",
+            "missing-workspace",
+        ),
+    };
     let mut message = SendTextRequest::new(
         PeerRef::Chat {
             chat_id: source.chat_id,
         },
-        "This project folder isn’t available. Choose a project or No project in Agent settings, then retry your request.",
+        text,
     );
     message.reply_to_message_id = Some(source.message_id);
     message.external_id = Some(ExternalId::try_new(
         "agent-bridge",
-        format!("{event_id}-missing-workspace"),
+        format!("{event_id}-{external_suffix}"),
     )?);
     message.notification_mode = BridgeNotificationClass::ImportantFailure.notification_mode();
     send_interactive_text_with_retry(

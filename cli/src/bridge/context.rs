@@ -376,6 +376,7 @@ mod tests {
             host_label: "Mo's Mac".to_string(),
             owner_dm_chat_id: 11,
             bot_user_id: 99,
+            sibling_bot_user_ids: Arc::default(),
             bot_username: "codex_bot".to_string(),
             bot_store,
             attachment_cache_dir: PathBuf::from("/tmp/inline-agent-bridge-test-attachments"),

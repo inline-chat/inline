@@ -5,6 +5,9 @@ use super::*;
 #[derive(Debug)]
 pub(in crate::bridge) enum ConversationResolutionError {
     MissingWorkspace,
+    /// The chat has no workspace yet and this sender may not pick the default
+    /// project or home for it. Only the owner can connect a new chat.
+    UnapprovedChat,
     InvalidAgentContext(String),
     ClientStore(inline_client::StoreError),
     Store(inline_agent_bridge::StoreError),
@@ -21,6 +24,7 @@ impl std::fmt::Display for ConversationResolutionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingWorkspace => formatter.write_str(BridgeNotice::MissingWorkspace.message()),
+            Self::UnapprovedChat => formatter.write_str(BridgeNotice::UnapprovedChat.message()),
             Self::InvalidAgentContext(message) => formatter.write_str(message),
             Self::ClientStore(error) => std::fmt::Display::fmt(error, formatter),
             Self::Store(error) => std::fmt::Display::fmt(error, formatter),
@@ -31,7 +35,7 @@ impl std::fmt::Display for ConversationResolutionError {
 impl std::error::Error for ConversationResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MissingWorkspace | Self::InvalidAgentContext(_) => None,
+            Self::MissingWorkspace | Self::UnapprovedChat | Self::InvalidAgentContext(_) => None,
             Self::ClientStore(error) => Some(error),
             Self::Store(error) => Some(error),
         }
@@ -50,11 +54,21 @@ impl From<inline_client::StoreError> for ConversationResolutionError {
     }
 }
 
+/// Who may give a chat without a workspace binding its first one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::bridge) enum UnboundChat {
+    /// The owner (or this bridge's own bot handing off admitted work) may bind
+    /// it to the default project, falling back to home.
+    UseDefault,
+    /// Only an existing binding or an explicit project selects the cwd.
+    RequireOwner,
+}
+
 pub(in crate::bridge) fn conversation_for_chat(
     route: &InboundRoute,
     chat_id: i64,
 ) -> Result<ActiveConversation, ConversationResolutionError> {
-    conversation_for_chat_with_fallback(route, chat_id, None)
+    conversation_for_chat_with_fallback(route, chat_id, None, UnboundChat::UseDefault)
 }
 
 /// Resolves one independent Inline Chat from its explicit Agent preset. Parent
@@ -65,6 +79,7 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
     chat_id: i64,
     context: Option<&proto::AgentThreadContext>,
     apply_provider_configuration: bool,
+    unbound: UnboundChat,
 ) -> Result<ActiveConversation, ConversationResolutionError> {
     let context = match context {
         Some(context) if context.bot_user_id != route.bot_user_id => {
@@ -97,6 +112,14 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
             )
         }
         None if context.is_some() => {
+            if unbound == UnboundChat::RequireOwner
+                && route
+                    .store
+                    .bound_chat_workspace(&route.installation_id, chat_id)?
+                    .is_none()
+            {
+                return Err(ConversationResolutionError::UnapprovedChat);
+            }
             // No project was shown/selected yet. Preserve an existing binding;
             // a new chat uses the advertised default or home, never recents.
             let default_id = route
@@ -113,9 +136,9 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
                 Some(workspace) => workspace,
                 None => home_workspace(route)?,
             };
-            conversation_for_chat_with_fallback(route, chat_id, Some(fallback))?
+            conversation_for_chat_with_fallback(route, chat_id, Some(fallback), unbound)?
         }
-        None => conversation_for_chat(route, chat_id)?,
+        None => conversation_for_chat_with_fallback(route, chat_id, None, unbound)?,
     };
     let binding = conversation.snapshot().binding;
     if let Some(context) = context.filter(|_| apply_provider_configuration) {
@@ -143,13 +166,14 @@ pub(in crate::bridge) async fn conversation_for_chat_inheriting_parent(
         return conversation_for_chat(route, chat_id);
     }
     let inherited = inherited_parent_workspace(route, chat_id).await?;
-    conversation_for_chat_with_fallback(route, chat_id, inherited)
+    conversation_for_chat_with_fallback(route, chat_id, inherited, UnboundChat::UseDefault)
 }
 
 fn conversation_for_chat_with_fallback(
     route: &InboundRoute,
     chat_id: i64,
     inherited: Option<WorkspaceRecord>,
+    unbound: UnboundChat,
 ) -> Result<ActiveConversation, ConversationResolutionError> {
     let workspace = match route
         .store
@@ -169,9 +193,12 @@ fn conversation_for_chat_with_fallback(
                 error => ConversationResolutionError::Store(error),
             })?,
         None => {
-            let workspace = match inherited {
-                Some(workspace) => workspace,
-                None => default_workspace_or_home(route)?,
+            let workspace = match (inherited, unbound) {
+                (Some(workspace), _) => workspace,
+                (None, UnboundChat::UseDefault) => default_workspace_or_home(route)?,
+                (None, UnboundChat::RequireOwner) => {
+                    return Err(ConversationResolutionError::UnapprovedChat);
+                }
             };
             bind_chat_workspace(route, chat_id, workspace)?
         }
@@ -317,7 +344,12 @@ fn conversation_for_workspace_selection_with_fallback(
     chat_id: i64,
     inherited: Option<WorkspaceRecord>,
 ) -> Result<ActiveConversation, ConversationResolutionError> {
-    match conversation_for_chat_with_fallback(route, chat_id, inherited.clone()) {
+    match conversation_for_chat_with_fallback(
+        route,
+        chat_id,
+        inherited.clone(),
+        UnboundChat::UseDefault,
+    ) {
         Ok(conversation) => Ok(conversation),
         Err(ConversationResolutionError::MissingWorkspace) => {
             // Settings and /projects are recovery surfaces for a disappeared or

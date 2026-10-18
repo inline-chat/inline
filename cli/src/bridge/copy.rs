@@ -58,6 +58,7 @@ pub(super) enum BridgeNotice {
     TurnTrackingFailed,
     ProviderRestartingQueued,
     MissingWorkspace,
+    UnapprovedChat,
     SessionCompactionUnsupported,
     SessionReplaced,
     SessionActiveElsewhere,
@@ -91,6 +92,9 @@ impl BridgeNotice {
             }
             Self::MissingWorkspace => {
                 "The selected project folder is unavailable. Choose another in Agent Settings."
+            }
+            Self::UnapprovedChat => {
+                "This chat has no project yet. The bot owner can choose one in Agent Settings."
             }
             Self::SessionCompactionUnsupported => {
                 "This agent doesn’t support session compaction here."
@@ -245,6 +249,7 @@ mod tests {
             BridgeNotice::TurnTrackingFailed,
             BridgeNotice::ProviderRestartingQueued,
             BridgeNotice::MissingWorkspace,
+            BridgeNotice::UnapprovedChat,
             BridgeNotice::SessionCompactionUnsupported,
             BridgeNotice::SessionReplaced,
             BridgeNotice::SessionActiveElsewhere,

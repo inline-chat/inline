@@ -36,6 +36,7 @@ pub(super) fn route(provider: &str) -> InboundRoute {
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
+        sibling_bot_user_ids: Arc::default(),
         bot_username: "test_bot".to_string(),
         bot_store: SqliteStore::open_in_memory().expect("bot store"),
         attachment_cache_dir: PathBuf::from("unused-authorization-test-attachments"),
@@ -724,10 +725,15 @@ fn explicit_project_and_projectless_chats_never_follow_recent_workspaces() {
             reasoning_effort_id: Some("low".to_string()),
         }),
     };
-    let inline =
-        conversation_for_chat_with_agent_context(&route, 6336, Some(&context("project")), true)
-            .unwrap()
-            .snapshot();
+    let inline = conversation_for_chat_with_agent_context(
+        &route,
+        6336,
+        Some(&context("project")),
+        true,
+        UnboundChat::UseDefault,
+    )
+    .unwrap()
+    .snapshot();
     assert_eq!(inline.binding.workspace_id.as_str(), "project");
     let settings = route.store.chat_settings(&inline.binding, 3).unwrap();
     assert_eq!(settings.model.as_deref(), Some("gpt-6-astra"));
@@ -743,6 +749,7 @@ fn explicit_project_and_projectless_chats_never_follow_recent_workspaces() {
         6336,
         Some(&context(no_project.workspace_id.as_str())),
         true,
+        UnboundChat::UseDefault,
     )
     .unwrap()
     .snapshot();
@@ -766,12 +773,19 @@ fn explicit_project_and_projectless_chats_never_follow_recent_workspaces() {
         6336,
         Some(&context(no_project.workspace_id.as_str())),
         true,
+        UnboundChat::UseDefault,
     )
     .unwrap()
     .snapshot();
     assert_eq!(resumed.binding, projectless.binding);
     assert!(matches!(
-        conversation_for_chat_with_agent_context(&route, 7000, Some(&context("missing")), true),
+        conversation_for_chat_with_agent_context(
+            &route,
+            7000,
+            Some(&context("missing")),
+            true,
+            UnboundChat::UseDefault,
+        ),
         Err(ConversationResolutionError::MissingWorkspace)
     ));
     assert!(
@@ -856,4 +870,231 @@ async fn settings_retry_rechecks_access_and_admits_the_original_request_once() {
         Some("gpt-6-astra")
     );
     bot.shutdown().await.unwrap();
+}
+
+const ORDINARY_CHAT: i64 = 4242;
+
+async fn admit_in_ordinary_chat(
+    route: &InboundRoute,
+    sender: i64,
+    is_bot: Option<bool>,
+) -> (Option<InboundRecord>, inline_client::HistoryPage) {
+    let (bot, backend, mut events) = client().await;
+    let mut message = message(sender, is_bot, "@bot run the tests");
+    message.chat_id = InlineId::new(ORDINARY_CHAT);
+    mention(&mut message);
+    route
+        .bot_store
+        .record_dialog(DialogRecord::new(message.chat_id))
+        .await
+        .expect("ordinary chat");
+    backend.push_event_batch(vec![ClientEvent::MessageStored { message }]);
+    let delivery = delivery(&mut events).await;
+    let record = inbound_from_delivery(&bot, &delivery, route)
+        .await
+        .expect("admission");
+    delivery.ack().await.expect("ack");
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(ORDINARY_CHAT),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("outbound history");
+    bot.shutdown().await.expect("shutdown");
+    (record, history)
+}
+
+fn ordinary_chat_binding(route: &InboundRoute) -> Option<WorkspaceRecord> {
+    route
+        .store
+        .bound_chat_workspace(&route.installation_id, ORDINARY_CHAT)
+        .expect("binding")
+}
+
+fn bind_ordinary_chat(route: &InboundRoute) {
+    route
+        .store
+        .bind_chat_workspace(
+            &route.installation_id,
+            ORDINARY_CHAT,
+            &WorkspaceId::new("project").expect("workspace"),
+            1,
+        )
+        .expect("bind ordinary chat");
+}
+
+#[tokio::test]
+async fn a_foreign_bot_mention_is_not_admitted_in_any_chat() {
+    // Any Inline user can create a bot, open a Home thread with this bot and
+    // mention it exactly. The mention addresses this bot; it is not authority.
+    for provider in ["codex", "claude"] {
+        for bound in [false, true] {
+            for is_bot in [Some(true), None] {
+                let route = route(provider);
+                if bound {
+                    bind_ordinary_chat(&route);
+                }
+                let (record, history) = admit_in_ordinary_chat(&route, 99, is_bot).await;
+                let case = format!("{provider}/bound={bound}/is_bot={is_bot:?}");
+                assert!(record.is_none(), "{case}");
+                assert!(history.messages.is_empty(), "unexpected reply: {case}");
+                assert_eq!(ordinary_chat_binding(&route).is_some(), bound, "{case}");
+                assert!(
+                    route
+                        .store
+                        .pending_inbound_bindings(&route.installation_id, 10)
+                        .expect("queued work")
+                        .is_empty(),
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_allowlisted_bot_is_admitted_only_in_a_chat_the_owner_connected() {
+    let route = route("codex");
+    let (record, history) = admit_in_ordinary_chat(&route, 77, Some(true)).await;
+    assert!(record.is_none(), "unbound chat must not default for a bot");
+    assert!(history.messages.is_empty(), "bots get no notice");
+    assert!(ordinary_chat_binding(&route).is_none());
+
+    bind_ordinary_chat(&route);
+    let (record, _) = admit_in_ordinary_chat(&route, 77, Some(true)).await;
+    let record = record.expect("allowlisted bot in a bound chat");
+    assert_eq!(record.sender_user_id, 77);
+    assert_eq!(record.binding.workspace_id.as_str(), "project");
+}
+
+#[tokio::test]
+async fn an_allowlisted_person_needs_the_owner_to_connect_a_new_chat() {
+    let route = route("codex");
+    let (record, history) = admit_in_ordinary_chat(&route, 8, Some(false)).await;
+    assert!(record.is_none());
+    assert!(history_contains(&history, "The bot owner can choose one"));
+    assert!(ordinary_chat_binding(&route).is_none());
+
+    bind_ordinary_chat(&route);
+    let (record, _) = admit_in_ordinary_chat(&route, 8, Some(false)).await;
+    assert_eq!(record.expect("bound chat").sender_user_id, 8);
+}
+
+#[tokio::test]
+async fn owner_and_bridge_bot_handoffs_still_open_new_chats() {
+    let mut route = route("codex");
+    let (record, _) = admit_in_ordinary_chat(&route, 7, Some(false)).await;
+    let record = record.expect("owner in a new chat");
+    assert_eq!(record.binding.chat_id, ORDINARY_CHAT);
+    assert!(ordinary_chat_binding(&route).is_some());
+
+    // Another provider bot of this same bridge needs no allowlist entry and
+    // may open a new delegated chat with the default project.
+    route = self::route("codex");
+    route.sibling_bot_user_ids = Arc::new(HashSet::from([18]));
+    assert!(!route.allows(18));
+    let (record, _) = admit_in_ordinary_chat(&route, 18, Some(true)).await;
+    assert_eq!(record.expect("sibling handoff").sender_user_id, 18);
+    assert!(ordinary_chat_binding(&route).is_some());
+}
+
+#[test]
+fn replay_and_tools_share_the_admission_sender_gate() {
+    let mut route = route("codex");
+    route.sibling_bot_user_ids = Arc::new(HashSet::from([18]));
+    assert!(route.admits_sender(7), "owner");
+    assert!(route.admits_sender(8), "allowlisted person");
+    assert!(route.admits_sender(77), "allowlisted bot");
+    assert!(route.admits_sender(17), "this bot");
+    assert!(route.admits_sender(18), "sibling provider bot");
+    assert!(!route.admits_sender(99), "foreign bot");
+    route.replace_policy(OperatorPolicy::owner_only(7));
+    assert!(!route.admits_sender(77), "revoked bot");
+    assert!(!route.admits_sender(8), "revoked person");
+}
+
+#[tokio::test]
+async fn a_foreign_bot_turn_cannot_use_inline_tools() {
+    let mut route = route("codex");
+    route.sibling_bot_user_ids = Arc::new(HashSet::from([18]));
+    let (bot, _, _) = client().await;
+    let host = InlineToolHost::new(bot.clone(), route.clone(), String::new(), String::new());
+    for (sender, allowed) in [(99, false), (18, true)] {
+        let mut message = message(sender, Some(true), "@bot handoff");
+        message.chat_id = InlineId::new(ORDINARY_CHAT);
+        message.message_id = InlineId::new(100 + sender);
+        mention(&mut message);
+        route
+            .bot_store
+            .insert_message(message.clone())
+            .expect("source message");
+        let record = InboundRecord {
+            event_id: format!("inline-message-{ORDINARY_CHAT}-{}", message.message_id),
+            binding: BindingKey {
+                installation_id: route.installation_id.clone(),
+                chat_id: ORDINARY_CHAT,
+                workspace_id: WorkspaceId::new("project").expect("workspace"),
+            },
+            message_id: message.message_id.get(),
+            delivery_chat_id: ORDINARY_CHAT,
+            sender_user_id: sender,
+            direction: Direction::new(DirectionId::new("handoff").expect("id"), "handoff"),
+            state: InboundState::Accepted,
+            accepted_at: 1,
+            started_at: None,
+            lease_expires_at: None,
+            attempt_count: 0,
+            provider_turn_id: None,
+            stream_message_id: None,
+            failure: None,
+        };
+        assert_eq!(
+            host.explicit_bot_turn_may_use_tools(&record).await,
+            allowed,
+            "sender={sender}"
+        );
+    }
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[test]
+fn projectless_agent_threads_need_the_owner_for_a_first_binding() {
+    let route = route("codex");
+    let context = |project: Option<&str>| proto::AgentThreadContext {
+        bot_user_id: route.bot_user_id,
+        agent_id: None,
+        configuration: project.map(|project| proto::AgentThreadConfiguration {
+            project_id: Some(project.to_string()),
+            model_id: None,
+            reasoning_effort_id: None,
+        }),
+    };
+    let resolve = |project: Option<&str>| {
+        conversation_for_chat_with_agent_context(
+            &route,
+            6400,
+            Some(&context(project)),
+            true,
+            UnboundChat::RequireOwner,
+        )
+    };
+    assert!(matches!(
+        resolve(None),
+        Err(ConversationResolutionError::UnapprovedChat)
+    ));
+    assert!(
+        route
+            .store
+            .bound_chat_workspace(&route.installation_id, 6400)
+            .unwrap()
+            .is_none()
+    );
+    // An explicit project names a workspace the owner registered on this host.
+    let explicit = resolve(Some("project")).unwrap().snapshot();
+    assert_eq!(explicit.binding.workspace_id.as_str(), "project");
+    // Once bound, a projectless context keeps that binding.
+    assert_eq!(resolve(None).unwrap().snapshot().binding, explicit.binding);
 }

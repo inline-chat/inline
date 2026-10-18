@@ -472,28 +472,35 @@ mod tests {
             .expect("route");
         assert!(route.bot_authored);
         assert_eq!(route.addressing, Addressing::Mention);
+        let envelope = InboundEnvelope {
+            event_id: "bot-mention".to_string(),
+            chat_id: 11,
+            message_id: 20,
+            sender_user_id: 77,
+            text: "fix it".to_string(),
+            duplicate: false,
+            bot_authored: route.bot_authored,
+            sender_is_bridge_bot: false,
+            addressing: route.addressing,
+            command: None,
+            action: None,
+        };
         let policy = OperatorPolicy::from_allowed(7, [77]).expect("allow bot operator");
         assert!(matches!(
-            TriggerResolver.resolve(
-                &policy,
-                InboundEnvelope {
-                    event_id: "bot-mention".to_string(),
-                    chat_id: 11,
-                    message_id: 20,
-                    sender_user_id: 77,
-                    text: "fix it".to_string(),
-                    duplicate: false,
-                    bot_authored: route.bot_authored,
-                    addressing: route.addressing,
-                    command: None,
-                    action: None,
-                },
-            ),
+            TriggerResolver.resolve(&policy, envelope.clone()),
             TriggerDecision::Direction {
                 addressing: Addressing::Mention,
                 ..
             }
         ));
+        // The exact mention addresses this bot but does not authorize a bot
+        // that is missing from the owner's allowlist.
+        assert_eq!(
+            TriggerResolver.resolve(&OperatorPolicy::owner_only(7), envelope),
+            TriggerDecision::Ignore {
+                reason: inline_agent_bridge::IgnoreReason::Unauthorized
+            }
+        );
 
         let mut unrelated_bot_message = message(11, 66);
         unrelated_bot_message.message_id = InlineId::new(18);

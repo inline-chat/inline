@@ -2061,6 +2061,14 @@ async fn run_provider_installation(
         host_label: settings_identity.host_label.clone(),
         owner_dm_chat_id: dm_chat_id.get(),
         bot_user_id: installation.bot_user_id,
+        sibling_bot_user_ids: Arc::new(
+            account
+                .providers
+                .iter()
+                .map(|provider| provider.bot_user_id)
+                .filter(|bot_user_id| *bot_user_id != installation.bot_user_id)
+                .collect(),
+        ),
         bot_username: installation.bot_username.clone(),
         bot_store: bot_store.clone(),
         attachment_cache_dir,
@@ -2301,6 +2309,13 @@ async fn run_provider_installation(
                 else {
                     continue;
                 };
+                // Queued work was admitted under the policy of its time.
+                // Recheck the sender so a revoked operator, or a bot queued
+                // before bots needed an allowlist entry, cannot run on replay.
+                if !inbound_route.admits_sender(record.sender_user_id) {
+                    bridge_store.fail_inbound(&record.event_id, "sender is not authorized")?;
+                    continue;
+                }
                 let provider_epoch_release = record.sender_user_id == inbound_route.owner_user_id
                     && is_provider_epoch_release_command(
                         &record.direction.text,

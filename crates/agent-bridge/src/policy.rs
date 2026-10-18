@@ -141,6 +141,11 @@ pub struct InboundEnvelope {
     /// Whether the sender is any bot account, including this bridge bot.
     /// Bot-authored message directions require exact mention addressing.
     pub bot_authored: bool,
+    /// Whether a bot sender is this bridge's own bot or another provider bot
+    /// of the same local bridge. Any other bot must be on the operator
+    /// allowlist: a mention addresses a bot but never authorizes it.
+    #[serde(default)]
+    pub sender_is_bridge_bot: bool,
     pub addressing: Addressing,
     pub command: Option<CommandInvocation>,
     pub action: Option<ActionInvocation>,
@@ -185,13 +190,13 @@ impl TriggerResolver {
                 reason: IgnoreReason::Duplicate,
             };
         }
-        if envelope.bot_authored {
-            if !matches!(envelope.addressing, Addressing::Mention) {
-                return TriggerDecision::Ignore {
-                    reason: IgnoreReason::BotAuthored,
-                };
-            }
-        } else if !policy.allows(envelope.sender_user_id) {
+        if envelope.bot_authored && !matches!(envelope.addressing, Addressing::Mention) {
+            return TriggerDecision::Ignore {
+                reason: IgnoreReason::BotAuthored,
+            };
+        }
+        let bridge_bot = envelope.bot_authored && envelope.sender_is_bridge_bot;
+        if !bridge_bot && !policy.allows(envelope.sender_user_id) {
             return TriggerDecision::Ignore {
                 reason: IgnoreReason::Unauthorized,
             };
@@ -249,6 +254,7 @@ mod tests {
             text: "fix the tests".to_string(),
             duplicate: false,
             bot_authored: false,
+            sender_is_bridge_bot: false,
             addressing,
             command: None,
             action: None,
@@ -306,7 +312,7 @@ mod tests {
 
     #[test]
     fn bot_authored_messages_require_an_explicit_mention() {
-        let policy = OperatorPolicy::owner_only(7);
+        let policy = OperatorPolicy::from_allowed(7, [8]).expect("valid policy");
         for addressing in [
             Addressing::OwnerDm,
             Addressing::ReplyToBot,
@@ -332,6 +338,58 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_mention_does_not_authorize_a_foreign_bot() {
+        let policy = OperatorPolicy::owner_only(7);
+        let mut envelope = message(99, Addressing::Mention);
+        envelope.bot_authored = true;
+        assert_eq!(
+            TriggerResolver.resolve(&policy, envelope.clone()),
+            TriggerDecision::Ignore {
+                reason: IgnoreReason::Unauthorized
+            }
+        );
+
+        // Commands addressed by mention are gated the same way.
+        envelope.command = Some(CommandInvocation {
+            name: "status".to_string(),
+            arguments: String::new(),
+            explicit_target: true,
+            targets_this_bot: true,
+        });
+        assert_eq!(
+            TriggerResolver.resolve(&policy, envelope),
+            TriggerDecision::Ignore {
+                reason: IgnoreReason::Unauthorized
+            }
+        );
+    }
+
+    #[test]
+    fn this_bridges_own_bots_need_no_allowlist_entry() {
+        let policy = OperatorPolicy::owner_only(7);
+        let mut envelope = message(17, Addressing::Mention);
+        envelope.bot_authored = true;
+        envelope.sender_is_bridge_bot = true;
+        assert!(matches!(
+            TriggerResolver.resolve(&policy, envelope),
+            TriggerDecision::Direction {
+                addressing: Addressing::Mention,
+                ..
+            }
+        ));
+
+        // The bridge-bot marker means nothing on a human sender.
+        let mut human = message(9, Addressing::Mention);
+        human.sender_is_bridge_bot = true;
+        assert_eq!(
+            TriggerResolver.resolve(&policy, human),
+            TriggerDecision::Ignore {
+                reason: IgnoreReason::Unauthorized
+            }
+        );
     }
 
     #[test]
@@ -591,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_checks_precede_an_explicit_bot_mention_and_human_allowlists_do_not_block_it() {
+    fn duplicate_checks_precede_an_explicit_bot_mention_and_the_allowlist_still_applies() {
         let policy = OperatorPolicy::owner_only(7);
         let mut envelope = message(7, Addressing::Mention);
         envelope.duplicate = true;
@@ -616,6 +674,18 @@ mod tests {
             explicit_target: true,
             targets_this_bot: true,
         });
+        assert_eq!(
+            TriggerResolver.resolve(&policy, envelope.clone()),
+            TriggerDecision::Ignore {
+                reason: IgnoreReason::Unauthorized
+            }
+        );
+        let allowlisted = OperatorPolicy::from_allowed(7, [8]).expect("policy");
+        assert!(matches!(
+            TriggerResolver.resolve(&allowlisted, envelope.clone()),
+            TriggerDecision::Command { .. }
+        ));
+        envelope.sender_is_bridge_bot = true;
         assert!(matches!(
             TriggerResolver.resolve(&policy, envelope),
             TriggerDecision::Command { .. }

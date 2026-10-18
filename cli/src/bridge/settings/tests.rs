@@ -491,6 +491,7 @@ impl Fixture {
             host_label: self.identity.host_label.clone(),
             owner_dm_chat_id: self.snapshot.binding.chat_id,
             bot_user_id: self.identity.bot_user_id,
+            sibling_bot_user_ids: Arc::default(),
             bot_username: "test_codex_bot".to_string(),
             bot_store: self.identity.bot_store.clone(),
             attachment_cache_dir: self._directory.path().join("attachments"),
