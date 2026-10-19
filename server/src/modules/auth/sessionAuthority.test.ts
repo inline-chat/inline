@@ -55,6 +55,54 @@ describe("SessionAuthorityReconciler", () => {
     reconciler.stop()
   })
 
+  test("verifies staggered sessions due in the same grid slot with one query and keeps them aligned", async () => {
+    let now = 0
+    const lookup = mock(async (sessionIds: readonly number[]) => sessionIds.map((sessionId) => identity(sessionId, sessionId)))
+    const close = mock()
+    const delays: number[] = []
+    const reconciler = new SessionAuthorityReconciler({
+      now: () => now,
+      findActiveSessions: lookup,
+      scheduleTimer: ((callback: () => void, delayMs: number) => {
+        delays.push(delayMs)
+        return { unref() {} } as unknown as ReturnType<typeof setTimeout>
+      }) as unknown as typeof setTimeout,
+      cancelTimer: () => {},
+    })
+    // 15 ms interval → 5 ms grid. Sessions admitted every ms land on three
+    // slots instead of twelve individual deadlines.
+    const sessions = Array.from({ length: 12 }, (_, index) => identity(index + 1, index + 1))
+    now = 3
+    reconciler.start({ connectedSessions: () => sessions, closeSession: close }, { ...configuration, reconciliationIntervalMs: 15 })
+    for (const [index, session] of sessions.entries()) {
+      now = 3 + index
+      expect(reconciler.admit(session)).toBe(true)
+    }
+    // The first admit pulled the interval timer (18) back to its slot (15);
+    // the later admits never touched the timer.
+    expect(delays).toEqual([15, 12])
+
+    const checked: number[][] = []
+    for (now = 15; now <= 25; now += 5) {
+      await reconciler.reconcileNow()
+      for (const call of lookup.mock.calls.slice(checked.length)) checked.push([...call[0]])
+    }
+    expect(checked).toEqual([
+      [1, 2],
+      [3, 4, 5, 6, 7],
+      [8, 9, 10, 11, 12],
+    ])
+    expect(close).not.toHaveBeenCalled()
+
+    // Once every slot is due again, all sessions share one query.
+    now = 40
+    await reconciler.reconcileNow()
+    expect(lookup).toHaveBeenCalledTimes(4)
+    expect(lookup.mock.calls.at(-1)?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    expect(reconciler.diagnostics.trackedSessions).toBe(12)
+    reconciler.stop()
+  })
+
   test("fails closed at the monotonic maximum age when revalidation is unavailable", async () => {
     let now = 0
     const close = mock()
