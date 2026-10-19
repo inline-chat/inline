@@ -21,7 +21,6 @@ export const userGroups = pgTable(
   },
   (table) => ({
     spaceNameUnique: uniqueIndex("user_groups_space_name_unique").on(table.spaceId, lower(table.name)),
-    spaceIndex: index("user_groups_space_id_idx").on(table.spaceId),
     createdByIndex: index("user_groups_created_by_idx").on(table.createdBy),
   }),
 )
@@ -40,7 +39,6 @@ export const userGroupMembers = pgTable(
   },
   (table) => ({
     groupUserUnique: uniqueIndex("user_group_members_group_user_unique").on(table.groupId, table.userId),
-    groupIndex: index("user_group_members_group_id_idx").on(table.groupId),
     userIndex: index("user_group_members_user_id_idx").on(table.userId),
   }),
 )
@@ -59,7 +57,6 @@ export const chatParticipantGroups = pgTable(
   },
   (table) => ({
     chatGroupUnique: uniqueIndex("chat_participant_groups_chat_group_unique").on(table.chatId, table.groupId),
-    chatIndex: index("chat_participant_groups_chat_id_idx").on(table.chatId),
     groupIndex: index("chat_participant_groups_group_id_idx").on(table.groupId),
   }),
 )

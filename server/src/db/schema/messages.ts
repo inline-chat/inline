@@ -117,6 +117,10 @@ export const messages = pgTable(
     activityDateIndex: index("messages_activity_date_from_id_idx")
       .on(table.date, table.fromId)
       .where(sql`${table.systemMessageEncrypted} is null`),
+    /** Pinned messages per chat are read on every chat open; only pinned rows are indexed. */
+    pinnedIndex: index("messages_pinned_idx")
+      .on(table.chatId, table.pinnedAt.desc(), table.messageId.desc())
+      .where(sql`${table.pinnedAt} is not null`),
   }),
 )
 

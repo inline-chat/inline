@@ -114,6 +114,8 @@ export const chats = pgTable(
     ),
 
     parentChatIdIndex: index("chats_parent_chat_id_idx").on(table.parentChatId),
+    /** Repair discovery and catalog refresh filter every reachable chat by recency. */
+    lastUpdateDateIndex: index("chats_last_update_date_idx").on(table.lastUpdateDate),
   }),
 )
 
