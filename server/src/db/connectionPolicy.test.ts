@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { assertQueryTimeouts, combineHealthProbes, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
+import { assertQueryTimeouts, cachedHealthProbe, combineHealthProbes, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
 
 const direct = "postgres://app:secret@db.example/test?sslmode=verify-full"
 const pooled = "postgres://app:secret@db.example:6432/test?sslmode=verify-full"
@@ -23,6 +23,64 @@ describe("database connection safety", () => {
     expect(() => probe.cancel()).toThrow("cancel failed")
     expect(cancelled).toEqual(["direct", "pooled"])
     expect(await probe).toEqual([])
+  })
+
+  test("cached validation runs on the first probe, once per interval after a pass, and on every probe after a failure", async () => {
+    let now = 0
+    let runs = 0
+    let failing = false
+    const cancelled: number[] = []
+    const probe = cachedHealthProbe(() => {
+      const run = ++runs
+      return Object.assign(
+        failing ? Promise.reject(new Error("role timeouts drifted")) : Promise.resolve(),
+        { cancel: () => { cancelled.push(run) } },
+      )
+    }, { intervalMs: 60_000, now: () => now })
+
+    await probe()
+    expect(runs).toBe(1)
+    now = 59_999
+    expect(probe()).toBeUndefined()
+    now = 60_000
+    await probe()
+    expect(runs).toBe(2)
+
+    failing = true
+    now = 120_000
+    await expect(probe()).rejects.toThrow("role timeouts drifted")
+    now = 120_001
+    await expect(probe()).rejects.toThrow("role timeouts drifted")
+    expect(runs).toBe(4)
+    failing = false
+    await probe()
+    expect(runs).toBe(5)
+    now = 120_002
+    expect(probe()).toBeUndefined()
+
+    now = 200_000
+    const pending = probe()
+    pending?.cancel?.()
+    expect(cancelled).toEqual([6])
+    await pending
+  })
+
+  test("cached validation dates a pass from the probe start so a slow probe cannot extend the window", async () => {
+    let now = 0
+    let runs = 0
+    const gate = Promise.withResolvers<void>()
+    const probe = cachedHealthProbe(() => { runs += 1; return runs === 1 ? gate.promise : Promise.resolve() },
+      { intervalMs: 60_000, now: () => now })
+    const slow = probe()
+    now = 70_000
+    gate.resolve()
+    await slow
+    const fresh = probe()
+    expect(fresh).not.toBeUndefined()
+    expect(runs).toBe(2)
+    await fresh
+    now = 100_000
+    expect(probe()).toBeUndefined()
   })
 
   test("direct mode preserves the existing query and health timeout profiles", async () => {
