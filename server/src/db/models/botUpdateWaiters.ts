@@ -2,9 +2,17 @@ type Waiter = () => void
 
 export const createBotUpdateWaiters = () => {
   const waiters = new Map<number, Set<Waiter>>()
+  const listeners = new Set<Waiter>()
 
   const wake = (botUserId: number) => {
     for (const finish of waiters.get(botUserId) ?? []) finish()
+    for (const listener of listeners) listener()
+  }
+
+  /** Observe every wake, for workers that otherwise poll; returns the unsubscribe. */
+  const onWake = (listener: Waiter) => {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
   }
 
   const wakeAll = () => {
@@ -42,7 +50,7 @@ export const createBotUpdateWaiters = () => {
     }
   }
 
-  return { subscribe, wake, wakeAll }
+  return { subscribe, wake, wakeAll, onWake }
 }
 
 export const botUpdateWaiters = createBotUpdateWaiters()

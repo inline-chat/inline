@@ -317,3 +317,43 @@ test("a validated local DM identity suppresses later peer-only delete repair and
   state.now += RECENT_REALTIME_BUCKET_TTL_MS
   expect(repair.knownPeerChatId(1, 2)).toBeUndefined()
 })
+
+test("discovery reads back off while the table is empty and resume on a broker hint", async () => {
+  const { state, source, repair } = fixture()
+  const scheduled: { id: number; delay: number; fire: () => void }[] = []
+  let nextId = 0
+  source.setTimeoutFn = (callback, delayMs) => {
+    const id = ++nextId
+    scheduled.push({ id, delay: delayMs, fire: callback })
+    return id as unknown as ReturnType<typeof setTimeout>
+  }
+  source.clearTimeoutFn = (timer) => {
+    const index = scheduled.findIndex((entry) => entry.id === (timer as unknown as number))
+    if (index >= 0) scheduled.splice(index, 1)
+  }
+  const runUntil = async (target: number) => {
+    while (state.now < target) {
+      const next = scheduled.pop()!
+      state.now += next.delay
+      next.fire()
+      await repair.poll()
+    }
+  }
+  repair.start()
+  // Thirty seconds of an empty table: reads double their gap (1, 2, 4, 8, 15 s)
+  // while cleanup keeps its own five-second cadence.
+  await runUntil(state.now + 30_000)
+  expect(state.reads).toBeGreaterThanOrEqual(4)
+  expect(state.reads).toBeLessThanOrEqual(7)
+  expect(state.cleanups).toBeGreaterThanOrEqual(5)
+  expect(repair.diagnostics.discoveryIntervalMs).toBe(15_000)
+
+  // A broker hint resets the cadence; the next read and the repair happen within the bucket's grace.
+  const readsBefore = state.reads
+  repair.observeBucket({ bucket: { kind: "chat", chatId: 10 }, frontier: 1 })
+  expect(repair.diagnostics.discoveryIntervalMs).toBe(1_000)
+  await runUntil(state.now + 1_000)
+  expect(state.reads).toBe(readsBefore + 1)
+  expect(state.hints).toEqual([{ userId: 1, seq: 1 }])
+  expect(repair.diagnostics.discoveryIntervalMs).toBe(2_000)
+})

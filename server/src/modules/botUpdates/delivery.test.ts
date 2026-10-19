@@ -5,6 +5,8 @@ import {
   webhookRetryDelayMs,
 } from "./delivery"
 
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 describe("bot webhook delivery", () => {
   it("checks delivery authority after DNS and before opening an HTTPS request", async () => {
     const steps: string[] = []
@@ -97,5 +99,53 @@ describe("bot webhook delivery", () => {
     finishRun()
     await stopping
     expect(stopped).toBe(true)
+  })
+
+  it("backs off the delivery queries while idle and resumes on claimed work or an appended update", async () => {
+    let tick: (() => void) | undefined
+    let runs = 0
+    let claimed = 0
+    let wakeListener: (() => void) | undefined
+    let unsubscribed = 0
+    const worker = new BotWebhookDeliveryWorker({
+      pollIntervalMs: 2_500,
+      maximumIdleIntervalMs: 10_000,
+      runOnce: async () => { runs += 1; return claimed },
+      onWork: (listener) => { wakeListener = listener; return () => { unsubscribed += 1 } },
+      setIntervalFn: ((handler: () => void, _timeout: number) => {
+        tick = handler
+        return Symbol("interval") as unknown as ReturnType<typeof setInterval>
+      }) as typeof setInterval,
+      clearIntervalFn: (() => {}) as typeof clearInterval,
+    })
+    expect(worker.start()).toBe(true)
+    await worker.pollOnce()
+    expect(runs).toBe(1)
+    expect(worker.idleMultiplier).toBe(2)
+
+    const runsPerTick: number[] = []
+    for (let index = 0; index < 6; index += 1) {
+      tick?.()
+      await settle()
+      runsPerTick.push(runs)
+    }
+    // Tick 2 polls with a two-interval gap; the next poll waits four intervals (the cap) until tick 6.
+    expect(runsPerTick).toEqual([1, 2, 2, 2, 2, 3])
+    expect(worker.idleMultiplier).toBe(4)
+
+    // An in-process append wakes the worker for the next tick.
+    wakeListener?.()
+    expect(worker.idleMultiplier).toBe(1)
+    tick?.()
+    await settle()
+    expect(runs).toBe(4)
+
+    claimed = 1
+    tick?.(); tick?.()
+    await settle()
+    expect(runs).toBe(5)
+    expect(worker.idleMultiplier).toBe(1)
+    await worker.stop()
+    expect(unsubscribed).toBe(1)
   })
 })

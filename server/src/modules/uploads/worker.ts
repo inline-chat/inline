@@ -11,6 +11,7 @@ import {
 } from "@in/server/db/models/inlineUploads"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { FileByteLengthError } from "@in/server/modules/files/readFileBytes"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 import {
   UploadIntegrityError,
@@ -45,6 +46,7 @@ type WorkerOptions = {
   concurrency?: number
   expiryCleanupIntervalMs?: number
   leaseRenewTimeoutMs?: number
+  maximumIdleIntervalMs?: number
   pollIntervalMs?: number
   random?: () => number
   shutdownDrainTimeoutMs?: number
@@ -136,6 +138,7 @@ export class NativeUploadWorker {
   readonly #leaseRenewTimeoutMs: number
   readonly #shutdownDrainTimeoutMs: number
   readonly #random: () => number
+  readonly #backoff: IdleBackoff
   readonly #queued = new Set<number>()
   readonly #activeUploads = new Set<number>()
   readonly #claimControllers = new Map<number, AbortController>()
@@ -172,6 +175,12 @@ export class NativeUploadWorker {
         !Number.isSafeInteger(this.#shutdownDrainTimeoutMs) || this.#shutdownDrainTimeoutMs < 1) {
       throw new RangeError("Invalid upload worker interval")
     }
+    this.#backoff = IdleBackoff.forInterval(this.#pollIntervalMs, options.maximumIdleIntervalMs)
+  }
+
+  /** Base intervals between claim polls; exposed for diagnostics and tests. */
+  get idleMultiplier(): number {
+    return this.#backoff.multiplier
   }
 
   start(): void {
@@ -181,8 +190,11 @@ export class NativeUploadWorker {
     }
     this.#started = true
     this.#abort = new AbortController()
+    // The timer keeps its base cadence; idle backoff only skips the claim
+    // query on ticks that come before the next due poll. Expiry cleanup has
+    // its own, longer interval.
     this.#timer = setInterval(() => {
-      this.#requestPoll()
+      if (!this.#pollPromise && this.#backoff.due()) this.#requestPoll()
       this.#requestCleanup()
     }, this.#pollIntervalMs)
     this.#requestPoll()
@@ -223,6 +235,7 @@ export class NativeUploadWorker {
   wake(uploadDbId: number): void {
     if (!Number.isSafeInteger(uploadDbId) || uploadDbId < 1) return
     this.#queued.add(uploadDbId)
+    this.#backoff.reset()
     if (this.#started) this.#pump()
   }
 
@@ -322,11 +335,13 @@ export class NativeUploadWorker {
   }
 
   async #poll(): Promise<void> {
+    let claimed = false
     try {
       this.#pump()
       while (this.#started && this.#active < this.#concurrency) {
         const claim = await this.repository.claimProcessing()
         if (!claim) break
+        claimed = true
         if (this.#activeUploads.has(claim.upload.id)) {
           await this.repository.releaseProcessingClaim({
             uploadDbId: claim.upload.id,
@@ -346,6 +361,8 @@ export class NativeUploadWorker {
       }
     } catch (error) {
       if (!this.#abort.signal.aborted) log.warn("Native upload worker poll failed", { error })
+    } finally {
+      this.#backoff.observe(claimed)
     }
   }
 

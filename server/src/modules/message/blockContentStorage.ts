@@ -1,4 +1,5 @@
 import type { BlockContent, BlockImage, MessageEntities } from "@inline-chat/protocol/core"
+import { registerPostCommitHook } from "@in/server/db/commitHooks"
 import { blockContentImageJobs, blockContents, messages } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
@@ -275,6 +276,16 @@ async function insertImageJobs(
       sourceTag: job.source.authTag,
     })),
   )
+  // An idle image worker backs off its claim poll; tell it work exists once
+  // the rows are visible. The worker module imports this one, so load it lazily.
+  try {
+    registerPostCommitHook(tx, "blockContent.imageWorker.wake", {
+      run: async () => (await import("./blockContentImageWorker")).wakeBlockContentImageWorker(),
+    })
+  } catch {
+    // A transaction outside the configured database still owns its rows; the
+    // worker's bounded idle poll picks the jobs up.
+  }
 }
 
 const hashBlockImageSource = (url: string): Buffer => contentEncryptionWritesEnabled()

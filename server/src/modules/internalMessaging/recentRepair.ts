@@ -7,6 +7,7 @@ import { isDistributedRealtimeEnabled } from "./config"
 import type { DurableBucket, DurableReference } from "./durable"
 import { connectedUserRepair, deliverTargetedBucketHint, emitUserHasNewUpdates, replayCurrentUserUpdate, type CurrentUserReplayResult, type TargetedRepairControls } from "./repair"
 import { ChatId, SpaceId, UserId } from "@in/server/core/schema/identifiers"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 
 const POLL_MS = 1_000
@@ -36,6 +37,8 @@ export type RecentRepairRuntime = {
   replayUser: (userId: number, frontier: number, current: () => boolean) => Promise<CurrentUserReplayResult>
   fallbackUser: (userId: number, frontier: number) => Promise<void>
   reconcile: () => void
+  setTimeoutFn?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  clearTimeoutFn?: (timer: ReturnType<typeof setTimeout>) => void
 }
 
 const runtime: RecentRepairRuntime = {
@@ -79,9 +82,12 @@ export class RecentRealtimeRepair {
   private readonly receipts = new Map<string, Receipt>()
   private readonly settled = new Map<string, Settled>()
   private readonly peerAliases = new Map<string, PeerAlias>()
+  /** Discovery reads back off while the recent-bucket table stays empty. */
+  private readonly backoff = IdleBackoff.forInterval(POLL_MS)
   private users = new Map<number, number>()
   private admissionGeneration = 0
   private nextCleanupAt = 0
+  private nextDiscoveryAt = 0
   private lastReadAt: number | undefined
   private cycleStartedAt = 0
   private lastCycleMs = 0
@@ -98,13 +104,16 @@ export class RecentRealtimeRepair {
     this.active = true
     this.cycleStartedAt = this.source.now()
     this.lastReadAt = this.source.now()
+    this.nextDiscoveryAt = this.source.now() + POLL_MS
     this.schedule()
   }
 
   async stop(): Promise<void> {
     this.active = false
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) (this.source.clearTimeoutFn ?? clearTimeout)(this.timer)
     this.timer = undefined
+    this.backoff.reset()
+    this.nextDiscoveryAt = 0
     await this.task
     this.pending.clear()
     this.receipts.clear()
@@ -122,7 +131,8 @@ export class RecentRealtimeRepair {
     return { active: this.active, pending: this.pending.size, receipts: this.receipts.size, peerAliases: this.peerAliases.size,
       oldestPendingAgeMs, scanCycleMs: this.users.size === 0 ? 0 : Math.max(this.lastCycleMs, this.active ? now - this.cycleStartedAt : 0),
       expiredRowsCleaned: this.expiredRowsCleaned, fullCleanupBatches: this.fullCleanupBatches,
-      overflowCount: this.overflowCount, failures: this.failures }
+      overflowCount: this.overflowCount, failures: this.failures,
+      discoveryIntervalMs: this.backoff.multiplier * POLL_MS }
   }
 
   observeBucket(event: DurableReference): void {
@@ -142,6 +152,17 @@ export class RecentRealtimeRepair {
     }
     const now = this.source.now()
     this.pending.set(key, { bucket: event.bucket, frontier: event.frontier, requestedAt: now, dueAt: now + LIVE_GRACE_MS })
+    // A broker or local hint means the table is not idle: resume the base
+    // cadence and bring a backed-off timer forward to this bucket's grace.
+    if (this.backoff.multiplier > 1) {
+      this.backoff.reset()
+      this.nextDiscoveryAt = Math.min(this.nextDiscoveryAt, now + POLL_MS)
+      if (this.timer && !this.task) {
+        (this.source.clearTimeoutFn ?? clearTimeout)(this.timer)
+        this.timer = undefined
+        this.schedule()
+      }
+    }
   }
 
   /** Receipts suppress only this exact observed frontier, never missing history. */
@@ -179,9 +200,13 @@ export class RecentRealtimeRepair {
 
   /** Also useful for deterministic scheduler tests; concurrent calls share ownership. */
   poll(): Promise<void> {
+    return this.run(true)
+  }
+
+  private run(discover: boolean): Promise<void> {
     if (!this.active) return Promise.resolve()
     if (this.task) return this.task
-    const task = this.runPoll().catch((error) => {
+    const task = this.runPoll(discover).catch((error) => {
       this.failures += 1
       log.warn("Recent realtime repair could not complete its bounded tick", { error })
     }).finally(() => { if (this.task === task) this.task = undefined })
@@ -192,16 +217,19 @@ export class RecentRealtimeRepair {
   private schedule(): void {
     const now = this.source.now()
     const catchingUp = this.cursor !== undefined || [...this.pending.values()].some((item) => item.dueAt <= now)
-    const delay = Math.min(catchingUp ? CATCHUP_POLL_MS : POLL_MS,
-      Math.max(CATCHUP_POLL_MS, this.nextCleanupAt - now))
-    this.timer = setTimeout(() => {
+    // Discovery doubles its gap while the table is empty; cleanup and due
+    // repairs keep their own cadence, so a tick may run without a read.
+    const discoveryDelay = catchingUp ? CATCHUP_POLL_MS : Math.max(CATCHUP_POLL_MS, this.nextDiscoveryAt - now)
+    const delay = Math.min(discoveryDelay, Math.max(CATCHUP_POLL_MS, this.nextCleanupAt - now))
+    this.timer = (this.source.setTimeoutFn ?? setTimeout)(() => {
       this.timer = undefined
-      void this.poll().finally(() => { if (this.active) this.schedule() })
+      const discover = this.cursor !== undefined || this.source.now() >= this.nextDiscoveryAt
+      void this.run(discover).finally(() => { if (this.active) this.schedule() })
     }, delay)
     this.timer.unref?.()
   }
 
-  private async runPoll(): Promise<void> {
+  private async runPoll(discover: boolean): Promise<void> {
     const now = this.source.now()
     this.refreshUsers()
     this.prune(now)
@@ -212,9 +240,13 @@ export class RecentRealtimeRepair {
       this.nextCleanupAt = now + (deleted >= 256 ? CATCHUP_POLL_MS : CLEANUP_MS)
       if (!this.active) return
     }
-    if (this.users.size > 0) {
+    if (this.users.size > 0 && discover) {
+      // A failed read retries at the base cadence; an empty one backs off.
+      this.nextDiscoveryAt = now + POLL_MS
       const rows = await this.source.readPage({ after: this.cursor, limit: 256 })
       if (!this.active) return
+      this.backoff.observe(rows.length > 0)
+      this.nextDiscoveryAt = now + this.backoff.multiplier * POLL_MS
       if (this.lastReadAt !== undefined && now - this.lastReadAt >= RECENT_REALTIME_BUCKET_TTL_MS) {
         this.cursor = undefined
         this.settled.clear()
@@ -238,12 +270,13 @@ export class RecentRealtimeRepair {
         const last = rows.at(-1)!
         this.cursor = { bucket: last.bucket, entityId: last.entityId }
       }
-    } else {
+    } else if (this.users.size === 0) {
       this.cursor = undefined
       this.pending.clear()
       this.lastReadAt = now
       this.lastCycleMs = 0
       this.cycleStartedAt = now
+      this.nextDiscoveryAt = now + POLL_MS
     }
     const work: [string, Pending][] = []
     for (const [key, item] of this.pending) {
