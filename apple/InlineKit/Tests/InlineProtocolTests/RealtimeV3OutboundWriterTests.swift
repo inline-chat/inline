@@ -95,6 +95,25 @@ struct RealtimeV3OutboundWriterTests {
     await closeTask.value
   }
 
+  @Test("closing aborts the wire before waiting for a send that ignores cancellation")
+  func closeAbortsWireBeforeWaiting() async throws {
+    let carrier = try InlineObfuscatedClientCarrier(randomHeader: Array(UInt8(1) ... UInt8(64)))
+    let wire = ControlledWire()
+    let writer = InlineProtocolOutboundWriter(outbound: carrier.outbound) { data in
+      try await wire.send(data)
+    }
+
+    let active = Task { try await writer.send([1, 2, 3, 4]) }
+    try await waitUntil { await wire.callCount == 1 }
+
+    // Only the abort can end this send, as cancelling a URLSession WebSocket task does.
+    await writer.close(with: InlineProtocolV3ConnectionError.closed) {
+      Task { await wire.releaseCurrent() }
+    }
+
+    await #expect(throws: InlineProtocolV3ConnectionError.closed) { try await active.value }
+  }
+
   @Test("rejects excess queued writes without advancing the carrier")
   func queueCapacityIsFinite() async throws {
     let carrier = try InlineObfuscatedClientCarrier(randomHeader: Array(UInt8(1) ... UInt8(64)))

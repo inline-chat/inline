@@ -187,7 +187,13 @@ actor InlineProtocolOutboundWriter {
     }
   }
 
-  func close(with error: any Error = InlineProtocolV3ConnectionError.closed) async {
+  /// `abortWire` runs after admitted writes have failed with `error` and before waiting for the
+  /// active send. A system WebSocket send ignores task cancellation, so closing the socket is what
+  /// ends a send stalled behind a peer that stopped reading.
+  func close(
+    with error: any Error = InlineProtocolV3ConnectionError.closed,
+    abortWire: @Sendable () -> Void = {}
+  ) async {
     guard terminalError == nil else { return }
     terminalError = error
     let closingDrainTask = drainTask
@@ -197,10 +203,10 @@ actor InlineProtocolOutboundWriter {
       activeWrite.continuation.resume(throwing: error)
     }
     failQueued(with: error)
+    abortWire()
     // A continuation being failed is not proof that the underlying WebSocket send stopped.
     // Await the structured drain task so transport stop cannot report quiescence while wire I/O
-    // admitted by the old account remains live. The platform logout deadline stays fail-closed if
-    // a system send ignores cancellation.
+    // admitted by the old account remains live.
     await closingDrainTask?.value
     drainTask = nil
   }
@@ -1219,9 +1225,13 @@ public actor InlineProtocolV3Connection {
     }
     receiveTask?.cancel()
     receiveTask = nil
-    await outboundWriter.close(with: error)
+    await outboundWriter.close(with: error) { [task, session] in
+      task.cancel(with: closeCode, reason: nil)
+      session.invalidateAndCancel()
+    }
     await failPending(with: error)
     updatePipe.finish()
+    // The writer was already terminal after a wire failure; its close did not abort the socket.
     task.cancel(with: closeCode, reason: nil)
     session.invalidateAndCancel()
   }
