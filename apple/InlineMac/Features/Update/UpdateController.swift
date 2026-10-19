@@ -315,8 +315,6 @@ final class UpdateController {
 
   var feedURLString: String {
     switch channel {
-    case .stable:
-      "https://public-assets.inline.chat/mac/stable/appcast.xml"
     case .beta:
       "https://public-assets.inline.chat/mac/beta/appcast.xml"
     case .tip:
@@ -572,21 +570,17 @@ final class UpdateController {
   }
 
   private static func loadChannel() -> AutoUpdateChannel {
-    if let value = UserDefaults.standard.string(forKey: channelDefaultsKey),
-       let channel = AutoUpdateChannel(rawValue: value) {
-      return channel
-    }
-
-    guard let feedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
-      return .stable
-    }
-    if feedURL.contains("/tip/") {
-      return .tip
-    }
-    if feedURL.contains("/beta/") {
+    if let value = UserDefaults.standard.string(forKey: channelDefaultsKey) {
+      if let channel = AutoUpdateChannel(rawValue: value) {
+        return channel
+      }
+      // Stable is retired for now, so a saved Stable choice moves to Beta.
+      UserDefaults.standard.set(AutoUpdateChannel.beta.rawValue, forKey: channelDefaultsKey)
       return .beta
     }
-    return .stable
+
+    let feedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
+    return feedURL?.contains("/tip/") == true ? .tip : .beta
   }
 
   private func updateInfo(for item: SUAppcastItem) -> SoftwareUpdateInfo {

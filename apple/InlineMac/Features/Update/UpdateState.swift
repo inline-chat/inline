@@ -2,7 +2,6 @@
 import Foundation
 
 enum AutoUpdateChannel: String, CaseIterable, Identifiable {
-  case stable
   case beta
   case tip
 
@@ -10,8 +9,6 @@ enum AutoUpdateChannel: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
-    case .stable:
-      "Stable"
     case .beta:
       "Beta"
     case .tip:

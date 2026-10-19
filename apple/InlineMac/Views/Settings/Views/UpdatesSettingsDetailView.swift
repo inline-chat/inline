@@ -100,7 +100,7 @@ struct UpdatesSettingsDetailView: View {
       } label: {
         SettingsRowLabel(
           "Update Channel",
-          description: "Stable receives regular releases; Beta receives previews; Tip receives the latest daily builds."
+          description: "Beta receives preview releases; Tip receives the latest builds several times a day."
         )
       }
     } header: {
