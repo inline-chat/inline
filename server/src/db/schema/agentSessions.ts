@@ -82,7 +82,6 @@ export const agentSessionMessages = pgTable(
     messageUnique: uniqueIndex("agent_session_messages_message_unique")
       .on(table.agentSessionId, table.messageGlobalId)
       .where(sql`${table.messageGlobalId} is not null`),
-    sessionIndex: index("agent_session_messages_session_idx").on(table.agentSessionId),
   }),
 )
 

@@ -24,7 +24,6 @@ export const spaceUrlPreviewExclusions = pgTable(
       table.host,
       table.pathPrefix,
     ),
-    spaceHostIndex: index("space_url_preview_exclusions_space_host_idx").on(table.spaceId, table.host),
     createdByIndex: index("space_url_preview_exclusions_created_by_idx").on(table.createdBy),
   }),
 )
