@@ -234,6 +234,9 @@ const sameMetadata = (row: DbInlineUpload, metadata: InlineUploadMetadata): bool
   row.hasAudio === (metadata.hasAudio ?? null) &&
   sameOptionalBytes(row.waveform, metadata.waveform)
 
+/** A lease older than this, measured on the database clock, may be taken over. */
+const staleLeaseCutoff = sql<Date>`CURRENT_TIMESTAMP - (${INLINE_UPLOAD_PROCESSING_LEASE_MS} * interval '1 millisecond')`
+
 const acceptedPartsFor = async (uploadDbId: number): Promise<number[]> =>
   (await db.select({ partIndex: inlineUploadParts.partIndex })
     .from(inlineUploadParts)
@@ -664,18 +667,16 @@ export class InlineUploadRepository {
 
   async claimProcessing(uploadDbId?: number): Promise<InlineUploadProcessingClaim | undefined> {
     return db.transaction(async (tx) => {
-      const [clock] = await tx.execute<{ now: string | Date }>(sql`
-        select CURRENT_TIMESTAMP as now
-      `)
-      const now = databaseTimestamp(clock?.now)
-      const staleAt = new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)
+      // CURRENT_TIMESTAMP is the transaction start inside this transaction, so
+      // the filter and the lease write below share one clock without a
+      // separate round trip; the worker polls this statement continuously.
       const conditions = [
         eq(inlineUploads.status, "processing"),
-        or(isNull(inlineUploads.retryAt), lte(inlineUploads.retryAt, now)),
+        or(isNull(inlineUploads.retryAt), lte(inlineUploads.retryAt, sql<Date>`CURRENT_TIMESTAMP`)),
         or(
           isNull(inlineUploads.lockToken),
           isNull(inlineUploads.lockedAt),
-          lte(inlineUploads.lockedAt, staleAt),
+          lte(inlineUploads.lockedAt, staleLeaseCutoff),
         ),
       ]
       if (uploadDbId !== undefined) conditions.push(eq(inlineUploads.id, uploadDbId))
@@ -689,7 +690,7 @@ export class InlineUploadRepository {
       const lockToken = randomBytes(32)
       const [claimed] = await tx.update(inlineUploads).set({
         lockToken,
-        lockedAt: now,
+        lockedAt: sql<Date>`CURRENT_TIMESTAMP`,
       }).where(and(
         eq(inlineUploads.id, row.id),
         eq(inlineUploads.status, "processing"),
@@ -716,11 +717,6 @@ export class InlineUploadRepository {
 
   async claimUploadingCompaction(uploadDbId: number): Promise<InlineUploadProcessingClaim | undefined> {
     return db.transaction(async (tx) => {
-      const [clock] = await tx.execute<{ now: string | Date }>(sql`
-        select CURRENT_TIMESTAMP as now
-      `)
-      const now = databaseTimestamp(clock?.now)
-      const staleAt = new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)
       const [row] = await tx.select().from(inlineUploads).where(and(
         eq(inlineUploads.id, uploadDbId),
         eq(inlineUploads.status, "uploading"),
@@ -728,7 +724,7 @@ export class InlineUploadRepository {
         or(
           isNull(inlineUploads.lockToken),
           isNull(inlineUploads.lockedAt),
-          lte(inlineUploads.lockedAt, staleAt),
+          lte(inlineUploads.lockedAt, staleLeaseCutoff),
         ),
       )).for("update", { skipLocked: true }).limit(1)
       if (!row) return undefined
@@ -736,7 +732,7 @@ export class InlineUploadRepository {
       const lockToken = randomBytes(32)
       const [claimed] = await tx.update(inlineUploads).set({
         lockToken,
-        lockedAt: now,
+        lockedAt: sql<Date>`CURRENT_TIMESTAMP`,
       }).where(and(
         eq(inlineUploads.id, row.id),
         eq(inlineUploads.status, "uploading"),

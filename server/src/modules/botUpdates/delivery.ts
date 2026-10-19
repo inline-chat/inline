@@ -1,5 +1,7 @@
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
+import { botUpdateWaiters } from "@in/server/db/models/botUpdateWaiters"
 import { isTest } from "@in/server/env"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 import { resolveWebhookUrl } from "./webhookSecurity"
 import { request as httpsRequest, type RequestOptions } from "node:https"
@@ -126,6 +128,11 @@ export type BotWebhookDeliveryWorkerOptions = {
   readonly clearIntervalFn?:
     | typeof clearInterval
     | undefined
+  readonly maximumIdleIntervalMs?: number | undefined
+  /** Subscribes to in-process "a Bot update was appended" wakes; returns the unsubscribe. */
+  readonly onWork?:
+    | ((listener: () => void) => () => void)
+    | undefined
   readonly pollIntervalMs?: number | undefined
   readonly runOnce?:
     | (() => Promise<number>)
@@ -139,6 +146,9 @@ export class BotWebhookDeliveryWorker {
   private readonly clearIntervalFn:
     typeof clearInterval
   private readonly pollIntervalMs: number
+  private readonly backoff: IdleBackoff
+  private readonly onWork:
+    (listener: () => void) => () => void
   private readonly runOnce:
     () => Promise<number>
   private readonly setIntervalFn:
@@ -148,6 +158,9 @@ export class BotWebhookDeliveryWorker {
     | undefined
   private interval:
     | ReturnType<typeof setInterval>
+    | undefined
+  private unsubscribeWork:
+    | (() => void)
     | undefined
   private stopping = false
 
@@ -163,6 +176,13 @@ export class BotWebhookDeliveryWorker {
       options.pollIntervalMs ??
         workerPollIntervalMs,
     )
+    this.backoff = IdleBackoff.forInterval(
+      this.pollIntervalMs,
+      options.maximumIdleIntervalMs,
+    )
+    this.onWork =
+      options.onWork ??
+      botUpdateWaiters.onWake
     this.runOnce =
       options.runOnce ??
       (() => runBotWebhookDeliveryOnce())
@@ -177,10 +197,21 @@ export class BotWebhookDeliveryWorker {
     }
 
     this.stopping = false
+    // The timer keeps its base cadence; idle backoff only skips the three
+    // delivery queries on ticks that come before the next due poll.
     this.interval = this.setIntervalFn(
-      () => void this.pollOnce(),
+      () => {
+        if (
+          this.inFlight === undefined &&
+          this.backoff.due()
+        ) {
+          void this.pollOnce()
+        }
+      },
       this.pollIntervalMs,
     )
+    this.unsubscribeWork ??=
+      this.onWork(() => this.wake())
     void this.pollOnce()
     return true
   }
@@ -191,7 +222,19 @@ export class BotWebhookDeliveryWorker {
       this.clearIntervalFn(this.interval)
       this.interval = undefined
     }
+    this.unsubscribeWork?.()
+    this.unsubscribeWork = undefined
     await this.inFlight
+  }
+
+  /** A Bot update was appended in this process: poll at the next base interval. */
+  wake(): void {
+    this.backoff.reset()
+  }
+
+  /** Base intervals between polls; exposed for diagnostics and tests. */
+  get idleMultiplier(): number {
+    return this.backoff.multiplier
   }
 
   pollOnce(): Promise<void> {
@@ -214,8 +257,11 @@ export class BotWebhookDeliveryWorker {
 
   private async drainOnce(): Promise<void> {
     try {
-      await this.runOnce()
+      this.backoff.observe(
+        (await this.runOnce()) > 0,
+      )
     } catch (error) {
+      this.backoff.observe(false)
       log.error(
         "Bot webhook delivery tick failed",
         { error },

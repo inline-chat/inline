@@ -4,6 +4,8 @@ import {
   isBlockContentImageWorkerEnabled,
 } from "./blockContentImageWorker"
 
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 describe("block content image worker lifecycle", () => {
   test("runs by default and supports an explicit emergency opt-out", () => {
     expect(isBlockContentImageWorkerEnabled(undefined)).toBe(true)
@@ -79,5 +81,48 @@ describe("block content image worker lifecycle", () => {
     await stopping
     expect(stopped).toBe(true)
     expect(runs).toBe(1)
+  })
+
+  test("backs off claim polls while idle and resumes at the base interval after work or a wake", async () => {
+    let tick: (() => void) | undefined
+    let runs = 0
+    let claimed = 0
+    const worker = new BlockContentImageWorker({
+      pollIntervalMs: 1_500,
+      maximumIdleIntervalMs: 6_000,
+      runOnce: async () => { runs += 1; return claimed },
+      setIntervalFn: ((handler: () => void, _timeout: number) => {
+        tick = handler
+        return Symbol("interval") as unknown as ReturnType<typeof setInterval>
+      }) as typeof setInterval,
+      clearIntervalFn: (() => {}) as typeof clearInterval,
+    })
+    expect(worker.start()).toBe(true)
+    await worker.pollOnce()
+    expect(runs).toBe(1)
+    expect(worker.idleMultiplier).toBe(2)
+
+    const runsPerTick: number[] = []
+    for (let index = 0; index < 6; index += 1) {
+      tick?.()
+      await settle()
+      runsPerTick.push(runs)
+    }
+    // Tick 2 polls with a two-interval gap; the next poll waits four intervals (the cap) until tick 6.
+    expect(runsPerTick).toEqual([1, 2, 2, 2, 2, 3])
+    expect(worker.idleMultiplier).toBe(4)
+
+    worker.wake()
+    expect(worker.idleMultiplier).toBe(1)
+    tick?.()
+    await settle()
+    expect(runs).toBe(4)
+
+    claimed = 2
+    tick?.(); tick?.()
+    await settle()
+    expect(runs).toBe(5)
+    expect(worker.idleMultiplier).toBe(1)
+    await worker.stop()
   })
 })

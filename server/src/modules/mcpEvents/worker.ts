@@ -3,6 +3,7 @@ import { isReactionEvent, reactionEventsEnabled } from "./config"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { isTest } from "@in/server/env"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 import { authorizeSelector, validateGrant } from "./authorization"
 import { acknowledgeClaim, claimSubscriptions, currentClaim, failClaim, fenceClaim, persistGap, persistPending, purgeExpiredSubscriptions, settleIdle } from "./repository"
@@ -78,36 +79,70 @@ export async function runMcpEventsOnce(limit = 25, transport: CallbackTransport 
   return claims.length
 }
 
+const workerPollIntervalMs = 1_000
+
+export type McpEventsWorkerOptions = {
+  pollIntervalMs?: number
+  maximumIdleIntervalMs?: number
+  /** Runs once a minute before a poll; purges expired subscriptions and reaction events. */
+  cleanup?: () => Promise<void>
+  setIntervalFn?: typeof setInterval
+  clearIntervalFn?: typeof clearInterval
+}
+
+const purgeExpired = async (): Promise<void> => {
+  await purgeExpiredSubscriptions()
+  await purgeExpiredReactionEvents()
+}
+
 export class McpEventsWorker {
+  private readonly pollIntervalMs: number
+  private readonly backoff: IdleBackoff
+  private readonly cleanup: () => Promise<void>
+  private readonly setIntervalFn: typeof setInterval
+  private readonly clearIntervalFn: typeof clearInterval
   private timer?: ReturnType<typeof setInterval>
   private inFlight?: Promise<void>
   private stopping = false
   private nextCleanupAt = 0
-  constructor(private readonly runOnce: () => Promise<number> = runMcpEventsOnce) {}
+  constructor(private readonly runOnce: () => Promise<number> = runMcpEventsOnce, options: McpEventsWorkerOptions = {}) {
+    this.pollIntervalMs = Math.max(100, options.pollIntervalMs ?? workerPollIntervalMs)
+    this.backoff = IdleBackoff.forInterval(this.pollIntervalMs, options.maximumIdleIntervalMs)
+    this.cleanup = options.cleanup ?? purgeExpired
+    this.setIntervalFn = options.setIntervalFn ?? setInterval
+    this.clearIntervalFn = options.clearIntervalFn ?? clearInterval
+  }
   start(): void {
     if (this.timer) return
     this.stopping = false
-    this.timer = setInterval(() => void this.poll(), 1000)
+    // The timer keeps its base cadence; idle backoff only skips database
+    // reads on ticks that come before the next due poll.
+    this.timer = this.setIntervalFn(() => { if (!this.inFlight && this.backoff.due()) void this.poll() }, this.pollIntervalMs)
     void this.poll()
   }
   async stop(): Promise<void> {
     this.stopping = true
-    if (this.timer) clearInterval(this.timer)
+    if (this.timer) this.clearIntervalFn(this.timer)
     this.timer = undefined
     await this.inFlight
+  }
+  /** Base intervals between polls; exposed for diagnostics and tests. */
+  get idleMultiplier(): number {
+    return this.backoff.multiplier
   }
   poll(): Promise<void> {
     if (this.stopping) return Promise.resolve()
     if (this.inFlight) return this.inFlight
     this.inFlight = (async () => {
       if (Date.now() >= this.nextCleanupAt) {
-        await purgeExpiredSubscriptions()
-        await purgeExpiredReactionEvents()
+        await this.cleanup()
         this.nextCleanupAt = Date.now() + 60_000
       }
-      await this.runOnce()
-    })().then(() => {}, () => { log.error("MCP event worker tick failed") })
-      .finally(() => { this.inFlight = undefined })
+      return this.runOnce()
+    })().then((delivered) => { this.backoff.observe(delivered > 0) }, () => {
+      log.error("MCP event worker tick failed")
+      this.backoff.observe(false)
+    }).finally(() => { this.inFlight = undefined })
     return this.inFlight
   }
 }

@@ -10,6 +10,8 @@ import {
   liveKitProviderTarget,
   revokeGridParticipantAccess,
 } from "@in/server/modules/grid/livekit"
+import { registerPostCommitHook } from "@in/server/db/commitHooks"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm"
 import { ServerError } from "livekit-server-sdk"
@@ -34,6 +36,7 @@ type ClearIntervalFn = (id: ReturnType<typeof setInterval>) => void
 
 export type GridProviderEffectWorkerOptions = {
   pollIntervalMs?: number
+  maximumIdleIntervalMs?: number
   claimLeaseMs?: number
   providerTimeoutMs?: number
   batchSize?: number
@@ -53,6 +56,7 @@ export async function enqueueGridConnectionCleanup(
   now = Date.now(),
   options: { delayMs?: number } = {},
 ): Promise<void> {
+  const delayMs = options.delayMs ?? CONNECTION_CLEANUP_GRACE_MS
   await tx
     .insert(gridProviderEffects)
     .values({
@@ -61,9 +65,10 @@ export async function enqueueGridConnectionCleanup(
       roomId: Number(connection.roomId),
       connectionGeneration: connection.generation,
       providerTarget: durableLiveKitProviderTarget(),
-      availableAt: new Date(now + (options.delayMs ?? CONNECTION_CLEANUP_GRACE_MS)),
+      availableAt: new Date(now + delayMs),
     })
     .onConflictDoNothing({ target: gridProviderEffects.deduplicationKey })
+  if (delayMs === 0) wakeWorkerAfterCommit(tx)
 }
 
 /** Must be called inside the transaction that removed this participant. */
@@ -87,6 +92,17 @@ export async function enqueueGridParticipantRevocation(
       availableAt: new Date(now),
     })
     .onConflictDoNothing({ target: gridProviderEffects.deduplicationKey })
+  wakeWorkerAfterCommit(tx)
+}
+
+/** An idle worker backs off its claim poll; tell it once the effect is visible. */
+function wakeWorkerAfterCommit(tx: Transaction): void {
+  try {
+    registerPostCommitHook(tx, "grid.providerEffects.wake", { run: async () => worker?.wake() })
+  } catch {
+    // A transaction outside the configured database still owns its rows; the
+    // worker's bounded idle poll picks the effect up.
+  }
 }
 
 export class GridProviderEffectWorker {
@@ -96,11 +112,16 @@ export class GridProviderEffectWorker {
       "pollIntervalMs" | "claimLeaseMs" | "providerTimeoutMs" | "batchSize" | "now" | "setIntervalFn" | "clearIntervalFn"
     >
   > & Pick<GridProviderEffectWorkerOptions, "claim" | "execute" | "complete" | "retry">
+  private readonly backoff: IdleBackoff
   private intervalId: ReturnType<typeof setInterval> | null = null
   private inFlight: Promise<void> | null = null
   private claimFailureCount = 0
 
   constructor(options: GridProviderEffectWorkerOptions = {}) {
+    this.backoff = IdleBackoff.forInterval(
+      positiveInt(options.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
+      options.maximumIdleIntervalMs,
+    )
     this.runtime = {
       pollIntervalMs: positiveInt(options.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
       claimLeaseMs: positiveInt(options.claimLeaseMs, DEFAULT_CLAIM_LEASE_MS),
@@ -118,8 +139,22 @@ export class GridProviderEffectWorker {
 
   start(): void {
     if (this.intervalId !== null) return
-    this.intervalId = this.runtime.setIntervalFn(() => void this.pollOnce(), this.runtime.pollIntervalMs)
+    // The timer keeps its base cadence; idle backoff only skips the claim
+    // query on ticks that come before the next due poll.
+    this.intervalId = this.runtime.setIntervalFn(() => {
+      if (!this.inFlight && this.backoff.due()) void this.pollOnce()
+    }, this.runtime.pollIntervalMs)
     void this.pollOnce()
+  }
+
+  /** An effect was just committed in this process: poll at the next base interval. */
+  wake(): void {
+    this.backoff.reset()
+  }
+
+  /** Base intervals between polls; exposed for diagnostics and tests. */
+  get idleMultiplier(): number {
+    return this.backoff.multiplier
   }
 
   async stop(): Promise<void> {
@@ -151,6 +186,7 @@ export class GridProviderEffectWorker {
       })
     } catch (error) {
       this.claimFailureCount += 1
+      this.backoff.observe(false)
       if (this.claimFailureCount === 1 || this.claimFailureCount === 10 || this.claimFailureCount % 100 === 0) {
         Log.shared.warn("Failed to claim durable Grid provider effects", {
           consecutiveFailures: this.claimFailureCount,
@@ -159,6 +195,7 @@ export class GridProviderEffectWorker {
       }
       return
     }
+    this.backoff.observe(effects.length > 0)
     if (this.claimFailureCount > 0) {
       log.info("GRID_TRACE phase=provider_effect_claim_recovered", {
         previousFailures: this.claimFailureCount,

@@ -31,6 +31,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
+import { IdleBackoff } from "@in/server/utils/idleBackoff"
 import { Log } from "@in/server/utils/log"
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm"
 import {
@@ -162,6 +163,7 @@ export async function runBlockContentImageWorkerOnce(limit = batchSize): Promise
 export type BlockContentImageWorkerOptions = {
   enabled?: boolean
   pollIntervalMs?: number
+  maximumIdleIntervalMs?: number
   runOnce?: () => Promise<number>
   setIntervalFn?: typeof setInterval
   clearIntervalFn?: typeof clearInterval
@@ -170,6 +172,7 @@ export type BlockContentImageWorkerOptions = {
 export class BlockContentImageWorker {
   private readonly enabled: boolean
   private readonly pollIntervalMs: number
+  private readonly backoff: IdleBackoff
   private readonly runOnce: () => Promise<number>
   private readonly setIntervalFn: typeof setInterval
   private readonly clearIntervalFn: typeof clearInterval
@@ -180,6 +183,7 @@ export class BlockContentImageWorker {
   constructor(options: BlockContentImageWorkerOptions = {}) {
     this.enabled = options.enabled ?? true
     this.pollIntervalMs = Math.max(100, options.pollIntervalMs ?? pollIntervalMs)
+    this.backoff = IdleBackoff.forInterval(this.pollIntervalMs, options.maximumIdleIntervalMs)
     this.runOnce = options.runOnce ?? (() => runBlockContentImageWorkerOnce())
     this.setIntervalFn = options.setIntervalFn ?? setInterval
     this.clearIntervalFn = options.clearIntervalFn ?? clearInterval
@@ -188,9 +192,21 @@ export class BlockContentImageWorker {
   start(): boolean {
     if (!this.enabled || this.interval !== null) return false
     this.stopping = false
-    this.interval = this.setIntervalFn(() => void this.pollOnce(), this.pollIntervalMs)
+    // The timer keeps its base cadence; idle backoff only skips the claim
+    // query on ticks that come before the next due poll.
+    this.interval = this.setIntervalFn(() => { if (!this.inFlight && this.backoff.due()) void this.pollOnce() }, this.pollIntervalMs)
     void this.pollOnce()
     return true
+  }
+
+  /** A job was just committed: poll at the next base interval. */
+  wake(): void {
+    this.backoff.reset()
+  }
+
+  /** Base intervals between polls; exposed for diagnostics and tests. */
+  get idleMultiplier(): number {
+    return this.backoff.multiplier
   }
 
   async stop(): Promise<void> {
@@ -215,14 +231,20 @@ export class BlockContentImageWorker {
 
   private async drainOnce(): Promise<void> {
     try {
-      await this.runOnce()
+      this.backoff.observe(await this.runOnce() > 0)
     } catch (error) {
+      this.backoff.observe(false)
       log.error("image worker tick failed", { errorType: errorName(error) })
     }
   }
 }
 
 let worker: BlockContentImageWorker | null = null
+
+/** Called after a transaction that queued image jobs commits. */
+export function wakeBlockContentImageWorker(): void {
+  worker?.wake()
+}
 
 export function isBlockContentImageWorkerEnabled(
   value = process.env["BLOCK_CONTENT_IMAGE_WORKER_ENABLED"],
