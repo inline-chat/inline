@@ -78,3 +78,75 @@ describe("replay loop guard", () => {
     expect(guard.allow("a", 0)).toBe(true)
   })
 })
+
+describe("replay loop guard: repeated identical pages", () => {
+  test("empty polls and page retries stay free; a third identical non-empty fetch is slowed with growing windows", () => {
+    let now = 0
+    const guard = new ReplayLoopGuard(() => now)
+    // Polling an empty frontier never counts.
+    for (let i = 0; i < 50; i++) {
+      expect(guard.allow("s", 4000)).toBe(true)
+      guard.served("s", 4000, 0)
+    }
+    // A client that cannot apply the first page keeps asking for it.
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(false)
+    now = 59_999
+    expect(guard.allow("s", 0)).toBe(false)
+    now = 60_000
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(false)
+    now += 119_999
+    expect(guard.allow("s", 0)).toBe(false)
+    now += 1
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(false)
+    // Windows keep doubling to the cap and stay there. The stuck client keeps
+    // polling while blocked, so the idle expiry never gives it a clean slate.
+    for (const windowMs of [240_000, 480_000, 960_000, 1_800_000, 1_800_000]) {
+      const windowEnd = now + windowMs
+      while (now + 300_000 < windowEnd) {
+        now += 300_000
+        expect(guard.allow("s", 0)).toBe(false)
+      }
+      now = windowEnd - 1
+      expect(guard.allow("s", 0)).toBe(false)
+      now += 1
+      expect(guard.allow("s", 0)).toBe(true)
+      guard.served("s", 0, 100)
+      expect(guard.allow("s", 0)).toBe(false)
+    }
+  })
+
+  test("forward progress or a different start resets the repeat count without a reconnect", () => {
+    const guard = new ReplayLoopGuard()
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 0, 100)
+    expect(guard.allow("s", 100)).toBe(true)
+    guard.served("s", 100, 100)
+    expect(guard.allow("s", 100)).toBe(true)
+    guard.served("s", 100, 100)
+    expect(guard.allow("s", 100)).toBe(true)
+    guard.served("s", 100, 100)
+    expect(guard.allow("s", 100)).toBe(false)
+    expect(guard.allow("s", 200)).toBe(true)
+    guard.served("s", 200, 100)
+    expect(guard.allow("s", 200)).toBe(true)
+  })
+
+  test("served records for another start do not count against the current one", () => {
+    const guard = new ReplayLoopGuard()
+    expect(guard.allow("s", 0)).toBe(true)
+    guard.served("s", 5, 100)
+    for (let i = 0; i < 5; i++) expect(guard.allow("s", 0)).toBe(true)
+  })
+})

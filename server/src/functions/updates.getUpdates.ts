@@ -11,7 +11,7 @@ import type { UpdateBoxInput } from "@in/server/db/models/updates"
 import type { DbChat } from "@in/server/db/schema"
 import { UpdateBucket as DbUpdateBucket } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { Sync } from "@in/server/modules/updates/sync"
+import { Sync, type ReplayAccessCache } from "@in/server/modules/updates/sync"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -92,8 +92,12 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const requestedPageLimit = rawPageLimit > 0 ? rawPageLimit : PAGE_LIMIT
   const pageLimit = Math.min(requestedPageLimit, PAGE_LIMIT)
-  if (descriptor.scope === "user" && context.currentConnectionId &&
-    !replayLoopGuard.allow(`${context.currentUserId}:${context.currentSessionId}:${context.currentConnectionId}`, seqStart)) {
+  // Keyed by session, not socket: a client that reconnects between identical
+  // failed catch-up passes must not start with a fresh allowance.
+  const replayIdentity = descriptor.scope === "user" && context.currentConnectionId
+    ? `${context.currentUserId}:${context.currentSessionId}`
+    : undefined
+  if (replayIdentity !== undefined && !replayLoopGuard.allow(replayIdentity, seqStart)) {
     databaseDiagnostics.record("replay.user.throttled", 0)
     throw RealtimeRpcError.RateLimit()
   }
@@ -125,6 +129,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     latestDate,
   } = fetchTiming.value
   const fetchMs = fetchTiming.ms
+  if (replayIdentity !== undefined) replayLoopGuard.served(replayIdentity, seqStart, dbUpdates.length)
 
   const seqDifference = latestSeq - seqStart
   if (replayRequiresAuthoritativeRepair(seqStart, latestSeq)) {
@@ -188,6 +193,9 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   let inflatedUpdates: GetUpdatesResult["updates"] = []
   let skippedSequences: GetUpdatesResult["skippedSequences"] = []
   const inflateStartedAt = performance.now()
+  // One access projection per chat per request, shared by replay filtering
+  // and every sidecar hydration pass of the byte-limited candidate loop.
+  const accessCache: ReplayAccessCache = new Map()
 
   switch (descriptor.scope) {
     case "chat": {
@@ -209,7 +217,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     }
 
     case "user": {
-      const page = await Sync.prepareUserUpdatesPage(dbUpdates, context.currentUserId)
+      const page = await Sync.prepareUserUpdatesPage(dbUpdates, context.currentUserId, accessCache)
       inflatedUpdates = page.updates
       skippedSequences = page.skippedSequences
       break
@@ -251,11 +259,13 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
             chatId: descriptor.chatId,
             updates,
             userId: context.currentUserId,
+            accessCache,
           })
         : descriptor.scope === "user"
           ? await Sync.buildUserSidecarsForUpdates({
               updates,
               userId: context.currentUserId,
+              accessCache,
             })
           : await Sync.buildSpaceSidecarsForUpdates({
               spaceId: descriptor.spaceId,

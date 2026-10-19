@@ -882,6 +882,8 @@ type ChatSidecarsForUpdatesInput = {
   chatId: number
   updates: Update[]
   userId: number
+  /** Shared with the page's replay filtering so overlapping chats are projected once. */
+  accessCache?: ReplayAccessCache
 }
 
 async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): Promise<UpdateSidecars> {
@@ -967,6 +969,7 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
     candidateChatRows.map((chat) => chat.id),
     input.userId,
     "sync.sidecars",
+    input.accessCache,
   )
   const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
   // Parent and payload references are dependencies, not authority. Rebuild
@@ -1034,6 +1037,8 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
 type UserSidecarsForUpdatesInput = {
   updates: Update[]
   userId: number
+  /** Shared with the page's replay filtering so overlapping chats are projected once. */
+  accessCache?: ReplayAccessCache
 }
 
 async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): Promise<UpdateSidecars> {
@@ -1157,7 +1162,12 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
   }
 
   const candidateChatRows = await getSidecarChats(undefined, chatIds)
-  const accessibleChatIds = await getAccessibleReplayChatIds(candidateChatRows.map((chat) => chat.id), input.userId, "sync.sidecars")
+  const accessibleChatIds = await getAccessibleReplayChatIds(
+    candidateChatRows.map((chat) => chat.id),
+    input.userId,
+    "sync.sidecars",
+    input.accessCache,
+  )
   const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
   // Historical chatOpen payloads are not authority to enrich their old Space
   // with current metadata; rebuild Space references from admitted chats only.
@@ -1471,13 +1481,38 @@ function inflateUserUpdatesPage(dbUpdates: DbUpdate[]): InflatedUpdatesPage {
   )
 }
 
-async function getAccessibleReplayChatIds(chatIds: number[], userId: number, source: AccessQuerySource = "sync.replay"): Promise<Set<number>> {
-  if (chatIds.length === 0) return new Set()
+/**
+ * Per-request memo of the requester's effective access by chat. One getUpdates
+ * page checks access while filtering replay records and again while hydrating
+ * sidecars, and the byte-limited candidate loop hydrates more than once; the
+ * sets overlap heavily, so each chat is projected at most once per request.
+ */
+export type ReplayAccessCache = Map<number, boolean>
+
+async function getAccessibleReplayChatIds(
+  chatIds: number[],
+  userId: number,
+  source: AccessQuerySource = "sync.replay",
+  cache?: ReplayAccessCache,
+): Promise<Set<number>> {
+  const accessible = new Set<number>()
+  const missing: number[] = []
+  for (const chatId of new Set(chatIds)) {
+    const known = cache?.get(chatId)
+    if (known === undefined) missing.push(chatId)
+    else if (known) accessible.add(chatId)
+  }
+  if (missing.length === 0) return accessible
   // The canonical projection is one SELECT, so PostgreSQL already gives all
   // its CTEs one statement snapshot. An explicit transaction adds BEGIN/SET/
   // COMMIT round trips and bypasses the shared client's prepared replay plans.
-  const access = await getEffectiveChatAccessUserIds(db, chatIds, { userIds: [userId], source })
-  return new Set(Array.from(access).flatMap(([chatId, users]) => users.has(userId) ? [chatId] : []))
+  const access = await getEffectiveChatAccessUserIds(db, missing, { userIds: [userId], source })
+  for (const chatId of missing) {
+    const allowed = access.get(chatId)?.has(userId) === true
+    cache?.set(chatId, allowed)
+    if (allowed) accessible.add(chatId)
+  }
+  return accessible
 }
 
 type ReplayChatAccessRef = {
@@ -1541,7 +1576,11 @@ function replayChatAccessRef(update: Update): ReplayChatAccessRef | undefined {
 
 /** Access-bearing replay must be complete and currently authorized. Obsolete
  * grants and snapshots are accounted without reviving private cached state. */
-async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Promise<InflatedUpdatesPage> {
+async function prepareUserUpdatesPage(
+  dbUpdates: DbUpdate[],
+  userId: number,
+  accessCache?: ReplayAccessCache,
+): Promise<InflatedUpdatesPage> {
   const page = inflateUserUpdatesPage(dbUpdates)
   const ids = new Set<number>()
   const userIds = new Set<number>()
@@ -1552,7 +1591,7 @@ async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Pr
     addSafeId(userIds, ref?.userId)
     addSafeId(groupIds, ref?.groupId)
   }
-  const accessible = await getAccessibleReplayChatIds(Array.from(ids), userId)
+  const accessible = await getAccessibleReplayChatIds(Array.from(ids), userId, "sync.replay", accessCache)
   const validUsers = new Set<string>()
   const validGroups = new Set<string>()
   if (ids.size > 0 && userIds.size > 0) {
