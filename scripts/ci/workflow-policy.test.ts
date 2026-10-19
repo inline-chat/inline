@@ -66,13 +66,16 @@ describe("public CI contracts", () => {
     }
   })
 
-  it("limits the nightly tip release to a green main selection", () => {
+  it("limits tip releases to green main commits after CI completes", () => {
     const tip = workflow("macos-tip-nightly.yml")
     expect(tip.on.schedule).toBeDefined()
     expect(tip.on.workflow_dispatch).toBeDefined()
+    expect(tip.on.workflow_run).toEqual({ workflows: ["CI", "Apple Validation", "Server Tests", "CodeQL", "CLI Build"], types: ["completed"], branches: ["main"] })
     const source = read(".github/workflows/macos-tip-nightly.yml")
     expect(source).toContain("github.ref == 'refs/heads/main'")
+    expect(source).toContain("cancel-in-progress: false")
     expect(source).toContain("scripts/ci/nightly-tip-gate.py select")
+    expect(source).toContain("scripts/ci/nightly-tip-gate.py qualify-tip")
     expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
     expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
   })

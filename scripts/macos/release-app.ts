@@ -791,19 +791,18 @@ function assertNightlyMainStillSelected(ctx: ReleaseContext): void {
   const expected = process.env.INLINE_NIGHTLY_MAIN_SHA;
   if (!expected) return;
   if (ctx.channel !== "tip" || ctx.experimentalTip || ctx.sourceCommit !== expected) {
-    throw new Error("Nightly release source does not match the selected green main commit.");
+    throw new Error("Tip release source does not match the selected green main commit.");
   }
-  const current = git(ctx.rootDir, ["ls-remote", "origin", "refs/heads/main"]).split(/\s+/)[0];
-  if (current !== expected) {
-    throw new Error(`main advanced during the nightly release: selected ${expected}, current ${current || "unavailable"}.`);
-  }
+  // main may advance during the build; the commit only has to stay green, on main,
+  // and no older than the current tip.
   const qualification = spawnSync({
-    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify"],
+    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify-tip"],
     stdout: "pipe",
     stderr: "pipe",
   });
   if (qualification.exitCode !== 0) {
-    throw new Error("The selected main commit no longer has green CI; refusing to publish the nightly release.");
+    const reason = qualification.stderr.toString().trim().split("\n").at(-1) || "qualification failed";
+    throw new Error(`Refusing to publish the tip release: ${reason}`);
   }
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Select the current green main commit for a macOS tip release."""
+"""Select green main commits for macOS tip and iOS early tester releases."""
 
+import email.utils
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 
 
 REQUIRED_WORKFLOWS = (
@@ -23,6 +25,12 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 COMMIT_DESCRIPTION = re.compile(r"from commit ([0-9a-f]{7,40})")
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 DMG_PATH = re.compile(r"^/mac/tip/([0-9]+)/Inline\.dmg$")
+MIN_TIP_INTERVAL = timedelta(hours=1)
+MAIN_COMMIT_WINDOW = 50
+COMPARE_FILE_LIMIT = 300
+# Mirrors selectAppleJobs in validation-gates.mjs: only known non-Apple paths
+# can skip a tip build, and unknown inputs fail open to building.
+NON_MAC_PATHS = re.compile(r"^(server/|landing/|packages/|plugins/|cli/|crates/|vendor/|skills/|docs/|admin/|\.cargo/|\.codex/|\.agents/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|[^/]+\.md$)")
 
 
 def require_sha(value):
@@ -73,10 +81,17 @@ def latest_feed_item(xml):
         raise ValueError("Latest tip appcast item has no valid DMG length") from error
     if size < 1:
         raise ValueError("Latest tip appcast item has no valid DMG length")
+    try:
+        published_at = email.utils.parsedate_to_datetime(item.findtext("pubDate", default=""))
+    except (TypeError, ValueError):
+        published_at = None
+    if published_at and published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
     return {
         "commit_prefix": match.group(1) if match else None,
         "dmg_url": url,
         "dmg_size": size,
+        "published_at": published_at,
     }
 
 
@@ -112,6 +127,42 @@ def published_tip_matches(sha, tag_sha, release, feed_item, remote_digest):
                 and prefix and sha.startswith(prefix)
                 and feed_item["dmg_size"] == asset["size"]
                 and feed_item["dmg_url"].startswith("https://public-assets.inline.chat/mac/tip/"))
+
+
+def mac_relevant(paths):
+    if paths is None:
+        return True
+    # Swift secure-transport tests consume canonical trust roots from this package.
+    if any(path.startswith("packages/protocol/") for path in paths):
+        return True
+    return not all(NON_MAC_PATHS.match(path) for path in paths)
+
+
+def changed_paths(comparison):
+    files = comparison.get("files")
+    if files is None or len(files) >= COMPARE_FILE_LIMIT:
+        return None
+    paths = []
+    for entry in files:
+        paths.append(entry["filename"])
+        if entry.get("previous_filename"):
+            paths.append(entry["previous_filename"])
+    return paths
+
+
+def tip_decision(comparison, feed_item, *, event, now):
+    """Return a skip reason for a candidate that differs from the tip, or None to release it."""
+    if comparison is not None:
+        if comparison["status"] == "behind":
+            return "candidate is older than the current tip"
+        # A diverged tip (an experimental build) fails open to releasing main.
+        if event != "workflow_dispatch" and comparison["status"] == "ahead" \
+                and not mac_relevant(changed_paths(comparison)):
+            return "no macOS-relevant changes since the current tip"
+    published_at = feed_item and feed_item.get("published_at")
+    if event != "workflow_dispatch" and published_at and now - published_at < MIN_TIP_INTERVAL:
+        return f"last tip was published at {published_at.isoformat()}, under {MIN_TIP_INTERVAL} ago"
+    return None
 
 
 class GitHub:
@@ -151,6 +202,15 @@ class GitHub:
             target = self.request(f"git/tags/{require_sha(target['sha'])}")["object"]
         raise ValueError("tip tag did not resolve to a commit")
 
+    def compare(self, base, head):
+        return self.request(f"compare/{base}...{head}")
+
+    def main_push_runs(self, workflow):
+        return self.request(f"actions/workflows/{workflow}/runs?branch=main&event=push&per_page=100")["workflow_runs"]
+
+    def main_commits(self):
+        return self.request(f"commits?sha=main&per_page={MAIN_COMMIT_WINDOW}")
+
     def checks(self, sha):
         checks = []
         for page in range(1, 11):
@@ -172,21 +232,95 @@ def public_feed():
         raise
 
 
-def inspect_main(github):
-    sha = require_sha(github.request("git/ref/heads/main")["object"]["sha"])
+def ci_problem(github, sha, runs=None):
     for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS):
-        path = f"actions/workflows/{workflow}/runs?head_sha={sha}&event=push&per_page=100"
-        run = latest_push_run(github.request(path)["workflow_runs"], sha)
+        if runs is None:
+            path = f"actions/workflows/{workflow}/runs?head_sha={sha}&event=push&per_page=100"
+            workflow_runs = github.request(path)["workflow_runs"]
+        else:
+            workflow_runs = runs[workflow]
+        run = latest_push_run(workflow_runs, sha)
         if not run and workflow in OPTIONAL_PUSH_WORKFLOWS:
             continue
         if not run or run.get("status") != "completed" or run.get("conclusion") != "success":
             state = f"{run.get('status')}/{run.get('conclusion')}" if run else "missing"
-            return sha, f"{workflow} is {state} for latest main"
+            return f"{workflow} is {state}"
     check = latest_codeql_check(github.checks(sha))
     if not check or check.get("status") != "completed" or check.get("conclusion") != "success":
         state = f"{check.get('status')}/{check.get('conclusion')}" if check else "missing"
-        return sha, f"CodeQL actions analysis is {state} for latest main"
-    return sha, None
+        return f"CodeQL actions analysis is {state}"
+    return None
+
+
+def inspect_main(github):
+    sha = require_sha(github.request("git/ref/heads/main")["object"]["sha"])
+    problem = ci_problem(github, sha)
+    return sha, f"{problem} for latest main" if problem else None
+
+
+def ci_running(sha, runs):
+    for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS):
+        run = latest_push_run(runs[workflow], sha)
+        if run and run.get("status") != "completed":
+            return True
+    return False
+
+
+def newest_green_main(github, stop_at):
+    """Return the newest green main commit and the newest commit above it still in CI.
+
+    The walk stops after the current tip so older commits are never selected.
+    """
+    runs = {workflow: github.main_push_runs(workflow)
+            for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS)}
+    running = None
+    for commit in github.main_commits():
+        sha = require_sha(commit["sha"])
+        problem = ci_problem(github, sha, runs)
+        if problem is None:
+            return sha, running
+        print(f"Not green: {sha[:9]} ({problem})")
+        if running is None and ci_running(sha, runs):
+            running = sha
+        if sha == stop_at:
+            break
+    return None, running
+
+
+def select_tip(github, event, now):
+    tag_sha = github.tip_commit()
+    sha, running = newest_green_main(github, tag_sha)
+    # Every CI completion retriggers this gate, so wait for newer commits instead
+    # of building one that is about to be superseded. The sweep never waits.
+    if running and event == "workflow_run":
+        return sha, f"newer main commit {running[:9]} is still in CI", False
+    if sha is None:
+        return None, "no green main commit at or after the current tip", False
+    if sha == tag_sha and event == "workflow_run":
+        # Re-hashing the published DMG on every CI completion would be wasteful,
+        # so only the scheduled sweep and manual runs repair a partial publication.
+        return sha, "already the current tip", False
+    feed = public_feed()
+    if sha == tag_sha:
+        release = github.request("releases/tags/tip", missing_ok=True)
+        digest = remote_dmg_sha256(feed) if release and feed else None
+        if published_tip_matches(sha, tag_sha, release, feed, digest):
+            return sha, "already published", False
+        return sha, None, feed is None
+    comparison = github.compare(tag_sha, sha) if tag_sha else None
+    problem = tip_decision(comparison, feed, event=event, now=now)
+    return sha, problem, feed is None
+
+
+def qualify_tip(github, sha):
+    problem = ci_problem(github, sha)
+    if problem:
+        raise ValueError(f"Selected commit {sha} is no longer green: {problem}")
+    if github.compare(sha, "main")["status"] not in ("ahead", "identical"):
+        raise ValueError(f"Selected commit {sha} is not on main")
+    tag_sha = github.tip_commit()
+    if tag_sha and tag_sha != sha and github.compare(tag_sha, sha)["status"] == "behind":
+        raise ValueError(f"Selected commit {sha} is older than the current tip {tag_sha}")
 
 
 def output(**values):
@@ -206,25 +340,24 @@ def main():
         print(f"Latest main: {sha}; gate: {problem or 'green'}")
         output(sha=sha, should_release=str(problem is None).lower())
     elif mode == "select":
-        sha, problem = inspect_main(github)
+        event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
+        sha, problem, create_new_appcast = select_tip(github, event, datetime.now(timezone.utc))
         if problem:
-            print(f"Skipping nightly tip: {problem} ({sha})")
-            output(sha=sha, should_release="false", create_new_appcast="false")
+            print(f"Skipping tip ({event}): {problem}{f' ({sha})' if sha else ''}")
+            output(sha=sha or "", should_release="false", create_new_appcast="false")
             return
-        tag_sha = github.tip_commit()
-        release = github.request("releases/tags/tip", missing_ok=True)
-        feed = public_feed()
-        remote_digest = remote_dmg_sha256(feed) if tag_sha == sha and release and feed else None
-        already_released = published_tip_matches(sha, tag_sha, release, feed, remote_digest)
-        print(f"Latest green main: {sha}; already published: {already_released}")
-        output(sha=sha, should_release=str(not already_released).lower(),
-               create_new_appcast=str(feed is None).lower())
+        print(f"Releasing tip ({event}) from green main commit {sha}")
+        output(sha=sha, should_release="true", create_new_appcast=str(create_new_appcast).lower())
     elif mode == "qualify":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
         current, problem = inspect_main(github)
         if current != sha or problem:
             raise ValueError(f"Selected main commit is no longer green: {problem or current}")
         print(f"Requalified latest green main: {sha}")
+    elif mode == "qualify-tip":
+        sha = require_sha(os.environ.get("EXPECTED_SHA"))
+        qualify_tip(github, sha)
+        print(f"Requalified green main commit for tip: {sha}")
     elif mode == "verify":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
         tag_sha = github.tip_commit()
