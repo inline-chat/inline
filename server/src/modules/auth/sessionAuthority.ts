@@ -108,6 +108,7 @@ export class SessionAuthorityReconciler {
   private bindings: SessionAuthorityBindings | undefined
   private configuration: SessionAuthorityConfiguration = sessionAuthorityConfigurationFromEnvironment()
   private timer: ReturnType<typeof setTimeout> | undefined
+  private timerAtMs = Number.POSITIVE_INFINITY
   private running = false
   private reconciliationInFlight = false
   private reconciliationTask: Promise<void> | undefined
@@ -128,16 +129,13 @@ export class SessionAuthorityReconciler {
     this.pruneInvalidations(now)
     const key = keyFor(identity)
     if (this.invalidatedUntil.has(key)) return false
-    this.authorities.set(key, {
-      ...identity,
-      key,
-      verifiedAtMs: now,
-      nextReconciliationAtMs: now + this.configuration.reconciliationIntervalMs,
-    })
+    const nextReconciliationAtMs = this.alignedReconciliationAtMs(now)
+    this.authorities.set(key, { ...identity, key, verifiedAtMs: now, nextReconciliationAtMs })
     // `start()` and every reconciliation keep one timer no later than the
-    // configured interval. An authority admitted after that timer is armed
-    // cannot be due before it, so rescanning every tracked authority here
-    // would only turn a connection burst into O(N²) timer work.
+    // configured interval. Only an authority whose slot lands before that
+    // timer pulls it earlier, in O(1); rescanning every tracked authority
+    // here would turn a connection burst into O(N²) timer work.
+    if (this.running && nextReconciliationAtMs < this.timerAtMs) this.armTimer(nextReconciliationAtMs)
     return true
   }
 
@@ -196,6 +194,7 @@ export class SessionAuthorityReconciler {
     this.running = false
     if (this.timer) this.cancelTimer(this.timer)
     this.timer = undefined
+    this.timerAtMs = Number.POSITIVE_INFINITY
     this.bindings = undefined
     this.authorities.clear()
     this.invalidatedUntil.clear()
@@ -276,7 +275,7 @@ export class SessionAuthorityReconciler {
             continue
           }
           authority.verifiedAtMs = queryStartedAtMs
-          authority.nextReconciliationAtMs = queryStartedAtMs + this.configuration.reconciliationIntervalMs
+          authority.nextReconciliationAtMs = this.alignedReconciliationAtMs(queryStartedAtMs)
         }
         // A slow batch can exhaust an unchecked authority in a later batch.
         this.collectDueAuthorities()
@@ -298,6 +297,18 @@ export class SessionAuthorityReconciler {
       invalidatedSessions: this.invalidatedUntil.size,
       reconciliationInFlight: this.reconciliationInFlight,
     }
+  }
+
+  /**
+   * Authorities due in the same slot of a shared grid are verified by one
+   * query, so N staggered sessions cost at most interval/grid queries per
+   * interval instead of N. Flooring keeps every refresh within the
+   * configured interval of its proof; a refresh is never scheduled later.
+   */
+  private alignedReconciliationAtMs(verifiedAtMs: number): number {
+    const intervalMs = this.configuration.reconciliationIntervalMs
+    const gridMs = Math.max(1, Math.floor(intervalMs / 3))
+    return Math.max(verifiedAtMs + 1, Math.floor((verifiedAtMs + intervalMs) / gridMs) * gridMs)
   }
 
   private collectDueAuthorities(): AuthorityRecord[] {
@@ -347,7 +358,6 @@ export class SessionAuthorityReconciler {
    */
   private reschedule(): void {
     if (!this.running) return
-    if (this.timer) this.cancelTimer(this.timer)
     const now = this.now()
     let nextAtMs = now + this.configuration.reconciliationIntervalMs
     for (const authority of this.authorities.values()) {
@@ -357,11 +367,17 @@ export class SessionAuthorityReconciler {
         : Math.min(authority.nextReconciliationAtMs, expiryAtMs)
       nextAtMs = Math.min(nextAtMs, candidateAtMs)
     }
-    const delayMs = Math.max(0, nextAtMs - now)
+    this.armTimer(nextAtMs)
+  }
+
+  private armTimer(atMs: number): void {
+    if (this.timer) this.cancelTimer(this.timer)
+    this.timerAtMs = atMs
     this.timer = this.scheduleTimer(() => {
       this.timer = undefined
+      this.timerAtMs = Number.POSITIVE_INFINITY
       void this.reconcileNow()
-    }, delayMs)
+    }, Math.max(0, atMs - this.now()))
     this.timer.unref?.()
   }
 }
