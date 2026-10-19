@@ -2388,7 +2388,8 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
         .order { $0.date.desc }
         .limit(1)
         .fetchOne(db)
-      return lastMsg?.messageId
+      // Transcribed speech is never editable.
+      return lastMsg?.isGridTranscript == true ? nil : lastMsg?.messageId
     }
     guard let lastMsgId else { return false }
 

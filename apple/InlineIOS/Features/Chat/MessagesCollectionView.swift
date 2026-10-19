@@ -4775,7 +4775,7 @@ private extension MessagesCollectionView {
       }
 
       var editAction: UIAction?
-      if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
+      if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText, !message.isGridTranscript {
         editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
           ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
         }

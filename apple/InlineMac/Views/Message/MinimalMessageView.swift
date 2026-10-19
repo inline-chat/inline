@@ -4882,7 +4882,9 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     }
 
     // Edit
-    if !isAnchorMessage, !message.isSubthreadPlacement, message.out == true, message.status == .sent {
+    if !isAnchorMessage, !message.isSubthreadPlacement, !message.isGridTranscript, message.out == true,
+       message.status == .sent
+    {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
       editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
       menu.addItem(editItem)

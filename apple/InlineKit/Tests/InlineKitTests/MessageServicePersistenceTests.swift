@@ -41,6 +41,36 @@ struct MessageServicePersistenceTests {
     #expect(Message(from: proto).countsAsUnread)
   }
 
+  @Test("a transcript turn sent by its speaker is an ordinary quiet message")
+  func speakerSentTranscriptTurn() {
+    let proto = InlineProtocol.Message.with {
+      $0.id = 102
+      $0.chatID = 44
+      $0.fromID = 10
+      $0.date = 1
+      $0.peerID.chat.chatID = 44
+      $0.message = "Let’s ship the small version."
+      $0.countsAsUnread = false
+      $0.serviceMessage.gridTranscript = .with {
+        $0.runID = "run-1"
+        $0.segmentID = "segment-3"
+        $0.speakerUserID = 10
+        $0.kind = .gridTranscriptTurn
+      }
+    }
+    let message = Message(from: proto)
+    #expect(message.isGridTranscript)
+    #expect(message.isGridTranscriptSpeech)
+    #expect(!message.isServiceMessage)
+    #expect(!message.countsAsUnread)
+    #expect(message.serviceDisplaySegments(actorName: "Ada") == nil)
+    #expect(message.stringRepresentationPlain == proto.message)
+
+    var status = proto
+    status.serviceMessage.gridTranscript.kind = .gridTranscriptStopped
+    #expect(Message(from: status).isServiceMessage)
+  }
+
   @Test("original anchors and continuation links retain validated UTF16 thread ranges", arguments: [
     GridTranscriptMessageKind.gridTranscriptStarted, .gridTranscriptLink,
   ])

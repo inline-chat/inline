@@ -866,7 +866,7 @@ public extension Message {
   }
 
   var isServiceMessage: Bool {
-    serviceMessage?.event != nil
+    serviceMessage?.event != nil && !isGridTranscriptSpeech
   }
 
   var isGridTranscript: Bool {
@@ -874,6 +874,13 @@ public extension Message {
       return true
     }
     return false
+  }
+
+  /// A transcript turn sent by its speaker renders as that person's ordinary
+  /// message. Older turns stored under the run starter keep the service row.
+  var isGridTranscriptSpeech: Bool {
+    guard case let .gridTranscript(transcript) = serviceMessage?.event else { return false }
+    return transcript.kind == .gridTranscriptTurn && transcript.hasSpeakerUserID && transcript.speakerUserID == fromId
   }
 
   /// Missing fields preserve ordinary-message behavior. Typed transcripts are
@@ -904,7 +911,7 @@ public extension Message {
   }
 
   func serviceDisplaySegments(actorName: String?) -> [MessageServiceDisplaySegment]? {
-    guard let serviceMessage else { return nil }
+    guard let serviceMessage, isServiceMessage else { return nil }
 
     let actor = serviceActorName(actorName)
     let actorLink: MessageServiceDisplaySegment.Link? = fromId > 0 ? .user(fromId) : nil
