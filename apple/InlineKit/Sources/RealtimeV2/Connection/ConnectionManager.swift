@@ -583,7 +583,9 @@ actor ConnectionManager {
       return
     }
 
+    let stallReport = reportStall(of: command.event)
     await handle(command.event)
+    stallReport.cancel()
 
     let handleMilliseconds = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
     if handleMilliseconds >= 250 {
@@ -592,6 +594,23 @@ actor ConnectionManager {
       )
     }
     await command.receipt?.finish()
+  }
+
+  /// The slow-handler warning only logs once a handler returns. A handler that never returns
+  /// stalls the whole owner silently, so report it while it is still running.
+  private func reportStall(of event: ConnectionEvent) -> Task<Void, Never> {
+    let delay = policy.stalledCommandReportDelay
+    let waitedMilliseconds = delay.components.seconds * 1_000 + delay.components.attoseconds / 1_000_000_000_000_000
+    let eventName = event.diagnosticName
+    let startedState = state
+    let startedSession = sessionID
+    return Task { [log] in
+      do { try await Task.sleep(for: delay) } catch { return }
+      log.error(
+        "Connection event handler stalled event=\(eventName) state=\(startedState) " +
+          "session=\(startedSession) waited_ms=\(waitedMilliseconds)"
+      )
+    }
   }
 
   private func handleSessionEvent(_ envelope: ProtocolSessionEventEnvelope) async {
