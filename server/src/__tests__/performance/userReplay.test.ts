@@ -12,7 +12,7 @@ import { assertQueryBudget, measureOperation } from "./measure"
 
 setupTestLifecycle()
 
-test.each(["updates.user-replay.100", "updates.user-replay.revoked.100"])("%s exercises both access batches and complete page accounting", async (id) => {
+test.each(["updates.user-replay.100", "updates.user-replay.revoked.100"])("%s projects page access once and keeps complete page accounting", async (id) => {
   const spec = selectScenarios([id])[0]!
   const operation = await prepareScenario(spec)
   const reads: { source: string; parameters: number }[] = []
@@ -28,9 +28,11 @@ test.each(["updates.user-replay.100", "updates.user-replay.revoked.100"])("%s ex
   }, async () => {})
   assertQueryBudget(id, sample, spec.maxCommands)
   await operation.verify()
+  // The replay filter projects every chat on the page once; the sidecar pass
+  // reuses those results through the per-request access cache, so a 100-chat
+  // page costs one access batch instead of two.
   expect(reads).toEqual([
     { source: "sync.replay", parameters: 301 },
-    { source: "sync.sidecars", parameters: id.includes("revoked") ? 298 : 301 },
   ])
 })
 

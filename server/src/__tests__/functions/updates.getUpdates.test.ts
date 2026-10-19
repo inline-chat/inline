@@ -112,10 +112,10 @@ const decodeGetUpdatesFrame = (frame: Uint8Array) => {
 describe("getUpdates", () => {
   setupTestLifecycle()
 
-  test("rejects repeated full rewinds before database replay and isolates other sockets", async () => {
+  test("rejects repeated full rewinds before database replay per session, across reconnects, and isolates other sessions", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Replay backoff", ["replay-backoff@example.com"])
     const user = users[0]!
-    const identity = `${user.id}:1:replay-loop-test`
+    const identity = `${user.id}:1`
     for (const seq of [4000, 0, 4000]) expect(replayLoopGuard.allow(identity, seq)).toBe(true)
     const input: GetUpdatesInput = {
       bucket: { type: { oneofKind: "user", user: {} } },
@@ -128,10 +128,51 @@ describe("getUpdates", () => {
     const fetch = spyOn(Sync, "getUpdates")
     try {
       await expect(handleGetUpdates(input, context)).rejects.toMatchObject({ codeNumber: 429 })
+      // Reconnecting the same session does not grant a fresh allowance.
+      await expect(handleGetUpdates(input, { ...context, connectionId: "reconnected-socket" })).rejects.toMatchObject({ codeNumber: 429 })
       expect(fetch).not.toHaveBeenCalled()
-      const result = await handleGetUpdates(input, { ...context, connectionId: "recovered-socket" })
+      const result = await handleGetUpdates(input, { ...context, sessionId: 2, connectionId: "other-session-socket" })
       expect(result.final).toBe(true)
       expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("slows a session that keeps re-fetching the same non-empty page before touching the database", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Replay repeat", ["replay-repeat@example.com"])
+    const user = users[0]!
+    for (let seq = 1; seq <= 3; seq += 1) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: { oneofKind: "userChatParticipantDelete", userChatParticipantDelete: { chatId: BigInt(seq) } },
+      })
+    }
+    const input: GetUpdatesInput = {
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }
+    const context = {
+      userId: user.id, sessionId: 7, connectionId: "repeat-socket",
+      sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    const fetch = spyOn(Sync, "getUpdates")
+    try {
+      // Three identical fetches of a page that carries records are allowed.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const result = await handleGetUpdates(input, { ...context, connectionId: `repeat-socket-${attempt}` })
+        expect(result.seq).toBe(3n)
+      }
+      expect(fetch).toHaveBeenCalledTimes(3)
+      await expect(handleGetUpdates(input, context)).rejects.toMatchObject({ codeNumber: 429 })
+      expect(fetch).toHaveBeenCalledTimes(3)
+      // Progress past the stuck page is served immediately.
+      const advanced = await handleGetUpdates({ ...input, startSeq: 3n }, context)
+      expect(advanced.final).toBe(true)
+      expect(fetch).toHaveBeenCalledTimes(4)
+      expect(space.id).toBeGreaterThan(0)
     } finally {
       fetch.mockRestore()
     }
