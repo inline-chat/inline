@@ -113,7 +113,7 @@ export const assertQueryTimeouts = (rows: readonly TimeoutRow[]): void => {
 
 type CancellableHealthProbe<T = unknown> = PromiseLike<T> & { readonly cancel?: () => void }
 
-/** Role settings and the migration head only change on deploy or restore. */
+/** The migration head only moves on deploy or restore. */
 export const HEALTH_VALIDATION_INTERVAL_MS = 60_000
 
 /**
@@ -194,9 +194,18 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
   })
   prepareQueries(queryClient, preparation)
   const close = () => Promise.all([queryClient.end({ timeout: 5 }), healthClient.end({ timeout: 5 })]).then(() => {})
+  // Readiness runs this through the pool on every probe, so it must stay
+  // cheap: current_setting() reads four GUCs directly, whereas the pg_settings
+  // view materializes every setting first (about 1.2 ms per probe in
+  // production, 8% of all measured query time). Timeouts are normalized to
+  // the millisecond shape pg_settings reports so assertQueryTimeouts is unchanged.
   const queryTimeoutSettings = () => queryClient<TimeoutRow[]>`
-    select name, setting, unit from pg_settings
-    where name in ('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'plan_cache_mode')
+    select name, setting, unit from (values
+      ('statement_timeout', (extract(epoch from current_setting('statement_timeout')::interval) * 1000)::bigint::text, 'ms'),
+      ('lock_timeout', (extract(epoch from current_setting('lock_timeout')::interval) * 1000)::bigint::text, 'ms'),
+      ('idle_in_transaction_session_timeout', (extract(epoch from current_setting('idle_in_transaction_session_timeout')::interval) * 1000)::bigint::text, 'ms'),
+      ('plan_cache_mode', current_setting('plan_cache_mode'), null::text)
+    ) as settings(name, setting, unit)
   `.execute()
   const assertPreparation = (rows: readonly TimeoutRow[]) => {
     if (preparedMode === "all-custom" && rows.find((row) => row.name === "plan_cache_mode")?.setting !== "force_custom_plan") {
@@ -204,25 +213,24 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
       throw new Error("all-custom preparation requires force_custom_plan on the query role.")
     }
   }
-  // Role timeouts and plan_cache_mode only change on deploy, so the pooled
-  // validation runs once per interval instead of on every readiness probe.
-  const pooledValidation = cachedHealthProbe(() => {
-    const pooled = queryTimeoutSettings()
-    return Object.assign(pooled.then((rows) => {
-      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
-      assertPreparation(rows)
-    }), { cancel: () => pooled.cancel() })
-  })
   const checkHealth = () => {
     const direct = healthClient.unsafe(
       "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::double precision AS database_time_millis",
     ).execute()
     if (policy.mode === "direct" && preparedMode !== "all-custom") return direct
-    // A healthy direct endpoint must not hide a broken/queued pooled endpoint.
-    // The health controller's existing deadline cancels both pending queries.
-    const pooled = pooledValidation()
-    if (!pooled) return direct
-    return combineHealthProbes(direct, [pooled])
+    // A healthy direct endpoint must not hide a broken/queued pooled endpoint,
+    // and a role that lost its timeout or plan-cache qualification must fail
+    // readiness on the next probe, not a minute later. So the pooled read is
+    // never cached; it is kept cheap instead. The health controller's existing
+    // deadline cancels both pending queries.
+    const pooled = queryTimeoutSettings()
+    const probes = combineHealthProbes(direct, [pooled])
+    return Object.assign(probes.then(async (clock) => {
+      const rows = await pooled
+      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
+      assertPreparation(rows)
+      return clock
+    }), { cancel: probes.cancel })
   }
   const validateStartup = async (): Promise<void> => {
     if (policy.mode === "direct" && preparedMode === "access") return
