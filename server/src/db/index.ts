@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js"
 import { DATABASE_URL } from "@in/server/env"
-import { combineHealthProbes, makeDatabaseClients } from "./connectionPolicy"
+import { cachedHealthProbe, combineHealthProbes, makeDatabaseClients } from "./connectionPolicy"
 import { installPostCommitHooks } from "./commitHooks"
 import { checkMigrationHead, MigrationStateError, validateAppliedMigrations } from "./migrationState"
 import * as schema from "./schema"
@@ -12,6 +12,9 @@ const diagnosticsLog = new Log("db.diagnostics", LogLevel.INFO)
 let stopDiagnostics: (() => void) | undefined
 
 let clients = makeDatabaseClients(DATABASE_URL, process.env)
+// The migration head only moves on deploy or restore; one read per interval
+// still catches a restored older database within about a minute.
+let migrationHead = cachedHealthProbe(() => checkMigrationHead(clients.healthClient))
 
 const createDatabase = (queryClient: typeof clients.queryClient) => installPostCommitHooks(drizzle(queryClient, {
   relations,
@@ -27,13 +30,14 @@ export const initDb = (databaseUrl: string) => {
   stopDiagnostics = undefined
   void clients.close().catch(() => {})
   clients = next
+  migrationHead = cachedHealthProbe(() => checkMigrationHead(clients.healthClient))
   db = createDatabase(clients.queryClient)
 }
 
 export const checkDatabaseHealth = () => {
   const database = clients.checkHealth()
-  const migrations = checkMigrationHead(clients.healthClient)
-  return combineHealthProbes(database, [migrations])
+  const migrations = migrationHead()
+  return migrations ? combineHealthProbes(database, [migrations]) : database
 }
 
 export const validateDatabaseStartup = async () => {

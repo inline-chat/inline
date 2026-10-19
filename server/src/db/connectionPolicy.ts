@@ -113,6 +113,37 @@ export const assertQueryTimeouts = (rows: readonly TimeoutRow[]): void => {
 
 type CancellableHealthProbe<T = unknown> = PromiseLike<T> & { readonly cancel?: () => void }
 
+/** Role settings and the migration head only change on deploy or restore. */
+export const HEALTH_VALIDATION_INTERVAL_MS = 60_000
+
+/**
+ * Runs a validation probe at most once per interval after it last passed.
+ * The first probe after startup always runs, a rejected probe is never
+ * cached, so readiness keeps re-checking (and failing) until a fresh check
+ * passes, and a restored older database is caught within one interval.
+ */
+export const cachedHealthProbe = (
+  run: () => CancellableHealthProbe<void>,
+  options: { intervalMs?: number; now?: () => number } = {},
+): (() => CancellableHealthProbe<void> | undefined) => {
+  const intervalMs = options.intervalMs ?? HEALTH_VALIDATION_INTERVAL_MS
+  const now = options.now ?? Date.now
+  let passedAtMs: number | undefined
+  return () => {
+    const startedAtMs = now()
+    if (passedAtMs !== undefined && startedAtMs - passedAtMs < intervalMs) return undefined
+    const probe = run()
+    return Object.assign(
+      Promise.resolve(probe).then(() => {
+        // Record the start, not the completion, so a slow probe cannot
+        // extend the window past one interval of real time.
+        if (passedAtMs === undefined || startedAtMs > passedAtMs) passedAtMs = startedAtMs
+      }),
+      { cancel: () => probe.cancel?.() },
+    )
+  }
+}
+
 /** Never release readiness admission while a child probe is still queued/running. */
 export const combineHealthProbes = <T>(
   primary: CancellableHealthProbe<T>,
@@ -173,6 +204,15 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
       throw new Error("all-custom preparation requires force_custom_plan on the query role.")
     }
   }
+  // Role timeouts and plan_cache_mode only change on deploy, so the pooled
+  // validation runs once per interval instead of on every readiness probe.
+  const pooledValidation = cachedHealthProbe(() => {
+    const pooled = queryTimeoutSettings()
+    return Object.assign(pooled.then((rows) => {
+      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
+      assertPreparation(rows)
+    }), { cancel: () => pooled.cancel() })
+  })
   const checkHealth = () => {
     const direct = healthClient.unsafe(
       "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::double precision AS database_time_millis",
@@ -180,14 +220,9 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
     if (policy.mode === "direct" && preparedMode !== "all-custom") return direct
     // A healthy direct endpoint must not hide a broken/queued pooled endpoint.
     // The health controller's existing deadline cancels both pending queries.
-    const pooled = queryTimeoutSettings()
-    const probes = combineHealthProbes(direct, [pooled])
-    return Object.assign(probes.then(async (clock) => {
-      const rows = await pooled
-      if (policy.mode === "pgbouncer") assertQueryTimeouts(rows)
-      assertPreparation(rows)
-      return clock
-    }), { cancel: probes.cancel })
+    const pooled = pooledValidation()
+    if (!pooled) return direct
+    return combineHealthProbes(direct, [pooled])
   }
   const validateStartup = async (): Promise<void> => {
     if (policy.mode === "direct" && preparedMode === "access") return
