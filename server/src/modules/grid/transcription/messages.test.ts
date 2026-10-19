@@ -120,11 +120,12 @@ describe("Grid transcript ordinary encrypted history", () => {
       const result = await response.json() as { messageId: number }
       await waitForPostCommitHooks()
       const [stored] = await db.select().from(messages).where(and(eq(messages.chatId, s.destination.transcriptChatId), eq(messages.messageId, result.messageId)))
-      expect(stored).toMatchObject({ fromId: s.actor.id, text: null, countsAsUnread: false, hasLink: false, entitiesEncrypted: null, actionsEncrypted: null })
+      expect(stored).toMatchObject({ fromId: s.speaker.id, text: null, countsAsUnread: false, hasLink: false, entitiesEncrypted: null, actionsEncrypted: null })
       expect(stored?.textEncrypted).not.toBeNull()
       expect(stored?.systemMessageEncrypted).not.toBeNull()
       const history = await getChatHistory({ peerId: peer(s.destination.transcriptChatId) }, testUtils.functionContext({ userId: s.speaker.id }))
-      expect(history.messages[0]?.message).toBe("Transcript · Ben: @all /deploy https://example.test should remain speech")
+      expect(history.messages[0]?.message).toBe("@all /deploy https://example.test should remain speech")
+      expect(history.messages[0]).toMatchObject({ fromId: BigInt(s.speaker.id), out: true })
       expect(history.messages[0]).toMatchObject({ countsAsUnread: false, sendMode: MessageSendMode.MODE_SILENT, mentioned: false })
       expect(history.messages[0]?.serviceMessage?.event).toMatchObject({ oneofKind: "gridTranscript", gridTranscript: { runId: s.run.id, segmentId: s.segment.id, speakerUserId: BigInt(s.speaker.id) } })
       const rows = await db.select().from(updates).where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, s.destination.transcriptChatId)))
@@ -152,7 +153,7 @@ describe("Grid transcript ordinary encrypted history", () => {
     const inserted = await db.transaction((tx) => insertGridTranscriptMessage(tx, { chatId: s.destination.transcriptChatId, actorUserId: s.actor.id, runId: s.run.id, segmentId: s.segment.id, speakerUserId: s.speaker.id, kind: "turn", text: "original" }))
     await expect(editMessage({ peer: peer(s.destination.transcriptChatId), messageId: BigInt(inserted.message.messageId), text: "changed" }, testUtils.functionContext({ userId: s.actor.id }))).rejects.toThrow()
     await expect(MessageModel.editMessage({ chatId: s.destination.transcriptChatId, messageId: inserted.message.messageId, text: "changed" })).rejects.toThrow()
-    expect((await MessageModel.getMessage(inserted.message.messageId, s.destination.transcriptChatId)).text).toBe("Transcript · Ben: original")
+    expect((await MessageModel.getMessage(inserted.message.messageId, s.destination.transcriptChatId)).text).toBe("original")
   })
 
   test("a finalized deleted turn keeps its dedup tombstone and does not stop capture or push", async () => {
@@ -271,6 +272,6 @@ describe("Grid transcript ordinary encrypted history", () => {
     await expect(getChatHistory({ peerId: peer(s.destination.transcriptChatId) }, testUtils.functionContext({ userId: reader.id }))).rejects.toThrow()
     await db.transaction((tx) => grantGridTranscriptUsers(tx, { chatIds: [s.destination.destinationParentChatId], userIds: [reader.id] }))
     const history = await getChatHistory({ peerId: peer(s.destination.transcriptChatId) }, testUtils.functionContext({ userId: reader.id }))
-    expect(history.messages[0]?.message).toBe("Transcript · Ben: earlier conversation")
+    expect(history.messages[0]?.message).toBe("earlier conversation")
   })
 })

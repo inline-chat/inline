@@ -3,7 +3,7 @@ import { registerPostCommitHook } from "@in/server/db/commitHooks"
 import { ChatModel } from "@in/server/db/models/chats"
 import { ModelError } from "@in/server/db/models/_errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
-import { chats, messages, users, UpdateBucket, type DbMessage } from "@in/server/db/schema"
+import { chats, messages, UpdateBucket, type DbMessage } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
@@ -64,17 +64,18 @@ export async function insertGridTranscriptMessage(
       },
     },
   }
-  const text = kind === GridTranscriptMessageKind.GRID_TRANSCRIPT_TURN
-    ? `Transcript · ${await microphoneOwnerName(tx, input.speakerUserId)}: ${input.text}`
-    : input.text
-  const encryptedText = encryptMessage(text)
+  // A turn is the speaker's own line, so it renders and exports like their
+  // message. Lifecycle and link rows stay owned by the run actor.
+  const fromId = kind === GridTranscriptMessageKind.GRID_TRANSCRIPT_TURN ? input.speakerUserId : input.actorUserId
+  if (fromId === undefined) throw new Error("Transcript turn requires a microphone owner")
+  const encryptedText = encryptMessage(input.text)
   const encryptedSystem = encryptSystemMessagePayload(systemMessage)
   const encryptedEntities = input.entities ? encryptBinary(MessageEntities.toBinary(input.entities)) : undefined
   const messageId = ChatModel.nextMessageId(chat)
   const [message] = await tx.insert(messages).values({
     chatId: chat.id,
     messageId,
-    fromId: input.actorUserId,
+    fromId,
     date: input.date ?? new Date(),
     textEncrypted: encryptedText.encrypted,
     textIv: encryptedText.iv,
@@ -136,12 +137,4 @@ async function publishGridTranscriptMessage(input: InsertGridTranscriptMessageRe
       },
     }])
   }))
-}
-
-async function microphoneOwnerName(tx: Transaction, userId: number | undefined): Promise<string> {
-  if (userId === undefined) throw new Error("Transcript turn requires a microphone owner")
-  const [user] = await tx.select({ firstName: users.firstName, lastName: users.lastName, username: users.username })
-    .from(users).where(eq(users.id, userId)).limit(1)
-  if (!user) throw ModelError.Failed
-  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.username || "Participant"
 }
