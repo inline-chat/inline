@@ -489,11 +489,18 @@ pub async fn run_service(
                     setup.reason,
                     setup.message.clone(),
                 )),
-                // A proven revocation that surfaced from an owner request.
-                None if classify_failure(error.as_ref()) == FailureClass::NeedsSetup => Some(
-                    BridgeSetupRequired::new("owner_credential_expired", OWNER_SIGN_IN_EXPIRED),
-                ),
-                None => None,
+                None => match classify_failure(error.as_ref()) {
+                    // An explicit revocation that surfaced from an owner request.
+                    FailureClass::NeedsSetup => owner_sign_in_expired(&paths),
+                    // A bare 401/403 from an owner request: verify the session
+                    // before stopping; otherwise restart with backoff.
+                    FailureClass::AuthSuspect
+                        if probe_owner_session(&paths).await == SessionProbe::Revoked =>
+                    {
+                        owner_sign_in_expired(&paths)
+                    }
+                    _ => None,
+                },
             };
             if let Some(setup) = setup {
                 stop_service_for_setup(Some(&paths), &setup);
@@ -593,6 +600,50 @@ fn service_setup_required(
 const OWNER_SIGN_IN_EXPIRED: &str =
     "the Inline sign-in used by this bridge expired; run Inline agent setup again";
 
+/// Runtime configuration for the account, independent of the CLI's own.
+fn account_runtime_config(paths: &BridgePaths, account: &AccountBridgeConfig) -> Config {
+    Config {
+        api_base_url: account.api_base_url.clone(),
+        realtime_url: account.realtime_url.clone(),
+        secrets_path: paths.root.join("owner-secrets-unused.json"),
+        state_path: paths.root.join("owner-state-unused.json"),
+        data_dir: paths.root.clone(),
+        release_manifest_url: None,
+        release_install_url: None,
+    }
+}
+
+/// Probes the bridge's stored owner sign-in; inconclusive when unreadable.
+async fn probe_owner_session(paths: &BridgePaths) -> SessionProbe {
+    let Ok((account, secrets)) = load_account_files(paths) else {
+        return SessionProbe::Inconclusive;
+    };
+    let Ok(owner_auth) = owner_credential(&secrets) else {
+        return SessionProbe::Inconclusive;
+    };
+    probe_session(&account_runtime_config(paths, &account), &owner_auth).await
+}
+
+/// Clears the revoked owner sign-in so `inline login` can replace it.
+fn owner_sign_in_expired(paths: &BridgePaths) -> Option<BridgeSetupRequired> {
+    if let Ok((_, secrets)) = load_account_files(paths)
+        && let Ok(owner_auth) = owner_credential(&secrets)
+        && let Err(error) = clear_bridge_owner_authority(paths, &owner_auth)
+    {
+        eprintln!(
+            "Could not clear the revoked bridge sign-in: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
+    Some(BridgeSetupRequired::new(
+        "owner_credential_expired",
+        OWNER_SIGN_IN_EXPIRED,
+    ))
+}
+
+/// Owner authentication statuses are verified at most this often.
+const OWNER_SESSION_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+
 async fn run_owned_service(
     paths: &BridgePaths,
     trace: bool,
@@ -608,15 +659,7 @@ async fn run_owned_service(
     validate_account(&account, &secrets).map_err(|error| {
         service_setup_required("account_invalid", "the bridge account is incomplete", error)
     })?;
-    let runtime_config = Config {
-        api_base_url: account.api_base_url.clone(),
-        realtime_url: account.realtime_url.clone(),
-        secrets_path: paths.root.join("owner-secrets-unused.json"),
-        state_path: paths.root.join("owner-state-unused.json"),
-        data_dir: paths.root.clone(),
-        release_manifest_url: None,
-        release_install_url: None,
-    };
+    let runtime_config = account_runtime_config(&paths, &account);
     service::install_runtime_logging(&paths)?;
     install_bridge_logger(trace);
     eprintln!(
@@ -657,16 +700,22 @@ async fn run_owned_service(
                 }
                 break Some(Arc::new(control));
             }
-            Err(error) if owner_control_error_invalidates_authentication(error.as_ref()) => {
-                let _ = clear_bridge_owner_authority(&paths, &owner_auth)?;
-                return Err(BridgeSetupRequired::new(
-                    "owner_credential_expired",
-                    OWNER_SIGN_IN_EXPIRED,
-                )
-                .into());
-            }
             Err(error) => {
-                // Anything short of a proven revocation keeps retrying here.
+                let class = match classify_failure(error.as_ref()) {
+                    FailureClass::AuthSuspect => {
+                        settle_auth_suspect(probe_session(&runtime_config, &owner_auth).await)
+                    }
+                    class => class,
+                };
+                if class == FailureClass::NeedsSetup {
+                    let _ = clear_bridge_owner_authority(&paths, &owner_auth)?;
+                    return Err(BridgeSetupRequired::new(
+                        "owner_credential_expired",
+                        OWNER_SIGN_IN_EXPIRED,
+                    )
+                    .into());
+                }
+                // Anything short of an explicit revocation keeps retrying here.
                 owner_connection_failures = owner_connection_failures.saturating_add(1);
                 crate::telemetry::report_bridge_runtime_error(
                     "owner",
@@ -674,7 +723,7 @@ async fn run_owned_service(
                     error.as_ref(),
                     Some(owner_connection_failures),
                 );
-                let delay = match classify_failure(error.as_ref()) {
+                let delay = match class {
                     FailureClass::ServerWait(wait) => wait,
                     _ => SERVICE_BACKOFF.jittered(owner_connection_failures),
                 };
@@ -700,7 +749,8 @@ async fn run_owned_service(
     let mut service_stable = Box::pin(tokio::time::sleep(STABLE_AFTER));
     let mut owner_connection_end = owner_control
         .as_ref()
-        .map(|control| control.connection_end_receiver());
+        .and_then(|control| control.take_connection_end_receiver());
+    let mut last_owner_session_probe: Option<tokio::time::Instant> = None;
     reconcile_owner_dm_chat_ids(
         &paths,
         &mut account,
@@ -795,7 +845,19 @@ async fn run_owned_service(
                     failures = 0;
                 }
                 let mut retry_shutdown = Some(provider_shutdown.clone());
-                match classify_failure(error.as_ref()) {
+                let class = match classify_failure(error.as_ref()) {
+                    // A bare 401/403 may deny one bot request; reconnecting the
+                    // bot is the probe that decides.
+                    FailureClass::AuthSuspect => match AuthToken::try_new(&credentials.bot_token) {
+                        Ok(token) => settle_auth_suspect(
+                            probe_session(&provider_config, &AuthCredential::AccessToken { token })
+                                .await,
+                        ),
+                        Err(_) => FailureClass::Transient,
+                    },
+                    class => class,
+                };
+                match class {
                     FailureClass::NeedsSetup => {
                         // Retrying cannot help. Park this agent; siblings keep
                         // running. A missing runtime re-probes on its own; a
@@ -884,8 +946,28 @@ async fn run_owned_service(
                 }
             }
             end = wait_for_owner_connection_end(&mut owner_connection_end) => {
+                if end == OwnerConnectionEnd::Suspect {
+                    // A request was rejected with 401/403. That may deny only
+                    // that request, so verify the session before acting.
+                    if last_owner_session_probe
+                        .is_some_and(|probed| probed.elapsed() < OWNER_SESSION_PROBE_INTERVAL)
+                    {
+                        continue;
+                    }
+                    last_owner_session_probe = Some(tokio::time::Instant::now());
+                    match probe_session(&runtime_config, &owner_auth).await {
+                        SessionProbe::Revoked => {}
+                        outcome => {
+                            eprintln!(
+                                "An owner request was rejected, but the Inline sign-in is still {}; continuing.",
+                                if outcome == SessionProbe::Valid { "valid" } else { "unconfirmed" }
+                            );
+                            continue;
+                        }
+                    }
+                }
                 break Err(match end {
-                    OwnerConnectionEnd::Revoked => {
+                    OwnerConnectionEnd::Suspect | OwnerConnectionEnd::Revoked => {
                         match clear_bridge_owner_authority(&paths, &owner_auth) {
                             Ok(_) => BridgeSetupRequired::new(
                                 "owner_credential_expired",
@@ -1064,18 +1146,14 @@ async fn reconcile_owner_dm_chat_ids(
 }
 
 async fn wait_for_owner_connection_end(
-    receiver: &mut Option<tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>>>,
+    receiver: &mut Option<tokio::sync::mpsc::UnboundedReceiver<OwnerConnectionEnd>>,
 ) -> OwnerConnectionEnd {
     let Some(receiver) = receiver else {
         return std::future::pending().await;
     };
-    loop {
-        if let Some(end) = *receiver.borrow() {
-            return end;
-        }
-        if receiver.changed().await.is_err() {
-            return std::future::pending().await;
-        }
+    match receiver.recv().await {
+        Some(end) => end,
+        None => std::future::pending().await,
     }
 }
 
@@ -3109,6 +3187,8 @@ mod helpers;
 use helpers::*;
 mod backoff;
 use backoff::*;
+mod session_probe;
+use session_probe::*;
 
 #[cfg(test)]
 #[path = "bridge/tests.rs"]

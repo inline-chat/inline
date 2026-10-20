@@ -5,24 +5,27 @@
 //! authors bot messages.
 
 use super::*;
-use inline_client::{
-    BackendError, ClientStatus, ClientStore, DialogFollowMode, UpdateDialogFollowModeRequest,
-};
+use inline_client::{ClientStatus, ClientStore, DialogFollowMode, UpdateDialogFollowModeRequest};
 
-/// Why the owner connection stopped serving the bridge.
+/// A change in the owner connection that the service must act on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum OwnerConnectionEnd {
-    /// The server revoked or expired the session; retrying cannot help.
+    /// An authentication rejection that may deny only one request; verify
+    /// the session with a probe. The connection keeps running meanwhile.
+    Suspect,
+    /// The client signed out locally; retrying cannot help.
     Revoked,
     /// The client stopped reconnecting for another reason; restart and retry.
     Lost,
 }
 
+type OwnerConnectionEnds = tokio::sync::mpsc::UnboundedReceiver<OwnerConnectionEnd>;
+
 pub(super) struct OwnerControl {
     client: InlineClient,
     store: SqliteStore,
     drain: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    connection_end: tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>>,
+    connection_end: std::sync::Mutex<Option<OwnerConnectionEnds>>,
 }
 
 impl OwnerControl {
@@ -32,7 +35,7 @@ impl OwnerControl {
             client,
             store,
             drain: tokio::sync::Mutex::new(None),
-            connection_end: tokio::sync::watch::channel(None).1,
+            connection_end: std::sync::Mutex::new(None),
         }
     }
 
@@ -92,7 +95,7 @@ impl OwnerControl {
             return Err(error.into());
         }
 
-        let (connection_end_tx, connection_end) = tokio::sync::watch::channel(None);
+        let (connection_end_tx, connection_end) = tokio::sync::mpsc::unbounded_channel();
         let drain = tokio::spawn(async move {
             while let Some(delivery) = events.recv_delivery().await {
                 let end = owner_event_connection_end(delivery.event());
@@ -103,9 +106,11 @@ impl OwnerControl {
                     );
                     break;
                 }
-                if end.is_some() {
+                if let Some(end) = end {
                     let _ = connection_end_tx.send(end);
-                    break;
+                    if end != OwnerConnectionEnd::Suspect {
+                        break;
+                    }
                 }
             }
         });
@@ -113,14 +118,16 @@ impl OwnerControl {
             client,
             store,
             drain: tokio::sync::Mutex::new(Some(drain)),
-            connection_end,
+            connection_end: std::sync::Mutex::new(Some(connection_end)),
         })
     }
 
-    pub(super) fn connection_end_receiver(
-        &self,
-    ) -> tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>> {
-        self.connection_end.clone()
+    /// The single consumer of owner connection changes.
+    pub(super) fn take_connection_end_receiver(&self) -> Option<OwnerConnectionEnds> {
+        self.connection_end
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
     }
 
     pub(super) async fn follow_mode(
@@ -236,22 +243,28 @@ where
     }
 }
 
-/// Only a server-proven revocation (see the table in `backoff.rs`). A bare
-/// `AuthRequired` (not connected, unspecified rejection) is retried.
+/// Only an explicit server revocation (see the table in `backoff.rs`). A
+/// bare 401/403 or `AuthRequired` is verified or retried instead.
 pub(super) fn owner_control_error_invalidates_authentication(
     error: &(dyn std::error::Error + 'static),
 ) -> bool {
     matches!(
         error.downcast_ref::<ClientRequestError>(),
-        Some(ClientRequestError::Backend(BackendError { category, retry_after_seconds, .. }))
-            if classify_backend_failure(*category, *retry_after_seconds) == FailureClass::NeedsSetup
+        Some(ClientRequestError::Backend(backend))
+            if classify_backend_error(backend) == FailureClass::NeedsSetup
     )
 }
 
 fn owner_event_connection_end(event: &ClientEvent) -> Option<OwnerConnectionEnd> {
     match event {
+        // Any request rejected with 401/403 sets this status, including a
+        // single denied action; the service verifies before acting.
         ClientEvent::StatusChanged {
-            status: ClientStatus::AuthExpired | ClientStatus::LoggedOut,
+            status: ClientStatus::AuthExpired,
+            ..
+        } => Some(OwnerConnectionEnd::Suspect),
+        ClientEvent::StatusChanged {
+            status: ClientStatus::LoggedOut,
             ..
         } => Some(OwnerConnectionEnd::Revoked),
         // The client stops reconnecting here without proof of revocation.
@@ -266,6 +279,7 @@ fn owner_event_connection_end(event: &ClientEvent) -> Option<OwnerConnectionEnd>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inline_client::BackendError;
 
     #[tokio::test]
     async fn seeded_owner_requires_a_real_handshake_before_becoming_ready() {
@@ -344,7 +358,10 @@ mod tests {
             let result: Result<(), _> = retry_owner_control_connection(|| {
                 attempts += 1;
                 async move {
-                    Err(ClientRequestError::Backend(BackendError::new(category, "revoked")).into())
+                    Err(ClientRequestError::Backend(
+                        BackendError::new(category, "revoked").with_session_invalidated(),
+                    )
+                    .into())
                 }
             })
             .await;
@@ -379,8 +396,13 @@ mod tests {
             ClientErrorCategory::AuthExpired,
             ClientErrorCategory::ReloginRequired,
         ] {
-            let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
+            let error = ClientRequestError::Backend(
+                BackendError::new(category, "redacted").with_session_invalidated(),
+            );
             assert!(owner_control_error_invalidates_authentication(&error));
+            // A bare 401/403 is not proof of revocation.
+            let denied = ClientRequestError::Backend(BackendError::new(category, "redacted"));
+            assert!(!owner_control_error_invalidates_authentication(&denied));
         }
 
         for category in [
@@ -396,15 +418,20 @@ mod tests {
 
     #[test]
     fn owner_control_only_stops_for_terminal_authentication_status() {
-        for status in [ClientStatus::AuthExpired, ClientStatus::LoggedOut] {
-            assert_eq!(
-                owner_event_connection_end(&ClientEvent::StatusChanged {
-                    status,
-                    failure: None,
-                }),
-                Some(OwnerConnectionEnd::Revoked)
-            );
-        }
+        assert_eq!(
+            owner_event_connection_end(&ClientEvent::StatusChanged {
+                status: ClientStatus::AuthExpired,
+                failure: None,
+            }),
+            Some(OwnerConnectionEnd::Suspect)
+        );
+        assert_eq!(
+            owner_event_connection_end(&ClientEvent::StatusChanged {
+                status: ClientStatus::LoggedOut,
+                failure: None,
+            }),
+            Some(OwnerConnectionEnd::Revoked)
+        );
         assert_eq!(
             owner_event_connection_end(&ClientEvent::StatusChanged {
                 status: ClientStatus::AuthRequired,

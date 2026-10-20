@@ -4960,6 +4960,10 @@ fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendE
         {
             rate_limited_backend_error(rendered)
         }
+        error if error.is_session_revoked() => {
+            BackendError::new(ClientErrorCategory::AuthExpired, rendered).with_session_invalidated()
+        }
+        // Possibly a missing temporary key, which regeneration recovers.
         error if error.is_authorization_invalidated() => {
             BackendError::new(ClientErrorCategory::AuthExpired, rendered)
         }
@@ -4999,6 +5003,8 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         RealtimeError::ConnectionError { .. } => {
             BackendError::new(ClientErrorCategory::AuthRequired, error.to_string())
         }
+        // Not marked: Inline Protocol carriers convert a recoverable
+        // `authorization_unavailable` close into this error too.
         RealtimeError::AuthenticationInvalidated => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
         }
@@ -5070,12 +5076,25 @@ fn realtime_error_invalidates_account_authority(error: &RealtimeError) -> bool {
     matches!(error, RealtimeError::AuthenticationInvalidated)
 }
 
+/// Server error names that prove the session itself is gone (`errors.ts`).
+fn is_session_invalidated_error_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_uppercase().as_str(),
+        "SESSION_REVOKED" | "SESSION_EXPIRED" | "USER_DEACTIVATED"
+    )
+}
+
 fn api_error_to_backend(error: ApiError) -> BackendError {
     let rendered = error.to_string();
     match error {
         ApiError::InvalidBaseUrl { message, .. } | ApiError::InvalidInput { message } => {
             BackendError::new(ClientErrorCategory::InvalidInput, message)
         }
+        ApiError::Api { ref error, .. } if is_session_invalidated_error_name(error) => {
+            BackendError::new(ClientErrorCategory::AuthExpired, rendered).with_session_invalidated()
+        }
+        // A bare 401/403 also denies single actions; it stays AuthExpired for
+        // credential refresh but is not proof that the session is gone.
         ApiError::Status { status, .. } if status == 401 || status == 403 => {
             BackendError::new(ClientErrorCategory::AuthExpired, rendered)
         }
@@ -10205,6 +10224,58 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, ClientEvent::UserSettingsChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn only_named_session_errors_prove_the_session_is_gone() {
+        // The server also answers a denied action with a bare 401 or 403.
+        let denied = [
+            api_error_to_backend(ApiError::Api {
+                status: Some(401),
+                error: "UNAUTHORIZED".to_owned(),
+                error_code: Some(401),
+                description: "not the task's assignee".to_owned(),
+            }),
+            api_error_to_backend(ApiError::Api {
+                status: Some(403),
+                error: "FORBIDDEN".to_owned(),
+                error_code: Some(403),
+                description: "Forbidden".to_owned(),
+            }),
+            api_error_to_backend(ApiError::Status {
+                status: 401,
+                message: "Unauthorized".to_owned(),
+                body: None,
+            }),
+        ];
+        for error in denied {
+            assert_eq!(error.category, ClientErrorCategory::AuthExpired);
+            assert!(!error.session_invalidated, "{error:?}");
+        }
+        for name in ["SESSION_EXPIRED", "SESSION_REVOKED", "USER_DEACTIVATED"] {
+            let error = api_error_to_backend(ApiError::Api {
+                status: Some(401),
+                error: name.to_owned(),
+                error_code: Some(401),
+                description: "session".to_owned(),
+            });
+            assert_eq!(error.category, ClientErrorCategory::AuthExpired);
+            assert!(error.session_invalidated, "{name}");
+        }
+        assert!(
+            inline_protocol_v3_error_to_backend(InlineProtocolV3Error::SessionRevoked)
+                .session_invalidated
+        );
+        // A recoverable missing temporary key and transport-converted
+        // invalidations stay unproven.
+        assert!(
+            !inline_protocol_v3_error_to_backend(InlineProtocolV3Error::AuthorizationInvalidated)
+                .session_invalidated
+        );
+        assert!(
+            !realtime_error_to_backend(RealtimeError::AuthenticationInvalidated)
+                .session_invalidated
         );
     }
 

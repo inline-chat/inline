@@ -1,25 +1,32 @@
 //! Failure classification and persisted backoff for the autonomous bridge.
 //!
-//! Modeled on how Telegram clients treat errors: only a failure that proves a
-//! restart cannot help (the server revoked the session, the configuration or
-//! runtime is gone) stops retrying. A server-requested wait is honored exactly.
-//! Everything else, including anything unrecognized, retries with jittered
-//! exponential backoff, so the bridge never parks on a guess.
+//! Modeled on how Telegram clients treat errors: only a specific signal that
+//! proves a restart cannot help stops retrying, the way only
+//! `AUTH_KEY_UNREGISTERED` or `SESSION_REVOKED` sign a Telegram client out. A
+//! bare HTTP 401/403 proves nothing: the server also uses them to deny one
+//! action (for example `UNAUTHORIZED` for a task the user does not own), so
+//! such a rejection is verified with one authenticated `GetMe` probe
+//! (`session_probe.rs`) before anything parks. A server-requested wait is
+//! honored exactly. Everything else retries with jittered exponential
+//! backoff, so the bridge never parks on a guess.
 //!
-//! | Failure                                                         | Telegram analogue           | Class        | Reaction                              |
-//! |-----------------------------------------------------------------|-----------------------------|--------------|---------------------------------------|
-//! | Owner or bot session revoked/expired: `AuthExpired`,            | `AUTH_KEY_UNREGISTERED`,    | `NeedsSetup` | park; `inline login` or setup heals   |
-//! | `ReloginRequired` (realtime `INVALID_AUTH`/`SESSION_REVOKED`,   | `SESSION_REVOKED`,          |              |                                       |
-//! | HTTP 401/403, V3 authorization invalidated)                     | `USER_DEACTIVATED`          |              |                                       |
-//! | Bridge has no usable owner sign-in in its secrets               | `AUTH_KEY_UNREGISTERED`     | `NeedsSetup` | park; `inline login` or setup heals   |
-//! | Bridge config removed, account files unreadable or invalid      | (local install gone)        | `NeedsSetup` | park; setup heals                     |
-//! | Configured agent runtime missing or not executable, or its      | (local install gone)        | `NeedsSetup` | park that agent; re-probe every 2 min |
-//! | launch configuration invalid                                    |                             |              |                                       |
-//! | `RateLimited` with a server delay (420/429, `FLOOD_WAIT_X`,     | `FLOOD_WAIT_X`              | `ServerWait` | wait exactly the requested time       |
-//! | `Retry-After`)                                                  |                             |              |                                       |
-//! | `Network`, `Timeout`, `Internal`, 5xx, `RateLimited` without a  | `-500`, timeouts            | `Transient`  | jittered exponential backoff          |
-//! | delay, `AuthRequired` (not connected, unspecified rejection),   |                             |              |                                       |
-//! | protocol mismatch, agent process exits, any unclassified error  |                             |              |                                       |
+//! | Failure                                                          | Telegram analogue        | Class         | Reaction                               |
+//! |------------------------------------------------------------------|--------------------------|---------------|----------------------------------------|
+//! | API `SESSION_REVOKED`, `SESSION_EXPIRED`, `USER_DEACTIVATED`;    | `AUTH_KEY_UNREGISTERED`, | `NeedsSetup`  | park; `inline login` or setup heals    |
+//! | Inline Protocol close 4401 `session_revoked_confirmed`           | `SESSION_REVOKED`,       |               |                                        |
+//! |                                                                  | `USER_DEACTIVATED`       |               |                                        |
+//! | Bridge has no usable owner sign-in in its secrets                | `AUTH_KEY_UNREGISTERED`  | `NeedsSetup`  | park; `inline login` or setup heals    |
+//! | Bridge config removed, account files unreadable or invalid       | (local install gone)     | `NeedsSetup`  | park; setup heals                      |
+//! | Configured agent runtime missing or not executable, or its       | (local install gone)     | `NeedsSetup`  | park that agent; re-probe every 2 min  |
+//! | launch configuration invalid                                     |                          |               |                                        |
+//! | Bare HTTP 401/403 (`UNAUTHORIZED`, `FORBIDDEN`), other 4401      | `-401`/`-403` on one     | `AuthSuspect` | probe `GetMe` with the same credential;|
+//! | closes (`authorization_unavailable`), realtime invalidation      | method                   |               | park only if the probe is explicitly   |
+//! | whose transport is unknown                                       |                          |               | revoked, otherwise retry with backoff  |
+//! | `RateLimited` with a server delay (420/429, `FLOOD_WAIT_X`,      | `FLOOD_WAIT_X`           | `ServerWait`  | wait exactly that long, at most 1 h    |
+//! | `Retry-After`)                                                   |                          |               |                                        |
+//! | `Network`, `Timeout`, `Internal`, 5xx, `RateLimited` without a   | `-500`, timeouts         | `Transient`   | jittered exponential backoff           |
+//! | delay, `AuthRequired` (not connected, unspecified rejection),    |                          |               |                                        |
+//! | protocol mismatch, agent process exits, any unclassified error   |                          |               |                                        |
 //!
 //! Backoff uses full jitter: attempt *n* waits a uniform 1 s..min(cap, 2^(n-1) s).
 //! A local agent caps at 5 minutes: a relaunch costs one process spawn, so
@@ -36,8 +43,9 @@ use super::*;
 pub(super) const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// Parked agents re-check their runtime this often, so installing it heals.
 pub(super) const PARKED_REPROBE_INTERVAL: Duration = Duration::from_secs(2 * 60);
-/// Bound for a server-requested wait, guarding against a malformed hint.
-const MAX_SERVER_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
+/// Bound for a server-requested wait, so a malformed or hostile hint cannot
+/// freeze the bridge for longer than an hour.
+const MAX_SERVER_WAIT: Duration = Duration::from_secs(60 * 60);
 const PROVIDER_LEDGER_FILE: &str = "provider-failures.json";
 const SERVICE_LEDGER_FILE: &str = "service-failure.json";
 
@@ -87,10 +95,21 @@ pub(super) fn jitter_random() -> u64 {
 pub(super) enum FailureClass {
     /// A restart provably cannot help; wait for setup, login or a re-probe.
     NeedsSetup,
+    /// An authentication rejection that may deny only one action; verify the
+    /// session with a probe before parking, otherwise retry like `Transient`.
+    AuthSuspect,
     /// The server named a wait; honor exactly that, without jitter.
     ServerWait(Duration),
     /// Uncertain or transient; retry with jittered backoff.
     Transient,
+}
+
+/// Server error names that prove the session itself is gone (`errors.ts`).
+fn is_session_invalidated_error_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_uppercase().as_str(),
+        "SESSION_REVOKED" | "SESSION_EXPIRED" | "USER_DEACTIVATED"
+    )
 }
 
 /// Classifies by walking the error chain. Unrecognized errors are transient.
@@ -108,24 +127,77 @@ pub(super) fn classify_failure(error: &(dyn std::error::Error + 'static)) -> Fai
             })
             .or_else(|| error.downcast_ref::<inline_client::BackendError>());
         if let Some(backend) = backend {
-            return classify_backend_failure(backend.category, backend.retry_after_seconds);
+            return classify_backend_error(backend);
+        }
+        if let Some(error) = error.downcast_ref::<inline_sdk::InlineProtocolV3Error>() {
+            return if error.is_session_revoked() {
+                FailureClass::NeedsSetup
+            } else if error.is_authorization_invalidated() {
+                FailureClass::AuthSuspect
+            } else {
+                FailureClass::Transient
+            };
+        }
+        match error.downcast_ref::<inline_sdk::api::ApiError>() {
+            Some(inline_sdk::api::ApiError::Api { error, .. })
+                if is_session_invalidated_error_name(error) =>
+            {
+                return FailureClass::NeedsSetup;
+            }
+            Some(
+                inline_sdk::api::ApiError::Api {
+                    status: Some(401 | 403),
+                    ..
+                }
+                | inline_sdk::api::ApiError::Status {
+                    status: 401 | 403, ..
+                },
+            ) => return FailureClass::AuthSuspect,
+            _ => {}
+        }
+        if matches!(
+            error.downcast_ref::<inline_sdk::realtime::RealtimeError>(),
+            Some(inline_sdk::realtime::RealtimeError::AuthenticationInvalidated)
+        ) {
+            return FailureClass::AuthSuspect;
         }
         current = error.source();
     }
     FailureClass::Transient
 }
 
-pub(super) fn classify_backend_failure(
-    category: inline_client::ClientErrorCategory,
-    retry_after_seconds: Option<u64>,
-) -> FailureClass {
+pub(super) fn classify_backend_error(error: &inline_client::BackendError) -> FailureClass {
     use inline_client::ClientErrorCategory as Category;
-    match (category, retry_after_seconds) {
-        (Category::AuthExpired | Category::ReloginRequired, _) => FailureClass::NeedsSetup,
+    if error.session_invalidated {
+        return FailureClass::NeedsSetup;
+    }
+    match (error.category, error.retry_after_seconds) {
+        (Category::AuthExpired | Category::ReloginRequired, _) => FailureClass::AuthSuspect,
         (Category::RateLimited, Some(seconds)) if seconds > 0 => {
-            FailureClass::ServerWait(Duration::from_secs(seconds).min(MAX_SERVER_WAIT))
+            FailureClass::ServerWait(bounded_server_wait(seconds))
         }
         _ => FailureClass::Transient,
+    }
+}
+
+fn bounded_server_wait(seconds: u64) -> Duration {
+    let requested = Duration::from_secs(seconds);
+    if requested > MAX_SERVER_WAIT {
+        eprintln!(
+            "Inline asked the bridge to wait {}; waiting {} instead.",
+            describe_delay(requested),
+            describe_delay(MAX_SERVER_WAIT)
+        );
+        return MAX_SERVER_WAIT;
+    }
+    requested
+}
+
+/// What an ambiguous authentication rejection means once a probe answered.
+pub(super) fn settle_auth_suspect(probe: SessionProbe) -> FailureClass {
+    match probe {
+        SessionProbe::Revoked => FailureClass::NeedsSetup,
+        SessionProbe::Valid | SessionProbe::Inconclusive => FailureClass::Transient,
     }
 }
 
@@ -199,7 +271,9 @@ pub(super) fn next_failure_record(
     let wait = match class {
         FailureClass::NeedsSetup => Duration::ZERO,
         FailureClass::ServerWait(wait) => wait,
-        FailureClass::Transient => backoff.delay(consecutive_failures, random),
+        FailureClass::Transient | FailureClass::AuthSuspect => {
+            backoff.delay(consecutive_failures, random)
+        }
     };
     FailureRecord {
         consecutive_failures,
@@ -430,12 +504,21 @@ mod tests {
         assert!(samples.len() > 1, "jitter must spread retries");
     }
 
+    fn backend(category: Category) -> inline_client::BackendError {
+        inline_client::BackendError::new(category, "redacted")
+    }
+
     #[test]
-    fn only_proven_revocation_needs_setup() {
+    fn only_explicit_revocation_needs_setup() {
         for category in [Category::AuthExpired, Category::ReloginRequired] {
             assert_eq!(
-                classify_backend_failure(category, None),
+                classify_backend_error(&backend(category).with_session_invalidated()),
                 FailureClass::NeedsSetup
+            );
+            // A bare 401/403 maps to AuthExpired without proof; verify first.
+            assert_eq!(
+                classify_backend_error(&backend(category)),
+                FailureClass::AuthSuspect
             );
         }
         for category in [
@@ -453,7 +536,7 @@ mod tests {
             Category::Conflict,
         ] {
             assert_eq!(
-                classify_backend_failure(category, None),
+                classify_backend_error(&backend(category)),
                 FailureClass::Transient,
                 "{category:?}"
             );
@@ -461,18 +544,99 @@ mod tests {
     }
 
     #[test]
-    fn server_requested_waits_are_honored_exactly() {
+    fn a_permission_denial_401_does_not_park_but_session_expired_does() {
+        let denied = inline_client::ClientRequestError::Backend(backend(Category::AuthExpired));
+        assert_eq!(classify_failure(&denied), FailureClass::AuthSuspect);
+        assert_ne!(classify_failure(&denied), FailureClass::NeedsSetup);
+        let api_denied = inline_sdk::api::ApiError::Api {
+            status: Some(401),
+            error: "UNAUTHORIZED".to_string(),
+            error_code: Some(401),
+            description: "not the task's assignee".to_string(),
+        };
+        assert_eq!(classify_failure(&api_denied), FailureClass::AuthSuspect);
+        let forbidden = inline_sdk::api::ApiError::Status {
+            status: 403,
+            message: "Forbidden".to_string(),
+            body: None,
+        };
+        assert_eq!(classify_failure(&forbidden), FailureClass::AuthSuspect);
+
+        for name in ["SESSION_EXPIRED", "SESSION_REVOKED", "USER_DEACTIVATED"] {
+            let expired = inline_sdk::api::ApiError::Api {
+                status: Some(401),
+                error: name.to_string(),
+                error_code: Some(401),
+                description: "session".to_string(),
+            };
+            assert_eq!(
+                classify_failure(&expired),
+                FailureClass::NeedsSetup,
+                "{name}"
+            );
+        }
+        let marked = inline_client::ClientRequestError::Backend(
+            backend(Category::AuthExpired).with_session_invalidated(),
+        );
+        assert_eq!(classify_failure(&marked), FailureClass::NeedsSetup);
+    }
+
+    #[test]
+    fn only_a_confirmed_inline_protocol_revocation_needs_setup() {
         assert_eq!(
-            classify_backend_failure(Category::RateLimited, Some(23)),
+            classify_failure(&inline_sdk::InlineProtocolV3Error::SessionRevoked),
+            FailureClass::NeedsSetup
+        );
+        assert_eq!(
+            classify_failure(&inline_sdk::InlineProtocolV3Error::AuthorizationInvalidated),
+            FailureClass::AuthSuspect
+        );
+        assert_eq!(
+            classify_failure(&inline_sdk::InlineProtocolV3Error::Closed),
+            FailureClass::Transient
+        );
+        assert_eq!(
+            classify_failure(&inline_sdk::realtime::RealtimeError::AuthenticationInvalidated),
+            FailureClass::AuthSuspect
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_rejection_parks_only_after_an_explicit_probe_failure() {
+        assert_eq!(
+            settle_auth_suspect(SessionProbe::Valid),
+            FailureClass::Transient
+        );
+        assert_eq!(
+            settle_auth_suspect(SessionProbe::Inconclusive),
+            FailureClass::Transient
+        );
+        assert_eq!(
+            settle_auth_suspect(SessionProbe::Revoked),
+            FailureClass::NeedsSetup
+        );
+    }
+
+    #[test]
+    fn server_requested_waits_are_honored_exactly_up_to_an_hour() {
+        assert_eq!(
+            classify_backend_error(&backend(Category::RateLimited).with_retry_after_seconds(23)),
             FailureClass::ServerWait(Duration::from_secs(23))
         );
         assert_eq!(
-            classify_backend_failure(Category::RateLimited, Some(10 * 24 * 60 * 60)),
+            classify_backend_error(&backend(Category::RateLimited).with_retry_after_seconds(3_600)),
+            FailureClass::ServerWait(Duration::from_secs(3_600))
+        );
+        assert_eq!(
+            classify_backend_error(
+                &backend(Category::RateLimited).with_retry_after_seconds(24 * 60 * 60)
+            ),
             FailureClass::ServerWait(MAX_SERVER_WAIT)
         );
+        assert_eq!(MAX_SERVER_WAIT, Duration::from_secs(60 * 60));
         // A hint on another category does not turn it into a wait.
         assert_eq!(
-            classify_backend_failure(Category::Network, Some(23)),
+            classify_backend_error(&backend(Category::Network).with_retry_after_seconds(23)),
             FailureClass::Transient
         );
         let error = inline_client::ClientRequestError::Backend(
@@ -501,11 +665,13 @@ mod tests {
             classify_failure(&io::Error::other("unknown")),
             FailureClass::Transient
         );
-        let revoked = inline_client::ClientRequestError::Backend(inline_client::BackendError::new(
-            Category::AuthExpired,
-            "session revoked",
-        ));
+        let revoked = inline_client::ClientRequestError::Backend(
+            inline_client::BackendError::new(Category::AuthExpired, "session revoked")
+                .with_session_invalidated(),
+        );
         assert_eq!(classify_failure(&revoked), FailureClass::NeedsSetup);
+        let wrapped = io::Error::other(revoked);
+        assert_eq!(classify_failure(&wrapped), FailureClass::Transient);
         let setup = provider_setup_required("runtime missing");
         assert_eq!(classify_failure(&setup), FailureClass::NeedsSetup);
     }

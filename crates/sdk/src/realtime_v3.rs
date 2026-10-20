@@ -35,6 +35,10 @@ const PING: u32 = 0x7abe_77ec;
 const PONG: u32 = 0x3477_73c5;
 const VECTOR: u32 = 0x1cb5_c415;
 const SESSION_REVOKED_CLOSE_CODE: u16 = 4401;
+/// The only 4401 reason that proves the account session itself is gone. The
+/// server also closes with 4401 `authorization_unavailable` when a temporary
+/// key is missing, which a fresh temporary key recovers.
+const SESSION_REVOKED_CONFIRMED_REASON: &str = "session_revoked_confirmed";
 const PENDING_UPDATE_CAPACITY: usize = 256;
 const PENDING_UPDATE_BYTE_CAPACITY: usize = 8 * 1024 * 1024;
 const TEMPORARY_KEY_LIFETIME_SECONDS: i64 = 86_400;
@@ -280,9 +284,14 @@ pub enum InlineProtocolV3Error {
     /// The connection closed before a response arrived.
     #[error("Inline Protocol connection closed")]
     Closed,
-    /// The server explicitly invalidated the authenticated account session.
+    /// The server rejected the current authorization. This may be recoverable
+    /// with a fresh temporary key; see [`Self::SessionRevoked`] for the
+    /// confirmed account-session revocation.
     #[error("Inline Protocol session authorization was revoked")]
     AuthorizationInvalidated,
+    /// The server confirmed that the account session itself was revoked.
+    #[error("Inline Protocol account session was revoked")]
+    SessionRevoked,
     /// Application updates arrived faster than an owner could be installed.
     #[error("Inline Protocol pending update capacity exceeded")]
     UpdateBufferOverflow,
@@ -292,7 +301,13 @@ impl InlineProtocolV3Error {
     /// Returns whether authenticated transport evidence proves that the
     /// active account authorization was revoked.
     pub fn is_authorization_invalidated(&self) -> bool {
-        matches!(self, Self::AuthorizationInvalidated)
+        matches!(self, Self::AuthorizationInvalidated | Self::SessionRevoked)
+    }
+
+    /// Returns whether the server confirmed that the account session itself
+    /// was revoked, which no reconnect or temporary key can recover.
+    pub fn is_session_revoked(&self) -> bool {
+        matches!(self, Self::SessionRevoked)
     }
 }
 
@@ -954,7 +969,7 @@ impl InlineProtocolV3Connection {
                 WsMessage::Close(Some(frame))
                     if u16::from(frame.code) == SESSION_REVOKED_CLOSE_CODE =>
                 {
-                    return Err(InlineProtocolV3Error::AuthorizationInvalidated);
+                    return Err(authorization_close_error(frame.reason.as_ref()));
                 }
                 WsMessage::Close(_) => return Err(InlineProtocolV3Error::Closed),
                 _ => continue,
@@ -1484,7 +1499,7 @@ fn realtime_error_from_v3(error: InlineProtocolV3Error) -> crate::realtime::Real
             crate::realtime::RealtimeError::CommitOutcomeUnknown
         }
         InlineProtocolV3Error::Closed => crate::realtime::RealtimeError::ConnectionClosed,
-        InlineProtocolV3Error::AuthorizationInvalidated => {
+        InlineProtocolV3Error::AuthorizationInvalidated | InlineProtocolV3Error::SessionRevoked => {
             crate::realtime::RealtimeError::AuthenticationInvalidated
         }
         InlineProtocolV3Error::UpdateBufferOverflow => {
@@ -1493,6 +1508,14 @@ fn realtime_error_from_v3(error: InlineProtocolV3Error) -> crate::realtime::Real
         other => crate::realtime::RealtimeError::InlineProtocol {
             message: other.to_string(),
         },
+    }
+}
+
+fn authorization_close_error(reason: &str) -> InlineProtocolV3Error {
+    if reason == SESSION_REVOKED_CONFIRMED_REASON {
+        InlineProtocolV3Error::SessionRevoked
+    } else {
+        InlineProtocolV3Error::AuthorizationInvalidated
     }
 }
 
@@ -1660,7 +1683,20 @@ mod tests {
     #[test]
     fn explicit_session_revocation_is_terminal_authentication_failure() {
         assert!(InlineProtocolV3Error::AuthorizationInvalidated.is_authorization_invalidated());
+        assert!(InlineProtocolV3Error::SessionRevoked.is_authorization_invalidated());
         assert!(!InlineProtocolV3Error::Closed.is_authorization_invalidated());
+    }
+
+    #[test]
+    fn only_a_confirmed_revocation_close_proves_the_session_is_gone() {
+        let confirmed = authorization_close_error("session_revoked_confirmed");
+        assert!(confirmed.is_session_revoked());
+        assert!(confirmed.is_authorization_invalidated());
+        for reason in ["authorization_unavailable", "", "session_revoked"] {
+            let recoverable = authorization_close_error(reason);
+            assert!(!recoverable.is_session_revoked(), "{reason}");
+            assert!(recoverable.is_authorization_invalidated(), "{reason}");
+        }
     }
 
     #[test]

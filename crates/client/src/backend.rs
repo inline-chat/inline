@@ -49,6 +49,12 @@ pub struct BackendError {
     pub message: String,
     /// Server-requested retry delay, when the failure is rate limited.
     pub retry_after_seconds: Option<u64>,
+    /// The server explicitly invalidated the session: realtime `INVALID_AUTH`
+    /// or `SESSION_REVOKED`, an invalidated Inline Protocol authorization, or
+    /// an API `SESSION_REVOKED`, `SESSION_EXPIRED` or `USER_DEACTIVATED` error.
+    /// A bare HTTP 401/403 is not proof: the server also uses them to deny a
+    /// single action.
+    pub session_invalidated: bool,
 }
 
 impl BackendError {
@@ -58,7 +64,14 @@ impl BackendError {
             category,
             message: message.into(),
             retry_after_seconds: None,
+            session_invalidated: false,
         }
+    }
+
+    /// Marks an authentication failure as an explicit server invalidation.
+    pub fn with_session_invalidated(mut self) -> Self {
+        self.session_invalidated = true;
+        self
     }
 
     /// Attaches a server-requested retry delay.
