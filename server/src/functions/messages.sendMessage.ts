@@ -100,6 +100,7 @@ import {
 } from "@in/server/modules/agentConfiguration"
 import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
 import { InlineError } from "@in/server/types/errors"
+import { logReplacedSendDate, resolveMessageDate } from "@in/server/modules/message/clientSendDate"
 
 type Input = {
   peerId: InputPeer
@@ -182,7 +183,9 @@ const loadOwnedMedia = async <Media>(
 
 export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   // input data
-  const date = input.sendDate ? new Date(input.sendDate * 1000) : new Date()
+  const receivedAt = Date.now()
+  const messageDate = resolveMessageDate(input.sendDate, receivedAt)
+  const date = messageDate.date
   const fromId = context.currentUserId
   const currentUserId = context.currentUserId
   let chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
@@ -224,6 +227,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     0,
   )
   const isRealtimeV3Session = currentSessionConnections.some(({ version }) => version === ConnVersion.REALTIME_V3)
+  if (messageDate.replaced && input.sendDate !== undefined) {
+    logReplacedSendDate({
+      userId: currentUserId,
+      chatId,
+      sendDate: input.sendDate,
+      receivedAt,
+      clientType: currentSessionConnections.find((connection) => connection.clientType)?.clientType,
+      layer: currentUserLayer,
+    })
+  }
 
   const outgoingText = input.message
     ? await processOutgoingText({
