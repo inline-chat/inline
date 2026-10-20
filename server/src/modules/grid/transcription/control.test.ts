@@ -33,7 +33,7 @@ import { deleteChat } from "@in/server/functions/messages.deleteChat"
 import { handler as leaveSpace } from "@in/server/methods/leaveSpace"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 import { ensureGridRoomThread, insertGridTranscriptContinuationLink } from "./threads"
-import { invalidateGridTranscriptionForHistory } from "./state"
+import { invalidateGridTranscriptionForHistory, nextGridTranscriptionDeadline } from "./state"
 import { handleGridTranscriptionWorkerRequest } from "./worker"
 
 setupTestLifecycle()
@@ -467,6 +467,23 @@ describe("Grid transcription control and worker authorization", () => {
     }
     expect(new Set(labels.values()).size).toBe(3)
     expect(await db.select().from(chatParticipants)).toEqual(before)
+  })
+
+  test("the expiry probe reports the unclaimed start deadline, then the worker lease", async () => {
+    const f = await fixture("expiry-probe")
+    expect(await nextGridTranscriptionDeadline(db)).toBeUndefined()
+    await f.control(true)
+    // created_at uses the database clock default; compare stored values the way the probe does.
+    const earliest = (...dates: Date[]) => new Date(Math.min(...dates.map((date) => date.getTime())))
+    const [run] = await db.select().from(gridTranscriptionRuns)
+    expect(run!.workerId).toBeNull()
+    expect(await nextGridTranscriptionDeadline(db)).toEqual(
+      earliest(new Date(run!.createdAt.getTime() + 30_000), run!.expiresAt),
+    )
+    await f.claim()
+    const [claimed] = await db.select().from(gridTranscriptionRuns)
+    expect(claimed!.leaseExpiresAt).not.toBeNull()
+    expect(await nextGridTranscriptionDeadline(db)).toEqual(earliest(claimed!.leaseExpiresAt!, claimed!.expiresAt))
   })
 
   test("lease-only renewals keep Grid revision and hints quiet while authority loss publishes once", async () => {

@@ -126,25 +126,48 @@ export function supportedGridTranscriptionSession(session: {
     transcriptionConfig().allowedClientVersions.includes(session.clientVersion)
   )
 }
-/** Unclaimed runs can retire safely; claimed unknown capture retains its global slot. */
-export async function retireUnclaimedGridTranscriptions(tx: Transaction) {
-  if (!transcriptionConfig().enabled) return
-  const overdue = await tx
-    .select()
-    .from(gridTranscriptionRuns)
-    .where(
+const UNCLAIMED_START_TIMEOUT_MS = 30_000
+function overdueCapture() {
+  return and(
+    inArray(gridTranscriptionRuns.state, ["starting", "active"]),
+    or(
       and(
-        inArray(gridTranscriptionRuns.state, ["starting", "active"]),
-        or(
-          and(
-            isNull(gridTranscriptionRuns.workerId),
-            lt(gridTranscriptionRuns.createdAt, new Date(Date.now() - 30_000)),
-          ),
-          lte(gridTranscriptionRuns.expiresAt, new Date()),
-          lte(gridTranscriptionRuns.leaseExpiresAt, new Date()),
-        ),
+        isNull(gridTranscriptionRuns.workerId),
+        lt(gridTranscriptionRuns.createdAt, new Date(Date.now() - UNCLAIMED_START_TIMEOUT_MS)),
       ),
-    )
+      lte(gridTranscriptionRuns.expiresAt, new Date()),
+      lte(gridTranscriptionRuns.leaseExpiresAt, new Date()),
+    ),
+  )
+}
+/**
+ * Earliest moment any capture run becomes overdue, read without the Grid
+ * mutation lock. The state filter implies the partial active-run index
+ * predicates, so only live runs are read.
+ */
+export async function nextGridTranscriptionDeadline(query: Pick<Transaction, "select">): Promise<Date | undefined> {
+  if (!transcriptionConfig().enabled) return undefined
+  const [row] = await query
+    .select({
+      dueAt: sql<Date | null>`min(least(
+        case when ${gridTranscriptionRuns.workerId} is null
+          then ${gridTranscriptionRuns.createdAt} + ${sql.raw(`interval '${UNCLAIMED_START_TIMEOUT_MS} milliseconds'`)} end,
+        ${gridTranscriptionRuns.expiresAt},
+        ${gridTranscriptionRuns.leaseExpiresAt}
+      ))`.mapWith(gridTranscriptionRuns.expiresAt),
+    })
+    .from(gridTranscriptionRuns)
+    .where(inArray(gridTranscriptionRuns.state, ["starting", "active"]))
+  return row?.dueAt ?? undefined
+}
+/**
+ * Unclaimed runs can retire safely; claimed unknown capture retains its global slot.
+ * Returns the Spaces whose transcription state changed.
+ */
+export async function retireUnclaimedGridTranscriptions(tx: Transaction): Promise<Set<number>> {
+  const changedSpaceIds = new Set<number>()
+  if (!transcriptionConfig().enabled) return changedSpaceIds
+  const overdue = await tx.select().from(gridTranscriptionRuns).where(overdueCapture())
   const chatIds = [...new Set(overdue.flatMap((run) => [run.destinationParentChatId, run.transcriptChatId]))].sort(
     (a, b) => a - b,
   )
@@ -173,22 +196,10 @@ export async function retireUnclaimedGridTranscriptions(tx: Transaction) {
         stopRequestedAt: new Date(),
         revision: sql`${gridTranscriptionRuns.revision} + 1`,
       })
-      .where(
-        and(
-          eq(gridTranscriptionRuns.id, run.id),
-          inArray(gridTranscriptionRuns.state, ["starting", "active"]),
-          or(
-            and(
-              isNull(gridTranscriptionRuns.workerId),
-              lt(gridTranscriptionRuns.createdAt, new Date(Date.now() - 30_000)),
-            ),
-            lte(gridTranscriptionRuns.expiresAt, new Date()),
-            lte(gridTranscriptionRuns.leaseExpiresAt, new Date()),
-          ),
-        ),
-      )
+      .where(and(eq(gridTranscriptionRuns.id, run.id), overdueCapture()))
       .returning()
     if (!changed.length) continue
+    changedSpaceIds.add(run.spaceId)
     await tx
       .update(gridTranscriptionSegments)
       .set({ state: "discarded" })
@@ -203,6 +214,7 @@ export async function retireUnclaimedGridTranscriptions(tx: Transaction) {
         text: "Transcription interrupted",
       })
   }
+  return changedSpaceIds
 }
 export function encodeGridTranscription(run: DbGridTranscriptionRun, canRead: boolean): GridTranscription {
   const state =

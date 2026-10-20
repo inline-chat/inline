@@ -47,23 +47,45 @@ export interface LegacyGridProviderEffectsModule {
 export type LoadLegacyGridProviderEffects =
   () => Promise<LegacyGridProviderEffectsModule>
 
+export interface GridExpirySweeperModule {
+  readonly startGridExpirySweeper: () => unknown
+  readonly stopGridExpirySweeper: () => Promise<void>
+}
+
+export type LoadGridExpirySweeper =
+  () => Promise<GridExpirySweeperModule>
+
 const loadLegacyGridProviderEffects: LoadLegacyGridProviderEffects =
   () => import("./providerEffects")
 
+const loadGridExpirySweeper: LoadGridExpirySweeper =
+  () => import("./expirySweeper")
+
+/**
+ * The Grid process owns both durable background loops: provider effects and
+ * the lease/transcription expiry sweep that keeps reads off the mutation lock.
+ */
 export const makeCurrentGridProviderEffectsAdapter =
   (
     loadModule: LoadLegacyGridProviderEffects =
       loadLegacyGridProviderEffects,
+    loadSweeper: LoadGridExpirySweeper =
+      loadGridExpirySweeper,
   ): GridProviderEffectsProcessAdapter => ({
     start: async () => {
-      const legacy = await loadModule()
-      return legacy.startGridProviderEffectWorker()
+      const [legacy, sweeper] = await Promise.all([loadModule(), loadSweeper()])
+      const worker = legacy.startGridProviderEffectWorker()
+      sweeper.startGridExpirySweeper()
+      return worker
     },
     stop: async (worker) => {
-      const legacy = await loadModule()
-      await legacy.stopGridProviderEffectWorker(
-        worker,
-      )
+      const [legacy, sweeper] = await Promise.all([loadModule(), loadSweeper()])
+      await Promise.all([
+        sweeper.stopGridExpirySweeper(),
+        legacy.stopGridProviderEffectWorker(
+          worker,
+        ),
+      ])
     },
   })
 

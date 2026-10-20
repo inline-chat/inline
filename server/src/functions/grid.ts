@@ -9,7 +9,6 @@ import type {
   GetGridHomeResult,
   GridHomeSpace,
   Grid,
-  GridConnection,
   GridCurrentCall,
   GridRoom,
   JoinGridRoomInput,
@@ -67,7 +66,6 @@ import {
   encodeGridTranscription,
   stopGridTranscription,
   transcriptionAvailable,
-  retireUnclaimedGridTranscriptions,
   supportedGridTranscriptionSession,
 } from "@in/server/modules/grid/transcription/state"
 import { enqueueGridParticipantRevocation } from "@in/server/modules/grid/providerEffects"
@@ -79,7 +77,7 @@ import {
   type GridMutationState,
 } from "@in/server/modules/grid/roomLifecycle"
 import { Log } from "@in/server/utils/log"
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 
 // Heartbeats are normally 30 seconds apart. Keep enough server-independent
 // recovery budget for a user to repair or switch networks without another
@@ -109,7 +107,11 @@ export async function getGrid(input: GetGridInput, context: FunctionContext): Pr
 
   const expectedMembershipId =
     input.expectedMembershipId === undefined ? undefined : membershipFence(input.expectedMembershipId)
-  await refreshPresenceLeases({ spaceId, context, expectedMembershipId })
+  // Expired leases are hidden by every read and removed by the expiry sweeper,
+  // so a snapshot never waits on the Grid mutation lock.
+  if (expectedMembershipId !== undefined || !isGridCallTransferEnabled()) {
+    await renewOwnedPresence(spaceId, context, expectedMembershipId)
+  }
   const [grid, currentCall] = await Promise.all([buildGrid(spaceId, context), buildCurrentCall(context)])
   return { grid, currentCall }
 }
@@ -118,7 +120,6 @@ export async function getGridHome(
   _input: GetGridHomeInput,
   context: FunctionContext,
 ): Promise<GetGridHomeResult> {
-  await refreshPresenceLeases()
   const membershipRows = await db
     .select({ spaceId: members.spaceId })
     .from(members)
@@ -879,87 +880,34 @@ async function claimPresence(
   return presence
 }
 
-async function refreshPresenceLeases(input?: {
-  spaceId: number
-  context: FunctionContext
-  expectedMembershipId?: string
-}) {
-  const affected = await db.transaction(async (tx) => {
-    await lockGridMutations(tx)
-
-    // Selection and deletion must use exactly the same cutoff so every deleted
-    // presence has a corresponding room reconciliation/provider revocation.
-    const cutoff = new Date()
-    const expired = await tx
-      .select({
-        room: gridRooms,
-        userId: gridPresence.userId,
-        mediaMembershipId: gridPresence.mediaMembershipId,
-      })
-      .from(gridPresence)
-      .innerJoin(gridRooms, eq(gridRooms.id, gridPresence.roomId))
-      .where(lte(gridPresence.leaseExpiresAt, cutoff))
-    if (expired.length > 0) {
-      await tx.delete(gridPresence).where(lte(gridPresence.leaseExpiresAt, cutoff))
-    }
-    const endedConnections: GridConnection[] = []
-    for (const roomId of new Set(expired.map(({ room }) => room.id))) {
-      const endedConnection = await reconcileGridRoom(tx, roomId)
-      if (endedConnection) endedConnections.push(endedConnection)
-    }
-    if (input && (input.expectedMembershipId !== undefined || !isGridCallTransferEnabled())) {
-      await renewOwnedPresence(tx, input.spaceId, input.context, cutoff, input.expectedMembershipId)
-    }
-    const state: GridMutationState = {
-      affectedSpaceIds: new Set(expired.map(({ room }) => room.spaceId)),
-      endedConnections,
-    }
-    for (const { room, userId, mediaMembershipId } of expired) {
-      const connection = activeGridConnection(room)
-      if (connection) {
-        await recordGridParticipantRevocation(tx, state, connection, userId, mediaMembershipId)
-      }
-    }
-    return state
-  })
-  if (affected.affectedSpaceIds.size > 0) await notifyGridChanged(affected)
-}
-
-async function renewOwnedPresence(
-  tx: Transaction,
-  spaceId: number,
-  context: FunctionContext,
-  cutoff: Date,
-  expectedMembershipId?: string,
-) {
-  const [presence] = await tx
-    .select({ roomId: gridPresence.roomId })
-    .from(gridPresence)
-    .innerJoin(gridRooms, and(eq(gridRooms.id, gridPresence.roomId), eq(gridRooms.spaceId, spaceId)))
-    .where(
-      and(
-        eq(gridPresence.userId, context.currentUserId),
-        eq(gridPresence.ownerSessionId, context.currentSessionId),
-        expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
-        gt(gridPresence.leaseExpiresAt, cutoff),
-      ),
-    )
-    .limit(1)
-  if (!presence) return
-
-  await tx
+/**
+ * Extends only the caller's own unexpired lease in this Space. Lease-only
+ * writes do not bump the Grid revision, and the one row lock orders renewal
+ * against expiry and ownership changes without the Grid mutation lock: a
+ * mutation or sweep that deletes the row first leaves nothing to renew, and a
+ * sweep skips a row whose renewal is still in flight.
+ */
+async function renewOwnedPresence(spaceId: number, context: FunctionContext, expectedMembershipId?: string) {
+  const now = new Date()
+  await db
     .update(gridPresence)
-    .set({ leaseExpiresAt: new Date(Date.now() + PRESENCE_LEASE_MS) })
+    .set({ leaseExpiresAt: new Date(now.getTime() + PRESENCE_LEASE_MS) })
     .where(
       and(
         eq(gridPresence.userId, context.currentUserId),
         eq(gridPresence.ownerSessionId, context.currentSessionId),
-        eq(gridPresence.roomId, presence.roomId),
         expectedMembershipId === undefined ? undefined : eq(gridPresence.mediaMembershipId, expectedMembershipId),
-        gt(gridPresence.leaseExpiresAt, cutoff),
+        gt(gridPresence.leaseExpiresAt, now),
+        inArray(gridPresence.roomId, db.select({ id: gridRooms.id }).from(gridRooms).where(eq(gridRooms.spaceId, spaceId))),
       ),
     )
 }
+
+// Grid snapshots read one MVCC snapshot instead of taking the mutation lock.
+// Every writer bumps the Space revision counters in the same transaction as
+// the content (database triggers), so a snapshot's revision always matches
+// its content.
+const snapshotRead = { isolationLevel: "repeatable read", accessMode: "read only" } as const
 
 async function buildGrids(spaceIds: Set<number>, context: FunctionContext): Promise<Grid[]> {
   return Promise.all([...spaceIds].sort((a, b) => a - b).map((spaceId) => buildGrid(spaceId, context)))
@@ -967,7 +915,6 @@ async function buildGrids(spaceIds: Set<number>, context: FunctionContext): Prom
 
 async function buildCurrentCall(context: FunctionContext): Promise<GridCurrentCall | undefined> {
   return db.transaction(async (tx) => {
-    await lockGridMutations(tx)
     const [row] = await tx
       .select({ presence: gridPresence, room: gridRooms, ownerClientType: sessions.clientType })
       .from(gridPresence)
@@ -986,7 +933,7 @@ async function buildCurrentCall(context: FunctionContext): Promise<GridCurrentCa
       .limit(1)
     if (!row || !(await SpaceSettingsModel.getStored(row.room.spaceId, tx)).gridEnabled) return undefined
     return encodeCurrentCall(row.presence, row.room, context, row.ownerClientType)
-  })
+  }, snapshotRead)
 }
 
 function encodeCurrentCall(
@@ -1054,20 +1001,19 @@ function assertPresenceFence(
 }
 
 async function buildGrid(spaceId: number, context: FunctionContext): Promise<Grid> {
-  // Snapshot content and its revision are read under the same lock used by
-  // every Grid mutation. A response can therefore be older than a later
-  // response, but it can never label old content with a newer revision.
+  // Snapshot content and its revision come from one MVCC snapshot. A response
+  // can therefore be older than a later response, but it can never label old
+  // content with a newer revision. Leases that expired since the last sweep
+  // are already hidden here by their lease time.
   const snapshot = await db.transaction(async (tx) => {
-    await lockGridMutations(tx)
-    await retireUnclaimedGridTranscriptions(tx)
     const settings = await SpaceSettingsModel.getStored(spaceId, tx)
     const [space] = await tx
       .select({
         revision: spaces.gridRevision,
-        // Hold the isolated counter stable while reading run projections. No
-        // capture/history writer can commit newer state with an older label.
+        // Capture/history writers bump this isolated counter with their run
+        // changes, so it labels exactly the run projections read below.
         transcriptionRevision:
-          sql<bigint>`coalesce((select "revision" from ${gridTranscriptionSpaceRevisions} where "space_id" = ${spaces.id} for share), 0)`.mapWith(
+          sql<bigint>`coalesce((select "revision" from ${gridTranscriptionSpaceRevisions} where "space_id" = ${spaces.id}), 0)`.mapWith(
             BigInt,
           ),
       })
@@ -1190,7 +1136,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
       projected,
       available,
     }
-  })
+  }, snapshotRead)
 
   if (!snapshot.settings.gridEnabled) {
     return {

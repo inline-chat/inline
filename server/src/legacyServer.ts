@@ -33,6 +33,7 @@ import { root } from "@in/server/controllers/root"
 import { health } from "@in/server/controllers/health"
 import { startDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import { startGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
+import { startGridExpirySweeper } from "@in/server/modules/grid/expirySweeper"
 import {
   createGracefulShutdownManager,
   registerGracefulShutdown,
@@ -220,6 +221,7 @@ export const startCurrentServer = (
   connectionManager.setServer(server)
   startDatabaseHealthMonitor()
   startGridProviderEffectWorker()
+  startGridExpirySweeper()
   const nativeUploadLease = acquireNativeUploadWorker()
   const shutdownDeps = { stopNativeUploadWorker: nativeUploadLease.release }
   const gracefulShutdown = options.installSignalHandlers === false

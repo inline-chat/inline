@@ -5,6 +5,7 @@ import { shutdownApnProvider } from "@in/server/libs/apn"
 import { stopUserSettingsCacheCleanup } from "@in/server/modules/cache/userSettings"
 import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
+import { stopGridExpirySweeper } from "@in/server/modules/grid/expirySweeper"
 import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
 import { stopBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
 import { stopBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
@@ -76,7 +77,9 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   stopBlockContentImageWorker: () => stopBlockContentImageWorker(),
   stopNativeUploadWorker: () => nativeUploadWorker.stop(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
-  stopGridProviderEffects: () => stopGridProviderEffectWorker(),
+  stopGridProviderEffects: async () => {
+    await Promise.all([stopGridExpirySweeper(), stopGridProviderEffectWorker()])
+  },
   stopBotChatSettings: () => { shutdownBotChatSettingsBroker(); botFilesystemBroker.shutdown() },
   stopServer: (server, closeActiveConnections) => server.stop(closeActiveConnections),
   closeConnections: () => connectionManager.shutdown(),

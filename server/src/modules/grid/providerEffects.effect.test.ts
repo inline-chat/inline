@@ -69,6 +69,7 @@ describe(
         const stopped: Array<
           GridProviderEffectWorker | null | undefined
         > = []
+        const sweeper: Array<string> = []
         const adapter =
           makeCurrentGridProviderEffectsAdapter(
             async () => ({
@@ -79,6 +80,12 @@ describe(
                   stopped.push(owned)
                 },
             }),
+            async () => ({
+              startGridExpirySweeper: () => sweeper.push("start"),
+              stopGridExpirySweeper: async () => {
+                sweeper.push("stop")
+              },
+            }),
           )
 
         const acquired =
@@ -87,6 +94,7 @@ describe(
 
         expect(acquired).toBe(worker)
         expect(stopped).toEqual([worker])
+        expect(sweeper).toEqual(["start", "stop"])
       },
     )
   },

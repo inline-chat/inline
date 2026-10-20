@@ -33,10 +33,34 @@ class GridChangedPublication implements OutboundPublication {
   }
 }
 
+const gridChangeListeners = new Set<() => void>()
+
+/**
+ * In-process observers of committed Grid changes, made here or hinted from
+ * another node. Background loops use this to sleep without polling.
+ */
+export function onGridChanged(listener: () => void): () => void {
+  gridChangeListeners.add(listener)
+  return () => {
+    gridChangeListeners.delete(listener)
+  }
+}
+
+function announceGridChanged() {
+  for (const listener of gridChangeListeners) {
+    try {
+      listener()
+    } catch (error) {
+      log.warn("Grid change listener failed", { error })
+    }
+  }
+}
+
 export async function notifyGridChanged(state: GridMutationState) {
   const startedAt = Date.now()
   try {
     if (state.affectedSpaceIds.size > 0) {
+      announceGridChanged()
       const spaceIds = [...state.affectedSpaceIds]
       const payload = {
         oneofKind: "grid" as const,
@@ -89,7 +113,10 @@ export async function notifyGridChanged(state: GridMutationState) {
 }
 
 export function subscribeGridChangeHints(): () => void {
-  return internalMessaging.on("GridChanged", async ({ event }) => {
+  // A broker gap may have dropped hints for presence created elsewhere.
+  const unsubscribeContinuity = internalMessaging.onContinuityLost(announceGridChanged)
+  const unsubscribeHints = internalMessaging.on("GridChanged", async ({ event }) => {
+    announceGridChanged()
     // Reuse current membership checks on this node, without republishing.
     await sendMessageToRealtimeSpace(event.spaceId, {
       oneofKind: "grid",
@@ -99,6 +126,10 @@ export function subscribeGridChangeHints(): () => void {
       } } },
     })
   })
+  return () => {
+    unsubscribeHints()
+    unsubscribeContinuity()
+  }
 }
 
 export async function notifyGridSpaceChanged(spaceId: number) {

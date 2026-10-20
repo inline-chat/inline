@@ -18,7 +18,9 @@ import { toggleSpaceGrid } from "@in/server/functions/space.settings"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
-import { removeGridMemberPresence } from "@in/server/modules/grid/roomLifecycle"
+import { lockGridMutations, removeGridMemberPresence } from "@in/server/modules/grid/roomLifecycle"
+import { sweepExpiredGridState } from "@in/server/modules/grid/expirySweeper"
+import { onGridChanged } from "@in/server/modules/grid/realtime"
 import { durableLiveKitProviderTarget } from "@in/server/modules/grid/livekit"
 import { handler as leaveSpace } from "@in/server/methods/leaveSpace"
 import { handler as deleteSpace } from "@in/server/methods/deleteSpace"
@@ -194,17 +196,148 @@ describe("grid", () => {
     await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
     const created = await createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)
     const roomId = created.grids[0]!.rooms[0]!.id
-    await joinGridRoom({ roomId }, contexts[1]!)
+    const joined = await joinGridRoom({ roomId }, contexts[1]!)
+    const generation = joined.grids[0]!.rooms[0]!.connection!.generation
+    const expiredAt = new Date(Date.now() - 1)
     await db
       .update(gridPresence)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: expiredAt })
       .where(eq(gridPresence.userId, contexts[0]!.currentUserId))
 
-    const repaired = await getGrid({ spaceId: BigInt(space.id) }, contexts[0]!)
-    expect(repaired.grid?.currentRoomId).toBeUndefined()
+    // Reads hide the expired lease without renewing it; the sweep removes it.
+    const stale = await getGrid({ spaceId: BigInt(space.id) }, contexts[0]!)
+    expect(stale.grid?.currentRoomId).toBeUndefined()
+    expect(stale.currentCall).toBeUndefined()
+    expect(stale.grid?.rooms[0]?.avatars).toHaveLength(1)
+    const [unrenewed] = await db.select().from(gridPresence).where(eq(gridPresence.userId, contexts[0]!.currentUserId))
+    expect(unrenewed?.leaseExpiresAt).toEqual(expiredAt)
+
+    expect(await sweepExpiredGridState()).toEqual({ status: "swept", expiredPresences: 1, retiredTranscriptionSpaces: 0 })
+    const repaired = await getGrid({ spaceId: BigInt(space.id) }, contexts[1]!)
     expect(repaired.grid?.rooms[0]?.avatars).toHaveLength(1)
     expect(repaired.grid?.rooms[0]?.connection).toBeUndefined()
+    expect(repaired.grid!.revision).toBeGreaterThan(stale.grid!.revision)
     expect(await db.select().from(gridPresence).where(eq(gridPresence.userId, contexts[0]!.currentUserId))).toEqual([])
+    const revocations = (await db.select().from(gridProviderEffects)).filter((effect) => effect.kind === "revoke_participant")
+    expect(revocations.map((effect) => [effect.userId, effect.connectionGeneration])).toEqual([
+      [contexts[0]!.currentUserId, generation],
+    ])
+    expect(await sweepExpiredGridState()).toEqual({ status: "idle", nextDueAt: await earliestLease() })
+  })
+
+  test("snapshot reads and lease renewal never wait on the Grid mutation lock", async () => {
+    const { space, contexts } = await createFixture("lockless-reads", 2)
+    await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
+    const created = await createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)
+    const roomId = created.grids[0]!.rooms[0]!.id
+    const joined = await joinGridRoom({ roomId }, contexts[1]!)
+    const shortenedLease = new Date(Date.now() + 60_000)
+    await db.update(gridPresence).set({ leaseExpiresAt: shortenedLease })
+
+    // A held mutation lock stands in for a slow mutation or, before this
+    // change, any other client's read.
+    const held = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const mutation = db.transaction(async (tx) => {
+      await lockGridMutations(tx)
+      held.resolve()
+      await release.promise
+    })
+    await held.promise
+    try {
+      const reads = Promise.all([
+        getGrid({ spaceId: BigInt(space.id) }, contexts[0]!),
+        getGridHome({}, contexts[0]!),
+        getGrid({ spaceId: BigInt(space.id) }, contexts[1]!),
+        getGridHome({}, contexts[1]!),
+      ])
+      const settled = await Promise.race([reads, Bun.sleep(3_000).then(() => "blocked" as const)])
+      if (settled === "blocked") throw new Error("Grid reads waited on the mutation lock")
+      const [ownerGrid, ownerHome, peerGrid, peerHome] = settled
+      expect(ownerGrid.grid!.rooms[0]!.avatars).toHaveLength(2)
+      expect(ownerGrid.currentCall?.roomId).toBe(roomId)
+      expect(peerGrid.grid!.revision).toBe(ownerGrid.grid!.revision)
+      expect(ownerHome.spaces[0]!.activeAvatarCount).toBe(2)
+      expect(peerHome.currentCall?.roomId).toBe(roomId)
+      // A lease-only renewal leaves the snapshot revision unchanged.
+      expect(peerGrid.grid!.revision).toBe(joined.grids[0]!.revision)
+      expect(await sweepExpiredGridState()).toEqual({ status: "idle", nextDueAt: await earliestLease() })
+    } finally {
+      release.resolve()
+      await mutation
+    }
+    const leases = await db.select({ leaseExpiresAt: gridPresence.leaseExpiresAt }).from(gridPresence)
+    expect(leases).toHaveLength(2)
+    expect(leases.every(({ leaseExpiresAt }) => leaseExpiresAt > shortenedLease)).toBe(true)
+  })
+
+  test("committed Grid changes wake in-process listeners such as the expiry sweeper", async () => {
+    const { space, contexts } = await createFixture("change-listener", 1)
+    let changes = 0
+    const unsubscribe = onGridChanged(() => {
+      changes += 1
+    })
+    try {
+      await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
+      const before = changes
+      const created = await createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)
+      expect(changes).toBe(before + 1)
+      await getGrid({ spaceId: BigInt(space.id) }, contexts[0]!)
+      // Reads and lease renewals only move deadlines later and stay quiet.
+      expect(changes).toBe(before + 1)
+      await leaveGridRoom({ expectedRoomId: created.grids[0]!.rooms[0]!.id }, contexts[0]!)
+      expect(changes).toBe(before + 2)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("an expiry sweep never revokes a presence whose renewal is in flight", async () => {
+    const { space, contexts } = await createFixture("sweep-renewal-race", 2)
+    await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
+    const created = await createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)
+    await joinGridRoom({ roomId: created.grids[0]!.rooms[0]!.id }, contexts[1]!)
+    const ownerId = contexts[0]!.currentUserId
+    await db.update(gridPresence).set({ leaseExpiresAt: new Date(Date.now() - 1) }).where(eq(gridPresence.userId, ownerId))
+
+    const renewing = Promise.withResolvers<void>()
+    const commit = Promise.withResolvers<void>()
+    const renewal = db.transaction(async (tx) => {
+      await tx
+        .update(gridPresence)
+        .set({ leaseExpiresAt: new Date(Date.now() + 60_000) })
+        .where(eq(gridPresence.userId, ownerId))
+      renewing.resolve()
+      await commit.promise
+    })
+    await renewing.promise
+    try {
+      expect(await sweepExpiredGridState()).toEqual({ status: "swept", expiredPresences: 0, retiredTranscriptionSpaces: 0 })
+    } finally {
+      commit.resolve()
+      await renewal
+    }
+    expect(await db.select().from(gridPresence).where(eq(gridPresence.userId, ownerId))).toHaveLength(1)
+    expect(await db.select().from(gridProviderEffects)).toEqual([])
+    expect(await sweepExpiredGridState()).toEqual({ status: "idle", nextDueAt: await earliestLease() })
+
+    // A sweep also stays out of the way of a held mutation lock.
+    await db.update(gridPresence).set({ leaseExpiresAt: new Date(Date.now() - 1) }).where(eq(gridPresence.userId, ownerId))
+    const held = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const mutation = db.transaction(async (tx) => {
+      await lockGridMutations(tx)
+      held.resolve()
+      await release.promise
+    })
+    await held.promise
+    try {
+      expect(await sweepExpiredGridState()).toEqual({ status: "busy" })
+    } finally {
+      release.resolve()
+      await mutation
+    }
+    expect(await sweepExpiredGridState()).toEqual({ status: "swept", expiredPresences: 1, retiredTranscriptionSpaces: 0 })
   })
 
   test("reconciles an expired owner before rejoining the same room", async () => {
@@ -569,6 +702,11 @@ describe("grid", () => {
     expect(rooms[0]?.connectionStartedAt).toBeNull()
   })
 })
+
+async function earliestLease() {
+  const leases = await db.select({ leaseExpiresAt: gridPresence.leaseExpiresAt }).from(gridPresence)
+  return leases.map(({ leaseExpiresAt }) => leaseExpiresAt).sort((a, b) => a.getTime() - b.getTime())[0]
+}
 
 async function createFixture(label: string, userCount: number) {
   const space = await testUtils.createSpace(`Grid ${label}`)

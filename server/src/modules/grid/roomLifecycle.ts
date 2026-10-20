@@ -34,9 +34,20 @@ export type GridPresenceRemovalState = GridMutationState & {
   activeConnection?: GridConnection
 }
 
-/** Serializes global-avatar moves and room connection generations. */
+/**
+ * Serializes global-avatar moves and room connection generations. A user's
+ * single avatar can move between rooms in different Spaces, so a per-Space
+ * key would not order those moves. Reads never take it: snapshots rely on
+ * MVCC and trigger-bumped revisions instead.
+ */
 export async function lockGridMutations(tx: Transaction) {
   await tx.execute(sql`select pg_advisory_xact_lock(817263941)`)
+}
+
+/** Background maintenance takes the mutation lock only when it is free. */
+export async function tryLockGridMutations(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.execute<{ acquired: boolean }>(sql`select pg_try_advisory_xact_lock(817263941) as acquired`)
+  return row?.acquired === true
 }
 
 /**
