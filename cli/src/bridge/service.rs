@@ -472,7 +472,6 @@ pub(super) async fn restart_service(
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
-    clear_account_failure_ledgers(paths, account);
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let definition = service_definition_path(&account.service_label)?;
@@ -481,6 +480,40 @@ pub(super) async fn restart_service(
             return wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await;
         }
     }
+    restart_installed_service(paths, account, secrets).await?;
+    wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
+}
+
+/// Restarts an installed service so every agent retries now, without waiting
+/// for readiness. Returns false when no service is installed. Used by the
+/// self-healing triggers (login) that must not block on the bridge.
+pub(super) async fn kick_service(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    validate_service_paths(paths, account)?;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        if !service_definition_path(&account.service_label)?.is_file() {
+            return Ok(false);
+        }
+        restart_installed_service(paths, account, secrets).await?;
+        Ok(true)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = secrets;
+        Ok(false)
+    }
+}
+
+async fn restart_installed_service(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> Result<(), Box<dyn std::error::Error>> {
+    clear_account_failure_ledgers(paths, account);
     #[cfg(target_os = "macos")]
     {
         let installation = account.providers.first().ok_or_else(|| {
@@ -512,7 +545,8 @@ pub(super) async fn restart_service(
         )
         .into());
     }
-    wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Ok(())
 }
 
 // The command integration owns the public CLI surface; keep this API buildable while it is wired.

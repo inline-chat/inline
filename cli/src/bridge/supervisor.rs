@@ -143,9 +143,10 @@ where
                     {
                         return Err(provider_setup_required(problem).into());
                     }
-                    let record = ledger.record_failure(
+                    let record = ledger.record(
                         "provider_exited_during_startup",
                         Some(&description),
+                        FailureClass::Transient,
                         unix_now(),
                     );
                     let error = io::Error::other(description.clone());
@@ -178,17 +179,20 @@ where
                 {
                     return Err(provider_setup_required(problem).into());
                 }
+                if classify_failure(error.as_ref()) == FailureClass::NeedsSetup {
+                    return Err(error);
+                }
                 let requires_bridge_update = provider_probe_requires_bridge_update(
                     &launch.installation.provider_id,
                     &error.to_string(),
                 );
-                let record = ledger.record_failure(
+                let record = ledger.record_error(
                     if requires_bridge_update {
                         "provider_requires_bridge_update"
                     } else {
                         "provider_startup_failed"
                     },
-                    Some(&error.to_string()),
+                    error.as_ref(),
                     unix_now(),
                 );
                 crate::telemetry::report_bridge_runtime_error(

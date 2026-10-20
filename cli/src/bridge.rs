@@ -125,7 +125,7 @@ use settings::*;
 mod owner_control;
 mod projects;
 use owner_control::{
-    OwnerControl, owner_control_error_invalidates_authentication, owner_control_error_is_retryable,
+    OwnerConnectionEnd, OwnerControl, owner_control_error_invalidates_authentication,
 };
 mod workspace_rpc;
 use workspace_rpc::*;
@@ -430,6 +430,8 @@ fn install_bridge_logger(trace: bool) {
 
 /// How often a standby service retries the account lock held by another process.
 const INSTANCE_LOCK_STANDBY_POLL: Duration = Duration::from_secs(2);
+/// How often a running agent re-reads its operator allowlist.
+const POLICY_RELOAD_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Runs the account service under launchd/systemd. Both restart a failed exit
 /// every ten seconds, so failures that a restart cannot fix end successfully:
@@ -477,20 +479,68 @@ pub async fn run_service(
         }
     }
     match run_owned_service(&paths, trace).await {
-        Err(error) => match error.downcast_ref::<BridgeSetupRequired>() {
-            Some(setup) => {
-                stop_service_for_setup(Some(&paths), setup);
-                Ok(())
-            }
-            None => {
-                let failure = crate::errors::json_cli_error_from_error(error.as_ref()).code;
-                service_ledger.record_failure(&failure, Some(&error.to_string()), unix_now());
-                Err(error)
-            }
-        },
         Ok(()) => {
             service_ledger.clear();
             Ok(())
+        }
+        Err(error) => {
+            let setup = match error.downcast_ref::<BridgeSetupRequired>() {
+                Some(setup) => Some(BridgeSetupRequired::new(
+                    setup.reason,
+                    setup.message.clone(),
+                )),
+                // A proven revocation that surfaced from an owner request.
+                None if classify_failure(error.as_ref()) == FailureClass::NeedsSetup => Some(
+                    BridgeSetupRequired::new("owner_credential_expired", OWNER_SIGN_IN_EXPIRED),
+                ),
+                None => None,
+            };
+            if let Some(setup) = setup {
+                stop_service_for_setup(Some(&paths), &setup);
+                return Ok(());
+            }
+            // Transient or unclassified: exit for the service manager to
+            // restart, then wait out the persisted, jittered backoff.
+            let failure = crate::errors::json_cli_error_from_error(error.as_ref()).code;
+            service_ledger.record_error(&failure, error.as_ref(), unix_now());
+            Err(error)
+        }
+    }
+}
+
+/// Explains why an agent is parked, and whether a re-probe can heal it.
+fn provider_park_reason(
+    installation: &ProviderInstallationConfig,
+    error: &(dyn std::error::Error + 'static),
+) -> (&'static str, String) {
+    match error.downcast_ref::<BridgeSetupRequired>() {
+        Some(setup) => (setup.reason, setup.message.clone()),
+        None => (
+            PROVIDER_CREDENTIAL_SETUP,
+            format!(
+                "Inline signed out the bot for this agent; run `inline setup {}` again",
+                installation.provider_id
+            ),
+        ),
+    }
+}
+
+/// Holds a parked agent until shutdown (false) or, for a missing runtime,
+/// until a periodic re-probe finds it launchable again (true).
+async fn park_until_runtime_recovers(
+    installation: &ProviderInstallationConfig,
+    reason: &str,
+    reprobe_interval: Duration,
+    shutdown: &mut Option<tokio::sync::watch::Receiver<bool>>,
+) -> bool {
+    loop {
+        tokio::select! {
+            _ = wait_for_control_shutdown(shutdown) => return false,
+            _ = tokio::time::sleep(reprobe_interval) => {
+                if reason == PROVIDER_RUNTIME_SETUP && provider_runtime_recovered(installation) {
+                    return true;
+                }
+            }
         }
     }
 }
@@ -615,7 +665,8 @@ async fn run_owned_service(
                 )
                 .into());
             }
-            Err(error) if owner_control_error_is_retryable(error.as_ref()) => {
+            Err(error) => {
+                // Anything short of a proven revocation keeps retrying here.
                 owner_connection_failures = owner_connection_failures.saturating_add(1);
                 crate::telemetry::report_bridge_runtime_error(
                     "owner",
@@ -623,15 +674,17 @@ async fn run_owned_service(
                     error.as_ref(),
                     Some(owner_connection_failures),
                 );
-                let delay = provider_restart_delay(owner_connection_failures);
+                let delay = match classify_failure(error.as_ref()) {
+                    FailureClass::ServerWait(wait) => wait,
+                    _ => SERVICE_BACKOFF.jittered(owner_connection_failures),
+                };
                 eprintln!(
-                    "Owner connection unavailable; bridge will retry in {} seconds: {}",
-                    delay.as_secs(),
+                    "Owner connection unavailable; bridge will retry in {}: {}",
+                    describe_delay(delay),
                     safe_diagnostic(&error.to_string())
                 );
                 tokio::time::sleep(delay).await;
             }
-            Err(error) => return Err(error),
         }
     };
     // The service owns a working sign-in again; forget any earlier setup stop.
@@ -645,9 +698,9 @@ async fn run_owned_service(
         record => record.is_some(),
     };
     let mut service_stable = Box::pin(tokio::time::sleep(STABLE_AFTER));
-    let mut owner_authentication_invalidation = owner_control
+    let mut owner_connection_end = owner_control
         .as_ref()
-        .map(|control| control.authentication_invalidation_receiver());
+        .map(|control| control.connection_end_receiver());
     reconcile_owner_dm_chat_ids(
         &paths,
         &mut account,
@@ -715,6 +768,7 @@ async fn run_owned_service(
                 if *provider_shutdown.borrow() {
                     break Ok(());
                 }
+                let cycle_started = tokio::time::Instant::now();
                 let result = run_provider_installation(
                     &provider_config,
                     installation.clone(),
@@ -733,31 +787,47 @@ async fn run_owned_service(
                     },
                 )
                 .await;
-                match result {
+                let error = match result {
                     Ok(()) => break Ok(()),
-                    Err(error) if error.downcast_ref::<BridgeSetupRequired>().is_some() => {
-                        // Retrying cannot fix a missing runtime. Park this agent
-                        // until setup or an owner restart; siblings keep running.
-                        let message = error.to_string();
-                        FailureLedger::provider(&installation).record_needs_setup(
-                            "provider_configuration",
-                            &message,
-                            unix_now(),
-                        );
+                    Err(error) => error,
+                };
+                if cycle_started.elapsed() >= STABLE_AFTER {
+                    failures = 0;
+                }
+                let mut retry_shutdown = Some(provider_shutdown.clone());
+                match classify_failure(error.as_ref()) {
+                    FailureClass::NeedsSetup => {
+                        // Retrying cannot help. Park this agent; siblings keep
+                        // running. A missing runtime re-probes on its own; a
+                        // revoked bot waits for setup, which restarts the service.
+                        let (reason, message) = provider_park_reason(&installation, error.as_ref());
+                        let ledger = FailureLedger::provider(&installation);
+                        ledger.record_needs_setup(reason, &message, unix_now());
                         provider_readiness.mark_needs_setup(&installation_id, &message);
                         crate::telemetry::report_bridge_setup_required(
                             &installation.provider_id,
-                            "provider_configuration",
+                            reason,
                         );
                         eprintln!(
-                            "{provider_name} needs setup and will not restart until setup runs again: {}",
+                            "{provider_name} needs setup and is parked: {}",
                             safe_diagnostic(&message)
                         );
-                        let mut parked_shutdown = Some(provider_shutdown.clone());
-                        wait_for_control_shutdown(&mut parked_shutdown).await;
-                        break Ok(());
+                        let recovered = park_until_runtime_recovers(
+                            &installation,
+                            reason,
+                            PARKED_REPROBE_INTERVAL,
+                            &mut retry_shutdown,
+                        )
+                        .await;
+                        if !recovered {
+                            break Ok(());
+                        }
+                        ledger.clear();
+                        failures = 0;
+                        provider_readiness.mark_restarting(&installation_id);
+                        eprintln!("{provider_name} runtime is available again; starting it.");
                     }
-                    Err(error) => {
+                    class => {
                         failures = failures.saturating_add(1);
                         provider_readiness.mark_restarting(&installation_id);
                         crate::telemetry::report_bridge_runtime_error(
@@ -766,14 +836,17 @@ async fn run_owned_service(
                             error.as_ref(),
                             Some(failures),
                         );
+                        let delay = match class {
+                            FailureClass::ServerWait(wait) => wait,
+                            _ => SERVICE_BACKOFF.jittered(failures),
+                        };
                         eprintln!(
-                            "{provider_name} bridge cycle failed; reconnecting without affecting other agents: {}",
+                            "{provider_name} bridge cycle failed; reconnecting in {} without affecting other agents: {}",
+                            describe_delay(delay),
                             safe_diagnostic(&error.to_string())
                         );
-                        let mut delay = Box::pin(tokio::time::sleep(provider_restart_delay(failures)));
-                        let mut retry_shutdown = Some(provider_shutdown.clone());
                         tokio::select! {
-                            _ = &mut delay => {}
+                            _ = tokio::time::sleep(delay) => {}
                             _ = wait_for_control_shutdown(&mut retry_shutdown) => break Ok(()),
                         }
                     }
@@ -810,15 +883,22 @@ async fn run_owned_service(
                     ).into());
                 }
             }
-            _ = wait_for_owner_authentication_invalidation(&mut owner_authentication_invalidation) => {
-                let terminal_error = match clear_bridge_owner_authority(&paths, &owner_auth) {
-                    Ok(_) => BridgeSetupRequired::new(
-                        "owner_credential_expired",
-                        OWNER_SIGN_IN_EXPIRED,
+            end = wait_for_owner_connection_end(&mut owner_connection_end) => {
+                break Err(match end {
+                    OwnerConnectionEnd::Revoked => {
+                        match clear_bridge_owner_authority(&paths, &owner_auth) {
+                            Ok(_) => BridgeSetupRequired::new(
+                                "owner_credential_expired",
+                                OWNER_SIGN_IN_EXPIRED,
+                            ).into(),
+                            Err(error) => error,
+                        }
+                    }
+                    OwnerConnectionEnd::Lost => io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "the owner connection stopped reconnecting; restarting the bridge",
                     ).into(),
-                    Err(error) => error,
-                };
-                break Err(terminal_error);
+                });
             }
             _ = &mut service_stable, if service_recovery_pending => {
                 service_ledger.clear();
@@ -983,20 +1063,18 @@ async fn reconcile_owner_dm_chat_ids(
     Ok(())
 }
 
-async fn wait_for_owner_authentication_invalidation(
-    receiver: &mut Option<tokio::sync::watch::Receiver<bool>>,
-) {
+async fn wait_for_owner_connection_end(
+    receiver: &mut Option<tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>>>,
+) -> OwnerConnectionEnd {
     let Some(receiver) = receiver else {
-        std::future::pending::<()>().await;
-        return;
+        return std::future::pending().await;
     };
     loop {
-        if *receiver.borrow() {
-            return;
+        if let Some(end) = *receiver.borrow() {
+            return end;
         }
         if receiver.changed().await.is_err() {
-            std::future::pending::<()>().await;
-            return;
+            return std::future::pending().await;
         }
     }
 }
@@ -1216,13 +1294,101 @@ pub async fn refresh_after_update(
     updated_binary: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for loaded in load_all_installed_accounts(config)? {
-        validate_account(&loaded.account, &loaded.secrets)?;
+        if let Err(error) = validate_account(&loaded.account, &loaded.secrets) {
+            eprintln!(
+                "Skipped restarting an agent bridge that needs setup: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            continue;
+        }
         service::refresh_stable_binary(&loaded.paths, updated_binary)?;
-        service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
-        service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets)
-            .await?;
+        // The update itself succeeded. A bridge that is not healthy yet keeps
+        // retrying (or re-probing) on the new binary by itself.
+        let restarted = async {
+            service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
+            service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets)
+                .await
+        }
+        .await;
+        if let Err(error) = restarted {
+            eprintln!(
+                "The agent bridge restarted on the new version but is not healthy yet: {}. Check `inline bridge status`.",
+                safe_diagnostic(&error.to_string())
+            );
+        }
     }
     Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum LoginHeal {
+    Nothing,
+    Restart,
+    RefreshOwnerSignIn,
+}
+
+fn login_heal_plan(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> LoginHeal {
+    let owner_sign_in_needed = owner_credential(secrets).is_err()
+        || FailureLedger::service(paths)
+            .load()
+            .is_some_and(|record| record.needs_setup && record.failure.starts_with("owner_"));
+    if owner_sign_in_needed {
+        LoginHeal::RefreshOwnerSignIn
+    } else if account_has_failure_records(paths, account) {
+        LoginHeal::Restart
+    } else {
+        LoginHeal::Nothing
+    }
+}
+
+/// After a successful `inline login`: if the installed bridge for this account
+/// lost its owner sign-in, give it the new one; if the bridge recorded any
+/// failures, restart it so everything retries now. A healthy bridge is left
+/// alone. Returns a one-line note for the user when something changed.
+pub(crate) async fn heal_after_login(
+    config: &Config,
+    owner_auth: AuthCredential,
+) -> Result<Option<&'static str>, Box<dyn std::error::Error>> {
+    let Some(loaded) = load_installed_account(config)? else {
+        return Ok(None);
+    };
+    let owner_sign_in_needed =
+        match login_heal_plan(&loaded.paths, &loaded.account, &loaded.secrets) {
+            LoginHeal::Nothing => return Ok(None),
+            LoginHeal::Restart => false,
+            LoginHeal::RefreshOwnerSignIn => true,
+        };
+    if owner_sign_in_needed {
+        let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
+        let me = owner
+            .call(proto::GetMeInput {})
+            .await?
+            .user
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
+        if me.id != loaded.account.owner_user_id {
+            return Ok(None);
+        }
+        let credential = owner.credential()?;
+        let _account_mutation_lock = acquire_account_mutation_lock(&loaded.paths)?;
+        let mut secrets: AccountBridgeSecrets = read_required_json(&loaded.paths.secrets)?;
+        secrets.version = ACCOUNT_SECRETS_VERSION;
+        secrets.owner_auth = Some(credential);
+        secrets.owner_token.clear();
+        validate_account(&loaded.account, &secrets)?;
+        write_private_json(&loaded.paths.secrets, &secrets)?;
+    }
+    if !service::kick_service(&loaded.paths, &loaded.account, &loaded.secrets).await? {
+        return Ok(None);
+    }
+    Ok(Some(if owner_sign_in_needed {
+        "Reconnected the agent bridge with this sign-in and restarted it."
+    } else {
+        "Restarted the agent bridge so it retries now."
+    }))
 }
 
 pub async fn doctor(
@@ -1915,9 +2081,10 @@ async fn run_provider_installation(
     let health = service::RuntimeHealth::ready();
     if let Some(description) = process_status.exit_description() {
         health.mark_provider_unavailable();
-        provider_ledger.record_failure(
+        provider_ledger.record(
             "provider_exited_during_startup",
             Some(&description),
+            FailureClass::Transient,
             unix_now(),
         );
         return Err(io::Error::new(
@@ -1952,6 +2119,9 @@ async fn run_provider_installation(
     let mut provider_recovery_pending = provider_ledger.load().is_some();
     let mut provider_stable =
         Box::pin(tokio::time::sleep_until(provider_started_at + STABLE_AFTER));
+    // Hand edits to the operator allowlist apply without a restart.
+    let mut policy_reload = tokio::time::interval(POLICY_RELOAD_INTERVAL);
+    policy_reload.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     if let Some(readiness) = shared_provider_readiness.as_ref() {
         readiness.mark_ready(&installation.installation_id);
     }
@@ -2460,6 +2630,15 @@ async fn run_provider_installation(
                     provider_ledger.clear();
                     provider_recovery_pending = false;
                 }
+                _ = policy_reload.tick() => {
+                    if let Ok(policy) =
+                        operator_policy_for_provider(&account, &installation.provider_id)
+                        && policy != inbound_route.policy_snapshot()
+                    {
+                        inbound_route.replace_policy(policy);
+                        eprintln!("{provider_name} reloaded its operator allowlist from ~/.inline/config.toml.");
+                    }
+                }
                 description = &mut provider_exit => {
                     if let Some(task) = catalog_refresh.take() {
                         task.abort();
@@ -2522,11 +2701,12 @@ async fn run_provider_installation(
                     if provider_started_at.elapsed() >= STABLE_AFTER {
                         provider_ledger.clear();
                     }
-                    // Persisted, so a crash loop keeps backing off (up to an
-                    // hour) even across service restarts.
-                    let mut restart_record = provider_ledger.record_failure(
+                    // Persisted, so a crash loop keeps backing off (jittered, up
+                    // to five minutes) even across service restarts.
+                    let mut restart_record = provider_ledger.record(
                         "provider_exited",
                         Some(&description),
+                        FailureClass::Transient,
                         unix_now(),
                     );
                     provider_recovery_pending = true;
@@ -2642,9 +2822,10 @@ async fn run_provider_installation(
                                     {
                                         break 'runtime Err(provider_setup_required(problem).into());
                                     }
-                                    restart_record = provider_ledger.record_failure(
+                                    restart_record = provider_ledger.record(
                                         "provider_exited_during_restart",
                                         Some(&description),
+                                        FailureClass::Transient,
                                         unix_now(),
                                     );
                                     continue 'restart;
@@ -2707,9 +2888,12 @@ async fn run_provider_installation(
                                 ) {
                                     break 'runtime Err(provider_setup_required(problem).into());
                                 }
-                                restart_record = provider_ledger.record_failure(
+                                if classify_failure(error.as_ref()) == FailureClass::NeedsSetup {
+                                    break 'runtime Err(error);
+                                }
+                                restart_record = provider_ledger.record_error(
                                     "provider_restart_failed",
-                                    Some(&error.to_string()),
+                                    error.as_ref(),
                                     unix_now(),
                                 );
                                 crate::telemetry::report_bridge_runtime_error(

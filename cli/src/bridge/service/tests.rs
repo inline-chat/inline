@@ -1,4 +1,4 @@
-use super::super::BridgeNotice;
+use super::super::{BridgeNotice, FailureClass};
 use super::*;
 
 fn fixture() -> (AccountBridgeConfig, ProviderInstallationConfig, BridgePaths) {
@@ -716,8 +716,13 @@ fn provider_backoff_and_setup_state_reach_doctor() {
     let (account, provider, paths) = temporary_fixture(directory.path());
     let ledger = FailureLedger::provider(&provider);
     let now = unix_now();
-    ledger.record_failure("provider_exited", Some("exit status: 1"), now);
-    ledger.record_failure("provider_exited", None, now);
+    ledger.record(
+        "provider_exited",
+        Some("exit status: 1"),
+        FailureClass::Transient,
+        now,
+    );
+    ledger.record("provider_exited", None, FailureClass::Transient, now);
     let check = recovery_check(&paths, &provider);
     assert!(!check.ok);
     assert!(
@@ -766,10 +771,16 @@ fn service_restart_backoff_is_visible_without_claiming_setup() {
     let ledger = FailureLedger::service(&paths);
     let now = unix_now();
     for _ in 0..4 {
-        ledger.record_failure("network_error", Some("realtime connection closed"), now);
+        ledger.record_error(
+            "network_error",
+            &io::Error::other("realtime connection closed"),
+            now,
+        );
     }
     let record = ledger.load().unwrap();
-    assert_eq!(record.retry_delay(now), Duration::from_secs(8));
+    let delay = record.retry_delay(now);
+    // Fourth failure: full jitter within 1 s..=8 s.
+    assert!(delay >= Duration::from_secs(1) && delay <= Duration::from_secs(8));
     let check = recovery_check(&paths, &provider);
     assert!(!check.ok);
     assert!(

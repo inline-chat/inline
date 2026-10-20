@@ -9,11 +9,20 @@ use inline_client::{
     BackendError, ClientStatus, ClientStore, DialogFollowMode, UpdateDialogFollowModeRequest,
 };
 
+/// Why the owner connection stopped serving the bridge.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OwnerConnectionEnd {
+    /// The server revoked or expired the session; retrying cannot help.
+    Revoked,
+    /// The client stopped reconnecting for another reason; restart and retry.
+    Lost,
+}
+
 pub(super) struct OwnerControl {
     client: InlineClient,
     store: SqliteStore,
     drain: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    authentication_invalidated: tokio::sync::watch::Receiver<bool>,
+    connection_end: tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>>,
 }
 
 impl OwnerControl {
@@ -23,7 +32,7 @@ impl OwnerControl {
             client,
             store,
             drain: tokio::sync::Mutex::new(None),
-            authentication_invalidated: tokio::sync::watch::channel(false).1,
+            connection_end: tokio::sync::watch::channel(None).1,
         }
     }
 
@@ -83,12 +92,10 @@ impl OwnerControl {
             return Err(error.into());
         }
 
-        let (authentication_invalidated_tx, authentication_invalidated) =
-            tokio::sync::watch::channel(false);
+        let (connection_end_tx, connection_end) = tokio::sync::watch::channel(None);
         let drain = tokio::spawn(async move {
             while let Some(delivery) = events.recv_delivery().await {
-                let authentication_invalidated =
-                    owner_event_invalidates_authentication(delivery.event());
+                let end = owner_event_connection_end(delivery.event());
                 if let Err(error) = delivery.ack().await {
                     eprintln!(
                         "Owner control event acknowledgement failed: {}",
@@ -96,8 +103,8 @@ impl OwnerControl {
                     );
                     break;
                 }
-                if authentication_invalidated {
-                    let _ = authentication_invalidated_tx.send(true);
+                if end.is_some() {
+                    let _ = connection_end_tx.send(end);
                     break;
                 }
             }
@@ -106,14 +113,14 @@ impl OwnerControl {
             client,
             store,
             drain: tokio::sync::Mutex::new(Some(drain)),
-            authentication_invalidated,
+            connection_end,
         })
     }
 
-    pub(super) fn authentication_invalidation_receiver(
+    pub(super) fn connection_end_receiver(
         &self,
-    ) -> tokio::sync::watch::Receiver<bool> {
-        self.authentication_invalidated.clone()
+    ) -> tokio::sync::watch::Receiver<Option<OwnerConnectionEnd>> {
+        self.connection_end.clone()
     }
 
     pub(super) async fn follow_mode(
@@ -229,43 +236,31 @@ where
     }
 }
 
+/// Only a server-proven revocation (see the table in `backoff.rs`). A bare
+/// `AuthRequired` (not connected, unspecified rejection) is retried.
 pub(super) fn owner_control_error_invalidates_authentication(
     error: &(dyn std::error::Error + 'static),
 ) -> bool {
     matches!(
         error.downcast_ref::<ClientRequestError>(),
-        Some(ClientRequestError::Backend(BackendError {
-            category: ClientErrorCategory::AuthExpired
-                | ClientErrorCategory::AuthRequired
-                | ClientErrorCategory::ReloginRequired,
-            ..
-        }))
+        Some(ClientRequestError::Backend(BackendError { category, retry_after_seconds, .. }))
+            if classify_backend_failure(*category, *retry_after_seconds) == FailureClass::NeedsSetup
     )
 }
 
-pub(super) fn owner_control_error_is_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
-    matches!(
-        error.downcast_ref::<ClientRequestError>(),
-        Some(ClientRequestError::Backend(BackendError {
-            category: ClientErrorCategory::Network
-                | ClientErrorCategory::Timeout
-                | ClientErrorCategory::RateLimited
-                | ClientErrorCategory::Internal,
-            ..
-        }))
-    )
-}
-
-fn owner_event_invalidates_authentication(event: &ClientEvent) -> bool {
-    matches!(
-        event,
+fn owner_event_connection_end(event: &ClientEvent) -> Option<OwnerConnectionEnd> {
+    match event {
         ClientEvent::StatusChanged {
-            status: ClientStatus::AuthExpired
-                | ClientStatus::AuthRequired
-                | ClientStatus::LoggedOut,
+            status: ClientStatus::AuthExpired | ClientStatus::LoggedOut,
             ..
-        }
-    )
+        } => Some(OwnerConnectionEnd::Revoked),
+        // The client stops reconnecting here without proof of revocation.
+        ClientEvent::StatusChanged {
+            status: ClientStatus::AuthRequired,
+            ..
+        } => Some(OwnerConnectionEnd::Lost),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -343,7 +338,6 @@ mod tests {
     async fn owner_startup_does_not_retry_revoked_authority() {
         for category in [
             ClientErrorCategory::AuthExpired,
-            ClientErrorCategory::AuthRequired,
             ClientErrorCategory::ReloginRequired,
         ] {
             let mut attempts = 0;
@@ -383,61 +377,48 @@ mod tests {
     fn owner_control_classifies_terminal_authentication_failures() {
         for category in [
             ClientErrorCategory::AuthExpired,
-            ClientErrorCategory::AuthRequired,
             ClientErrorCategory::ReloginRequired,
         ] {
             let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
             assert!(owner_control_error_invalidates_authentication(&error));
         }
 
-        let network = ClientRequestError::Backend(BackendError::new(
-            ClientErrorCategory::Network,
-            "redacted",
-        ));
-        assert!(!owner_control_error_invalidates_authentication(&network));
-    }
-
-    #[test]
-    fn owner_control_retries_only_transient_connection_failures() {
         for category in [
+            ClientErrorCategory::AuthRequired,
             ClientErrorCategory::Network,
-            ClientErrorCategory::Timeout,
             ClientErrorCategory::RateLimited,
-            ClientErrorCategory::Internal,
-        ] {
-            let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
-            assert!(owner_control_error_is_retryable(&error));
-        }
-
-        for category in [
-            ClientErrorCategory::AuthExpired,
             ClientErrorCategory::ProtocolMismatch,
         ] {
             let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
-            assert!(!owner_control_error_is_retryable(&error));
+            assert!(!owner_control_error_invalidates_authentication(&error));
         }
     }
 
     #[test]
     fn owner_control_only_stops_for_terminal_authentication_status() {
-        for status in [
-            ClientStatus::AuthExpired,
-            ClientStatus::AuthRequired,
-            ClientStatus::LoggedOut,
-        ] {
-            assert!(owner_event_invalidates_authentication(
-                &ClientEvent::StatusChanged {
+        for status in [ClientStatus::AuthExpired, ClientStatus::LoggedOut] {
+            assert_eq!(
+                owner_event_connection_end(&ClientEvent::StatusChanged {
                     status,
                     failure: None,
-                }
-            ));
+                }),
+                Some(OwnerConnectionEnd::Revoked)
+            );
         }
+        assert_eq!(
+            owner_event_connection_end(&ClientEvent::StatusChanged {
+                status: ClientStatus::AuthRequired,
+                failure: None,
+            }),
+            Some(OwnerConnectionEnd::Lost)
+        );
 
-        assert!(!owner_event_invalidates_authentication(
-            &ClientEvent::StatusChanged {
+        assert_eq!(
+            owner_event_connection_end(&ClientEvent::StatusChanged {
                 status: ClientStatus::Reconnecting,
                 failure: None,
-            }
-        ));
+            }),
+            None
+        );
     }
 }

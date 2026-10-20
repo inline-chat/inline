@@ -1183,3 +1183,122 @@ fn diagnostics_are_bounded_and_redact_secret_markers() {
     );
     assert!(safe_diagnostic(&"x".repeat(1_000)).len() <= 513);
 }
+
+#[test]
+fn login_heals_only_a_bridge_that_lost_its_sign_in_or_recorded_failures() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path().join("accounts").join("42");
+    let (paths, account, mut secrets) = account_fixture_at(&root);
+    ensure_private_dir(&paths.root).expect("account directory");
+    assert_eq!(
+        login_heal_plan(&paths, &account, &secrets),
+        LoginHeal::Nothing
+    );
+
+    let provider = FailureLedger::provider(&account.providers[0]);
+    provider.record("provider_exited", None, FailureClass::Transient, 10);
+    assert_eq!(
+        login_heal_plan(&paths, &account, &secrets),
+        LoginHeal::Restart
+    );
+    provider.clear();
+
+    // The service stopped after the server revoked the owner session.
+    FailureLedger::service(&paths).record_needs_setup(
+        "owner_credential_expired",
+        "the Inline sign-in used by this bridge expired",
+        10,
+    );
+    assert_eq!(
+        login_heal_plan(&paths, &account, &secrets),
+        LoginHeal::RefreshOwnerSignIn
+    );
+    FailureLedger::service(&paths).clear();
+
+    // The revoked sign-in was already cleared from the bridge secrets.
+    secrets.owner_auth = None;
+    secrets.owner_token.clear();
+    assert_eq!(
+        login_heal_plan(&paths, &account, &secrets),
+        LoginHeal::RefreshOwnerSignIn
+    );
+}
+
+#[tokio::test]
+async fn a_parked_agent_resumes_when_its_runtime_is_installed() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let (account, _) = account_fixture();
+    let mut installation = account.providers[0].clone();
+    installation.executable = directory.path().join("codex");
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut shutdown = Some(shutdown_rx);
+    let parked_installation = installation.clone();
+    let parked = tokio::spawn(async move {
+        park_until_runtime_recovers(
+            &parked_installation,
+            PROVIDER_RUNTIME_SETUP,
+            Duration::from_millis(20),
+            &mut shutdown,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert!(!parked.is_finished(), "a missing runtime stays parked");
+    fs::write(&installation.executable, b"#!/bin/sh\n").expect("install runtime");
+    set_file_mode(&installation.executable, 0o755).expect("make executable");
+    let resumed = tokio::time::timeout(Duration::from_secs(5), parked)
+        .await
+        .expect("re-probe finds the runtime")
+        .expect("parked task");
+    assert!(resumed);
+}
+
+#[tokio::test]
+async fn a_revoked_bot_stays_parked_until_shutdown() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let (account, _) = account_fixture();
+    let mut installation = account.providers[0].clone();
+    installation.executable = directory.path().join("codex");
+    fs::write(&installation.executable, b"#!/bin/sh\n").expect("install runtime");
+    set_file_mode(&installation.executable, 0o755).expect("make executable");
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut shutdown = Some(shutdown_rx);
+    let parked = tokio::spawn(async move {
+        park_until_runtime_recovers(
+            &installation,
+            PROVIDER_CREDENTIAL_SETUP,
+            Duration::from_millis(20),
+            &mut shutdown,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert!(!parked.is_finished(), "a re-probe cannot fix a revoked bot");
+    shutdown_tx.send(true).expect("request shutdown");
+    let resumed = tokio::time::timeout(Duration::from_secs(5), parked)
+        .await
+        .expect("shutdown ends the park")
+        .expect("parked task");
+    assert!(!resumed);
+}
+
+#[test]
+fn park_reasons_distinguish_runtime_from_revoked_bot() {
+    let (account, _) = account_fixture();
+    let installation = &account.providers[0];
+    let runtime = provider_setup_required("the configured Codex runtime is missing");
+    assert_eq!(
+        provider_park_reason(installation, &runtime),
+        (
+            PROVIDER_RUNTIME_SETUP,
+            "the configured Codex runtime is missing".to_string()
+        )
+    );
+    let revoked = inline_client::ClientRequestError::Backend(inline_client::BackendError::new(
+        ClientErrorCategory::AuthExpired,
+        "session revoked",
+    ));
+    let (reason, message) = provider_park_reason(installation, &revoked);
+    assert_eq!(reason, PROVIDER_CREDENTIAL_SETUP);
+    assert!(message.contains("inline setup codex"));
+}

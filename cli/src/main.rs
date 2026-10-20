@@ -2961,6 +2961,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 },
             },
             Command::Login(args) => {
+                let completes_login = !args.send_code;
                 handle_login(
                     args,
                     &api,
@@ -2971,6 +2972,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     json_format,
                 )
                 .await?;
+                if completes_login {
+                    heal_bridge_after_login(&config, &auth_store, cli.json).await;
+                }
             }
             Command::Logout => {
                 let output = perform_auth_logout(&config, &auth_store, &local_db).await?;
@@ -2982,6 +2986,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             Command::Auth { command } => match command {
                 AuthCommand::Login(args) => {
+                    let completes_login = !args.send_code;
                     handle_login(
                         args,
                         &api,
@@ -2992,6 +2997,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         json_format,
                     )
                     .await?;
+                    if completes_login {
+                        heal_bridge_after_login(&config, &auth_store, cli.json).await;
+                    }
                 }
                 AuthCommand::Me => {
                     let me = fetch_authenticated_me(&config, &auth_store).await?;
@@ -5386,6 +5394,22 @@ fn require_token(auth_store: &AuthStore) -> Result<String, Box<dyn std::error::E
     match auth_store.load_token()? {
         Some(token) => Ok(token),
         None => Err(CliError::not_authenticated().into()),
+    }
+}
+
+/// A completed login also heals an installed agent bridge that lost its owner
+/// sign-in or recorded failures. Never fails the login itself.
+async fn heal_bridge_after_login(config: &Config, auth_store: &AuthStore, json: bool) {
+    let Ok(owner_auth) = require_owner_credential(auth_store) else {
+        return;
+    };
+    match bridge::heal_after_login(config, owner_auth).await {
+        Ok(Some(note)) if !json => eprintln!("{note}"),
+        Err(error) if !json => eprintln!(
+            "Signed in, but the agent bridge could not be refreshed: {}. Run `inline bridge doctor`.",
+            diagnostics::safe_text(&error.to_string())
+        ),
+        _ => {}
     }
 }
 
