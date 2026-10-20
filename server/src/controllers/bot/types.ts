@@ -326,6 +326,7 @@ export const TForwardMessageInput = t.Object({
   chat_id: TTargetId,
   from_chat_id: TTargetId,
   message_id: TTargetId,
+  copy: t.Optional(t.Boolean()),
 })
 
 export const TPinMessageInput = t.Object({

@@ -42,7 +42,7 @@ await bot.setWebhook({
 
 `sendMessage` and `editMessageText` parse [Inline's bounded Markdown surface](../protocol/docs/markdown.md) by default; set `parse_markdown: false` to preserve the supplied syntax literally. Supported blocks include headings, lists/checklists, quotes, tables, separators, fenced code, HTTP(S) images, and Inline's documented disclosure/footer extensions. Unsupported or ambiguous incomplete syntax remains text; during streaming edits, an open full-line code fence is code through the current snapshot's end. Ordinary messages return plain `text` plus Telegram-aligned UTF-16 `entities`, so mentions are safe to detect without parsing text. Structural messages also return `rich_message.blocks`, whose text-bearing blocks contain recursive rich text. Every message has `peer_id: { user_id } | { chat_id }`; expanded `chat` data is optional and omitted from repeated history and nested replies.
 
-Use `editMessageActions` to replace actions without changing text (`actions: []` clears them). `forwardMessages` and `deleteMessages` accept 1–100 IDs and skip missing IDs. `setThreadTitle` can update `title`, `emoji`, or both.
+Use `editMessageActions` to replace actions without changing text (`actions: []` clears them). `forwardMessages` and `deleteMessages` accept 1–100 IDs and skip missing IDs. Pass `copy: true` to `forwardMessage` or `forwardMessages` to send without a forward header; this is how a bot resends media it did not upload. `setThreadTitle` can update `title`, `emoji`, or both.
 
 Polling uses the same ordered backlog and is mutually exclusive with an enabled webhook:
 

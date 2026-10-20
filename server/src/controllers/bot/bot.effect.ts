@@ -353,8 +353,8 @@ const BotMethodDocumentation = {
     description:
       "Deletes every installed skill published by the authenticated bot harness.",
   },
-  forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat." },
-  forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages and returns their new IDs. Missing source IDs are skipped." },
+  forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat. Set copy to send it without a forward header; use this to resend media the bot did not upload." },
+  forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages and returns their new IDs. Missing source IDs are skipped. Set copy to send them without forward headers." },
   pinMessage: { summary: "Pin a message", description: "Pins one message in a chat." },
   unpinMessage: { summary: "Unpin a message", description: "Unpins one message in a chat." },
   getChatParticipant: { summary: "Get a chat participant", description: "Returns one participant of an accessible chat, with space membership when applicable." },

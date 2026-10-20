@@ -1618,6 +1618,7 @@ const forwardMessage = async (
     fromPeerId: sourcePeer,
     toPeerId: destinationPeer,
     messageIds: [BigInt(messageId)],
+    shareForwardHeader: parseBotBoolean(input.copy) !== true,
   }, context)
   const forwardedMessageId = result.messageIds[0]
   if (!forwardedMessageId) throw new InlineError(InlineError.ApiError.INTERNAL)
@@ -1661,6 +1662,7 @@ const forwardMessages = async (
       fromPeerId: sourcePeer,
       toPeerId: destinationPeer,
       messageIds: forwardable.map(BigInt),
+      shareForwardHeader: parseBotBoolean(input.copy) !== true,
     },
     context,
   )

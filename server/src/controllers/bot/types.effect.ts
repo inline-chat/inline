@@ -1101,10 +1101,16 @@ export const SetMySkillsInput = Schema.Struct({
   description: "Installed skills to publish for the authenticated bot harness.",
 })
 
+const ForwardCopy = Schema.optionalKey(Schema.Boolean).annotateKey({
+  description:
+    "Send as new messages without a forward header, like Telegram's copyMessage. Media is copied into the bot's ownership. Defaults to false.",
+})
+
 export const ForwardMessageInput = Schema.Struct({
   chat_id: ChatId,
   from_chat_id: ChatId,
   message_id: MessageId,
+  copy: ForwardCopy,
 }).annotate({ identifier: "ForwardMessageInput" })
 
 export const ForwardMessagesInput = Schema.Struct({
@@ -1114,6 +1120,7 @@ export const ForwardMessagesInput = Schema.Struct({
     Schema.isMinLength(1),
     Schema.isMaxLength(100),
   ),
+  copy: ForwardCopy,
 }).annotate({
   identifier: "ForwardMessagesInput",
   description:

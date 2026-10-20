@@ -550,12 +550,16 @@ export type ForwardMessageParams = {
   chat_id: BotInputId
   from_chat_id: BotInputId
   message_id: BotInputId
+  /** Send as a new message without a forward header (like Telegram's copyMessage). */
+  copy?: boolean
 }
 
 export type ForwardMessagesParams = {
   chat_id: BotInputId
   from_chat_id: BotInputId
   message_ids: BotInputId[]
+  /** Send as new messages without a forward header (like Telegram's copyMessages). */
+  copy?: boolean
 }
 
 export type PinMessageParams = {
