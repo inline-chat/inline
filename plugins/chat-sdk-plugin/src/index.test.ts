@@ -254,7 +254,7 @@ describe("Inline adapter", () => {
         file: { file_id: "doc", download_url: "https://signed.example/secret", file_name: "report.txt" },
       },
     })
-    expect(parsed.attachments[0]?.fetchMetadata).toEqual({ fileId: "doc" })
+    expect(parsed.attachments[0]?.fetchMetadata).toEqual({ fileId: "doc", chatId: "10", messageId: "1" })
     expect(parsed.attachments[0]?.url).toBeUndefined()
     expect(typeof parsed.attachments[0]?.fetchData).toBe("function")
     await expect(
@@ -323,8 +323,22 @@ describe("Inline adapter", () => {
     const data = await rehydrated.fetchData!()
     expect(new TextDecoder().decode(data)).toBe("download")
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token")
+    const getFileUrl = new URL(seen[0]!.url)
+    expect(getFileUrl.searchParams.get("chat_id")).toBe("10")
+    expect(getFileUrl.searchParams.get("message_id")).toBe("1")
     expect(seen[1]?.headers.has("authorization")).toBe(false)
     expect(seen[1]?.url).toBe("https://files.example/fresh")
+  })
+
+  test("falls back to an id-only getFile when a message has no chat id", async () => {
+    const { adapter } = await setup()
+    const { chat: _chat, ...withoutChat } = message()
+    const parsed = adapter.parseMessage({
+      ...withoutChat,
+      peer_id: { user_id: 5 },
+      media: { type: "document", file: { file_id: "doc" } },
+    })
+    expect(parsed.attachments[0]?.fetchMetadata).toEqual({ fileId: "doc" })
   })
 
   test("slash commands dispatch once in groups and DMs, with working channel replies", async () => {

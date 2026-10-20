@@ -178,14 +178,21 @@ export class InlineAdapter implements Adapter<InlineThreadId, BotMessage> {
 
   private messageAttachments(raw: BotMessage): Attachment[] {
     const attachments: Attachment[] = []
+    // getFile authorizes a received file through the message that carries it.
+    const chatId = raw.chat?.chat_id ?? raw.peer_id.chat_id
+    const location = chatId !== undefined ? { chatId: String(chatId), messageId: String(raw.message_id) } : {}
     const append = (file: BotFile, kind: string) => attachments.push(this.attachment(
-      file, kind === "photo" ? "image" : kind === "voice" ? "audio" : kind === "video" ? "video" : "file",
+      file, kind === "photo" ? "image" : kind === "voice" ? "audio" : kind === "video" ? "video" : "file", location,
     ))
     if (raw.media && "file" in raw.media) append(raw.media.file, raw.media.type)
     return attachments
   }
 
-  private attachment(file: BotFile, type: Attachment["type"]): Attachment {
+  private attachment(
+    file: BotFile,
+    type: Attachment["type"],
+    location: { chatId?: string; messageId?: string },
+  ): Attachment {
     return this.rehydrateAttachment({
       type,
       name: file.file_name,
@@ -193,17 +200,20 @@ export class InlineAdapter implements Adapter<InlineThreadId, BotMessage> {
       size: file.file_size,
       width: file.width,
       height: file.height,
-      fetchMetadata: { fileId: file.file_id },
+      fetchMetadata: { fileId: file.file_id, ...location },
     })
   }
 
   rehydrateAttachment(attachment: Attachment): Attachment {
     const fileId = attachment.fetchMetadata?.fileId
     if (!fileId) return attachment
+    const chatId = attachment.fetchMetadata?.chatId
+    const messageId = attachment.fetchMetadata?.messageId
+    const location = chatId && messageId ? { chat_id: chatId, message_id: messageId } : {}
     return {
       ...attachment,
       fetchData: async () => {
-        const { file } = result(await this.client.getFile({ file_id: fileId }))
+        const { file } = result(await this.client.getFile({ file_id: fileId, ...location }))
         if (!file.download_url) throw new Error("Inline did not return a file download URL")
         // Refresh the signed URL on each download; never attach the bot authorization header.
         const response = await this.fetchImpl(file.download_url)
