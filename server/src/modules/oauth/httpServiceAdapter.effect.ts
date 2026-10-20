@@ -70,6 +70,7 @@ export interface OAuthHttpHandlers {
   readonly hostedLoginVerifyEmail: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
   readonly hostedLoginSendSms: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
   readonly hostedLoginVerifySms: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
+  readonly hostedLoginConfirm: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
 }
 
 const badRequest = (): Response =>
@@ -163,6 +164,8 @@ const execute = async (
       return handlers.hostedLoginSendSms(request, body, clientIp)
     case "hostedLoginVerifySms":
       return handlers.hostedLoginVerifySms(request, body, clientIp)
+    case "hostedLoginConfirm":
+      return handlers.hostedLoginConfirm(request, body, clientIp)
   }
 }
 

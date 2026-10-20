@@ -108,6 +108,14 @@ const OAuthVerificationPayload = Schema.Struct({
   identifier: "OAuthEmailVerificationForm",
 })
 
+const OAuthCliConfirmationPayload = Schema.Struct({
+  csrf: OptionalString,
+  code: OptionalString,
+  decision: OptionalString,
+}).annotate({
+  identifier: "OAuthCliConfirmationForm",
+})
+
 const ProviderContinuationPayload = Schema.Struct({
   attempt_id: OptionalString,
   continuation: OptionalString,
@@ -425,6 +433,13 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
     HttpApiEndpoint.post("hostedLoginVerifySms", "/v1/auth/login/verify-phone-code", {
       payload: oauthPayloads(OAuthVerificationPayload),
       success: [OAuthHtml, OAuthSeeOther],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("hostedLoginConfirm", "/v1/auth/login/confirm", {
+      payload: oauthPayloads(OAuthCliConfirmationPayload),
+      success: OAuthHtml,
       error: oauthHtmlErrors,
     }),
   )
@@ -911,6 +926,7 @@ const oauthResponseContracts: Readonly<
     badRequestVariant,
     ...oauthHtmlErrorVariants,
   ],
+  hostedLoginConfirm: [htmlVariant(200, ["cache-control"]), badRequestVariant, ...oauthHtmlErrorVariants],
   providerStart: [
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     ...oauthHtmlErrorVariants,

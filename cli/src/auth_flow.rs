@@ -352,13 +352,13 @@ async fn handle_browser_login(
     if json {
         eprintln!("Open this URL to sign in:\n{}", login.browser_url);
         eprintln!(
-            "Confirm this code in the browser: {}",
+            "After signing in, enter this code in the browser: {}",
             login.verification_code
         );
     } else {
         println!("Open this URL to sign in:\n{}", login.browser_url);
         println!(
-            "Confirm this code in the browser: {}",
+            "After signing in, enter this code in the browser: {}",
             login.verification_code
         );
     }

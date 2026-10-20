@@ -22,6 +22,8 @@ export type HostedAuthClient = {
   clientVersion?: string
   osVersion?: string
   deviceName?: string
+  /** Keyed fingerprint of the network that started a CLI login (never the raw IP). */
+  requestNetwork?: string
 }
 
 export const nativeAppAuthRequests = pgTable(

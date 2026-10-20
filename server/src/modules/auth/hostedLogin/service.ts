@@ -1,5 +1,6 @@
-import { and, eq, gt, isNull } from "drizzle-orm"
-import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { and, eq, gt, isNull, or } from "drizzle-orm"
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto"
+import { isIP } from "node:net"
 import { db } from "@in/server/db"
 import {
   inlineProtocolAuthKeys,
@@ -73,6 +74,83 @@ export async function beginInlineProtocolBrowserLogin(input: {
     verificationCode: code,
     expiresAt,
   }
+}
+
+/**
+ * A keyed fingerprint of the client's network: the full IPv4 address, or the
+ * /64 for IPv6 (temporary addresses rotate within it). Used only to tell the
+ * person confirming a CLI login whether it started on their own network.
+ */
+export function networkFingerprint(ip: string | undefined): string | undefined {
+  if (!ip || isIP(ip) === 0) return undefined
+  const network = isIP(ip) === 6 && !ip.toLowerCase().startsWith("::ffff:")
+    ? expandIpv6(ip).slice(0, 4).join(":")
+    : ip.toLowerCase().replace(/^::ffff:/, "")
+  return createHmac("sha256", process.env["ENCRYPTION_KEY"] ?? "inline-login-network")
+    .update(`login-network-v1:${network}`)
+    .digest("base64url")
+    .slice(0, 22)
+}
+
+function expandIpv6(ip: string): string[] {
+  const [head = "", tail = ""] = ip.toLowerCase().split("%", 1)[0]!.split("::")
+  const left = head ? head.split(":") : []
+  const right = tail ? tail.split(":") : []
+  const fill = ip.includes("::") ? Array<string>(Math.max(0, 8 - left.length - right.length)).fill("0") : []
+  return [...left, ...fill, ...right].map((part) => part.padStart(4, "0"))
+}
+
+/**
+ * Records which account proved itself for a CLI login without authorizing the
+ * CLI yet. The person must still confirm the code shown in their terminal.
+ *
+ * The browser link's capability is a bearer secret the CLI owner also holds
+ * (their terminal printed it). Proof rotates it, and only the proving browser
+ * receives the replacement, so a phisher's copy of the link can no longer
+ * reach the confirmation step. Returns the new capability, or undefined when
+ * the transaction is no longer pending for this account.
+ */
+export async function markHostedLoginProven(input: {
+  transactionId: string
+  account: AuthenticatedAccount
+  now?: Date
+}): Promise<string | undefined> {
+  const now = input.now ?? new Date()
+  const capability = randomCapability()
+  const updated = await db.update(loginTransactions).set({
+    userId: input.account.userId,
+    authMethod: input.account.method,
+    capabilityHash: digest(capability),
+    browserCsrfHash: null,
+  }).where(and(
+    eq(loginTransactions.id, input.transactionId),
+    eq(loginTransactions.status, "pending"),
+    eq(loginTransactions.targetKind, "inline_protocol_key"),
+    gt(loginTransactions.expiresAt, now),
+    isNull(loginTransactions.cancelledAt),
+    or(isNull(loginTransactions.userId), eq(loginTransactions.userId, input.account.userId)),
+  )).returning({ id: loginTransactions.id })
+  return updated.length === 1 ? capability : undefined
+}
+
+export async function cancelHostedLogin(transactionId: string, now = new Date()): Promise<void> {
+  await db.update(loginTransactions).set({ status: "cancelled", cancelledAt: now }).where(and(
+    eq(loginTransactions.id, transactionId),
+    eq(loginTransactions.status, "pending"),
+  ))
+}
+
+/** Issues a fresh browser CSRF value for a pending transaction. */
+export async function issueHostedLoginCsrf(transactionId: string): Promise<string> {
+  const csrf = randomBytes(32).toString("base64url")
+  await db.update(loginTransactions).set({
+    browserCsrfHash: createHash("sha256").update(csrf).digest(),
+  }).where(and(eq(loginTransactions.id, transactionId), eq(loginTransactions.status, "pending")))
+  return csrf
+}
+
+export async function getHostedLoginById(transactionId: string) {
+  return (await db.select().from(loginTransactions).where(eq(loginTransactions.id, transactionId)).limit(1))[0]
 }
 
 export async function beginOAuthHostedLogin(input: {

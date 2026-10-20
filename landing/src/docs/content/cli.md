@@ -49,8 +49,9 @@ For a remote server without a browser:
 inline login --browser --no-open
 ```
 
-Open the returned approval URL on your own computer. Keep the command running
-until approval completes, then run `inline me --json` on the server. Never copy
+Open the returned approval URL on your own computer. After you sign in, enter
+the 6-digit code the command printed to confirm the CLI. Keep the command
+running until approval completes, then run `inline me --json` on the server. Never copy
 session files or print tokens to move authentication between hosts.
 
 ## Update

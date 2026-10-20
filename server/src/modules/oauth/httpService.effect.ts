@@ -33,6 +33,7 @@ export type OAuthHttpOperation =
   | "hostedLoginVerifyEmail"
   | "hostedLoginSendSms"
   | "hostedLoginVerifySms"
+  | "hostedLoginConfirm"
 
 export interface OAuthHttpInput {
   readonly request: Request

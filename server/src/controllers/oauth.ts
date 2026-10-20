@@ -31,6 +31,7 @@ import {
   handleHostedLoginSendSms,
   handleHostedLoginVerifyEmail,
   handleHostedLoginVerifySms,
+  handleHostedLoginConfirm,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
 
 const executeLegacyOAuth = async (
@@ -72,6 +73,8 @@ export const oauth = new Elysia({ name: "oauth" })
     handleHostedLoginSendSms(request, body, legacyOAuthClientIp(request)))
   .post("/v1/auth/login/verify-phone-code", ({ request, body }) =>
     handleHostedLoginVerifySms(request, body, legacyOAuthClientIp(request)))
+  .post("/v1/auth/login/confirm", ({ request, body }) =>
+    handleHostedLoginConfirm(request, body, legacyOAuthClientIp(request)))
   .get("/v1/auth/provider/start", ({ request }) =>
     executeLegacyOAuth(() => handleProviderStart(request, legacyOAuthClientIp(request))),
   )

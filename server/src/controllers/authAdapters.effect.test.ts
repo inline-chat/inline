@@ -62,6 +62,7 @@ const makeOAuthHandlers = (
   hostedLoginVerifyEmail: async () => unused("hostedLoginVerifyEmail"),
   hostedLoginSendSms: async () => unused("hostedLoginSendSms"),
   hostedLoginVerifySms: async () => unused("hostedLoginVerifySms"),
+  hostedLoginConfirm: async () => unused("hostedLoginConfirm"),
   ...overrides,
 })
 

@@ -55,7 +55,9 @@ For a remote host, prefer browser approval without launching a local browser:
 inline login --browser --no-open
 ```
 
-Give the user the returned approval URL and wait for completion; then run
+Give the user the returned approval URL and the 6-digit code that
+`inline login` prints with it. After signing in, the browser asks the user to
+enter that code to confirm the CLI. Wait for completion; then run
 `inline me --json --compact` in that same environment. Do not copy session
 files or expose tokens.
 

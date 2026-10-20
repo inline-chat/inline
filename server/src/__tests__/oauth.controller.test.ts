@@ -194,7 +194,7 @@ describe("OAuth controller", () => {
     expect(chooserHtml).toContain('href="/v1/auth/login?method=phone"')
     expect(chooserHtml).toContain("provider=google&amp;purpose=hosted_login")
     expect(chooserHtml).toContain("provider=apple&amp;purpose=hosted_login")
-    expect(chooserHtml.match(/class="method-button"/g)).toHaveLength(4)
+    expect(chooserHtml.match(/<a class="button" href=/g)).toHaveLength(4)
     expect(chooserHtml).not.toContain("Confirm that this code matches")
     expect(chooserHtml).not.toContain("CLI code")
     expect(chooserHtml).not.toContain('name="email"')
@@ -230,35 +230,36 @@ describe("OAuth controller", () => {
     expect(phoneHtml).not.toContain('name="invite_code"')
   })
 
-  it("shows client-bound proof only to the Inline CLI login target", async () => {
-    const oauthChooserHtml = await hostedLoginChooser("oauth_authorization", "123456").text()
-    expect(oauthChooserHtml).not.toContain("Confirm that this code matches")
-    expect(oauthChooserHtml).not.toContain("123456")
+  it("never shows the CLI code in the browser and names who is asking", async () => {
+    const oauthChooserHtml = await hostedLoginChooser("oauth_authorization", {
+      kind: "verified-app", label: "ChatGPT", detail: "chatgpt.com",
+    }).text()
+    expect(oauthChooserHtml).toContain("Sign in to connect ChatGPT to your Inline account.")
 
-    const cliChooserHtml = await hostedLoginChooser("inline_protocol_key", "654321").text()
-    expect(cliChooserHtml).toContain("Confirm that this code matches the one shown in your Inline CLI.")
-    expect(cliChooserHtml).toContain("654321")
+    const cliChooserHtml = await hostedLoginChooser("inline_protocol_key", {
+      kind: "cli", label: "Inline CLI", detail: "Mo’s MacBook",
+    }).text()
+    expect(cliChooserHtml).toContain("Sign in to connect the Inline CLI to your account.")
+    expect(cliChooserHtml).toContain("Mo’s MacBook")
+    expect(cliChooserHtml).not.toContain("Confirm that this code matches")
 
     const oauthHtml = await hostedLoginVerificationForm(
       "oauth_authorization",
-      "123456",
       "csrf-token",
       "email",
       "person@example.com",
     ).text()
-    expect(oauthHtml).toContain("We sent a 6-digit code to person@example.com.")
-    expect(oauthHtml).not.toContain("CLI code")
-    expect(oauthHtml).not.toContain("123456")
+    expect(oauthHtml).toContain("We sent a 6-digit code to <strong>person@example.com</strong>.")
     expect(oauthHtml).not.toContain('name="invite_code"')
 
     const cliHtml = await hostedLoginVerificationForm(
       "inline_protocol_key",
-      "654321",
       "csrf-token",
       "email",
       "person@example.com",
     ).text()
-    expect(cliHtml).toContain("CLI code: <strong>654321</strong>")
+    expect(cliHtml).not.toContain("CLI code")
+    expect(cliHtml).toContain("<summary>Have an invite code?</summary>")
     expect(cliHtml).toContain('name="invite_code"')
   })
 

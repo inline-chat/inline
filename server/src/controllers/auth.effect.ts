@@ -66,6 +66,7 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   OAuthEndpoints.hostedLoginVerifyEmail,
   OAuthEndpoints.hostedLoginSendSms,
   OAuthEndpoints.hostedLoginVerifySms,
+  OAuthEndpoints.hostedLoginConfirm,
   OAuthEndpoints.oauthMetadata,
   OAuthEndpoints.oauthRegister,
   OAuthEndpoints.oauthRegisterAlias,
@@ -237,6 +238,9 @@ export const makeAuthRouteGroup = () => {
         )
         .handleRaw("hostedLoginVerifySms", ({ request }) =>
           execute(executeOAuth("hostedLoginVerifySms", request)),
+        )
+        .handleRaw("hostedLoginConfirm", ({ request }) =>
+          execute(executeOAuth("hostedLoginConfirm", request)),
         )
         .handleRaw("providerCallbackGoogle", ({ request }) =>
           execute(executeOAuth("providerCallbackGoogle", request)),

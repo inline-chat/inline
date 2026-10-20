@@ -432,6 +432,23 @@ describe("Effect OAuth routes", () => {
     }
   })
 
+  it("declares the CLI confirmation and consent-cancel pages it serves", async () => {
+    const { hostedLoginConfirmPage } = await import("../modules/auth/hostedLogin/httpHandlers")
+    const transaction = { client: { deviceName: "Laptop" }, createdAt: new Date() }
+    const confirm = hostedLoginConfirmPage({ transaction, csrf: "c" })
+    const rejected = hostedLoginConfirmPage({ transaction, csrf: "c", error: "That code doesn’t match." })
+    expect(rejected.status).toBe(400)
+    for (const response of [confirm, rejected]) {
+      const validated = await Effect.runPromise(validateOAuthResponse("hostedLoginConfirm", response))
+      expect(validated.status).toBe(response.status)
+    }
+    const cancelled = await Effect.runPromise(validateOAuthResponse("consent", new Response("<!doctype html>", {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "set-cookie": "inline_ar=; Max-Age=0" },
+    })))
+    expect(cancelled.status).toBe(200)
+  })
+
   it("rejects undeclared OAuth responses before serving them", async () => {
     const failure = await Effect.runPromise(
       Effect.flip(
@@ -846,6 +863,7 @@ describe("Effect OAuth routes", () => {
         hostedLoginVerifyEmail: async () => response(),
         hostedLoginSendSms: async () => response(),
         hostedLoginVerifySms: async () => response(),
+        hostedLoginConfirm: async () => response(),
       }
       const kernel = makeKernel({
         oauth: makeOAuthHttpService(handlers),
@@ -919,6 +937,7 @@ describe("Effect OAuth routes", () => {
       "/revoke",
       "/token",
       "/v1/auth/login",
+      "/v1/auth/login/confirm",
       "/v1/auth/login/send-email-code",
       "/v1/auth/login/send-sms-code",
       "/v1/auth/login/verify-email-code",

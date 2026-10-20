@@ -44,6 +44,7 @@ import { upgradeInlineProtocolSession } from "./upgradeSession"
 import {
   beginInlineProtocolBrowserLogin,
   inlineProtocolBrowserLoginStatus,
+  networkFingerprint,
 } from "@in/server/modules/auth/hostedLogin/service"
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1_000
@@ -174,7 +175,11 @@ export class InlineProtocolAuthOperations {
         deviceName: boundedString(request.client.deviceName, MAX_DEVICE_NAME_BYTES),
       }).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0))
       : {}
-    const result = await beginInlineProtocolBrowserLogin({ authKeyId, client })
+    const requestNetwork = networkFingerprint(context.metadata?.ip)
+    const result = await beginInlineProtocolBrowserLogin({
+      authKeyId,
+      client: requestNetwork ? { ...client, requestNetwork } : client,
+    })
     return {
       loginTransactionId: result.loginTransactionId,
       browserUrl: result.browserUrl,

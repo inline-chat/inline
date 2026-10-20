@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 264,
+  "count": 265,
   "methodCounts": {
     "ALL": 3,
     "GET": 103,
     "OPTIONS": 18,
-    "POST": 139,
+    "POST": 140,
     "WS": 1
   },
-  "sha256": "886c959ba02972e44663bfd6740667ba5e84d6bf5577f021bc3cd4cd766a5e10",
+  "sha256": "8162c427519ef6cd6f9f218c0f54c70edb7dfdcd731aac9d30816dcfae20b670",
   "routes": [
     {
       "method": "ALL",
@@ -829,6 +829,10 @@
     {
       "method": "POST",
       "path": "/v1/addReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/confirm"
     },
     {
       "method": "POST",

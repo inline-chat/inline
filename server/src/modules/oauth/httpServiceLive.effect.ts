@@ -31,6 +31,7 @@ import {
   handleHostedLoginSendSms,
   handleHostedLoginVerifyEmail,
   handleHostedLoginVerifySms,
+  handleHostedLoginConfirm,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
 import { handleMcpEvents } from "@in/server/modules/mcpEvents/service"
 import {
@@ -123,6 +124,7 @@ export const OAuthHttpServiceLive = Layer.effect(
         hostedLoginVerifyEmail: handleHostedLoginVerifyEmail,
         hostedLoginSendSms: handleHostedLoginSendSms,
         hostedLoginVerifySms: handleHostedLoginVerifySms,
+        hostedLoginConfirm: handleHostedLoginConfirm,
       }),
     ),
   ),

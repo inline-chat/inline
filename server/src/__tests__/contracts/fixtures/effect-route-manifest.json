@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 319,
+  "count": 320,
   "methodCounts": {
     "DELETE": 1,
     "GET": 153,
-    "POST": 163,
+    "POST": 164,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "9cc716886cf0f2bb569141bc7fe1fcc6558c5953dbb4d13dcd891d891f720a66",
+  "sha256": "0aa50f8de98f44492cb10ac00a131d64d9093dac491029e0922ecb4e170a1ccd",
   "routes": [
     {
       "method": "DELETE",
@@ -1041,6 +1041,10 @@
     {
       "method": "POST",
       "path": "/v1/addReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/confirm"
     },
     {
       "method": "POST",
