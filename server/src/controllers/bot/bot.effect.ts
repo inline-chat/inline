@@ -298,7 +298,7 @@ const BotMethodDocumentation = {
   deleteReaction: { summary: "Delete a reaction", description: "Removes the bot's emoji reaction from one message." },
   answerMessageAction: { summary: "Answer a message action", description: "Acknowledges an action interaction and optionally shows a short toast." },
   sendChatAction: { summary: "Send a chat action", description: "Publishes a short-lived typing or upload indicator." },
-  getFile: { summary: "Get a file", description: "Returns metadata and a short-lived download URL for a Bot-owned file or a file in a currently accessible message." },
+  getFile: { summary: "Get a file", description: "Returns metadata and a short-lived download URL for a Bot-owned file or a file in a currently accessible message. Pass chat_id and message_id of that message; the file_id-only form is legacy." },
   getUpdates: { summary: "Get updates", description: "Long-polls the authenticated Bot's bounded pending-update queue." },
   setWebhook: { summary: "Set webhook", description: "Enables or replaces webhook delivery for the same pending-update queue." },
   deleteWebhook: { summary: "Delete webhook", description: "Disables webhook delivery while preserving pending updates unless explicitly dropped." },

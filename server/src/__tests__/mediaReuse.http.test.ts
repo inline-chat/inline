@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { eq } from "drizzle-orm"
 import { app } from "../legacyServer"
 import { db } from "@in/server/db"
@@ -8,6 +8,7 @@ import { documents, files, photoSizes, photos, users } from "@in/server/db/schem
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { InlineError } from "@in/server/types/errors"
 import { generateToken, hashToken } from "@in/server/utils/auth"
+import { Log } from "@in/server/utils/log"
 import { setupTestLifecycle, testUtils } from "./setup"
 
 const MEDIA_NOT_OWNED = {
@@ -36,6 +37,14 @@ const createFile = async (userId: number, fileType: "photo" | "document") => {
   if (!file) throw new Error("Failed to create file")
   return file
 }
+
+const getFile = (token: string, query: Record<string, string | number>) =>
+  app.handle(
+    new Request(
+      `http://localhost/bot/getFile?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ),
+  )
 
 const post = (token: string, path: string, body: unknown) =>
   app.handle(
@@ -127,5 +136,45 @@ describe("Media reuse over HTTP", () => {
     const response = await post(token, "/v1/sendMessage20250509", { peerThreadId: chat.id, photoId: photo!.id })
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject(MEDIA_NOT_OWNED)
+  })
+
+  it("downloads a received file through the message that carries it", async () => {
+    const { token, chat, documentFile } = await setup()
+
+    const response = await getFile(token, { file_id: documentFile.fileUniqueId, chat_id: chat.id, message_id: 1 })
+    expect(response.status).toBe(200)
+    expect((await response.json()).result.file.file_id).toBe(documentFile.fileUniqueId)
+  })
+
+  it("answers a wrong message and a missing file alike, and needs both locator fields", async () => {
+    const { token, chat, documentFile } = await setup()
+    const notFound = { ok: false, error: "FILE_NOT_FOUND", error_code: 400 }
+
+    for (const query of [
+      { file_id: documentFile.fileUniqueId, chat_id: chat.id, message_id: 2 },
+      { file_id: `missing-${crypto.randomUUID()}`, chat_id: chat.id, message_id: 1 },
+    ]) {
+      const response = await getFile(token, query)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject(notFound)
+    }
+
+    const partial = await getFile(token, { file_id: documentFile.fileUniqueId, chat_id: chat.id })
+    expect(partial.status).toBe(400)
+    expect(await partial.json()).toMatchObject({ ok: false, error: "BAD_REQUEST" })
+  })
+
+  it("keeps the legacy id-only getFile working and logs which bot used it", async () => {
+    const { bot, token, documentFile } = await setup()
+    const info = spyOn(Log.prototype, "info")
+    try {
+      const response = await getFile(token, { file_id: documentFile.fileUniqueId })
+      expect(response.status).toBe(200)
+      const lines = info.mock.calls.filter(([message]) => message === "bot getFile without a message locator")
+      expect(lines).toHaveLength(1)
+      expect(lines[0]?.[1]).toEqual({ botUserId: bot.id, granted: true })
+    } finally {
+      info.mockRestore()
+    }
   })
 })

@@ -614,7 +614,13 @@ export type BotChatAction =
 
 export type SendChatActionParams = BotTargetInput & { action: BotChatAction }
 
-export type GetFileParams = { file_id: string }
+export type GetFileParams = {
+  file_id: string
+  /** Chat of the message that contains the file. Preferred: pass with `message_id`. */
+  chat_id?: BotInputId
+  /** Message that contains the file. Pass with `chat_id`. */
+  message_id?: BotInputId
+}
 export type GetFileResult = { file: BotFile }
 export type UploadFileParams = {
   type: "photo" | "video" | "document" | "voice"

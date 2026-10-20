@@ -1053,7 +1053,17 @@ export const SendChatActionInput = Schema.Struct({
 
 export const GetFileInput = Schema.Struct({
   file_id: Schema.String.check(Schema.isMinLength(1)),
-}).annotate({ identifier: "GetFileInput" })
+  chat_id: Schema.optionalKey(ChatIdFromString).annotateKey({
+    description: "Chat of the message that contains the file. Preferred: pass it with message_id.",
+  }),
+  message_id: Schema.optionalKey(MessageIdFromString).annotateKey({
+    description: "Message that contains the file. Pass it with chat_id.",
+  }),
+}).annotate({
+  identifier: "GetFileInput",
+  description:
+    "Selects a file. Pass chat_id and message_id of the message that contains it; the file_id-only form is legacy.",
+})
 
 export const GetUpdatesInput = Schema.Struct({
   offset: Schema.optionalKey(MessageIdFromString),

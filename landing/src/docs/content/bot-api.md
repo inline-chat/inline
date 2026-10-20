@@ -166,7 +166,7 @@ For initialization, acknowledgement, selection, and recovery, follow [Receive Bo
 
 `sendMessage` media accepts only a `file_id` the bot uploaded with `uploadFile`. Knowing a file ID alone does not grant access. To resend media from a message the bot can access, call `forwardMessage` or `forwardMessages` with `copy: true`. Inline then sends a new message without a forward header and copies the media into the bot's ownership, so later sends can reuse the new `file_id`.
 
-`getFile` requires a bot-owned upload or an accessible message.
+To download a file someone sent, call `getFile` with the `file_id` plus the `chat_id` and `message_id` of the message that carries it. Inline checks that this message contains the file and that the bot can access its chat. If either check fails, or the file does not exist, the response is `FILE_NOT_FOUND`. `getFile` with only a `file_id` still works for the bot's own uploads and files in accessible messages, but that form is legacy; pass the message instead.
 
 A `file_id` the bot did not upload returns `MEDIA_NOT_OWNED`. So does one that does not exist, so a response never reveals whether an ID exists:
 

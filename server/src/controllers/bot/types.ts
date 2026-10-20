@@ -297,7 +297,11 @@ export const TSendChatActionInput = t.Object({
   ]),
 })
 
-export const TGetFileInput = t.Object({ file_id: t.String() })
+export const TGetFileInput = t.Object({
+  file_id: t.String(),
+  chat_id: t.Optional(TTargetId),
+  message_id: t.Optional(TTargetId),
+})
 export const TGetUpdatesInput = t.Object({
   offset: t.Optional(TTargetId),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100 })),

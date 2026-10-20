@@ -106,6 +106,9 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { chats, documents, photoSizes, videos, voices } from "@in/server/db/schema"
 import { eq, inArray, sql } from "drizzle-orm"
 import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
+import { resolveDownloadFile } from "@in/server/modules/files/downloadAccess"
+import { createFloodGuardedLog } from "@in/server/utils/floodGuardedLog"
+import { Log } from "@in/server/utils/log"
 import { validateWebhookUrl } from "@in/server/modules/botUpdates/webhookSecurity"
 import { BotUpdateProjector, encodeBotActions, encodeBotMedia } from "@in/server/modules/botUpdates/projector"
 import { decodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
@@ -1854,12 +1857,48 @@ const sendChatAction = async (
   return {}
 }
 
-const getFile = async (input: GetFileParams, context: BotOperationContext) => {
-  const file = await FileModel.getFileByUniqueId(input.file_id)
-  if (!file) {
-    throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
+const log = new Log("controllers.bot.operations")
+const logLegacyGetFile = createFloodGuardedLog({
+  write: (message, fields) => log.info(message, fields),
+  summary: "suppressed id-only getFile logs",
+})
+
+/**
+ * With chat_id and message_id, the file must be in that message: one message by primary
+ * key plus chat access. The legacy id-only form still scans for any accessible message.
+ */
+const resolveBotFile = async (input: GetFileParams, botUserId: number) => {
+  if (input.chat_id !== undefined || input.message_id !== undefined) {
+    const chatId = normalizeInputId(input.chat_id)
+    const messageId = normalizeInputId(input.message_id)
+    if (!chatId || chatId <= 0 || !messageId || messageId <= 0) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    const file = await resolveDownloadFile(input.file_id, botUserId, {
+      chatId: BigInt(chatId),
+      messageId: BigInt(messageId),
+    })
+    // Missing files and files outside that message or chat fail alike.
+    if (!file) throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
+    return file
   }
-  await ensureBotFileAccess(file, context.currentUserId)
+
+  const file = await FileModel.getFileByUniqueId(input.file_id)
+  if (!file) throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
+  if (file.userId === botUserId) return file
+  let granted = false
+  try {
+    await ensureBotFileAccess(file, botUserId)
+    granted = true
+  } finally {
+    // Shows which bots still rely on the id-only scan before it is retired.
+    logLegacyGetFile("bot getFile without a message locator", { botUserId, granted })
+  }
+  return file
+}
+
+const getFile = async (input: GetFileParams, context: BotOperationContext) => {
+  const file = await resolveBotFile(input, context.currentUserId)
   const expiresIn = 60 * 60
   return {
     file: {
