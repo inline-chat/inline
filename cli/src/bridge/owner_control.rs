@@ -10,8 +10,9 @@ use inline_client::{ClientStatus, ClientStore, DialogFollowMode, UpdateDialogFol
 /// A change in the owner connection that the service must act on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum OwnerConnectionEnd {
-    /// An authentication rejection that may deny only one request; verify
-    /// the session with a probe. The connection keeps running meanwhile.
+    /// The event stream or a connect/resume failed authentication without
+    /// proof of revocation. The client has stopped listening; verify the
+    /// session with a probe, then park or rebuild the connection.
     Suspect,
     /// The client signed out locally; retrying cannot help.
     Revoked,
@@ -107,10 +108,9 @@ impl OwnerControl {
                     break;
                 }
                 if let Some(end) = end {
+                    // Every end stops the client's event receiver.
                     let _ = connection_end_tx.send(end);
-                    if end != OwnerConnectionEnd::Suspect {
-                        break;
-                    }
+                    break;
                 }
             }
         });
@@ -257,8 +257,9 @@ pub(super) fn owner_control_error_invalidates_authentication(
 
 fn owner_event_connection_end(event: &ClientEvent) -> Option<OwnerConnectionEnd> {
     match event {
-        // Any request rejected with 401/403 sets this status, including a
-        // single denied action; the service verifies before acting.
+        // Set only by the event stream or connect/resume (not by ordinary
+        // request failures), possibly for a recoverable rejection; the client
+        // stops receiving either way, and the service verifies before acting.
         ClientEvent::StatusChanged {
             status: ClientStatus::AuthExpired,
             ..

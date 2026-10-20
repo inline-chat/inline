@@ -641,8 +641,27 @@ fn owner_sign_in_expired(paths: &BridgePaths) -> Option<BridgeSetupRequired> {
     ))
 }
 
-/// Owner authentication statuses are verified at most this often.
-const OWNER_SESSION_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+/// The owner client stops listening once it reports an authentication
+/// failure. A probe decides whether the session is gone; in every other case
+/// the connection must be rebuilt from the bridge's own secrets, exactly like
+/// a lost connection. Continuing would leave a healthy-looking service whose
+/// owner connection never receives anything again.
+fn owner_end_after_probe(probe: SessionProbe) -> OwnerConnectionEnd {
+    match probe {
+        SessionProbe::Revoked => OwnerConnectionEnd::Revoked,
+        SessionProbe::Valid | SessionProbe::Inconclusive => OwnerConnectionEnd::Lost,
+    }
+}
+
+/// Ends the service so the service manager restarts it; the persisted,
+/// jittered service backoff paces the reconnect.
+fn owner_connection_lost_error() -> Box<dyn std::error::Error> {
+    io::Error::new(
+        io::ErrorKind::ConnectionAborted,
+        "the owner connection stopped receiving; restarting the bridge",
+    )
+    .into()
+}
 
 async fn run_owned_service(
     paths: &BridgePaths,
@@ -750,7 +769,6 @@ async fn run_owned_service(
     let mut owner_connection_end = owner_control
         .as_ref()
         .and_then(|control| control.take_connection_end_receiver());
-    let mut last_owner_session_probe: Option<tokio::time::Instant> = None;
     reconcile_owner_dm_chat_ids(
         &paths,
         &mut account,
@@ -946,28 +964,16 @@ async fn run_owned_service(
                 }
             }
             end = wait_for_owner_connection_end(&mut owner_connection_end) => {
-                if end == OwnerConnectionEnd::Suspect {
-                    // A request was rejected with 401/403. That may deny only
-                    // that request, so verify the session before acting.
-                    if last_owner_session_probe
-                        .is_some_and(|probed| probed.elapsed() < OWNER_SESSION_PROBE_INTERVAL)
-                    {
-                        continue;
+                let end = match end {
+                    // Park only on an explicit revocation; otherwise rebuild
+                    // the connection, since the owner client stopped listening.
+                    OwnerConnectionEnd::Suspect => {
+                        owner_end_after_probe(probe_session(&runtime_config, &owner_auth).await)
                     }
-                    last_owner_session_probe = Some(tokio::time::Instant::now());
-                    match probe_session(&runtime_config, &owner_auth).await {
-                        SessionProbe::Revoked => {}
-                        outcome => {
-                            eprintln!(
-                                "An owner request was rejected, but the Inline sign-in is still {}; continuing.",
-                                if outcome == SessionProbe::Valid { "valid" } else { "unconfirmed" }
-                            );
-                            continue;
-                        }
-                    }
-                }
+                    end => end,
+                };
                 break Err(match end {
-                    OwnerConnectionEnd::Suspect | OwnerConnectionEnd::Revoked => {
+                    OwnerConnectionEnd::Revoked => {
                         match clear_bridge_owner_authority(&paths, &owner_auth) {
                             Ok(_) => BridgeSetupRequired::new(
                                 "owner_credential_expired",
@@ -976,10 +982,9 @@ async fn run_owned_service(
                             Err(error) => error,
                         }
                     }
-                    OwnerConnectionEnd::Lost => io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "the owner connection stopped reconnecting; restarting the bridge",
-                    ).into(),
+                    OwnerConnectionEnd::Suspect | OwnerConnectionEnd::Lost => {
+                        owner_connection_lost_error()
+                    }
                 });
             }
             _ = &mut service_stable, if service_recovery_pending => {

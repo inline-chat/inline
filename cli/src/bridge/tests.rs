@@ -1302,3 +1302,26 @@ fn park_reasons_distinguish_runtime_from_revoked_bot() {
     assert_eq!(reason, PROVIDER_CREDENTIAL_SETUP);
     assert!(message.contains("inline setup codex"));
 }
+
+#[test]
+fn a_suspect_owner_end_with_a_valid_probe_restarts_the_owner_connection() {
+    // The owner client has stopped listening, so carrying on would be a
+    // silent outage: rebuild the connection unless the session is revoked.
+    assert_eq!(
+        owner_end_after_probe(SessionProbe::Valid),
+        OwnerConnectionEnd::Lost
+    );
+    assert_eq!(
+        owner_end_after_probe(SessionProbe::Inconclusive),
+        OwnerConnectionEnd::Lost
+    );
+    assert_eq!(
+        owner_end_after_probe(SessionProbe::Revoked),
+        OwnerConnectionEnd::Revoked
+    );
+    // The restart ends the service as a transient failure: the service
+    // manager restarts it after the persisted backoff, nothing parks.
+    let lost = owner_connection_lost_error();
+    assert!(lost.downcast_ref::<BridgeSetupRequired>().is_none());
+    assert_eq!(classify_failure(lost.as_ref()), FailureClass::Transient);
+}
