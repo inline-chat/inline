@@ -113,10 +113,11 @@ describe("getDialogs", () => {
       const chatTitles = result.chats.map((c) => c.title)
       expect(chatTitles).toContain("Public Thread")
       expect(chatTitles).toContain("Private Thread")
-      // Check for expected user emails
-      const userEmails = result.users.map((u) => u.email)
-      expect(userEmails).toContain("a@example.com")
-      expect(userEmails).toContain("b@example.com")
+      // Both members are returned; only the caller's own contact details
+      expect(result.users.find((u) => u.id === userA.id)?.email).toBe("a@example.com")
+      const memberB = result.users.find((u) => u.id === userB.id)
+      expect(memberB).toBeDefined()
+      expect(memberB?.email).toBeUndefined()
       // There should be at least 2 dialogs and 2 messages
       expect(result.dialogs.length).toBeGreaterThanOrEqual(2)
       expect(result.messages.length).toBeGreaterThanOrEqual(2)
@@ -146,8 +147,9 @@ describe("getDialogs", () => {
       // There should be a DM chat and userB in users
       const chatTitles = result.chats.map((c) => c.title)
       expect(chatTitles).toContain("DM Chat")
-      const userEmails = result.users.map((u) => u.email)
-      expect(userEmails).toContain("dmB@example.com")
+      const peer = result.users.find((u) => u.id === userB.id)
+      expect(peer).toBeDefined()
+      expect(peer?.email).toBeUndefined()
       expect(result.dialogs.length).toBeGreaterThanOrEqual(1)
       expect(result.messages.length).toBeGreaterThanOrEqual(1)
     } catch (err) {
@@ -530,11 +532,21 @@ describe("getDialogs", () => {
     const dialogPeerIds = result.dialogs.map((d) => (d.peerId && "userId" in d.peerId ? d.peerId.userId : undefined))
     expect(dialogPeerIds).toContain(userC.id)
 
-    // Should include all users
+    // Should include all members, but contact details only for the caller.
+    // Private-space membership needs no invite consent, so it must not reveal
+    // another member's email, phone, presence or time zone.
+    const returnedIds = result.users.map((u) => u.id)
+    expect(returnedIds).toEqual(expect.arrayContaining([userA.id, userB.id, userC.id]))
+    expect(result.users.find((u) => u.id === userA.id)?.email).toBe("userA3@example.com")
+    for (const other of result.users.filter((u) => u.id !== userA.id)) {
+      expect(other.email).toBeUndefined()
+      expect(other.phoneNumber).toBeUndefined()
+      expect(other.timeZone).toBeUndefined()
+      expect(other.lastOnline).toBeUndefined()
+    }
     const userEmails = result.users.map((u) => u.email)
-    expect(userEmails).toContain("userA3@example.com")
-    expect(userEmails).toContain("userB3@example.com")
-    expect(userEmails).toContain("userC3@example.com")
+    expect(userEmails).not.toContain("userB3@example.com")
+    expect(userEmails).not.toContain("userC3@example.com")
   })
 
   test("does not create duplicate private chats for existing conversations", async () => {
@@ -621,10 +633,9 @@ describe("getDialogs", () => {
     expect(dialogPeerIds).toContain(userB.id)
     expect(dialogPeerIds.filter((id) => id === userB.id).length).toBe(1) // Should appear exactly once
 
-    // Should include both users
-    const userEmails = result.users.map((u) => u.email)
-    expect(userEmails).toContain("userA4@example.com")
-    expect(userEmails).toContain("userB4@example.com")
+    // Should include both users; the other member without contact details
+    expect(result.users.find((u) => u.id === userA.id)?.email).toBe("userA4@example.com")
+    expect(result.users.find((u) => u.id === userB.id)?.email).toBeUndefined()
   })
 
   test("creates dialog for public thread when new user joins space", async () => {

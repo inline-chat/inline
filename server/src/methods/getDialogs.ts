@@ -433,7 +433,14 @@ export const handler = async (
     dialogs: dialogsEncoded,
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
     messages: messages,
-    users: canViewFullSpaceUserInfo ? users.map(encodeFullUserInfo) : users.map((user) => encodeMinUserInfo(user)),
+    // Contact details, presence and time zone are self-only, as in the realtime
+    // encoders. Space membership (even private, which needs no invite consent)
+    // does not grant another member's email or phone number.
+    users: users.map((user) =>
+      user.id === currentUserId
+        ? encodeFullUserInfo(user)
+        : encodeMinUserInfo(user, { photoFile: user.photo ?? undefined }),
+    ),
   }
 
   return finalResult
