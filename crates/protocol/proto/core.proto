@@ -1482,6 +1482,8 @@ message RpcError {
     URL_PREVIEW_UNAVAILABLE = 18;
     AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
     SPACE_INVITE_INVALID = 20;
+    // Media or file not uploaded by the sender, or missing. Forward the source message to resend it.
+    MEDIA_NOT_OWNED = 21;
   }
 }
 

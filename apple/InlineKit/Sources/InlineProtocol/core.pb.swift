@@ -7229,6 +7229,9 @@ public nonisolated struct RpcError: Sendable {
     case urlPreviewUnavailable // = 18
     case agentSessionMessageImmutable // = 19
     case spaceInviteInvalid // = 20
+
+    /// Media or file not uploaded by the sender, or missing. Forward the source message to resend it.
+    case mediaNotOwned // = 21
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -7258,6 +7261,7 @@ public nonisolated struct RpcError: Sendable {
       case 18: self = .urlPreviewUnavailable
       case 19: self = .agentSessionMessageImmutable
       case 20: self = .spaceInviteInvalid
+      case 21: self = .mediaNotOwned
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -7285,6 +7289,7 @@ public nonisolated struct RpcError: Sendable {
       case .urlPreviewUnavailable: return 18
       case .agentSessionMessageImmutable: return 19
       case .spaceInviteInvalid: return 20
+      case .mediaNotOwned: return 21
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -7312,6 +7317,7 @@ public nonisolated struct RpcError: Sendable {
       .urlPreviewUnavailable,
       .agentSessionMessageImmutable,
       .spaceInviteInvalid,
+      .mediaNotOwned,
     ]
 
   }
@@ -30384,7 +30390,7 @@ nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 }
 
 nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}BAD_REQUEST\0\u{1}UNAUTHENTICATED\0\u{1}RATE_LIMIT\0\u{1}INTERNAL_ERROR\0\u{1}PEER_ID_INVALID\0\u{1}MESSAGE_ID_INVALID\0\u{1}USER_ID_INVALID\0\u{1}USER_ALREADY_MEMBER\0\u{1}SPACE_ID_INVALID\0\u{1}CHAT_ID_INVALID\0\u{1}EMAIL_INVALID\0\u{1}PHONE_NUMBER_INVALID\0\u{1}SPACE_ADMIN_REQUIRED\0\u{1}SPACE_OWNER_REQUIRED\0\u{1}USERNAME_INVALID\0\u{1}USERNAME_TAKEN\0\u{1}FIRST_NAME_INVALID\0\u{1}URL_PREVIEW_UNAVAILABLE\0\u{1}AGENT_SESSION_MESSAGE_IMMUTABLE\0\u{1}SPACE_INVITE_INVALID\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}BAD_REQUEST\0\u{1}UNAUTHENTICATED\0\u{1}RATE_LIMIT\0\u{1}INTERNAL_ERROR\0\u{1}PEER_ID_INVALID\0\u{1}MESSAGE_ID_INVALID\0\u{1}USER_ID_INVALID\0\u{1}USER_ALREADY_MEMBER\0\u{1}SPACE_ID_INVALID\0\u{1}CHAT_ID_INVALID\0\u{1}EMAIL_INVALID\0\u{1}PHONE_NUMBER_INVALID\0\u{1}SPACE_ADMIN_REQUIRED\0\u{1}SPACE_OWNER_REQUIRED\0\u{1}USERNAME_INVALID\0\u{1}USERNAME_TAKEN\0\u{1}FIRST_NAME_INVALID\0\u{1}URL_PREVIEW_UNAVAILABLE\0\u{1}AGENT_SESSION_MESSAGE_IMMUTABLE\0\u{1}SPACE_INVITE_INVALID\0\u{1}MEDIA_NOT_OWNED\0")
 }
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

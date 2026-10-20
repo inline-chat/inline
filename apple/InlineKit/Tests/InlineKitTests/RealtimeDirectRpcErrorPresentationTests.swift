@@ -75,6 +75,7 @@ struct RealtimeDirectRpcErrorPresentationTests {
       (.usernameTaken, "That username is already taken."),
       (.firstNameInvalid, "Enter a valid first name."),
       (.urlPreviewUnavailable, "This link can’t be previewed."),
+      (.mediaNotOwned, "This media can’t be sent here. Forward the original message instead."),
     ]
 
     for (errorCode, expected) in cases {

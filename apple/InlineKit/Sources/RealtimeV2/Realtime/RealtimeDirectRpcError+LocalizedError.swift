@@ -93,6 +93,8 @@ public enum RealtimeErrorPresentation {
       String(localized: "This link can’t be previewed.")
     case .agentSessionMessageImmutable:
       String(localized: "Imported agent session history cannot be edited or deleted yet.")
+    case .mediaNotOwned:
+      String(localized: "This media can’t be sent here. Forward the original message instead.")
     case .unknown, .UNRECOGNIZED:
       statusFallback(statusCode)
     }

@@ -3737,7 +3737,13 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: SPACE_INVITE_INVALID = 20;
      */
-    SPACE_INVITE_INVALID = 20
+    SPACE_INVITE_INVALID = 20,
+    /**
+     * Media or file not uploaded by the sender, or missing. Forward the source message to resend it.
+     *
+     * @generated from protobuf enum value: MEDIA_NOT_OWNED = 21;
+     */
+    MEDIA_NOT_OWNED = 21
 }
 /**
  * @generated from protobuf message RpcCall
